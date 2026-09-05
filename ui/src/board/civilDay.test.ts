@@ -19,6 +19,7 @@ import {
   byRecentActivityThenName,
 } from './KanbanReadModel.js';
 import type { KanbanCard } from './KanbanTypes.js';
+import { expectPinnedZone } from './testFixtures.js';
 
 // The timezone is the experiment. `npm test` runs this file twice — once under
 // TZ=America/Los_Angeles (negative offset, where the original bug bit) and once
@@ -33,10 +34,7 @@ const LOCAL_DAY_OF_22Z = TZ === 'America/Los_Angeles' ? '2026-07-30' : '2026-07-
 
 describe('civil-day handling of a `due:` value', () => {
   it('runs under a pinned, non-UTC timezone', () => {
-    expect(TZ, 'run via `npm test` — the zone is what this suite tests').toMatch(
-      /^(America\/Los_Angeles|Europe\/Paris)$/,
-    );
-    expect(new Date('2026-07-30T00:00:00Z').getTimezoneOffset()).not.toBe(0);
+    expectPinnedZone();
   });
 
   // [value, expected civil day]

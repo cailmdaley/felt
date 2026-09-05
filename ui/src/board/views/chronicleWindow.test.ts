@@ -29,9 +29,9 @@ import {
   type ScrollProbe,
 } from './chronicleWindow.js';
 import { civilDayToLocalDate } from '../civilDay.js';
+import { expectPinnedZone } from '../testFixtures.js';
 import { RAIL_START_HOUR, shiftCivilDay } from './railTime.js';
 
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** An instant at a LOCAL wall-clock time on a civil day — never a UTC literal,
  *  and noon by default so it is unambiguously past the 6am rail boundary. */
@@ -53,7 +53,7 @@ const settled: ScrollProbe = {
 
 describe('the suite runs under a pinned, non-UTC zone', () => {
   it('is one of the two zones `npm test` pins', () => {
-    expect(TZ).toMatch(/^(America\/Los_Angeles|Europe\/Paris)$/);
+    expectPinnedZone();
   });
 });
 

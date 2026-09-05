@@ -26,6 +26,7 @@ import { KanbanModal } from './KanbanModal.js'
 import { FiberDetailModal } from './FiberDetailModal.js'
 import { dueCivilDay, isoDayLocal } from './civilDay.js'
 import type { KanbanCard } from './KanbanTypes.js'
+import { card as baseCard } from './testFixtures.js'
 
 // ── The harness ──────────────────────────────────────────────────────────────
 
@@ -130,23 +131,17 @@ function installWindowStub(): () => void {
 
 /** A minimally-real card. Every gesture reads `id`/`originId`/`status`. */
 function card(over: Partial<KanbanCard> = {}): KanbanCard {
-  return {
+  return baseCard({
     id: 'fiber-1',
     name: 'A card',
     path: '/store/fiber-1.md',
-    originId: 'local',
-    status: 'open',
-    dependsOnSatisfied: true,
     createdAt: '2026-08-01T09:00:00Z',
     // Nothing under test reads this — the write side asks `storedHorizon` —
     // but it is a required field, so keep the two consistent rather than
     // minting a card that could not come off the classifier.
     effectiveHorizon: over.storedHorizon ?? 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
     ...over,
-  }
+  })
 }
 
 /**

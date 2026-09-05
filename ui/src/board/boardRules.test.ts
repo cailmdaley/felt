@@ -38,6 +38,7 @@ import type { Fiber } from './KanbanFiber.js'
 import { mapFeltJsonToFiber } from './KanbanFiber.js'
 import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { card as baseCard, response } from './testFixtures.js'
 import { buildKanbanResponseFromComposite, cardFromCompositeEntry, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
 import {
   clusterStashCards,
@@ -1263,40 +1264,19 @@ describe('the cycle lens — membership is derived, never assigned', () => {
   })
 
   describe('deriveCycleLens — what the Desk draws differently', () => {
-    const card = (over: Partial<KanbanCard>): KanbanCard => ({
-      id: 'work/a',
-      name: 'A',
-      path: 'work/a.md',
-      originId: 'here',
-      status: 'active',
-      createdAt: at0,
-      dependsOnSatisfied: true,
-      effectiveHorizon: 'now',
-      drifted: false,
-      isCycle: false,
-      cycleStart: null,
-      ...over,
-    })
+    const card = (over: Partial<KanbanCard>): KanbanCard =>
+      baseCard({ id: 'work/a', name: 'A', path: 'work/a.md', originId: 'here', status: 'active', createdAt: at0, ...over })
 
-    const board = (over: Partial<KanbanResponse> = {}): KanbanResponse => ({
-      feltHost: 'here',
-      now: { drafts: [], inFlight: [], awaitingReview: [] },
-      timeline: { past: [], futureDated: [] },
-      stash: [],
-      pinned: [],
-      cycles: [card({
-        id: 'cycles/now', name: 'Now', isCycle: true,
-        cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)),
-      })],
-      totals: {
-        drafts: 0, inFlight: 0, awaitingReview: 0,
-        past: 0, futureDated: 0, stash: 0, pinned: 0,
-      },
-      temperedTotal: 0,
-      staleness: {},
-      generatedAt: NOW,
-      ...over,
-    })
+    const board = (over: Partial<KanbanResponse> = {}): KanbanResponse =>
+      response({
+        feltHost: 'here',
+        cycles: [card({
+          id: 'cycles/now', name: 'Now', isCycle: true,
+          cycleStart: dayFromNow(-3), due: asFeltWrites(dayFromNow(10)),
+        })],
+        generatedAt: NOW,
+        ...over,
+      })
 
     it('claims the due-in-span and the in-flight, and leaves the rest alone', () => {
       const lens = deriveCycleLens(board({
@@ -1764,36 +1744,19 @@ describe('chains, tails and the drop that authors them', () => {
 })
 
 /** A minimal card, for tests that care only about ids, status and deps. */
-const queueCard = (id: string, over: Partial<KanbanCard> = {}): KanbanCard => ({
-  id,
-  name: id,
-  path: `.felt/${id}.md`,
-  originId: 'local',
-  status: 'open',
-  createdAt: at0,
-  dependsOnSatisfied: true,
-  effectiveHorizon: 'now',
-  drifted: false,
-  isCycle: false,
-  cycleStart: null,
-  ...over,
-})
+const queueCard = (id: string, over: Partial<KanbanCard> = {}): KanbanCard =>
+  baseCard({ id, createdAt: at0, ...over })
 
 /** A board response holding exactly these cards: open ones on Drafts, closed
  *  ones on the past lane. Enough for the graph builders, which read every list
  *  `boardCards` collects. */
-const queueResp = (...cards: KanbanCard[]): KanbanResponse => ({
-  feltHost: 'here',
-  now: { drafts: cards.filter((c) => c.status === 'open'), inFlight: [], awaitingReview: [] },
-  timeline: { past: cards.filter((c) => c.status === 'closed'), futureDated: [] },
-  stash: [],
-  pinned: [],
-  cycles: [],
-  totals: { drafts: 0, inFlight: 0, awaitingReview: 0, past: 0, futureDated: 0, stash: 0, pinned: 0 },
-  temperedTotal: 0,
-  staleness: {},
-  generatedAt: NOW,
-})
+const queueResp = (...cards: KanbanCard[]): KanbanResponse =>
+  response({
+    feltHost: 'here',
+    now: { drafts: cards.filter((c) => c.status === 'open'), inFlight: [], awaitingReview: [] },
+    timeline: { past: cards.filter((c) => c.status === 'closed'), futureDated: [] },
+    generatedAt: NOW,
+  })
 
 describe('who may be stacked, and behind what', () => {
   // ONE lifecycle refusal, and it is TEMPERED — the only verdict that

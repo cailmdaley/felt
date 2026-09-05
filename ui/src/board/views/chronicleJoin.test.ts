@@ -52,8 +52,17 @@ import { formatSpanMinutes } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
+import {
+  card as baseCard,
+  expectPinnedZone,
+  commit as baseCommit,
+  pairings as basePairings,
+  DAY_INDEX,
+  noonOf,
+  TODAY_IDX,
+  WINDOW_DAYS,
+} from '../testFixtures.js'
 import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
-import { buildTimelineDays } from '../KanbanSurfaces.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -76,21 +85,8 @@ function bucket(m: number, over: Partial<ActivityBucket> = {}): ActivityBucket {
   return { m, s: null, cwd: null, k: 'agent', n: 1, ...over }
 }
 
-function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
-  return {
-    name: over.name ?? over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'active',
-    createdAt: '2026-03-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  }
-}
+const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+  baseCard({ status: 'active', createdAt: '2026-03-01T09:00:00Z', ...over })
 
 /** A cycle as the `cycles` surface delivers it — just the span and a name. */
 function cycle(id: string, start: string | null, due: string | undefined): CycleCard {
@@ -263,10 +259,7 @@ describe('attributing activity to fibers', () => {
 
 describe('folding buckets into civil days', () => {
   it('runs under a pinned, non-UTC timezone', () => {
-    expect(TZ, 'run via `npm test` — the zone is what this suite tests').toMatch(
-      /^(America\/Los_Angeles|Europe\/Paris)$/,
-    )
-    expect(new Date(2026, 2, 1).getTimezoneOffset()).not.toBe(0)
+    expectPinnedZone()
   })
 
   // The page groups by 6am RAILS, not midnights, so that it agrees with Day and
@@ -335,22 +328,6 @@ describe('folding buckets into civil days', () => {
 })
 
 // ── The lifeline, and the honesty of its close mark ──────────────────────────
-
-// The real column layout: 28 back, 14 forward, today at index 28. Built from
-// the production helper against a fixed LOCAL day, so the fixture is the same
-// shape in both zones.
-const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
-const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
-const TODAY_IDX = 28
-
-/** An INSTANT at local noon on a civil day — safely inside that day's column
- *  in any zone, unlike a midnight that a DST shift can push over the edge. */
-function noonOf(dayISO: string): string {
-  const d = civilDayToLocalDate(dayISO)
-  if (!d) throw new Error(`not a civil day: ${dayISO}`)
-  d.setHours(12, 0, 0, 0)
-  return d.toISOString()
-}
 
 describe('placing a fiber lifeline and its close', () => {
   it('ends the line at a close it can place, and marks it there', () => {
@@ -676,33 +653,15 @@ describe('composing an era’s look-back', () => {
   // by cardId, not by a `slug: ` prefix a human might have mistyped or skipped.
   const ledgerCards = [card({ id: 'a/board', name: 'Board work' }), card({ id: 'b/daemon', name: 'Daemon work' })]
 
-  /** One ledger commit. Only what the joins and the totals read is spelled out;
-   *  the rest is the shape the wire always carries. */
-  function commit(over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord {
-    return {
-      at: localMs(DST_DAY, 12),
-      subject: 'a subject',
-      repo: 'felt',
-      files: 1,
-      insertions: 0,
-      deletions: 0,
-      session: 's1',
-      tmux: null,
-      cwd: null,
-      // Host-agnostic pairings, so the host-scoping rung is not what these
-      // cases are testing.
-      host: null,
-      ...over,
-    }
-  }
+  const commit = (over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord =>
+    // Host-agnostic: `host` stays null (the shared default), so the
+    // host-scoping rung is not what these cases are testing.
+    baseCommit({ at: localMs(DST_DAY, 12), subject: 'a subject', repo: 'felt', session: 's1', ...over })
 
   /** Session→fiber pairings with no host of their own, so any host's commit may
    *  read them — the ledger's own `bySession` shape. */
-  function pairings(pairs: readonly (readonly [string, string])[]): Map<string, SessionPairing> {
-    return new Map(
-      pairs.map(([session, fiber]) => [session, { fiber, uid: null, session, host: null }]),
-    )
-  }
+  const pairings = (pairs: readonly (readonly [string, string])[]): Map<string, SessionPairing> =>
+    basePairings(...pairs.map(([session, fiber]) => ({ session, fiber })))
 
   it('gathers commits under the fiber the ledger attributed them to', () => {
     const ledger: LedgerNarration = {

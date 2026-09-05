@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { captureFetch, ok, type FetchCall } from '../testFixtures.js'
 
 import {
   buildSessionIndex,
@@ -20,25 +21,6 @@ import {
  * window. The suite runs twice, under America/Los_Angeles and Europe/Paris, so
  * the local-midnight resolution is exercised in two zones on every run.
  */
-
-interface FetchCall {
-  url: string
-  params: URLSearchParams
-}
-
-/** Stub `fetch`, recording each URL. `respond` shapes the reply. */
-function captureFetch(respond: () => Response): FetchCall[] {
-  const calls: FetchCall[] = []
-  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
-    const url = String(input)
-    calls.push({ url, params: new URL(url, 'http://daemon.test').searchParams })
-    return respond()
-  })
-  return calls
-}
-
-const ok = (body: unknown) => () =>
-  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
 /** Reply per URL substring: the composite path and the plain path answer
  *  differently, which is the whole subject of the fallback tests. */

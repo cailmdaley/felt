@@ -9,20 +9,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveOpenTarget } from './KanbanModal.js'
 import type { KanbanCard } from './KanbanTypes.js'
+import { card as baseCard } from './testFixtures.js'
 
-function card(id: string, over: Partial<KanbanCard> = {}): KanbanCard {
-  return {
-    id,
-    name: id,
-    originId: 'local',
-    status: 'open',
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  } as KanbanCard
-}
+const card = (id: string, over: Partial<KanbanCard> = {}): KanbanCard =>
+  baseCard({ id, ...over })
 
 const WORK = [card('work/a/run'), card('work/b/triage')]
 const CYCLES = [

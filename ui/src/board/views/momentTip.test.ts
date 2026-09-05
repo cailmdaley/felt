@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { captureFetch, ok } from '../testFixtures.js'
 
 import {
   createTemporalFetchers,
@@ -133,30 +134,19 @@ describe('parseMoment', () => {
 })
 
 describe('the moment fetcher', () => {
-  const okJson = (body: unknown) =>
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
-
   it('asks the named host for the session and window', async () => {
-    const urls: string[] = []
-    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
-      urls.push(String(input))
-      return okJson({ host: 'kelvin', excerpts: [excerpt()] })
-    })
+    const calls = captureFetch(ok({ host: 'kelvin', excerpts: [excerpt()] }))
 
     const result = await createTemporalFetchers('').moment('sess-1', 10, 70, 'kelvin')
 
     expect(result.excerpts).toHaveLength(1)
-    const params = new URL(urls[0], 'http://daemon.test').searchParams
-    expect(params.get('session')).toBe('sess-1')
+    const params = calls[0].params
     expect(params.get('from_ms')).toBe('10')
     expect(params.get('to_ms')).toBe('70')
     expect(params.get('host')).toBe('kelvin')
     // Deliberately NOT /moment/composite: a transcript is a file on one
     // machine, not a feed to merge.
-    expect(urls[0]).not.toContain('composite')
+    expect(calls[0].url).not.toContain('composite')
   })
 
   it('degrades a failure to empty rather than rejecting — the caller is a tooltip', async () => {
