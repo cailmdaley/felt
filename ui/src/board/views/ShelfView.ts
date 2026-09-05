@@ -109,7 +109,6 @@ import {
   resetLayout,
   saveShelfPersist,
   SHELF_METRICS,
-  type ShelfCardState,
   type ShelfLayout,
   type ShelfPersist,
   type ShelfStack,
@@ -157,8 +156,6 @@ interface CardHandle {
   file: ShelfFile
   kind: ShelfKind
   root: HTMLElement
-  /** The metadata layer. Always mounted, hidden only under a live body. */
-  face: HTMLElement
   /** Where the body mounts. */
   host: HTMLElement
   ageEl: HTMLElement
@@ -173,8 +170,6 @@ interface CardHandle {
   visible: boolean
   /** When it was last inside the ring — the eviction key. */
   lastVisible: number
-  /** Distance from the viewport centre at the last pump, for load ordering. */
-  distance: number
   timer: number | null
   /** The file changed under a live body; the card offers a reload rather than
    *  swapping the document out from under the reader. */
@@ -304,7 +299,7 @@ class ShelfView implements TemporalView {
 
     window.addEventListener('resize', this.onResize)
 
-    this.applyPan()
+    this.applyZoom()
     void this.load()
     // The reader outlives the view's DOM, so a board reopened while it was
     // open restores the split too — after the first layout, so it has a board
@@ -612,7 +607,7 @@ class ShelfView implements TemporalView {
 
     const hidden = document.createElement('button')
     hidden.type = 'button'
-    hidden.className = 'kbn-shelf-tool kbn-shelf-hidden'
+    hidden.className = 'kbn-shelf-tool'
     hidden.addEventListener('click', () => {
       this.showDismissed = !this.showDismissed
       this.syncTools()
@@ -704,7 +699,6 @@ class ShelfView implements TemporalView {
       if (!handle) continue
       this.placeCard(handle, card.x, card.y)
       this.sizeCard(handle, card.w, card.h)
-      handle.root.classList.toggle('kbn-shelf-card-pinned', card.pinned)
       handle.root.classList.toggle('kbn-shelf-card-starred', card.starred)
       this.syncStack(handle, card.stack)
     }
@@ -984,8 +978,7 @@ class ShelfView implements TemporalView {
     const host = document.createElement('div')
     host.className = 'kbn-shelf-body'
 
-    const face = buildFace(file, kind)
-    host.append(face)
+    host.append(buildFace(file, kind))
 
     // The sheet that gives the surface its gestures back. Clicking it focuses
     // the card, which lifts it — see the class docstring.
@@ -1056,7 +1049,6 @@ class ShelfView implements TemporalView {
       file,
       kind,
       root,
-      face,
       host,
       ageEl: age,
       dismissEl: dismiss,
@@ -1066,7 +1058,6 @@ class ShelfView implements TemporalView {
       body: null,
       visible: false,
       lastVisible: 0,
-      distance: Number.POSITIVE_INFINITY,
       timer: null,
       stale: false,
       unframeWheel: null,
@@ -1112,8 +1103,7 @@ class ShelfView implements TemporalView {
       if (handle.state !== 'idle' || !handle.visible) continue
       if (handle.kind === 'opaque') continue // a face is all it will ever have
       const geom = readGeom(handle.root)
-      handle.distance = Math.hypot(geom.x + geom.w / 2 - cx, geom.y + geom.h / 2 - cy)
-      candidates.push({ key: path, distance: handle.distance })
+      candidates.push({ key: path, distance: Math.hypot(geom.x + geom.w / 2 - cx, geom.y + geom.h / 2 - cy) })
     }
     for (const key of chooseLoads(candidates, LOAD_POLICY.maxConcurrent - inFlight)) {
       const handle = this.handles.get(key)
@@ -1167,7 +1157,6 @@ class ShelfView implements TemporalView {
       handle.timer = null
       handle.state = 'live'
       handle.root.classList.remove('kbn-shelf-card-loading', 'kbn-shelf-card-stalled')
-      handle.root.classList.add('kbn-shelf-card-live')
       // One frame of face still showing, then the crossfade — swapping in the
       // same tick shows an unpainted body.
       requestAnimationFrame(() => handle.body?.classList.add('kbn-shelf-body-in'))
@@ -1332,11 +1321,7 @@ class ShelfView implements TemporalView {
     handle.state = 'idle'
     handle.unframeWheel?.()
     handle.unframeWheel = null
-    handle.root.classList.remove(
-      'kbn-shelf-card-live',
-      'kbn-shelf-card-loading',
-      'kbn-shelf-card-stalled',
-    )
+    handle.root.classList.remove('kbn-shelf-card-loading', 'kbn-shelf-card-stalled')
     if (!body) return
     if (body instanceof HTMLIFrameElement) body.src = 'about:blank'
     if (body instanceof HTMLImageElement) body.removeAttribute('src')
@@ -1350,16 +1335,6 @@ class ShelfView implements TemporalView {
     handle.stale = true
     handle.root.classList.add('kbn-shelf-card-updated')
   }
-
-  /** Put a stale card's new bytes on screen, on the reader's word. */
-  private reload(handle: CardHandle): void {
-    this.evictBody(handle)
-    handle.root.classList.remove('kbn-shelf-card-updated')
-    handle.stale = false
-    this.mountBody(handle)
-  }
-
-  // ── Reading ────────────────────────────────────────────────────────────────
 
   // ── Reading ────────────────────────────────────────────────────────────────
 
@@ -1404,10 +1379,7 @@ class ShelfView implements TemporalView {
    * by asking for it, not by a button that only says "retry".
    */
   private ensureBody(handle: CardHandle): void {
-    if (handle.stale || handle.state === 'stalled') {
-      this.reload(handle)
-      return
-    }
+    if (handle.stale || handle.state === 'stalled') this.evictBody(handle)
     if (handle.state === 'idle') this.mountBody(handle)
   }
 
@@ -1503,7 +1475,7 @@ class ShelfView implements TemporalView {
     if (before === 'maybe') this.beginMotion(drag.target, gesture)
     if (gesture.mode === 'pan') {
       this.persist.pan = { x: geometry.x, y: geometry.y }
-      this.applyPan()
+      this.applyZoom()
       return
     }
     // The gesture speaks surface units throughout, so a promoted card's
@@ -1688,7 +1660,7 @@ class ShelfView implements TemporalView {
       x: this.persist.pan.x - e.deltaX * lines,
       y: this.persist.pan.y - e.deltaY * lines,
     }
-    this.applyPan()
+    this.applyZoom()
     this.holdLayer()
     this.saveSoon()
     this.pump()
@@ -1749,10 +1721,6 @@ class ShelfView implements TemporalView {
   }
 
   private layerTimer: ReturnType<typeof setTimeout> | null = null
-
-  private applyPan(): void {
-    this.applyZoom()
-  }
 
   /** One transform carries both: pan OUTSIDE the scale (so pan stays in screen
    *  pixels and the drag maths does not have to unpick it) and the scale about
@@ -1916,5 +1884,3 @@ export function relativeAge(timestamp: number, now: number): string {
 
 registerView(new ShelfView())
 
-export { ShelfView }
-export type { ShelfCardState }
