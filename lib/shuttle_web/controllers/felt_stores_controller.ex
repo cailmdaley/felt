@@ -7,6 +7,10 @@ defmodule ShuttleWeb.FeltStoresController do
   persisted file so the daemon has no configured stores unless `FELT_STORES` is
   set.
 
+  Each remote's origin is read from `Shuttle.RemoteFiberRegistry`'s cached owner
+  feed — every host carries its own registry as that feed's `stores` block — so
+  a slow remote goes stale in the picker rather than dropping out of it.
+
   The origin map is also what the Stash/Capture forms' HOST picker offers, and
   each origin carries `native_folder_picker` — true when that host can raise an
   OS folder dialog (`POST /api/v1/choose-folder`), which is how the board
@@ -22,21 +26,27 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{FeltStores, FolderPicker, OriginRouter, Poller, Projects, RegistryCommon, Remote}
+  import ShuttleWeb.TemporalComposite, only: [render_error: 1]
 
-  @remote_timeout_ms 8_000
+  alias Shuttle.{FeltStores, FolderPicker, Poller, Projects, RegistryCommon, Remote}
+  alias Shuttle.RemoteFiberRegistry
 
   def show(conn, _params) do
     own = Poller.own_host_id()
-    local = local_origin(own)
 
     # C6: the same fleet chokepoint `Shuttle.OriginRouter` and the two remote
     # registries use, so this endpoint's remote list can never drift from what
     # routing and polling consider "configured".
+    #
+    # A remote's block comes off `RemoteFiberRegistry`'s cached owner feed (each
+    # host serves its own registry as the feed's `stores` block), never a live
+    # GET: a loaded remote answering slowly must not drop out of the picker.
+    feeds = RemoteFiberRegistry.feeds()
+
     origins =
       RegistryCommon.configured_remotes()
-      |> Enum.reduce(%{own => local}, fn remote, acc ->
-        Map.put(acc, remote.name, remote_origin(remote))
+      |> Enum.reduce(%{own => local_origin(own)}, fn remote, acc ->
+        Map.put(acc, remote.name, remote_origin(remote, Map.get(feeds, remote.name)))
       end)
 
     json(conn, %{
@@ -67,7 +77,14 @@ defmodule ShuttleWeb.FeltStoresController do
     |> json(%{error: "felt_stores must be an array of host paths"})
   end
 
-  defp local_origin(host) do
+  @doc """
+  This host's store-registry origin block: its curated store list, the expanded
+  poll list, the picker projects, and whether it can raise an OS folder dialog.
+
+  Public because the owner fiber feed carries it too — that is how a viewer's
+  `/api/v1/felt-stores` learns a remote's registry without fetching it live.
+  """
+  def local_origin(host) do
     %{
       kind: "local",
       stale: false,
@@ -87,58 +104,32 @@ defmodule ShuttleWeb.FeltStoresController do
     |> Map.put(:host, host)
   end
 
-  defp remote_origin(%Remote{} = remote) do
-    url = Remote.felt_stores_url(remote)
-    timeout = remote.request_timeout_ms || @remote_timeout_ms
-
-    with {:ok, body} <- fetch_remote_registry(url, timeout),
-         {:ok, decoded} <- Jason.decode(body),
-         %{} = origin <- origin_for_remote(decoded) do
-      origin
-      |> Map.put("kind", "remote")
-      |> Map.put("stale", false)
-      # Presentation label, carried so the board can title an origin without
-      # inventing its own name mapping. Never an address — routing keys off
-      # `name` alone.
-      |> Map.put("display", Remote.display_name(remote))
-      |> Map.delete("expanded_felt_stores")
-    else
-      {:error, reason} -> remote_error(remote, reason)
-      _ -> remote_error(remote, :malformed_response)
-    end
+  # A remote's cached registry block, stamped with this fleet's presentation
+  # label and the feed's own staleness. `display` is never an address — routing
+  # keys off `name` alone. A feed that has not yet carried a `stores` block
+  # (never polled, or an owner too old to serve one) reads as an empty stale
+  # origin, exactly as an unreachable host did.
+  defp remote_origin(%Remote{} = remote, %{stores: %{} = stores} = feed) do
+    stores
+    |> Map.drop(["expanded_felt_stores"])
+    |> Map.merge(%{
+      "kind" => "remote",
+      "host" => remote.name,
+      "display" => Remote.display_name(remote),
+      "stale" => feed.stale,
+      "last_error" => render_error(feed[:last_error])
+    })
   end
 
-  defp origin_for_remote(%{"origins" => origins, "host" => host})
-       when is_map(origins) and is_binary(host) do
-    Map.get(origins, host)
-  end
-
-  defp origin_for_remote(%{"felt_stores" => stores} = decoded) when is_list(stores),
-    do: decoded
-
-  defp origin_for_remote(_), do: nil
-
-  defp remote_error(%Remote{name: name} = remote, reason) do
+  defp remote_origin(%Remote{name: name} = remote, feed) do
     %{
       "kind" => "remote",
       "host" => name,
       "display" => Remote.display_name(remote),
       "stale" => true,
       "felt_stores" => [],
-      "last_error" => format_error(reason)
+      "last_error" => render_error(feed[:last_error])
     }
-  end
-
-  # Transport comes from the same chokepoint as the write plane — see
-  # `OriginRouter.forward_client/0`. This is a read, not a forward, but it is the
-  # same config key and the same client behaviour, so a test that stubs the
-  # forward plane stubs this too.
-  defp fetch_remote_registry(url, timeout) do
-    OriginRouter.forward_client().get(url, timeout)
-  rescue
-    error -> {:error, error}
-  catch
-    kind, reason -> {:error, {kind, reason}}
   end
 
   defp format_error(%{message: message}) when is_binary(message), do: message
