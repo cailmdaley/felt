@@ -501,7 +501,7 @@ defmodule Shuttle.Moment do
       path
       |> File.stream!()
       |> Enum.reduce({[], [], %{}, "/root"}, fn line, {excerpts, tools, spawns, codex_self} ->
-        case decode_record(line) do
+        case decode_record(line, path) do
           {:ok, record} ->
             codex_self = Map.get(record, "codex_self") || codex_self
             record = Map.put(record, :codex_self, codex_self)
@@ -532,12 +532,21 @@ defmodule Shuttle.Moment do
       {[], []}
   end
 
-  defp decode_record(line) do
+  defp decode_record(line, path) do
     with {:ok, raw} <- Jason.decode(line),
          true <- is_map(raw),
-         {:ok, record} <- normalize_record(raw),
-         {:ok, at_ms} <- at_ms(record) do
-      {:ok, Map.put(record, :at_ms, at_ms)}
+         {:ok, record} <- normalize_record(raw) do
+      case at_ms(record) do
+        {:ok, at_ms} ->
+          {:ok, Map.put(record, :at_ms, at_ms)}
+
+        :skip ->
+          Logger.warning(
+            "moment: dropping record with malformed timestamp session=#{path} timestamp=#{inspect(record["timestamp"])}"
+          )
+
+          :skip
+      end
     else
       _ -> :skip
     end
