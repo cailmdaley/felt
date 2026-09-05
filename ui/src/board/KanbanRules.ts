@@ -1,6 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 import type { Fiber } from './KanbanFiber.js';
-import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
+import { dueCivilDay, isoDayLocal } from './civilDay.js';
 
 // The kanban's single classifier, in the view. Shuttle (the engine) speaks
 // engine vocabulary — eligible/blocked/running — and never names a kanban
@@ -13,8 +13,7 @@ import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
 // there is no separate scheduled surface, because a `due:` is a date a card
 // wears, never a place it goes. (The old `soon` exiled every future-dated card
 // to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
-const KANBAN_HORIZONS = ['now', 'stashed'] as const;
-export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
+export type KanbanHorizon = 'now' | 'stashed';
 
 /**
  * The set of columns the kanban renders. Differs from KanbanTarget in that
@@ -88,7 +87,7 @@ export function cycleSpan(
   return null;
 }
 
-/** The shape `upcomingCycleDropTargets` reads off a cycle card. Structural
+/** The shape `lensCycles` reads off a cycle card. Structural
  *  rather than `Pick<KanbanCard, …>` so the rules module keeps owning no
  *  view types; `KanbanCard` satisfies it. */
 export interface CycleDropCandidate {
@@ -98,73 +97,12 @@ export interface CycleDropCandidate {
   due?: string;
 }
 
-/** One cycle offered as a drop target on the drag horizon. */
-export interface CycleDropTarget {
-  id: string;
-  name: string;
-  /** The span's edges, as civil days (`end` is today for an open-ended cycle). */
-  start: string;
-  end: string;
-  openEnded: boolean;
-  /** True when the cycle has already opened — today is on or after `start`. */
-  running: boolean;
-  /** The civil day a drop writes, i.e. the day cell this chip stands in for. */
-  dropDay: string;
-}
-
-/**
- * The cycles the drag horizon offers alongside its day cells — "put this down
- * in the next chapter" rather than "put it down on the 14th".
- *
- * A cycle qualifies when it has a `start:` and has not already finished. A
- * cycle without a start is NOT a target: its span is a bare deadline (see
- * `cycleSpan`'s second branch), and there is no opening day to snooze to.
- *
- * `dropDay` is the cycle's start, CLAMPED FORWARD to tomorrow when the cycle
- * is already running. Dropping into a chapter you are living in means "later
- * this chapter", never a backdated due — and tomorrow is also the earliest day
- * the day cells themselves treat as a snooze (today means "onto the desk now").
- *
- * Ordered by start, so the horizon reads left to right as the calendar does.
- */
-export function upcomingCycleDropTargets(
-  cycles: readonly CycleDropCandidate[],
-  nowMs: number = Date.now(),
-): CycleDropTarget[] {
-  const today = isoDayLocal(nowMs);
-  // Stepped on the civil calendar, not by adding 24h: a DST-long day would
-  // leave `nowMs + DAY_MS` on today, and the clamp would emit a backdate.
-  const tomorrowDate = civilDayToLocalDate(today) ?? new Date(nowMs);
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = isoDayLocal(tomorrowDate.getTime());
-
-  const targets: CycleDropTarget[] = [];
-  for (const c of cycles) {
-    if (!c.cycleStart) continue;
-    const span = cycleSpan({ start: c.cycleStart, due: c.due }, nowMs);
-    if (!span) continue;
-    if (span.end < today) continue;
-    const running = span.start <= today;
-    targets.push({
-      id: c.id,
-      name: c.name,
-      start: span.start,
-      end: span.end,
-      openEnded: span.openEnded,
-      running,
-      dropDay: running ? tomorrow : span.start,
-    });
-  }
-  targets.sort((a, b) => (a.start === b.start ? a.name.localeCompare(b.name) : a.start < b.start ? -1 : 1));
-  return targets;
-}
-
 /**
  * Why a fiber belongs to a cycle. Membership is always DERIVED — a fiber is
  * never assigned to a cycle, so there is no field to write, nothing to keep in
  * sync, and no way for a cycle's roster to disagree with the calendar.
  *
- * Three rungs, in the order this function tries them:
+ * Two rungs, in the order this function tries them:
  *
  *   'due'       the fiber's `due:` falls inside the span. The plain reading of
  *               "this is due this sprint".
@@ -179,7 +117,7 @@ export function upcomingCycleDropTargets(
  *               caller can supply `workedDays` it simply passes them; the Desk
  *               leaves the field undefined and the rung is skipped.
  */
-export type CycleMembershipReason = 'due' | 'in-flight' | 'worked';
+export type CycleMembershipReason = 'due' | 'in-flight';
 
 /** What membership reads off a fiber. Structural, like `CycleDropCandidate`:
  *  the rules module owns no view types, and `KanbanCard` satisfies this. */
@@ -189,9 +127,6 @@ export interface CycleMemberCandidate {
    *  in the In flight column. A fact supplied by the caller, not re-derived
    *  here, so the predicate stays independent of how a surface is assembled. */
   inFlight?: boolean;
-  /** Civil days (`YYYY-MM-DD`) this fiber was worked on. Undefined wherever the
-   *  caller has no activity data — see the `worked` rung above. */
-  workedDays?: readonly string[];
 }
 
 /**
@@ -210,8 +145,6 @@ export function cycleMembership(
   const today = isoDayLocal(nowMs);
   if (card.inFlight === true && span.start <= today && today <= span.end) return 'in-flight';
 
-  if (card.workedDays?.some((d) => d >= span.start && d <= span.end)) return 'worked';
-
   return null;
 }
 
@@ -225,36 +158,57 @@ export interface CycleLensChip {
   /** True when the cycle has already opened and has not closed — the chapter
    *  we are living in. */
   running: boolean;
+  /** The civil day a drop on this chip writes, i.e. the day cell the chip
+   *  stands in for — undefined for a cycle with no `start:`, which offers no
+   *  day and so refuses the drop. */
+  dropDay?: string;
 }
 
 /**
  * The cycles the Desk offers as lenses — the current one plus everything still
  * ahead. A cycle qualifies when its span has not ended.
  *
- * Deliberately WIDER than `upcomingCycleDropTargets`, which is the drop-target
- * rule: that one refuses a cycle without a `start:`, because a bare deadline
- * has no opening day to snooze to. A lens needs no opening day — a one-day
- * span is a perfectly good filter — so a due-only cycle is admitted here.
- *
  * Ordered by start, then name, so the row holds still across polls.
+ *
+ * Each chip is also a DROP TARGET, and `dropDay` is what a drop writes — but
+ * only for a cycle that has a `start:`. A cycle without one is a bare deadline
+ * (see `cycleSpan`'s second branch): there is no opening day to snooze to, so
+ * it offers no `dropDay` and the drop refuses. A lens needs no opening day —
+ * a one-day span is a perfectly good filter — so a due-only cycle still gets
+ * its chip.
+ *
+ * `dropDay` is the cycle's start, CLAMPED FORWARD to tomorrow when the cycle
+ * is already running. Dropping into a chapter you are living in means "later
+ * this chapter", never a backdated due — and tomorrow is also the earliest day
+ * the day cells themselves treat as a snooze (today means "onto the desk now").
  */
 export function lensCycles(
   cycles: readonly CycleDropCandidate[],
   nowMs: number = Date.now(),
 ): CycleLensChip[] {
   const today = isoDayLocal(nowMs);
+  // Stepped on the civil calendar from a noon anchor, not by adding 24h: a
+  // DST-long day would leave `nowMs + DAY_MS` on today, and the clamp would
+  // emit a backdate.
+  const tomorrowDate = new Date(nowMs);
+  tomorrowDate.setHours(12, 0, 0, 0);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = isoDayLocal(tomorrowDate.getTime());
+
   const chips: CycleLensChip[] = [];
   for (const c of cycles) {
     const span = cycleSpan({ start: c.cycleStart ?? undefined, due: c.due }, nowMs);
     if (!span) continue;
     if (span.end < today) continue;
+    const running = span.start <= today;
     chips.push({
       id: c.id,
       name: c.name,
       start: span.start,
       end: span.end,
       openEnded: span.openEnded,
-      running: span.start <= today,
+      running,
+      dropDay: c.cycleStart ? (running ? tomorrow : span.start) : undefined,
     });
   }
   chips.sort((a, b) => (a.start === b.start ? a.name.localeCompare(b.name) : a.start < b.start ? -1 : 1));
@@ -265,8 +219,7 @@ export function lensCycles(
  * Classify a fiber into the kanban column it belongs in. The single source
  * of truth for "what column is this?". Reads ONLY the document-lifecycle
  * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,
- * live tmux liveness (`runningWorker`), and dependency
- * satisfaction (`dependsOnSatisfied`). There is no `enabled` and no
+ * and live tmux liveness (`runningWorker`). There is no `enabled` and no
  * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
  *
  *   1. A closed fiber is a human verdict, terminal regardless of tags or
@@ -304,8 +257,8 @@ export function lensCycles(
  *                                            inFlight at the liveness branch
  *                                            above — live work shows in Now.)
  *      A blocked-by-deps active oneshot still reads inFlight (launch intent —
- *      it flies when the dep clears), so the oneshot active branch collapses to
- *      a single inFlight regardless of `dependsOnSatisfied`.
+ *      it flies when the dep clears); the dependency gate is applied downstream,
+ *      by `depGated` on this classifier's output, never here.
  *
  * The kanban response splits classifyFiber's output across the
  * surfaces: now, timeline, stash, and the pinned strip. The classifier
@@ -314,7 +267,7 @@ export function lensCycles(
  */
 export function classifyFiber(
   f: Fiber,
-  opts: { runningWorker?: boolean; dependsOnSatisfied?: boolean } = {},
+  opts: { runningWorker?: boolean } = {},
 ): KanbanColumn {
   // A CYCLE is an annotation on time, not work, so it leaves before any
   // lifecycle question is asked. This branch is FIRST on purpose and it is
@@ -389,33 +342,20 @@ export function effectiveHorizon(
   // return ticket. A snoozed card is `horizon:stashed` + a future `due:`; when
   // the due day arrives this branch pulls it back onto the desk. Without the
   // override, snooze would be a black hole — the card would rest forever with
-  // a date nobody reads. The branch order IS the rule: drift is checked before
-  // the stashed branch below, never after.
-  if (duePromotesToNow) {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'now',
-      drifted: storedHorizon !== undefined,
-    };
-  }
-
-  // SNOOZED — a future `due:` under a stored `stashed`. The two fields compose:
-  // `stashed` says where the card lives (Resting, off the desk), `due:` says
-  // when it comes back. Only an EXPLICIT snooze takes a card off the desk: a
-  // bare future `due:` falls through to `now` below, so the card keeps its
-  // column and simply wears the date.
-  if (storedHorizon === 'stashed') {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'stashed',
-      drifted: false,
-    };
-  }
-
+  // a date nobody reads. The PRECEDENCE is the rule: drift WINS over a stored
+  // `stashed`, never the other way round.
+  //
+  // SNOOZED — a future `due:` under a stored `stashed` — is the other half. The
+  // two fields compose: `stashed` says where the card lives (Resting, off the
+  // desk), `due:` says when it comes back. Only an EXPLICIT snooze takes a card
+  // off the desk: a bare future `due:` reads `now`, so the card keeps its column
+  // and simply wears the date. (`normalizeHorizon` only ever answers `stashed`
+  // or undefined, so `stashed` below is exactly "there is a stored horizon".)
+  const stashed = storedHorizon === 'stashed';
   return {
     storedHorizon,
-    effectiveHorizon: 'now',
-    drifted: false,
+    effectiveHorizon: duePromotesToNow || !stashed ? 'now' : 'stashed',
+    drifted: duePromotesToNow && stashed,
   };
 }
 
@@ -473,15 +413,15 @@ const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
  * always stays available on the `title`.
  */
 export function humanizeCron(expr: string | undefined): string | undefined {
-  if (typeof expr !== 'string' || !expr.trim()) return undefined;
+  if (!expr?.trim()) return undefined;
   let fields;
   try {
     fields = CronExpressionParser.parse(expr.trim()).fields;
   } catch {
     return undefined;
   }
-  const minutes = [...fields.minute.values];
-  const hours = [...fields.hour.values];
+  const minutes = fields.minute.values;
+  const hours = fields.hour.values;
   if (minutes.length !== 1 || hours.length !== 1) return undefined;
   // Only an unconstrained day-of-month + month can be said as a weekly cadence.
   if (fields.dayOfMonth.values.length !== 31) return undefined;
@@ -523,13 +463,11 @@ export function nextStandingLaunch(
 ): string | undefined {
   if (f.shuttleKind !== 'standing') return undefined;
   if (f.status !== 'active') return undefined;
-  const expr = f.shuttleSchedule?.expr;
-  if (typeof expr !== 'string' || !expr.trim()) return undefined;
-  const rawTz = f.shuttleSchedule?.tz;
-  const tz = typeof rawTz === 'string' && rawTz.trim() ? rawTz : 'UTC';
+  const sched = f.shuttleSchedule;
+  if (!sched?.expr.trim()) return undefined;
   try {
-    const it = CronExpressionParser.parse(expr, {
-      tz,
+    const it = CronExpressionParser.parse(sched.expr, {
+      tz: sched.tz.trim() ? sched.tz : 'UTC',
       currentDate: new Date(nowMs),
     });
     return it.next().toISOString() ?? undefined;
@@ -596,7 +534,6 @@ export function resolveDependencies(
 /** The shape the gate reads off a card. Structural, so the rules module keeps
  *  owning no view types; `KanbanCard` satisfies it. */
 export interface DepGateCandidate {
-  status: string;
   dependsOnSatisfied: boolean;
   runningWorker?: string;
   /** The human's verdict, when there is one. Only a VERDICT exempts a card
@@ -731,23 +668,6 @@ export function chainTail(
 }
 
 /**
- * Would stacking `sourceId` behind `targetId` close a loop?
- *
- * True when the target is the source itself, or is already somewhere in the
- * queue behind the source — dropping a card onto its own descendant. The
- * gesture refuses rather than writing frontmatter that would gate both cards
- * forever with no way out but a text editor.
- */
-export function stackWouldCycle(
-  sourceId: string,
-  targetId: string,
-  dependents: ReadonlyMap<string, readonly string[]>,
-): boolean {
-  if (sourceId === targetId) return true;
-  return queuedBehind(sourceId, dependents).includes(targetId);
-}
-
-/**
  * The card's own hot zone for a stack drop — the inner fraction of its box.
  *
  * A card is a drop target for TWO different gestures: the column under it
@@ -795,11 +715,11 @@ export function intersectRects(a: ZoneRect, b: ZoneRect): ZoneRect | null {
 export function inStackHotZone(
   rect: { left: number; top: number; width: number; height: number },
   point: { x: number; y: number },
-  fraction = 0.6,
 ): boolean {
   if (rect.width <= 0 || rect.height <= 0) return false;
-  const marginX = (rect.width * (1 - fraction)) / 2;
-  const marginY = (rect.height * (1 - fraction)) / 2;
+  // The inner 60% of the box in each axis; the outer band belongs to the column.
+  const marginX = (rect.width * 0.4) / 2;
+  const marginY = (rect.height * 0.4) / 2;
   return (
     point.x >= rect.left + marginX &&
     point.x <= rect.left + rect.width - marginX &&
@@ -945,10 +865,6 @@ export function queueRowGesture(opts: {
   queueLength: number;
   /** Is every member of the chain scalar-shaped? */
   chainAllScalar: boolean;
-  /** Is a reorder handler wired at all? */
-  canReorder: boolean;
-  /** Is an unqueue handler wired at all? */
-  canUnqueue: boolean;
 }): QueueRowGesture {
   // A hand-written `depends_on:` LIST is the one honest refusal. Dropping the
   // row would have to guess which of several edges the human meant to cut, and
@@ -960,14 +876,7 @@ export function queueRowGesture(opts: {
       hint: 'Waits on a hand-written depends_on: list — open it and edit that list to move it.',
     };
   }
-  const reorderable = opts.canReorder && opts.queueLength > 1 && opts.chainAllScalar;
-  if (!opts.canUnqueue && !reorderable) {
-    return {
-      draggable: false,
-      reorderable: false,
-      hint: 'This board is read-only for sequences right now.',
-    };
-  }
+  const reorderable = opts.queueLength > 1 && opts.chainAllScalar;
   return {
     draggable: true,
     reorderable,
@@ -1054,7 +963,7 @@ export function unqueueRowWrites(
   queue: readonly string[],
   index: number,
 ): QueueRewrite[] {
-  if (!Number.isInteger(index) || index < 0 || index >= queue.length) return [];
+  if (!Number.isInteger(index) || index < 0) return [];
   const successor = queue[index + 1];
   if (successor === undefined) return [];
   const predecessor = index === 0 ? headId : queue[index - 1];
@@ -1114,22 +1023,6 @@ export function queueMemberNote(
 ): QueueMemberNote | null {
   if (member.status !== 'closed') return null;
   return member.tempered === false ? 'composted' : 'awaiting review';
-}
-
-/**
- * What the "+N queued" chip reads for a queue of this size.
- *
- * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
- * this card in every sense the gesture cares about, and a count that skipped
- * them would disagree with the refusal you get for dropping onto the same card.
- * The chip used to append a second clause counting the settled ones ("· 1 in
- * review"); it made a glance at the desk do arithmetic to answer a question the
- * glance was not asking. How each member sits is a fact about that member, so
- * it belongs where the members are: the peek list, where every row says its own
- * state and wears its own colour (`queueMemberNote`).
- */
-export function queuedChipLabel(total: number): string {
-  return `+${total} queued`;
 }
 
 /** What the stack gesture needs to know about a card to rule on a drop.
@@ -1231,7 +1124,11 @@ export function stackDropVerdict(
   if (tail === source.id || queuedBehind(target.id, dependents).includes(source.id)) {
     return { ok: false, code: 'alreadyQueued', reason: 'it is already queued behind this one' };
   }
-  if (stackWouldCycle(source.id, tail, dependents)) {
+  // A LOOP: the tail already sits somewhere in the queue behind the source, so
+  // writing the edge would gate both cards forever with no gesture that undoes
+  // it. (`tail === source.id` cannot reach here — the branch above returned
+  // `alreadyQueued` for it.)
+  if (queuedBehind(source.id, dependents).includes(tail)) {
     return { ok: false, reason: 'that would make a loop' };
   }
   if ((source.dependsOn ?? []).length === 1 && source.dependsOn?.[0] === tail) {
@@ -1242,10 +1139,9 @@ export function stackDropVerdict(
 
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  // `now` is absence, and legacy `soon` frontmatter reads as absence too: the
-  // surface it named no longer exists, and a card that carried it belongs on
-  // the desk wearing whatever `due:` it has.
-  if (trimmed === 'now' || trimmed === 'soon') return undefined;
-  return trimmed === 'stashed' ? 'stashed' : undefined;
+  // Only `stashed` is a value; everything else is absence. `now` is absence by
+  // definition, and legacy `soon` frontmatter reads as absence too: the surface
+  // it named no longer exists, and a card that carried it belongs on the desk
+  // wearing whatever `due:` it has.
+  return value.trim() === 'stashed' ? 'stashed' : undefined;
 }

@@ -29,15 +29,12 @@ import {
   queueMemberNote,
   queueRowGesture,
   queuedBehind,
-  queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
   unqueueRowWrites,
   stackDropVerdict,
-  upcomingCycleDropTargets,
 } from './KanbanRules.js'
 import type {
-  CycleDropTarget,
   CycleLensChip,
   QueueRewrite,
   QueueRowGesture,
@@ -505,7 +502,7 @@ export class KanbanSurfaceRenderer {
    * chapter chips of its own any more: there was one row of chapters on screen
    * already, and drawing a second one under the tabs the moment you picked
    * something up was the board saying the same thing twice. `dropDay` (from
-   * `upcomingCycleDropTargets`) is what a drop here writes — a chip is a day
+   * `lensCycles`) is what a drop here writes — a chip is a day
    * cell you happen to know by name. A cycle with no `start:` is a deadline
    * rather than a span, so it has no day to offer and simply refuses, silently
    * and without claiming the event.
@@ -522,10 +519,6 @@ export class KanbanSurfaceRenderer {
     const chips = lensCycles(resp?.cycles ?? [], nowMs)
     if (chips.length === 0) return null
 
-    const drops = new Map(
-      upcomingCycleDropTargets(resp?.cycles ?? [], nowMs).map((t) => [t.id, t]),
-    )
-
     const bar = document.createElement('div')
     bar.className = 'kbn-lensbar'
     bar.setAttribute('role', 'region')
@@ -533,10 +526,9 @@ export class KanbanSurfaceRenderer {
     for (const chip of chips) {
       const count = deriveCycleLens(resp, chip.id, nowMs)?.count ?? 0
       const el = this.renderLensChip(chip, count, chip.id === activeId, onToggle)
-      const target = drops.get(chip.id)
-      if (target) {
-        this.installTimelineDayDropHandlers(el, target.dropDay, cycleAimLabel(target))
-        el.title = `${el.title} Or drop something here to rest it until ${shortDayLabel(target.dropDay)}.`
+      if (chip.dropDay !== undefined) {
+        this.installTimelineDayDropHandlers(el, chip.dropDay, cycleAimLabel(chip, chip.dropDay))
+        el.title = `${el.title} Or drop something here to rest it until ${shortDayLabel(chip.dropDay)}.`
       }
       bar.append(el)
     }
@@ -1838,7 +1830,16 @@ export class KanbanSurfaceRenderer {
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'kbn-card-queued'
-    chip.textContent = queuedChipLabel(queued.length)
+    // ONE NUMBER, and it is the WHOLE chain — the closed members are queued
+    // behind this card in every sense the gesture cares about, and a count that
+    // skipped them would disagree with the refusal you get for dropping onto the
+    // same card. The chip used to append a second clause counting the settled
+    // ones ("· 1 in review"); it made a glance at the desk do arithmetic to
+    // answer a question the glance was not asking. How each member sits is a
+    // fact about that member, so it belongs where the members are: the peek
+    // list, where every row says its own state and wears its own colour
+    // (`queueMemberNote`).
+    chip.textContent = `+${queued.length} queued`
     chip.setAttribute('aria-expanded', 'false')
     chip.setAttribute(
       'aria-label',
@@ -1862,8 +1863,6 @@ export class KanbanSurfaceRenderer {
         shape: m?.dependsOnShape,
         queueLength: queued.length,
         chainAllScalar,
-        canReorder: !!this.o.reorderQueue,
-        canUnqueue: !!this.o.unqueueRow,
       })
     const gestures = members.map(gestureFor)
     const reorderable = gestures.some((g) => g.reorderable)
@@ -2468,10 +2467,10 @@ function dayAimLabel(day: TimelineDay): string {
 
 /** What the aim readout says while a cycle chip is the target. A cycle
  *  already underway means "later this chapter", not "when it opens". */
-function cycleAimLabel(target: CycleDropTarget): string {
+function cycleAimLabel(target: CycleLensChip, dropDay: string): string {
   return target.running
-    ? `→ resting until ${shortDayLabel(target.dropDay)} · later in ${target.name}`
-    : `→ resting until ${shortDayLabel(target.dropDay)} · ${target.name} opens`
+    ? `→ resting until ${shortDayLabel(dropDay)} · later in ${target.name}`
+    : `→ resting until ${shortDayLabel(dropDay)} · ${target.name} opens`
 }
 
 /** A cycle's span as a chip says it — `Aug 12 – Aug 26`, or `Aug 12 –` for a

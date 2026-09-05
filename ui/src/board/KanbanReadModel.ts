@@ -269,10 +269,7 @@ function assembleSurfaces(
   const depGatedCards: KanbanCard[] = [];
   for (const entry of entries) {
     const card = toCard(entry, byId, nowMs);
-    const column = classifyFiber(entry.fiber, {
-      runningWorker: !!card.runningWorker,
-      dependsOnSatisfied: card.dependsOnSatisfied,
-    });
+    const column = classifyFiber(entry.fiber, { runningWorker: !!card.runningWorker });
     // The gate covers every column where the card is still an ATTENTION CLAIM:
     // the three working columns plus `awaitingReview` — closed but unjudged, and
     // a review queued behind work that has not landed is precisely what queuing
@@ -449,11 +446,8 @@ export interface CycleLens {
  * Resolve one cycle into a lens over a board response: who belongs, and which
  * of them the Desk is not currently showing.
  *
- * Membership is `cycleMembership` — derived, never assigned. The Desk supplies
- * two of its three rungs: `due:` inside the span, and "in flight right now".
- * The third (worked inside the span) needs activity days from the temporal
- * feeds, which the Desk does not fetch; when a caller can supply them, it puts
- * them on the candidate and the rung starts firing with no change here.
+ * Membership is `cycleMembership` — derived, never assigned: `due:` inside the
+ * span, or "in flight right now".
  *
  * GHOSTS come from Resting. A resting card is off the desk by choice, but if it
  * is due inside the cycle you are looking at, it is part of that chapter's
@@ -486,7 +480,7 @@ export function deriveCycleLens(
   const ghosts: CycleLensGhost[] = [];
   for (const card of restingCards(resp)) {
     // A resting card is never in flight — that is what resting means — so only
-    // the `due:` rung (and, later, `worked`) can admit it.
+    // the `due:` rung can admit it.
     if (!cycleMembership({ due: card.due }, span, nowMs)) continue;
     memberIds.add(card.id);
     ghosts.push({ card, column: ghostColumn(card) });

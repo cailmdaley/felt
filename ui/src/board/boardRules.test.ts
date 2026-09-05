@@ -26,14 +26,12 @@ import {
   lensCycles,
   queueDropIndex,
   queuedBehind,
-  queuedChipLabel,
   reorderQueueWrites,
   restingUntil,
   stackZoneOffered,
   unqueueRowWrites,
   stackClaimsDrop,
   stackDropVerdict,
-  upcomingCycleDropTargets,
 } from './KanbanRules.js'
 import type { CycleDropCandidate, StackCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
@@ -909,7 +907,7 @@ describe('cycles — a named span of time, not work', () => {
     })
   })
 
-  describe('upcomingCycleDropTargets — the chapters the drag horizon offers', () => {
+  describe('lensCycles as drop targets — the chapters the drag horizon offers', () => {
     const cycle = (
       id: string,
       cycleStart: string | null,
@@ -917,7 +915,7 @@ describe('cycles — a named span of time, not work', () => {
     ): CycleDropCandidate => ({ id, name: id, cycleStart, due })
 
     it('offers a future cycle at its own opening day', () => {
-      const targets = upcomingCycleDropTargets(
+      const targets = lensCycles(
         [cycle('autumn', dayFromNow(10), dayFromNow(40))],
         NOW,
       )
@@ -932,7 +930,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('clamps a running cycle to TOMORROW — later this chapter, never a backdate', () => {
-      const targets = upcomingCycleDropTargets(
+      const targets = lensCycles(
         [cycle('summer', dayFromNow(-10), dayFromNow(10))],
         NOW,
       )
@@ -940,19 +938,19 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('clamps a cycle opening TODAY too — today means "onto the desk", not a snooze', () => {
-      const targets = upcomingCycleDropTargets([cycle('opens-now', dayFromNow(0))], NOW)
+      const targets = lensCycles([cycle('opens-now', dayFromNow(0))], NOW)
       expect(targets[0]).toMatchObject({ running: true, dropDay: dayFromNow(1) })
     })
 
     it('drops a cycle that has already closed', () => {
-      expect(upcomingCycleDropTargets(
+      expect(lensCycles(
         [cycle('spring', dayFromNow(-40), dayFromNow(-1))],
         NOW,
       )).toEqual([])
     })
 
     it('keeps a cycle closing TODAY — the chapter is still open', () => {
-      const targets = upcomingCycleDropTargets(
+      const targets = lensCycles(
         [cycle('closing', dayFromNow(-10), dayFromNow(0))],
         NOW,
       )
@@ -960,7 +958,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('keeps an open-ended cycle, running, and says so', () => {
-      const targets = upcomingCycleDropTargets([cycle('ongoing', dayFromNow(-3))], NOW)
+      const targets = lensCycles([cycle('ongoing', dayFromNow(-3))], NOW)
       expect(targets[0]).toMatchObject({
         openEnded: true,
         running: true,
@@ -970,12 +968,14 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('is not a target without a start — a bare due is a deadline, not a chapter', () => {
-      expect(upcomingCycleDropTargets([cycle('deadline', null, dayFromNow(5))], NOW)).toEqual([])
+      const targets = lensCycles([cycle('deadline', null, dayFromNow(5))], NOW)
+      expect(targets).toHaveLength(1)
+      expect(targets[0].dropDay).toBeUndefined()
     })
 
     it('reads felt\'s midnight-Z start the same as a bare civil day', () => {
-      const bare = upcomingCycleDropTargets([cycle('c', dayFromNow(4))], NOW)
-      const written = upcomingCycleDropTargets(
+      const bare = lensCycles([cycle('c', dayFromNow(4))], NOW)
+      const written = lensCycles(
         [cycle('c', asFeltWrites(dayFromNow(4)))],
         NOW,
       )
@@ -983,7 +983,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('orders by start, so the strip reads as the calendar does', () => {
-      const targets = upcomingCycleDropTargets([
+      const targets = lensCycles([
         cycle('third', dayFromNow(20)),
         cycle('first', dayFromNow(-2), dayFromNow(3)),
         cycle('second', dayFromNow(5)),
@@ -992,7 +992,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('offers nothing when there are no cycles at all', () => {
-      expect(upcomingCycleDropTargets([], NOW)).toEqual([])
+      expect(lensCycles([], NOW)).toEqual([])
     })
   })
 
@@ -1227,14 +1227,6 @@ describe('the cycle lens — membership is derived, never assigned', () => {
       expect(cycleMembership({}, span, NOW)).toBeNull()
       expect(cycleMembership({ inFlight: false, due: undefined }, span, NOW)).toBeNull()
     })
-
-    it('has the activity rung ready for the day a caller can supply it', () => {
-      // The Desk never fills `workedDays` — the days live in the temporal feeds
-      // it does not fetch — so this rung is dark there and live here.
-      expect(cycleMembership({ workedDays: [dayFromNow(-1)] }, span, NOW)).toBe('worked')
-      expect(cycleMembership({ workedDays: [dayFromNow(-40)] }, span, NOW)).toBeNull()
-      expect(cycleMembership({ workedDays: [] }, span, NOW)).toBeNull()
-    })
   })
 
   describe('lensCycles — which chapters the Desk offers', () => {
@@ -1262,7 +1254,7 @@ describe('the cycle lens — membership is derived, never assigned', () => {
       // A lens needs no opening day to snooze to — a one-day span filters fine.
       const bare = [c({ id: 'cycles/deadline', name: 'Deadline', due: asFeltWrites(dayFromNow(5)) })]
       expect(lensCycles(bare, NOW).map((k) => k.id)).toEqual(['cycles/deadline'])
-      expect(upcomingCycleDropTargets(bare, NOW)).toEqual([])
+      expect(lensCycles(bare, NOW)[0].dropDay).toBeUndefined()
     })
 
     it('has nothing to say about a cycle with no dates at all', () => {
@@ -2096,8 +2088,6 @@ describe('the queue counts every follower a dependency still holds', () => {
 
     // The chip counts, and only counts — how each member sits is the peek
     // list's job, per row, so the desk stays readable at a glance.
-    expect(queuedChipLabel(2)).toBe('+2 queued')
-    expect(queuedChipLabel(1)).toBe('+1 queued')
   })
 })
 
@@ -2223,8 +2213,6 @@ describe('a queued row asks only about itself', () => {
     shape: 'scalar' as const,
     queueLength: 3,
     chainAllScalar: true,
-    canReorder: true,
-    canUnqueue: true,
   }
 
   it('offers both gestures on an ordinary scalar chain', () => {
@@ -2270,23 +2258,9 @@ describe('a queued row asks only about itself', () => {
     // to the owning daemon — and an owner that is genuinely dead fails that
     // forward and is reported then, by name.
     expect(Object.keys(base).sort()).toEqual([
-      'canReorder',
-      'canUnqueue',
       'chainAllScalar',
       'queueLength',
       'shape',
     ])
-  })
-
-  it('goes inert, with a reason, when no sequence handler is wired', () => {
-    const g = queueRowGesture({ ...base, canReorder: false, canUnqueue: false })
-    expect(g.draggable).toBe(false)
-    expect(g.hint).toMatch(/read-only/i)
-  })
-
-  it('still drags when only the unqueue handler is wired', () => {
-    const g = queueRowGesture({ ...base, canReorder: false })
-    expect(g.draggable).toBe(true)
-    expect(g.reorderable).toBe(false)
   })
 })
