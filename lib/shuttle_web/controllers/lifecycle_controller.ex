@@ -109,13 +109,7 @@ defmodule ShuttleWeb.LifecycleController do
     with {:ok, %{fiber_id: fiber_id}} <- resolve_fiber(identifier), do: {:ok, fiber_id}
   end
 
-  defp resolve_fiber(identifier) do
-    case FeltStores.resolve_fiber(identifier) do
-      {:ok, resolved} -> {:ok, resolved}
-      {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
-      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
-    end
-  end
+  defp resolve_fiber(identifier), do: FeltStores.resolve_fiber_or_error(identifier)
 
   defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
   defp run_elem(error, _felt_store), do: error

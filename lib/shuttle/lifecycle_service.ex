@@ -54,11 +54,8 @@ defmodule Shuttle.LifecycleService do
   end
 
   defp fiber_address(identifier) do
-    case FeltStores.resolve_fiber(identifier) do
-      {:ok, %{fiber_id: fiber_id}} -> {:ok, fiber_id}
-      {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
-      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
-    end
+    with {:ok, %{fiber_id: fiber_id}} <- FeltStores.resolve_fiber_or_error(identifier),
+         do: {:ok, fiber_id}
   end
 
   defp to_message(reason) when is_binary(reason), do: reason

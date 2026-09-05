@@ -184,6 +184,14 @@ defmodule Shuttle.Remote do
   @spec display_name(t()) :: String.t()
   def display_name(%__MODULE__{display: display, name: name}), do: string_or(display, name)
 
+  @doc """
+  This remote's base URL joined to `path` — the ONE definition of that join, so
+  every `*_url/1` builder here and `Shuttle.OriginRouter`'s forwards produce a
+  byte-identical URL.
+  """
+  @spec url_for(t(), String.t()) :: String.t()
+  def url_for(%__MODULE__{url: url}, path), do: base(url) <> path
+
   defp base(url), do: String.trim_trailing(url, "/")
 
   @doc """

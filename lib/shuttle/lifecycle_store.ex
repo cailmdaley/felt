@@ -283,8 +283,8 @@ defmodule Shuttle.LifecycleStore do
 
   # Boolean kind predicates for the kind-aware `accept` dispatch (one verb, two
   # termini: standing re-arm vs pinned re-park).
-  defp standing?(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "standing"
-  defp pinned?(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "pinned"
+  defp standing?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "standing"
+  defp pinned?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "pinned"
 
   defp require_schedule(%{"schedule" => schedule}) when is_map(schedule), do: {:ok, schedule}
   defp require_schedule(_), do: {:error, "fiber has no schedule"}

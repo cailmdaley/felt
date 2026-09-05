@@ -107,11 +107,8 @@ defmodule ShuttleWeb.RelayHelpers do
           | {:error, String.t()}
           | {:error, :timeout, String.t()}
   def host_for_fiber(fiber_id) do
-    case FeltStores.resolve_fiber(fiber_id) do
-      {:ok, %{host: host, fiber_id: address}} -> {:ok, host, address}
-      {:error, :not_found} -> {:error, "fiber not found: #{fiber_id}"}
-      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{fiber_id}"}
-    end
+    with {:ok, %{host: host, fiber_id: address}} <- FeltStores.resolve_fiber_or_error(fiber_id),
+         do: {:ok, host, address}
   end
 
   @doc "True for a non-empty binary — the required-string guard the controllers share."
