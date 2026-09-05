@@ -37,7 +37,8 @@ import {
   type PickerHost,
 } from './ProjectPicker'
 import { useAddProject } from './useAddProject'
-import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
+import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
+import { fiberIndex } from '../board/wikilinks'
 import { shuttleOrigin } from './projectModel'
 
 // ---------------------------------------------------------------------------
@@ -100,11 +101,6 @@ export interface StashFormProps {
   onCancel: () => void
 }
 
-interface CreateFiberResponse {
-  id?: string
-  error?: string
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -122,16 +118,6 @@ function slugStem(title: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
-}
-
-/** Submit variant — a timestamp keeps an alphanumeric-free title addressable. */
-function slugify(title: string): string {
-  return slugStem(title) || `stash-${Date.now()}`
-}
-
-/** Preview variant — an ellipsis stands in for the not-yet-known timestamp. */
-function previewSlug(title: string): string {
-  return slugStem(title) || 'stash-…'
 }
 
 /** The shuttle block, assembled client-side (lean: only true/non-empty
@@ -188,16 +174,6 @@ function agentLabel(a: AgentEntry): string {
 // Parent-fiber picker — project-scoped, project-relative
 // ---------------------------------------------------------------------------
 
-// One daemon index fetch per page load, shared across picker opens.
-let stashFiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
-function loadStashFiberIndex(shuttleBase: string): Promise<Array<{ id: string; name: string }>> {
-  stashFiberIndex ??= fetchFiberIndex(shuttleBase).catch((err: unknown) => {
-    stashFiberIndex = null
-    throw err
-  })
-  return stashFiberIndex
-}
-
 interface ParentPickerProps {
   value: string
   onChange: (value: string) => void
@@ -219,7 +195,7 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
   // strip the loomPrefix so candidates are project-relative — exactly the id
   // space the create endpoint expects for this project_dir.
   const fetchResults = (query: string): void => {
-    loadStashFiberIndex(shuttleBase)
+    fiberIndex(shuttleBase)
       .then((all) => {
         const scoped = scopePrefix
           ? all
@@ -250,10 +226,6 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
     onChange(v)
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(() => fetchResults(v.trim()), 200)
-  }
-
-  const handleFocus = (): void => {
-    fetchResults(value.trim())
   }
 
   const commit = (r: FiberSearchResult): void => {
@@ -298,7 +270,7 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
         className="stash-input"
         value={value}
         onChange={handleInput}
-        onFocus={handleFocus}
+        onFocus={() => fetchResults(value.trim())}
         onKeyDown={handleKeyDown}
         placeholder="standalone-kanban  ·  backend/…"
         autoComplete="off"
@@ -344,7 +316,7 @@ export function StashForm({
   availableCities = [],
   availableHosts = [],
   cityActivityById = {},
-  tagSuggestions,
+  tagSuggestions = [],
   shuttleBase = '',
   onCreated,
   onProjectAdded,
@@ -418,8 +390,7 @@ export function StashForm({
   const sortedCities = [...cities].sort(byRecency(cityActivityById))
   const hostCities = projectsForHost(sortedCities, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
-  const selectedCity =
-    selectedCityId !== null ? hostCities.find((c) => c.id === selectedCityId) ?? null : null
+  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
 
   // "+ Add project…" — native OS dialog on a local host that has one, the
   // absolute-path row everywhere else (see useAddProject).
@@ -448,11 +419,9 @@ export function StashForm({
     addProject.closePath()
   }
 
-  const allSuggestions = tagSuggestions ?? []
   const tagInputLower = tagInput.trim().toLowerCase()
-  const filteredSuggestions = allSuggestions
-    .filter((t) => !tags.includes(t))
-    .filter((t) => (tagInputLower ? t.toLowerCase().includes(tagInputLower) : true))
+  const filteredSuggestions = tagSuggestions
+    .filter((t) => !tags.includes(t) && (!tagInputLower || t.toLowerCase().includes(tagInputLower)))
     .slice(0, 8)
 
   const addTag = (raw: string): void => {
@@ -505,7 +474,7 @@ export function StashForm({
     // Build the project-relative id + native frontmatter, then POST Shuttle's
     // own create shape. `parentSlug` is already project-relative (the picker is
     // scoped to this project), so the id derivation is the plain join.
-    const childSlug = slugify(trimmedTitle)
+    const childSlug = slugStem(trimmedTitle) || `stash-${Date.now()}`
     const parentRel = parentSlug.trim().replace(/^\/+|\/+$/g, '')
     const id = parentRel ? `${parentRel}/${childSlug}` : childSlug
 
@@ -538,7 +507,7 @@ export function StashForm({
           origin: shuttleOrigin(selectedCity.originId),
         }),
       })
-      const data = (await res.json().catch(() => ({}))) as CreateFiberResponse
+      const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
       if (!res.ok || !data.id) {
         throw new Error(data.error || `Server returned ${res.status}`)
       }
@@ -704,7 +673,7 @@ export function StashForm({
                   <span className="stash-receipt-key">slug</span>
                   <span className="stash-receipt-sep">›</span>
                   <code className="stash-receipt-val">
-                    {parentSlug ? `${parentSlug}/` : ''}{previewSlug(title)}
+                    {parentSlug ? `${parentSlug}/` : ''}{slugStem(title) || 'stash-…'}
                   </code>
                 </div>
               )}
@@ -957,8 +926,6 @@ export function StashForm({
 
 /**
  * Inject the StashForm's CSS once. Idempotent — safe to call on every open.
- * The trailing `.stash-trigger` note refers to the kanban header button the
- * board already renders.
  */
 export function injectStashFormStyles(): void {
   if (typeof document === 'undefined') return
