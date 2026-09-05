@@ -24,6 +24,24 @@ var (
 	treeDepth    int
 )
 
+// listForOutput lists fibers the way the active output mode needs them: --json
+// carries mod times, and a --has filter that only names frontmatter keys is
+// pushed into the walk so unrelated fibers skip a full YAML parse.
+func listForOutput(storage *felt.Storage, hasFields []string) ([]*felt.Felt, error) {
+	frontmatterFields, canPrefilter := frontmatterPrefilterFields(hasFields)
+	prefilter := canPrefilter && len(frontmatterFields) > 0
+	if jsonOutput {
+		if prefilter {
+			return storage.ListMetadataWithModTimeHavingFrontmatterFields(frontmatterFields)
+		}
+		return storage.ListMetadataWithModTime()
+	}
+	if prefilter {
+		return storage.ListMetadataHavingFrontmatterFields(frontmatterFields)
+	}
+	return storage.ListMetadata()
+}
+
 var lsCmd = &cobra.Command{
 	Use:   "ls [query]",
 	Short: "List and search felts",
@@ -70,21 +88,7 @@ list every match flat. --json is always uncollapsed.`,
 			return fmt.Errorf("--json-field requires --json")
 		}
 
-		var felts []*felt.Felt
-		frontmatterFields, canPrefilterFrontmatter := frontmatterPrefilterFields(hasFields)
-		if jsonOutput {
-			if canPrefilterFrontmatter && len(frontmatterFields) > 0 {
-				felts, err = storage.ListMetadataWithModTimeHavingFrontmatterFields(frontmatterFields)
-			} else {
-				felts, err = storage.ListMetadataWithModTime()
-			}
-		} else {
-			if canPrefilterFrontmatter && len(frontmatterFields) > 0 {
-				felts, err = storage.ListMetadataHavingFrontmatterFields(frontmatterFields)
-			} else {
-				felts, err = storage.ListMetadata()
-			}
-		}
+		felts, err := listForOutput(storage, hasFields)
 		if err != nil {
 			return err
 		}
@@ -676,12 +680,7 @@ with the count of what lies below them. --json is always the full tree.`,
 			}
 		}
 
-		var felts []*felt.Felt
-		if jsonOutput {
-			felts, err = target.storage.ListMetadataWithModTime()
-		} else {
-			felts, err = target.storage.ListMetadata()
-		}
+		felts, err := listForOutput(target.storage, nil)
 		if err != nil {
 			return err
 		}

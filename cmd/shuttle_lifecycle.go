@@ -147,13 +147,7 @@ status:active is the sole dispatch gate; there is no enabled flag.`,
 
 		// Dual-recognition: kill whichever session form is live (a worker launched
 		// before the uid-keyed cutover carries the legacy name).
-		session := ""
-		for _, candidate := range shuttleTmuxSessionNames(f.ID, f.UID) {
-			if tmuxSessionExists(candidate) {
-				session = candidate
-				break
-			}
-		}
+		session, _ := liveWorkerSession(f)
 		if session == "" {
 			fmt.Printf("  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
 			return nil
