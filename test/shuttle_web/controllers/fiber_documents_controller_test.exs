@@ -1,5 +1,7 @@
 defmodule ShuttleWeb.FiberDocumentsControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ForwardStub
+  import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
   import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
@@ -1383,20 +1385,6 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end
   end
 
-  defp stub_forward(remote_name, remote_url, response) do
-    start_supervised!(StubGetFileClient)
-    StubGetFileClient.set_response(response)
-
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: remote_name, url: remote_url}])
-    Application.put_env(:shuttle, :write_forward_client, StubGetFileClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
-  end
 
   # Start a Poller under its default name (so the controller's calls reach it),
   # or reuse a running one — returning the original state to restore on exit.
@@ -1507,9 +1495,4 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     String.trim(realdir)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 end

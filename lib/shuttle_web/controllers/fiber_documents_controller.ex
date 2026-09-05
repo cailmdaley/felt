@@ -83,17 +83,15 @@ defmodule ShuttleWeb.FiberDocumentsController do
         conn = put_cache_header(conn, body)
         cold? = get_in(body, [:cache, :state]) == "cold"
 
-        cond do
-          cold? ->
-            json(conn, body)
+        if cold? do
+          json(conn, body)
+        else
+          etag = feed_etag(body.fibers)
+          conn = put_resp_header(conn, "etag", etag)
 
-          true ->
-            etag = feed_etag(body.fibers)
-            conn = put_resp_header(conn, "etag", etag)
-
-            if if_none_match_matches?(conn, etag),
-              do: send_resp(conn, 304, ""),
-              else: json(conn, body)
+          if if_none_match_matches?(conn, etag),
+            do: send_resp(conn, 304, ""),
+            else: json(conn, body)
         end
 
       :unavailable ->
@@ -207,7 +205,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp owning_remote(_body, true), do: nil
 
   defp owning_remote(%{fibers: [entry | _]}, _routed?), do: entry_owner(entry)
-  defp owning_remote(%{"fibers" => [entry | _]}, _routed?), do: entry_owner(entry)
   defp owning_remote(_body, _routed?), do: nil
 
   defp entry_owner(entry) do
@@ -311,9 +308,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
     case cached_owner_feed() do
       {:ok, %{host: host, fibers: entries} = body} ->
         {host, entries, cold?(body), Map.get(body, :cache)}
-
-      {:ok, %{fibers: entries} = body} ->
-        {own_host_id(), entries, cold?(body), Map.get(body, :cache)}
 
       :unavailable ->
         {own_host_id(), [], true, nil}

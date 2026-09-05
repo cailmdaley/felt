@@ -8,6 +8,8 @@ defmodule ShuttleWeb.FileControllerTest do
   felt-edit/transition forward tests.
   """
   use ExUnit.Case
+  import Shuttle.Test.ForwardStub
+  import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
@@ -247,20 +249,6 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
-  defp stub_forward(remote_name, remote_url, response) do
-    start_supervised!(StubGetFileClient)
-    StubGetFileClient.set_response(response)
-
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: remote_name, url: remote_url}])
-    Application.put_env(:shuttle, :write_forward_client, StubGetFileClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
-  end
 
   defp tmp_path(ext),
     do:
@@ -269,8 +257,4 @@ defmodule ShuttleWeb.FileControllerTest do
         "shuttle_file_ctrl_#{System.unique_integer([:positive])}.#{ext}"
       )
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-  end
 end

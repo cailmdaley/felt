@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.TranscriptControllerTest do
   use ExUnit.Case, async: false
+  import Shuttle.Test.EnvHelpers
 
   import Phoenix.ConnTest
   import Plug.Conn
@@ -151,7 +152,4 @@ defmodule ShuttleWeb.TranscriptControllerTest do
                |> json_response(503)
     end
   end
-
-  defp restore_app_env(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore_app_env(key, value), do: Application.put_env(:shuttle, key, value)
 end

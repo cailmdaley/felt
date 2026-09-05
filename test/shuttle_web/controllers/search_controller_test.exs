@@ -7,6 +7,7 @@ defmodule ShuttleWeb.SearchControllerTest do
   """
 
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
   import Shuttle.Test.EnvHelpers
@@ -67,9 +68,6 @@ defmodule ShuttleWeb.SearchControllerTest do
     :ok
   end
 
-  defp api_conn do
-    build_conn() |> put_req_header("accept", "application/json")
-  end
 
   test "a blank query answers empty without shelling felt" do
     conn = get(api_conn(), "/api/v1/search?q=%20%20")

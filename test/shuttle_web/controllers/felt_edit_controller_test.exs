@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.FeltEditControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -239,11 +240,6 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     end)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 
   defp install_fake_felt!(root) do
     bin_dir = Path.join(root, "bin")

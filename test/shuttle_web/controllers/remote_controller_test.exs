@@ -8,6 +8,7 @@ defmodule ShuttleWeb.RemoteControllerTest do
   unconfigured remote, 503 when no registry runs.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -51,9 +52,4 @@ defmodule ShuttleWeb.RemoteControllerTest do
     assert %{"error" => "registry_unavailable"} = json_response(conn, 503)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 end

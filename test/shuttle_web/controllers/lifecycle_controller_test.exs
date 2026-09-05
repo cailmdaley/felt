@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.LifecycleControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -702,11 +703,6 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.rm_rf(root)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("content-type", "application/json")
-    |> put_req_header("accept", "application/json")
-  end
 
   defp frontmatter(content) do
     [_, frontmatter | _] = String.split(content, "---\n", parts: 3)

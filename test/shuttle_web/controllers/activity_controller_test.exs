@@ -12,6 +12,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   the 400s.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -929,8 +930,4 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end)
   end
 
-  defp api_conn do
-    build_conn()
-    |> put_req_header("accept", "application/json")
-  end
 end

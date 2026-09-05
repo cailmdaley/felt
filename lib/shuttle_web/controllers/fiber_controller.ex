@@ -91,17 +91,13 @@ defmodule ShuttleWeb.FiberController do
   # resolution chain.
   defp normalize_shuttle_host(%{"shuttle" => shuttle} = frontmatter) when is_map(shuttle) do
     own_host = Shuttle.Poller.own_host_id()
-    shuttle = stringify_keys(shuttle)
 
     case Map.get(shuttle, "host") do
-      nil ->
-        {:ok, %{frontmatter | "shuttle" => Map.put(shuttle, "host", own_host)}}
-
-      "" ->
+      host when host in [nil, ""] ->
         {:ok, %{frontmatter | "shuttle" => Map.put(shuttle, "host", own_host)}}
 
       ^own_host ->
-        {:ok, %{frontmatter | "shuttle" => shuttle}}
+        {:ok, frontmatter}
 
       other ->
         {:error,
@@ -223,9 +219,6 @@ defmodule ShuttleWeb.FiberController do
     segments = String.split(fiber_id, "/")
 
     cond do
-      fiber_id == "" ->
-        {:error, "id is required"}
-
       String.starts_with?(fiber_id, "/") ->
         {:error, "id must be relative"}
 

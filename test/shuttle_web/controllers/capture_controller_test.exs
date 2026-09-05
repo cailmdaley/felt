@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.CaptureControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
@@ -98,7 +99,4 @@ defmodule ShuttleWeb.CaptureControllerTest do
     assert forwarded["project_dir"] == "/candide/project"
   end
 
-  defp api_conn do
-    build_conn() |> put_req_header("content-type", "application/json")
-  end
 end

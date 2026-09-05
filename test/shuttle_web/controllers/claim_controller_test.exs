@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.ClaimControllerTest do
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
@@ -86,7 +87,4 @@ defmodule ShuttleWeb.ClaimControllerTest do
     assert forwarded["tmux_session"] == "capture-x"
   end
 
-  defp api_conn do
-    build_conn() |> put_req_header("content-type", "application/json")
-  end
 end
