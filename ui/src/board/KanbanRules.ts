@@ -1,6 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 import type { Fiber } from './KanbanFiber.js';
-import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
+import { dueCivilDay, isoDayLocal } from './civilDay.js';
 
 // The kanban's single classifier, in the view. Shuttle (the engine) speaks
 // engine vocabulary — eligible/blocked/running — and never names a kanban
@@ -88,7 +88,7 @@ export function cycleSpan(
   return null;
 }
 
-/** The shape `upcomingCycleDropTargets` reads off a cycle card. Structural
+/** The shape `lensCycles` reads off a cycle card. Structural
  *  rather than `Pick<KanbanCard, …>` so the rules module keeps owning no
  *  view types; `KanbanCard` satisfies it. */
 export interface CycleDropCandidate {
@@ -96,67 +96,6 @@ export interface CycleDropCandidate {
   name: string;
   cycleStart: string | null;
   due?: string;
-}
-
-/** One cycle offered as a drop target on the drag horizon. */
-export interface CycleDropTarget {
-  id: string;
-  name: string;
-  /** The span's edges, as civil days (`end` is today for an open-ended cycle). */
-  start: string;
-  end: string;
-  openEnded: boolean;
-  /** True when the cycle has already opened — today is on or after `start`. */
-  running: boolean;
-  /** The civil day a drop writes, i.e. the day cell this chip stands in for. */
-  dropDay: string;
-}
-
-/**
- * The cycles the drag horizon offers alongside its day cells — "put this down
- * in the next chapter" rather than "put it down on the 14th".
- *
- * A cycle qualifies when it has a `start:` and has not already finished. A
- * cycle without a start is NOT a target: its span is a bare deadline (see
- * `cycleSpan`'s second branch), and there is no opening day to snooze to.
- *
- * `dropDay` is the cycle's start, CLAMPED FORWARD to tomorrow when the cycle
- * is already running. Dropping into a chapter you are living in means "later
- * this chapter", never a backdated due — and tomorrow is also the earliest day
- * the day cells themselves treat as a snooze (today means "onto the desk now").
- *
- * Ordered by start, so the horizon reads left to right as the calendar does.
- */
-export function upcomingCycleDropTargets(
-  cycles: readonly CycleDropCandidate[],
-  nowMs: number = Date.now(),
-): CycleDropTarget[] {
-  const today = isoDayLocal(nowMs);
-  // Stepped on the civil calendar, not by adding 24h: a DST-long day would
-  // leave `nowMs + DAY_MS` on today, and the clamp would emit a backdate.
-  const tomorrowDate = civilDayToLocalDate(today) ?? new Date(nowMs);
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = isoDayLocal(tomorrowDate.getTime());
-
-  const targets: CycleDropTarget[] = [];
-  for (const c of cycles) {
-    if (!c.cycleStart) continue;
-    const span = cycleSpan({ start: c.cycleStart, due: c.due }, nowMs);
-    if (!span) continue;
-    if (span.end < today) continue;
-    const running = span.start <= today;
-    targets.push({
-      id: c.id,
-      name: c.name,
-      start: span.start,
-      end: span.end,
-      openEnded: span.openEnded,
-      running,
-      dropDay: running ? tomorrow : span.start,
-    });
-  }
-  targets.sort((a, b) => (a.start === b.start ? a.name.localeCompare(b.name) : a.start < b.start ? -1 : 1));
-  return targets;
 }
 
 /**
@@ -225,36 +164,57 @@ export interface CycleLensChip {
   /** True when the cycle has already opened and has not closed — the chapter
    *  we are living in. */
   running: boolean;
+  /** The civil day a drop on this chip writes, i.e. the day cell the chip
+   *  stands in for — undefined for a cycle with no `start:`, which offers no
+   *  day and so refuses the drop. */
+  dropDay?: string;
 }
 
 /**
  * The cycles the Desk offers as lenses — the current one plus everything still
  * ahead. A cycle qualifies when its span has not ended.
  *
- * Deliberately WIDER than `upcomingCycleDropTargets`, which is the drop-target
- * rule: that one refuses a cycle without a `start:`, because a bare deadline
- * has no opening day to snooze to. A lens needs no opening day — a one-day
- * span is a perfectly good filter — so a due-only cycle is admitted here.
- *
  * Ordered by start, then name, so the row holds still across polls.
+ *
+ * Each chip is also a DROP TARGET, and `dropDay` is what a drop writes — but
+ * only for a cycle that has a `start:`. A cycle without one is a bare deadline
+ * (see `cycleSpan`'s second branch): there is no opening day to snooze to, so
+ * it offers no `dropDay` and the drop refuses. A lens needs no opening day —
+ * a one-day span is a perfectly good filter — so a due-only cycle still gets
+ * its chip.
+ *
+ * `dropDay` is the cycle's start, CLAMPED FORWARD to tomorrow when the cycle
+ * is already running. Dropping into a chapter you are living in means "later
+ * this chapter", never a backdated due — and tomorrow is also the earliest day
+ * the day cells themselves treat as a snooze (today means "onto the desk now").
  */
 export function lensCycles(
   cycles: readonly CycleDropCandidate[],
   nowMs: number = Date.now(),
 ): CycleLensChip[] {
   const today = isoDayLocal(nowMs);
+  // Stepped on the civil calendar from a noon anchor, not by adding 24h: a
+  // DST-long day would leave `nowMs + DAY_MS` on today, and the clamp would
+  // emit a backdate.
+  const tomorrowDate = new Date(nowMs);
+  tomorrowDate.setHours(12, 0, 0, 0);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = isoDayLocal(tomorrowDate.getTime());
+
   const chips: CycleLensChip[] = [];
   for (const c of cycles) {
     const span = cycleSpan({ start: c.cycleStart ?? undefined, due: c.due }, nowMs);
     if (!span) continue;
     if (span.end < today) continue;
+    const running = span.start <= today;
     chips.push({
       id: c.id,
       name: c.name,
       start: span.start,
       end: span.end,
       openEnded: span.openEnded,
-      running: span.start <= today,
+      running,
+      dropDay: c.cycleStart ? (running ? tomorrow : span.start) : undefined,
     });
   }
   chips.sort((a, b) => (a.start === b.start ? a.name.localeCompare(b.name) : a.start < b.start ? -1 : 1));
