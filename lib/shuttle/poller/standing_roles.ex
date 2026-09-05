@@ -145,7 +145,11 @@ defmodule Shuttle.Poller.StandingRoles do
             "handed_off_at=now) and leaving armed instead of closing"
         )
 
-        self_heal_inverted_markers(fiber_id, state)
+        # Self-heal by concluding the run — the same `handed_off_at = now` stamp
+        # `LifecycleStore.conclude_run` folds into a human accept. Best-effort:
+        # a stamp miss just means the next poll self-heals again, still without
+        # closing.
+        LifecycleStore.conclude_run(fiber_id, runner: state.runner, felt_stores: state.felt_stores)
         state
 
       # A dead ADHOC extra-run must not close the SCHEDULED standing role. An
@@ -249,15 +253,6 @@ defmodule Shuttle.Poller.StandingRoles do
     StandingRole.ad_hoc_run_id?(Shuttle.Continuation.run_id(fiber))
   end
 
-  # Self-heal a run with inverted/implausible markers by concluding it — the same
-  # `handed_off_at = now` stamp `LifecycleStore.conclude_run` folds into a human
-  # accept. Best-effort (conclude_run is itself best-effort): a stamp miss just
-  # means the next poll self-heals again, still without closing. Threads the
-  # poller's runner + felt stores so the `felt shuttle mark-runtime` write resolves.
-  def self_heal_inverted_markers(fiber_id, %State{} = state) do
-    LifecycleStore.conclude_run(fiber_id, runner: state.runner, felt_stores: state.felt_stores)
-  end
-
   # Mark a standing role awaiting (`status: closed`, untempered) by writing its
   # felt document on worker exit. Best-effort: a failed felt write must not crash
   # the exit-handling state machine (the worker is already gone; the dead-orphan
@@ -293,10 +288,10 @@ defmodule Shuttle.Poller.StandingRoles do
   # display next_due is computed
   # from cron in `standing_role_snapshots`, and awaiting/accepted are document
   # facts (status + tempered), so nothing daemon-owned is written.
-  def standing_roles_from_candidates(candidates, state) do
+  def standing_roles_from_candidates(candidates) do
     candidates
     |> Enum.reduce([], fn fiber, roles ->
-      case standing_role_from_fiber(fiber, state) do
+      case standing_role_from_fiber(fiber) do
         {:ok, role} ->
           if StandingRole.standing?(role), do: [role | roles], else: roles
 
@@ -310,7 +305,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # Standing roles are parsed straight from the felt document's `shuttle:` block.
   # The document is the truth — status,
   # tempered, and the cron schedule — and the StandingRole reads exactly that.
-  def standing_role_from_fiber(fiber, _state) do
+  def standing_role_from_fiber(fiber) do
     fiber_id = Map.get(fiber, "id", "")
 
     case Map.get(fiber, "shuttle") do
@@ -372,7 +367,7 @@ defmodule Shuttle.Poller.StandingRoles do
          {:ok, role} <- fetch_standing_role(fiber_id, state) do
       now = DateTime.utc_now()
       now_ms = DateTime.to_unix(now, :millisecond)
-      lookback = now_ms - last_serviced_at_ms(fiber, fiber_id, state, now_ms)
+      lookback = now_ms - last_serviced_at_ms(fiber, state, now_ms)
       StandingRole.due_by_cron?(role, now, lookback)
     else
       _ -> false
@@ -382,7 +377,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # Unix-ms the role was last serviced — the most recent of its marker
   # timestamps, its in-memory re-arm stamp, and its creation. Defaults to `now_ms`
   # (⇒ zero lookback ⇒ not due) only in the impossible case that none are known.
-  def last_serviced_at_ms(fiber, _fiber_id, state, now_ms) do
+  def last_serviced_at_ms(fiber, state, now_ms) do
     [
       last_service_event_ms(fiber),
       # `rearmed_at` is keyed by runtime key (uid when present), so look it up by
@@ -390,7 +385,7 @@ defmodule Shuttle.Poller.StandingRoles do
       # It is the within-lifetime fast path; the durable handoff marker the
       # re-arm stamps (in `last_service_event_ms`) is the restart-proof backstop.
       Map.get(state.rearmed_at, Poller.runtime_key_for_fiber(fiber)),
-      created_at_ms(fiber)
+      Poller.iso_to_unix_ms(Map.get(fiber, "created_at"))
     ]
     |> Enum.reject(&is_nil/1)
     |> case do
@@ -419,11 +414,7 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  def created_at_ms(fiber), do: Poller.iso_to_unix_ms(Map.get(fiber, "created_at"))
-
-  def standing_role_snapshots(roles, running, now, state) do
-    state = %{state | running: running}
-
+  def standing_role_snapshots(roles, now, state) do
     Enum.map(roles, fn role ->
       running? = Poller.running_key(state, role.fiber_id) != nil
 

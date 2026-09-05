@@ -143,7 +143,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
   # to `:ambiguous` and are skipped rather than mis-adopted).
   def candidate_session_lookup(%State{} = state) do
-    {:ok, candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
+    {candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
 
     candidates
     |> Enum.reduce(%{}, fn fiber, acc ->
