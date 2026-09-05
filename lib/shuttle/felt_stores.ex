@@ -243,6 +243,25 @@ defmodule Shuttle.FeltStores do
     do: resolve_fiber(identifier, configured_hosts())
 
   @doc """
+  `resolve_fiber/1` with its failures mapped into the CLI-result error
+  vocabulary the lifecycle and felt-edit surfaces render.
+
+  One definition of those two sentences: the daemon renders the same
+  "fiber not found" / "felt timed out resolving" pair everywhere it resolves a
+  fiber for a caller, and `:timeout` keeps its distinct three-tuple shape so a
+  wedged store is never reported as absence.
+  """
+  @spec resolve_fiber_or_error(String.t()) ::
+          {:ok, resolved_fiber()} | {:error, String.t()} | {:error, :timeout, String.t()}
+  def resolve_fiber_or_error(identifier) when is_binary(identifier) do
+    case resolve_fiber(identifier) do
+      {:ok, resolved} -> {:ok, resolved}
+      {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
+      {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
+    end
+  end
+
+  @doc """
   As `resolve_fiber/1`, but resolves against an explicit `hosts` store list
   rather than the globally-configured stores. The Poller passes its own
   `state.felt_stores` so cold-path host resolution honors the exact store set

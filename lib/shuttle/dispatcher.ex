@@ -1158,7 +1158,7 @@ defmodule Shuttle.Dispatcher do
   defp fiber_kind(fiber) do
     case Map.get(fiber, "shuttle") do
       shuttle when is_map(shuttle) ->
-        Map.get(shuttle, "kind", Map.get(shuttle, "mode", "oneshot"))
+        Shuttle.Poller.role_kind(shuttle)
 
       _ ->
         "oneshot"

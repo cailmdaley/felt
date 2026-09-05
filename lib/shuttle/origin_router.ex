@@ -113,7 +113,7 @@ defmodule Shuttle.OriginRouter do
   def forward(%Remote{} = remote, path, payload, opts \\ []) when is_map(payload) do
     client = forward_client()
     timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
-    url = remote_url(remote, path)
+    url = Remote.url_for(remote, path)
     body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
 
     case client.post(url, body, "application/json", timeout) do
@@ -142,16 +142,12 @@ defmodule Shuttle.OriginRouter do
     client = forward_client()
     timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
-    url = remote_url(remote, path) <> "?" <> URI.encode_query(stripped)
+    url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
 
     case client.get_file(url, timeout) do
       {:ok, status, content_type, body} -> {:forwarded, status, content_type, body}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
     end
-  end
-
-  defp remote_url(%Remote{url: url}, path) do
-    String.trim_trailing(url, "/") <> path
   end
 
   @doc """

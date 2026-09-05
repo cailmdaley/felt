@@ -232,11 +232,9 @@ defmodule Shuttle.Actions do
   # to the strip) — same verb, different terminus, resolved by the dedicated
   # pinned clause above. A oneshot has neither: its accept is the tempered
   # terminus.
-  defp standing?(shuttle),
-    do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "standing"
+  defp standing?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "standing"
 
-  defp pinned?(shuttle),
-    do: Map.get(shuttle, "kind", Map.get(shuttle, "mode")) == "pinned"
+  defp pinned?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "pinned"
 
   # `tempered` absent (nil) is the no-verdict state — the awaiting signal for a
   # closed fiber. `tempered: true` (accepted oneshot terminus) and

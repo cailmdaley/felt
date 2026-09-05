@@ -163,11 +163,7 @@ defmodule Shuttle.RemoteRegistry do
 
   @spec snapshots(GenServer.server(), non_neg_integer()) :: %{String.t() => map()}
   def snapshots(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :snapshots, timeout_ms)
-    else
-      %{}
-    end
+    RegistryCommon.read(server, :snapshots, %{}, timeout_ms)
   end
 
   @doc """
@@ -176,11 +172,7 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec snapshot(GenServer.server(), String.t()) :: map() | nil
   def snapshot(server, name) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, {:snapshot, name}, RegistryCommon.read_timeout_ms())
-    else
-      nil
-    end
+    RegistryCommon.read(server, {:snapshot, name}, nil)
   end
 
   @doc """

@@ -60,10 +60,6 @@ defmodule Shuttle.SessionLedger do
 
   @kinds ~w(dispatch claim resume)
 
-  # The ULID felt embeds in `<leaf>-<ULID>-shuttle`. Same shape
-  # `Shuttle.SentFiles` reads (Crockford base32 excludes I, L, O, U).
-  @ulid_in_tmux ~r/-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-
   @typedoc "One ledger line, as written and as served."
   @type record :: %{String.t() => String.t() | integer() | nil}
 
@@ -75,12 +71,7 @@ defmodule Shuttle.SessionLedger do
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_SESSIONS_FILE") ||
-      Path.join(
-        System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!(), ".shuttle"),
-        "sessions.jsonl"
-      )
+    System.get_env("SHUTTLE_SESSIONS_FILE") || Path.join(Shuttle.data_dir(), "sessions.jsonl")
   end
 
   @doc """
@@ -122,7 +113,7 @@ defmodule Shuttle.SessionLedger do
       {:ok,
        Jason.encode!(%{
          "fiber" => fiber,
-         "uid" => presence(Keyword.get(fields, :uid)) || uid_from_tmux(tmux),
+         "uid" => presence(Keyword.get(fields, :uid)) || Shuttle.ULID.from_tmux(tmux),
          "session" => session,
          "harness" => presence(Keyword.get(fields, :harness)),
          "host" => presence(Keyword.get(fields, :host)) || own_host(),
@@ -138,15 +129,6 @@ defmodule Shuttle.SessionLedger do
   defp to_kind(kind) when is_atom(kind) and not is_nil(kind), do: to_kind(Atom.to_string(kind))
   defp to_kind(kind) when kind in @kinds, do: kind
   defp to_kind(_), do: nil
-
-  defp uid_from_tmux(name) when is_binary(name) do
-    case Regex.run(@ulid_in_tmux, name) do
-      [_, ulid] -> ulid
-      nil -> nil
-    end
-  end
-
-  defp uid_from_tmux(_), do: nil
 
   defp own_host do
     Shuttle.Poller.own_host_id()
@@ -190,10 +172,7 @@ defmodule Shuttle.SessionLedger do
   def read_since(since_ms, opts \\ []) when is_integer(since_ms) do
     path = Keyword.get(opts, :path, default_path())
 
-    [path <> @rotated_suffix, path]
-    |> Enum.filter(&File.regular?/1)
-    |> Enum.flat_map(&stream_records(&1, since_ms))
-    |> Enum.sort_by(& &1["at"])
+    Shuttle.Ledger.read_window(path, since_ms, nil, nil, "session ledger")
   end
 
   @doc """
@@ -291,26 +270,6 @@ defmodule Shuttle.SessionLedger do
     # Vanished or unreadable between the check and the read — a rotation
     # racing this scan. Fall through to the next file.
     _ -> nil
-  end
-
-  defp stream_records(path, since_ms) do
-    path
-    |> File.stream!()
-    |> Stream.flat_map(&parse_line(&1, since_ms))
-    |> Enum.to_list()
-  rescue
-    # Vanished or unreadable between the check and the stream — a rotation
-    # racing this read. Serve what the other file gave us.
-    error ->
-      Logger.debug("session ledger: skipped #{path} — #{Exception.message(error)}")
-      []
-  end
-
-  defp parse_line(line, since_ms) do
-    case Jason.decode(line) do
-      {:ok, %{"at" => at} = record} when is_integer(at) and at >= since_ms -> [record]
-      _ -> []
-    end
   end
 
   @doc """

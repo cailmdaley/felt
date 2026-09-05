@@ -86,7 +86,7 @@ defmodule ShuttleWeb.TemporalComposite do
   Keep the items whose `key` timestamp falls in the window.
 
   The window is inclusive on both sides, and a `nil` upper bound is
-  open-ended — the same encoding `Shuttle.CommitLedger.parse_line/3` uses for
+  open-ended — the same encoding `Shuttle.Ledger.read_window/5` uses for
   the local half of the same request, so a controller that has no upper bound
   passes `nil` rather than a far-future sentinel.
 

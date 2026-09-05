@@ -104,13 +104,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   # The default on-disk home for the per-remote caches, honoring the same env
   # the rest of the daemon's host-local state does.
-  defp default_store_dir do
-    Path.join(
-      System.get_env("SHUTTLE_DATA_DIR") ||
-        Path.join(System.user_home!() || "/root", ".shuttle"),
-      "remote-temporal"
-    )
-  end
+  defp default_store_dir, do: Path.join(Shuttle.data_dir(), "remote-temporal")
 
   @doc """
   The cached temporal entries keyed by remote name. Each value carries
@@ -126,11 +120,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   @spec entries(GenServer.server()) :: %{String.t() => map()}
   def entries(server) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :entries, RegistryCommon.read_timeout_ms())
-    else
-      %{}
-    end
+    RegistryCommon.read(server, :entries, %{})
   end
 
   @doc """

@@ -26,7 +26,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, etag_hash: 1, if_none_match?: 2]
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
   alias Shuttle.OriginRouter
@@ -89,7 +89,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
           etag = feed_etag(body.fibers)
           conn = put_resp_header(conn, "etag", etag)
 
-          if if_none_match_matches?(conn, etag),
+          if if_none_match?(conn, etag),
             do: send_resp(conn, 304, ""),
             else: json(conn, body)
         end
@@ -113,21 +113,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # timestamps, which change every tick without the feed changing). SHA-256 of
   # the term-encoded entries, hex, truncated — collision-resistant enough for a
   # cache validator.
-  defp feed_etag(entries) do
-    hash =
-      :crypto.hash(:sha256, :erlang.term_to_binary(entries))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 32)
-
-    ~s("#{hash}")
-  end
-
-  defp if_none_match_matches?(conn, etag) do
-    case get_req_header(conn, "if-none-match") do
-      [value | _] -> String.trim(value) == etag
-      [] -> false
-    end
-  end
+  defp feed_etag(entries), do: ~s("#{etag_hash(entries)}")
 
   @doc """
   `GET /api/v1/fibers/:id` — resolve one fiber by canonical id. The id is a

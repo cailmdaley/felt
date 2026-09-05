@@ -29,10 +29,6 @@ defmodule Shuttle.SentFiles do
   the writer.
   """
 
-  # 26-char Crockford base32 ULID embedded as `…-<ULID>-shuttle` in the tmux
-  # session name (Crockford excludes I, L, O, U).
-  @ulid_in_tmux ~r/-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-
   @cap 50
 
   @doc """
@@ -166,17 +162,8 @@ defmodule Shuttle.SentFiles do
   # name, falling back to the raw sessionId (capture sessions with no tmux name
   # claim themselves by sessionId).
   defp event_uid(event) do
-    ulid_from_tmux(event["tmuxSession"]) || event["sessionId"]
+    Shuttle.ULID.from_tmux(event["tmuxSession"]) || event["sessionId"]
   end
-
-  defp ulid_from_tmux(name) when is_binary(name) do
-    case Regex.run(@ulid_in_tmux, name) do
-      [_, ulid] -> ulid
-      nil -> nil
-    end
-  end
-
-  defp ulid_from_tmux(_), do: nil
 
   # Keep only the newest send per fullPath. Entries arrive in file order
   # (oldest-first); reducing into a map keyed by path lets a later (newer) send

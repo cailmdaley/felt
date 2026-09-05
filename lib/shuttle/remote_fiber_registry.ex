@@ -139,13 +139,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   # The default on-disk home for the per-remote caches, honoring the same env
   # the rest of the daemon's host-local state does.
-  defp default_store_dir do
-    Path.join(
-      System.get_env("SHUTTLE_DATA_DIR") ||
-        Path.join(System.user_home!() || "/root", ".shuttle"),
-      "remote-fibers"
-    )
-  end
+  defp default_store_dir, do: Path.join(Shuttle.data_dir(), "remote-fibers")
 
   @doc """
   Returns the cached feed map keyed by remote name. Each value carries
@@ -160,11 +154,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec feeds(GenServer.server()) :: %{String.t() => map()}
   def feeds(server) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :feeds, RegistryCommon.read_timeout_ms())
-    else
-      %{}
-    end
+    RegistryCommon.read(server, :feeds, %{})
   end
 
   @doc """
@@ -214,11 +204,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec refresh(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def refresh(server, name) when is_binary(name) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, {:refresh, name}, RegistryCommon.read_timeout_ms())
-    else
-      {:error, :not_running}
-    end
+    RegistryCommon.read(server, {:refresh, name}, {:error, :not_running})
   end
 
   # ── Server ──

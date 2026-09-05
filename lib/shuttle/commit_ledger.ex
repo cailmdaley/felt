@@ -49,10 +49,6 @@ defmodule Shuttle.CommitLedger do
   than a reconstructed one, which is the honest answer.
   """
 
-  require Logger
-
-  @rotated_suffix ".1"
-
   @typedoc "One ledger line, as written and as served."
   @type record :: %{String.t() => String.t() | integer() | nil}
 
@@ -64,12 +60,7 @@ defmodule Shuttle.CommitLedger do
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_COMMITS_FILE") ||
-      Path.join(
-        System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!(), ".shuttle"),
-        "commits.jsonl"
-      )
+    System.get_env("SHUTTLE_COMMITS_FILE") || Path.join(Shuttle.data_dir(), "commits.jsonl")
   end
 
   @doc """
@@ -90,33 +81,6 @@ defmodule Shuttle.CommitLedger do
       when is_integer(since_ms) and (is_integer(until_ms) or is_nil(until_ms)) do
     path = Keyword.get(opts, :path, default_path())
 
-    [path <> @rotated_suffix, path]
-    |> Enum.filter(&File.regular?/1)
-    |> Enum.flat_map(&stream_records(&1, since_ms, until_ms))
-    |> Enum.sort_by(& &1["at"])
-  end
-
-  defp stream_records(path, since_ms, until_ms) do
-    path
-    |> File.stream!()
-    |> Stream.flat_map(&parse_line(&1, since_ms, until_ms))
-    |> Enum.to_list()
-  rescue
-    # Vanished or unreadable between the check and the stream — a rotation
-    # racing this read. Serve what the other file gave us.
-    error ->
-      Logger.debug("commit ledger: skipped #{path} — #{Exception.message(error)}")
-      []
-  end
-
-  defp parse_line(line, since_ms, until_ms) do
-    case Jason.decode(line) do
-      {:ok, %{"at" => at, "sha" => sha} = record}
-      when is_integer(at) and is_binary(sha) and sha != "" ->
-        if at >= since_ms and (is_nil(until_ms) or at <= until_ms), do: [record], else: []
-
-      _ ->
-        []
-    end
+    Shuttle.Ledger.read_window(path, since_ms, until_ms, "sha", "commit ledger")
   end
 end

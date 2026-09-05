@@ -75,7 +75,7 @@ defmodule ShuttleWeb.FiberController do
       frontmatter when is_map(frontmatter) ->
         {:ok,
          frontmatter
-         |> stringify_keys()
+         |> Shuttle.FiberDoc.stringify_keys()
          |> Map.put_new("name", name)
          |> Map.put_new("status", "active")}
 
@@ -294,11 +294,4 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  defp stringify_keys(map) do
-    Map.new(map, fn {key, value} -> {to_string(key), stringify_value(value)} end)
-  end
-
-  defp stringify_value(value) when is_map(value), do: stringify_keys(value)
-  defp stringify_value(value) when is_list(value), do: Enum.map(value, &stringify_value/1)
-  defp stringify_value(value), do: value
 end
