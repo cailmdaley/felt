@@ -166,8 +166,8 @@ export function ascByKey(a: number | undefined, b: number | undefined): number {
 }
 
 /**
- * The timeline day-column for a `due:` value — the due-aware sibling of
- * KanbanSurfaces' `dayIndexForIso`. The two must stay separate: the day columns
+ * The timeline day-column for a `due:` value. Due values and instants must be
+ * placed separately: the day columns
  * are keyed by local civil days, so a genuine instant (closedAt, modifiedAt,
  * nextLaunchAt) is placed by its LOCAL day, while a `due:` is placed by the
  * civil day it names. Null when there's no value or the day is outside the

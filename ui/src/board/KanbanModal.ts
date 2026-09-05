@@ -49,7 +49,7 @@ import type {
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -1036,39 +1036,6 @@ export class KanbanModal {
   }
 
   /**
-   * POST a surface edit. Computes the horizon/cold/due frontmatter diff
-   * client-side and posts it through the daemon's `/api/v1/felt-edit`
-   * (owner-routed by `origin`) so the drag is one atomic write.
-   *
-   *   • Drag a scheduled/in-flight card onto a date column →
-   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
-   *     and the card keeps its lifecycle column while wearing the date.
-   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
-   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
-   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
-   *     observe half of it. Which of the two a day-drop means is decided by
-   *     `dayDropHorizon` at the drop site, from where the card currently sits.
-   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
-   *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
-   *
-   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
-   * included. Putting a card down in Resting is one gesture and it does one
-   * thing: it moves the card. The date the human wrote is theirs, and a drag
-   * that quietly deleted it — "I'll look at Croatia in October" becoming a
-   * dateless card nothing will ever surface again — is the second, destructive
-   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
-   * future `due:` compose into the snooze that brings the card back by itself.
-   *
-   * The ONE exception, and the reason the old blanket clear existed: a `due:`
-   * that is today or already past would bounce the card straight back onto the
-   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
-   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
-   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
-   *
-   * Callers can still pass an explicit `due` to override either way: a day
-   * (the date-column snooze) or `null` to clear on purpose.
-   */
-  /**
    * "This one goes after that one" — the card-onto-card drop, persisted as a
    * scalar `depends_on:` on the DROPPED card.
    *
@@ -1322,6 +1289,39 @@ export class KanbanModal {
     await this.fetchAndRender()
   }
 
+  /**
+   * POST a surface edit. Computes the horizon/cold/due frontmatter diff
+   * client-side and posts it through the daemon's `/api/v1/felt-edit`
+   * (owner-routed by `origin`) so the drag is one atomic write.
+   *
+   *   • Drag a scheduled/in-flight card onto a date column →
+   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
+   *     and the card keeps its lifecycle column while wearing the date.
+   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
+   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
+   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
+   *     observe half of it. Which of the two a day-drop means is decided by
+   *     `dayDropHorizon` at the drop site, from where the card currently sits.
+   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
+   *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
+   *
+   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
+   * included. Putting a card down in Resting is one gesture and it does one
+   * thing: it moves the card. The date the human wrote is theirs, and a drag
+   * that quietly deleted it — "I'll look at Croatia in October" becoming a
+   * dateless card nothing will ever surface again — is the second, destructive
+   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
+   * future `due:` compose into the snooze that brings the card back by itself.
+   *
+   * The ONE exception, and the reason the old blanket clear existed: a `due:`
+   * that is today or already past would bounce the card straight back onto the
+   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
+   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
+   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
+   *
+   * Callers can still pass an explicit `due` to override either way: a day
+   * (the date-column snooze) or `null` to clear on purpose.
+   */
   private setSurface(
     card: KanbanCard,
     horizon: HorizonKind,
@@ -2548,16 +2548,7 @@ function withSurfaces(
     pinned: s.pinned,
     timeline: s.timeline,
     stash: s.stash,
-    totals: {
-      ...resp.totals,
-      drafts: s.now.drafts.length,
-      inFlight: s.now.inFlight.length,
-      awaitingReview: s.now.awaitingReview.length,
-      past: s.timeline.past.length,
-      futureDated: s.timeline.futureDated.length,
-      stash: s.stash.length,
-      pinned: s.pinned.length,
-    },
+    totals: surfaceTotals(s),
     temperedTotal: Math.max(0, s.temperedTotal),
   }
 }

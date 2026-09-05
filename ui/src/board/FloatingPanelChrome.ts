@@ -128,10 +128,7 @@ const GEOM_ANIM_MS = 320
  *  aren't smoothed-and-laggy. */
 export function animatePanelGeometry(overlay: HTMLElement, g: PanelGeometry): void {
   overlay.classList.add(GEOM_ANIM_CLASS)
-  overlay.style.left = `${Math.max(0, g.left)}px`
-  overlay.style.top = `${Math.max(0, g.top)}px`
-  overlay.style.width = `${g.width}px`
-  overlay.style.height = `${g.height}px`
+  applyPanelGeometry(overlay, g)
   window.setTimeout(() => overlay.classList.remove(GEOM_ANIM_CLASS), GEOM_ANIM_MS)
 }
 

@@ -2497,11 +2497,6 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
   return out
 }
 
-/** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
- *  the same way the timeline places the card — otherwise one render pass showed
- *  two different days: the card sat on the Thursday column while its own chip
- *  read Wednesday. The day is materialized as a local date, never re-parsed as
- *  an instant (see civilDay.ts). */
 /**
  * `Aug 12` from an INSTANT — the next-launch twin of `formatDue`. A cron
  * occurrence is a real point in time, so it is read with `instantMs` and shown
@@ -2515,6 +2510,11 @@ export function formatLaunchDay(iso: string): string {
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
+ *  the same way the timeline places the card — otherwise one render pass showed
+ *  two different days: the card sat on the Thursday column while its own chip
+ *  read Wednesday. The day is materialized as a local date, never re-parsed as
+ *  an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
   const date = civilDayToLocalDate(dueCivilDay(iso))
   if (!date) return iso

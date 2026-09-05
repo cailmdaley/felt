@@ -641,7 +641,12 @@ function routeOpenCardByPlanningSurface(
 }
 
 /** Per-bucket counts for a response, derived from the assembled surfaces. */
-function surfaceTotals(s: AssembledSurfaces): KanbanResponse['totals'] {
+export function surfaceTotals(s: {
+  now: KanbanResponse['now'];
+  timeline: KanbanResponse['timeline'];
+  stash: KanbanCard[];
+  pinned: KanbanCard[];
+}): KanbanResponse['totals'] {
   return {
     drafts: s.now.drafts.length,
     inFlight: s.now.inFlight.length,
