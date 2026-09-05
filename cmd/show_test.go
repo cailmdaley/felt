@@ -11,31 +11,16 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// writeMalformedFiber drops a fiber dir whose `<slug>.md` has truncated
-// frontmatter — used to confirm commands tolerate a single broken fiber
-// without failing the whole walk.
-func writeMalformedFiber(t *testing.T, dir string) {
+// writeBrokenFiber plants a fiber dir whose `<slug>.md` holds the given raw
+// bytes, bypassing storage so unparseable frontmatter can reach disk.
+func writeBrokenFiber(t *testing.T, dir, slug string, content []byte) {
 	t.Helper()
-	badDir := filepath.Join(dir, ".felt", "broken", "broken")
+	badDir := filepath.Join(dir, ".felt", slug, slug)
 	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll malformed fiber dir: %v", err)
+		t.Fatalf("MkdirAll %s fiber dir: %v", slug, err)
 	}
-	if err := os.WriteFile(filepath.Join(badDir, "broken.md"), []byte("---\nname: Broken\n"), 0644); err != nil {
-		t.Fatalf("WriteFile malformed fiber: %v", err)
-	}
-}
-
-// writeInvalidYAMLFiber drops a fiber whose frontmatter is syntactically
-// invalid YAML — only a command that walks every fiber should trip on it.
-func writeInvalidYAMLFiber(t *testing.T, dir string) {
-	t.Helper()
-	badDir := filepath.Join(dir, ".felt", "broken-yaml", "broken-yaml")
-	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll invalid YAML fiber dir: %v", err)
-	}
-	content := []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n")
-	if err := os.WriteFile(filepath.Join(badDir, "broken-yaml.md"), content, 0644); err != nil {
-		t.Fatalf("WriteFile invalid YAML fiber: %v", err)
+	if err := os.WriteFile(filepath.Join(badDir, slug+".md"), content, 0644); err != nil {
+		t.Fatalf("WriteFile %s fiber: %v", slug, err)
 	}
 }
 
@@ -415,7 +400,9 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	writeMalformedFiber(t, dir)
+	// A fiber with truncated frontmatter: commands must tolerate a single
+	// broken fiber without failing the whole walk.
+	writeBrokenFiber(t, dir, "broken", []byte("---\nname: Broken\n"))
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -490,7 +477,9 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	writeInvalidYAMLFiber(t, dir)
+	// Syntactically invalid YAML frontmatter — only a command that walks
+	// every fiber should trip on it.
+	writeBrokenFiber(t, dir, "broken-yaml", []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n"))
 
 	reset := saveShowGlobals()
 	defer reset()

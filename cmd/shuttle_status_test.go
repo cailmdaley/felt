@@ -23,13 +23,7 @@ func withStubbedLiveSessions(t *testing.T, live map[string]bool) {
 // as the frontmatter `id:` key), so tests can exercise the uid-keyed tmux names.
 func seedShuttleRoleUID(t *testing.T, storage *felt.Storage, id, uid, status string, block map[string]any) {
 	t.Helper()
-	f := &felt.Felt{ID: id, UID: uid, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if err := f.SetExtraField("shuttle", block); err != nil {
-		t.Fatalf("SetExtraField shuttle: %v", err)
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
+	seedFiber(t, storage, id, uid, status, block, nil)
 }
 
 // ---- computeState (pure matrix) --------------------------------------------

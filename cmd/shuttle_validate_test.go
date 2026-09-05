@@ -13,13 +13,7 @@ import (
 // can be planted on disk to prove that the next felt edit rejects it.
 func seedShuttleFiber(t *testing.T, storage *felt.Storage, id string, block map[string]any) {
 	t.Helper()
-	f := &felt.Felt{ID: id, Name: id, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if err := f.SetExtraField("shuttle", block); err != nil {
-		t.Fatalf("SetExtraField: %v", err)
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
+	seedFiber(t, storage, id, "", "", block, nil)
 }
 
 func TestEditValidatesShuttleFacet(t *testing.T) {

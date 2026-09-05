@@ -144,31 +144,33 @@ func pluginSkillNames(t *testing.T) []string {
 	return names
 }
 
-func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
-	skillsRoot := pluginSkillsRoot(t)
-
-	err := filepath.Walk(skillsRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+// forbidUnder walks root (filtering by ext when non-empty) and reports every
+// file containing any of the phrases. Errorf, not Fatalf: one run should name
+// every offender, not just the first.
+func forbidUnder(t *testing.T, root, ext string, phrases ...string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || (ext != "" && filepath.Ext(path) != ext) {
 			return err
-		}
-		if info.IsDir() {
-			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		text := string(data)
-		for _, phrase := range retiredCommandPhrases {
-			if strings.Contains(text, phrase) {
-				t.Fatalf("%s contains retired command phrase %q", path, phrase)
+		for _, phrase := range phrases {
+			if strings.Contains(string(data), phrase) {
+				t.Errorf("%s contains forbidden phrase %q", path, phrase)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("walk %s: %v", skillsRoot, err)
+		t.Fatalf("walk %s: %v", root, err)
 	}
+}
+
+func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
+	forbidUnder(t, pluginSkillsRoot(t), "", retiredCommandPhrases...)
 }
 
 func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
@@ -230,28 +232,11 @@ func TestReadmeListsPluginSkills(t *testing.T) {
 }
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
-	root := repoRoot(t)
-	docsDir := filepath.Join(root, "docs")
+	docsDir := filepath.Join(repoRoot(t), "docs")
 	if _, err := os.Stat(docsDir); err != nil {
 		t.Fatalf("could not find repository docs/: %v", err)
 	}
-
-	err := filepath.WalkDir(docsDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(data), "extracted from title") {
-			t.Errorf("%s still documents legacy tag extraction on the name/title argument", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk docs/: %v", err)
-	}
+	forbidUnder(t, docsDir, ".md", "extracted from title")
 }
 
 func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
@@ -270,29 +255,9 @@ func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 // TestPluginAssetsAvoidLegacyTitleDetailLevel walks the plugin tree (skills,
 // hooks, manifest) for legacy detail-level phrasing.
 func TestPluginAssetsAvoidLegacyTitleDetailLevel(t *testing.T) {
-	root := repoRoot(t)
-	pluginRoot := filepath.Join(root, "claude-plugin")
+	pluginRoot := filepath.Join(repoRoot(t), "claude-plugin")
 	if _, err := os.Stat(pluginRoot); err != nil {
 		t.Skipf("no claude-plugin at %s: %v", pluginRoot, err)
 	}
-	err := filepath.Walk(pluginRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		text := string(data)
-		if strings.Contains(text, "title < compact") {
-			t.Fatalf("%s still mentions legacy title detail level", path)
-		}
-		if strings.Contains(text, "Detail level (title, compact, summary, full)") {
-			t.Fatalf("%s still mentions legacy title detail flag help", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", pluginRoot, err)
-	}
+	forbidUnder(t, pluginRoot, "", "title < compact", "Detail level (title, compact, summary, full)")
 }

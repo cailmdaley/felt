@@ -12,10 +12,7 @@ import (
 // the create verbs have a fiber to attach a block to.
 func seedPlainFiber(t *testing.T, storage *felt.Storage, id, status string) {
 	t.Helper()
-	f := &felt.Felt{ID: id, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
+	seedFiber(t, storage, id, "", status, nil, nil)
 }
 
 // ---- install ---------------------------------------------------------------

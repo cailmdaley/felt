@@ -570,16 +570,13 @@ func runHookCommand(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
-// runPreToolWithInput invokes runPreToolHook directly with a constructed
-// payload — easier than wiring stdin through the cobra layer in tests.
-func runPreToolWithInput(t *testing.T, input preToolInput) string {
+// stdinPipe marshals input onto a pipe the hook can read as its stdin.
+func stdinPipe(t *testing.T, input any) *os.File {
 	t.Helper()
-
 	payload, err := json.Marshal(input)
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)
@@ -588,6 +585,15 @@ func runPreToolWithInput(t *testing.T, input preToolInput) string {
 		t.Fatalf("write stdin: %v", err)
 	}
 	stdinW.Close()
+	return stdinR
+}
+
+// runPreToolWithInput invokes runPreToolHook directly with a constructed
+// payload — easier than wiring stdin through the cobra layer in tests.
+func runPreToolWithInput(t *testing.T, input preToolInput) string {
+	t.Helper()
+
+	stdinR := stdinPipe(t, input)
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
@@ -614,18 +620,7 @@ func runPreToolWithInput(t *testing.T, input preToolInput) string {
 // PostToolUse payload.
 func runPostToolWithInput(t *testing.T, input postToolInput) {
 	t.Helper()
-	payload, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("marshal input: %v", err)
-	}
-	stdinR, stdinW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdin pipe: %v", err)
-	}
-	if _, err := stdinW.Write(payload); err != nil {
-		t.Fatalf("write stdin: %v", err)
-	}
-	stdinW.Close()
+	stdinR := stdinPipe(t, input)
 	if err := runPostToolHook(stdinR); err != nil {
 		t.Fatalf("runPostToolHook: %v", err)
 	}
@@ -637,63 +632,41 @@ func postEditInput(tool, filePath string) postToolInput {
 	return in
 }
 
-func TestPostToolHookStampsDirectFiberEdit(t *testing.T) {
-	_, storage := newStore(t)
-	created := mustParseTime(t, "2026-04-10T09:00:00Z")
-	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
+func TestPostToolHookStampsEdit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tool string
+		path func(*felt.Storage) string
+	}{
+		// An agent edits the fiber's markdown directly (not via `felt edit`).
+		{"direct fiber edit", "Edit", func(s *felt.Storage) string { return s.Path("alpha") }},
+		// Editing a companion file (report.html) inside the fiber dir is work
+		// on the fiber, so it advances recency too.
+		{"companion edit", "Write", func(s *felt.Storage) string {
+			return filepath.Join(filepath.Dir(s.Path("alpha")), "report.html")
+		}},
+		// pi names its tools lowercase ("edit", "write"); the stamp must
+		// survive the casing difference rather than silently no-op for a whole
+		// harness.
+		{"lowercase tool name", "edit", func(s *felt.Storage) string { return s.Path("alpha") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, storage := newStore(t)
+			created := mustParseTime(t, "2026-04-10T09:00:00Z")
+			if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
 
-	// An agent edits the fiber's markdown directly (not via `felt edit`).
-	runPostToolWithInput(t, postEditInput("Edit", storage.Path("alpha")))
+			runPostToolWithInput(t, postEditInput(tc.tool, tc.path(storage)))
 
-	f, err := storage.Read("alpha")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
-		t.Fatalf("direct edit did not stamp updated-at: %v", f.UpdatedAt)
-	}
-}
-
-func TestPostToolHookStampsCompanionEdit(t *testing.T) {
-	_, storage := newStore(t)
-	created := mustParseTime(t, "2026-04-10T09:00:00Z")
-	if err := storage.Write(&felt.Felt{ID: "beta", Name: "Beta", CreatedAt: created}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	// Editing a companion file (report.html) inside the fiber dir is work on
-	// the fiber, so it advances recency too.
-	companion := filepath.Join(filepath.Dir(storage.Path("beta")), "report.html")
-	runPostToolWithInput(t, postEditInput("Write", companion))
-
-	f, err := storage.Read("beta")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
-		t.Fatalf("companion edit did not stamp updated-at: %v", f.UpdatedAt)
-	}
-}
-
-// pi names its tools lowercase ("edit", "write"); the stamp must survive the
-// casing difference rather than silently no-op for a whole harness.
-func TestPostToolHookStampsLowercaseToolName(t *testing.T) {
-	_, storage := newStore(t)
-	created := mustParseTime(t, "2026-04-10T09:00:00Z")
-	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	runPostToolWithInput(t, postEditInput("edit", storage.Path("alpha")))
-
-	f, err := storage.Read("alpha")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
-		t.Fatalf("lowercase tool name did not stamp updated-at: %v", f.UpdatedAt)
+			f, err := storage.Read("alpha")
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if f.UpdatedAt == nil || !f.UpdatedAt.After(created) {
+				t.Fatalf("%s did not stamp updated-at: %v", tc.name, f.UpdatedAt)
+			}
+		})
 	}
 }
 

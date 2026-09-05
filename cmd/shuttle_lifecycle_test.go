@@ -106,13 +106,15 @@ func newStore(t *testing.T) (string, *felt.Storage) {
 	return dir, storage
 }
 
-// seedShuttleRole seeds a fiber carrying a shuttle: block plus the requested
-// felt-native status and optional tempered verdict, straight through storage.
-func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, block map[string]any, tempered *bool) {
+// seedFiber writes a fiber straight through storage, bypassing the cmd-layer
+// validation — so a deliberately invalid block can be planted on disk.
+func seedFiber(t *testing.T, storage *felt.Storage, id, uid, status string, block map[string]any, tempered *bool) {
 	t.Helper()
-	f := &felt.Felt{ID: id, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if err := f.SetExtraField("shuttle", block); err != nil {
-		t.Fatalf("SetExtraField shuttle: %v", err)
+	f := &felt.Felt{ID: id, UID: uid, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	if block != nil {
+		if err := f.SetExtraField("shuttle", block); err != nil {
+			t.Fatalf("SetExtraField shuttle: %v", err)
+		}
 	}
 	if tempered != nil {
 		if err := f.SetExtraField("tempered", *tempered); err != nil {
@@ -122,6 +124,13 @@ func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, blo
 	if err := storage.Write(f); err != nil {
 		t.Fatalf("Write %s: %v", id, err)
 	}
+}
+
+// seedShuttleRole seeds a fiber carrying a shuttle: block plus the requested
+// felt-native status and optional tempered verdict.
+func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, block map[string]any, tempered *bool) {
+	t.Helper()
+	seedFiber(t, storage, id, "", status, block, tempered)
 }
 
 func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
