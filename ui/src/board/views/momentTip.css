@@ -6,24 +6,17 @@
    which pigment, how many events — and then either the words recovered from the
    harness transcript, or — for a minute that worked without speaking — the
    tools that ran, or the note that neither was recovered. See
-   SLOT_NO_TEXT_NOTE and .kbn-tip-tools.
+   .kbn-tip-tools.
 
    The pigments are declared HERE rather than borrowed from WeekView.css,
    whose copies are scoped to its own sheet. Same hexes, one purpose each: a
    swatch on a Day tooltip must be the same blue as the wash it annotates. */
 .kbn-tip {
   --kbn-tip-agent: #3D5BA0;
-  /* WAS TEAL, and the teal was a ghost. It came from the old two-pole colour
-     scale that walked the curve from the agents' cobalt to a teal reading your
-     engagement — a channel deleted when the spines took over saying when you
-     spoke. The swatch outlived the pigment, so the slip was marking your
-     messages in a colour that appears nowhere on any rail, while the cards
-     three lines below marked the same messages in cinnabar. One pigment for
-     you, everywhere: the plot's spine, the card's spine, this swatch. */
-  --kbn-tip-attention: #BC4538;
-  /* Speaker identity in the excerpt cards below, matching the plot's own
-     pigments: the cinnabar spine for you, the curve's blue for the agent,
-     iron-gall grey — no accent — for the machine's own vocabulary. */
+  /* Speaker identity everywhere you appear — the plot's spine, the card's
+     spine, the row swatch. WAS TEAL for the swatch, from a two-pole colour
+     scale deleted when the spines took over: it must not go back, or the slip
+     marks your messages in a colour that appears on no rail. */
   --kbn-tip-you: #BC4538;
   --kbn-tip-tool: #7A6F5C;
 
@@ -127,7 +120,7 @@
   align-self: center;
 }
 .kbn-tip-key-agent { height: 7px; background: var(--kbn-tip-agent); }
-.kbn-tip-key-attention { height: 9px; background: var(--kbn-tip-attention); opacity: 0.85; }
+.kbn-tip-key-attention { height: 9px; background: var(--kbn-tip-you); opacity: 0.85; }
 /* The agent's own VOICE, which the magnet's last-exchange rows name directly.
    Cobalt like its tool work, at the height of a message rather than of a wash:
    the same machine, speaking rather than working. Never appeared before this,

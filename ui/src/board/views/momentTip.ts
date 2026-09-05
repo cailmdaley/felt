@@ -356,36 +356,6 @@ export interface MarkPick {
   magnetized: boolean
 }
 
-/**
- * The mark a pointer is asking about: the nearest one within `snapPx`, or —
- * anywhere past the last mark on the rail — the last mark itself.
- *
- * ## Why the right-hand dead zone is a magnet
- *
- * The most common question a lane answers is "what was the last thing that
- * happened here?", and the honest answer sits at one x-coordinate that gets
- * harder to hit the quieter the lane is. On a fiber that stopped at eleven in
- * the morning, the entire afternoon is blank paper that answers nothing, and
- * finding the last mark means pixel-hunting a hairline at the left edge of a
- * lot of nothing. So the blank paper answers instead: everything to the right
- * of the last mark reports that mark.
- *
- * It costs nothing, because that region had no other meaning. Nothing happened
- * there — there is no competing mark for the pointer to be asking about, and
- * hiding the tooltip was never an *answer*, only an absence of one.
- *
- * THE TWO ZONES ABUT EXACTLY and there is no third rule between them. Within
- * `snapPx` of any mark the ordinary snap wins, so a near-miss on the last mark
- * behaves exactly as a near-miss on any other and reads as an ordinary hover;
- * past that, the pointer is unambiguously in empty paper and the magnet takes
- * it. The buffer past the mark is therefore `snapPx` itself rather than a
- * constant of its own — a second number here could only open a gap or an
- * overlap between the two rules.
- *
- * Left of the FIRST mark there is no magnet, deliberately. That region is the
- * part of the day that had not happened yet when the lane began, and "the
- * earliest thing that happened here" is not a question anybody asks of it.
- */
 // ── The last exchange ────────────────────────────────────────────────────────
 
 /** A mark on a rail as {@link lastExchange} needs it: when, and what kinds of
@@ -489,6 +459,36 @@ export function lastExchange(marks: readonly ExchangeMark[]): LastExchange {
   return { turns, toolsAfter: count > 0 ? { atMs, count, minutes } : null }
 }
 
+/**
+ * The mark a pointer is asking about: the nearest one within `snapPx`, or —
+ * anywhere past the last mark on the rail — the last mark itself.
+ *
+ * ## Why the right-hand dead zone is a magnet
+ *
+ * The most common question a lane answers is "what was the last thing that
+ * happened here?", and the honest answer sits at one x-coordinate that gets
+ * harder to hit the quieter the lane is. On a fiber that stopped at eleven in
+ * the morning, the entire afternoon is blank paper that answers nothing, and
+ * finding the last mark means pixel-hunting a hairline at the left edge of a
+ * lot of nothing. So the blank paper answers instead: everything to the right
+ * of the last mark reports that mark.
+ *
+ * It costs nothing, because that region had no other meaning. Nothing happened
+ * there — there is no competing mark for the pointer to be asking about, and
+ * hiding the tooltip was never an *answer*, only an absence of one.
+ *
+ * THE TWO ZONES ABUT EXACTLY and there is no third rule between them. Within
+ * `snapPx` of any mark the ordinary snap wins, so a near-miss on the last mark
+ * behaves exactly as a near-miss on any other and reads as an ordinary hover;
+ * past that, the pointer is unambiguously in empty paper and the magnet takes
+ * it. The buffer past the mark is therefore `snapPx` itself rather than a
+ * constant of its own — a second number here could only open a gap or an
+ * overlap between the two rules.
+ *
+ * Left of the FIRST mark there is no magnet, deliberately. That region is the
+ * part of the day that had not happened yet when the lane began, and "the
+ * earliest thing that happened here" is not a question anybody asks of it.
+ */
 export function pickMark(
   positionsPx: readonly number[],
   x: number,
@@ -841,15 +841,6 @@ const TIP_FLIP_FRACTION = 0.62
 /** The gap between the anchor and the near edge of the slip, either way round. */
 const TIP_GAP_PX = 9
 
-/**
- * Hang the slip off an anchor.
- *
- * `box` is the container the tip is positioned within — the same element it was
- * appended to — measured by the caller, and `anchorX`/`topPx` are already in
- * that box's coordinates. That split is the whole point: WHERE the mark is
- * differs per view (a pointer position, a minute fraction, a slot fraction) and
- * stays with the view; how a slip hangs off it does not, and lives here.
- */
 /** The one floating slip element, made once and re-used: `held` unless the
  *  view rebuilt its chart out from under it. */
 export function ensureTipHost(parent: HTMLElement | null, held: HTMLElement | null): HTMLElement {
@@ -860,6 +851,15 @@ export function ensureTipHost(parent: HTMLElement | null, held: HTMLElement | nu
   return tip
 }
 
+/**
+ * Hang the slip off an anchor.
+ *
+ * `box` is the container the tip is positioned within — the same element it was
+ * appended to — measured by the caller, and `anchorX`/`topPx` are already in
+ * that box's coordinates. That split is the whole point: WHERE the mark is
+ * differs per view (a pointer position, a minute fraction, a slot fraction) and
+ * stays with the view; how a slip hangs off it does not, and lives here.
+ */
 export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx: number): void {
   const flip = anchorX > box.width * TIP_FLIP_FRACTION
   tip.style.top = `${topPx}px`
