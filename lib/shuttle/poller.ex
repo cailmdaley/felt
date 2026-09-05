@@ -1155,17 +1155,12 @@ defmodule Shuttle.Poller do
 
   @doc false
   def running_key(%State{} = state, fiber_id) when is_binary(fiber_id) do
-    cond do
-      Map.has_key?(state.running, fiber_id) ->
-        fiber_id
-
-      true ->
-        Enum.find_value(state.running, fn {key, metadata} ->
-          address = fiber_address(metadata)
-          uid = metadata_uid(metadata)
-
-          if fiber_id in [address, uid], do: key
-        end)
+    if Map.has_key?(state.running, fiber_id) do
+      fiber_id
+    else
+      Enum.find_value(state.running, fn {key, metadata} ->
+        if fiber_id in [fiber_address(metadata), metadata_uid(metadata)], do: key
+      end)
     end
   end
 
