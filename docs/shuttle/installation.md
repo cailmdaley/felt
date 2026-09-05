@@ -702,6 +702,25 @@ is no git-log fallback, so commits made outside an agent session never appear.
 Override the path with `SHUTTLE_COMMITS_FILE`; see [The commit
 ledger](telemetry.md#the-commit-ledger) for the line format.
 
+## The board on your phone (Tailscale)
+
+The daemon binds `:4000` to `127.0.0.1` and never needs to change. To reach the
+board from another device, front it with Tailscale Serve on the host running
+the daemon:
+
+```bash
+brew install --cask tailscale        # macOS; log in from the menu-bar app
+tailscale serve --bg 4000            # https://<host>.<tailnet>.ts.net → 127.0.0.1:4000
+tailscale serve status
+```
+
+The first `serve` prints a one-time link to enable Serve on the tailnet;
+approve it in the browser and the command completes. Any device signed into
+the same tailnet (the Tailscale iOS app, say) opens the URL directly; the URL
+is tailnet-only, TLS is Tailscale's. The board composites the whole fleet from
+that daemon's `remotes.json`, so which host fronts it is a question of
+uptime, not reach — a laptop asleep is a board offline.
+
 ## Sharp edges
 
 Roughly in the order a new installer hits them.
