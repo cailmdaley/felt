@@ -1328,13 +1328,8 @@ class ChronicleView implements TemporalView {
     // A search is a question about one visit, like the era scope above it: the
     // box goes with the head that held it, and a pending debounce must not fire
     // into a torn-down view.
-    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
-    this.searchTimer = null
-    this.searchSeq += 1
+    this.resetSearch()
     this.searchBox = null
-    this.searchQuery = ''
-    this.recordHits = []
-    this.recordHitsFor = ''
     this.foundId = null
     this.root?.remove()
     this.root = null
@@ -1441,13 +1436,19 @@ class ChronicleView implements TemporalView {
     }, SEARCH_DEBOUNCE_MS)
   }
 
-  private clearSearch(ctx: ViewContext): void {
-    this.searchQuery = ''
-    this.recordHits = []
-    this.recordHitsFor = ''
+  /** Forget the query and everything derived from it, and make sure a pending
+   *  debounce cannot fire into the state that follows. */
+  private resetSearch(): void {
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
     this.searchTimer = null
     this.searchSeq += 1
+    this.searchQuery = ''
+    this.recordHits = []
+    this.recordHitsFor = ''
+  }
+
+  private clearSearch(ctx: ViewContext): void {
+    this.resetSearch()
     if (this.searchBox) this.searchBox.input.value = ''
     this.setFound(null)
     this.paintHits(ctx)
@@ -2155,7 +2156,8 @@ class ChronicleView implements TemporalView {
     const inSpan = (idx: number | null): boolean =>
       idx !== null && idx >= band.startIdx && idx <= band.endIdx
     const touched = rows.filter((r) => this.rowInSpan(r, band, days)).length
-    const dues = ctx.cards.filter((c) => inSpan(idxOfDue(c.due, new Map(days.map((d, i) => [d.iso, i]))))).length
+    const faceDayIndex = new Map(days.map((d, i) => [d.iso, i]))
+    const dues = ctx.cards.filter((c) => inSpan(idxOfDue(c.due, faceDayIndex))).length
     const closed = ctx.cards.filter((c) => {
       const ms = instantMs(c.closedAt)
       return ms !== undefined && ms >= fromMs && ms <= toMs
@@ -2193,6 +2195,18 @@ class ChronicleView implements TemporalView {
     face.append(stats)
 
     // ── the look back ───────────────────────────────────────────────────────
+    // The memoir names fibers twice — once per commit group, once per close —
+    // and both namings are the door to the fiber.
+    const openBtn = (id: string, name: string, extra?: string): HTMLButtonElement => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = extra ? `${extra} chr-face-open` : 'chr-face-open'
+      btn.textContent = name
+      btn.title = `Open ${name}`
+      btn.addEventListener('click', () => ctx.openCard(id))
+      return btn
+    }
+
     const memoir = document.createElement('div')
     memoir.className = 'chr-face-memoir'
     const memoirHead = document.createElement('h3')
@@ -2212,12 +2226,7 @@ class ChronicleView implements TemporalView {
           const line = document.createElement('p')
           line.className = 'chr-face-line'
           // The ledger named the fiber, so the name opens it — no guessing.
-          const fiber = document.createElement('button')
-          fiber.type = 'button'
-          fiber.className = 'chr-face-fiber chr-face-open'
-          fiber.textContent = group.name
-          fiber.title = `Open ${group.name}`
-          fiber.addEventListener('click', () => ctx.openCard(group.cardId))
+          const fiber = openBtn(group.cardId, group.name, 'chr-face-fiber')
           const count = document.createElement('span')
           count.className = 'chr-face-count'
           count.textContent = `×${group.count}`
@@ -2244,12 +2253,7 @@ class ChronicleView implements TemporalView {
           // A fiber the era closed is named here and nowhere else on the face —
           // so this is where you reach it. The whole name is the target; the
           // verdict mark stays a mark.
-          const open = document.createElement('button')
-          open.type = 'button'
-          open.className = 'chr-face-open'
-          open.textContent = card.name
-          open.title = `Open ${card.name}`
-          open.addEventListener('click', () => ctx.openCard(card.id))
+          const open = openBtn(card.id, card.name)
           line.append(mark, document.createTextNode(' '), open)
           memoir.append(line)
         }
@@ -3550,33 +3554,32 @@ class ChronicleView implements TemporalView {
       }
     }
 
+    const mark = (cls: string, idx: number, glyph: string, title?: string): HTMLElement => {
+      const el = document.createElement('div')
+      el.className = `chr-mark ${cls}`
+      el.style.left = colLeft(idx)
+      el.textContent = glyph
+      if (title) el.title = title
+      track.append(el)
+      return el
+    }
+
     if (row.closed && row.closeIdx !== null) {
-      const end = document.createElement('div')
-      end.className = `chr-mark chr-end${row.closedOk ? '' : ' chr-end-compost'}`
-      end.style.left = colLeft(row.closeIdx)
-      end.textContent = row.closedOk ? '✓' : '✗'
-      track.append(end)
+      mark(`chr-end${row.closedOk ? '' : ' chr-end-compost'}`, row.closeIdx, row.closedOk ? '✓' : '✗')
     }
     // Ahead of today: promises only, never ink.
     if (row.dueIdx !== null) {
-      const due = document.createElement('div')
-      due.className = 'chr-mark chr-due'
-      due.style.left = colLeft(row.dueIdx)
-      due.textContent = MARK_GLYPH.due
-      due.title = row.cardId ? 'due — drag to reschedule' : 'due'
-      track.append(due)
+      const due = mark(
+        'chr-due',
+        row.dueIdx,
+        MARK_GLYPH.due,
+        row.cardId ? 'due — drag to reschedule' : 'due',
+      )
       // A cycle's due-edge is grabbed by its own small handle; a fiber's due
       // mark IS the handle — nothing else on the row promises a future date.
       if (row.cardId) this.installDueMarkDrag(due, row, ctx)
     }
-    if (row.launchIdx !== null) {
-      const launch = document.createElement('div')
-      launch.className = 'chr-mark chr-launch'
-      launch.style.left = colLeft(row.launchIdx)
-      launch.textContent = MARK_GLYPH.launch
-      launch.title = 'next launch'
-      track.append(launch)
-    }
+    if (row.launchIdx !== null) mark('chr-launch', row.launchIdx, MARK_GLYPH.launch, 'next launch')
 
     // The gutter and the days are two grid children; the row they belong to is
     // only in the reader's head. Pointing at either one lights both, which is
