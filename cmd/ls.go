@@ -56,12 +56,10 @@ folded into that ancestor, which carries a count of what it swallowed. Use -v to
 list every match flat. --json is always uncollapsed.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 		query := ""
 		if len(args) == 1 {
 			query = args[0]
@@ -668,12 +666,10 @@ Use -L/--depth to cap how deep the tree is drawn; elided branches are marked
 with the count of what lies below them. --json is always the full tree.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 
 		// Resolve the argument before listing anything: an id that names a
 		// fiber in the enclosing store draws THAT store's tree — the fiber is

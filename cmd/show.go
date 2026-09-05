@@ -37,9 +37,9 @@ Targeted views:
                     scalars one-per-line, structured values as YAML)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, root, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
 
 		detail := showDetail
@@ -65,7 +65,6 @@ Targeted views:
 			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, or --field")
 		}
 
-		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 
 		// An id that names a fiber in the enclosing store is shown from

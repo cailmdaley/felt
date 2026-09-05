@@ -41,12 +41,10 @@ Examples:
 keys have dedicated flags; use those.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, root, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 		// A fiber in the enclosing store is edited where it lives.
 		target, err := resolveFiberRef(storage, scopeID, args[0])
@@ -114,17 +112,13 @@ keys have dedicated flags; use those.`,
 			}
 		}
 		if cmd.Flags().Changed("tag") {
-			for _, raw := range editTags {
-				for _, tag := range splitTags(raw) {
-					f.AddTag(tag)
-				}
+			for _, tag := range splitListFlag(editTags) {
+				f.AddTag(tag)
 			}
 		}
 		if cmd.Flags().Changed("untag") {
-			for _, raw := range editUntag {
-				for _, tag := range splitTags(raw) {
-					f.RemoveTag(tag)
-				}
+			for _, tag := range splitListFlag(editUntag) {
+				f.RemoveTag(tag)
 			}
 		}
 		if cmd.Flags().Changed("unset") {
