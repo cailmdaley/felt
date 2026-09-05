@@ -1825,7 +1825,7 @@ function buildKeyRow(): HTMLElement {
   // NOTE — the constitution-driven axis used to live here, drawn as a broader
   // nib on a slot whose work carried a `shuttle:` block. The curve has no
   // channel left to carry it: height is the agents' volume and the spine is
-  // your messages. `RasterSlot.shuttle` is still recorded and still read by the
+  // your messages. `SlotKind.shuttle` is still recorded and still read by the
   // tooltip, so the claim is not lost — only its ink is.
 
   return key
@@ -1853,9 +1853,6 @@ export interface RasterSlot {
   /** Centre of the slot, 0…1 along the rail. */
   fraction: number
   kinds: SlotKind[]
-  /** Any kind in the slot is constitution-driven — the flag the ink's weight
-   *  reads. */
-  shuttle: boolean
   /**
    * Minutes from the rail's start in which YOU sent a message — the spines.
    *
@@ -1925,7 +1922,6 @@ export function rasterSlots(
       endMs: startMs + RASTER_SLOT_MS,
       fraction: (index + 0.5) * RASTER_SLOT_MS / span,
       kinds: list,
-      shuttle: list.some((k) => k.shuttle),
       humanMinutes: humanByIndex.get(index) ?? [],
       sources: dedupeSources(sourcesByIndex.get(index) ?? []),
     })

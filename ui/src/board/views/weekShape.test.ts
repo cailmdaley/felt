@@ -1201,11 +1201,11 @@ describe('the raster tick knows whose minute it was', () => {
       rasterSlots([bucket({ m: bounds.startMs, s: 'w-1' })], bounds, bounds.endMs, origin(index))[0],
       rasterSlots([bucket({ m: bounds.startMs, s: 'w-2' })], bounds, bounds.endMs, origin(index))[0],
     ];
-    expect(driven.shuttle).toBe(true);
+    expect(driven.kinds.some((k) => k.shuttle)).toBe(true);
     expect(driven.kinds[0].where).toEqual(['ship it']);
     // A `shuttle:` block is what makes a fiber constitution-driven — a card
     // that merely has a running worker is not.
-    expect(plain.shuttle).toBe(false);
+    expect(plain.kinds.some((k) => k.shuttle)).toBe(false);
     expect(plain.kinds[0].where).toEqual(['notes']);
   });
 
