@@ -259,10 +259,7 @@ func formatHookEntry(f *felt.Felt, recency time.Time, withOutcome bool) string {
 	icon := felt.StatusIcon(f.Status)
 	line1 := fmt.Sprintf("%s %s\n", icon, hookEntryHead(f, recency))
 
-	tagStr := ""
-	if len(f.Tags) > 0 {
-		tagStr = fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
-	}
+	tagStr := tagSuffix(f)
 	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), tagStr)
 
 	if !withOutcome || f.Outcome == "" {
