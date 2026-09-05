@@ -918,7 +918,7 @@ function orderSources(sources: readonly MomentSource[]): MomentSource[] {
  * delegation register (`return` — a subagent's report, a teammate message),
  * which nobody typed; only `prose` is speech.
  */
-function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
+function pickExcerpts(excerpts: readonly MomentExcerpt[], cap: number): MomentExcerpt[] {
   const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
   const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
   if (inTime.length <= cap) return inTime

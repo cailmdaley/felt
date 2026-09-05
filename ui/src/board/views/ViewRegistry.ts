@@ -242,7 +242,7 @@ export function isTypingTarget(
   el: { tagName: string; isContentEditable?: boolean } | null | undefined,
 ): boolean {
   if (!el) return false
-  const tag = el.tagName?.toUpperCase()
+  const tag = el.tagName.toUpperCase()
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
   return el.isContentEditable === true
 }
@@ -283,9 +283,9 @@ export const BLOCKING_DIALOG_SELECTOR =
  * THE predicate — chassis, Day and Week should all call this rather than keep
  * their own copy, so they cannot drift apart again.
  */
-export function keystrokeIsSpokenFor(doc: Document = document): boolean {
-  if (isTypingTarget(doc.activeElement as HTMLElement | null)) return true
-  for (const el of doc.querySelectorAll(BLOCKING_DIALOG_SELECTOR)) {
+export function keystrokeIsSpokenFor(): boolean {
+  if (isTypingTarget(document.activeElement as HTMLElement | null)) return true
+  for (const el of document.querySelectorAll(BLOCKING_DIALOG_SELECTOR)) {
     if (isBlockingDialog(el)) return true
   }
   return false

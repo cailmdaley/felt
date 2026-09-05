@@ -1693,7 +1693,7 @@ class ChronicleView implements TemporalView {
     }
     // The cycle strip. Its own surface, so it is invisible to the per-card loop
     // below — and a band moves with its span, not just with its existence.
-    for (const c of ctx.response.cycles ?? []) {
+    for (const c of ctx.response.cycles) {
       parts.push(`y:${c.id}|${c.name}|${c.cycleStart ?? ''}|${c.due ?? ''}`)
     }
     for (const c of cards) {
@@ -1953,7 +1953,7 @@ class ChronicleView implements TemporalView {
   ): CycleBand[] {
     // Cycles have their own surface — they are deliberately absent from
     // `ctx.cards`, so a cycle can never be mistaken for a piece of work.
-    const served: CycleCard[] = ctx.response.cycles ?? []
+    const served: CycleCard[] = ctx.response.cycles
     this.pendingCycles = retirePendingCycles(this.pendingCycles, served)
 
     // Lay any un-echoed edge drag over the served card, and retire the override
@@ -3638,7 +3638,7 @@ class ChronicleView implements TemporalView {
    * the cursor moves; otherwise a render restores whatever the reader had
    * scrolled to.
    */
-  private anchorDay(scroller: HTMLElement, idx: number, fraction = TODAY_ANCHOR): void {
+  private anchorDay(scroller: HTMLElement, idx: number, fraction: number): void {
     requestAnimationFrame(() => {
       if (this.scroller !== scroller) return
       const styles = getComputedStyle(scroller)

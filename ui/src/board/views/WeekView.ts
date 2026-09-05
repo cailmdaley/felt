@@ -1564,7 +1564,7 @@ class WeekView implements TemporalView {
     // Only explain ink that is on the page.
     if (this.key) this.key.style.display = (activity?.week.totalMs ?? 0) > 0 ? '' : 'none'
 
-    this.paintCycles(cyclesInWeek(ctx.response.cycles ?? [], this.rows.map((r) => r.day), now))
+    this.paintCycles(cyclesInWeek(ctx.response.cycles, this.rows.map((r) => r.day), now))
 
     const inFlight = ctx.response.now.inFlight
     // Who did each minute of work, and whether a constitution is driving it.

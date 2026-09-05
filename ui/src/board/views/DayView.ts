@@ -692,7 +692,7 @@ export function buildDayLanes(
   origins: TemporalOrigins = activity.origins ?? {},
 ): DayLane[] {
   const index = buildJoinIndex(cards, byTmux)
-  const pageHost = (activity.host ?? '').toLowerCase()
+  const pageHost = activity.host.toLowerCase()
   const folded = foldOrigins(origins)
 
   interface Acc {
@@ -811,7 +811,7 @@ export function buildDayLanes(
   // opens a lane of its own: an interval with no activity under it would be a
   // rail with a hairline and no curve, which says a fiber was working while
   // showing that it was not.
-  for (const span of activity.spawns ?? []) {
+  for (const span of activity.spawns) {
     const card = joinBucket(index, span)
     if (!card) continue
     acc.get(`fiber:${card.id}`)?.spawns.push({
@@ -1336,7 +1336,7 @@ export function buildDayModel(
     dayISO,
     window: win,
     frame,
-    host: (activity.host ?? '').toLowerCase(),
+    host: activity.host.toLowerCase(),
     origins,
     totals,
     lanes,
@@ -1564,12 +1564,12 @@ export function beatTip(
  * is the honest report and keeps the panel from flickering out of existence
  * every other keystroke.
  */
-export function emptyMinuteTip(startMs: number, pinned = false): SlotTip {
+function emptyMinuteTip(startMs: number): SlotTip {
   return {
     time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
     rows: [],
     resolved: true,
-    pinned,
+    pinned: true,
     note: 'nothing recorded in this minute',
   }
 }
@@ -2691,7 +2691,7 @@ class DayViewImpl implements TemporalView {
       this.moments.cancel()
       this.hoveredKey = null
       this.pinnedKey = `${laneKey}:${minute}`
-      renderTip(tip, emptyMinuteTip(startMs, true))
+      renderTip(tip, emptyMinuteTip(startMs))
       tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
     } else {
       this.openMoment(
