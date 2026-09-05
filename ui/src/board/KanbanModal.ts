@@ -242,7 +242,7 @@ export class KanbanModal {
    */
   private gestureDepth = 0
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
-  private detailModal: FiberDetailModal | null = null
+  private readonly detailModal: FiberDetailModal
   private readonly surfaces: KanbanSurfaceRenderer
 
   constructor(options: KanbanModalOptions) {
@@ -292,7 +292,7 @@ export class KanbanModal {
       stack: (card, tailId) => this.stackBehind(card, tailId),
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, splice, drop) => this.unqueueRow(fiberId, splice, drop),
-      openDetail: (card) => this.detailModal?.open(card),
+      openDetail: (card) => this.detailModal.open(card),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       // A peek row's drag never touches `dragSourceId`, so this is how the
@@ -350,7 +350,7 @@ export class KanbanModal {
     // tab-away/close would otherwise orphan it over whatever is behind (and
     // its presence makes the workspace's Escape handler yield, so the orphan
     // would eat the first Escape too).
-    this.detailModal?.close()
+    this.detailModal.close()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
     this.activeView?.unmount()
@@ -649,28 +649,6 @@ export class KanbanModal {
   }
 
   /**
-   * Open a card's detail panel by id — the `openCard` a ViewContext exposes.
-   *
-   * Looks past `ctx.cards`, which is the WORK surfaces only. A cycle is an
-   * annotation, not work: it lives in `response.cycles` and deliberately
-   * appears in none of the eight surfaces `collectCards` walks, so a view that
-   * draws cycle bands or chips would hand over an id this list has never heard
-   * of. Widening `collectCards` would have been the smaller diff and the wrong
-   * one — views walk `ctx.cards` to place due-marks, and a cycle's `due` is a
-   * span's closing edge, not a deadline, so every such view would have to learn
-   * to skip them. The lookup widens here instead; the contract stays put.
-   *
-   * A miss WARNS rather than returning quietly. The bug this replaces was
-   * silent — a click that did nothing at all, with no throw and no log, found
-   * only by someone watching the overlay in a browser. A no-op that says
-   * nothing is its own defect class, so the next unknown id announces itself.
-   */
-  private openCardById(cardId: string, cards: KanbanCard[]): void {
-    const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
-    if (card) this.detailModal?.open(card)
-  }
-
-  /**
    * Put a stand-in page in the view host when there is no response to mount a
    * view with — the fix for a temporal tab rendering as a completely blank
    * page when the composite feed is unreachable.
@@ -727,7 +705,10 @@ export class KanbanModal {
       commits: (sinceMs, untilMs) => this.temporal.commits(sinceMs, untilMs),
       moment: (session, fromMs, toMs, host, full) =>
         this.temporal.moment(session, fromMs, toMs, host, full),
-      openCard: (cardId) => this.openCardById(cardId, cards),
+      openCard: (cardId) => {
+        const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
+        if (card) this.detailModal.open(card)
+      },
       // The Desk's worker pill, handed to the views. Passed through rather than
       // wrapped: it is already the gesture-deferred form (see the constructor —
       // kitty hides on focus loss, so activation waits for the click to finish),
@@ -1155,13 +1136,7 @@ export class KanbanModal {
   ): Promise<void> {
     const card = findCardById(this.lastResponse, fiberId)
     if (!card) return
-    if (card.dependsOnShape === 'list') {
-      this.showBanner(
-        `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
-        'info',
-      )
-      return
-    }
+    if (this.refusesHandwrittenList(card)) return
     // The board as it stands BEFORE the optimistic paint. `transition` needs it
     // to know where the card came from; see its `basis` parameter.
     const before = this.lastResponse
@@ -1237,6 +1212,20 @@ export class KanbanModal {
     }
   }
 
+  /**
+   * A LIST-shaped `depends_on:` is somebody's fan-in, not a chain this board
+   * may rewrite — both queue exits refuse it rather than collapsing it.
+   * Returns whether it refused (and bannered).
+   */
+  private refusesHandwrittenList(card: KanbanCard): boolean {
+    if (card.dependsOnShape !== 'list') return false
+    this.showBanner(
+      `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
+      'info',
+    )
+    return true
+  }
+
   /** POST one frontmatter edit, owner-routed by `origin`, throwing the
    *  daemon's own message on failure. The shared half of every sequence
    *  write. */
@@ -1260,11 +1249,7 @@ export class KanbanModal {
    * rule the stack drop follows, from the other direction.
    */
   private async unstack(card: KanbanCard): Promise<void> {
-    if (card.dependsOnShape === 'list') {
-      this.showBanner(
-        `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
-        'info',
-      )
+    if (this.refusesHandwrittenList(card)) {
       this.announce(`${card.name} has a hand-written depends_on list; edit it there.`)
       return
     }
@@ -1748,15 +1733,15 @@ export class KanbanModal {
   }
 
   private computeResponseSignature(data: KanbanResponse): string {
-    // Hash the three surfaces + totals + staleness — stale-origin cards dim
-    // and disable drag even when the card lists themselves are unchanged.
+    // Hash the three surfaces + staleness — stale-origin cards dim and
+    // disable drag even when the card lists themselves are unchanged.
+    // `totals`/`temperedTotal` are pure `.length` derivations of the same
+    // surfaces, so hashing them could only produce redundant work.
     return JSON.stringify({
       n: data.now,
       tl: data.timeline,
       s: data.stash,
       p: data.pinned,
-      t: data.totals,
-      tt: data.temperedTotal,
       st: data.staleness,
     })
   }
@@ -2539,14 +2524,14 @@ export function clearQueueGate(
       futureDated: restore(timeline.futureDated, resp.timeline.futureDated),
     },
     stash: restore(stash, resp.stash),
-    temperedTotal: resp.temperedTotal,
   })
 }
 
 /**
  * Reassemble a response from mutated surfaces with the length-derived totals
- * recomputed. `temperedTotal` is a historical count that can exceed the
- * recent-N `past` slice, so it's supplied explicitly rather than recounted.
+ * recomputed. `temperedTotal` rides through on the spread: it is a historical
+ * count that can exceed the recent-N `past` slice, so it cannot be recounted
+ * from these arrays.
  */
 function withSurfaces(
   resp: KanbanResponse,
@@ -2555,7 +2540,6 @@ function withSurfaces(
     pinned: KanbanCard[]
     timeline: KanbanResponse['timeline']
     stash: KanbanCard[]
-    temperedTotal: number
   },
 ): KanbanResponse {
   return {
@@ -2565,7 +2549,6 @@ function withSurfaces(
     timeline: s.timeline,
     stash: s.stash,
     totals: surfaceTotals(s),
-    temperedTotal: Math.max(0, s.temperedTotal),
   }
 }
 
@@ -2609,9 +2592,7 @@ export function resolveOpenTarget(
  * placement from fiber fields (that stays the server's `classifyFiber`). It
  * only patches the minimal fields the destination's own rendering reads — the
  * past lane keys off `status`/`tempered` and a `closedAt` day-column, and
- * closing the fiber drops the running-worker pill. `temperedTotal` is adjusted
- * by the move *direction* rather than recounted off the (possibly capped)
- * array.
+ * closing the fiber drops the running-worker pill.
  */
 function applyOptimisticTransition(
   resp: KanbanResponse | null,
@@ -2620,7 +2601,6 @@ function applyOptimisticTransition(
   nowIso: string = new Date().toISOString(),
 ): KanbanResponse | null {
   if (!resp) return null
-  const wasTempered = resp.timeline.past.some((c) => c.id === cardId && c.tempered === true)
   const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
@@ -2645,7 +2625,7 @@ function applyOptimisticTransition(
     moved.runningWorker = undefined
     moved.runtimePhase = undefined
     if (card.shuttleKind === 'pinned') {
-      return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash, temperedTotal: resp.temperedTotal })
+      return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash })
     }
     const nowMs = Date.parse(nowIso)
     moved.nextLaunchAt = nextStandingLaunch(
@@ -2657,7 +2637,7 @@ function applyOptimisticTransition(
       nowMs,
     )
     timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, pinned, timeline, stash, temperedTotal: resp.temperedTotal })
+    return withSurfaces(resp, { now, pinned, timeline, stash })
   }
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
@@ -2698,8 +2678,7 @@ function applyOptimisticTransition(
     now[target] = [...now[target], moved]
   }
 
-  const temperedDelta = (target === 'tempered' ? 1 : 0) - (wasTempered ? 1 : 0)
-  return withSurfaces(resp, { now, pinned, timeline, stash, temperedTotal: resp.temperedTotal + temperedDelta })
+  return withSurfaces(resp, { now, pinned, timeline, stash })
 }
 
 /**
@@ -2741,7 +2720,7 @@ function applyOptimisticSurface(
     // date-column snooze, and the stale-due clear — wins over it.
     due: opts.due === undefined ? card.due : (opts.due ?? undefined),
   }
-  return withSurfaces(resp, { now, pinned, timeline, stash: [moved, ...stash], temperedTotal: resp.temperedTotal })
+  return withSurfaces(resp, { now, pinned, timeline, stash: [moved, ...stash] })
 }
 
 /**
@@ -2772,6 +2751,5 @@ function applyOptimisticPin(
     pinned: [moved, ...pinned],
     timeline,
     stash,
-    temperedTotal: resp.temperedTotal,
   })
 }
