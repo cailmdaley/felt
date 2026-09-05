@@ -86,12 +86,7 @@ unsuppressed by default: every status the filter asked for, every match — pass
 		// human-facing trim removed.
 		suppressClosed := !statusExplicit && !jsonOutput
 
-		var felts []*felt.Felt
-		if jsonOutput {
-			felts, err = storage.ListMetadataWithModTime()
-		} else {
-			felts, err = storage.ListMetadata()
-		}
+		felts, err := listForOutput(storage, nil)
 		if err != nil {
 			return err
 		}

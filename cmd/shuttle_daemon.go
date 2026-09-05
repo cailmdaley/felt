@@ -83,6 +83,21 @@ func postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, erro
 	return readDaemonResponse(url, resp)
 }
 
+// getDaemonJSON is getDaemon plus a decode into T; label names the decode
+// failure for the caller's verb. The transport error is returned unwrapped so
+// isLifecycleTransportError still recognizes it.
+func getDaemonJSON[T any](url, label string) (T, error) {
+	var out T
+	body, err := getDaemon(url, daemonReadTimeout)
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return out, fmt.Errorf("%s: %w", label, err)
+	}
+	return out, nil
+}
+
 func readDaemonResponse(url string, resp *http.Response) ([]byte, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -84,13 +84,7 @@ Exits with a clear error if no session is live.`,
 			return err
 		}
 
-		session := ""
-		for _, candidate := range shuttleTmuxSessionNames(f.ID, f.UID) {
-			if tmuxSessionExists(candidate) {
-				session = candidate
-				break
-			}
-		}
+		session, _ := liveWorkerSession(f)
 		if session == "" {
 			want := shuttleTmuxSessionName(f.ID, f.UID)
 			return fmt.Errorf("no tmux session %q — fiber %s has no live worker\n(run 'felt shuttle ps' to list active workers)", want, args[0])

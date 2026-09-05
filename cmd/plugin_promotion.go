@@ -110,7 +110,7 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 		// The failed candidate may have installed the plugin before returning an
 		// error. Best effort uninstall is safe for the absent-plugin case.
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
-		if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing failed marketplace: %w", err)
 		}
 		return nil
@@ -119,11 +119,11 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 	if source == "" {
 		return errors.New("previous Claude marketplace source is not recoverable from CLI JSON")
 	}
-	if err := runClaudeCLI("plugin", "marketplace", "add", source); err != nil {
+	if err := runHarnessCLI("claude", "plugin", "marketplace", "add", source); err != nil {
 		return fmt.Errorf("restoring Claude marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runClaudeCLI("plugin", "update", pluginRef); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "update", pluginRef); err != nil {
 			return fmt.Errorf("restoring Claude plugin: %w", err)
 		}
 	} else {
@@ -189,10 +189,7 @@ func codexPluginInstalled() bool {
 		return false
 	}
 	var document struct {
-		Installed []struct {
-			PluginID string `json:"pluginId"`
-			ID       string `json:"id"`
-		} `json:"installed"`
+		Installed []receiptInstalledPlugin `json:"installed"`
 	}
 	if json.Unmarshal([]byte(out), &document) == nil && document.Installed != nil {
 		for _, entry := range document.Installed {
@@ -224,7 +221,7 @@ func restoreCodexInstallation(state codexInstallationState) error {
 		return fmt.Errorf("restoring Codex marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runCodexCLI("plugin", "add", codexPluginRef); err != nil {
+		if err := runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 			return fmt.Errorf("restoring Codex plugin: %w", err)
 		}
 	} else {
@@ -671,7 +668,7 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
-		if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing Claude marketplace: %w", err)
 		}
 	} else {
@@ -679,7 +676,7 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 			return fmt.Errorf("reinstalling Claude from restored current: %w", err)
 		}
 		if !intent.Installed {
-			if err := runClaudeCLI("plugin", "uninstall", pluginRef); err != nil {
+			if err := runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
 				return fmt.Errorf("restoring absent Claude plugin: %w", err)
 			}
 		}
@@ -751,35 +748,47 @@ func writePluginJournal(path string, journal pluginPromotionJournal) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".promotion-*")
+	return writeFileDurably(path, data, 0o600, ".promotion-*", "creating plugin journal", "", "committing plugin journal")
+}
+
+// writeFileDurably writes data to path atomically and durably: an fsynced
+// temp file in the target directory, a rename, then a parent-directory sync
+// so the rename itself survives power loss — the guarantee the plugin
+// recovery paths depend on. stepMsg wraps the per-step failures when
+// non-empty; callers that report those bare pass "".
+func writeFileDurably(path string, data []byte, perm os.FileMode, tmpPrefix, createMsg, stepMsg, commitMsg string) error {
+	step := func(err error) error {
+		if err == nil || stepMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stepMsg, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), tmpPrefix)
 	if err != nil {
-		return fmt.Errorf("creating plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", createMsg, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return step(err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("committing plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", commitMsg, err)
 	}
-	// The file itself was fsynced before the rename; syncing the parent
-	// directory makes the rename durable, which the recovery path's power-loss
-	// guarantee depends on.
 	if err := syncParentDir(path); err != nil {
-		return fmt.Errorf("committing plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", commitMsg, err)
 	}
 	return nil
 }

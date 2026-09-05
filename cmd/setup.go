@@ -187,7 +187,7 @@ Use --uninstall to remove.`,
 			if installed == "" {
 				installed = "git:github.com/" + marketplaceRepo
 			}
-			return runPiCLI("remove", installed)
+			return runHarnessCLI("pi", "remove", installed)
 		}
 
 		return installPiPackageViaCLI(piPackageSource(defaultMarketplaceRef()))
@@ -404,7 +404,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// hard-fails on a missing plugin.
 	installed := isPluginInstalled(pluginRef)
 
-	if err := runClaudeCLI("plugin", "marketplace", "add", repoRoot); err != nil {
+	if err := runHarnessCLI("claude", "plugin", "marketplace", "add", repoRoot); err != nil {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
 
@@ -412,7 +412,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 	if installed {
 		op, gerund = "update", "updating"
 	}
-	if err := runClaudeCLI("plugin", op, pluginRef); err != nil {
+	if err := runHarnessCLI("claude", "plugin", op, pluginRef); err != nil {
 		return fmt.Errorf("%s %s: %w", gerund, pluginRef, err)
 	}
 	// The CLI's zero exit is not trusted as proof of materialization: the
@@ -425,7 +425,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// reconciliation, whose reinstall also lands here.
 	if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
-		if installErr := runClaudeCLI("plugin", "install", pluginRef); installErr != nil {
+		if installErr := runHarnessCLI("claude", "plugin", "install", pluginRef); installErr != nil {
 			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", pluginRef, err, installErr)
 		}
 		if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
@@ -451,10 +451,7 @@ func isPluginInstalled(ref string) bool {
 	if err != nil {
 		return false
 	}
-	// Mirrors `claude plugin list --json`; only the fields we read are decoded.
-	var entries []struct {
-		ID string `json:"id"` // "<plugin>@<marketplace>"
-	}
+	var entries []receiptInstalledPlugin
 	if err := json.Unmarshal(out, &entries); err != nil {
 		return false
 	}
@@ -518,7 +515,7 @@ func uninstallPlugin() error {
 	}
 
 	pluginRef := "felt@" + marketplaceName
-	if err := runClaudeCLI("plugin", "uninstall", pluginRef); err != nil {
+	if err := runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
 		return fmt.Errorf("uninstalling %s: %w", pluginRef, err)
 	}
 
@@ -530,7 +527,7 @@ func uninstallPlugin() error {
 		fmt.Printf("Unlinked skill: %s\n", name)
 	}
 
-	if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+	if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 		return fmt.Errorf("removing marketplace %s: %w", marketplaceName, err)
 	}
 
@@ -580,18 +577,10 @@ func pruneMarketplaceSkillLinks() []string {
 	return pruned
 }
 
-// runClaudeCLI invokes the claude CLI, piping stdout/stderr through to the
-// caller so the user sees the same status output Claude Code prints natively.
-func runClaudeCLI(args ...string) error {
-	cmd := exec.Command("claude", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// runPiCLI wraps the official pi CLI the same way runClaudeCLI does.
-func runPiCLI(args ...string) error {
-	cmd := exec.Command("pi", args...)
+// runHarnessCLI invokes a harness CLI, piping stdout/stderr through to the
+// caller so the user sees the same status output the harness prints natively.
+func runHarnessCLI(bin string, args ...string) error {
+	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -621,11 +610,11 @@ func piPackageSource(source string) string {
 // (including a tag bump) replace their own entry in place.
 func installPiPackageViaCLI(spec string) error {
 	if installed := piFeltPackageSource(); installed != "" && !samePiSourceLocation(installed, spec) {
-		if err := runPiCLI("remove", installed); err != nil {
+		if err := runHarnessCLI("pi", "remove", installed); err != nil {
 			return fmt.Errorf("removing %q before installing %q: %w", installed, spec, err)
 		}
 	}
-	if err := runPiCLI("install", spec); err != nil {
+	if err := runHarnessCLI("pi", "install", spec); err != nil {
 		return err
 	}
 	fmt.Println()
@@ -868,7 +857,7 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 		return err
 	}
 
-	if err := runCodexCLI("plugin", "add", codexPluginRef); err != nil {
+	if err := runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 		return fmt.Errorf("installing %s: %w\n"+
 			"  felt installs through Codex's native plugin commands, verified on\n"+
 			"  codex-cli 0.147.0. Upgrade Codex if `codex plugin add` is unknown.",
@@ -881,7 +870,7 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 	// the promotion is refused.
 	if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
 		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
-		if addErr := runCodexCLI("plugin", "add", codexPluginRef); addErr != nil {
+		if addErr := runHarnessCLI("codex", "plugin", "add", codexPluginRef); addErr != nil {
 			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", codexPluginRef, err, addErr)
 		}
 		if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
@@ -967,14 +956,6 @@ func codexMarketplaceConflict(out string) bool {
 	return strings.Contains(out, "marketplace '"+marketplaceName+"' is already added from a different source")
 }
 
-// runCodexCLI invokes the codex CLI, piping stdio through to the caller.
-func runCodexCLI(args ...string) error {
-	cmd := exec.Command("codex", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // runCodexCLIQuiet invokes the codex CLI capturing combined output instead of
 // streaming it, so a failure the caller recovers from doesn't print an alarming
 // error the user can't act on.
@@ -1018,12 +999,8 @@ func pruneLegacyCodexHooks() int {
 // whole document and its "hooks" map, so a caller can prune in place and write
 // the document back untouched apart from the pruning.
 func readHookFile(path string) (map[string]interface{}, map[string]interface{}, bool) {
-	data, err := os.ReadFile(path)
+	settings, err := readJSONFile[map[string]interface{}](path)
 	if err != nil {
-		return nil, nil, false
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, nil, false
 	}
 	hooks, ok := settings["hooks"].(map[string]interface{})

@@ -18,10 +18,7 @@ func formatFeltTwoLine(f *felt.Felt, collapsed int) string {
 
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
 
-	metaStr := ""
-	if len(f.Tags) > 0 {
-		metaStr = fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
-	}
+	metaStr := tagSuffix(f)
 	if collapsed > 0 {
 		metaStr += fmt.Sprintf(" (+%d matching %s; -v to expand)", collapsed, pluralize(collapsed, "descendant", "descendants"))
 	}
@@ -29,4 +26,13 @@ func formatFeltTwoLine(f *felt.Felt, collapsed int) string {
 	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), metaStr)
 
 	return line1 + line2
+}
+
+// tagSuffix renders a fiber's tags as the parenthesized suffix both two-line
+// renderers append after the display name — empty when it has none.
+func tagSuffix(f *felt.Felt) string {
+	if len(f.Tags) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
 }
