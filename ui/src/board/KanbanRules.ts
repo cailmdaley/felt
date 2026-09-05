@@ -15,7 +15,6 @@ import { civilDayToLocalDate, dueCivilDay, isoDayLocal } from './civilDay.js';
 // to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
 const KANBAN_HORIZONS = ['now', 'stashed'] as const;
 export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
-const HORIZON_SET = new Set<string>(KANBAN_HORIZONS);
 
 /**
  * The set of columns the kanban renders. Differs from KanbanTarget in that
@@ -405,14 +404,6 @@ export function effectiveHorizon(
   // when it comes back. Only an EXPLICIT snooze takes a card off the desk: a
   // bare future `due:` falls through to `now` below, so the card keeps its
   // column and simply wears the date.
-  if (due !== undefined && storedHorizon === 'stashed') {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'stashed',
-      drifted: false,
-    };
-  }
-
   if (storedHorizon === 'stashed') {
     return {
       storedHorizon,
@@ -1256,5 +1247,5 @@ function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   // surface it named no longer exists, and a card that carried it belongs on
   // the desk wearing whatever `due:` it has.
   if (trimmed === 'now' || trimmed === 'soon') return undefined;
-  return HORIZON_SET.has(trimmed) ? trimmed as KanbanHorizon : undefined;
+  return trimmed === 'stashed' ? 'stashed' : undefined;
 }

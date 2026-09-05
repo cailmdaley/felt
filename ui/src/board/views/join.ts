@@ -108,10 +108,8 @@ export function buildJoinIndex(
   const byWorker = new Map<string, KanbanCard>()
   for (const card of cards) {
     byId.set(card.id, card)
-    for (const value of [card.uid, card.shuttleFiberId]) {
-      const ulid = typeof value === 'string' ? value.trim().toUpperCase() : ''
-      if (ulid) byUlid.set(ulid, card)
-    }
+    const ulid = typeof card.uid === 'string' ? card.uid.trim().toUpperCase() : ''
+    if (ulid) byUlid.set(ulid, card)
     if (card.runningWorker) byWorker.set(card.runningWorker, card)
   }
   return { byId, byUlid, byWorker, byTmux }

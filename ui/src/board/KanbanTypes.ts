@@ -108,11 +108,6 @@ export interface KanbanCard {
   /** Ms timestamp the boot-quarantine hold began (`parked_at`), for a tooltip. */
   heldSince?: number
   /**
-   * Fiber id in Shuttle's canonical felt store. City-scoped kanban cards may
-   * use project-relative ids for navigation; dispatch must use this id.
-   */
-  shuttleFiberId?: string
-  /**
    * Session UUID of the most recently dispatched worker, IFF the fiber's
    * frontmatter still carries `shuttle.session.id`. Effectively always absent:
    * continuation state lives in the `shuttle:` block's `session_uuid`, resolved
@@ -204,12 +199,6 @@ export interface KanbanCard {
   /** Top-level `cold:` flag; held-open cluster marker on stashed cards. */
   cold?: boolean
   /**
-   * True when the fiber carries the `cycle` tag — a named span of time drawn as
-   * a band by the temporal views, not a piece of work. A cycle card appears
-   * ONLY in `KanbanResponse.cycles`; `classifyFiber` keeps it out of every
-   * lifecycle column, so no desk surface and no column count ever sees one.
-   */
-  /**
    * Other hosts that also serve this fiber (a git-synced store mirrored across
    * daemons). The board renders ONE card — the locally-owned or freshest row,
    * per `dedupeMirroredRows` — and names the rest here, so a mirrored fiber
@@ -217,6 +206,12 @@ export interface KanbanCard {
    * Absent for the ordinary single-origin fiber.
    */
   mirroredOrigins?: string[]
+  /**
+   * True when the fiber carries the `cycle` tag — a named span of time drawn as
+   * a band by the temporal views, not a piece of work. A cycle card appears
+   * ONLY in `KanbanResponse.cycles`; `classifyFiber` keeps it out of every
+   * lifecycle column, so no desk surface and no column count ever sees one.
+   */
   isCycle: boolean
   /**
    * The cycle's opening edge as a BARE CIVIL DAY (`YYYY-MM-DD`), already
@@ -239,13 +234,11 @@ export interface KanbanCard {
  *
  * Local origin is always 'fresh'. Remote origins are:
  *   • 'fresh'   — agent connected, last fetch landed promptly.
- *   • 'loading' — agent connected but this build's fetch crossed the soft
- *     deadline and may still land. Reachable, just behind.
  *   • 'stale'   — agent disconnected or the document fetch failed; cards may
  *     be last-known-good until the feed recovers.
  */
 export interface KanbanOriginStaleness {
-  status: 'fresh' | 'loading' | 'stale'
+  status: 'fresh' | 'stale'
   /** Hostname for human-readable badging (e.g. "waiting on cluster-a"). */
   hostname?: string
   /** ISO timestamp; only set when status === 'stale'. */
@@ -303,9 +296,5 @@ export interface KanbanResponse {
    * stale badge and to disable drag for stale-origin cards.
    */
   staleness: Record<string, KanbanOriginStaleness>
-  remoteScope?: {
-    originId: string
-    hostname: string
-  }
   generatedAt: number
 }

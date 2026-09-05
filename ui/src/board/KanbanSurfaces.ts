@@ -1,4 +1,4 @@
-import { renderMarkdown } from './utils.js'
+import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilDayToLocalDate,
@@ -117,22 +117,6 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
 /** Below this, an attention chip carries no clock: a worker that just raised
  *  its hand is simply "now", and a number there would be noise. */
 const ATTENTION_AGE_FLOOR_MS = 60 * 60_000
-
-/**
- * An idle duration as a human reads a clock face — `12m`, `3h`, `2d`. One unit,
- * coarsening as it grows: minutes under an hour, hours under a day, days after.
- * No seconds — the board repaints on a 15s poll, so a seconds figure would be
- * wrong more often than right, and "how long has this been sitting?" is never a
- * question answered in seconds. Negative or absent input gives `0m`.
- */
-export function humanizeIdleAge(ms: number | undefined): string {
-  const safe = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0
-  const minutes = Math.floor(safe / 60_000)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
 
 /**
  * The phase pill's text, with the wait made visible. A `waiting` worker always
@@ -2712,11 +2696,6 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
   return out
 }
 
-/** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
- *  the same way the timeline places the card — otherwise one render pass showed
- *  two different days: the card sat on the Thursday column while its own chip
- *  read Wednesday. The day is materialized as a local date, never re-parsed as
- *  an instant (see civilDay.ts). */
 /**
  * `Aug 12` from an INSTANT — the next-launch twin of `formatDue`. A cron
  * occurrence is a real point in time, so it is read with `instantMs` and shown
@@ -2730,6 +2709,11 @@ export function formatLaunchDay(iso: string): string {
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
+ *  the same way the timeline places the card — otherwise one render pass showed
+ *  two different days: the card sat on the Thursday column while its own chip
+ *  read Wednesday. The day is materialized as a local date, never re-parsed as
+ *  an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
   const date = civilDayToLocalDate(dueCivilDay(iso))
   if (!date) return iso

@@ -27,8 +27,8 @@
  */
 
 import { buildTabButton, buildViewCell } from './ReaderChrome.js'
-import { emptyTabState, type TabState } from './ReaderTabs.js'
-import { closeLinkedTab, focusTab, insertTab, routeWikilink } from './linkedTabs.js'
+import { activateTab, emptyTabState, type TabState } from './ReaderTabs.js'
+import { closeLinkedTab, insertTab, routeWikilink } from './linkedTabs.js'
 import { isMobileViewport } from './mobile.js'
 import { holdSheet, SHEET_LINKED } from './sheetHistory.js'
 import {
@@ -120,7 +120,7 @@ export class LinkedFiberPanel {
       return
     }
     if (route === 'focus') {
-      this.state = focusTab(this.state, fiberId)
+      this.state = activateTab(this.state, fiberId)
       this.render()
       this.raise()
       return
@@ -134,7 +134,7 @@ export class LinkedFiberPanel {
     const entry: LinkedTabEntry = { path: fiberId, tab, cell, handle: null }
 
     tab.addEventListener('click', () => {
-      this.state = focusTab(this.state, fiberId)
+      this.state = activateTab(this.state, fiberId)
       this.render()
     })
     closeBtn.addEventListener('click', (e) => {

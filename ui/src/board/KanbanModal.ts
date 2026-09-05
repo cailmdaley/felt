@@ -51,7 +51,7 @@ import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCa
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveDestination, QueueTarget } from './MoveDestinations.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -955,16 +955,10 @@ export class KanbanModal {
       // would pull the card back, so clearing it is what makes the rest of the
       // gesture stick. See the `unstacks` note in `transition`.
       if (unstacks) {
-        const res = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fiber_id: card.id,
-            origin: card.originId,
-            unset: ['depends_on'],
-          }),
-        })
-        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Unstack failed'))
+        await this.postFeltEdit(
+          { fiber_id: card.id, origin: card.originId, unset: ['depends_on'] },
+          'Unstack failed',
+        )
         this.announce(`“${card.name}” is out of the queue.`)
       }
 
@@ -976,14 +970,7 @@ export class KanbanModal {
           fiber_id: card.id, origin: card.originId, unset: ['horizon', 'cold'],
         }
         if (target === 'drafts' && card.due !== undefined) surfaceBody.due = null
-        const surfaceRes = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(surfaceBody),
-        })
-        if (!surfaceRes.ok) {
-          throw new Error(await errorMessageFromResponse(surfaceRes, 'Park-on-desk failed'))
-        }
+        await this.postFeltEdit(surfaceBody, 'Park-on-desk failed')
       }
 
       if (target === 'inFlight') {
@@ -1069,39 +1056,6 @@ export class KanbanModal {
   }
 
   /**
-   * POST a surface edit. Computes the horizon/cold/due frontmatter diff
-   * client-side and posts it through the daemon's `/api/v1/felt-edit`
-   * (owner-routed by `origin`) so the drag is one atomic write.
-   *
-   *   • Drag a scheduled/in-flight card onto a date column →
-   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
-   *     and the card keeps its lifecycle column while wearing the date.
-   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
-   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
-   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
-   *     observe half of it. Which of the two a day-drop means is decided by
-   *     `dayDropHorizon` at the drop site, from where the card currently sits.
-   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
-   *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
-   *
-   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
-   * included. Putting a card down in Resting is one gesture and it does one
-   * thing: it moves the card. The date the human wrote is theirs, and a drag
-   * that quietly deleted it — "I'll look at Croatia in October" becoming a
-   * dateless card nothing will ever surface again — is the second, destructive
-   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
-   * future `due:` compose into the snooze that brings the card back by itself.
-   *
-   * The ONE exception, and the reason the old blanket clear existed: a `due:`
-   * that is today or already past would bounce the card straight back onto the
-   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
-   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
-   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
-   *
-   * Callers can still pass an explicit `due` to override either way: a day
-   * (the date-column snooze) or `null` to clear on purpose.
-   */
-  /**
    * "This one goes after that one" — the card-onto-card drop, persisted as a
    * scalar `depends_on:` on the DROPPED card.
    *
@@ -1120,16 +1074,11 @@ export class KanbanModal {
     const tail = findCardById(this.lastResponse, tailId)
     const tailName = tail?.name ?? tailId
     try {
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fiber_id: card.id,
-          origin: card.originId,
-          set: { depends_on: tailId },
-        }),
+      await this.postFeltEdit({
+        fiber_id: card.id,
+        origin: card.originId,
+        set: { depends_on: tailId },
       })
-      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
       this.announce(`“${card.name}” now waits on “${tailName}”; it rests until that is tempered.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -1161,16 +1110,11 @@ export class KanbanModal {
     for (const write of writes) {
       const card = findCardById(this.lastResponse, write.fiberId)
       try {
-        const res = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fiber_id: write.fiberId,
-            origin: card?.originId,
-            set: { depends_on: write.newDep },
-          }),
+        await this.postFeltEdit({
+          fiber_id: write.fiberId,
+          origin: card?.originId,
+          set: { depends_on: write.newDep },
         })
-        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
         moved += 1
       } catch (err: unknown) {
         const msg = (err as { message?: string })?.message ?? String(err)
@@ -1305,13 +1249,16 @@ export class KanbanModal {
   /** POST one frontmatter edit, owner-routed by `origin`, throwing the
    *  daemon's own message on failure. The shared half of every sequence
    *  write. */
-  private async postFeltEdit(payload: Record<string, unknown>): Promise<void> {
+  private async postFeltEdit(
+    payload: Record<string, unknown>,
+    label = 'Sequence edit failed',
+  ): Promise<void> {
     const res = await fetch(this.horizonUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+    if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
   }
 
   /**
@@ -1340,12 +1287,7 @@ export class KanbanModal {
       ? ['depends_on', 'horizon', 'cold']
       : ['depends_on']
     try {
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: card.id, origin: card.originId, unset }),
-      })
-      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, unset })
       this.announce(`“${card.name}” is out of the queue and back on the desk.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -1355,6 +1297,39 @@ export class KanbanModal {
     await this.fetchAndRender()
   }
 
+  /**
+   * POST a surface edit. Computes the horizon/cold/due frontmatter diff
+   * client-side and posts it through the daemon's `/api/v1/felt-edit`
+   * (owner-routed by `origin`) so the drag is one atomic write.
+   *
+   *   • Drag a scheduled/in-flight card onto a date column →
+   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
+   *     and the card keeps its lifecycle column while wearing the date.
+   *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
+   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
+   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
+   *     observe half of it. Which of the two a day-drop means is decided by
+   *     `dayDropHorizon` at the drop site, from where the card currently sits.
+   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
+   *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
+   *
+   * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
+   * included. Putting a card down in Resting is one gesture and it does one
+   * thing: it moves the card. The date the human wrote is theirs, and a drag
+   * that quietly deleted it — "I'll look at Croatia in October" becoming a
+   * dateless card nothing will ever surface again — is the second, destructive
+   * act a gesture must never smuggle in. Preserved, `horizon: stashed` + a
+   * future `due:` compose into the snooze that brings the card back by itself.
+   *
+   * The ONE exception, and the reason the old blanket clear existed: a `due:`
+   * that is today or already past would bounce the card straight back onto the
+   * desk, because `effectiveHorizon`'s drift branch outranks its stashed branch
+   * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
+   * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
+   *
+   * Callers can still pass an explicit `due` to override either way: a day
+   * (the date-column snooze) or `null` to clear on purpose.
+   */
   private setSurface(
     card: KanbanCard,
     horizon: HorizonKind,
@@ -1533,14 +1508,7 @@ export class KanbanModal {
       if (Object.keys(set).length > 0) payload.set = set
       if (unset.length > 0) payload.unset = unset
       if (opts.due !== undefined) payload.due = opts.due
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        throw new Error(await errorMessageFromResponse(res, 'Surface edit failed'))
-      }
+      await this.postFeltEdit(payload, 'Surface edit failed')
       this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -2680,16 +2648,7 @@ function withSurfaces(
     pinned: s.pinned,
     timeline: s.timeline,
     stash: s.stash,
-    totals: {
-      ...resp.totals,
-      drafts: s.now.drafts.length,
-      inFlight: s.now.inFlight.length,
-      awaitingReview: s.now.awaitingReview.length,
-      past: s.timeline.past.length,
-      futureDated: s.timeline.futureDated.length,
-      stash: s.stash.length,
-      pinned: s.pinned.length,
-    },
+    totals: surfaceTotals(s),
     temperedTotal: Math.max(0, s.temperedTotal),
   }
 }

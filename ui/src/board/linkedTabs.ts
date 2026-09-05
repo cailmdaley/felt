@@ -48,13 +48,6 @@ export function routeWikilink<T extends TabLike>(
   return findTab(state, fiberId) ? 'focus' : 'load'
 }
 
-/** Show an open tab. Unlike `activateTab` this is only ever called on a known
- *  hit, so a miss is a caller bug — it still leaves the set alone. */
-export function focusTab<T extends TabLike>(state: TabState<T>, fiberId: string): TabState<T> {
-  if (!findTab(state, fiberId)) return state
-  return { tabs: state.tabs, active: fiberId }
-}
-
 /**
  * Add a freshly-loaded tab in open-order and make it active.
  *

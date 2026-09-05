@@ -177,9 +177,9 @@ export function shuttleOrigin(originId: string | undefined): string {
 }
 
 /** Origin for a write with no card behind it yet — a cycle being created. The
- *  board's own scope: the remote it is pinned to, else this daemon. */
-function boardOrigin(response: KanbanResponse): string {
-  return shuttleOrigin(response.remoteScope?.originId)
+ *  board is never pinned to a remote, so such a write lands on this daemon. */
+function boardOrigin(): string {
+  return shuttleOrigin(undefined)
 }
 
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
@@ -1712,7 +1712,6 @@ class ChronicleView implements TemporalView {
           c.originId, // host note
           c.shuttleHost ?? '', // host note
           c.uid ?? '', // join rung 2
-          c.shuttleFiberId ?? '', // join rung 2
         ].join('|'),
       )
     }
@@ -1976,7 +1975,7 @@ class ChronicleView implements TemporalView {
     const ghosts: CycleCard[] = this.pendingCycles.map((p) => ({
       id: p.id ?? `pending:${p.name}`,
       name: p.name,
-      originId: boardOrigin(ctx.response),
+      originId: boardOrigin(),
       cycleStart: p.startDay,
       // A spoken era has no end yet: `cycleSpan` runs an open-ended cycle to
       // today, which is exactly what an era you have just entered looks like.
@@ -3202,7 +3201,7 @@ class ChronicleView implements TemporalView {
 
     // No card exists yet, so this is the board's own scope rather than a
     // fiber's — the same resolution the capture forms use.
-    const origin = boardOrigin(ctx.response)
+    const origin = boardOrigin()
     const slug =
       name
         .toLowerCase()

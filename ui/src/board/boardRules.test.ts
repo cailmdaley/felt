@@ -45,7 +45,6 @@ import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
-  humanizeIdleAge,
   KanbanSurfaceRenderer,
   phasePillLabel,
   sortDatedByReturn,
@@ -54,6 +53,7 @@ import {
 } from './KanbanSurfaces.js'
 import { chromeRestartDirective, chromeRestartNeeded, sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
+import { humanizeIdleAge } from './utils.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
 const DAY = 86_400_000
@@ -227,8 +227,6 @@ describe('a mirrored fiber renders as ONE card', () => {
       uid: '01KTCA2D1FGAJNHX5WKQ34BSZF',
       name: 'Final push',
       status: 'open',
-      kind: 'task',
-      priority: 2,
       createdAt: at0,
       hasShuttleBlock: true,
       shuttleKind: 'oneshot',
@@ -464,8 +462,6 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
       uid: '01KTCA2D1FGAJNHX5WKQ34BSZG',
       name: 'X',
       status: 'open',
-      kind: 'task',
-      priority: 2,
       createdAt: at0,
       ...over,
     },
@@ -818,8 +814,6 @@ describe('cycles — a named span of time, not work', () => {
     id: 'cycles/autumn',
     name: 'Autumn',
     status: 'open',
-    kind: 'task',
-    priority: 2,
     createdAt: at0,
     tags: ['cycle'],
     ...over,
@@ -1018,8 +1012,6 @@ describe('cycles — a named span of time, not work', () => {
       id: 'work/thing',
       name: 'A thing',
       status: 'open',
-      kind: 'task',
-      priority: 2,
       createdAt: at0,
       hasShuttleBlock: true,
       shuttleKind: 'oneshot',
@@ -1382,8 +1374,6 @@ describe('Resting holds standing roles asleep between runs', () => {
       id: 'finances/cc-bills-monthly',
       name: 'CC bills',
       status: 'active',
-      kind: 'task',
-      priority: 2,
       createdAt: at0,
       hasShuttleBlock: true,
       shuttleKind: 'standing',
@@ -1417,7 +1407,7 @@ describe('Resting holds standing roles asleep between runs', () => {
       feltStore: '/store/laptop',
       path: '.felt/work/later.md',
       fiber: {
-        id: 'work/later', name: 'Later', status: 'open', kind: 'task', priority: 2,
+        id: 'work/later', name: 'Later', status: 'open',
         createdAt: at0, hasShuttleBlock: true, shuttleKind: 'oneshot',
         horizon: 'stashed', due: dayFromNow(6),
       },
@@ -1511,8 +1501,6 @@ describe('the sequence gate', () => {
     id,
     name: id,
     status: 'open',
-    kind: 'task',
-    priority: 2,
     createdAt: at0,
     hasShuttleBlock: true,
     shuttleKind: 'oneshot',
@@ -1959,7 +1947,7 @@ describe('a card the board could see but never hit', () => {
         feltStore: '/store',
         path: '.felt/draft.md',
         fiber: {
-          id: 'local/draft', name: 'A local draft', status: 'open', kind: 'task', priority: 2,
+          id: 'local/draft', name: 'A local draft', status: 'open',
           createdAt: at0, hasShuttleBlock: true, shuttleKind: 'oneshot',
         },
       },
@@ -1970,7 +1958,7 @@ describe('a card the board could see but never hit', () => {
         fiber: {
           id: 'smokescreen/replan', uid: '01KX6YH5ZYRQRN1Y7CZA7VR9DE',
           name: 'Execute the Smokescreen-fork replan', status: 'closed',
-          kind: 'task', priority: 2, createdAt: at0, closedAt: at0,
+          createdAt: at0, closedAt: at0,
           horizon: 'stashed', due: dayFromNow(-2),
           hasShuttleBlock: true, shuttleKind: 'oneshot', shuttleHost: 'candide',
         },

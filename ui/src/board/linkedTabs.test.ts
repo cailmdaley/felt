@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { emptyTabState, type TabState } from './ReaderTabs.js'
-import { closeLinkedTab, focusTab, insertTab, routeWikilink } from './linkedTabs.js'
+import { closeLinkedTab, insertTab, routeWikilink } from './linkedTabs.js'
 
 interface Tab {
   path: string
@@ -33,14 +33,6 @@ describe('routing a wikilink click', () => {
     expect(routeWikilink(state(['b'], 'b'), 'a', 'c')).toBe('load')
     // No origin fiber known → a self-reference is just another fiber.
     expect(routeWikilink(emptyTabState<Tab>(), null, 'a')).toBe('load')
-  })
-})
-
-describe('focusing a tab', () => {
-  it('shows it without reordering the strip', () => {
-    const s = focusTab(state(['b', 'c', 'd'], 'd'), 'b')
-    expect(s.active).toBe('b')
-    expect(ids(s)).toEqual(['b', 'c', 'd'])
   })
 })
 

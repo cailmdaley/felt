@@ -276,15 +276,18 @@ function escapeAttr(text: string): string {
  * a placeholder. `origin` is appended only for a remote-owned fiber, mirroring
  * the route's local-when-absent contract.
  */
+/** Append the owner-routing `origin` param, mirroring the routes' shared
+ *  local-when-absent contract: a local file carries no `origin` at all. */
+function withOrigin(url: string, originId: string | undefined): string {
+  if (originId && originId !== 'local') return `${url}&origin=${encodeURIComponent(originId)}`
+  return url
+}
+
 export function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string | null {
   if (/^https?:\/\//.test(rawPath) || /^data:/.test(rawPath)) return rawPath
   const abs = resolveAbs(rawPath, opts)
   if (abs === null) return null
-  let url = `${FILE_ROUTE}?path=${encodePathParam(abs)}`
-  if (opts?.originId && opts.originId !== 'local') {
-    url += `&origin=${encodeURIComponent(opts.originId)}`
-  }
-  return url
+  return withOrigin(`${FILE_ROUTE}?path=${encodePathParam(abs)}`, opts?.originId)
 }
 
 /**
@@ -345,9 +348,7 @@ function encodePathParam(abs: string): string {
  */
 export function fileBytesUrl(base: string, fullPath: string, originId: string): string {
   const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  let url = `${base}${FILE_ROUTE}?path=${encodePathParam(abs)}`
-  if (originId && originId !== 'local') url += `&origin=${encodeURIComponent(originId)}`
-  return url
+  return withOrigin(`${base}${FILE_ROUTE}?path=${encodePathParam(abs)}`, originId)
 }
 
 /**
@@ -357,9 +358,7 @@ export function fileBytesUrl(base: string, fullPath: string, originId: string): 
  */
 export function fileInfoUrl(base: string, fullPath: string, originId: string): string {
   const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  let url = `${base}/api/v1/file-info?path=${encodePathParam(abs)}`
-  if (originId && originId !== 'local') url += `&origin=${encodeURIComponent(originId)}`
-  return url
+  return withOrigin(`${base}/api/v1/file-info?path=${encodePathParam(abs)}`, originId)
 }
 
 /**
@@ -386,11 +385,7 @@ export function paperUrl(astraPath: string, opts?: RenderMarkdownOptions): strin
   const abs = resolveAbs(astraPath, opts)
   if (abs === null) return null
   const dir = dirname(abs)
-  let url = `paper.html?path=${encodePathParam(dir)}`
-  if (opts?.originId && opts.originId !== 'local') {
-    url += `&origin=${encodeURIComponent(opts.originId)}`
-  }
-  return url
+  return withOrigin(`paper.html?path=${encodePathParam(dir)}`, opts?.originId)
 }
 
 /** The by-extension image/audio vocabulary, shared by the two dispatches that
@@ -599,4 +594,20 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
     toast.classList.add('toast-out')
     setTimeout(() => toast.remove(), 300)
   }, duration)
+}
+
+/**
+ * An idle duration as a human reads a clock face — `12m`, `3h`, `2d`. One unit,
+ * coarsening as it grows: minutes under an hour, hours under a day, days after.
+ * No seconds — the board repaints on a 15s poll, so a seconds figure would be
+ * wrong more often than right, and "how long has this been sitting?" is never a
+ * question answered in seconds. Negative or absent input gives `0m`.
+ */
+export function humanizeIdleAge(ms: number | undefined): string {
+  const safe = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0
+  const minutes = Math.floor(safe / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
 }
