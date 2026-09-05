@@ -116,7 +116,6 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
       tagSuggestions={feed.tags}
       shuttleBase={opts.shuttleBase}
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
-      nativeFolderPicker={feed.model.nativeFolderPicker}
       onCancel={close}
       onCreated={(id) => {
         close()

@@ -92,11 +92,6 @@ export interface StashFormProps {
    *  (the island re-derives it from the daemon). Absent → the picker offers no
    *  "+ Add project…" row. */
   onProjectAdded?: (path: string) => Promise<StashProject[]>
-  /** The local daemon can raise its own OS folder dialog. True → "+ Add
-   *  project…" on the local host opens Finder/zenity; every other case asks for
-   *  the absolute path on the selected host. Redundant with `availableHosts`'
-   *  local entry, and the fallback when no host list came through. */
-  nativeFolderPicker?: boolean
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
 }
@@ -164,6 +159,11 @@ function validateParentSlug(raw: string): string | null {
   }
   return null
 }
+
+const KIND_SEGMENTS = [
+  ['oneshot', 'One-shot', 'drafts, manual launch'],
+  ['standing', 'Standing', 'cron-scheduled role'],
+] as const
 
 /** Human-readable label for an agent entry. */
 function agentLabel(a: AgentEntry): string {
@@ -320,7 +320,6 @@ export function StashForm({
   shuttleBase = '',
   onCreated,
   onProjectAdded,
-  nativeFolderPicker = false,
   onCancel,
 }: StashFormProps): JSX.Element {
   // Core stash fields
@@ -396,9 +395,7 @@ export function StashForm({
   // absolute-path row everywhere else (see useAddProject).
   const addProject = useAddProject<StashProject>({
     shuttleBase,
-    nativeFolderPicker: selectedHost.isLocal
-      ? selectedHost.nativeFolderPicker || nativeFolderPicker
-      : false,
+    nativeFolderPicker: selectedHost.isLocal && selectedHost.nativeFolderPicker,
     isLocalHost: selectedHost.isLocal,
     origin: selectedHostId,
     onProjectAdded,
@@ -797,40 +794,24 @@ export function StashForm({
               <div className="stash-field">
                 <span className="stash-label">Kind</span>
                 <div className="stash-segmented" role="radiogroup" aria-label="Dispatch kind">
-                  <label
-                    className={
-                      kind === 'oneshot'
-                        ? 'stash-segment stash-segment-active'
-                        : 'stash-segment'
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="stash-kind"
-                      value="oneshot"
-                      checked={kind === 'oneshot'}
-                      onChange={() => setKind('oneshot')}
-                    />
-                    <span className="stash-segment-name">One-shot</span>
-                    <span className="stash-segment-hint">drafts, manual launch</span>
-                  </label>
-                  <label
-                    className={
-                      kind === 'standing'
-                        ? 'stash-segment stash-segment-active'
-                        : 'stash-segment'
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="stash-kind"
-                      value="standing"
-                      checked={kind === 'standing'}
-                      onChange={() => setKind('standing')}
-                    />
-                    <span className="stash-segment-name">Standing</span>
-                    <span className="stash-segment-hint">cron-scheduled role</span>
-                  </label>
+                  {KIND_SEGMENTS.map(([value, name, hint]) => (
+                    <label
+                      key={value}
+                      className={
+                        kind === value ? 'stash-segment stash-segment-active' : 'stash-segment'
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="stash-kind"
+                        value={value}
+                        checked={kind === value}
+                        onChange={() => setKind(value)}
+                      />
+                      <span className="stash-segment-name">{name}</span>
+                      <span className="stash-segment-hint">{hint}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
             </div>
