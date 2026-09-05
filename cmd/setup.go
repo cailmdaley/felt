@@ -90,17 +90,11 @@ Use --uninstall to remove.`,
 			return uninstallPlugin()
 		}
 
-		// No --source / $FELT_PLUGIN_DIR: register from GitHub. Claude Code
-		// clones the marketplace itself.
-		if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
-			return installPluginViaCLI(defaultMarketplaceRef())
-		}
-
-		repoRoot, err := findMarketplaceRoot(source)
+		marketplaceSource, err := resolveSetupSource(source)
 		if err != nil {
 			return err
 		}
-		return installPluginViaCLI(repoRoot)
+		return installPluginViaCLI(marketplaceSource)
 	},
 }
 
@@ -143,13 +137,9 @@ Use --uninstall to remove.`,
 			return uninstallCodexPlugin()
 		}
 
-		marketplaceSource := defaultMarketplaceRef()
-		if source != "" || os.Getenv("FELT_PLUGIN_DIR") != "" {
-			repoRoot, err := findMarketplaceRoot(source)
-			if err != nil {
-				return err
-			}
-			marketplaceSource = repoRoot
+		marketplaceSource, err := resolveSetupSource(source)
+		if err != nil {
+			return err
 		}
 
 		if err := installCodexPluginViaCLI(marketplaceSource); err != nil {
@@ -288,11 +278,32 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 }
 
+// resolveSetupSource picks what `felt setup claude|codex` registers: with no
+// --source and no $FELT_PLUGIN_DIR, the GitHub ref (the harness clones the
+// marketplace itself); otherwise the resolved local marketplace root.
+func resolveSetupSource(source string) (string, error) {
+	if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
+		return defaultMarketplaceRef(), nil
+	}
+	return findMarketplaceRoot(source)
+}
+
 // hasMarketplaceManifest returns true if dir contains a marketplace manifest at
 // .claude-plugin/marketplace.json (the standard marketplace layout).
 func hasMarketplaceManifest(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".claude-plugin", "marketplace.json"))
 	return err == nil
+}
+
+// absManifestRoot reports dir as an absolute path when it carries a
+// marketplace manifest. Callers rely on every successful findMarketplaceRoot
+// return being absolute.
+func absManifestRoot(dir string) (string, bool) {
+	if !hasMarketplaceManifest(dir) {
+		return "", false
+	}
+	abs, err := filepath.Abs(dir)
+	return abs, err == nil
 }
 
 // findPluginDir returns the plugin directory derived from the marketplace
@@ -314,21 +325,12 @@ func findPluginDir(source string) (string, error) {
 // directory marketplace, then the legacy Claude Code clone path.
 func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
-		if hasMarketplaceManifest(source) {
-			abs, err := filepath.Abs(source)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(source); ok {
 			return abs, nil
 		}
 		// Allow pointing at the plugin subdir; walk one level up to find
 		// the marketplace root.
-		parent := filepath.Dir(source)
-		if hasMarketplaceManifest(parent) {
-			abs, err := filepath.Abs(parent)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(filepath.Dir(source)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("no marketplace manifest found at %q\n  Expected .claude-plugin/marketplace.json (felt repo root)", source)
@@ -336,12 +338,7 @@ func findMarketplaceRoot(source string) (string, error) {
 
 	if env := os.Getenv("FELT_PLUGIN_DIR"); env != "" {
 		// $FELT_PLUGIN_DIR points at the plugin dir; the repo root is its parent.
-		root := filepath.Dir(env)
-		if hasMarketplaceManifest(root) {
-			abs, err := filepath.Abs(root)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(filepath.Dir(env)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
@@ -352,20 +349,16 @@ func findMarketplaceRoot(source string) (string, error) {
 	// marketplace list --json` keeps us in sync with whatever path the user
 	// registered, even if it differs from where the binary is running from.
 	if entry, ok := marketplaceEntry(marketplaceName); ok && entry.Source == "directory" && entry.Path != "" {
-		if hasMarketplaceManifest(entry.Path) {
-			abs, err := filepath.Abs(entry.Path)
-			if err == nil {
-				return abs, nil
-			}
+		if abs, ok := absManifestRoot(entry.Path); ok {
+			return abs, nil
 		}
 	}
 
 	// Fallback 2: Claude Code clones GitHub-sourced marketplaces to a known
 	// path. If the user has run `felt setup claude` (or otherwise installed
 	// the marketplace from GitHub), the plugin files live there.
-	if cloned := claudeMarketplaceClonePath(); cloned != "" && hasMarketplaceManifest(cloned) {
-		abs, err := filepath.Abs(cloned)
-		if err == nil {
+	if cloned := claudeMarketplaceClonePath(); cloned != "" {
+		if abs, ok := absManifestRoot(cloned); ok {
 			return abs, nil
 		}
 	}
