@@ -1593,6 +1593,8 @@
   .kbn-move-menu.kbn-move-sheet { animation: none; }
 }
 
-/* The aloft mark on a touch device: the same stamp, without the promise of a
-   terminal it cannot open. */
+/* The aloft mark on a touch device: the same stamp, linking to the session in
+   the Claude app once the daemon has found its address — and until then, or
+   for a session that was never bridged, a stamp without a promise. */
+a.kbn-detail-aloft { text-decoration: none; }
 .kbn-detail-aloft-static { cursor: default; }

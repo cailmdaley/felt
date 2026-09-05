@@ -131,6 +131,12 @@ export interface KanbanCard {
    */
   handedOffAt?: string
   /**
+   * `shuttle.runtime.session_uuid` — the running (or most recent) worker's
+   * harness transcript UUID. Paired with `shuttleHost` it lets the detail
+   * panel ask the daemon where the session can be opened from a phone.
+   */
+  sessionUuid?: string
+  /**
    * `shuttle.agent` — the agent to dispatch with. Present when the fiber
    * has a shuttle block and the block specifies an agent.
    */

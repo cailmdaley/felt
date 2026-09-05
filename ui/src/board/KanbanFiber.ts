@@ -74,6 +74,10 @@ export interface Fiber {
    * to tell this run's handoff from a leftover stamp of the previous one: only
    * `handed_off_at >= dispatched_at` concluded the run in hand. */
   shuttleHandedOffAt?: string;
+  /** `shuttle.runtime.session_uuid` — the harness transcript UUID of the most
+   * recent worker. With `shuttleHost` it names the transcript the daemon reads
+   * for `/api/v1/session-link`, the phone's way of opening the session. */
+  shuttleSessionUuid?: string;
   /** `shuttle.agent` — the agent identifier to dispatch with (e.g. `claude-opus`). */
   shuttleAgent?: string;
   /** `shuttle.effort` — reasoning-effort axis (harness-native token, e.g.
@@ -170,6 +174,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleSessionId: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
+  let shuttleSessionUuid: string | undefined;
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
@@ -198,6 +203,9 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       const r = runtime as Record<string, unknown>;
       shuttleDispatchedAt = pickIsoString(r, 'dispatched_at');
       shuttleHandedOffAt = pickIsoString(r, 'handed_off_at');
+      if (typeof r.session_uuid === 'string' && r.session_uuid.trim()) {
+        shuttleSessionUuid = r.session_uuid.trim();
+      }
     }
 
     if (typeof s.agent === 'string' && s.agent) shuttleAgent = s.agent;
@@ -258,6 +266,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleSessionId,
     shuttleDispatchedAt,
     shuttleHandedOffAt,
+    shuttleSessionUuid,
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,

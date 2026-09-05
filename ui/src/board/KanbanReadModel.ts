@@ -595,6 +595,7 @@ function toCard(
     sessionId: f.shuttleSessionId,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
+    sessionUuid: f.shuttleSessionUuid,
     shuttleAgent: f.shuttleAgent,
     shuttleEffort: f.shuttleEffort,
     shuttleChrome: f.shuttleChrome,

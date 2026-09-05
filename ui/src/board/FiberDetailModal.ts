@@ -628,30 +628,44 @@ export class FiberDetailModal {
     // Worker aloft → the same teal ▸ aloft pill the grid card wears, same
     // class, same gesture: click opens the worker's tmux session in kitty.
     //
-    // A TERMINAL IS NOT SOMETHING A PHONE HAS. The pill's whole gesture is
-    // "focus this worker's kitty tab", which needs a native terminal on the
-    // machine the browser runs on. On a coarse pointer we keep the STATUS — a
-    // worker is aloft, and that is the first thing you open a card to learn —
-    // and drop the promise: a plain mark, not a button that would do nothing.
+    // A TERMINAL IS NOT SOMETHING A PHONE HAS. On a coarse pointer the pill
+    // becomes a LINK instead: a remote-controlled Claude Code session writes
+    // its claude.ai bridge URL into its own transcript, and the daemon reads
+    // it back (`/api/v1/session-link`, host-routed to the worker's machine).
+    // That URL is a universal link — on a phone with the Claude app it opens
+    // this very session. The mark renders at once as a plain stamp (the
+    // status — a worker is aloft — is the first thing you open a card to
+    // learn) and gains its href when the daemon answers; a session that was
+    // never bridged simply stays a stamp rather than a link to nowhere.
     let aloftPill: HTMLElement | null = null
-    if (card.runningWorker && (coarsePointer() || this.onOpenWorker)) {
-      const tmuxName = card.runningWorker
-      const coarse = coarsePointer()
-      const el = document.createElement(coarse ? 'span' : 'button')
-      el.className = `kbn-card-worker kbn-detail-aloft${coarse ? ' kbn-detail-aloft-static' : ''}`
-      el.textContent = '▸ aloft'
-      if (coarse) {
-        el.title = `Worker aloft — ${tmuxName}`
-      } else {
-        ;(el as HTMLButtonElement).type = 'button'
-        el.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
-        el.title = `Worker aloft — click to open ${tmuxName} in kitty`
-        el.addEventListener('click', (e) => {
-          e.stopPropagation()
-          this.onOpenWorker?.(tmuxName, card.shuttleHost)
+    if (card.runningWorker && coarsePointer()) {
+      const mark = document.createElement('a')
+      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
+      mark.title = `Worker aloft — ${card.runningWorker}`
+      mark.textContent = '▸ aloft'
+      mark.addEventListener('click', (e) => e.stopPropagation())
+      if (card.sessionUuid) {
+        void this.fetchSessionLink(card.sessionUuid, card.shuttleHost).then((url) => {
+          if (!url) return
+          mark.href = url
+          mark.classList.remove('kbn-detail-aloft-static')
+          mark.title = 'Worker aloft — open this session in the Claude app'
         })
       }
-      aloftPill = el
+      aloftPill = mark
+    } else if (card.runningWorker && this.onOpenWorker) {
+      const tmuxName = card.runningWorker
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'kbn-card-worker kbn-detail-aloft'
+      btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
+      btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
+      btn.textContent = '▸ aloft'
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.onOpenWorker?.(tmuxName, card.shuttleHost)
+      })
+      aloftPill = btn
     }
 
     const closeBtn = document.createElement('button')
@@ -1159,6 +1173,22 @@ export class FiberDetailModal {
    * answer is to refetch rather than to re-derive whether a refetch is owed —
    * which is also why a tick already in flight does not block it.
    */
+  /** Where a phone can open the worker's session: the claude.ai bridge URL
+   * the daemon reads out of the transcript on the worker's host. `null` when
+   * the session was never bridged or the daemon can't be reached. */
+  private async fetchSessionLink(sessionUuid: string, host?: string): Promise<string | null> {
+    const params = new URLSearchParams({ session: sessionUuid })
+    if (host) params.set('host', host)
+    try {
+      const res = await fetch(`${this.shuttleBase}/api/v1/session-link?${params}`)
+      if (!res.ok) return null
+      const body = (await res.json()) as { url?: unknown }
+      return typeof body.url === 'string' && body.url.startsWith('https://') ? body.url : null
+    } catch {
+      return null
+    }
+  }
+
   private async forceReload(): Promise<void> {
     const card = this.card
     const overlay = this.overlay
