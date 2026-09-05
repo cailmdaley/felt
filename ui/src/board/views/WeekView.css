@@ -470,56 +470,102 @@
    and the tick row still subscribe to the identical gutter-plus-rail pair, and
    2pm is still 2pm on every row. Nothing is hidden either — the diffstat is
    what a day cost, and a day's cost is most of the reason to open the week. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .wk-head { flex: 1 1 100%; flex-wrap: wrap; gap: 10px; }
   .wk-weeklabel { white-space: nowrap; }
 
+  /* THE WEEK'S FIGURES, ON ONE LINE. `views.css` lets the head figures wrap on
+     a phone — two printed lines beating one hidden one — but this particular
+     line is five clauses of tabular mono and it lands with its diffstat alone
+     on the second line, which reads as a stray number rather than as the cost
+     of the week. It fits: at this size and with the tracking pulled back to a
+     hair, the widest week measures about 320 of the 340 pixels a portrait phone
+     gives it, and landscape has 500 more. Sized once for both preludes, so it
+     needs nothing back in SHORT_MEDIA. Ellipsis is the last resort if a week
+     ever runs six figures in both directions. */
+  .kbn-view-headfigures.wk-totals {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: calc(9px * var(--kbn-type-scale, 1));
+    letter-spacing: 0.02em;
+  }
+
+  /* The grid is a flex item that fills the sheet's height on a wide board,
+     which is right when seven rails share one screenful. No phone has a
+     screenful to give — 402px in landscape is barely three rows — so here it
+     takes its natural height and the view host (`.kbn-view-host`, views.css)
+     does the scrolling. Without this the tracks are squeezed below their
+     content and every row is clipped off the bottom of itself. */
+  .wk-grid {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  /* The two-line row below is a narrow page's answer and not every phone's —
+     see the SHORT_MEDIA block after this one, which puts the annotation back
+     beside its raster for a phone on its side. */
   .wk-grid {
     /* Two digits of old-style numerals and a weekday's small caps; the desktop
-       54px was buying room the phone would rather give the raster. */
+       54px was buying room a narrow page would rather give the raster. */
     --wk-gutter: 40px;
     grid-template-columns: var(--wk-gutter) minmax(0, 1fr);
     /* Rows are two lines tall now and no longer share the sheet's height
        equally — they take what they need. */
     grid-template-rows: repeat(7, auto) auto auto;
     column-gap: 8px;
-    /* The grid is a flex item that fills the sheet's height on a wide board,
-       which is right when seven rails share one screenful. Two-line rows do
-       not fit a phone, so here it takes its natural height instead and the
-       view host (`.kbn-view-host`, views.css) does the scrolling — otherwise
-       the `auto` tracks are squeezed below their content and every row's
-       annotation is clipped off the bottom of its own row. */
-    flex: 0 0 auto;
-    min-height: auto;
   }
 
-  /* Raster on the first line, annotation on the second; the date spans both
-     and stays centred against the pair. */
+  /* Raster on the first line, annotation on the second. */
   .wk-row {
     grid-template-rows: auto auto;
     align-items: stretch;
   }
-  .wk-daylabel { grid-row: 1 / -1; }
+  /* The date keeps the first line only. It used to span both and hold the
+     annotation out of the gutter; the annotation now needs that gutter more
+     than the alignment was worth — see below. */
+  .wk-daylabel { grid-row: 1; }
   .wk-rail {
     grid-row: 1;
     /* Was `align-self: stretch` in a 40px-floored row; the row's height now
        comes from its contents, so the raster has to state its own. */
     min-height: 34px;
   }
+  /* ONE LINE PER DAY, THE FULL WIDTH OF THE SHEET.
+     A day's annotation is up to six clauses — duration, two message counts, an
+     aloft count, a five-figure diffstat — and in the rail's own column (303px
+     at 390) it needed a 9px hand to hold them, which is past reading. Two
+     things buy it back: it spans BOTH tracks, taking the 48px the date's
+     gutter was reserving, and the qualitative weight word is dropped (below).
+     Fifty-four characters over 351px is a 10px hand, near the desktop's own.
+     What it costs is the left edge shared with the raster; the annotation now
+     starts under the date and reads as a caption of the whole row, which is
+     what it is. Nothing about the shared x-scale moves — the annotation is out
+     of the rails' flow either way, and 2pm is still 2pm on every row. */
   .wk-annot {
-    grid-column: 2;
+    grid-column: 1 / -1;
     grid-row: 2;
     align-self: start;
-    /* Under the mark it annotates, reading from the same left edge — a right
-       rag here would float the clause away from the raster it belongs to. */
     text-align: left;
-    white-space: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* 8.5px and 0.01em of tracking, both measured rather than chosen: the
+       desktop's 9.5px at 0.03em runs the busiest day forty pixels past a 375px
+       sheet, and mono is already spaced. Today's row is the one to watch — it
+       is the only one that carries an aloft count on top of everything else. */
+    font-size: calc(8.5px * var(--kbn-type-scale, 1));
+    letter-spacing: 0.01em;
     line-height: 1.5;
     padding-bottom: 3px;
   }
-  /* Two lines is fine; a line holding nothing but the deletions is not. The
-     diffstat travels as one word so the wrap lands before it, not inside it. */
-  .wk-annot .kbn-diffclause { white-space: nowrap; }
+  /* THE WEIGHT WORD GOES. `full` / `half` is the one qualitative token on the
+     line, and the duration two clauses to its left already says the same thing
+     in figures — with the raster above saying it a third time, in shape. It is
+     seven characters, which is most of what a one-line narrow row is short. It
+     carries its own leading separator so hiding it leaves no orphaned dot; see
+     `wk-annot-weight` in WeekView.ts. */
+  .wk-annot-weight { display: none; }
 
   /* The tick row and the key have no second line to fill. */
   .wk-tickrow { grid-template-rows: auto; }
@@ -527,4 +573,47 @@
     grid-column: 1 / -1;
     justify-self: stretch;
   }
+}
+
+/* ── The week on a phone HELD ON ITS SIDE ─────────────────────────────────────
+   Verbatim `SHORT_MEDIA` (`../mobile.ts`), running after the block above:
+   landscape matches the shared prelude, takes the two-line row, and gives it
+   back. One condition — "narrow AND not short" — would say this once, but the
+   board admits exactly two preludes and a third would be a third threshold to
+   keep in step; a dozen declarations is the cheaper of the two prices.
+
+   Landscape has 874 horizontal pixels, which is room for the annotation beside
+   its raster, exactly where the shared x-scale wants it. What it has not got is
+   vertical room: doubling seven rows at 402px tall spends the axis that is
+   scarce to relieve the one that is not. The grid keeps its natural height from
+   the shared block — no phone has a screenful to give — and only the row shape
+   is undone. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .wk-grid {
+    --wk-gutter: 54px;
+    grid-template-columns: var(--wk-gutter) minmax(0, 1fr) minmax(var(--wk-annot), max-content);
+    grid-template-rows: repeat(7, minmax(40px, 1fr)) auto auto;
+    column-gap: 10px;
+  }
+  .wk-row { grid-template-rows: auto; }
+  .wk-daylabel { grid-row: auto; }
+  .wk-rail { grid-row: auto; min-height: 22px; }
+  /* Back into the third track, right-ragged against the rails, at the size and
+     tracking the desktop sets — 874px is room for the whole clause, so none of
+     what a portrait row gives up is owed here. */
+  .wk-annot {
+    grid-column: auto;
+    grid-row: auto;
+    align-self: center;
+    text-align: right;
+    white-space: nowrap;
+    overflow: visible;
+    font-size: calc(9.5px * var(--kbn-type-scale, 1));
+    letter-spacing: 0.03em;
+    line-height: 1;
+    padding-bottom: 0;
+  }
+  /* And the day's weight comes back with the room to print it. */
+  .wk-annot-weight { display: inline; }
+  .wk-key { grid-column: 2; justify-self: center; }
 }

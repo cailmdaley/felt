@@ -2172,11 +2172,20 @@ class DayViewImpl implements TemporalView {
       // lane only repeats it when it disagrees (see DayLane.hostNote).
       const diffEl = diffClauseEl(model.totals.insertions ?? 0, model.totals.deletions ?? 0)
       const prefix =
-        (model.host ? `${model.host} · ` : '') +
         `${messageClause(model.totals.messages, model.totals.received)}` +
         ` · agents ${formatSpanMinutes(model.totals.agent, { pad: true })}` +
         (diffEl ? ' · ' : '')
       this.statsEl.textContent = ''
+      // The host leads the line in its own span so a phone can drop it and keep
+      // the rest on ONE line (`.kbn-day-stats-host`, DayView.css). It is the
+      // least informative token there: it is the same for the whole page, and a
+      // lane says so itself the moment it disagrees.
+      if (model.host) {
+        const host = document.createElement('span')
+        host.className = 'kbn-day-stats-host'
+        host.textContent = `${model.host} · `
+        this.statsEl.append(host)
+      }
       this.statsEl.append(document.createTextNode(prefix))
       if (diffEl) this.statsEl.append(diffEl)
       this.statsEl.classList.toggle('kbn-day-stats-quiet', model.lanes.length === 0)

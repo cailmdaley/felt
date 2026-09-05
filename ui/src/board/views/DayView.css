@@ -1057,8 +1057,17 @@ button.kbn-day-entrytitle:focus-visible {
 }
 
 /* ── The day on a phone ───────────────────────────────────────────────────────
-   `@media (max-width: 700px)` is the board's one mobile threshold (see
-   `../mobile.ts`).
+   The prelude is the board's one mobile threshold, `MOBILE_MEDIA` in
+   `../mobile.ts`: narrow OR short-and-touched, the second half being a phone
+   held on its side, which is 874px wide and would otherwise be served the
+   desktop chart.
+
+   Only the TAP TARGET is owed to every phone. The stack below is owed to a
+   NARROW one, and it is nested in its own `max-width` query for that reason:
+   in landscape there are 874 horizontal pixels going spare and 402 vertical
+   ones that are not, so lifting each name onto a line of its own would spend
+   the scarce axis to relieve the abundant one and cut the lanes on screen from
+   twenty-odd to eight.
 
    The chart is a two-column grid — names, then rails — and at 390px neither
    column survives it. The label track clamps to its 86px floor and every name
@@ -1078,17 +1087,50 @@ button.kbn-day-entrytitle:focus-visible {
    the hour hand's six labels to sit clear of each other. That is why there is
    no sideways scroller here: a day you have to swipe through is a day you
    cannot see the shape of, and the shape is the entire point of the page. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  /* A thumb-sized band around the name, in either orientation — the label is
+     the way into the lane's terminal, so it has to be a target and not just a
+     word. In landscape it is still a cell of the desktop gutter, where a
+     floor on the height costs nothing. */
+  .kbn-day-label { min-height: 24px; }
+
+  /* THE DAY'S FIGURES, ON ONE LINE — the same promise Week's head makes, and
+     like Week's it is sized once for both preludes. The line is four clauses
+     and a diffstat; at this size and tracking it measures about 320 of the 340
+     pixels a portrait phone gives it, once the host is dropped. */
+  .kbn-view-headfigures.kbn-day-stats {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: calc(9px * var(--kbn-type-scale, 1));
+    letter-spacing: 0.02em;
+  }
+  /* The host goes. It is the same for the whole page — a lane prints its own
+     only when it disagrees — so on the one line a phone can spare it is the
+     token that says the least. It carries its own trailing separator, so
+     hiding it leaves no orphaned dot (see DayView.ts). */
+  .kbn-day-stats-host { display: none; }
+
+  /* Everything below reflows the chart into a STACK, which is a narrow page's
+     answer and not every phone's — see the SHORT_MEDIA block after this one,
+     which hands a phone on its side the desktop chart back. */
   .kbn-day-chart {
     display: block;
     padding: 6px 0 0;
+    /* THE COMPOSITED SHEET. `.kbn-view-page`'s wash is translucent and every
+       box behind it is transparent, so the paper's actual value exists only on
+       screen; this is it, sampled. Nothing but the caption bands is painted
+       with it and they sit directly on the sheet, so a shade of drift would
+       show as a faint band rather than as a wrong colour, and only here. */
+    --day-paper: #ECE1CD;
   }
 
   /* The gridline layer had a column to occupy and now has none, so it becomes
      an overlay on the whole chart. Its lines are placed by percentage, and the
      percentages are now measured across exactly the width the rails span —
-     which is the whole sheet. Running behind the names as well as the rails is
-     a gain: the hour rules read as one continuous ruling of the page. */
+     which is the whole sheet. It runs the full height of the chart, names
+     included; the captions are opaque bands over it (see `.kbn-day-label`), so
+     what the reader sees is a ruling that belongs to the rails. */
   .kbn-day-grid {
     position: absolute;
     inset: 0;
@@ -1099,24 +1141,40 @@ button.kbn-day-entrytitle:focus-visible {
      rail belongs to which name: a wide gap above the name, none below it. Set
      evenly the page reads as rails captioned from underneath, which is the
      wrong lane every time. */
+  /* TIGHTER LANES. Every lane cost about 68px — a 14px gap, a 24px caption, a
+     30px rail — and a phone showed eight of a twenty-lane day. The gap above
+     the name still has to be the biggest whitespace in the lane (it is the only
+     thing saying which rail a caption owns), so it is cut rather than removed,
+     and the rail keeps enough paper for a wash to be a shape. */
   .kbn-day-label {
     justify-content: flex-start;
     align-items: flex-end;
     gap: 6px;
-    margin: 14px 0 0;
-    padding-bottom: 1px;
-    /* A thumb-sized band around the name — the label is the way into the
-       lane's terminal, so it has to be a target and not just a word. */
-    min-height: 24px;
+    margin: 8px 0 0;
+    padding-bottom: 0;
+    /* ABOVE THE RULES, ON A BAND OF PAPER. Under the stack the gridline layer
+       is an overlay on the whole chart (above), which is a gain for the hour
+       rules — but it also draws the gold now-thread straight through the
+       captions, and the thread crossed a lane's host note like a strike-
+       through. A caption is a band of paper laid over the ruling: the rules and
+       the thread break at every name and run only where the rails are, which is
+       where they mean something. A halo round the glyphs was tried first and is
+       not enough — the thread is 1.5px of gold and reads straight through the
+       gaps in a word. Undone in SHORT_MEDIA, where the overlay is back in the
+       rail track and a band would be a patch over nothing. */
+    position: relative;
+    z-index: 1;
+    background: var(--day-paper);
   }
   .kbn-day-lanename {
     text-align: left;
     font-size: calc(14px * var(--kbn-type-scale, 1));
   }
 
-  /* Taller than the desktop lane: with the name lifted out of the row there is
-     no reason to keep the rail at name height, and a wash needs some paper. */
-  .kbn-day-rail { min-height: 30px; }
+  /* Still taller than the desktop lane — with the name lifted out of the row
+     there is no reason to keep the rail at name height, and a wash needs some
+     paper — but four of those pixels were air above the curve, not curve. */
+  .kbn-day-rail { min-height: 26px; }
 
   /* Both were `grid-column: 2` items centred in the rail track. Under a block
      chart the track is the sheet, so they simply take the width. */
@@ -1161,4 +1219,51 @@ button.kbn-day-entrytitle:focus-visible {
     min-width: 0;
     text-align: left;
   }
+}
+
+/* ── The day on a phone HELD ON ITS SIDE ──────────────────────────────────────
+   Verbatim `SHORT_MEDIA` (`../mobile.ts`), and it runs after the block above
+   on purpose: landscape matches the shared prelude too, takes the stack, and
+   then gives it straight back.
+
+   Two preludes saying one thing would be better written as one condition —
+   "narrow AND not short" — but the board's contract admits exactly two forms,
+   MOBILE_MEDIA and SHORT_MEDIA, and a third would be a third threshold to keep
+   in step. Restoring costs a dozen declarations; a private threshold costs
+   every future reader.
+
+   What landscape wants is the desktop chart: 874 horizontal pixels going spare
+   and 402 vertical ones that are not, so a name lifted onto a line of its own
+   spends the scarce axis to relieve the abundant one and cuts the lanes on
+   screen from twenty-odd to eight. The tap target from the shared block stays;
+   only the stack is undone. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .kbn-day-chart {
+    display: grid;
+    padding: 7px 2px 0;
+  }
+  .kbn-day-grid { position: relative; inset: auto; }
+  .kbn-day-label {
+    justify-content: flex-end;
+    align-items: baseline;
+    gap: 5px;
+    margin: 0;
+    padding-bottom: 0;
+    /* The gridline layer is back in the rail track, so nothing is drawn under a
+       name and the caption has nothing to mask. A band of paper here would be a
+       patch over the sheet it is painted to match. */
+    position: static;
+    z-index: auto;
+    background: none;
+  }
+  .kbn-day-lanename {
+    text-align: right;
+    font-size: calc(13px * var(--kbn-type-scale, 1));
+  }
+  .kbn-day-rail { min-height: 0; }
+  .kbn-day-axis { margin-top: 3px; }
+  .kbn-day-legend { margin: 6px 0 0; justify-self: center; }
+  .kbn-day-entries { columns: 2; column-rule: 0.5px solid rgba(122, 111, 92, 0.16); }
+  .kbn-day-entrystats { white-space: nowrap; flex-basis: auto; }
+  .kbn-day-entrytitle { flex: 0 1 auto; }
 }

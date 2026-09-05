@@ -1667,15 +1667,28 @@ class WeekView implements TemporalView {
       const annotText = annotationFor(spend, isPast, isToday, inFlight.length, dayDiff)
       const dayDiffEl = dayDiff ? diffClauseEl(dayDiff.insertions, dayDiff.deletions) : null
       const dayDiffText = dayDiff ? diffClause(dayDiff.insertions, dayDiff.deletions) : ''
-      if (dayDiffEl && annotText.endsWith(dayDiffText)) {
-        row.annot.textContent = ''
-        row.annot.append(
-          document.createTextNode(annotText.slice(0, -dayDiffText.length)),
-          dayDiffEl,
-        )
-      } else {
-        row.annot.textContent = annotText
+      // The line is printed clause by clause rather than as one string, for one
+      // reason: the WEIGHT word has to be addressable. On a narrow page it is
+      // dropped (`.wk-annot-weight`, WeekView.css) — the duration beside it
+      // already says how full the day was, in figures — and a token you may hide
+      // has to carry its own leading separator, or hiding it leaves a doubled dot
+      // behind. `annotationFor` still returns the whole line, and the aria-label
+      // below still reads it: the spans are a rendering detail, not a second model.
+      row.annot.textContent = ''
+      let head = annotText
+      if (dayDiffEl && annotText.endsWith(dayDiffText)) head = annotText.slice(0, -dayDiffText.length)
+      for (const [i, token] of head.split(' · ').entries()) {
+        const sep = i > 0 ? ' · ' : ''
+        if (token === 'full' || token === 'half' || token === 'quiet') {
+          const weight = document.createElement('span')
+          weight.className = 'wk-annot-weight'
+          weight.textContent = `${sep}${token}`
+          row.annot.append(weight)
+        } else {
+          row.annot.append(document.createTextNode(`${sep}${token}`))
+        }
       }
+      if (dayDiffEl && head !== annotText) row.annot.append(dayDiffEl)
       if (waiting !== null) {
         const badge = document.createElement('span')
         badge.className = 'kbn-card-waiting'
