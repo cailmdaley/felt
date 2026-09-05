@@ -137,12 +137,9 @@ defmodule Shuttle.RemoteFiberRegistry do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc """
-  The default on-disk home for the per-remote feed caches, honoring the same env
-  the rest of the daemon's host-local state does.
-  """
-  @spec default_store_dir() :: String.t()
-  def default_store_dir do
+  # The default on-disk home for the per-remote caches, honoring the same env
+  # the rest of the daemon's host-local state does.
+  defp default_store_dir do
     Path.join(
       System.get_env("SHUTTLE_DATA_DIR") ||
         Path.join(System.user_home!() || "/root", ".shuttle"),
@@ -162,12 +159,9 @@ defmodule Shuttle.RemoteFiberRegistry do
   def feeds, do: feeds(__MODULE__)
 
   @spec feeds(GenServer.server()) :: %{String.t() => map()}
-  def feeds(server), do: feeds(server, RegistryCommon.read_timeout_ms())
-
-  @spec feeds(GenServer.server(), non_neg_integer()) :: %{String.t() => map()}
-  def feeds(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
+  def feeds(server) do
     if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :feeds, timeout_ms)
+      GenServer.call(server, :feeds, RegistryCommon.read_timeout_ms())
     else
       %{}
     end
@@ -233,7 +227,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   def init(opts) do
     remotes = RegistryCommon.configured_remotes(opts)
     store_dir = Keyword.get(opts, :store_dir, default_store_dir())
-    persisted = load_all(store_dir)
+    persisted = RegistryCommon.load_all(store_dir)
 
     state = %State{
       remotes: remotes,
@@ -248,7 +242,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       store_dir: store_dir,
       feeds:
         Map.new(remotes, fn remote ->
-          {remote.name, restore(Map.get(persisted, safe_name(remote.name)), remote)}
+          {remote.name, restore(Map.get(persisted, RegistryCommon.safe_name(remote.name)), remote)}
         end)
     }
 
@@ -325,7 +319,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
       {name, tasks} ->
         Logger.warning("RemoteFiberRegistry: #{name} fiber fetch crashed: #{inspect(reason)}")
-        feeds = record_failure(state.feeds, name, reason, DateTime.utc_now())
+        feeds = RegistryCommon.record_failure(state.feeds, name, reason, DateTime.utc_now())
         {:noreply, %{state | tasks: tasks, feeds: feeds}}
     end
   end
@@ -334,27 +328,9 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   # ── Fleet reload ──
 
-  # Same mtime-gated reload as `Shuttle.RemoteRegistry`: one stat per tick, and
-  # a fleet edit lands without a daemon bounce. Kept entries retain their ETag
-  # and cache metadata, so a reload never forces a full refetch of every feed.
-  defp reload_remotes(%State{reload_from_file?: false} = state), do: state
-
-  defp reload_remotes(%State{} = state) do
-    case Shuttle.Remotes.config_token() do
-      token when token == state.remotes_token ->
-        state
-
-      token ->
-        remotes = RegistryCommon.configured_remotes()
-
-        %{
-          state
-          | remotes: remotes,
-            remotes_token: token,
-            feeds: RegistryCommon.reconcile(state.feeds, remotes, &initial_entry/1)
-        }
-    end
-  end
+  # Same mtime-gated reload as `Shuttle.RemoteRegistry`: one stat per tick.
+  defp reload_remotes(%State{} = state),
+    do: RegistryCommon.reload_fleet(state, :feeds, &initial_entry/1)
 
   # ── Fetch orchestration ──
 
@@ -399,7 +375,7 @@ defmodule Shuttle.RemoteFiberRegistry do
         {name, fetch_fibers(remote, client, timeout, etag)}
       end)
 
-    feeds = stamp_attempt(state.feeds, remote)
+    feeds = RegistryCommon.stamp_attempt(state.feeds, remote, &initial_entry/1)
     %{state | tasks: Map.put(state.tasks, task.ref, name), feeds: feeds}
   end
 
@@ -409,9 +385,19 @@ defmodule Shuttle.RemoteFiberRegistry do
         state
 
       {_name, tasks} ->
-        entry = Map.get(state.feeds, name, initial_entry_for(state, name))
-        updated = apply_and_persist(state, name, entry, result, DateTime.utc_now())
-        %{state | tasks: tasks, feeds: Map.put(state.feeds, name, updated)}
+        case Map.get(state.feeds, name) do
+          # A vanished entry means a fleet reload dropped the remote while its
+          # fetch was in flight. Release the task ref but drop the late result
+          # rather than resurrecting an entry the reconcile decided is gone —
+          # nothing would ever evict it, and it would read to the composite's
+          # origins block as a permanently-stale host that does not exist.
+          nil ->
+            %{state | tasks: tasks}
+
+          entry ->
+            updated = apply_and_persist(state, name, entry, result, DateTime.utc_now())
+            %{state | tasks: tasks, feeds: Map.put(state.feeds, name, updated)}
+        end
     end
   end
 
@@ -427,7 +413,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp fetch_fibers(%Remote{} = remote, client, timeout_ms, etag) do
     url = Remote.fibers_url(remote)
 
-    case conditional_get(client, url, etag, timeout_ms) do
+    case RegistryCommon.conditional_get(client, url, etag, timeout_ms) do
       {:ok, 304, headers, _body} ->
         # The 304 has no body, so the fresh cache metadata rides the
         # `x-shuttle-cache` header — carry it so `refreshed_at`/`state` don't
@@ -435,26 +421,13 @@ defmodule Shuttle.RemoteFiberRegistry do
         {:ok, {:not_modified, cache_from_header(headers)}}
 
       {:ok, status, headers, body} when status in 200..299 ->
-        decode_feed(body, header_value(headers, "etag"))
+        decode_feed(body, RegistryCommon.header_value(headers, "etag"))
 
       {:ok, status, _headers, _body} ->
         {:error, {:http_status, status}}
 
       {:error, reason} ->
         {:error, reason}
-    end
-  end
-
-  defp conditional_get(client, url, etag, timeout_ms) do
-    if function_exported?(client, :get, 3) do
-      headers = if is_binary(etag), do: [{"if-none-match", etag}], else: []
-      client.get(url, headers, timeout_ms)
-    else
-      # get/2 has no status/headers: normalize its {:ok, body} to a 200 tuple.
-      case client.get(url, timeout_ms) do
-        {:ok, body} -> {:ok, 200, [], body}
-        {:error, reason} -> {:error, reason}
-      end
     end
   end
 
@@ -473,12 +446,8 @@ defmodule Shuttle.RemoteFiberRegistry do
     end
   end
 
-  defp header_value(headers, key) do
-    Enum.find_value(headers, fn {k, v} -> if k == key, do: v end)
-  end
-
   defp cache_from_header(headers) do
-    case header_value(headers, "x-shuttle-cache") do
+    case RegistryCommon.header_value(headers, "x-shuttle-cache") do
       value when is_binary(value) ->
         case Jason.decode(value) do
           {:ok, %{} = cache} -> cache
@@ -509,29 +478,6 @@ defmodule Shuttle.RemoteFiberRegistry do
       restored?: false,
       remote: remote
     }
-  end
-
-  defp initial_entry_for(%State{remotes: remotes}, name) do
-    case Enum.find(remotes, &(&1.name == name)) do
-      %Remote{} = remote ->
-        initial_entry(remote)
-
-      _ ->
-        %{
-          fibers: [],
-          last_polled_at: nil,
-          last_attempt_at: nil,
-          last_error: nil,
-          etag: nil,
-          cache: nil,
-          restored?: false
-        }
-    end
-  end
-
-  defp stamp_attempt(feeds, %Remote{name: name} = remote) do
-    entry = Map.get(feeds, name, initial_entry(remote))
-    Map.put(feeds, name, %{entry | last_attempt_at: DateTime.utc_now()})
   end
 
   # 304 Not Modified: the feed is unchanged. Keep last-good fibers and etag,
@@ -590,19 +536,6 @@ defmodule Shuttle.RemoteFiberRegistry do
     %{entry | last_attempt_at: now, last_error: reason}
   end
 
-  # The `:DOWN` crash path (rare — the Default client rescues). Same contract as
-  # a failed fetch: record the failure without touching last-good state or the
-  # last-success timestamp; time alone drives the badge.
-  defp record_failure(feeds, name, reason, now) do
-    case Map.get(feeds, name) do
-      nil ->
-        feeds
-
-      entry ->
-        Map.put(feeds, name, %{entry | last_attempt_at: now, last_error: reason})
-    end
-  end
-
   # ── Views ──
 
   defp build_feeds_view(%State{} = state) do
@@ -642,11 +575,6 @@ defmodule Shuttle.RemoteFiberRegistry do
     Remote.stale?(remote, last, now)
   end
 
-  # No `remote` to time-check against (the initial_entry_for nil-remote
-  # fallback): an unknown/unconfigured remote can't be time-checked, so treat as
-  # stale.
-  defp stale?(_entry, _now), do: true
-
   # ── Disk persistence ──
   #
   # One JSON file per remote, written atomically (tmp + rename) so a crash
@@ -672,58 +600,16 @@ defmodule Shuttle.RemoteFiberRegistry do
     updated
   end
 
-  defp persist(nil, _name, _entry), do: :ok
-
-  defp persist(dir, name, entry) do
-    File.mkdir_p!(dir)
-    path = Path.join(dir, "#{safe_name(name)}.json")
-    tmp = path <> ".tmp"
-    File.write!(tmp, Jason.encode!(encode_entry(entry)))
-    File.rename!(tmp, path)
-    :ok
-  rescue
-    error ->
-      Logger.debug("RemoteFiberRegistry: persist for #{name} failed — #{inspect(error)}")
-      :ok
-  end
-
-  # A remote name is a routing key and a hostname, but it reaches a path here,
-  # so anything that is not a plain filename character is flattened.
-  defp safe_name(name), do: String.replace(name, ~r/[^A-Za-z0-9_.-]/, "_")
+  defp persist(dir, name, entry),
+    do: RegistryCommon.persist(dir, name, encode_entry(entry), "RemoteFiberRegistry")
 
   defp encode_entry(entry) do
     %{
       "fibers" => entry.fibers,
       "etag" => entry.etag,
       "cache" => entry.cache,
-      "last_polled_at" => encode_dt(entry.last_polled_at)
+      "last_polled_at" => RegistryCommon.encode_dt(entry.last_polled_at)
     }
-  end
-
-  defp encode_dt(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
-  defp encode_dt(_), do: nil
-
-  defp load_all(nil), do: %{}
-
-  defp load_all(dir) do
-    case File.ls(dir) do
-      {:ok, files} ->
-        files
-        |> Enum.filter(&String.ends_with?(&1, ".json"))
-        |> Map.new(fn file -> {Path.rootname(file), load_file(Path.join(dir, file))} end)
-
-      _ ->
-        %{}
-    end
-  end
-
-  defp load_file(path) do
-    with {:ok, raw} <- File.read(path),
-         {:ok, %{} = decoded} <- Jason.decode(raw) do
-      decoded
-    else
-      _ -> nil
-    end
   end
 
   # A restored entry carries its rows, its etag (so the first poll can 304
@@ -744,7 +630,7 @@ defmodule Shuttle.RemoteFiberRegistry do
           | fibers: fibers,
             etag: string_or_nil(persisted["etag"]),
             cache: map_or_nil(persisted["cache"]),
-            last_polled_at: decode_dt(persisted["last_polled_at"]),
+            last_polled_at: RegistryCommon.decode_dt(persisted["last_polled_at"]),
             restored?: true
         }
     end
@@ -759,12 +645,4 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp map_or_nil(%{} = value), do: value
   defp map_or_nil(_), do: nil
 
-  defp decode_dt(value) when is_binary(value) do
-    case DateTime.from_iso8601(value) do
-      {:ok, dt, _offset} -> dt
-      _ -> nil
-    end
-  end
-
-  defp decode_dt(_), do: nil
 end

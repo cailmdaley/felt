@@ -156,9 +156,6 @@ defmodule Shuttle.RemoteRegistry do
   An empty map means no remotes are configured (or the registry isn't
   running — callers tolerate this for graceful degradation).
   """
-  @spec snapshots() :: %{String.t() => map()}
-  def snapshots, do: snapshots(__MODULE__)
-
   @spec snapshots(GenServer.server()) :: %{String.t() => map()}
   def snapshots(server) do
     snapshots(server, RegistryCommon.read_timeout_ms())
@@ -177,9 +174,6 @@ defmodule Shuttle.RemoteRegistry do
   Returns one cached snapshot or `nil` when the remote isn't
   configured.
   """
-  @spec snapshot(String.t()) :: map() | nil
-  def snapshot(name), do: snapshot(__MODULE__, name)
-
   @spec snapshot(GenServer.server(), String.t()) :: map() | nil
   def snapshot(server, name) do
     if RegistryCommon.registry_alive?(server) do
@@ -792,7 +786,7 @@ defmodule Shuttle.RemoteRegistry do
       stale: true,
       last_error: reason,
       remote: remote,
-      recovery: Map.get(entry, :recovery, %Recovery{})
+      recovery: entry.recovery
     }
   end
 
@@ -941,7 +935,7 @@ defmodule Shuttle.RemoteRegistry do
       last_polled_at: entry.last_polled_at,
       stale: Remote.stale?(remote, entry.last_polled_at, now),
       last_error: entry.last_error,
-      recovery: recovery_view(Map.get(entry, :recovery, %Recovery{}))
+      recovery: recovery_view(entry.recovery)
     }
   end
 
