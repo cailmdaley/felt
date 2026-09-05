@@ -451,9 +451,80 @@
    paper, so the styles moved out with the renderer. Only the box it is
    positioned against (`.wk-grid { position: relative }`) is Week's. */
 
-/* On a phone the head is a stack (views.css) — the week's name gets a line of
-   its own, so it should use it as one line rather than breaking after "Week". */
+/* ── The week on a phone ──────────────────────────────────────────────────────
+   On a phone the head is a stack (views.css) — the week's name gets a line of
+   its own, so it should use it as one line rather than breaking after "Week".
+
+   The rows are the real work. The third track is `max-content` over the whole
+   week, and the widest day's annotation — a duration, a share, two counts and
+   a five-figure diffstat — is about 280 of the 350 available pixels. The rail
+   track is `minmax(0, 1fr)`, so it dutifully collapsed to ZERO and the seven
+   rasters were drawn on top of the annotation text, with the hour hand printed
+   into 100px as "6a9a12p2a". A ruler nobody can read under rails nobody can
+   see.
+
+   The fix is to stop asking one line to hold both. The annotation moves to a
+   second line of its own row, under the raster and left-aligned with it, and
+   the day column drops to two tracks. Nothing about the shared x-scale is
+   lost: the annotation is out of the column flow entirely, so all seven rows
+   and the tick row still subscribe to the identical gutter-plus-rail pair, and
+   2pm is still 2pm on every row. Nothing is hidden either — the diffstat is
+   what a day cost, and a day's cost is most of the reason to open the week. */
 @media (max-width: 700px) {
   .wk-head { flex: 1 1 100%; flex-wrap: wrap; gap: 10px; }
   .wk-weeklabel { white-space: nowrap; }
+
+  .wk-grid {
+    /* Two digits of old-style numerals and a weekday's small caps; the desktop
+       54px was buying room the phone would rather give the raster. */
+    --wk-gutter: 40px;
+    grid-template-columns: var(--wk-gutter) minmax(0, 1fr);
+    /* Rows are two lines tall now and no longer share the sheet's height
+       equally — they take what they need. */
+    grid-template-rows: repeat(7, auto) auto auto;
+    column-gap: 8px;
+    /* The grid is a flex item that fills the sheet's height on a wide board,
+       which is right when seven rails share one screenful. Two-line rows do
+       not fit a phone, so here it takes its natural height instead and the
+       view host (`.kbn-view-host`, views.css) does the scrolling — otherwise
+       the `auto` tracks are squeezed below their content and every row's
+       annotation is clipped off the bottom of its own row. */
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  /* Raster on the first line, annotation on the second; the date spans both
+     and stays centred against the pair. */
+  .wk-row {
+    grid-template-rows: auto auto;
+    align-items: stretch;
+  }
+  .wk-daylabel { grid-row: 1 / -1; }
+  .wk-rail {
+    grid-row: 1;
+    /* Was `align-self: stretch` in a 40px-floored row; the row's height now
+       comes from its contents, so the raster has to state its own. */
+    min-height: 34px;
+  }
+  .wk-annot {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    /* Under the mark it annotates, reading from the same left edge — a right
+       rag here would float the clause away from the raster it belongs to. */
+    text-align: left;
+    white-space: normal;
+    line-height: 1.5;
+    padding-bottom: 3px;
+  }
+  /* Two lines is fine; a line holding nothing but the deletions is not. The
+     diffstat travels as one word so the wrap lands before it, not inside it. */
+  .wk-annot .kbn-diffclause { white-space: nowrap; }
+
+  /* The tick row and the key have no second line to fill. */
+  .wk-tickrow { grid-template-rows: auto; }
+  .wk-key {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
 }

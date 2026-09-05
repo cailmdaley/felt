@@ -398,19 +398,18 @@ export class KanbanSurfaceRenderer {
       seg.tabIndex = -1
       seg.setAttribute('aria-label', `${title} (${counts[i]})`)
 
-      const mark = document.createElement('span')
-      mark.className = 'kbn-folio-mark'
-      appendCappedText(mark, title.charAt(0))
-
+      // The illuminated initial IS the word's first letter — "𝕯rafts", not
+      // "𝕯 Drafts". One capped run, the way the column heads and view titles
+      // set theirs; repeating the letter read as a typo on the phone.
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
-      name.textContent = short
+      appendCappedText(name, short)
 
       const count = document.createElement('span')
       count.className = 'kbn-folio-count'
       count.textContent = String(counts[i])
 
-      seg.append(mark, name, count)
+      seg.append(name, count)
       const turnTo = (): void => {
         board.scrollTo({
           left: folioScrollTarget(i, board.clientWidth, NOW_COLUMN_ORDER.length),

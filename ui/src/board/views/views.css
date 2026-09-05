@@ -360,10 +360,27 @@
   .kbn-view-titlecenter {
     flex: 1 1 100%;
     max-width: 100%;
-    overflow-x: auto;
     text-overflow: clip;
   }
+  /* The figures line is `nowrap` on a wide head so its dots never break a
+     clause; on a phone that made it a sideways-scrolling strip with the
+     diffstat hanging off the sheet, which is a line you have to go looking
+     for. Two printed lines beat one hidden one — it wraps between clauses
+     (each clause is `nowrap` in its own right, so a break can only land on a
+     separator). */
+  .kbn-view-titlecenter,
+  .kbn-view-headfigures { white-space: normal; }
   /* The controls wrap onto the line beneath, and the period's name keeps its
      chevrons beside it rather than breaking mid-phrase. */
   .kbn-view-nav { white-space: nowrap; }
+
+  /* The key's glosses are `nowrap` so a break can never land inside one — but
+     Day's gesture gloss is a whole sentence, and one unbreakable 460px item
+     was what forced the rail column wider than the phone. A sentence is not a
+     gloss; on a narrow page it is allowed to wrap like the prose it is. */
+  .kbn-view-key {
+    gap: 4px 11px;
+    text-align: center;
+  }
+  .kbn-view-key-item { white-space: normal; }
 }

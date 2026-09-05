@@ -1055,3 +1055,110 @@ button.kbn-day-entrytitle:focus-visible {
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* ── The day on a phone ───────────────────────────────────────────────────────
+   `@media (max-width: 700px)` is the board's one mobile threshold (see
+   `../mobile.ts`).
+
+   The chart is a two-column grid — names, then rails — and at 390px neither
+   column survives it. The label track clamps to its 86px floor and every name
+   becomes an initial and an ellipsis ("L…", "C…"), which is the one thing a
+   gutter of names must never do. The rail track is worse: it is sized by the
+   widest thing in column 2, and that is the key's gesture gloss, an
+   unbreakable 460px sentence — so the rails were drawn a hundred pixels wider
+   than the sheet and clipped, leaving a day that started at 6am and ended,
+   visibly, at about ten in the morning.
+
+   So the chart stops being a grid of PAIRS and becomes a STACK: the lane's
+   name on a line of its own, its rail full-width directly beneath it, the way
+   a ruled ledger reads on a narrow page. Nothing in the markup moves — the DOM
+   is already label, rail, label, rail — so `display: block` IS the stacked
+   layout, and the rail gets the whole 350px for a whole day: about 15px an
+   hour, which is enough for a density wash to read as a shape and enough for
+   the hour hand's six labels to sit clear of each other. That is why there is
+   no sideways scroller here: a day you have to swipe through is a day you
+   cannot see the shape of, and the shape is the entire point of the page. */
+@media (max-width: 700px) {
+  .kbn-day-chart {
+    display: block;
+    padding: 6px 0 0;
+  }
+
+  /* The gridline layer had a column to occupy and now has none, so it becomes
+     an overlay on the whole chart. Its lines are placed by percentage, and the
+     percentages are now measured across exactly the width the rails span —
+     which is the whole sheet. Running behind the names as well as the rails is
+     a gain: the hour rules read as one continuous ruling of the page. */
+  .kbn-day-grid {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* Names read from the left, at full length, on a line they do not share.
+     The lane is now two stacked boxes, so the WHITESPACE has to say which
+     rail belongs to which name: a wide gap above the name, none below it. Set
+     evenly the page reads as rails captioned from underneath, which is the
+     wrong lane every time. */
+  .kbn-day-label {
+    justify-content: flex-start;
+    align-items: flex-end;
+    gap: 6px;
+    margin: 14px 0 0;
+    padding-bottom: 1px;
+    /* A thumb-sized band around the name — the label is the way into the
+       lane's terminal, so it has to be a target and not just a word. */
+    min-height: 24px;
+  }
+  .kbn-day-lanename {
+    text-align: left;
+    font-size: calc(14px * var(--kbn-type-scale, 1));
+  }
+
+  /* Taller than the desktop lane: with the name lifted out of the row there is
+     no reason to keep the rail at name height, and a wash needs some paper. */
+  .kbn-day-rail { min-height: 30px; }
+
+  /* Both were `grid-column: 2` items centred in the rail track. Under a block
+     chart the track is the sheet, so they simply take the width. */
+  .kbn-day-axis { margin-top: 5px; }
+  .kbn-day-legend {
+    margin: 8px auto 0;
+    justify-self: auto;
+  }
+
+  /* One column. Two columns of ~24 characters is not a measure, it is a pair
+     of gutters — the section reads as prose here, one entry after another. */
+  .kbn-day-entries {
+    columns: 1;
+    column-rule: none;
+  }
+  /* A ledger row's cost line is `nowrap` so its clauses stay whole; with a
+     diffstat on the end that is wider than the phone. It wraps between
+     clauses instead — each clause is still unbreakable in itself. */
+  .kbn-day-entrystats {
+    white-space: normal;
+    /* And it takes a line of its own. Sharing the title's line, a flexible
+       mono clause and a flexible serif name each gave up half the width and
+       neither could be read; a break before the figures costs one line and
+       buys back the whole measure for the name. */
+    flex-basis: 100%;
+  }
+
+  /* The head is a wrapping flex row, which on a narrow page threw the title
+     onto the line BELOW its own lifecycle glyph — a lone ✓ over a hanging,
+     centred name, reading as two entries rather than one. The title takes the
+     rest of the line instead and wraps inside itself, so the glyph stays the
+     mark on the name it marks. The row still WRAPS — the cost line that
+     follows the title needs a line of its own — it is only the title that
+     stops being wrappable away from its glyph. */
+  .kbn-day-entryhead { align-items: baseline; }
+  .kbn-day-entrytitle {
+    /* Basis ZERO, not `auto`: a long name's max-content basis exceeds the line
+       and flex bumps the whole item to the next one, which is how the glyph
+       ended up alone on a line above its own title. From zero it simply takes
+       what is left and wraps inside itself. */
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: left;
+  }
+}

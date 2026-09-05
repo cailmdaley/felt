@@ -2070,15 +2070,22 @@
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
-    gap: 5px;
+    gap: 4px;
     padding-bottom: 6px;
     margin-bottom: -2px;
   }
   .kbn-viewtabs::-webkit-scrollbar { display: none; }
+  /* Trimmed until all five names fit a 390px strip. The row still scrolls —
+     that is the insurance for a narrower phone and for a bigger type scale —
+     but a strip you have to scroll to discover that a fifth view EXISTS is a
+     strip that hides a view: "BOARD" cut off mid-word at the right edge reads
+     as a rendering fault, not as an invitation. Six pixels of padding a side
+     is the whole cost of never seeing that again. */
   .kbn-viewtab {
     flex: 0 0 auto;
-    padding: 7px 12px;
-    font-size: calc(12px * var(--kbn-type-scale, 1));
+    padding: 7px 9px;
+    letter-spacing: 0.08em;
+    font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
   .kbn-viewtabs-lens {
@@ -2149,17 +2156,17 @@
     font-size: 10.5px;
     color: #7A6F5C;
   }
-  /* The mark rides at the strip's own size; the F1 flourish still reads at
-     22px, which is why the segment gets the initial and the two band heads
-     below do not. Inactive segments hold the pigment but drop back — the
-     illumination dims, it doesn't change colour. */
-  .kbn-folio-mark {
-    flex: 0 0 auto;
+  /* The initial rides at the strip's own size; the F1 flourish still reads at
+     ~22px, which is why the segment gets the illumination and the two band
+     heads below do not. Inactive segments hold the pigment but drop back —
+     the illumination dims, it doesn't change colour. */
+  .kbn-folio-name .kbn-cap {
     font-size: 15px;
     line-height: 1;
+    vertical-align: -0.04em;
+    margin-right: 0.06em;
   }
-  .kbn-folio-mark .kbn-cap { vertical-align: -0.04em; }
-  .kbn-folio-seg:not(.kbn-folio-seg-active) .kbn-folio-mark { opacity: 0.5; }
+  .kbn-folio-seg:not(.kbn-folio-seg-active) .kbn-folio-name .kbn-cap { opacity: 0.5; }
 
   /* ── The pager ─────────────────────────────────────────────────────────
      One column per screen, snapped, with the native momentum scroll. The

@@ -106,6 +106,7 @@ import {
   momentSource,
   type LedgerNarration,
 } from './join.js'
+import { coarsePointer } from '../mobile.js'
 import { formatSpanMinutes, railBounds, shiftCivilDay } from './railTime.js'
 import {
   ALOFT_KEY_LABEL,
@@ -1426,7 +1427,13 @@ function buildStateKey(present: ReadonlySet<LifecycleState>): HTMLElement | null
 function buildGestureKey(): HTMLElement {
   const item = document.createElement('span')
   item.className = 'kbn-view-key-item kbn-day-key kbn-day-key-gesture'
-  item.textContent = 'click in the day pins the moment (← → to scrub) · click past now opens the terminal · drag zooms'
+  // The gloss names the gestures this reader actually has. There is no drag
+  // to zoom under a finger (see the mousedown wiring in `renderChart`), and no
+  // arrow keys to scrub with, so promising either would be teaching a control
+  // that is not there.
+  item.textContent = coarsePointer()
+    ? 'tap in the day pins the moment · tap past now opens the terminal'
+    : 'click in the day pins the moment (← → to scrub) · click past now opens the terminal · drag zooms'
   return item
 }
 
@@ -2210,7 +2217,14 @@ class DayViewImpl implements TemporalView {
     // Sweep a span to read it close up. The press is only ever a press here —
     // whether it becomes a zoom or stays a pin is decided by how far the
     // pointer travels, in `onDragMove`.
-    chart.addEventListener('mousedown', this.onDragDown)
+    //
+    // NOT UNDER A FINGER. A horizontal sweep across the rails is how you zoom
+    // with a mouse and how you scroll the page with a thumb, and the two
+    // cannot share one surface: on a phone the drag armed itself mid-scroll,
+    // called `preventDefault` on the move, and the day simply refused to move
+    // under the reader. The pointer type decides, not the viewport — a narrow
+    // desktop window still has a mouse and still zooms.
+    if (!coarsePointer()) chart.addEventListener('mousedown', this.onDragDown)
     this.railByLane.clear()
 
     // One gridline layer behind every rail, so the hour rules run unbroken
