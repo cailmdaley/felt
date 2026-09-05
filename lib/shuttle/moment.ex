@@ -246,16 +246,6 @@ defmodule Shuttle.Moment do
         }
 
   @doc """
-  The transcript root — `$SHUTTLE_CLAUDE_PROJECTS_DIR`, else
-  `~/.claude/projects`. The env override exists so a test can point at a
-  fixture tree; nothing in production sets it. `Shuttle.HarnessPaths` owns
-  this layout alongside the pi and Codex roots, so the dispatcher and the
-  temporal reader cannot quietly disagree about where a session lives.
-  """
-  @spec projects_root() :: String.t()
-  def projects_root, do: Shuttle.HarnessPaths.claude_projects_root()
-
-  @doc """
   Validate a window without reading anything, so a controller can refuse a bad
   one before paying for the scan. Mirrors `Shuttle.Activity.check_range/2`.
   """
@@ -515,16 +505,6 @@ defmodule Shuttle.Moment do
 
   defp codex_paths(session, opts) do
     [Shuttle.HarnessPaths.codex_session_glob(session, opts)]
-  end
-
-  @doc """
-  The pi sessions root — `$SHUTTLE_PI_SESSIONS_DIR`, else
-  `~/.pi/agent/sessions`. The env override exists for tests, mirroring
-  `projects_root/0`; nothing in production sets it.
-  """
-  @spec pi_sessions_root() :: String.t()
-  def pi_sessions_root do
-    Shuttle.HarnessPaths.pi_sessions_root()
   end
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the

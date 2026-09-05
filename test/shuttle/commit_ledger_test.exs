@@ -49,12 +49,12 @@ defmodule Shuttle.CommitLedgerTest do
     File.write!(path, Enum.map_join(records, "\n", &Jason.encode!/1) <> "\n")
   end
 
-  describe "read_since/2" do
+  describe "read_between/3 — open-ended" do
     test "serves the whole line the hook wrote, unmodified", %{path: path} do
       record = commit(%{})
       write(path, [record])
 
-      assert CommitLedger.read_since(0, path: path) == [record]
+      assert CommitLedger.read_between(0, nil, path: path) == [record]
     end
 
     test "returns everything at or after the bound, oldest first", %{path: path} do
@@ -64,15 +64,15 @@ defmodule Shuttle.CommitLedgerTest do
         commit(%{"at" => 200, "sha" => "edge"})
       ])
 
-      assert Enum.map(CommitLedger.read_since(200, path: path), & &1["sha"]) == ["edge", "new"]
+      assert Enum.map(CommitLedger.read_between(200, nil, path: path), & &1["sha"]) == ["edge", "new"]
 
-      assert Enum.map(CommitLedger.read_since(0, path: path), & &1["sha"]) == [
+      assert Enum.map(CommitLedger.read_between(0, nil, path: path), & &1["sha"]) == [
                "old",
                "edge",
                "new"
              ]
 
-      assert CommitLedger.read_since(301, path: path) == []
+      assert CommitLedger.read_between(301, nil, path: path) == []
     end
 
     test "reads the rotated sibling too, and orders across both files", %{path: path} do
@@ -83,7 +83,7 @@ defmodule Shuttle.CommitLedgerTest do
 
       write(path, [commit(%{"at" => 200, "sha" => "live"})])
 
-      assert Enum.map(CommitLedger.read_since(150, path: path), & &1["sha"]) ==
+      assert Enum.map(CommitLedger.read_between(150, nil, path: path), & &1["sha"]) ==
                ["live", "rotated-late"]
     end
 
@@ -103,7 +103,7 @@ defmodule Shuttle.CommitLedgerTest do
         ) <> "\n"
       )
 
-      assert Enum.map(CommitLedger.read_since(0, path: path), & &1["sha"]) == ["good"]
+      assert Enum.map(CommitLedger.read_between(0, nil, path: path), & &1["sha"]) == ["good"]
     end
 
     test "drops a record with no sha — the join key every reader dedupes on", %{path: path} do
@@ -119,7 +119,7 @@ defmodule Shuttle.CommitLedgerTest do
         ) <> "\n"
       )
 
-      assert Enum.map(CommitLedger.read_since(0, path: path), & &1["sha"]) == ["kept"]
+      assert Enum.map(CommitLedger.read_between(0, nil, path: path), & &1["sha"]) == ["kept"]
     end
 
     test "keeps a commit the hook could not pair with a session", %{path: path} do
@@ -127,11 +127,11 @@ defmodule Shuttle.CommitLedgerTest do
       # partial by construction; an unpaired commit is data, not an error.
       write(path, [commit(%{"session" => nil, "tmux" => nil})])
 
-      assert [%{"session" => nil}] = CommitLedger.read_since(0, path: path)
+      assert [%{"session" => nil}] = CommitLedger.read_between(0, nil, path: path)
     end
 
     test "an absent ledger reads as empty", %{path: path} do
-      assert CommitLedger.read_since(0, path: path) == []
+      assert CommitLedger.read_between(0, nil, path: path) == []
     end
   end
 

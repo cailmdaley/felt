@@ -189,9 +189,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at`
   # into the fiber's `shuttle.runtime` block (the real .md under `host`), by
   # shelling the REAL `felt shuttle mark-runtime` — the actual production
-  # write path (C5: it nests under shuttle.runtime; `FrontmatterEdit`'s
-  # `:put_nested` only reaches one level deep, so hand-rolled text surgery
-  # can't produce the real shape here — shelling the CLI can). `at` lets a
+  # write path (C5: it nests under shuttle.runtime, a two-level shape
+  # hand-rolled text surgery can't produce here — shelling the CLI can). `at` lets a
   # test order a later handoff against it. The fiber must already exist
   # (write_fiber).
   defp write_dispatch_marker(_host, id, session_id, at \\ DateTime.utc_now()) do

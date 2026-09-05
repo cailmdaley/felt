@@ -94,18 +94,16 @@ defmodule Shuttle.PathListConfig do
     end
   end
 
-  @doc "Where the file lives: `<ENV>_FILE` when set, else the default."
-  @spec config_path(spec()) :: String.t()
-  def config_path(spec) do
+  # Where the file lives: `<ENV>_FILE` when set, else the default.
+  defp config_path(spec) do
     case System.get_env(spec.config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(spec.default_path)
     end
   end
 
-  @doc "The compact comma-separated `<ENV>` form, or `[]`."
-  @spec from_env(spec()) :: path_list()
-  def from_env(spec) do
+  # The compact comma-separated `<ENV>` form, or `[]`.
+  defp from_env(spec) do
     case System.get_env(spec.env) do
       v when is_binary(v) and v != "" -> v |> String.split(",") |> normalize()
       _ -> []
@@ -122,9 +120,8 @@ defmodule Shuttle.PathListConfig do
     ~s({\n  "version": 1,\n  "#{spec.json_key}": [\n#{body}\n  ]\n}\n)
   end
 
-  @doc "Trim, drop blanks and non-strings, expand, de-duplicate — in that order."
-  @spec normalize(list()) :: path_list()
-  def normalize(paths) do
+  # Trim, drop blanks and non-strings, expand, de-duplicate — in that order.
+  defp normalize(paths) do
     paths
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)

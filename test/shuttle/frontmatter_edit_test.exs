@@ -80,49 +80,6 @@ defmodule Shuttle.FrontmatterEditTest do
       assert out =~ ~s(    expr: "0 8 * * *")
     end
 
-    test "put_nested appends a fresh child inheriting the block's child indent" do
-      out = FrontmatterEdit.apply(@fm, [{:put_nested, "shuttle", "dispatched_at", "2026-06-20T18:00:00Z"}])
-      # 2-space child indent inherited from the block's existing children.
-      assert out =~ "\n  dispatched_at: 2026-06-20T18:00:00Z"
-      # Siblings and the nested schedule block untouched.
-      assert out =~ "  kind: standing"
-      assert out =~ ~s(    expr: "0 8 * * *")
-      {:ok, parsed} = YamlElixir.read_from_string(out)
-      assert parsed["shuttle"]["dispatched_at"] == "2026-06-20T18:00:00Z"
-      assert parsed["shuttle"]["kind"] == "standing"
-    end
-
-    test "put_nested replaces an existing child in place (re-stamp), value-only change" do
-      seeded = FrontmatterEdit.apply(@fm, [{:put_nested, "shuttle", "handed_off_at", "2026-06-20T18:00:00Z"}])
-      out = FrontmatterEdit.apply(seeded, [{:put_nested, "shuttle", "handed_off_at", "2026-06-20T19:00:00Z"}])
-      assert out =~ "handed_off_at: 2026-06-20T19:00:00Z"
-      refute out =~ "2026-06-20T18:00:00Z"
-      # Exactly one occurrence — replaced, not duplicated.
-      assert length(String.split(out, "handed_off_at:")) == 2
-    end
-
-    test "put_nested on a 4-space block inherits 4-space indent (felt's writer)" do
-      felt_fm = "id: x\nshuttle:\n    kind: oneshot\n    host: h\n"
-      out = FrontmatterEdit.apply(felt_fm, [{:put_nested, "shuttle", "session_uuid", "u-123"}])
-      assert out =~ "\n    session_uuid: u-123"
-      {:ok, parsed} = YamlElixir.read_from_string(out)
-      assert parsed["shuttle"]["session_uuid"] == "u-123"
-      assert parsed["shuttle"]["host"] == "h"
-    end
-
-    test "put_nested creates the parent block when absent" do
-      out = FrontmatterEdit.apply("id: x\nstatus: active\n", [{:put_nested, "shuttle", "handed_off_at", "2026-06-20T20:00:00Z"}])
-      {:ok, parsed} = YamlElixir.read_from_string(out)
-      assert parsed["shuttle"]["handed_off_at"] == "2026-06-20T20:00:00Z"
-    end
-
-    test "put_nested preserves a block scalar elsewhere in the document" do
-      out = FrontmatterEdit.apply(@fm, [{:put_nested, "shuttle", "session_uuid", "u-9"}])
-      assert out =~ "outcome: |-"
-      assert out =~ ~s(    Line one with a "quote" and unicode σ → ✓.)
-      assert out =~ "    Line two."
-    end
-
     test "no-op edits are byte-identical (idempotency contract)" do
       # Deleting an absent key and re-putting an identical value is a no-op.
       out = FrontmatterEdit.apply(@fm, [{:delete, "tempered"}, {:put, "status", "open"}])

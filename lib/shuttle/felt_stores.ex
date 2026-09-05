@@ -410,18 +410,7 @@ defmodule Shuttle.FeltStores do
 
   defp ulid_or_nil(_), do: nil
 
-  @spec registered_hosts() :: host_list()
-  def registered_hosts, do: PathListConfig.registered(@spec_)
-
   @spec save(host_list()) :: {:ok, host_list()} | {:error, term()}
   def save(hosts) when is_list(hosts), do: PathListConfig.save(@spec_, hosts)
 
-  @spec config_path() :: String.t()
-  def config_path, do: PathListConfig.config_path(@spec_)
-
-  @spec env_hosts() :: host_list()
-  def env_hosts, do: PathListConfig.from_env(@spec_)
-
-  @spec normalize(list()) :: host_list()
-  def normalize(hosts), do: PathListConfig.normalize(hosts)
 end

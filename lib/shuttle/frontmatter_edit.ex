@@ -27,15 +27,6 @@ defmodule Shuttle.FrontmatterEdit do
     * `{:delete, key}` — drop a top-level key and its whole value span.
     * `{:delete_nested, parent, child}` — drop a child key (and its span) from
       within the `parent:` block (e.g. a runtime key under `shuttle:`).
-    * `{:put_nested, parent, child, value}` — set/replace a scalar `child:` key
-      within the `parent:` block (e.g. a runtime key under `shuttle:`). The
-      child's indentation is inherited from the block's existing children (so it
-      matches felt's 4-space and the Go writer's 2-space alike); a fresh child is
-      appended at the end of the block's span. Creates the `parent:` block itself
-      if absent. This is the write counterpart to `:delete_nested` — together
-      they let the daemon stamp the continuation fields
-      (`session_uuid`/`dispatched_at`/`handed_off_at`) into the `shuttle:` block.
-
   `apply/2` returns the new frontmatter text. The lifecycle store reconstructs
   the file as `"---\n" <> apply(raw_fm, ops) <> "---\n" <> body`.
   """
@@ -45,7 +36,6 @@ defmodule Shuttle.FrontmatterEdit do
           {:put, String.t(), term()}
           | {:delete, String.t()}
           | {:delete_nested, String.t(), String.t()}
-          | {:put_nested, String.t(), String.t(), term()}
 
   @doc """
   Apply a list of `op`s to the raw frontmatter `text`, returning new text.
@@ -252,72 +242,12 @@ defmodule Shuttle.FrontmatterEdit do
     end)
   end
 
-  defp apply_op(entries, {:put_nested, parent, child, value}) do
-    if Enum.any?(entries, &(&1.key == parent)) do
-      Enum.map(entries, fn
-        %{key: ^parent, lines: lines} = e -> %{e | lines: put_nested_key(lines, child, value)}
-        other -> other
-      end)
-    else
-      # No parent block yet — create it with the single child indented two past
-      # the (zero-indent) parent key. Appended at the end, like a fresh top-level
-      # key.
-      entries ++ [%{key: parent, lines: ["#{parent}:", "  #{child}: #{scalar(value)}"]}]
-    end
-  end
-
   # Within a block's lines (the `parent:` line followed by indented children),
   # drop the `child:` line and any deeper-indented continuation lines under it.
   # The child's own indentation defines the span: subsequent lines that are
   # blank or indented strictly deeper than the child line belong to its value.
   defp drop_nested_key([header | rest], child) do
     [header | reject_child_span(rest, child)]
-  end
-
-  # Within a block's lines (`parent:` header followed by indented children), set
-  # `child:` to `value`. If the child already exists, replace its line in place
-  # preserving its own indentation (so a re-stamp is byte-stable but for the
-  # value). Otherwise append a fresh `child: value` line, indented to match the
-  # block's existing children (felt writes 4 spaces, the Go schema writer 2 — we
-  # inherit whichever this block already uses), at the end of the block span.
-  defp put_nested_key([header | rest] = lines, child, value) do
-    if Enum.any?(rest, &match_child_header?(&1, child)) do
-      [
-        header
-        | Enum.map(rest, fn line ->
-            if match_child_header?(line, child) do
-              "#{String.duplicate(" ", indent_of(line))}#{child}: #{scalar(value)}"
-            else
-              line
-            end
-          end)
-      ]
-    else
-      new_line = "#{String.duplicate(" ", nested_child_indent(rest))}#{child}: #{scalar(value)}"
-      insert_before_trailing_blanks(lines, new_line)
-    end
-  end
-
-  # Append `new_line` after the block's last non-blank line, keeping any trailing
-  # blank lines (which `parse_entries` folds into the block span) after it — so a
-  # fresh child lands inside the block, not below a stray blank.
-  defp insert_before_trailing_blanks(lines, new_line) do
-    {trailing_blanks, kept} =
-      lines
-      |> Enum.reverse()
-      |> Enum.split_while(&blank?/1)
-
-    Enum.reverse(kept) ++ [new_line] ++ Enum.reverse(trailing_blanks)
-  end
-
-  # The indentation (column count) the block's children sit at: the leading
-  # whitespace of its first non-blank child line, or 2 when the block has no
-  # children yet (a bare `parent:` header).
-  defp nested_child_indent(child_lines) do
-    case Enum.find(child_lines, fn line -> not blank?(line) end) do
-      nil -> 2
-      line -> indent_of(line)
-    end
   end
 
   defp reject_child_span(lines, child) do

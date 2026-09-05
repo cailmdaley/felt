@@ -237,7 +237,7 @@ defmodule Shuttle.SessionLedger do
 
     [path, path <> @rotated_suffix]
     |> Enum.filter(&File.regular?/1)
-    |> Enum.find_value(&newest_session_match(&1, session))
+    |> Enum.find_value(&newest_match(&1, session, "session"))
   end
 
   def latest_for_session(_session, _opts), do: nil
@@ -265,20 +265,23 @@ defmodule Shuttle.SessionLedger do
     # order) — with a substring prefilter so only candidate lines are decoded.
     [path, path <> @rotated_suffix]
     |> Enum.filter(&File.regular?/1)
-    |> Enum.find_value(fn file -> newest_match_in(file, uid) end)
+    |> Enum.find_value(&newest_match(&1, uid, "uid"))
   end
 
   def latest_for_uid(_uid, _opts), do: nil
 
-  defp newest_match_in(file, uid) do
+  # Newest-first scan of one ledger file for the line whose `key` equals
+  # `needle`. A `"uid"` match additionally requires a non-empty session — a
+  # lineage rung is only useful if it names a transcript.
+  defp newest_match(file, needle, key) do
     file
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.reverse()
     |> Enum.find_value(fn line ->
-      with true <- String.contains?(line, uid),
-           {:ok, %{"uid" => ^uid, "session" => session} = record} <- Jason.decode(line),
-           true <- is_binary(session) and session != "" do
+      with true <- String.contains?(line, needle),
+           {:ok, %{^key => ^needle} = record} <- Jason.decode(line),
+           true <- key != "uid" or (is_binary(record["session"]) and record["session"] != "") do
         record
       else
         _ -> nil
@@ -287,23 +290,6 @@ defmodule Shuttle.SessionLedger do
   rescue
     # Vanished or unreadable between the check and the read — a rotation
     # racing this scan. Fall through to the next file.
-    _ -> nil
-  end
-
-  defp newest_session_match(file, session) do
-    file
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.reverse()
-    |> Enum.find_value(fn line ->
-      with true <- String.contains?(line, session),
-           {:ok, %{"session" => ^session} = record} <- Jason.decode(line) do
-        record
-      else
-        _ -> nil
-      end
-    end)
-  rescue
     _ -> nil
   end
 
