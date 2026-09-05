@@ -1961,8 +1961,7 @@ defmodule Shuttle.PollerTest do
 
       %{
         state
-        | running: Map.put(state.running, fiber_id, meta),
-          claimed: MapSet.put(state.claimed, fiber_id)
+        | running: Map.put(state.running, fiber_id, meta)
       }
     end)
 

@@ -120,7 +120,7 @@ defmodule Shuttle.Poller.Snapshot do
       retrying: [],
       standing_roles:
         StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
-      claimed_count: MapSet.size(state.claimed),
+      claimed_count: map_size(state.running),
       max_concurrent: state.max_concurrent_workers,
       document_cache:
         state.document_cache_stats

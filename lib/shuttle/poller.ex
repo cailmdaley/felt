@@ -143,11 +143,6 @@ defmodule Shuttle.Poller do
       # adopting live shuttle sessions (`adopt_orphans`) and every poll
       # reconciles entries whose tmux session has died.
       running: %{},
-      # MapSet of runtime keys (uid when the fiber carries one, else slug —
-      # identical to a `running` key) for fibers with a live or queued worker.
-      # Re-keyed off slug in the identity cutover so it shares `running`'s key:
-      # the only slug consumer left is felt I/O.
-      claimed: MapSet.new(),
       standing_roles: [],
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
@@ -993,7 +988,7 @@ defmodule Shuttle.Poller do
     state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
 
     cond do
-      running_key(state, fiber_id) != nil or MapSet.member?(state.claimed, runtime_key) ->
+      running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key) ->
         {:reply, {:error, :already_running}, state}
 
       fiber_session_live?(state, fiber_id, uid) ->
@@ -1964,9 +1959,11 @@ defmodule Shuttle.Poller do
       running_key(state, fiber_id) != nil ->
         false
 
-      # Must not be claimed (retry queued). `claimed` is keyed by runtime key
-      # (uid when present), so match the candidate's runtime key, not its slug.
-      MapSet.member?(state.claimed, runtime_key_for_fiber(fiber)) ->
+      # Not subsumed by the clause above: a fiber renamed mid-flight has the
+      # OLD slug in its running meta, so only the uid-shaped runtime key finds
+      # it. `running` is keyed by runtime key (uid when present), so match the
+      # candidate's runtime key, not its slug.
+      Map.has_key?(state.running, runtime_key_for_fiber(fiber)) ->
         false
 
       # Resume-loop circuit breaker is open: this fiber's workers keep dying
@@ -2544,7 +2541,7 @@ defmodule Shuttle.Poller do
     fiber = maybe_force_rearm(fiber, opts, state)
 
     # The runtime key (uid when the fiber carries one, else slug) keys every
-    # runtime map — running, claimed, dispatch_failures. felt I/O below stays
+    # runtime map — running, dispatch_failures. felt I/O below stays
     # addressed by the slug `fiber_id`.
     runtime_key = runtime_key_for_fiber(fiber)
 
@@ -2598,7 +2595,6 @@ defmodule Shuttle.Poller do
               %{
                 state
                 | running: running,
-                  claimed: MapSet.put(state.claimed, runtime_key),
                   dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
               }
               |> note_running(runtime_key)
@@ -2610,7 +2606,6 @@ defmodule Shuttle.Poller do
             # failure for the `blocked` snapshot; the next poll re-evaluates the
             # fiber (status:active + no watcher → eligible / adopted again).
             Logger.error("Failed to start watcher for #{fiber_id}: #{inspect(reason)}")
-            state = release_claim(state, runtime_key)
             state = record_dispatch_failure(state, fiber, :watcher_start_failed)
             {state, {:error, :watcher_start_failed}}
         end
@@ -2749,7 +2744,6 @@ defmodule Shuttle.Poller do
           %{
             state
             | running: Map.put(state.running, runtime_key, running_meta),
-              claimed: MapSet.put(state.claimed, runtime_key),
               dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
           }
           |> note_running(runtime_key)
@@ -2983,8 +2977,7 @@ defmodule Shuttle.Poller do
 
                 cond do
                   status == "closed" ->
-                    # Work complete or blocked — release claim
-                    release_claim(state, runtime_key)
+                    state
 
                   standing_role?(fiber, state) ->
                     # A STANDING (cron) worker's exit makes the role awaiting
@@ -2996,7 +2989,7 @@ defmodule Shuttle.Poller do
                     # skips re-dispatch).
                     StandingRoles.mark_standing_awaiting(fiber_id)
 
-                    release_claim(state, runtime_key)
+                    state
 
                   pinned_role?(fiber) ->
                     # A PINNED role's session ended. Two cases, split by the
@@ -3018,12 +3011,11 @@ defmodule Shuttle.Poller do
                     #    re-attaches with Resume (force-dispatch → rearm). Write
                     #    BEFORE release_claim so the document reflects the parked
                     #    state before the claim frees.
-                    if Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber) do
-                      release_claim(state, runtime_key)
-                    else
+                    unless Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber) do
                       StandingRoles.mark_pinned_parked(fiber_id)
-                      release_claim(state, runtime_key)
                     end
+
+                    state
 
                   true ->
                     # A still-active ONESHOT continuation: the next poll re-picks
@@ -3033,14 +3025,12 @@ defmodule Shuttle.Poller do
                     # lifetime to the resume-loop breaker: a rapid death (lived <
                     # threshold) increments the count and may open the circuit; a
                     # healthy run clears it.
-                    state
-                    |> note_worker_lifetime(runtime_key, fiber, meta)
-                    |> release_claim(runtime_key)
+                    note_worker_lifetime(state, runtime_key, fiber, meta)
                 end
 
               {:error, _} ->
-                # Can't read fiber — release the claim; the next poll re-reads it.
-                release_claim(state, runtime_key)
+                # Can't read fiber — the next poll re-reads it.
+                state
             end
         end
     end
@@ -3232,18 +3222,8 @@ defmodule Shuttle.Poller do
     max(state.max_concurrent_workers - map_size(state.running), 0)
   end
 
-  defp release_claim(%State{} = state, runtime_key) do
-    %{state | claimed: MapSet.delete(state.claimed, runtime_key)}
-  end
-
-  # Both `running` and `claimed` are keyed by the same runtime key now, so a
-  # single delete on each clears the fiber's runtime footprint.
   defp remove_running(%State{} = state, runtime_key) do
-    %{
-      state
-      | running: Map.delete(state.running, runtime_key),
-        claimed: MapSet.delete(state.claimed, runtime_key)
-    }
+    %{state | running: Map.delete(state.running, runtime_key)}
   end
 
   # tmux's messages for a session (or the whole server) that's already gone,
@@ -3277,11 +3257,11 @@ defmodule Shuttle.Poller do
 
     open? =
       running_key(state, fiber_id) != nil or
-        MapSet.member?(state.claimed, runtime_key) or
+        Map.has_key?(state.running, runtime_key) or
         fiber_session_live?(state, fiber_id, uid)
 
     if forced_fresh? and open? do
-      cut_open_session(state, fiber_id, runtime_key, uid)
+      cut_open_session(state, fiber_id, uid)
     else
       state
     end
@@ -3292,7 +3272,7 @@ defmodule Shuttle.Poller do
   # re-dispatch: even if the fresh dispatch that follows never spawns, the cut
   # session reads clean (`handed_off_at >= dispatched_at` → fresh) and the next
   # poll starts fresh rather than resuming the killed transcript.
-  defp cut_open_session(%State{} = state, fiber_id, runtime_key, uid) do
+  defp cut_open_session(%State{} = state, fiber_id, uid) do
     felt_store = owning_store(fiber_id, state)
 
     # 1. Clean-exit marker — daemon-side, no worker spawned, no transcript
@@ -3304,11 +3284,11 @@ defmodule Shuttle.Poller do
     #    poll doesn't also report the exit and double-handle through
     #    handle_worker_exit) and kill exactly the session we're watching — the
     #    kill_session twin. An ORPHAN (live tmux, no running entry): resolve the
-    #    live name by liveness and release any lingering claim.
+    #    live name by liveness.
     {state, session} =
       case running_key(state, fiber_id) do
         nil ->
-          {release_claim(state, runtime_key), live_session_for_fiber(state, fiber_id, uid)}
+          {state, live_session_for_fiber(state, fiber_id, uid)}
 
         key ->
           meta = Map.get(state.running, key)
