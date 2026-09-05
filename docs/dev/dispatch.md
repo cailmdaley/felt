@@ -66,6 +66,18 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   run id) and preserves `next_due_at`; worker exit flips state to
   `awaiting`, and `felt shuttle accept` advances `next_due_at` only for
   scheduled runs.
+- **A finished run is finished — there is no reopen.** When a worker's tmux
+  session is gone, `Shuttle.Continuation` decides between resuming the
+  transcript and starting fresh from one comparison: a `handed_off_at` newer
+  than `dispatched_at` (the worker's own `felt shuttle handoff`) means fresh;
+  no newer handoff means the session died mid-thought and its `session_uuid`
+  is resumed. A clean handoff therefore *is* the end of that conversation: the
+  next worker lands on the rewritten `## Status`, and `resume`/`reopen` on a
+  closed or awaiting fiber re-arm the document for a fresh dispatch rather
+  than reattaching. The only reattach window is while the run is live
+  (`felt shuttle attach`); a worker that wants a human's word before it ends
+  stays alive at the checkpoint instead of handing off (the pinned-role
+  contract). This is the contract, not a gap.
 
 ## Dispatch prompt structure
 
