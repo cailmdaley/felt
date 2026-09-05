@@ -1709,6 +1709,21 @@ export class KanbanSurfaceRenderer {
         this.o.openWorker?.(tmuxName, card.shuttleHost)
       })
       rightChip = w
+      // Under a finger the terminal is out of reach, but the session is not:
+      // a bridged worker's pill becomes a link to it in the Claude app. The
+      // anchor replaces the button (same classes, same place); the touch
+      // stylesheet hides only the buttons, so a card with a link keeps its
+      // pill and a card without one shows the aloft state elsewhere.
+      if (coarsePointer() && card.sessionLink) {
+        const a = document.createElement('a')
+        a.className = `${w.className} kbn-card-worker-link`
+        a.textContent = w.textContent
+        a.href = card.sessionLink
+        a.title = 'Open this session in the Claude app'
+        a.setAttribute('aria-label', `Open worker session in the Claude app: ${tmuxName}`)
+        a.addEventListener('click', (e) => e.stopPropagation())
+        rightChip = a
+      }
     }
 
     // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions

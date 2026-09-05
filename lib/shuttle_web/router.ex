@@ -120,10 +120,6 @@ defmodule ShuttleWeb.Router do
     # transcript lives on the machine that ran the session, named by `host` or
     # by this host's session ledger.
     get("/moment", MomentController, :show)
-    # Where a phone opens the session: the claude.ai bridge URL a remote-
-    # controlled Claude Code session writes into its own transcript. Host-
-    # routed like /moment, for the same reason.
-    get("/session-link", SessionLinkController, :show)
     # Native transcript provenance: JSON receipt, with host routing selected
     # from the session ledger or an explicit `host` query parameter.
     get("/transcript", TranscriptController, :show)

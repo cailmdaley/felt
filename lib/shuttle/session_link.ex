@@ -27,11 +27,41 @@ defmodule Shuttle.SessionLink do
   """
   @spec remote_url(String.t(), keyword()) :: String.t() | nil
   def remote_url(session, opts \\ []) when is_binary(session) do
-    case Moment.transcript_path(session, opts) do
-      path when is_binary(path) -> last_url(path)
-      nil -> nil
+    with path when is_binary(path) <- Moment.transcript_path(session, opts) do
+      last_url(path)
     end
   end
+
+  # A found link is stable for the life of the session; a session with no link
+  # yet (the bridge comes up a few seconds after launch) is asked again after
+  # this long. Stored in persistent_term: a handful of running workers, written
+  # once each — the poll that stamps every feed row must never re-read a
+  # transcript it has already read.
+  @retry_ms 60_000
+
+  @doc """
+  `remote_url/2`, memoised per session. What the poller stamps on a feed row.
+  """
+  @spec cached_url(String.t(), keyword()) :: String.t() | nil
+  def cached_url(session, opts \\ []) when is_binary(session) do
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get({__MODULE__, session}, nil) do
+      {url, _} when is_binary(url) ->
+        url
+
+      {nil, checked_at} when now - checked_at < @retry_ms ->
+        nil
+
+      _ ->
+        url = remote_url(session, opts)
+        :persistent_term.put({__MODULE__, session}, {url, now})
+        url
+    end
+  end
+
+  @doc false
+  def forget(session), do: :persistent_term.erase({__MODULE__, session})
 
   defp last_url(path) do
     path

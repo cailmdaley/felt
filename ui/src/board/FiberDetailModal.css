@@ -1418,7 +1418,7 @@
    Note what is NOT here: any width or height. The sheet's geometry is
    `inset`, and FiberDetailModal deliberately writes no inline geometry in
    this mode — an inline `left` would outrank every rule below. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-detail-overlay.kbn-detail-sheet {
     inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
            env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);

@@ -59,7 +59,7 @@ import {
 } from './KanbanRules.js'
 import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
-import { isMobileViewport, onMobileChange } from './mobile.js'
+import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import {
   collectCards,
@@ -252,8 +252,18 @@ export class KanbanModal {
     // browser as that same gesture finishes, immediately hiding the terminal
     // again. Let the browser finish the gesture first; session selection and
     // Kitty activation then happen in the next task.
+    //
+    // Under a finger there is no kitty to raise: the same gesture goes to the
+    // worker's session in the Claude app instead, when the feed knows its
+    // address (`sessionLink`, stamped by the owning daemon), and to nothing
+    // when it doesn't — never to a terminal on some other machine.
     this.openWorkerAfterGesture = this.onOpenWorker
       ? (tmuxSessionName, shuttleHost) => {
+          if (coarsePointer()) {
+            const link = this.sessionLinkFor(tmuxSessionName)
+            if (link) window.location.assign(link)
+            return
+          }
           window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
         }
       : undefined
@@ -1668,6 +1678,15 @@ export class KanbanModal {
    * settle. Sets `lastResponseSig` so a reconcile that agrees dedups to a
    * no-op re-render.
    */
+  /** The claude.ai address of the live worker running as `tmux`, if the last
+   * feed carried one — the phone's substitute for "open the terminal". */
+  private sessionLinkFor(tmux: string): string | undefined {
+    const r = this.lastResponse
+    if (!r) return undefined
+    const cards = [...r.now.drafts, ...r.now.inFlight, ...r.now.awaitingReview]
+    return cards.find((c) => c.runningWorker === tmux)?.sessionLink
+  }
+
   private applyResponse(data: KanbanResponse): void {
     ++this.inflightFetchToken
     this.lastResponse = data

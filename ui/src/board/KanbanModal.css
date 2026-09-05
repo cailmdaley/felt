@@ -2360,12 +2360,15 @@
      no meaning under a finger. The attention and waiting phases stay: those
      are STATE ("needs you · 11h"), and the board would be lying by omission
      without them. They just stop pretending to be buttons. */
-  .kbn-card-worker-aloft { display: none; }
-  .kbn-card-worker-attention,
-  .kbn-card-worker-waiting {
+  .kbn-card-worker-aloft:not(.kbn-card-worker-link) { display: none; }
+  .kbn-card-worker-attention:not(.kbn-card-worker-link),
+  .kbn-card-worker-waiting:not(.kbn-card-worker-link) {
     pointer-events: none;
     cursor: default;
   }
+  /* …unless the daemon knows where the session lives on the web: then the
+     pill is a link to it in the Claude app, in every phase. */
+  .kbn-card-worker-link { text-decoration: none; }
   /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
      cursor and the lift-on-press would be promising a gesture that no longer
      exists. */

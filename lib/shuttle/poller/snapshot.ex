@@ -196,7 +196,7 @@ defmodule Shuttle.Poller.Snapshot do
     |> index_match(index)
     |> case do
       nil -> entry
-      payload -> Map.put(entry, :runtime, payload)
+      payload -> Map.put(entry, :runtime, put_session_link(payload, fiber))
     end
   end
 
@@ -228,6 +228,23 @@ defmodule Shuttle.Poller.Snapshot do
     |> case do
       nil -> entry
       %{parked_at: at} -> entry |> Map.put(:held, true) |> Map.put(:held_since, at)
+    end
+  end
+
+  # Where a phone opens this worker: the claude.ai bridge URL of the session
+  # named by the fiber's own `shuttle.runtime.session_uuid` (the transcript is
+  # on this host — the owner stamps its own rows). Omitted when the session was
+  # never bridged, so a viewer renders a stamp rather than a link to nowhere.
+  defp put_session_link(payload, fiber) do
+    case get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+      uuid when is_binary(uuid) and uuid != "" ->
+        case Shuttle.SessionLink.cached_url(uuid) do
+          url when is_binary(url) -> Map.put(payload, :session_link, url)
+          nil -> payload
+        end
+
+      _ ->
+        payload
     end
   end
 

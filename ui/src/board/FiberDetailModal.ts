@@ -629,28 +629,23 @@ export class FiberDetailModal {
     // class, same gesture: click opens the worker's tmux session in kitty.
     //
     // A TERMINAL IS NOT SOMETHING A PHONE HAS. On a coarse pointer the pill
-    // becomes a LINK instead: a remote-controlled Claude Code session writes
-    // its claude.ai bridge URL into its own transcript, and the daemon reads
-    // it back (`/api/v1/session-link`, host-routed to the worker's machine).
-    // That URL is a universal link — on a phone with the Claude app it opens
-    // this very session. The mark renders at once as a plain stamp (the
-    // status — a worker is aloft — is the first thing you open a card to
-    // learn) and gains its href when the daemon answers; a session that was
-    // never bridged simply stays a stamp rather than a link to nowhere.
+    // is a LINK instead: the owning daemon stamps each live worker's claude.ai
+    // bridge URL on the feed row (`sessionLink`), a universal link the Claude
+    // app claims — so the tap opens this very session on the phone. A session
+    // that was never bridged keeps the stamp and drops the promise: a plain
+    // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
     if (card.runningWorker && coarsePointer()) {
-      const mark = document.createElement('a')
-      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
-      mark.title = `Worker aloft — ${card.runningWorker}`
+      const mark = document.createElement(card.sessionLink ? 'a' : 'span')
+      mark.className = 'kbn-card-worker kbn-detail-aloft'
       mark.textContent = '▸ aloft'
-      mark.addEventListener('click', (e) => e.stopPropagation())
-      if (card.sessionUuid) {
-        void this.fetchSessionLink(card.sessionUuid, card.shuttleHost).then((url) => {
-          if (!url) return
-          mark.href = url
-          mark.classList.remove('kbn-detail-aloft-static')
-          mark.title = 'Worker aloft — open this session in the Claude app'
-        })
+      if (mark instanceof HTMLAnchorElement && card.sessionLink) {
+        mark.href = card.sessionLink
+        mark.title = 'Worker aloft — open this session in the Claude app'
+        mark.addEventListener('click', (e) => e.stopPropagation())
+      } else {
+        mark.classList.add('kbn-detail-aloft-static')
+        mark.title = `Worker aloft — ${card.runningWorker}`
       }
       aloftPill = mark
     } else if (card.runningWorker && this.onOpenWorker) {
@@ -1173,22 +1168,6 @@ export class FiberDetailModal {
    * answer is to refetch rather than to re-derive whether a refetch is owed —
    * which is also why a tick already in flight does not block it.
    */
-  /** Where a phone can open the worker's session: the claude.ai bridge URL
-   * the daemon reads out of the transcript on the worker's host. `null` when
-   * the session was never bridged or the daemon can't be reached. */
-  private async fetchSessionLink(sessionUuid: string, host?: string): Promise<string | null> {
-    const params = new URLSearchParams({ session: sessionUuid })
-    if (host) params.set('host', host)
-    try {
-      const res = await fetch(`${this.shuttleBase}/api/v1/session-link?${params}`)
-      if (!res.ok) return null
-      const body = (await res.json()) as { url?: unknown }
-      return typeof body.url === 'string' && body.url.startsWith('https://') ? body.url : null
-    } catch {
-      return null
-    }
-  }
-
   private async forceReload(): Promise<void> {
     const card = this.card
     const overlay = this.overlay

@@ -60,6 +60,9 @@ interface CompositeRuntime {
    * only for a tracked running worker; drives the In-flight idle-descending sort
    * and the 60s waiting-chip gate. */
   lastActivityAt?: number;
+  /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
+   * the session wrote into its own transcript. Absent when never bridged. */
+  sessionLink?: string;
 }
 
 export interface CompositeEntry {
@@ -171,7 +174,11 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   if (typeof session !== 'string' || session.length === 0) return undefined;
   const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
-  return { tmuxSession: session, phase, lastActivityAt };
+  const sessionLink =
+    typeof value.session_link === 'string' && value.session_link.startsWith('https://')
+      ? value.session_link
+      : undefined;
+  return { tmuxSession: session, phase, lastActivityAt, sessionLink };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
