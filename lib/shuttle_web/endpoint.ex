@@ -21,7 +21,7 @@ defmodule ShuttleWeb.Endpoint do
     # decision (env override / release priv / checkout — see ShuttleWeb.Assets)
     # rather than a path baked at compile time on the build machine.
     from: {ShuttleWeb.Assets, :dist, []},
-    only: ~w(assets fonts index.html paper.html favicon.ico apple-touch-icon.png)
+    only: ~w(assets fonts index.html paper.html favicon.ico apple-touch-icon.png manifest.webmanifest)
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

@@ -1,0 +1,9 @@
+{
+  "name": "Shuttle",
+  "short_name": "Shuttle",
+  "start_url": "/?view=desk",
+  "display": "standalone",
+  "background_color": "#EDE2CE",
+  "theme_color": "#EDE2CE",
+  "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }]
+}
