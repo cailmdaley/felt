@@ -817,7 +817,6 @@ export function overlayDueEdits(
   cards: readonly KanbanCard[],
   edits: ReadonlyMap<string, string>,
 ): { cards: KanbanCard[]; confirmed: string[] } {
-  if (edits.size === 0) return { cards: [...cards], confirmed: [] }
   const confirmed: string[] = []
   const next = cards.map((c) => {
     const edit = edits.get(c.id)
@@ -932,15 +931,14 @@ function buildFiberRow(
   // fibers with real signal. `createdAt` never enters it — see `createdMs`
   // and the comparator below for why a never-worked, no-due fiber sinks
   // instead of floating on how recently it was created.
-  const DAY_MS = 86_400_000
   let workMs = instantMs(card.closedAt) ?? 0
   for (const day of days.keys()) workMs = Math.max(workMs, civilDayNoon(day)?.getTime() ?? 0)
 
   const dueMs = dueSortMs(card.due)
   let dueMsEquivalent = 0
   if (dueMs !== undefined) {
-    const daysUntilDue = Math.round((dueMs - todayNoonMs) / DAY_MS)
-    dueMsEquivalent = todayNoonMs - Math.max(0, daysUntilDue) * DAY_MS
+    const daysUntilDue = Math.round((dueMs - todayNoonMs) / DAY_MS_CONST)
+    dueMsEquivalent = todayNoonMs - Math.max(0, daysUntilDue) * DAY_MS_CONST
   }
 
   const sortMs = Math.max(workMs, dueMsEquivalent)
@@ -1151,7 +1149,6 @@ class ChronicleView implements TemporalView {
   /** The sticky month bearing in the corner cell, and what it currently says.
    *  Held so a scroll can repaint one word without touching the grid. */
   private monthEl: HTMLElement | null = null
-  private monthText = ''
   /** The cursor value the scroll is currently anchored on, so a move re-anchors
    *  while an unrelated refresh leaves the reader where they were. */
   private anchoredOn: string | null = null
@@ -1219,7 +1216,6 @@ class ChronicleView implements TemporalView {
   private pendingScrollDelta = 0
   /** Activity chunks already requested, by key — see chronicleWindow. */
   private fetchedChunks = new Map<string, readonly ActivityBucket[]>()
-  private onScroll: (() => void) | null = null
   private autoScrollTimer: number | null = null
 
   /** The era being read. Non-null puts the face above the grid and dims every
@@ -1276,25 +1272,12 @@ class ChronicleView implements TemporalView {
     this.root = page.root
     this.body = page.body
     this.ctx = ctx
-    this.signature = ''
-    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
-    // value" — and they only behave if they move together. Clearing one alone
-    // leaves the view believing it is anchored on a cursor from a previous
-    // visit, so both are cleared here and in unmount, side by side.
-    this.didAnchor = false
-    this.anchoredOn = null
-    this.dayWidthPx = 0
-    this.monthEl = null
-    this.monthText = ''
     // The head's right end. `titleRow` is `space-between` with an out-of-flow
     // centre, so a third child lands at the right margin without any of the
     // three moving the others.
     page.titleRow.append(this.buildSearch(ctx))
     host.append(page.root)
 
-    // Refit the columns when the board changes width. Only the CSS variable
-    // moves; every mark's position is a calc() over it, so the whole chronicle
-    // rescales without a rebuild.
     this.onEsc = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || this.scopedCycleId === null || !this.ctx) return
       e.stopPropagation() // the board closes itself on Escape; leaving an era comes first
@@ -1302,6 +1285,9 @@ class ChronicleView implements TemporalView {
     }
     document.addEventListener('keydown', this.onEsc, true)
 
+    // Refit the columns when the board changes width. Only the CSS variable
+    // moves; every mark's position is a calc() over it, so the whole chronicle
+    // rescales without a rebuild.
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.fitDayWidth())
       this.resizeObserver.observe(page.body)
@@ -1336,21 +1322,14 @@ class ChronicleView implements TemporalView {
     this.window = null
     this.pendingScrollDelta = 0
     this.fetchedChunks = new Map()
-    this.onScroll = null
     this.monthEl = null
-    this.monthText = ''
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
     // A search is a question about one visit, like the era scope above it: the
     // box goes with the head that held it, and a pending debounce must not fire
     // into a torn-down view.
-    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
-    this.searchTimer = null
-    this.searchSeq += 1
+    this.resetSearch()
     this.searchBox = null
-    this.searchQuery = ''
-    this.recordHits = []
-    this.recordHitsFor = ''
     this.foundId = null
     this.root?.remove()
     this.root = null
@@ -1358,6 +1337,11 @@ class ChronicleView implements TemporalView {
     this.scroller = null
     this.ctx = null
     this.signature = ''
+    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
+    // value" — and they only behave if they move together. Clearing one alone
+    // would leave the next visit believing it is anchored on a cursor from the
+    // last one, so they are cleared side by side. A view is a singleton, and
+    // unmount always runs before the next mount, so this is the only clear.
     this.didAnchor = false
     this.anchoredOn = null
     this.dayWidthPx = 0
@@ -1452,13 +1436,19 @@ class ChronicleView implements TemporalView {
     }, SEARCH_DEBOUNCE_MS)
   }
 
-  private clearSearch(ctx: ViewContext): void {
-    this.searchQuery = ''
-    this.recordHits = []
-    this.recordHitsFor = ''
+  /** Forget the query and everything derived from it, and make sure a pending
+   *  debounce cannot fire into the state that follows. */
+  private resetSearch(): void {
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer)
     this.searchTimer = null
     this.searchSeq += 1
+    this.searchQuery = ''
+    this.recordHits = []
+    this.recordHitsFor = ''
+  }
+
+  private clearSearch(ctx: ViewContext): void {
+    this.resetSearch()
     if (this.searchBox) this.searchBox.input.value = ''
     this.setFound(null)
     this.paintHits(ctx)
@@ -1761,13 +1751,11 @@ class ChronicleView implements TemporalView {
       return
     }
 
-    const shown = rows
     const peak = peakSpellWork(rows)
 
     const bands = this.collectBands(ctx, days, dayIndex)
     // Always at least one lane: empty, the strip is the target you draw on.
     const laneCount = Math.max(1, ...bands.map((b) => b.lane + 1))
-    const bodyRows = shown.length
 
     const scroller = document.createElement('div')
     scroller.className = 'chr-scroll'
@@ -1776,20 +1764,19 @@ class ChronicleView implements TemporalView {
     grid.className = 'chr-grid'
     grid.style.gridTemplateColumns = `var(--chr-label-w) repeat(${days.length}, var(--chr-day-w))`
     grid.style.gridTemplateRows =
-      `var(--chr-head-h) repeat(${laneCount}, var(--chr-cycle-h)) repeat(${bodyRows}, var(--chr-row-h))`
+      `var(--chr-head-h) repeat(${laneCount}, var(--chr-cycle-h)) repeat(${rows.length}, var(--chr-row-h))`
 
     grid.append(this.buildCorner(rows.length), ...this.buildHead(days, ctx))
-    grid.append(...this.buildWashes(days, laneCount + bodyRows))
+    grid.append(...this.buildWashes(days))
     grid.append(...this.buildCycleStrip(bands, laneCount, days, ctx))
     // Fiber rows start below the cycle strip.
-    const rowOffset = laneCount
     const era = this.scopedCycleId === null ? null : bands.find((b) => b.id === this.scopedCycleId)
-    let r = rowOffset
-    for (let i = 0; i < shown.length; i += 1) {
-      const parts = this.buildRow(shown[i], r++, days, dayIndex, peak, ctx)
+    let r = laneCount
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = this.buildRow(rows[i], r++, days, dayIndex, peak, ctx)
       // Dimmed, never hidden: a row with no part in the era is still part of
       // the record, and removing it would make the era look emptier than it was.
-      if (era && !this.rowInSpan(shown[i], era, days)) {
+      if (era && !this.rowInSpan(rows[i], era, days)) {
         for (const el of parts) el.classList.add('chr-outside')
       }
       grid.append(...parts)
@@ -1802,10 +1789,9 @@ class ChronicleView implements TemporalView {
     if (todayIdx >= 0) grid.append(this.buildTodaySeam(todayIdx))
 
     scroller.append(grid)
-    const scoped = this.scopedCycleId === null ? null : bands.find((b) => b.id === this.scopedCycleId)
-    if (scoped) {
-      body.append(this.buildFace(scoped, days, shown, buckets, ctx))
-      void this.loadIntention(scoped.id, ctx)
+    if (era) {
+      body.append(this.buildFace(era, days, rows, buckets, ctx))
+      void this.loadIntention(era.id, ctx)
     } else if (this.scopedCycleId !== null) {
       // The era left the window (its dates moved, or it was deleted). Silently
       // stop scoping rather than showing a face for a band that is not there.
@@ -1816,11 +1802,11 @@ class ChronicleView implements TemporalView {
     this.scroller = scroller
     // The scroller is a new element every rebuild, so the listener goes on with
     // it. Passive: extension never prevents the scroll it is reacting to.
-    this.onScroll = () => {
+    const onScroll = (): void => {
       this.bearMonth()
       this.maybeExtend()
     }
-    scroller.addEventListener('scroll', this.onScroll, { passive: true })
+    scroller.addEventListener('scroll', onScroll, { passive: true })
     this.fitDayWidth()
     this.bearMonth()
     // The grid is new; the jump the reader made is not. Re-light it.
@@ -2170,7 +2156,8 @@ class ChronicleView implements TemporalView {
     const inSpan = (idx: number | null): boolean =>
       idx !== null && idx >= band.startIdx && idx <= band.endIdx
     const touched = rows.filter((r) => this.rowInSpan(r, band, days)).length
-    const dues = ctx.cards.filter((c) => inSpan(idxOfDue(c.due, new Map(days.map((d, i) => [d.iso, i]))))).length
+    const faceDayIndex = new Map(days.map((d, i) => [d.iso, i]))
+    const dues = ctx.cards.filter((c) => inSpan(idxOfDue(c.due, faceDayIndex))).length
     const closed = ctx.cards.filter((c) => {
       const ms = instantMs(c.closedAt)
       return ms !== undefined && ms >= fromMs && ms <= toMs
@@ -2208,6 +2195,18 @@ class ChronicleView implements TemporalView {
     face.append(stats)
 
     // ── the look back ───────────────────────────────────────────────────────
+    // The memoir names fibers twice — once per commit group, once per close —
+    // and both namings are the door to the fiber.
+    const openBtn = (id: string, name: string, extra?: string): HTMLButtonElement => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = extra ? `${extra} chr-face-open` : 'chr-face-open'
+      btn.textContent = name
+      btn.title = `Open ${name}`
+      btn.addEventListener('click', () => ctx.openCard(id))
+      return btn
+    }
+
     const memoir = document.createElement('div')
     memoir.className = 'chr-face-memoir'
     const memoirHead = document.createElement('h3')
@@ -2227,12 +2226,7 @@ class ChronicleView implements TemporalView {
           const line = document.createElement('p')
           line.className = 'chr-face-line'
           // The ledger named the fiber, so the name opens it — no guessing.
-          const fiber = document.createElement('button')
-          fiber.type = 'button'
-          fiber.className = 'chr-face-fiber chr-face-open'
-          fiber.textContent = group.name
-          fiber.title = `Open ${group.name}`
-          fiber.addEventListener('click', () => ctx.openCard(group.cardId))
+          const fiber = openBtn(group.cardId, group.name, 'chr-face-fiber')
           const count = document.createElement('span')
           count.className = 'chr-face-count'
           count.textContent = `×${group.count}`
@@ -2259,12 +2253,7 @@ class ChronicleView implements TemporalView {
           // A fiber the era closed is named here and nowhere else on the face —
           // so this is where you reach it. The whole name is the target; the
           // verdict mark stays a mark.
-          const open = document.createElement('button')
-          open.type = 'button'
-          open.className = 'chr-face-open'
-          open.textContent = card.name
-          open.title = `Open ${card.name}`
-          open.addEventListener('click', () => ctx.openCard(card.id))
+          const open = openBtn(card.id, card.name)
           line.append(mark, document.createTextNode(' '), open)
           memoir.append(line)
         }
@@ -2671,6 +2660,34 @@ class ChronicleView implements TemporalView {
   }
 
   /**
+   * The document-level half of a drag gesture, shared by the three that have
+   * one (edge, due mark, draw-to-create).
+   *
+   * The listeners go on the DOCUMENT, not the element: a drag that leaves the
+   * grid must still track and still commit. The returned detach is also parked
+   * on `this.teardownDraw` so `unmount()` can end a gesture mid-flight, and it
+   * runs before the caller's `onUp` so an up-handler can never re-enter.
+   */
+  private beginDrag(
+    onMove: (ev: MouseEvent) => void,
+    onUp: (ev: MouseEvent) => void,
+  ): () => void {
+    const detach = (): void => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', up)
+      this.stopAutoScroll()
+    }
+    const up = (ev: MouseEvent): void => {
+      detach()
+      onUp(ev)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', up)
+    this.teardownDraw = detach
+    return detach
+  }
+
+  /**
    * Drag a band's edge to move its `start:` or its `due:`.
    *
    * The band is repainted from the cursor as it moves, so the gesture reads as
@@ -2723,9 +2740,6 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const onUp = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
         this.teardownDraw = null
         this.draft = null
         bandEl.classList.remove('chr-band-resizing')
@@ -2736,13 +2750,7 @@ class ChronicleView implements TemporalView {
         const originalDay = edge === 'start' ? originStart : originEnd
         if (dropped !== originalDay) void this.writeCycleEdge(band, edge, dropped, ctx)
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
-      this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
-      }
+      this.beginDrag(onMove, onUp)
     })
   }
 
@@ -2826,10 +2834,7 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const cleanup = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        document.removeEventListener('keydown', onKey, true)
-        this.stopAutoScroll()
+        endGesture()
         this.teardownDraw = null
         this.draft = null
         mark.classList.remove('chr-mark-dragging')
@@ -2857,15 +2862,15 @@ class ChronicleView implements TemporalView {
         cleanup()
         paint()
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+      const detach = this.beginDrag(onMove, onUp)
       document.addEventListener('keydown', onKey, true)
-      this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
+      // Escape is this gesture's own extra listener, so it comes off on both
+      // ways out: the caller's cleanup and unmount's teardown.
+      const endGesture = (): void => {
+        detach()
         document.removeEventListener('keydown', onKey, true)
-        this.stopAutoScroll()
       }
+      this.teardownDraw = endGesture
     })
   }
 
@@ -2957,20 +2962,17 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const onUp = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
         this.teardownDraw = null
         if (!this.draft) return
         this.draft.naming = true
         const [from, to] = [this.draft.fromDay, this.draft.toDay].sort()
         this.openNameInput(track, ghost, from, to, ctx)
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+      // The ghost survives a normal release — `openNameInput` names the span it
+      // draws — so only the teardown path discards it.
+      const detach = this.beginDrag(onMove, onUp)
       this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
+        detach()
         ghost.remove()
       }
     })
@@ -3050,30 +3052,20 @@ class ChronicleView implements TemporalView {
     input.style.left = ghost.style.left
     input.style.width = `max(${ghost.style.width}, 150px)`
     track.append(input)
-    input.focus()
-
-    let settled = false
-    const finish = (name: string | null): void => {
-      if (settled) return
-      settled = true
-      input.remove()
-      ghost.remove()
-      this.draft = null
-      this.teardownDraw = null
-      if (name) void this.createCycle(name, startDay, endDay, ctx)
-      else if (this.ctx) void this.load(this.ctx)
-    }
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        finish(input.value.trim() || null)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        finish(null)
-      }
-      e.stopPropagation() // the board's own hotkeys must not eat the typing
+    this.editInPlace(input, {
+      // An empty name is an abandoned draw, not a nameless cycle.
+      commit: (value) => {
+        const name = value.trim()
+        if (name) void this.createCycle(name, startDay, endDay, ctx)
+        else if (this.ctx) void this.load(this.ctx)
+      },
+      done: () => {
+        input.remove()
+        ghost.remove()
+        this.draft = null
+        this.teardownDraw = null
+      },
     })
-    input.addEventListener('blur', () => finish(input.value.trim() || null))
   }
 
   /**
@@ -3278,7 +3270,6 @@ class ChronicleView implements TemporalView {
     count.textContent = `${total} ${total === 1 ? 'fiber' : 'fibers'}`
     corner.append(month, count)
     this.monthEl = month
-    this.monthText = ''
     return corner
   }
 
@@ -3301,8 +3292,7 @@ class ChronicleView implements TemporalView {
       this.currentDays.length - 1,
     )
     const text = monthBearing(this.currentDays[idx].iso, new Date().getFullYear())
-    if (text === this.monthText) return
-    this.monthText = text
+    if (el.textContent === text) return
     el.textContent = text
   }
 
@@ -3434,8 +3424,7 @@ class ChronicleView implements TemporalView {
   /** The washes are one element per day spanning every row — the weekend and
    *  past tints and the vertical hairlines live here, behind the ink, so a row
    *  never has to draw its own background. */
-  private buildWashes(days: TimelineDay[], rowCount: number): HTMLElement[] {
-    if (rowCount <= 0) return []
+  private buildWashes(days: TimelineDay[]): HTMLElement[] {
     return days.map((day, i) => {
       const wash = document.createElement('div')
       const classes = ['chr-wash']
@@ -3565,33 +3554,32 @@ class ChronicleView implements TemporalView {
       }
     }
 
+    const mark = (cls: string, idx: number, glyph: string, title?: string): HTMLElement => {
+      const el = document.createElement('div')
+      el.className = `chr-mark ${cls}`
+      el.style.left = colLeft(idx)
+      el.textContent = glyph
+      if (title) el.title = title
+      track.append(el)
+      return el
+    }
+
     if (row.closed && row.closeIdx !== null) {
-      const end = document.createElement('div')
-      end.className = `chr-mark chr-end${row.closedOk ? '' : ' chr-end-compost'}`
-      end.style.left = colLeft(row.closeIdx)
-      end.textContent = row.closedOk ? '✓' : '✗'
-      track.append(end)
+      mark(`chr-end${row.closedOk ? '' : ' chr-end-compost'}`, row.closeIdx, row.closedOk ? '✓' : '✗')
     }
     // Ahead of today: promises only, never ink.
     if (row.dueIdx !== null) {
-      const due = document.createElement('div')
-      due.className = 'chr-mark chr-due'
-      due.style.left = colLeft(row.dueIdx)
-      due.textContent = MARK_GLYPH.due
-      due.title = row.cardId ? 'due — drag to reschedule' : 'due'
-      track.append(due)
+      const due = mark(
+        'chr-due',
+        row.dueIdx,
+        MARK_GLYPH.due,
+        row.cardId ? 'due — drag to reschedule' : 'due',
+      )
       // A cycle's due-edge is grabbed by its own small handle; a fiber's due
       // mark IS the handle — nothing else on the row promises a future date.
       if (row.cardId) this.installDueMarkDrag(due, row, ctx)
     }
-    if (row.launchIdx !== null) {
-      const launch = document.createElement('div')
-      launch.className = 'chr-mark chr-launch'
-      launch.style.left = colLeft(row.launchIdx)
-      launch.textContent = MARK_GLYPH.launch
-      launch.title = 'next launch'
-      track.append(launch)
-    }
+    if (row.launchIdx !== null) mark('chr-launch', row.launchIdx, MARK_GLYPH.launch, 'next launch')
 
     // The gutter and the days are two grid children; the row they belong to is
     // only in the reader's head. Pointing at either one lights both, which is
