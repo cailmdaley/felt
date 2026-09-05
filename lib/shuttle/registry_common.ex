@@ -1,10 +1,12 @@
 defmodule Shuttle.RegistryCommon do
   @moduledoc """
-  Plumbing shared by the two remote registries (`Shuttle.RemoteRegistry`,
-  `Shuttle.RemoteFiberRegistry`). Both poll the same `:remotes` config on a
-  self-rescheduling tick and expose a read call guarded by liveness, so the
-  config normalization, tick scheduling, liveness check, and read timeout live
-  here once rather than verbatim in each.
+  Plumbing shared by the remote registries (`Shuttle.RemoteRegistry`,
+  `Shuttle.RemoteFiberRegistry`, `Shuttle.RemoteTemporalRegistry`). Each polls
+  the same `:remotes` config on a self-rescheduling tick and exposes a read call
+  guarded by liveness, so the config normalization, tick scheduling, liveness
+  check, and read timeout live here once rather than verbatim in each.
+  `configured_remotes/1` is additionally the fleet chokepoint for
+  `Shuttle.OriginRouter` and the felt-stores controller.
   """
 
   alias Shuttle.Remote
@@ -33,11 +35,8 @@ defmodule Shuttle.RegistryCommon do
   otherwise `Shuttle.Remotes.configured/0` applies the full precedence
   (application config when set, else the fleet file, else none).
 
-  This completes C6: that change unified remote *parsing* behind
-  `normalize_remotes/1` but left four copies of the *source* expression
-  (`Application.get_env(:shuttle, :remotes, [])`) in the two registries, the
-  origin router, and the felt-stores controller. Four sources could disagree
-  about where the fleet comes from even while agreeing on how to parse it.
+  One source, so no two consumers can disagree about where the fleet comes from
+  even while agreeing on how to parse it.
   """
   @spec configured_remotes(keyword()) :: [Remote.t()]
   def configured_remotes(opts \\ []) do

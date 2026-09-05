@@ -16,7 +16,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       `@poll_interval_multiplier ×` the remote's `poll_interval_ms` (~30s at
       the 5s default).
 
-    * **Four feeds per remote, one task.** The GETs run sequentially
+    * **Five feeds per remote, one task.** The GETs run sequentially
       inside one supervised task per remote. Each feed applies independently:
       a partial tick (activity 200s, commits times out) keeps last-good
       commits and takes the new activity.
@@ -140,7 +140,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   @doc """
-  Synchronously fetches every remote's four feeds once and returns when all
+  Synchronously fetches every remote's five feeds once and returns when all
   have been handled. Inline (no `Task`) — used by tests to drive the registry
   deterministically against a stub client.
   """
@@ -332,7 +332,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
     {to_ms - width, to_ms}
   end
 
-  # The four GETs, sequential inside one task. Returns a keyword-shaped map of
+  # The five GETs, sequential inside one task. Returns a keyword-shaped map of
   # per-feed results so `apply_results/4` can take the successes and leave the
   # failures' last-good data alone, feed by feed.
   defp fetch_all(%Remote{} = remote, entry, client, timeout_ms, {from_ms, to_ms}) do
@@ -345,15 +345,15 @@ defmodule Shuttle.RemoteTemporalRegistry do
           also: ["spawns"]
         ),
       sessions:
-        fetch(client, Remote.sessions_url(remote, 0), etags[:sessions], timeout_ms,
+        fetch(client, Remote.sessions_url(remote), etags[:sessions], timeout_ms,
           key: "records"
         ),
       commits:
-        fetch(client, Remote.commits_url(remote, 0), etags[:commits], timeout_ms, key: "records"),
+        fetch(client, Remote.commits_url(remote), etags[:commits], timeout_ms, key: "records"),
       spend:
-        fetch(client, Remote.spend_url(remote, 0), etags[:spend], timeout_ms, key: "sessions"),
+        fetch(client, Remote.spend_url(remote), etags[:spend], timeout_ms, key: "sessions"),
       sent_files:
-        fetch(client, Remote.sent_files_all_url(remote, 0), etags[:sent_files], timeout_ms,
+        fetch(client, Remote.sent_files_all_url(remote), etags[:sent_files], timeout_ms,
           key: "files"
         )
     }
@@ -444,7 +444,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
     Map.put(entries, name, %{entry | last_attempt_at: DateTime.utc_now()})
   end
 
-  # Fold the three per-feed results into the entry.
+  # Fold the per-feed results into the entry.
   #
   # The rules, identical to the fiber registry's and applied PER FEED:
   #   * 200 → take the items and the fresh etag.

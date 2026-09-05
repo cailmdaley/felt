@@ -125,42 +125,12 @@ defmodule Shuttle.Remotes do
     end
   end
 
-  @doc "Path the fleet is read from and written to."
+  @doc "Path the fleet is read from. Only the Go CLI writes it."
   @spec config_path() :: String.t()
   def config_path do
     case System.get_env(@config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(@default_config_path)
-    end
-  end
-
-  @doc """
-  Persist the fleet atomically. Entries are written as given (no defaults
-  materialized); an empty list deletes the file.
-  """
-  @spec save([map()]) :: {:ok, [map()]} | {:error, term()}
-  def save(entries) when is_list(entries) do
-    path = config_path()
-
-    try do
-      case entries do
-        [] ->
-          case File.rm(path) do
-            :ok -> {:ok, []}
-            {:error, :enoent} -> {:ok, []}
-            {:error, reason} -> {:error, {:file_error, reason}}
-          end
-
-        _ ->
-          File.mkdir_p!(Path.dirname(path))
-          tmp = path <> ".tmp"
-          payload = Jason.encode!(%{version: 1, remotes: entries}, pretty: true) <> "\n"
-          File.write!(tmp, payload)
-          File.rename!(tmp, path)
-          {:ok, entries}
-      end
-    rescue
-      error -> {:error, error}
     end
   end
 

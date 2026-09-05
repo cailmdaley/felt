@@ -168,19 +168,6 @@ defmodule Shuttle.RemotesTest do
     end
   end
 
-  describe "save/1" do
-    test "round-trips, and an empty list deletes the file" do
-      path = Path.join(tmp_dir(), "saved.json")
-      System.put_env("FELT_REMOTES_FILE", path)
-
-      assert {:ok, _} = Remotes.save([%{name: "a", port: 4001}])
-      assert [%Remote{name: "a", url: "http://127.0.0.1:4001"}] = Remotes.registered()
-
-      assert {:ok, []} = Remotes.save([])
-      refute File.exists?(path)
-    end
-  end
-
   defp write_remotes(body) do
     path = Path.join(tmp_dir(), "remotes-#{System.unique_integer([:positive])}.json")
     File.write!(path, body)
