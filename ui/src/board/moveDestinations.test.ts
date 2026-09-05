@@ -64,6 +64,22 @@ describe('moveDestinations', () => {
     expect(d).toEqual(['inFlight', 'drafts', 'unpin'])
   })
 
+  // pinRole ~1611: refusing this was a bug — a once-pinned card left closed
+  // could never be re-rested from the board.
+  it('lets a pinned role whose last run is closed come back to rest', () => {
+    const awaiting = card({ shuttleKind: 'pinned', status: 'closed' })
+    expect(ids(awaiting, 'awaitingReview')).toContain('pin')
+    const composted = card({ shuttleKind: 'pinned', status: 'closed', tempered: false })
+    expect(ids(composted, 'composted')).toContain('pin')
+  })
+
+  // setSurface compares the card's `cold` against the gesture's, and a menu
+  // Rest carries none — so clearing the flag IS the move.
+  it('offers Rest to a resting card that is cold', () => {
+    const cold = card({ status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', cold: true })
+    expect(ids(cold, null)).toContain('stashed')
+  })
+
   it('offers to stop a live pinned role back onto the strip', () => {
     const d = ids(card({ shuttleKind: 'pinned', status: 'active', runningWorker: 'w' }), 'inFlight')
     expect(d).toContain('pin')

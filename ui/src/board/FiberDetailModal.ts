@@ -34,6 +34,7 @@ import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { installGestureLayer, type GestureLayer } from './gestures/GestureLayer.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
+import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import type { MoveBroker } from './MoveDestinations.js'
 import {
   disambiguateBasenames,
@@ -526,14 +527,13 @@ export class FiberDetailModal {
    *  and clips its own fixed descendants), and its teardown. */
   private moveMenuEl: HTMLElement | null = null
   private closeMoveMenu: (() => void) | null = null
+  /** The head row's Move control, kept so a live tick can hide it when the
+   *  board stops offering this card anywhere to go (and show it again when it
+   *  does). Null when there is no board or no control. */
+  private moveBtn: HTMLButtonElement | null = null
   /** Unsubscribe from the mobile-threshold watch, live while the panel is open.
    *  Crossing 700px re-frames the panel between window and sheet in place. */
   private mobileWatch: (() => void) | null = null
-  /** True while this panel holds a pushed history entry, so the phone's back
-   *  gesture closes the sheet instead of leaving the board. Cleared before the
-   *  pop it caused, so a double close never eats a second entry. */
-  private historyHeld = false
-  private popHandler: (() => void) | null = null
 
   constructor(
     shuttleBase: string,
@@ -563,6 +563,20 @@ export class FiberDetailModal {
    * @param card the card the user clicked
    */
   open(card: KanbanCard): void {
+    // ONE LAYER, SWAPPED CONTENT. This is a single reused instance whose open
+    // begins by tearing down whatever it was showing — so opening card B over
+    // card A reads as close-then-open. Released and re-pushed, that is a
+    // `history.back()` racing a `pushState`, and the queued pop takes the new
+    // panel straight back down: the "open a second card and nothing appears"
+    // bug. Inside a swap the layer simply keeps the entry it already holds.
+    if (!this.host) {
+      swapSheet(SHEET_CARD, () => this.openInner(card))
+      return
+    }
+    this.openInner(card)
+  }
+
+  private openInner(card: KanbanCard): void {
     // Tear down any existing open panel first (rapid re-click).
     this.close()
 
@@ -837,27 +851,20 @@ export class FiberDetailModal {
     window.addEventListener('resize', this.resizeHandler)
 
     if (!this.host) {
-      // THE PHONE'S BACK GESTURE. A full-viewport sheet reads as a page, so the
-      // swipe-back that dismisses a page must dismiss it — otherwise the one
-      // instinctive gesture on a phone leaves the board entirely. We push an
-      // entry on open and pop it on close, and `historyHeld` is cleared BEFORE
-      // either half runs, so a double close (Escape, then the pop it caused)
-      // can never eat a second entry and walk the user off the board.
-      this.historyHeld = true
-      window.history.pushState({ kbnDetail: true }, '')
-      this.popHandler = () => {
-        if (!this.historyHeld) return
-        this.historyHeld = false // the entry is already gone; don't pop again
-        this.close()
-      }
-      window.addEventListener('popstate', this.popHandler)
+      // THE PHONE'S BACK GESTURE, and only the phone's: a desktop window is
+      // dismissed by its × or Escape, and pushing an entry there would make the
+      // browser's Back button close a panel the user did not navigate to.
+      this.syncSheetHistory()
 
       // Crossing 700px with the panel open re-frames it in place — window to
       // sheet and back — rather than leaving a phone-sized window stranded
-      // mid-viewport (a rotation, or a desktop window dragged narrow).
+      // mid-viewport (a rotation, or a desktop window dragged narrow). The
+      // history claim moves with the frame: a window holds no entry, a sheet
+      // does.
       this.mobileWatch = onMobileChange(() => {
         if (!this.overlay) return
         this.applyFrame(this.overlay)
+        this.syncSheetHistory()
       })
     }
 
@@ -868,18 +875,10 @@ export class FiberDetailModal {
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
     this.dismissMoveMenu()
+    this.moveBtn = null
     if (this.mobileWatch) {
       this.mobileWatch()
       this.mobileWatch = null
-    }
-    if (this.popHandler) {
-      window.removeEventListener('popstate', this.popHandler)
-      this.popHandler = null
-    }
-    // Give the pushed entry back, unless the pop is what closed us.
-    if (this.historyHeld) {
-      this.historyHeld = false
-      window.history.back()
     }
     // An origin card closing takes its followed references with it: the panel
     // is that card's reading, and leaving it open would strand tabs behind a
@@ -918,8 +917,13 @@ export class FiberDetailModal {
     this.disconnectGestureLayers()
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
+    if (this.viewerWindow) holdSheet(SHEET_VIEWER, false)
     this.viewerWindow?.remove()
     this.viewerWindow = null
+    // The card's own claim goes LAST. The sheet stack is LIFO, and only its top
+    // can give an entry back — releasing the card before the viewer and the
+    // followed-reference panel above it would leave both stranded.
+    if (!this.host) holdSheet(SHEET_CARD, false)
     if (this.overlay && !this.host) unregisterPanel(this.overlay)
     this.overlay?.remove()
     this.overlay = null
@@ -1178,6 +1182,13 @@ export class FiberDetailModal {
       if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
 
       await this.refreshArtifacts(card)
+      if (this.overlay !== overlay) return
+      // The board moved underneath this sheet while it sat open — a worker
+      // finished, someone tempered the card from another host. The Move control
+      // is the one piece of chrome whose very PRESENCE is a claim about board
+      // state, so it is re-asked here rather than left saying what was true
+      // when the panel opened.
+      this.syncMoveButton()
     } catch {
       // A live tick is best-effort. Keep the readable page and let the next
       // tick or the explicit button try again rather than replacing it with an
@@ -1644,6 +1655,16 @@ export class FiberDetailModal {
     this.applyGeometry(overlay)
   }
 
+  /**
+   * Claim (or give up) this card's back-entry to match its current frame. A
+   * sheet holds one; a window does not. Called on open and again whenever the
+   * viewport crosses the mobile threshold, so a rotation moves the claim
+   * rather than stranding it.
+   */
+  private syncSheetHistory(): void {
+    holdSheet(SHEET_CARD, this.isSheet(), () => this.close())
+  }
+
   private applyGeometry(overlay: HTMLElement): void {
     const vw = window.innerWidth
     const vh = window.innerHeight
@@ -1763,6 +1784,10 @@ export class FiberDetailModal {
       this.viewerWindow = win
       document.body.append(win)
       bringToFront(win)
+      // Its own entry, above the card's. Without one, the back gesture over an
+      // open viewer skipped straight past it and closed the card underneath —
+      // the reader loses the fiber they were reading to dismiss a file.
+      holdSheet(SHEET_VIEWER, true, () => this.closeViewerWindow())
       return
     }
     if (this.viewerGeom) {
@@ -1817,6 +1842,7 @@ export class FiberDetailModal {
     if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
       this.viewerGeom = readPanelGeometry(this.viewerWindow)
     }
+    if (this.viewerWindow) holdSheet(SHEET_VIEWER, false)
     this.viewerWindow?.remove()
     this.viewerWindow = null
     this.rightCol = null
@@ -1951,6 +1977,7 @@ export class FiberDetailModal {
     head.className = 'kbn-detail-controls-head'
     head.append(toggle)
     const moveBtn = this.buildMoveButton(card)
+    this.moveBtn = moveBtn
     if (moveBtn) head.append(moveBtn)
 
     const body = document.createElement('div')
@@ -3216,22 +3243,20 @@ export class FiberDetailModal {
    */
   // ── Move ▾: the drag, said in words ──────────────────────────────────────
   //
-  // Every gesture that moves a card between columns, onto the strip, into
-  // Resting or into a queue is drag-and-drop, and drag-and-drop has no touch
-  // backend. On a phone that is the entire desk vocabulary, unreachable. This
-  // menu is that vocabulary spelled out: the legality comes from
-  // `MoveDestinations`, which mirrors the drop's own guards, and each item is
-  // handed straight back to the board's existing wire calls. It earns its
-  // place on desktop too — a legal-destinations list is a thing a drag can
-  // never show you.
+  // Why this menu exists at all is written once, in `MoveDestinations.ts`.
+  // Here it is only rendered: the legality comes from there, and each chosen
+  // item goes back to the board's own wire calls through the `MoveBroker`.
 
   /** The head-row Move control, or null when there is no board behind the
    *  panel (the harness fixture) or nothing this card can legally do. */
   private buildMoveButton(card: KanbanCard): HTMLButtonElement | null {
     const broker = this.moves
     if (!broker) return null
-    if (broker.destinations(card).length === 0) return null
     const btn = document.createElement('button')
+    // Built even when the list is empty, and hidden instead. The board can
+    // change under an open sheet in either direction, and a control that was
+    // never created cannot come back when the card becomes movable again.
+    btn.hidden = broker.destinations(card).length === 0
     btn.type = 'button'
     btn.className = 'kbn-detail-move-btn'
     btn.textContent = 'Move ▾'
@@ -3358,8 +3383,20 @@ export class FiberDetailModal {
     }
     document.addEventListener('keydown', onKey, true)
 
+    // A MENU IS TRANSIENT, so any reflow under it takes it down rather than
+    // being chased. The desktop popover is placed once against the button's
+    // rectangle, and a resize moves that rectangle out from under it; crossing
+    // 700px is worse still, since the menu would have to change shape as well
+    // as place. Re-placing on every frame would be work spent on a surface the
+    // reader is about to dismiss anyway — one tap re-opens it, correct.
+    const onReflow = (): void => dismiss()
+    window.addEventListener('resize', onReflow)
+    const stopMobileWatch = onMobileChange(onReflow)
+
     this.closeMoveMenu = () => {
       document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('resize', onReflow)
+      stopMobileWatch()
       anchor.setAttribute('aria-expanded', 'false')
       scrim.remove()
       menu.remove()
@@ -3408,6 +3445,21 @@ export class FiberDetailModal {
       onPick()
     })
     return item
+  }
+
+  /** Show or hide the Move control to match what the live board now offers.
+   *  The destinations themselves are always computed at click time, so this is
+   *  only about the control's presence. */
+  private syncMoveButton(): void {
+    const btn = this.moveBtn
+    const card = this.card
+    if (!btn || !card || !this.moves) return
+    const none = this.moves.destinations(card).length === 0
+    if (btn.hidden === none) return
+    btn.hidden = none
+    // An open menu over a card with nothing left to offer is a menu about to
+    // lie; take it down with the button.
+    if (none) this.dismissMoveMenu()
   }
 
   private dismissMoveMenu(): void {

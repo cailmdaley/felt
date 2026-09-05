@@ -30,6 +30,7 @@ import { buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { emptyTabState, type TabState } from './ReaderTabs.js'
 import { closeLinkedTab, focusTab, insertTab, routeWikilink } from './linkedTabs.js'
 import { isMobileViewport } from './mobile.js'
+import { holdSheet, SHEET_LINKED } from './sheetHistory.js'
 import {
   applyPanelGeometry,
   attachPanelDrag,
@@ -202,6 +203,7 @@ export class LinkedFiberPanel {
       this.resizeHandler = null
     }
     if (this.win) {
+      if (this.win.classList.contains('kbn-detail-sheet')) holdSheet(SHEET_LINKED, false)
       unregisterPanel(this.win)
       this.win.remove()
       this.win = null
@@ -274,6 +276,10 @@ export class LinkedFiberPanel {
     const sheet = isMobileViewport()
     if (sheet) {
       win.classList.add('kbn-detail-sheet')
+      // Its own back-entry, above the card's. Following a reference on a phone
+      // is a navigation, so the back gesture must return to the fiber you came
+      // from rather than dismissing it along with the reference.
+      holdSheet(SHEET_LINKED, true, () => this.close())
     } else {
       const { card, other } = halfAndHalf()
       this.opts.placeOrigin(card)

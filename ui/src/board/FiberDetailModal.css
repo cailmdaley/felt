@@ -1278,6 +1278,13 @@
   color: #4A443C;
   cursor: pointer;
 }
+/* The UA's `[hidden]` rule loses to any author `display`, and this file's own
+   history says so — see the note beside `.kbn-detail-controls-body[hidden]`,
+   which is what made the dropdown ship stuck open. Kept adjacent to the rules
+   that could grow one. */
+.kbn-detail-move-btn[hidden] {
+  display: none;
+}
 .kbn-detail-move-btn:hover {
   border-color: rgba(154, 123, 53, 0.5);
   color: #1B1611;

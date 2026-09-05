@@ -17,6 +17,11 @@
  *
  * It performs nothing. It returns intents; the caller hands each one to the
  * board's existing wire calls, unchanged.
+ *
+ * The parity is with the drop's LEGALITY, not with everything a drop can carry.
+ * A drag can name a date column or drop a card cold; the menu offers the bare
+ * verbs and lets the drop's own defaults apply. Where such a field changes
+ * whether a move is a no-op — `cold` is the one — it is read here too.
  */
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
@@ -61,10 +66,23 @@ function planningIgnored(card: KanbanCard): boolean {
   return false
 }
 
-/** `setSurface`'s `actuallyOnHorizon` for the stash side: the card is really
- *  sitting in Resting right now, not merely carrying `horizon: stashed`. */
+/**
+ * `setSurface`'s no-op test for the stash side: the card is really sitting in
+ * Resting right now, AND a stash would change nothing about it.
+ *
+ * The `cold` half is easy to drop and wrong to. `setSurface` compares the
+ * card's `cold` against the one the gesture carries, and a menu Rest carries
+ * none — so a resting COLD card is not a no-op at all: the write clears the
+ * flag, which is a real move onto the held-open cluster's terms. Without this
+ * clause the menu would withhold a destination the drop performs.
+ */
 function restingNow(card: KanbanCard): boolean {
-  return !card.runningWorker && card.status === 'open' && card.effectiveHorizon === 'stashed'
+  return (
+    !card.runningWorker &&
+    card.status === 'open' &&
+    card.effectiveHorizon === 'stashed' &&
+    (card.cold ?? false) === false
+  )
 }
 
 /**
@@ -144,6 +162,17 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
       out.push({
         id: 'pin',
         label: 'Stop it and rest on the strip',
+        action: { kind: 'pin' },
+      })
+    } else if (card.status === 'closed') {
+      // A pinned role whose last run is CLOSED classifies into Awaiting review
+      // or Past, not onto the strip — so "already pinned" is not true of it and
+      // `pinRole` deliberately lets it through (reopen → reshape → park). This
+      // is the only gesture that brings a once-pinned role back to rest;
+      // withholding it left such a card stranded off the strip forever.
+      out.push({
+        id: 'pin',
+        label: 'Rest it back on the strip',
         action: { kind: 'pin' },
       })
     }

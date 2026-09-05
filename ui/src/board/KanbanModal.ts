@@ -2462,29 +2462,53 @@ export class KanbanModal {
 
   // ── The Move menu's seam (MoveBroker) ──────────────────────────────────
   //
-  // Drag-and-drop has no touch backend, so on a phone the desk's whole
-  // vocabulary — launch, rest, pin, queue — is unreachable. The detail
-  // panel's "Move ▾" says it in words instead. These four methods are the
-  // ONLY thing the panel is given: it never learns a column, a dependency
-  // graph or a wire protocol, and every item it performs lands in the same
-  // private gesture method the equivalent drop lands in. Nothing about the
-  // drag changes; this is a second door onto it.
+  // Why the menu exists is written once, in `MoveDestinations.ts`. What
+  // matters here is the seam: these four methods are the ONLY thing the detail
+  // panel is given, so it never learns a column, a dependency graph or a wire
+  // protocol, and every item it performs lands in the same private gesture
+  // method the equivalent drop lands in. Nothing about the drag changes; this
+  // is a second door onto it.
+
+  /**
+   * THE LIVE CARD, not the one the panel is holding.
+   *
+   * A detail sheet stays open for as long as the reader wants, polling its body
+   * while the board polls underneath it — so the `KanbanCard` captured when the
+   * panel opened goes stale: the worker finishes, the card closes, someone
+   * tempers it from another host. Every method below therefore re-resolves the
+   * card by id before it rules or writes, and only falls back to the caller's
+   * copy when the board genuinely has no row for it (a card that has left the
+   * feed entirely, where the stale copy is all anyone has).
+   *
+   * This is the same discipline `transition` already follows for the COLUMN,
+   * for the same reason: a gesture ruled on a stale read is a gesture that
+   * silently no-ops or writes the wrong thing.
+   */
+  private liveCard(card: KanbanCard): KanbanCard {
+    return findCardById(this.lastResponse, card.id) ?? card
+  }
 
   /** Legal destinations for this card, ruled on where the board actually has
    *  it (`findCardColumn`) rather than a local re-derivation. */
   moveDestinationsFor(card: KanbanCard): MoveDestination[] {
-    return moveDestinations(card, findCardColumn(this.lastResponse, card.id))
+    const live = this.liveCard(card)
+    return moveDestinations(live, findCardColumn(this.lastResponse, live.id))
   }
 
   /** Cards this one may be queued behind, from the same graph and the same
    *  verdict the card-onto-card drop consults. */
   moveQueueTargetsFor(card: KanbanCard): QueueTarget[] {
-    return queueTargets(card, boardCards(this.lastResponse), unsettledDependents(this.lastResponse))
+    return queueTargets(
+      this.liveCard(card),
+      boardCards(this.lastResponse),
+      unsettledDependents(this.lastResponse),
+    )
   }
 
   /** Perform one non-queue destination. Each branch is the drop's own entry
    *  point, so banners, optimism and reconciliation are inherited whole. */
-  performMove(card: KanbanCard, action: MoveAction): void {
+  performMove(stale: KanbanCard, action: MoveAction): void {
+    const card = this.liveCard(stale)
     switch (action.kind) {
       case 'transition':
         this.transition(card, action.target)
@@ -2511,7 +2535,7 @@ export class KanbanModal {
   /** The chosen queue target, written as the same scalar edge the drop writes.
    *  `tailId` is the chain's END, already resolved by `queueTargets`. */
   moveQueueBehind(card: KanbanCard, tailId: string): void {
-    void this.stackBehind(card, tailId)
+    void this.stackBehind(this.liveCard(card), tailId)
   }
 
   /**
