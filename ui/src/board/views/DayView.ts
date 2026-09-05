@@ -147,6 +147,7 @@ import {
   type MarkPick,
   type MomentSource,
   type MomentWords,
+  ensureTipHost,
   type SlotTip,
   type SlotTipRow,
 } from './momentTip.js'
@@ -2861,12 +2862,8 @@ class DayViewImpl implements TemporalView {
   }
 
   private ensureTip(): HTMLElement {
-    if (this.tip?.isConnected) return this.tip
-    const tip = document.createElement('div')
-    tip.className = 'kbn-tip'
-    this.chartEl?.append(tip)
-    this.tip = tip
-    return tip
+    this.tip = ensureTipHost(this.chartEl, this.tip)
+    return this.tip
   }
 
   /**

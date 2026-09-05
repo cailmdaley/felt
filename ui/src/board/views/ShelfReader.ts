@@ -64,6 +64,7 @@ import {
 import { buildTabButton, buildViewCell } from '../ReaderChrome.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
+import { safeStorage } from './shelfLayout.js'
 
 export const READER_PERSIST_KEY = 'shuttle:shelf:reader'
 
@@ -175,14 +176,6 @@ export function saveReaderPersist(state: ReaderPersist, storage?: Storage): void
     else store.setItem(READER_PERSIST_KEY, JSON.stringify(state))
   } catch {
     /* storage full / disabled — persistence is best-effort */
-  }
-}
-
-function safeStorage(): Storage | null {
-  try {
-    return typeof window !== 'undefined' ? window.localStorage : null
-  } catch {
-    return null
   }
 }
 

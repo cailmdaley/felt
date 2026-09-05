@@ -448,7 +448,9 @@ export function coercePersist(parsed: unknown): ShelfPersist {
   return out
 }
 
-function safeStorage(): Storage | null {
+/** localStorage, or null where the page has none (SSR, a browser with site
+ *  data blocked — the accessor itself throws there). */
+export function safeStorage(): Storage | null {
   try {
     return typeof window !== 'undefined' ? window.localStorage : null
   } catch {

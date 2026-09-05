@@ -99,6 +99,7 @@ import {
   tipContent,
   type DrawnKind,
   type MomentWords,
+  ensureTipHost,
   type SlotTip,
   type SlotTipRow,
 } from './momentTip.js'
@@ -582,12 +583,8 @@ export function advanceSwipe(state: SwipeState, deltaX: number, atMs: number): S
     step: 0,
     // Negated: swiping right-to-left (positive deltaX) walks FORWARD in time,
     // so the sheet slides left and the next week comes in from the right.
-    nudge: clamp(-offset * SWIPE_NUDGE_RATIO, -SWIPE_NUDGE_CAP_PX, SWIPE_NUDGE_CAP_PX),
+    nudge: Math.min(SWIPE_NUDGE_CAP_PX, Math.max(-SWIPE_NUDGE_CAP_PX, -offset * SWIPE_NUDGE_RATIO)),
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
 }
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
@@ -1346,12 +1343,8 @@ class WeekView implements TemporalView {
   }
 
   private ensureTip(): HTMLElement {
-    if (this.tip?.isConnected) return this.tip
-    const tip = document.createElement('div')
-    tip.className = 'kbn-tip'
-    this.grid?.append(tip)
-    this.tip = tip
-    return tip
+    this.tip = ensureTipHost(this.grid, this.tip)
+    return this.tip
   }
 
   /** Close the slip. A pinned one ignores this — the pointer wandering off is
