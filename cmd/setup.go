@@ -785,15 +785,7 @@ func feltCodexLegacyHooksInstalled() bool {
 	if err != nil {
 		return false
 	}
-	data, err := os.ReadFile(hooksPath)
-	if err != nil {
-		return false
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return false
-	}
-	hooks, ok := settings["hooks"].(map[string]interface{})
+	_, hooks, ok := readHookFile(hooksPath)
 	if !ok {
 		return false
 	}
@@ -1047,25 +1039,45 @@ func pruneLegacyCodexHooks() int {
 	if err != nil {
 		return 0
 	}
-	data, err := os.ReadFile(hooksPath)
+	return pruneHookFile(hooksPath, func(hooks map[string]interface{}) int {
+		removed := 0
+		for _, event := range []string{"SessionStart", "PreToolUse"} {
+			for _, basename := range []string{"session.sh", "remind.sh"} {
+				removed += len(pruneFeltHooks(hooks, event, basename))
+			}
+		}
+		return removed
+	})
+}
+
+// readHookFile decodes a hooks-carrying settings file and hands back both the
+// whole document and its "hooks" map, so a caller can prune in place and write
+// the document back untouched apart from the pruning.
+func readHookFile(path string) (map[string]interface{}, map[string]interface{}, bool) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0
+		return nil, nil, false
 	}
 	var settings map[string]interface{}
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return 0
+		return nil, nil, false
 	}
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
+		return nil, nil, false
+	}
+	return settings, hooks, true
+}
+
+// pruneHookFile applies prune to the file's hook map and rewrites the file
+// only when something was actually removed. Every failure is a silent zero:
+// pruning legacy wiring is best-effort cleanup, never a reason to fail setup.
+func pruneHookFile(path string, prune func(hooks map[string]interface{}) int) int {
+	settings, hooks, ok := readHookFile(path)
+	if !ok {
 		return 0
 	}
-	removed := 0
-	for _, event := range []string{"SessionStart", "PreToolUse"} {
-		for _, basename := range []string{"session.sh", "remind.sh"} {
-			pruned := pruneFeltHooks(hooks, event, basename)
-			removed += len(pruned)
-		}
-	}
+	removed := prune(hooks)
 	if removed == 0 {
 		return 0
 	}
@@ -1073,7 +1085,7 @@ func pruneLegacyCodexHooks() int {
 	if err != nil {
 		return 0
 	}
-	if err := os.WriteFile(hooksPath, out, 0644); err != nil {
+	if err := os.WriteFile(path, out, 0o644); err != nil {
 		return 0
 	}
 	return removed
@@ -1090,35 +1102,13 @@ func pruneLegacyClaudeHooks() int {
 	if err != nil {
 		return 0
 	}
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return 0
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return 0
-	}
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		return 0
-	}
-
-	removed := 0
-	for event := range hooks {
-		removed += len(pruneFeltHooks(hooks, event, "shuttle-hook.sh"))
-	}
-	if removed == 0 {
-		return 0
-	}
-
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return 0
-	}
-	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
-		return 0
-	}
-	return removed
+	return pruneHookFile(settingsPath, func(hooks map[string]interface{}) int {
+		removed := 0
+		for event := range hooks {
+			removed += len(pruneFeltHooks(hooks, event, "shuttle-hook.sh"))
+		}
+		return removed
+	})
 }
 
 // pruneLegacyCodexSkills removes felt-related symlinks from
