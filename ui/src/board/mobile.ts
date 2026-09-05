@@ -15,11 +15,12 @@
  * who dragged their browser flat, with a mouse and a whole screen behind it —
  * out of the phone layout, where it would be an insult rather than a help.
  *
- * CSS and TS must agree, so the numbers live here and every
- * `@media (max-width: 700px), (max-height: 500px) and (pointer: coarse)` in
- * the board is this expression written out by hand (media queries cannot read
- * a custom property). `test/mobileMedia.test.ts` fails the suite if a
- * stylesheet drifts from it.
+ * There are three named forms and no others: MOBILE_MEDIA (either face),
+ * SHORT_MEDIA (the phone on its side) and NARROW_MEDIA (the phone upright).
+ * CSS and TS must agree, so the numbers live here and every prelude in the
+ * board is one of the three written out by hand (media queries cannot read a
+ * custom property). `test/mobileMedia.test.ts` fails the suite if a
+ * stylesheet drifts from them.
  *
  * `coarsePointer()` stays a separate question — whether the primary input is a
  * finger — used only where the interaction, not the layout, must change
@@ -34,6 +35,32 @@ export const MOBILE_SHORT_MAX_PX = 500
  *  must additionally give up vertical chrome key off this. */
 export const SHORT_MEDIA = `(max-height: ${MOBILE_SHORT_MAX_PX}px) and (pointer: coarse)`
 export const MOBILE_MEDIA = `(max-width: ${MOBILE_MAX_PX}px), ${SHORT_MEDIA}`
+
+/** A phone held UPRIGHT: narrow, and not short.
+ *
+ * The third form, and it exists because the two above cannot express what the
+ * temporal views actually need. Most of what a phone wants is true of both
+ * orientations — 44px targets, a title that does not wrap into the page — and
+ * that is MOBILE_MEDIA. But a few reflows trade one axis for the other: the
+ * Day chart lifting each lane's name onto a line of its own, the Week putting
+ * a row's annotation under its raster. Those buy horizontal room with vertical
+ * room, which is the right trade at 390x844 and exactly the wrong one at
+ * 874x402.
+ *
+ * Written under MOBILE_MEDIA, such a rule has to be undone again under
+ * SHORT_MEDIA, and an undo block is a dozen declarations that say nothing
+ * about the design and drift the moment the rule above them changes. Written
+ * here, it simply never applies to a phone on its side. The complement is
+ * exact — `min-height: 501px` is `max-height: 500px` negated — so no viewport
+ * falls between the two forms or matches both.
+ */
+export const NARROW_MEDIA = `(max-width: ${MOBILE_MAX_PX}px) and (min-height: ${MOBILE_SHORT_MAX_PX + 1}px)`
+
+/** True on a phone held upright. Never true at the same time as
+ *  `isShortViewport()`; both imply `isMobileViewport()`. */
+export function isNarrowViewport(win: Pick<Window, 'matchMedia'> = window): boolean {
+  return win.matchMedia?.(NARROW_MEDIA)?.matches ?? false
+}
 
 export function isMobileViewport(win: Pick<Window, 'matchMedia'> = window): boolean {
   return win.matchMedia?.(MOBILE_MEDIA)?.matches ?? false

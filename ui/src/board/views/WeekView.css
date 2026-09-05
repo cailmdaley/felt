@@ -469,7 +469,11 @@
    lost: the annotation is out of the column flow entirely, so all seven rows
    and the tick row still subscribe to the identical gutter-plus-rail pair, and
    2pm is still 2pm on every row. Nothing is hidden either — the diffstat is
-   what a day cost, and a day's cost is most of the reason to open the week. */
+   what a day cost, and a day's cost is most of the reason to open the week.
+
+   That fix trades vertical room for horizontal, so it belongs to a NARROW page
+   and not to every phone — see the NARROW_MEDIA block below. What is here is
+   what a phone wants held either way up. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .wk-head { flex: 1 1 100%; flex-wrap: wrap; gap: 10px; }
   .wk-weeklabel { white-space: nowrap; }
@@ -480,9 +484,9 @@
      on the second line, which reads as a stray number rather than as the cost
      of the week. It fits: at this size and with the tracking pulled back to a
      hair, the widest week measures about 320 of the 340 pixels a portrait phone
-     gives it, and landscape has 500 more. Sized once for both preludes, so it
-     needs nothing back in SHORT_MEDIA. Ellipsis is the last resort if a week
-     ever runs six figures in both directions. */
+     gives it, and landscape has 500 more. One size serves both orientations,
+     which is why it sits here rather than below. Ellipsis is the last resort
+     if a week ever runs six figures in both directions. */
   .kbn-view-headfigures.wk-totals {
     white-space: nowrap;
     overflow: hidden;
@@ -501,10 +505,19 @@
     flex: 0 0 auto;
     min-height: auto;
   }
+}
 
-  /* The two-line row below is a narrow page's answer and not every phone's —
-     see the SHORT_MEDIA block after this one, which puts the annotation back
-     beside its raster for a phone on its side. */
+/* ── and specifically on a NARROW one ─────────────────────────────────────────
+   `NARROW_MEDIA` (`../mobile.ts`): narrow AND not short, the exact height
+   complement of SHORT_MEDIA, so a phone matches this or that and never both.
+
+   Everything below buys horizontal room with vertical room, which is the right
+   trade in portrait and the wrong one on a phone held on its side. Landscape is
+   874px wide — room for the annotation beside its raster, in the third track
+   where the shared x-scale wants it — and 402px tall, where doubling seven rows
+   would cost more than the width was worth. Landscape simply never enters here,
+   so there is nothing to give back afterwards. */
+@media (max-width: 700px) and (min-height: 501px) {
   .wk-grid {
     /* Two digits of old-style numerals and a weekday's small caps; the desktop
        54px was buying room a narrow page would rather give the raster. */
@@ -573,47 +586,4 @@
     grid-column: 1 / -1;
     justify-self: stretch;
   }
-}
-
-/* ── The week on a phone HELD ON ITS SIDE ─────────────────────────────────────
-   Verbatim `SHORT_MEDIA` (`../mobile.ts`), running after the block above:
-   landscape matches the shared prelude, takes the two-line row, and gives it
-   back. One condition — "narrow AND not short" — would say this once, but the
-   board admits exactly two preludes and a third would be a third threshold to
-   keep in step; a dozen declarations is the cheaper of the two prices.
-
-   Landscape has 874 horizontal pixels, which is room for the annotation beside
-   its raster, exactly where the shared x-scale wants it. What it has not got is
-   vertical room: doubling seven rows at 402px tall spends the axis that is
-   scarce to relieve the one that is not. The grid keeps its natural height from
-   the shared block — no phone has a screenful to give — and only the row shape
-   is undone. */
-@media (max-height: 500px) and (pointer: coarse) {
-  .wk-grid {
-    --wk-gutter: 54px;
-    grid-template-columns: var(--wk-gutter) minmax(0, 1fr) minmax(var(--wk-annot), max-content);
-    grid-template-rows: repeat(7, minmax(40px, 1fr)) auto auto;
-    column-gap: 10px;
-  }
-  .wk-row { grid-template-rows: auto; }
-  .wk-daylabel { grid-row: auto; }
-  .wk-rail { grid-row: auto; min-height: 22px; }
-  /* Back into the third track, right-ragged against the rails, at the size and
-     tracking the desktop sets — 874px is room for the whole clause, so none of
-     what a portrait row gives up is owed here. */
-  .wk-annot {
-    grid-column: auto;
-    grid-row: auto;
-    align-self: center;
-    text-align: right;
-    white-space: nowrap;
-    overflow: visible;
-    font-size: calc(9.5px * var(--kbn-type-scale, 1));
-    letter-spacing: 0.03em;
-    line-height: 1;
-    padding-bottom: 0;
-  }
-  /* And the day's weight comes back with the room to print it. */
-  .wk-annot-weight { display: inline; }
-  .wk-key { grid-column: 2; justify-self: center; }
 }

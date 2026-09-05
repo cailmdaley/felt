@@ -1062,12 +1062,9 @@ button.kbn-day-entrytitle:focus-visible {
    held on its side, which is 874px wide and would otherwise be served the
    desktop chart.
 
-   Only the TAP TARGET is owed to every phone. The stack below is owed to a
-   NARROW one, and it is nested in its own `max-width` query for that reason:
-   in landscape there are 874 horizontal pixels going spare and 402 vertical
-   ones that are not, so lifting each name onto a line of its own would spend
-   the scarce axis to relieve the abundant one and cut the lanes on screen from
-   twenty-odd to eight.
+   What is in THIS block is what a phone wants held either way up: the tap
+   target and the one-line head. The stack is owed to a NARROW page and lives
+   under NARROW_MEDIA below.
 
    The chart is a two-column grid — names, then rails — and at 390px neither
    column survives it. The label track clamps to its 86px floor and every name
@@ -1110,10 +1107,19 @@ button.kbn-day-entrytitle:focus-visible {
      token that says the least. It carries its own trailing separator, so
      hiding it leaves no orphaned dot (see DayView.ts). */
   .kbn-day-stats-host { display: none; }
+}
 
-  /* Everything below reflows the chart into a STACK, which is a narrow page's
-     answer and not every phone's — see the SHORT_MEDIA block after this one,
-     which hands a phone on its side the desktop chart back. */
+/* ── and specifically on a NARROW one ─────────────────────────────────────────
+   `NARROW_MEDIA` (`../mobile.ts`): narrow AND not short, the exact height
+   complement of SHORT_MEDIA, so a phone matches this or that and never both.
+
+   The stack below buys horizontal room with vertical room. In portrait that is
+   the trade worth making; on a phone held on its side it is exactly backwards —
+   874 horizontal pixels going spare, 402 vertical ones that are not — and a
+   name lifted onto a line of its own would cut the lanes on screen from
+   twenty-odd to eight. Landscape never enters here and keeps the desktop
+   chart, so nothing below needs giving back afterwards. */
+@media (max-width: 700px) and (min-height: 501px) {
   .kbn-day-chart {
     display: block;
     padding: 6px 0 0;
@@ -1160,8 +1166,9 @@ button.kbn-day-entrytitle:focus-visible {
        the thread break at every name and run only where the rails are, which is
        where they mean something. A halo round the glyphs was tried first and is
        not enough — the thread is 1.5px of gold and reads straight through the
-       gaps in a word. Undone in SHORT_MEDIA, where the overlay is back in the
-       rail track and a band would be a patch over nothing. */
+       gaps in a word. It costs nothing to confine to this block: landscape
+       keeps the overlay in the rail track, where a band would be a patch over
+       the sheet it is painted to match. */
     position: relative;
     z-index: 1;
     background: var(--day-paper);
@@ -1219,51 +1226,4 @@ button.kbn-day-entrytitle:focus-visible {
     min-width: 0;
     text-align: left;
   }
-}
-
-/* ── The day on a phone HELD ON ITS SIDE ──────────────────────────────────────
-   Verbatim `SHORT_MEDIA` (`../mobile.ts`), and it runs after the block above
-   on purpose: landscape matches the shared prelude too, takes the stack, and
-   then gives it straight back.
-
-   Two preludes saying one thing would be better written as one condition —
-   "narrow AND not short" — but the board's contract admits exactly two forms,
-   MOBILE_MEDIA and SHORT_MEDIA, and a third would be a third threshold to keep
-   in step. Restoring costs a dozen declarations; a private threshold costs
-   every future reader.
-
-   What landscape wants is the desktop chart: 874 horizontal pixels going spare
-   and 402 vertical ones that are not, so a name lifted onto a line of its own
-   spends the scarce axis to relieve the abundant one and cuts the lanes on
-   screen from twenty-odd to eight. The tap target from the shared block stays;
-   only the stack is undone. */
-@media (max-height: 500px) and (pointer: coarse) {
-  .kbn-day-chart {
-    display: grid;
-    padding: 7px 2px 0;
-  }
-  .kbn-day-grid { position: relative; inset: auto; }
-  .kbn-day-label {
-    justify-content: flex-end;
-    align-items: baseline;
-    gap: 5px;
-    margin: 0;
-    padding-bottom: 0;
-    /* The gridline layer is back in the rail track, so nothing is drawn under a
-       name and the caption has nothing to mask. A band of paper here would be a
-       patch over the sheet it is painted to match. */
-    position: static;
-    z-index: auto;
-    background: none;
-  }
-  .kbn-day-lanename {
-    text-align: right;
-    font-size: calc(13px * var(--kbn-type-scale, 1));
-  }
-  .kbn-day-rail { min-height: 0; }
-  .kbn-day-axis { margin-top: 3px; }
-  .kbn-day-legend { margin: 6px 0 0; justify-self: center; }
-  .kbn-day-entries { columns: 2; column-rule: 0.5px solid rgba(122, 111, 92, 0.16); }
-  .kbn-day-entrystats { white-space: nowrap; flex-basis: auto; }
-  .kbn-day-entrytitle { flex: 0 1 auto; }
 }

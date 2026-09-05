@@ -8,6 +8,7 @@ import {
   MOBILE_MAX_PX,
   MOBILE_MEDIA,
   MOBILE_SHORT_MAX_PX,
+  NARROW_MEDIA,
   SHORT_MEDIA,
 } from '../src/board/mobile.js'
 
@@ -61,14 +62,30 @@ function sheets(): Array<{ path: string; text: string }> {
 
 const PRELUDE = /@media([^{]*)\{/g
 
+/** The three forms the board is allowed to write, and nothing else. A prelude
+ *  that mentions either number must be exactly one of these. */
+const FORMS = [MOBILE_MEDIA, SHORT_MEDIA, NARROW_MEDIA]
+
 describe('the mobile threshold is one contract', () => {
-  it('is a disjunction of a width and a short handheld viewport', () => {
+  it('has three named forms built from the same two numbers', () => {
     expect(MOBILE_MEDIA).toBe(`(max-width: ${MOBILE_MAX_PX}px), ${SHORT_MEDIA}`)
     expect(SHORT_MEDIA).toBe(`(max-height: ${MOBILE_SHORT_MAX_PX}px) and (pointer: coarse)`)
+    expect(NARROW_MEDIA).toBe(
+      `(max-width: ${MOBILE_MAX_PX}px) and (min-height: ${MOBILE_SHORT_MAX_PX + 1}px)`,
+    )
+  })
+
+  // NARROW and SHORT must PARTITION the mobile viewports, not merely differ:
+  // a height that matched both would apply a stacking reflow and its opposite
+  // at once, and one that matched neither would drop a phone out of both.
+  it('narrow and short are exact complements in height', () => {
+    const shortMax = Number(/max-height: (\d+)px/.exec(SHORT_MEDIA)![1])
+    const narrowMin = Number(/min-height: (\d+)px/.exec(NARROW_MEDIA)![1])
+    expect(narrowMin).toBe(shortMax + 1)
   })
 
   // A scanner that finds nothing passes every assertion below it. This is the
-  // one that says the glob is still pointed at real files.
+  // one that says the reader is still pointed at real files.
   it('actually reads the board stylesheets', () => {
     const paths = sheets().map((f) => f.path)
     expect(paths).toContain('board/KanbanModal.css')
@@ -77,34 +94,18 @@ describe('the mobile threshold is one contract', () => {
     expect(sheets().filter((f) => f.text.includes('max-width: 700px')).length).toBeGreaterThan(4)
   })
 
-  it('every stylesheet that names the width also names the short viewport', () => {
+  it('every prelude that names either number is exactly one of the three forms', () => {
     const offenders: string[] = []
     for (const { path, text } of sheets()) {
       for (const m of text.matchAll(PRELUDE)) {
         const prelude = m[1].trim().replace(/\s+/g, ' ')
-        if (!prelude.includes(`max-width: ${MOBILE_MAX_PX}px`)) continue
-        // The whole prelude must BE the contract — not merely contain it, so a
-        // stray extra clause is caught as loudly as a missing one.
-        if (prelude !== MOBILE_MEDIA) offenders.push(`${path}: @media ${prelude}`)
-      }
-    }
-    expect(offenders).toEqual([])
-  })
-
-  it('the short-only blocks are written exactly as SHORT_MEDIA', () => {
-    const offenders: string[] = []
-    for (const { path, text } of sheets()) {
-      for (const m of text.matchAll(PRELUDE)) {
-        const prelude = m[1].trim().replace(/\s+/g, ' ')
-        if (!prelude.includes(`max-height: ${MOBILE_SHORT_MAX_PX}px`)) continue
-        // The one legitimate other use of the number is its COMPLEMENT — a
-        // rule for viewports that are NOT short, which the Week view uses to
-        // gate a two-line row. That is the contract being respected, not
-        // drifted from, so it is named here rather than flagged.
-        const complement = `not all and (max-height: ${MOBILE_SHORT_MAX_PX}px)`
-        if (prelude !== SHORT_MEDIA && prelude !== MOBILE_MEDIA && prelude !== complement) {
-          offenders.push(`${path}: @media ${prelude}`)
-        }
+        const names =
+          prelude.includes(`${MOBILE_MAX_PX}px`) || prelude.includes(`${MOBILE_SHORT_MAX_PX}px`)
+        if (!names) continue
+        // The whole prelude must BE a form — not merely contain one — so a
+        // stray extra clause is caught as loudly as a missing one, and so is a
+        // hand-rolled fourth threshold.
+        if (!FORMS.includes(prelude)) offenders.push(`${path}: @media ${prelude}`)
       }
     }
     expect(offenders).toEqual([])
