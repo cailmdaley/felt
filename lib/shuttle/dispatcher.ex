@@ -894,85 +894,65 @@ defmodule Shuttle.Dispatcher do
   defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
 
   defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
-    cond do
-      already_clean?(fiber) ->
-        :ok
-
-      closed?(fiber) ->
-        reopen_closed(fiber_id, runner, felt_store)
-
-      true ->
-        reopen_best_effort(fiber_id, runner, felt_store)
+    if already_clean?(fiber) do
+      :ok
+    else
+      reopen(fiber_id, runner, felt_store, closed?(fiber))
     end
   end
 
-  # Authoritative reopen for a closed fiber — failure aborts the dispatch.
-  defp reopen_closed(fiber_id, _runner, nil) do
-    Logger.error(
-      "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
-        "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
-    )
+  # One reopen, two severities. `fatal?` is the closed-fiber case above: a
+  # failure aborts the dispatch (`:reopen_unavailable` / `:reopen_failed`).
+  # Otherwise the worker has a live mandate regardless, so a failure only risks
+  # a sticky kanban column and we log loudly and continue.
+  defp reopen(fiber_id, _runner, nil, fatal?) do
+    if fatal? do
+      Logger.error(
+        "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
+          "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
+      )
 
-    {:error, :reopen_unavailable}
-  end
-
-  defp reopen_closed(fiber_id, runner, felt_store) do
-    case run_reopen(fiber_id, runner, felt_store) do
-      {:ok, output} ->
-        Logger.info("Force-dispatch reopened closed fiber #{fiber_id}: #{String.trim(output)}")
-        :ok
-
-      {:command_error, code, output} ->
-        Logger.error(
-          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` failed " <>
-            "(exit #{code}: #{String.trim(to_string(output))}) — refusing to spawn a worker " <>
-            "against a still-closed fiber"
-        )
-
-        {:error, :reopen_failed}
-
-      {:error, reason} ->
-        Logger.error(
-          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` raised " <>
-            "#{inspect(reason)} — refusing to spawn a worker against a still-closed fiber"
-        )
-
-        {:error, :reopen_failed}
+      {:error, :reopen_unavailable}
+    else
+      Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
+      :ok
     end
   end
 
-  # Best-effort reopen for a non-closed-but-not-clean fiber (e.g. tempered but
-  # active). The worker has a live mandate regardless; a failed reopen only
-  # risks a sticky kanban column, which we log loudly.
-  defp reopen_best_effort(fiber_id, _runner, nil) do
-    Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
-    :ok
-  end
-
-  defp reopen_best_effort(fiber_id, runner, felt_store) do
+  defp reopen(fiber_id, runner, felt_store, fatal?) do
     case run_reopen(fiber_id, runner, felt_store) do
       {:ok, output} ->
         Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
         :ok
 
       {:command_error, code, output} ->
-        Logger.warning(
-          "Force-dispatch reopen failed for #{fiber_id} " <>
-            "(worker will still spawn but kanban card may stick in its prior column): " <>
-            "exit #{code}: #{String.trim(to_string(output))}"
+        reopen_failure(
+          fiber_id,
+          fatal?,
+          "`felt shuttle reopen` failed (exit #{code}: #{String.trim(to_string(output))})"
         )
-
-        :ok
 
       {:error, reason} ->
-        Logger.warning(
-          "Force-dispatch reopen raised for #{fiber_id} " <>
-            "(worker will still spawn but kanban card may stick in its prior column): " <>
-            "#{inspect(reason)}"
-        )
-
-        :ok
+        reopen_failure(fiber_id, fatal?, "`felt shuttle reopen` raised #{inspect(reason)}")
     end
+  end
+
+  defp reopen_failure(fiber_id, true, detail) do
+    Logger.error(
+      "Force-dispatch aborted for #{fiber_id}: #{detail} — refusing to spawn a worker " <>
+        "against a still-closed fiber"
+    )
+
+    {:error, :reopen_failed}
+  end
+
+  defp reopen_failure(fiber_id, false, detail) do
+    Logger.warning(
+      "Force-dispatch reopen failed for #{fiber_id} " <>
+        "(worker will still spawn but kanban card may stick in its prior column): #{detail}"
+    )
+
+    :ok
   end
 
   # Shell `felt shuttle reopen` through the one audited write helper
@@ -1291,30 +1271,24 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
-          {:ok, _} = result ->
-            # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
-            # (same session_id — resuming doesn't change session identity, and
-            # the fresh-fallback path above reuses it as well) so the
-            # continuation heuristic compares a subsequent clean-exit or
-            # died-mid-window against THIS run, not the run being resumed. The
-            # session id is already known synchronously here (it's the resume
-            # target itself), unlike fresh codex/pi dispatch — no capture/
-            # backfill needed, one synchronous stamp same as fresh dispatch.
-            record_dispatch_session(fiber_id, session_id, runner,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :resume
-            )
-
-            result
-
-          error ->
-            error
-        end
+        # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
+        # (same session_id — resuming doesn't change session identity, and the
+        # fresh-fallback path above reuses it as well) so the continuation
+        # heuristic compares a subsequent clean-exit or died-mid-window against
+        # THIS run, not the run being resumed. The session id is already known
+        # synchronously here (it's the resume target itself), unlike fresh
+        # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
+        # same as fresh dispatch.
+        spawn_and_record(session, work_dir, run_script, runner, fn ->
+          record_dispatch_session(fiber_id, session_id, runner,
+            felt_store: felt_store,
+            run_id: Keyword.get(opts, :run_id),
+            tmux: session,
+            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+            uid: Keyword.get(opts, :uid),
+            ledger_kind: :resume
+          )
+        end)
 
       :fresh ->
         # Fresh mode: build the full dispatch prompt.
@@ -1329,24 +1303,31 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
-          {:ok, _} = result ->
-            # Store the session UUID in the dispatch marker so "Resume previous"
-            # and the autonomous continuation heuristic can recover it.
-            store_session_id(fiber_id, session_uuid, runner,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :dispatch
-            )
+        # Store the session UUID in the dispatch marker so "Resume previous"
+        # and the autonomous continuation heuristic can recover it.
+        spawn_and_record(session, work_dir, run_script, runner, fn ->
+          store_session_id(fiber_id, session_uuid, runner,
+            felt_store: felt_store,
+            run_id: Keyword.get(opts, :run_id),
+            tmux: session,
+            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+            uid: Keyword.get(opts, :uid),
+            ledger_kind: :dispatch
+          )
+        end)
+    end
+  end
 
-            result
+  # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
+  # propagates unchanged — nothing is stamped for a worker that never started.
+  defp spawn_and_record(session, work_dir, run_script, runner, record_fun) do
+    case spawn_tmux(session, work_dir, run_script, runner) do
+      {:ok, _} = result ->
+        record_fun.()
+        result
 
-          error ->
-            error
-        end
+      error ->
+        error
     end
   end
 
@@ -1505,12 +1486,22 @@ defmodule Shuttle.Dispatcher do
   # default. `uuid` may be `nil` (codex/pi at launch, or `:none` agents) — the
   # marker still gets a `dispatched_at` boundary, just no `session_uuid` yet.
   defp record_dispatch_session(fiber_id, uuid, runner, opts) do
+    write_runtime_marker(fiber_id, uuid, opts, "dispatch marker", fn store ->
+      Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
+        session_uuid: uuid,
+        run_id: Keyword.get(opts, :run_id)
+      })
+    end)
+  end
+
+  # The one runtime-marker writer both entry points share: guard on the felt
+  # store, run the caller's Continuation write, and on success log + append the
+  # structural half to the session ledger. A missing store suppresses the
+  # ledger append too — that is behaviour, not just a skipped write.
+  defp write_runtime_marker(fiber_id, uuid, opts, label, write_fun) do
     case Keyword.get(opts, :felt_store) do
       store when is_binary(store) and store != "" ->
-        case Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
-               session_uuid: uuid,
-               run_id: Keyword.get(opts, :run_id)
-             }) do
+        case write_fun.(store) do
           :ok ->
             if is_binary(uuid) and uuid != "" do
               Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
@@ -1518,23 +1509,23 @@ defmodule Shuttle.Dispatcher do
               Logger.info("Stamped dispatched_at for #{fiber_id} in shuttle.runtime")
             end
 
-            # The structural half of the same fact. `record/1` drops a nil uuid
-            # itself, so the codex/pi launch (boundary stamped, UUID not yet
-            # scraped) contributes no line here — its line comes from the
-            # backfill, once the pairing is actually known.
+            # `record/1` drops a nil uuid itself, so the codex/pi launch
+            # (boundary stamped, UUID not yet scraped) contributes no line
+            # here — its line comes from the backfill, once the pairing is
+            # actually known.
             append_session_ledger(fiber_id, uuid, opts)
 
           {:error, reason} ->
             Logger.warning(
-              "Could not record dispatch marker for #{fiber_id} (#{store}): #{inspect(reason)}"
+              "Could not write #{label} for #{fiber_id} (#{store}): #{inspect(reason)}"
             )
         end
 
       _ ->
-        Logger.debug("record_dispatch_session: no felt_store for #{fiber_id}; skipping")
+        Logger.debug("write_runtime_marker (#{label}): no felt_store for #{fiber_id}; skipping")
     end
   rescue
-    e -> Logger.warning("Could not record session UUID for #{fiber_id}: #{inspect(e)}")
+    e -> Logger.warning("Could not write #{label} for #{fiber_id}: #{inspect(e)}")
   end
 
   # Append the fiber↔session pairing to this host's session ledger. Carries the
@@ -1562,27 +1553,12 @@ defmodule Shuttle.Dispatcher do
   # flag, and mark-runtime only writes fields whose flag is present, so the
   # boundary `record_dispatch_session/4` stamped synchronously at launch is
   # left exactly as it was.
+  # (The ledger line the shared writer appends is the codex/pi `dispatch` line:
+  # that pairing becomes known here, not at launch.)
   defp backfill_session_uuid(fiber_id, uuid, runner, opts) do
-    case Keyword.get(opts, :felt_store) do
-      store when is_binary(store) and store != "" ->
-        case Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid) do
-          :ok ->
-            Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
-            # The codex/pi pairing becomes known here, not at launch — this is
-            # that harness's `dispatch` line.
-            append_session_ledger(fiber_id, uuid, opts)
-
-          {:error, reason} ->
-            Logger.warning(
-              "Could not backfill session UUID for #{fiber_id} (#{store}): #{inspect(reason)}"
-            )
-        end
-
-      _ ->
-        Logger.debug("backfill_session_uuid: no felt_store for #{fiber_id}; skipping")
-    end
-  rescue
-    e -> Logger.warning("Could not backfill session UUID for #{fiber_id}: #{inspect(e)}")
+    write_runtime_marker(fiber_id, uuid, opts, "session UUID backfill", fn store ->
+      Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid)
+    end)
   end
 
   # Poll for the session UUID written by codex/pi to their respective session
