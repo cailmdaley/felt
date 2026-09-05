@@ -1299,7 +1299,7 @@ defmodule Shuttle.Poller do
 
     state = reconcile(%{state | felt_stores: felt_stores})
 
-    standing_roles = StandingRoles.standing_roles_from_candidates(candidates, state)
+    standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
 
     # Merge newly resolved host entries into the cache. Existing entries
     # are not evicted — earlier-configured hosts win for ID collisions,
@@ -1927,19 +1927,18 @@ defmodule Shuttle.Poller do
   defp eligible?(fiber, state) do
     shuttle = Map.get(fiber, "shuttle")
 
-    if is_map(shuttle) do
-      # `project_dir_available?/1` is the only predicate in this function that
-      # touches the filesystem — it stats `shuttle.project_dir`. For a
-      # project_dir hosted in a macOS file provider (iCloud Drive,
-      # `~/Library/CloudStorage`), a per-tick stat raises a repeating TCC
-      # "access data from other apps" prompt that cannot be granted away. It
-      # is evaluated LAST, after every cheap in-memory gate, so the stat only
-      # happens for a fiber that is otherwise about to dispatch — a fiber
-      # already rejected by a pure predicate never reaches it.
-      dispatch_gates_pass?(fiber, shuttle, state) and project_dir_available?(shuttle)
-    else
-      false
-    end
+    # `project_dir_available?/1` is the only predicate in this function that
+    # touches the filesystem — it stats `shuttle.project_dir`. For a
+    # project_dir hosted in a macOS file provider (iCloud Drive,
+    # `~/Library/CloudStorage`), a per-tick stat raises a repeating TCC
+    # "access data from other apps" prompt that cannot be granted away. It
+    # is evaluated LAST, after every cheap in-memory gate, so the stat only
+    # happens for a fiber that is otherwise about to dispatch — a fiber
+    # already rejected by a pure predicate never reaches it.
+    #
+    # A non-map `shuttle` fails `dispatch_gates_pass?/3`'s `host_owned?` gate,
+    # so the `and` short-circuits before the stat.
+    dispatch_gates_pass?(fiber, shuttle, state) and project_dir_available?(shuttle)
   end
 
   defp dispatch_gates_pass?(fiber, shuttle, state) do
@@ -2044,13 +2043,7 @@ defmodule Shuttle.Poller do
   # Force-dispatch predicate: only the irreducible requirements. The user
   # explicitly clicked dispatch; honor the intent.
   defp force_dispatch_eligible?(fiber, state) do
-    shuttle = Map.get(fiber, "shuttle")
-
-    cond do
-      not is_map(shuttle) -> false
-      not host_owned?(shuttle, state.own_host_id) -> false
-      true -> true
-    end
+    host_owned?(Map.get(fiber, "shuttle"), state.own_host_id)
   end
 
   # Names WHY a dispatch was refused so the kanban can say something true
@@ -2069,7 +2062,7 @@ defmodule Shuttle.Poller do
   defp dispatch_ineligible_reason(fiber, state, opts) do
     shuttle = Map.get(fiber, "shuttle")
     status = Map.get(fiber, "status", "")
-    forced? = Keyword.get(opts, :force, false) or Keyword.get(opts, :ad_hoc, false)
+    forced? = Keyword.get(opts, :force, false)
 
     cond do
       not is_map(shuttle) ->

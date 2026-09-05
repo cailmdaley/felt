@@ -11,7 +11,7 @@ defmodule Shuttle.Poller.Snapshot do
   State-coupled helpers that the rest of the poller also relies on
   (`fiber_address/1`, `metadata_uid/1`, `runtime_seconds/2`) stay in
   `Shuttle.Poller` as the single source of truth and are called back into from
-  here. `standing_role_snapshots/4` lives in `Shuttle.Poller.StandingRoles`.
+  here. `standing_role_snapshots/3` lives in `Shuttle.Poller.StandingRoles`.
   """
 
   alias Shuttle.Poller
@@ -119,7 +119,7 @@ defmodule Shuttle.Poller.Snapshot do
       # stays (empty) for snapshot-shape stability with API/kanban consumers.
       retrying: [],
       standing_roles:
-        StandingRoles.standing_role_snapshots(state.standing_roles, state.running, now, state),
+        StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
       claimed_count: MapSet.size(state.claimed),
       max_concurrent: state.max_concurrent_workers,
       document_cache:
