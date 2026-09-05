@@ -543,7 +543,6 @@ export function StashForm({
 
   // Clamp axes whenever the constraint agent shifts under them.
   useEffect(() => {
-    if (effort !== effectiveEffort) setEffort(effectiveEffort)
     if (chrome && !chromeCapable) setChrome(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [constraintAgent?.id, agents])
@@ -553,7 +552,6 @@ export function StashForm({
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
     const levels = rec?.effort_levels ?? []
     setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
-    if (!(rec?.chrome_capable ?? false)) setChrome(false)
   }
 
   return (
@@ -819,7 +817,7 @@ export function StashForm({
             {/* Schedule + timezone, only when kind=standing */}
             {kind === 'standing' && (
               <div className="stash-row stash-row-schedule">
-                <label className="stash-field stash-field-cron">
+                <label className="stash-field">
                   <span className="stash-label">Schedule</span>
                   <input
                     type="text"
@@ -833,7 +831,7 @@ export function StashForm({
                     5-field cron · e.g. <code>0 9 * * 1-5</code> (weekdays 09:00)
                   </div>
                 </label>
-                <label className="stash-field stash-field-tz">
+                <label className="stash-field">
                   <span className="stash-label">Timezone</span>
                   <input
                     type="text"
@@ -1057,7 +1055,6 @@ export function injectStashFormStyles(): void {
       grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
     }
     @media (max-width: 700px) {
-      .stash-row-2,
       .stash-row-3,
       .stash-row-dispatch,
       .stash-row-schedule {
@@ -1126,7 +1123,6 @@ export function injectStashFormStyles(): void {
     .stash-textarea {
       resize: vertical;
       min-height: 64px;
-      font-family: var(--font-main, 'EB Garamond', serif);
       line-height: 1.45;
     }
     .stash-input:focus,
@@ -1153,7 +1149,6 @@ export function injectStashFormStyles(): void {
     .stash-hint-warn {
       color: #8C5A1A;
       font-style: normal;
-      font-size: 12px;
     }
     .stash-receipt {
       display: inline-flex;
@@ -1181,8 +1176,6 @@ export function injectStashFormStyles(): void {
     .stash-receipt-val {
       font-family: inherit;
       color: #2E2A26;
-      background: transparent;
-      padding: 0;
     }
     .stash-chips {
       display: flex;
@@ -1231,9 +1224,6 @@ export function injectStashFormStyles(): void {
       padding: 2px 4px;
       background: transparent;
       box-shadow: none !important;
-    }
-    .stash-tag-input:focus {
-      box-shadow: none;
     }
     .stash-suggestions {
       display: flex;
@@ -1352,7 +1342,6 @@ export function injectStashFormStyles(): void {
     .stash-segment-name {
       font-size: 13px;
       font-weight: 600;
-      color: inherit;
       line-height: 1.2;
     }
     .stash-segment-hint {
