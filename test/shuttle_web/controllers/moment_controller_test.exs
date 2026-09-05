@@ -123,6 +123,29 @@ defmodule ShuttleWeb.MomentControllerTest do
       assert at == @t0 + 1_000
     end
 
+    test "a record with a malformed timestamp is dropped and warns, naming the raw value" do
+      import ExUnit.CaptureLog
+
+      root =
+        write_tree([
+          {"-slug", @session,
+           [
+             %{"type" => "user", "timestamp" => "not-a-timestamp", "message" => %{"content" => "ghost"}},
+             user(@t0 + 1_000, "still here")
+           ]}
+        ])
+
+      log =
+        capture_log(fn ->
+          excerpts = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
+          assert Enum.map(excerpts, & &1.text) == ["still here"]
+        end)
+
+      assert log =~ "malformed timestamp"
+      assert log =~ @session
+      assert log =~ "not-a-timestamp"
+    end
+
     test "an unknown session, a non-uuid session and a missing root are all empty" do
       root = default_tree()
 

@@ -149,7 +149,7 @@ defmodule Shuttle.Moment do
   pattern reaches the filesystem.
   """
 
-    @max_window_ms 2 * 60 * 60 * 1000
+  @max_window_ms 2 * 60 * 60 * 1000
   @cap 6
   @max_chars 280
 
@@ -501,7 +501,7 @@ defmodule Shuttle.Moment do
       path
       |> File.stream!()
       |> Enum.reduce({[], [], %{}, "/root"}, fn line, {excerpts, tools, spawns, codex_self} ->
-        case decode_record(line) do
+        case decode_record(line, path) do
           {:ok, record} ->
             codex_self = Map.get(record, "codex_self") || codex_self
             record = Map.put(record, :codex_self, codex_self)
@@ -532,12 +532,27 @@ defmodule Shuttle.Moment do
       {[], []}
   end
 
-  defp decode_record(line) do
+  defp decode_record(line, path) do
     with {:ok, raw} <- Jason.decode(line),
          true <- is_map(raw),
-         {:ok, record} <- normalize_record(raw),
-         {:ok, at_ms} <- at_ms(record) do
-      {:ok, Map.put(record, :at_ms, at_ms)}
+         {:ok, record} <- normalize_record(raw) do
+      # A record with no timestamp is not a moment (mode/last-prompt/snapshot
+      # rows) and is dropped silently; one whose timestamp is present but
+      # unparseable is a real moment lost, and says so.
+      case at_ms(record) do
+        {:ok, at_ms} ->
+          {:ok, Map.put(record, :at_ms, at_ms)}
+
+        {:malformed, stamp} ->
+          Logger.warning(
+            "moment: dropping record with malformed timestamp session=#{path} timestamp=#{inspect(stamp)}"
+          )
+
+          :skip
+
+        :skip ->
+          :skip
+      end
     else
       _ -> :skip
     end
@@ -1075,11 +1090,12 @@ defmodule Shuttle.Moment do
   defp at_ms(%{"timestamp" => stamp}) when is_binary(stamp) do
     case DateTime.from_iso8601(stamp) do
       {:ok, dt, _offset} -> {:ok, DateTime.to_unix(dt, :millisecond)}
-      _ -> :skip
+      _ -> {:malformed, stamp}
     end
   end
 
   defp at_ms(%{"timestamp" => stamp}) when is_integer(stamp), do: {:ok, stamp}
+  defp at_ms(%{"timestamp" => stamp}) when not is_nil(stamp), do: {:malformed, stamp}
   defp at_ms(_), do: :skip
 
   # `isMeta` records are injected context wearing a user's clothes.
