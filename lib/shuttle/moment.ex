@@ -149,7 +149,7 @@ defmodule Shuttle.Moment do
   pattern reaches the filesystem.
   """
 
-    @max_window_ms 2 * 60 * 60 * 1000
+  @max_window_ms 2 * 60 * 60 * 1000
   @cap 6
   @max_chars 280
 
@@ -536,15 +536,21 @@ defmodule Shuttle.Moment do
     with {:ok, raw} <- Jason.decode(line),
          true <- is_map(raw),
          {:ok, record} <- normalize_record(raw) do
+      # A record with no timestamp is not a moment (mode/last-prompt/snapshot
+      # rows) and is dropped silently; one whose timestamp is present but
+      # unparseable is a real moment lost, and says so.
       case at_ms(record) do
         {:ok, at_ms} ->
           {:ok, Map.put(record, :at_ms, at_ms)}
 
-        :skip ->
+        {:malformed, stamp} ->
           Logger.warning(
-            "moment: dropping record with malformed timestamp session=#{path} timestamp=#{inspect(record["timestamp"])}"
+            "moment: dropping record with malformed timestamp session=#{path} timestamp=#{inspect(stamp)}"
           )
 
+          :skip
+
+        :skip ->
           :skip
       end
     else
@@ -1084,11 +1090,12 @@ defmodule Shuttle.Moment do
   defp at_ms(%{"timestamp" => stamp}) when is_binary(stamp) do
     case DateTime.from_iso8601(stamp) do
       {:ok, dt, _offset} -> {:ok, DateTime.to_unix(dt, :millisecond)}
-      _ -> :skip
+      _ -> {:malformed, stamp}
     end
   end
 
   defp at_ms(%{"timestamp" => stamp}) when is_integer(stamp), do: {:ok, stamp}
+  defp at_ms(%{"timestamp" => stamp}) when not is_nil(stamp), do: {:malformed, stamp}
   defp at_ms(_), do: :skip
 
   # `isMeta` records are injected context wearing a user's clothes.
