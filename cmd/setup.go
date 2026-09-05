@@ -441,12 +441,6 @@ func installClaudePluginAtSource(repoRoot string) error {
 	return nil
 }
 
-// claudePluginEntry mirrors the structured `claude plugin list --json`
-// output. Only the fields we read are decoded.
-type claudePluginEntry struct {
-	ID string `json:"id"` // "<plugin>@<marketplace>"
-}
-
 // isPluginInstalled reports whether `claude plugin list` knows the given
 // "<plugin>@<marketplace>" ref. Chooses between the install and update paths
 // in installPluginViaCLI. Returns false when the CLI is missing or the call
@@ -457,7 +451,10 @@ func isPluginInstalled(ref string) bool {
 	if err != nil {
 		return false
 	}
-	var entries []claudePluginEntry
+	// Mirrors `claude plugin list --json`; only the fields we read are decoded.
+	var entries []struct {
+		ID string `json:"id"` // "<plugin>@<marketplace>"
+	}
 	if err := json.Unmarshal(out, &entries); err != nil {
 		return false
 	}
@@ -683,10 +680,9 @@ func linkSkillsFromPlugin(targetDir, pluginDir string) error {
 			continue
 		}
 		name := entry.Name()
-		src, err := filepath.Abs(filepath.Join(skillsDir, name))
-		if err != nil {
-			return err
-		}
+		// skillsDir descends from findMarketplaceRoot, whose every success
+		// return is a filepath.Abs result, so this join is already absolute.
+		src := filepath.Join(skillsDir, name)
 		dest := filepath.Join(targetDir, name)
 
 		if existing, err := os.Readlink(dest); err == nil && existing == src {
@@ -777,18 +773,21 @@ func feltCodexLegacyHooksInstalled() bool {
 	if err != nil {
 		return false
 	}
+	// Prunes in memory only — nothing is written back.
 	_, hooks, ok := readHookFile(hooksPath)
-	if !ok {
-		return false
-	}
+	return ok && pruneCodexHookEntries(hooks) > 0
+}
+
+// pruneCodexHookEntries removes felt's legacy direct hook entries from a
+// ~/.codex/hooks.json hook map, returning how many it removed.
+func pruneCodexHookEntries(hooks map[string]interface{}) int {
+	removed := 0
 	for _, event := range []string{"SessionStart", "PreToolUse"} {
 		for _, basename := range []string{"session.sh", "remind.sh"} {
-			if len(pruneFeltHooks(hooks, event, basename)) > 0 {
-				return true
-			}
+			removed += len(pruneFeltHooks(hooks, event, basename))
 		}
 	}
-	return false
+	return removed
 }
 
 // refreshCodexSetupIfInstalled reinstalls the Codex plugin from marketplaceRef
@@ -930,7 +929,7 @@ func repointCodexMarketplace(codexSource string) error {
 	if !codexMarketplaceConflict(out) {
 		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
-	previousSource, hadPrevious := codexMarketplaceState()
+	previousSource, _ := codexMarketplaceState()
 
 	fmt.Printf("Repointing marketplace %s → %s\n", marketplaceName, codexSource)
 	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
@@ -939,7 +938,7 @@ func repointCodexMarketplace(codexSource string) error {
 
 	retryOut, retryErr := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if retryErr != nil {
-		if hadPrevious && previousSource != "" {
+		if previousSource != "" {
 			// Re-register the prior source before returning. A failed repoint is
 			// not allowed to strand the user's working marketplace on a missing
 			// source; the outer promotion transaction will restore the cache too.
@@ -984,8 +983,8 @@ func runCodexCLIQuiet(args ...string) (string, error) {
 	return string(out), err
 }
 
-// readCodexConfig loads ~/.codex/config.toml as a generic map. Returns an
-// empty map if the file doesn't exist.
+// readCodexConfig loads ~/.codex/config.toml as a generic map. Callers only
+// index the result, so a nil map (empty or comment-only document) is fine.
 func readCodexConfig() (map[string]interface{}, error) {
 	path, err := homePath(".codex", "config.toml")
 	if err != nil {
@@ -1002,9 +1001,6 @@ func readCodexConfig() (map[string]interface{}, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if cfg == nil {
-		cfg = map[string]interface{}{}
-	}
 	return cfg, nil
 }
 
@@ -1015,15 +1011,7 @@ func pruneLegacyCodexHooks() int {
 	if err != nil {
 		return 0
 	}
-	return pruneHookFile(hooksPath, func(hooks map[string]interface{}) int {
-		removed := 0
-		for _, event := range []string{"SessionStart", "PreToolUse"} {
-			for _, basename := range []string{"session.sh", "remind.sh"} {
-				removed += len(pruneFeltHooks(hooks, event, basename))
-			}
-		}
-		return removed
-	})
+	return pruneHookFile(hooksPath, pruneCodexHookEntries)
 }
 
 // readHookFile decodes a hooks-carrying settings file and hands back both the
