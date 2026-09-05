@@ -145,7 +145,7 @@ var nestCmd = &cobra.Command{
 		// enclosing store, with the local side rewritten into its outer
 		// coordinates: it is one namespace and one git repo, so moving a
 		// fiber across a project boundary inside it is an ordinary move.
-		store, childID, parentID, where := liftPair(storage, childRef, parentRef)
+		childID, parentID, where := liftPair(storage, childRef, parentRef)
 
 		if childID == parentID {
 			return fmt.Errorf("child and parent must be different fibers")
@@ -158,10 +158,10 @@ var nestCmd = &cobra.Command{
 		if felt.ParentPath(childID) == parentID && childID == targetID {
 			return fmt.Errorf("%s is already nested under %s", childID, parentID)
 		}
-		if err := store.CheckAvailableID(targetID); err != nil {
+		if err := where.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		if err := store.MoveSubtree(childID, targetID); err != nil {
+		if err := where.storage.MoveSubtree(childID, targetID); err != nil {
 			return err
 		}
 

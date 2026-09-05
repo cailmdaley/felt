@@ -334,15 +334,9 @@ func normalizeToolInput(raw json.RawMessage) json.RawMessage {
 	if fp == "" {
 		return raw
 	}
-	encoded, err := json.Marshal(fp)
-	if err != nil {
-		return raw
-	}
+	encoded, _ := json.Marshal(fp)
 	obj["file_path"] = encoded
-	merged, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
+	merged, _ := json.Marshal(obj)
 	return merged
 }
 
@@ -379,10 +373,7 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 			trimmed["file_path"] = v
 		}
 	}
-	out, err := json.Marshal(trimmed)
-	if err != nil {
-		return json.RawMessage(`{"truncated":true}`)
-	}
+	out, _ := json.Marshal(trimmed)
 	return out
 }
 

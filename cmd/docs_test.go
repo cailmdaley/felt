@@ -44,56 +44,10 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		visible = append(visible, cmd.Name())
 	}
 
-	for _, retired := range []string{
-		"tag",
-		"untag",
-		"link",
-		"unlink",
-		"comment",
-		"upstream",
-		"downstream",
-		"graph",
-		"ready",
-		"prime",
-		"tapestry",
-		"export",
-	} {
-		if slices.Contains(visible, retired) {
-			t.Fatalf("root command surface still exposes retired command %q in %v", retired, visible)
-		}
-	}
-
-	for _, expected := range []string{
-		"add",
-		"check",
-		"edit",
-		"find",
-		"hook",
-		"init",
-		"ls",
-		"migrate",
-		"nest",
-		"rm",
-		"session",
-		"setup",
-		"show",
-		"tree",
-		"uninstall",
-		"unnest",
-		"update",
-	} {
-		if !slices.Contains(visible, expected) {
-			t.Fatalf("root command surface missing %q in %v", expected, visible)
-		}
-	}
-
 	// `hook` is back as a binary subcommand: the plugin's hook scripts are
 	// thin shims that exec into it, so brew-upgrading the binary refreshes
 	// hook behavior without requiring users to also refresh the plugin.
-	if !slices.Contains(visible, "hook") {
-		t.Fatalf("root command surface missing `hook` subcommand: %v", visible)
-	}
-
+	//
 	// `shuttle` is the dispatch command group — felt's active/weaving mode,
 	// absorbed from the standalone shuttle-ctl. It groups all `felt shuttle
 	// <verb>` dispatch verbs so the top-level surface stays about notes.

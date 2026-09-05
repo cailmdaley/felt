@@ -186,8 +186,8 @@ func init() {
 }
 
 type showBodyOutput struct {
-	Body          string `json:"body" yaml:"body"`
-	BodyStartLine int    `json:"body_start_line" yaml:"body_start_line"`
+	Body          string `json:"body"`
+	BodyStartLine int    `json:"body_start_line"`
 }
 
 func outputShowBody(storage *felt.Storage, f *felt.Felt) error {
@@ -278,7 +278,7 @@ func emitFieldNode(n *yaml.Node) error {
 			return nil
 		}
 		fallthrough
-	case yaml.MappingNode, yaml.AliasNode, yaml.DocumentNode:
+	case yaml.MappingNode, yaml.AliasNode:
 		out, err := yaml.Marshal(n)
 		if err != nil {
 			return fmt.Errorf("marshal field value: %w", err)

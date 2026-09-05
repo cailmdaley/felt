@@ -129,9 +129,6 @@ func resolveCommandScope(root string) string {
 	parts := strings.Split(rel, "/")
 	for i := len(parts); i > 0; i-- {
 		candidate := path.Join(parts[:i]...)
-		if candidate == "." || candidate == "" {
-			continue
-		}
 		fiberPath := filepath.Join(feltRoot, filepath.FromSlash(candidate), path.Base(candidate)+felt.FileExt)
 		if info, err := os.Stat(fiberPath); err == nil && !info.IsDir() {
 			return candidate
