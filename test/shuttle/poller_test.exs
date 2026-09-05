@@ -1059,59 +1059,15 @@ defmodule Shuttle.PollerTest do
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/killme")
   end
 
-  test "kill_session treats tmux's \"session not found\" as a successful teardown" do
-    uid = "01JZ00000000000000000000KN"
-
-    fiber =
-      make_fiber("tests/killme-gone", %{
-        "uid" => uid,
-        "modified_at" => "2026-06-08T01:00:00Z"
-      })
-
-    MockRunner.set_fiber("tests/killme-gone", fiber)
-    MockRunner.set_shuttle("tests/killme-gone", "enabled: true\nkind: oneshot\nhost: candide\n")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_kill_session_gone,
-        runner: MockRunner,
-        own_host_id: "candide",
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    send(poller, :run_poll_cycle)
-
-    assert wait_until(fn ->
-             case Poller.cached_fiber_documents(poller) do
-               {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
-               _ -> false
-             end
-           end)
-
-    {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
-    session = get_in(live, [:runtime, :tmux_session])
-
-    # tmux itself reports the session is already gone (exit 1, "can't find
-    # session") — the poller must still treat this as a successful kill and
-    # tear down runtime tracking, not surface it as a failure.
-    MockRunner.set_kill_session_failure(:not_found)
-    assert {:ok, ^session} = Poller.kill_session(poller, "tests/killme-gone")
-
-    assert wait_until(fn ->
-             case Poller.cached_fiber_documents(poller) do
-               {:ok, %{fibers: [entry]}} -> not Map.has_key?(entry, :runtime)
-               _ -> false
-             end
-           end)
-  end
-
-  # Twin of the "session not found" test above for the two other tmux
-  # "already gone" phrasings session_already_gone? must also treat as success:
-  # a whole-server-down "no server running" and the per-session "no such
-  # session". Each is its own test (not a loop) so a fresh MockRunner + poller
-  # keeps them from cross-claiming each other's fiber.
+  # The three tmux "already gone" phrasings session_already_gone? must treat as
+  # success: the per-session "session not found" and "no such session", and a
+  # whole-server-down "no server running". In every case tmux reports the
+  # session is already gone (exit 1) - the poller must still treat this as a
+  # successful kill and tear down runtime tracking, not surface it as a
+  # failure. Each is its own test (not one shared body) so a fresh MockRunner +
+  # poller keeps them from cross-claiming each other's fiber.
   for {variant, uid_suffix, gone_output} <- [
+        {:not_found, "KN", "\"session not found\""},
         {:no_server, "K0", "\"no server running\""},
         {:no_such, "K1", "\"no such session\""}
       ] do

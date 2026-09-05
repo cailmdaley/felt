@@ -226,13 +226,6 @@ defmodule Shuttle.DispatchIntegrationTest do
     :ok
   end
 
-  # The fiber's on-disk `.md`: host/.felt/<id segments>/<basename>.md (mirrors
-  # write_fiber / read_frontmatter).
-  defp fiber_md_path(host, id) do
-    parts = String.split(id, "/")
-    Path.join([host, ".felt"] ++ parts ++ ["#{List.last(parts)}.md"])
-  end
-
   # Start a Poller under ExUnit's per-test supervisor so it is torn down at test
   # end rather than leaking as a zombie ticker (Poller.start_link links to the
   # test process, but a :normal test exit doesn't kill linked processes). Returns

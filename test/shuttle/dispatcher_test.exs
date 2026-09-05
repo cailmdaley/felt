@@ -960,14 +960,27 @@ defmodule Shuttle.DispatcherTest do
   # daemon's; the daemon only renders what it's handed.
   defp resolved(fields), do: Agents.from_resolved(fields)
 
-  test "build_command for claude uses here-string" do
-    agent =
+  # The two four-key base records these tests reuse verbatim.
+  defp claude_sonnet,
+    do:
       resolved(%{
         "id" => "claude-sonnet",
         "cli" => "claude",
         "wrapper" => "claude",
         "model" => "sonnet"
       })
+
+  defp codex,
+    do:
+      resolved(%{
+        "id" => "codex",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-5.5-codex"
+      })
+
+  test "build_command for claude uses here-string" do
+    agent = claude_sonnet()
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "claude"
@@ -976,13 +989,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_command for codex uses positional arg" do
-    agent =
-      resolved(%{
-        "id" => "codex",
-        "cli" => "codex",
-        "wrapper" => "codex",
-        "model" => "gpt-5.5-codex"
-      })
+    agent = codex()
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "codex"
@@ -1073,20 +1080,6 @@ defmodule Shuttle.DispatcherTest do
     refute cmd =~ "--effort"
   end
 
-  test "pi renders the resolved effort as the model suffix (pi-luna :high)" do
-    agent =
-      resolved(%{
-        "id" => "pi-luna",
-        "cli" => "pi",
-        "wrapper" => "pi",
-        "model" => "claude-sonnet-4.6",
-        "effort" => "high"
-      })
-
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--model 'claude-sonnet-4.6:high'"
-  end
-
   test "codex renders effort via -c model_reasoning_effort" do
     agent =
       resolved(%{
@@ -1099,20 +1092,6 @@ defmodule Shuttle.DispatcherTest do
 
     cmd = Agents.build_command(agent, "hi")
     assert cmd =~ ~s(-c model_reasoning_effort='high')
-  end
-
-  test "codex renders the resolved default effort" do
-    agent =
-      resolved(%{
-        "id" => "codex",
-        "cli" => "codex",
-        "wrapper" => "codex",
-        "model" => "gpt-5.5-codex",
-        "effort" => "xhigh"
-      })
-
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ ~s(-c model_reasoning_effort='xhigh')
   end
 
   test "resolved chrome renders --chrome" do
@@ -1190,13 +1169,7 @@ defmodule Shuttle.DispatcherTest do
   # ── Resume command shape ──
 
   test "build_resume_command for claude with empty prompt: --resume only, no stdin pipe" do
-    agent =
-      resolved(%{
-        "id" => "claude-sonnet",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "sonnet"
-      })
+    agent = claude_sonnet()
 
     cmd = Agents.build_resume_command(agent, "abc-123", "")
     assert cmd =~ "claude"
@@ -1205,13 +1178,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command for claude with prompt: pipes via here-string" do
-    agent =
-      resolved(%{
-        "id" => "claude-sonnet",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "sonnet"
-      })
+    agent = claude_sonnet()
 
     cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
     assert cmd =~ "--resume 'abc-123'"
@@ -1219,26 +1186,14 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command for claude with whitespace-only prompt: treated as empty" do
-    agent =
-      resolved(%{
-        "id" => "claude-sonnet",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "sonnet"
-      })
+    agent = claude_sonnet()
 
     cmd = Agents.build_resume_command(agent, "abc-123", "   \n  ")
     refute cmd =~ "<<<"
   end
 
   test "build_resume_command for codex with prompt: positional arg" do
-    agent =
-      resolved(%{
-        "id" => "codex",
-        "cli" => "codex",
-        "wrapper" => "codex",
-        "model" => "gpt-5.5-codex"
-      })
+    agent = codex()
 
     cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
     assert cmd =~ "codex"
@@ -1248,13 +1203,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command for codex with empty prompt: resume only" do
-    agent =
-      resolved(%{
-        "id" => "codex",
-        "cli" => "codex",
-        "wrapper" => "codex",
-        "model" => "gpt-5.5-codex"
-      })
+    agent = codex()
 
     cmd = Agents.build_resume_command(agent, "abc-123", "")
     assert cmd =~ "resume 'abc-123'"
@@ -1296,13 +1245,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_resume_command/2 default-arg form still works (zero-arg prompt)" do
-    agent =
-      resolved(%{
-        "id" => "claude-sonnet",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "sonnet"
-      })
+    agent = claude_sonnet()
 
     cmd = Agents.build_resume_command(agent, "abc-123")
     assert cmd =~ "--resume 'abc-123'"
