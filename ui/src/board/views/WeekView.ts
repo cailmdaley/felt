@@ -105,9 +105,6 @@ import {
 } from './momentTip.js'
 import { RailScrub } from './railScrub.js'
 
-// Re-exported because the tooltip vocabulary was Week's before it was shared,
-// and callers (and tests) that learned it here keep working.
-export { type SlotTip, type SlotTipRow }
 import type { KanbanCard } from '../KanbanTypes.js'
 import { cycleSpan, type CycleSpan } from '../KanbanRules.js'
 import {
@@ -369,7 +366,7 @@ export interface ActivitySpend {
  * back. So the human side sums `n` (events) while the agent side counts
  * distinct minutes.
  */
-export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS): ActivitySpend {
+export function summarizeSpend(buckets: ActivityBucket[]): ActivitySpend {
   const minutes = foldActiveMinutes(buckets)
   let sent = 0
   let received = 0
@@ -378,8 +375,8 @@ export function summarizeSpend(buckets: ActivityBucket[], bucketMs = BUCKET_MS):
     else if (b.k === 'reply') received += b.n
   }
   return {
-    totalMs: minutes.all * bucketMs,
-    agentMs: minutes.agent * bucketMs,
+    totalMs: minutes.all * BUCKET_MS,
+    agentMs: minutes.agent * BUCKET_MS,
     sent,
     received,
   }
@@ -1633,7 +1630,6 @@ class WeekView implements TemporalView {
       row.sig = sig
 
       row.root.classList.toggle('wk-row-today', isToday)
-      row.root.classList.toggle('wk-row-past', isPast)
       row.root.classList.toggle('wk-row-future', !isPast && !isToday)
       // The kanban's own muted register (KanbanModal.css), unchanged: a row
       // whose ink comes only from an origin we have lost contact with is
@@ -1762,7 +1758,7 @@ class WeekView implements TemporalView {
 function navButton(glyph: string, title: string, onClick: () => void): HTMLElement {
   const el = document.createElement('button')
   el.type = 'button'
-  el.className = 'kbn-view-chev wk-navbtn'
+  el.className = 'kbn-view-chev'
   el.textContent = glyph
   el.title = title
   el.setAttribute('aria-label', title)
@@ -1809,24 +1805,17 @@ function buildTickRow(): HTMLElement {
 function buildKeyRow(): HTMLElement {
   const key = document.createElement('div')
   key.className = 'kbn-view-key wk-key'
-  for (const { kind, label } of ACTIVITY_KEY_ITEMS) {
+  // The spine — the other channel, and the only mark here that is an EVENT
+  // rather than the wash. Kept out of ACTIVITY_KEY_ITEMS because that list is
+  // about the curve's pigment, and a spine is not a pigment.
+  for (const { kind, label } of [...ACTIVITY_KEY_ITEMS, { kind: 'spine', label: SPINE_KEY_LABEL }]) {
     const item = document.createElement('span')
-    item.className = 'kbn-view-key-item wk-key-item'
+    item.className = 'kbn-view-key-item'
     const glyph = document.createElement('span')
     glyph.className = `wk-key-glyph wk-key-${kind}`
     item.append(glyph, document.createTextNode(label))
     key.append(item)
   }
-
-  // The spine — the other channel, and the only mark here that is an EVENT
-  // rather than the wash. Kept out of ACTIVITY_KEY_ITEMS because that list is
-  // about the curve's pigment, and a spine is not a pigment.
-  const item = document.createElement('span')
-  item.className = 'kbn-view-key-item wk-key-item'
-  const glyph = document.createElement('span')
-  glyph.className = 'wk-key-glyph wk-key-spine'
-  item.append(glyph, document.createTextNode(SPINE_KEY_LABEL))
-  key.append(item)
 
   // NOTE — the constitution-driven axis used to live here, drawn as a broader
   // nib on a slot whose work carried a `shuttle:` block. The curve has no
@@ -1844,8 +1833,6 @@ interface SlotKind {
   kind: DrawnKind
   /** Events in the slot — the sum of the buckets' `n`. What the tooltip says. */
   count: number
-  /** The largest single minute in the slot. What the ink's weight reads. */
-  peak: number
   /** Distinct names the slot's work joined to, strongest evidence first
    *  (fiber names; a session or directory when nothing earned it). */
   where: string[]
@@ -1918,11 +1905,10 @@ export function rasterSlots(
     }
     let entry = kinds.get(b.k)
     if (!entry) {
-      entry = { kind: b.k, count: 0, peak: 0, where: [], shuttle: false }
+      entry = { kind: b.k, count: 0, where: [], shuttle: false }
       kinds.set(b.k, entry)
     }
     entry.count += b.n
-    entry.peak = Math.max(entry.peak, b.n)
     if (!entry.where.includes(who.label)) entry.where.push(who.label)
     if (who.shuttle) entry.shuttle = true
     if (b.k === 'attention') {

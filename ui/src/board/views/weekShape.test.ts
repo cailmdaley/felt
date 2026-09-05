@@ -1052,15 +1052,12 @@ describe('how full a day was', () => {
     const bucket = (m: number, k: ActivityBucket['k'], n = 1): ActivityBucket =>
       ({ m, s: null, cwd: null, k, n });
     // Three kinds in the same minute, then one more minute of agent work.
-    const spend = summarizeSpend(
-      [
+    const spend = summarizeSpend([
         bucket(0, 'agent', 9),
         bucket(0, 'attention'),
         bucket(0, 'notify'),
         bucket(60_000, 'agent', 4),
-      ],
-      60_000,
-    );
+    ]);
     expect(spend.totalMs).toBe(2 * 60_000);
     expect(spend.agentMs).toBe(2 * 60_000);
   });
