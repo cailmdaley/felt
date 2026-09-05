@@ -108,7 +108,10 @@ try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
 }
 
 # Clusters keep their toolchain under ~/.local (kerl OTP + precompiled Elixir +
-# Go), not on the default PATH of a non-interactive ssh shell.
+# Go), not on the default PATH of a non-interactive ssh shell. The build step
+# also runs under `bash -lc`, so a host whose toolchain lives wherever its own
+# login shell says (asdf shims relocated off a quota'd $HOME, say) still finds
+# `mix` without this list knowing about it.
 REMOTE_PATH='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:$HOME/.local/elixir/bin:$HOME/.local/otp/27/bin:$PATH'
 
 BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
@@ -213,7 +216,7 @@ deploy_remote() {
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
-  ssh $flags "$dest" "$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon" >/dev/null \
+  ssh $flags "$dest" "bash -lc '$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon'" >/dev/null \
     || { bad "pull/build failed"; return 1; }
   if [ -f "$AGENTS_FILE" ]; then
     ssh $flags "$dest" "mkdir -p ~/.config/felt" \
