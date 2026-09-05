@@ -30,12 +30,8 @@ export const CONTAINER_COVERAGE = 0.8
 /** Take the innermost candidate that is neither scaffolding nor a container
  * spanning most of the slide. Cail's complaint: a press on a slide would grab
  * the section or a full-bleed wrapper instead of the paragraph he aimed at. */
-export function pickTarget(
-  candidates: readonly HitCandidate[],
-  slideArea: number,
-  coverage = CONTAINER_COVERAGE,
-): HitOutcome {
-  const limit = slideArea > 0 ? slideArea * coverage : Infinity
+export function pickTarget(candidates: readonly HitCandidate[], slideArea: number): HitOutcome {
+  const limit = slideArea > 0 ? slideArea * CONTAINER_COVERAGE : Infinity
   for (const [index, candidate] of candidates.entries()) {
     if (candidate.interactive) return { kind: 'pass-through' }
     if (candidate.structural || candidate.area <= 0) continue

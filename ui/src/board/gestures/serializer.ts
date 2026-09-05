@@ -74,7 +74,7 @@ export function coalesceGestures(records: readonly GestureRecord[]): GestureReco
 }
 
 /** A move/resize is noise when every box coordinate changed by at most 2px. */
-export function isGestureNoop(record: GestureRecord): boolean {
+function isGestureNoop(record: GestureRecord): boolean {
   if (record.kind === 'text') return record.beforeText === record.afterText
   if (record.kind === 'move' || record.kind === 'resize') {
     return boxWithinDeadZone(record.beforeBox, record.afterBox)

@@ -111,7 +111,6 @@ export function buildFileViewer(
     shuttleBase,
     fiberId: gesture?.fiberId,
     filePath: fullPath,
-    originId,
     sourceUrl: src,
   })
 

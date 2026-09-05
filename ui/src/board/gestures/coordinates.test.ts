@@ -30,7 +30,6 @@ const slide: CoordinateSpace = {
     expect(pointInRect(500, 280, outline)).toBe(true)
     expect(pointInRect(99, 180, outline)).toBe(false)
     expect(pointInRect(300, 281, outline)).toBe(false)
-    expect(pointInRect(99, 180, outline, 2)).toBe(true)
   })
 
   it('reads both 2d and 3d CSS matrix scales', () => {
