@@ -105,10 +105,6 @@ export function buildKanbanResponseFromComposite(
     }
   }
 
-  if (feed.entries.length === 0) {
-    return emptyResponse(feed, nowMs, staleness);
-  }
-
   const eligible = dedupeMirroredRows(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
@@ -683,28 +679,6 @@ function originStaleness(name: string, origin: CompositeOrigin): KanbanOriginSta
   return status === 'stale'
     ? { status, hostname: name, staleSince: origin.lastPolledAt }
     : { status, hostname: name };
-}
-
-function emptyResponse(
-  feed: CompositeFeed,
-  nowMs: number,
-  staleness: Record<string, KanbanOriginStaleness>,
-): KanbanResponse {
-  return {
-    feltHost: feed.host,
-    now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [] },
-    stash: [],
-    pinned: [],
-    cycles: [],
-    totals: {
-      drafts: 0, inFlight: 0, awaitingReview: 0,
-      past: 0, futureDated: 0, stash: 0, pinned: 0,
-    },
-    temperedTotal: 0,
-    staleness,
-    generatedAt: nowMs,
-  };
 }
 
 // `createdAt` / `modifiedAt` / `closedAt` / `nextLaunchAt` are INSTANTS. Order

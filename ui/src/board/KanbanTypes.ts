@@ -234,13 +234,11 @@ export interface KanbanCard {
  *
  * Local origin is always 'fresh'. Remote origins are:
  *   • 'fresh'   — agent connected, last fetch landed promptly.
- *   • 'loading' — agent connected but this build's fetch crossed the soft
- *     deadline and may still land. Reachable, just behind.
  *   • 'stale'   — agent disconnected or the document fetch failed; cards may
  *     be last-known-good until the feed recovers.
  */
 export interface KanbanOriginStaleness {
-  status: 'fresh' | 'loading' | 'stale'
+  status: 'fresh' | 'stale'
   /** Hostname for human-readable badging (e.g. "waiting on cluster-a"). */
   hostname?: string
   /** ISO timestamp; only set when status === 'stale'. */

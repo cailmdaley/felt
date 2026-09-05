@@ -21,8 +21,6 @@ export interface Fiber {
                      // remains slug-shaped via `id`.
   name: string;      // frontmatter `name:`
   status: string;    // open, active, closed
-  kind: string;      // task, decision, question, spec
-  priority: number;  // default 2
   createdAt: string; // ISO date from frontmatter
   body?: string;     // markdown body after frontmatter
   outcome?: string;  // outcome from frontmatter
@@ -145,10 +143,9 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const horizon = typeof f.horizon === 'string' && f.horizon.trim() ? f.horizon.trim() : undefined;
   const cold = typeof f.cold === 'boolean' ? f.cold : undefined;
 
-  // Prefer canonical *_at fields; fall back to legacy `created`/`closed`.
-  const createdAt = pickIsoString(f, ['created_at', 'created']) ?? '';
-  const closedAt = pickIsoString(f, ['closed_at', 'closed']);
-  const modifiedAt = pickIsoString(f, ['modified_at', 'modified']);
+  const createdAt = pickIsoString(f, 'created_at') ?? '';
+  const closedAt = pickIsoString(f, 'closed_at');
+  const modifiedAt = pickIsoString(f, 'modified_at');
 
   const tags = stringList(f.tags);
   // depends_on ships as `[{id: "..."}]` (common), bare-string arrays (legacy),
@@ -199,8 +196,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     const runtime = s.runtime;
     if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
       const r = runtime as Record<string, unknown>;
-      shuttleDispatchedAt = pickIsoString(r, ['dispatched_at']);
-      shuttleHandedOffAt = pickIsoString(r, ['handed_off_at']);
+      shuttleDispatchedAt = pickIsoString(r, 'dispatched_at');
+      shuttleHandedOffAt = pickIsoString(r, 'handed_off_at');
     }
 
     if (typeof s.agent === 'string' && s.agent) shuttleAgent = s.agent;
@@ -238,23 +235,11 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       ? id.slice(0, id.lastIndexOf('/'))
       : null;
 
-  // kind / priority are UI-side conventions felt does not interpret.
-  const kind = typeof f.kind === 'string' && f.kind ? f.kind : 'task';
-  const priorityRaw = f.priority;
-  const priority =
-    typeof priorityRaw === 'number'
-      ? priorityRaw
-      : typeof priorityRaw === 'string'
-        ? parseInt(priorityRaw, 10) || 2
-        : 2;
-
   return {
     id,
     uid,
     name,
     status,
-    kind,
-    priority,
     createdAt,
     closedAt,
     modifiedAt,
@@ -284,15 +269,11 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   };
 }
 
-function pickIsoString(obj: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const v = obj[key];
-    if (typeof v === 'string' && v && !v.startsWith('0001-')) {
-      // 0001-01-01 is Go's zero-value time.Time when the field was absent in
-      // source — treat as missing.
-      return v;
-    }
-  }
+function pickIsoString(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  // 0001-01-01 is Go's zero-value time.Time when the field was absent in
+  // source — treat as missing.
+  if (typeof v === 'string' && v && !v.startsWith('0001-')) return v;
   return undefined;
 }
 
