@@ -15,23 +15,42 @@ import (
 
 const provenanceSession = "01a02f80-b023-7ed2-8f3d-8f5b7b94ce21"
 
-func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
-	defer saveShuttleGlobals()()
+// The one-record composite body that names the session's owning host.
+const provenanceOwnerRecords = `{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`
+
+// daemonStub serves the given routes and points SHUTTLE_DAEMON_URL at itself.
+// Every other path 404s, so an unexpected request still fails loudly.
+func daemonStub(t *testing.T, routes map[string]http.HandlerFunc) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != sessionsCompositePath {
-			http.NotFound(w, r)
+		if h, ok := routes[r.URL.Path]; ok {
+			h(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"records":[
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	return server
+}
+
+func jsonBody(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }
+}
+
+func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
+	defer saveShuttleGlobals()()
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"records":[
           {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
           {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","at":2,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
           {"fiber":"new/name","uid":"01UID","session":"other","host":"cineca","harness":"claude-code","kind":"dispatch","at":3,"transcript":{"availability":"transcript_missing"}},
           {"fiber":"other","uid":"02UID","session":"ignored","host":"candide","harness":"codex","kind":"dispatch","at":4}
         ]}`))
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+		},
+	})
 	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "new/name", "--json")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
@@ -55,22 +74,15 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 	defer saveShuttleGlobals()()
 	body := []byte("{\"type\":\"response_item\"}\n")
 	digest := sha256.Sum256(body)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(body)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`))
-		case "/api/v1/transcript/raw":
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
+		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(body)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`),
+		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Transcript-Byte-Count", "25")
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
 			_, _ = w.Write(body)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+		},
+	})
 	cache := t.TempDir()
 	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", cache)
 	out, err := runCommand(t, t.TempDir(), "shuttle", "transcript", provenanceSession)
@@ -93,21 +105,14 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T) {
 	defer saveShuttleGlobals()()
 	digest := sha256.Sum256(nil)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","byte_count":0,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`))
-		case "/api/v1/transcript/raw":
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
+		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","byte_count":0,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`),
+		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Transcript-Byte-Count", "0")
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+		},
+	})
 	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	out, err := runCommand(t, t.TempDir(), "shuttle", "transcript", provenanceSession)
 	if err != nil {
@@ -128,22 +133,15 @@ func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) 
 	current := []byte("old\nnew\n")
 	oldDigest := sha256.Sum256(old)
 	currentDigest := sha256.Sum256(current)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/live.jsonl","byte_count":` + strconv.Itoa(len(old)) + `,"sha256":"` + hex.EncodeToString(oldDigest[:]) + `"}`))
-		case "/api/v1/transcript/raw":
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
+		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/live.jsonl","byte_count":` + strconv.Itoa(len(old)) + `,"sha256":"` + hex.EncodeToString(oldDigest[:]) + `"}`),
+		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Transcript-Byte-Count", strconv.Itoa(len(current)))
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(currentDigest[:]))
 			_, _ = w.Write(current)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+		},
+	})
 	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	out, err := runCommand(t, t.TempDir(), "shuttle", "transcript", provenanceSession)
 	if err != nil {
@@ -171,20 +169,11 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 	good := []byte("previous verified transcript\n")
 	bad := []byte("truncated transfer\n")
 	goodDigest := sha256.Sum256(good)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(good)) + `,"sha256":"` + hex.EncodeToString(goodDigest[:]) + `"}`))
-		case "/api/v1/transcript/raw":
-			_, _ = w.Write(bad)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath:    jsonBody(provenanceOwnerRecords),
+		transcriptPath:           jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(good)) + `,"sha256":"` + hex.EncodeToString(goodDigest[:]) + `"}`),
+		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(bad) },
+	})
 	cache := t.TempDir()
 	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", cache)
 	_, destination, err := transcriptCachePath(provenanceSession)
@@ -217,18 +206,10 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 func TestShuttleTranscript_LocalJSONCarriesBothPaths(t *testing.T) {
 	defer saveShuttleGlobals()()
 	native := "/Users/cail/.codex/sessions/rollout.jsonl"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[{"session":"` + provenanceSession + `","host":"local"}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_local","host":"local","harness":"codex","source_path":"` + native + `","byte_count":12,"sha256":"abc"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(`{"records":[{"session":"` + provenanceSession + `","host":"local"}]}`),
+		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_local","host":"local","harness":"codex","source_path":"` + native + `","byte_count":12,"sha256":"abc"}`),
+	})
 	out, err := runCommand(t, t.TempDir(), "shuttle", "transcript", provenanceSession, "--json")
 	if err != nil {
 		t.Fatalf("transcript --json: %v\n%s", err, out)
@@ -265,15 +246,9 @@ func TestIdentityPendingAppendsAlongsideHistoricalSessions(t *testing.T) {
 
 func TestCompositeFiberRuntimePendingRequiresMissingSession(t *testing.T) {
 	defer saveShuttleGlobals()()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/fibers/composite" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01UID","slug":"remote/name","shuttle":{"runtime":{"dispatched_at":"2026-08-23T18:00:00Z"}}}}]}`))
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	daemonStub(t, map[string]http.HandlerFunc{
+		"/api/v1/fibers/composite": jsonBody(`{"fibers":[{"fiber":{"id":"01UID","slug":"remote/name","shuttle":{"runtime":{"dispatched_at":"2026-08-23T18:00:00Z"}}}}]}`),
+	})
 	if !compositeFiberRuntimePending("remote/name") {
 		t.Fatal("remote dispatched_at without session_uuid should be pending")
 	}
@@ -303,29 +278,20 @@ func resetSessionsFlags() func() {
 func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
 	t.Helper()
 	digest := sha256.Sum256(transcriptBody)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[
+	return daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(`{"records":[
               {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1},
               {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","at":2}
-            ]}`))
-		case "/api/v1/commits/composite":
-			_, _ = w.Write([]byte(`{"records":[{"sha":"79def80abc123","session":"` + provenanceSession + `","kind":"commit","at":5}]}`))
-		case "/api/v1/fibers/composite":
-			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01UID","slug":"new/name","status":"closed","tempered":true}}]}`))
-		case transcriptPath:
-			_, _ = w.Write([]byte(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(transcriptBody)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`))
-		case "/api/v1/transcript/raw":
+            ]}`),
+		"/api/v1/commits/composite": jsonBody(`{"records":[{"sha":"79def80abc123","session":"` + provenanceSession + `","kind":"commit","at":5}]}`),
+		"/api/v1/fibers/composite":  jsonBody(`{"fibers":[{"fiber":{"id":"01UID","slug":"new/name","status":"closed","tempered":true}}]}`),
+		transcriptPath:              jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(transcriptBody)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`),
+		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Transcript-Byte-Count", strconv.Itoa(len(transcriptBody)))
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
 			_, _ = w.Write(transcriptBody)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-	return server
+		},
+	})
 }
 
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
@@ -436,21 +402,13 @@ func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
 	defer resetSessionsFlags()()
 	// Fiber-less ledger rows: path round-tripping would match the first
 	// fiber-less row (01OTHER); keying on the ledger's own UID must not.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case sessionsCompositePath:
-			_, _ = w.Write([]byte(`{"records":[
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath: jsonBody(`{"records":[
               {"uid":"01OTHER","session":"aaaaaaaa-0000-4000-8000-000000000000","host":"h","harness":"codex","kind":"dispatch","at":1,"transcript":{"availability":"transcript_missing"}},
               {"uid":"01UID","session":"` + provenanceSession + `","host":"h","harness":"codex","kind":"dispatch","at":2,"transcript":{"availability":"transcript_missing"}}
-            ]}`))
-		case "/api/v1/fibers/composite":
-			_, _ = w.Write([]byte(`{"fibers":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+            ]}`),
+		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
+	})
 	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", provenanceSession, "--json")
 	if err != nil {
 		t.Fatalf("reverse lookup: %v\n%s", err, out)
@@ -473,22 +431,13 @@ func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
 func TestShuttleSessions_AmbiguousCommitPrefixErrors(t *testing.T) {
 	defer saveShuttleGlobals()()
 	defer resetSessionsFlags()()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/commits/composite" {
-			_, _ = w.Write([]byte(`{"records":[
+	daemonStub(t, map[string]http.HandlerFunc{
+		"/api/v1/commits/composite": jsonBody(`{"records":[
               {"sha":"79def80aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"s1"},
               {"sha":"79def80bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","session":"s2"}
-            ]}`))
-			return
-		}
-		if r.URL.Path == sessionsCompositePath {
-			_, _ = w.Write([]byte(`{"records":[]}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+            ]}`),
+		sessionsCompositePath: jsonBody(`{"records":[]}`),
+	})
 	_, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "79def80")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("want ambiguous-prefix error, got %v", err)

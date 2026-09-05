@@ -35,31 +35,35 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 	}
 }
 
-func TestClaudeSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
-	f := newRemoteSetupFixture(t, "claude")
-	if err := installPluginViaCLI(f.remote); err != nil {
-		t.Fatalf("baseline remote Claude setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "one" {
-		t.Fatalf("baseline generation = %q, want one", got)
-	}
+func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
+	for _, h := range nativeHarnesses {
+		t.Run(h.name, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, h.name)
+			if err := h.install(f.remote); err != nil {
+				t.Fatalf("baseline remote %s setup: %v", h.name, err)
+			}
+			if got := f.currentGeneration(t); got != "one" {
+				t.Fatalf("baseline generation = %q, want one", got)
+			}
 
-	for _, tamper := range []string{"stale", "alter", "missing-marker"} {
-		t.Run(tamper, func(t *testing.T) {
-			f.setGeneration(t, "poisoned-"+tamper)
-			t.Setenv("FAKE_NATIVE_TAMPER", tamper)
-			err := installPluginViaCLI(f.remote + "#" + tamper)
-			assertRefusedBeforeCommit(t, f, err, "one")
+			for _, tamper := range []string{"stale", "alter", "missing-marker"} {
+				t.Run(tamper, func(t *testing.T) {
+					f.setGeneration(t, "poisoned-"+tamper)
+					t.Setenv("FAKE_NATIVE_TAMPER", tamper)
+					err := h.install(f.remote + "#" + tamper)
+					assertRefusedBeforeCommit(t, f, err, "one")
+				})
+			}
+
+			// With the lie removed the same source promotes and verifies cleanly.
+			f.setGeneration(t, "honest")
+			if err := h.install(f.remote + "#honest"); err != nil {
+				t.Fatalf("honest retry after refused caches: %v", err)
+			}
+			if got := f.currentGeneration(t); got != "honest" {
+				t.Fatalf("post-retry generation = %q, want honest", got)
+			}
 		})
-	}
-
-	// With the lie removed the same source promotes and verifies cleanly.
-	f.setGeneration(t, "honest")
-	if err := installPluginViaCLI(f.remote + "#honest"); err != nil {
-		t.Fatalf("honest retry after refused caches: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "honest" {
-		t.Fatalf("post-retry generation = %q, want honest", got)
 	}
 }
 
@@ -93,32 +97,5 @@ func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
 	delta := strings.TrimPrefix(string(log), string(baseline))
 	if !strings.Contains(delta, "plugin uninstall") || !strings.Contains(delta, "plugin install") {
 		t.Fatalf("convergence did not go through uninstall+install:\n%s", delta)
-	}
-}
-
-func TestCodexSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
-	f := newRemoteSetupFixture(t, "codex")
-	if err := installCodexPluginViaCLI(f.remote); err != nil {
-		t.Fatalf("baseline remote Codex setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "one" {
-		t.Fatalf("baseline generation = %q, want one", got)
-	}
-
-	for _, tamper := range []string{"stale", "alter", "missing-marker"} {
-		t.Run(tamper, func(t *testing.T) {
-			f.setGeneration(t, "poisoned-"+tamper)
-			t.Setenv("FAKE_NATIVE_TAMPER", tamper)
-			err := installCodexPluginViaCLI(f.remote + "#" + tamper)
-			assertRefusedBeforeCommit(t, f, err, "one")
-		})
-	}
-
-	f.setGeneration(t, "honest")
-	if err := installCodexPluginViaCLI(f.remote + "#honest"); err != nil {
-		t.Fatalf("honest retry after refused caches: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "honest" {
-		t.Fatalf("post-retry generation = %q, want honest", got)
 	}
 }
