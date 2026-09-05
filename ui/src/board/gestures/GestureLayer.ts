@@ -381,14 +381,15 @@ export class GestureLayer {
     const space = this.runtimeSpace()
     if (!space) return
 
-    const group = this.groupUnderPointer(event)
+    const inside = this.pointInSelection(event)
     const single = this.selection && 'target' in this.selection ? this.selection : null
+    const group = !single && inside ? this.selection as GroupSelection : null
     const hit = this.hitTest(event, space)
     const hitElement = hit.element
     const plan = planPress({
       hit: hit.outcome,
       insideGroupBox: Boolean(group),
-      insideSelectionBox: Boolean(single) && this.pointInSelection(event),
+      insideSelectionBox: Boolean(single) && inside,
       onSelection: Boolean(single && hitElement && (hitElement === single.target || single.target.contains(hitElement))),
     })
     if (plan === 'none' || plan === 'marquee') {
@@ -413,23 +414,14 @@ export class GestureLayer {
       this.updateMarquee(event)
       return
     }
-    if (this.commentManipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.applyCommentManipulation(event)
-      return
-    }
-    if (this.groupManipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.applyGroupManipulation(event)
-      return
-    }
-    if (this.manipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.applyManipulation(event)
-    }
+    const apply = this.commentManipulation?.pointerId === event.pointerId ? this.applyCommentManipulation
+      : this.groupManipulation?.pointerId === event.pointerId ? this.applyGroupManipulation
+      : this.manipulation?.pointerId === event.pointerId ? this.applyManipulation
+      : null
+    if (!apply) return
+    event.preventDefault()
+    event.stopPropagation()
+    apply.call(this, event)
   }
 
   private pointerUp(event: PointerEvent): void {
@@ -437,22 +429,15 @@ export class GestureLayer {
       this.suppressClick = this.finishMarquee(event)
       return
     }
-    if (this.commentManipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.finishCommentManipulation()
-      this.suppressClick = true
-    } else if (this.groupManipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.finishGroupManipulation()
-      this.suppressClick = true
-    } else if (this.manipulation?.pointerId === event.pointerId) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.finishManipulation()
-      this.suppressClick = true
-    }
+    const finish = this.commentManipulation?.pointerId === event.pointerId ? this.finishCommentManipulation
+      : this.groupManipulation?.pointerId === event.pointerId ? this.finishGroupManipulation
+      : this.manipulation?.pointerId === event.pointerId ? this.finishManipulation
+      : null
+    if (!finish) return
+    event.preventDefault()
+    event.stopPropagation()
+    finish.call(this)
+    this.suppressClick = true
   }
 
   private pointerCancel(event: PointerEvent): void {
@@ -580,18 +565,13 @@ export class GestureLayer {
       move.target.style.transform = [move.transform, translation].filter(Boolean).join(' ')
     } else {
       const direction = move.direction ?? ''
-      const west = direction.includes('w')
-      const north = direction.includes('n')
-      const east = direction.includes('e')
-      const south = direction.includes('s')
-      const width = Math.max(MIN_SIZE, move.before.width + (west ? -dx : east ? dx : 0))
-      const height = Math.max(MIN_SIZE, move.before.height + (north ? -dy : south ? dy : 0))
+      const box = resizedBox(move.before, direction, dx, dy)
       move.target.style.position = move.position || 'relative'
-      move.target.style.width = `${width}px`
-      move.target.style.height = `${height}px`
+      move.target.style.width = `${box.width}px`
+      move.target.style.height = `${box.height}px`
       move.target.style.maxWidth = 'none'
-      if (west) move.target.style.left = `${(parseFloat(move.left) || 0) + dx}px`
-      if (north) move.target.style.top = `${(parseFloat(move.top) || 0) + dy}px`
+      if (direction.includes('w')) move.target.style.left = `${(parseFloat(move.left) || 0) + dx}px`
+      if (direction.includes('n')) move.target.style.top = `${(parseFloat(move.top) || 0) + dy}px`
     }
     this.renderSelection()
   }
@@ -709,15 +689,6 @@ export class GestureLayer {
     this.ensureOverlay(space).append(boxEl)
     this.selection = { targets, space, boxEl }
     this.renderSelection()
-  }
-
-  /** The group selection whose outline covers this pointer, if any. */
-  private groupUnderPointer(event: { clientX: number; clientY: number }): GroupSelection | undefined {
-    const selection = this.selection
-    if (!selection || 'target' in selection) return undefined
-    return pointInRect(event.clientX, event.clientY, rectLike(selection.boxEl.getBoundingClientRect()))
-      ? selection
-      : undefined
   }
 
   /** Clicks inside any selection outline keep it; only outside clicks drop it. */
