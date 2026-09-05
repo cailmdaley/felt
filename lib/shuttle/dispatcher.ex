@@ -1607,7 +1607,7 @@ defmodule Shuttle.Dispatcher do
 
       case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
         {:ok, path} ->
-          read_uuid_from_jsonl(cli, path, work_dir)
+          read_uuid_from_jsonl(cli, path)
 
         {:error, _} ->
           capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
@@ -1615,98 +1615,70 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  @doc false
-  # Pi's encoded-cwd directory: the absolute path with every "/" replaced by
-  # "-", bracketed by "--" — e.g. /home/user/loom → --home-user-loom--. The
-  # LEADING slash becomes a dash too, so the munge of /a/b starts with three
-  # dashes before the bracket is added; trimming it first is what keeps the
-  # encoding two-dash-fronted like pi's own directories. Public for tests,
-  # same as `codex_session_dirs/0` — this encoding was once wrong in exactly
-  # that leading slash, and every pi dispatch's session capture timed out.
-  def pi_sessions_dir(work_dir) do
-    Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
+  # Candidate transcripts for this harness, newest first. Both harnesses lead
+  # each basename with an ISO stamp, so descending basename order is descending
+  # time — within a day directory and across them. The first candidate that
+  # matches cwd, recency AND content is this dispatch's session; a bare
+  # newest-file pick would steal another worker's session whenever two workers
+  # share a cwd.
+  defp candidate_session_files("codex", _work_dir) do
+    Shuttle.HarnessPaths.codex_session_dirs()
+    |> Enum.flat_map(fn dir ->
+      case File.ls(dir) do
+        {:ok, files} ->
+          files
+          |> Enum.filter(&String.starts_with?(&1, "rollout-"))
+          |> Enum.map(&Path.join(dir, &1))
+
+        {:error, _} ->
+          []
+      end
+    end)
+    |> Enum.sort_by(&Path.basename/1, :desc)
   end
 
-  defp find_session_file("codex", work_dir, fiber_id, dispatched_after) do
-    paths =
-      codex_session_dirs()
-      |> Enum.flat_map(fn dir ->
-        case File.ls(dir) do
-          {:ok, files} ->
-            files
-            |> Enum.filter(&String.starts_with?(&1, "rollout-"))
-            |> Enum.map(&{&1, Path.join(dir, &1)})
+  defp candidate_session_files("pi", work_dir) do
+    dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
 
-          {:error, _} ->
-            []
-        end
-      end)
-      # A rollout basename leads with its local-wall-clock ISO stamp, so
-      # descending basename order is newest-first both within a day directory
-      # and across the three we search.
-      |> Enum.sort_by(&elem(&1, 0), :desc)
-      |> Enum.map(&elem(&1, 1))
+    case File.ls(dir) do
+      {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
+      {:error, _} -> []
+    end
+  end
 
-    case Enum.find(paths, &session_matches?("codex", &1, work_dir, fiber_id, dispatched_after)) do
+  defp candidate_session_files(_cli, _work_dir), do: []
+
+  defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
+    cli
+    |> candidate_session_files(work_dir)
+    |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
+    |> case do
       nil -> {:error, :not_found}
       path -> {:ok, path}
     end
   end
 
-  defp find_session_file("pi", work_dir, fiber_id, dispatched_after) do
-    dir = pi_sessions_dir(work_dir)
-
-    case File.ls(dir) do
-      {:ok, files} ->
-        # Newest-first by filename — pi leads each basename with an ISO stamp,
-        # so descending name order is descending time, within a day and across
-        # them. The first transcript that matches cwd, recency, AND content is
-        # this dispatch's session; a bare newest-file pick would steal another
-        # worker's session whenever two pi workers share a cwd.
-        files
-        |> Enum.sort(:desc)
-        |> Enum.map(&Path.join(dir, &1))
-        |> Enum.find(
-          {:error, :not_found},
-          &session_matches?("pi", &1, work_dir, fiber_id, dispatched_after)
-        )
-        |> case do
-          {:error, :not_found} = miss -> miss
-          path -> {:ok, path}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
-    do: {:error, :unsupported}
-
   # The JSONL first line each harness writes as its session header, reduced to
   # the map that carries `id` / `cwd` / `timestamp`. Codex nests them under
   # `payload` of a `session_meta` event; pi puts them on a top-level `session`
   # event. Everything downstream reads the same three keys.
-  defp session_header("codex", content) do
+  defp session_header(cli, content) do
     with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, %{"type" => "session_meta", "payload" => payload}} <- Jason.decode(first_line),
-         true <- is_map(payload) do
-      {:ok, payload}
+         {:ok, event} <- Jason.decode(first_line) do
+      case {cli, event} do
+        {"codex", %{"type" => "session_meta", "payload" => payload}} when is_map(payload) ->
+          {:ok, payload}
+
+        {"pi", %{"type" => "session"}} ->
+          {:ok, event}
+
+        _ ->
+          :error
+      end
     else
       _ -> :error
     end
   end
-
-  defp session_header("pi", content) do
-    with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, %{"type" => "session"} = event} <- Jason.decode(first_line) do
-      {:ok, event}
-    else
-      _ -> :error
-    end
-  end
-
-  defp session_header(_cli, _content), do: :error
 
   # The transcript's session header names its cwd and start time, but the
   # dispatch prompt's fiber line only appears once the first message lands
@@ -1726,41 +1698,14 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Codex files a rollout under the LOCAL civil day, not the UTC one. Verified
-  # on disk: ~/.codex/sessions/2026/07/22/rollout-2026-07-22T17-41-02-*.jsonl
-  # whose first line carries "timestamp":"2026-07-22T15:41:03.435Z" — 17:41
-  # Paris, filed under the Paris date. Deriving this path from
-  # `Date.utc_today()` therefore names a directory that does not exist for
-  # every dispatch made west of UTC late in the day (at UTC-7: 17:00–23:59
-  # local), and the capture burns its whole retry budget for nothing — the
-  # worker runs, its session_uuid is lost, and it cannot be resumed.
-  #
-  # One day is also not enough on its own: the dispatch and the transcript
-  # write can straddle local midnight in either direction. So search
-  # yesterday / today / tomorrow in local time and take the newest matching
-  # transcript across all three. That window also absorbs a stale zone read —
-  # the BEAM resolves the local zone through libc, which on some platforms
-  # holds the value captured when the OS process started, and no zone on earth
-  # is more than one civil day from another.
-  #
-  # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
-  # equivalent); the YYYY/MM/DD fan-out below applies to it too.
-  @doc false
-  def codex_session_dirs do
-    Shuttle.HarnessPaths.codex_session_dirs()
-  end
-
-  defp read_uuid_from_jsonl(cli, path, work_dir) do
+  # No cwd re-check here: the only caller hands us the path
+  # `find_session_file/4` just returned, and `session_matches?/5` already
+  # required the header's cwd to expand to `work_dir` before returning it.
+  defp read_uuid_from_jsonl(cli, path) do
     with {:ok, content} <- File.read(path),
          {:ok, header} <- session_header(cli, content),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id"),
-         cwd when is_binary(cwd) <- Map.get(header, "cwd") do
-      # Verify the session belongs to this worker's working directory.
-      if Path.expand(cwd) == Path.expand(work_dir) do
-        {:ok, uuid}
-      else
-        {:error, "session cwd mismatch: #{cwd} ≠ #{work_dir}"}
-      end
+         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id") do
+      {:ok, uuid}
     else
       _ -> {:error, "could not parse session UUID from #{path}"}
     end

@@ -32,6 +32,25 @@ defmodule Shuttle.HarnessPaths do
     end)
   end
 
+  # Codex files a rollout under the LOCAL civil day, not the UTC one. Verified
+  # on disk: ~/.codex/sessions/2026/07/22/rollout-2026-07-22T17-41-02-*.jsonl
+  # whose first line carries "timestamp":"2026-07-22T15:41:03.435Z" — 17:41
+  # Paris, filed under the Paris date. Deriving this path from
+  # `Date.utc_today()` therefore names a directory that does not exist for
+  # every dispatch made west of UTC late in the day (at UTC-7: 17:00–23:59
+  # local), and the capture burns its whole retry budget for nothing — the
+  # worker runs, its session_uuid is lost, and it cannot be resumed.
+  #
+  # One day is also not enough on its own: the dispatch and the transcript
+  # write can straddle local midnight in either direction. So search
+  # yesterday / today / tomorrow in local time and take the newest matching
+  # transcript across all three. That window also absorbs a stale zone read —
+  # the BEAM resolves the local zone through libc, which on some platforms
+  # holds the value captured when the OS process started, and no zone on earth
+  # is more than one civil day from another.
+  #
+  # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
+  # equivalent); the YYYY/MM/DD fan-out applies to it too.
   @doc "The three local-civil-day directories used while capturing a new rollout."
   @spec codex_session_dirs(keyword()) :: [String.t()]
   def codex_session_dirs(opts \\ []) do
@@ -50,6 +69,12 @@ defmodule Shuttle.HarnessPaths do
     Path.join(codex_sessions_root(opts), "*/*/*/rollout-*#{session}.jsonl")
   end
 
+  # The absolute path with every "/" replaced by "-", bracketed by "--" — e.g.
+  # /home/user/loom → --home-user-loom--. The LEADING slash becomes a dash too,
+  # so the munge of /a/b starts with three dashes before the bracket is added;
+  # trimming it first is what keeps the encoding two-dash-fronted like pi's own
+  # directories. This encoding was once wrong in exactly that leading slash,
+  # and every pi dispatch's session capture timed out.
   @doc "The pi directory for a working directory's encoded session files."
   @spec pi_sessions_dir(String.t(), keyword()) :: String.t()
   def pi_sessions_dir(work_dir, opts \\ []) when is_binary(work_dir) do

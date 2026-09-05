@@ -1558,10 +1558,10 @@ defmodule Shuttle.DispatcherTest do
     # session-UUID capture timed out, so no ledger line, no resume, and no
     # day-view attribution for any pi worker. This is that bug's tombstone.
     test "pi_sessions_dir encodes the cwd the way pi does" do
-      assert Dispatcher.pi_sessions_dir("/home/user/loom") =~ "--home-user-loom--"
-      refute Dispatcher.pi_sessions_dir("/home/user/loom") =~ "---"
+      assert Shuttle.HarnessPaths.pi_sessions_dir("/home/user/loom") =~ "--home-user-loom--"
+      refute Shuttle.HarnessPaths.pi_sessions_dir("/home/user/loom") =~ "---"
 
-      assert Dispatcher.pi_sessions_dir("/Users/cd280747/dev/felt") =~
+      assert Shuttle.HarnessPaths.pi_sessions_dir("/Users/cd280747/dev/felt") =~
                "--Users-cd280747-dev-felt--"
     end
 

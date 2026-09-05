@@ -872,7 +872,7 @@ defmodule Shuttle.DispatchIntegrationTest do
         ])
       end
 
-    assert Dispatcher.codex_session_dirs() == expected
+    assert Shuttle.HarnessPaths.codex_session_dirs() == expected
 
     # The +/-1 window is what makes the fix robust independently of the zone
     # read: no two civil days on earth are more than a day apart, so even a
