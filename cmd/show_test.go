@@ -296,7 +296,9 @@ func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
 	}
 }
 
-func TestShowIncludesCitations(t *testing.T) {
+// citationStore seeds a question plus an analysis whose body cites it.
+func citationStore(t *testing.T) string {
+	t.Helper()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -306,6 +308,31 @@ func TestShowIncludesCitations(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
+	return dir
+}
+
+// consumerStore seeds a question with an output plus an analysis consuming it.
+func consumerStore(t *testing.T, outputType string) string {
+	t.Helper()
+	dir, storage := newStore(t)
+	output := map[string]any{"id": "posterior"}
+	if outputType != "" {
+		output["type"] = outputType
+	}
+	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	mustShowExtra(t, question, "outputs", []map[string]any{output})
+	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
+	for _, fiber := range []*felt.Felt{question, analysis} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	return dir
+}
+
+func TestShowIncludesCitations(t *testing.T) {
+	dir := citationStore(t)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -320,16 +347,7 @@ func TestShowIncludesCitations(t *testing.T) {
 }
 
 func TestShowIncludesConsumers(t *testing.T) {
-	dir, storage := newStore(t)
-	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior", "type": "data"}})
-	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
-	for _, fiber := range []*felt.Felt{question, analysis} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := consumerStore(t, "data")
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -344,16 +362,7 @@ func TestShowIncludesConsumers(t *testing.T) {
 }
 
 func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
-	dir, storage := newStore(t)
-	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior"}})
-	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
-	for _, fiber := range []*felt.Felt{question, analysis} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := consumerStore(t, "")
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -368,15 +377,7 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
-	dir, storage := newStore(t)
-	for _, fiber := range []*felt.Felt{
-		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
-		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := citationStore(t)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -391,15 +392,7 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
-	dir, storage := newStore(t)
-	for _, fiber := range []*felt.Felt{
-		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
-		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := citationStore(t)
 	// A fiber with truncated frontmatter: commands must tolerate a single
 	// broken fiber without failing the whole walk.
 	writeBrokenFiber(t, dir, "broken", []byte("---\nname: Broken\n"))
