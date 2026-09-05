@@ -192,16 +192,28 @@ defmodule ShuttleWeb.RelayHelpers do
     end
   end
 
-  defp weak_etag(parts) do
-    hash =
-      :crypto.hash(:sha256, :erlang.term_to_binary(parts))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 32)
+  @doc """
+  SHA-256 of the term-encoded parts, hex, truncated to 32 chars —
+  collision-resistant enough for a cache validator, short enough for a header.
 
-    ~s(W/"#{hash}")
+  Bare: the caller wraps it in weak (`W/"…"`) or strong (`"…"`) quoting, which
+  is the distinction each route makes for itself.
+  """
+  def etag_hash(parts) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(parts))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 32)
   end
 
-  defp if_none_match?(conn, etag) do
+  @doc """
+  A weak validator over `parts` — `W/"<etag_hash>"`.
+  """
+  def weak_etag(parts), do: ~s(W/"#{etag_hash(parts)}")
+
+  @doc """
+  Whether the request's `If-None-Match` names exactly this etag.
+  """
+  def if_none_match?(conn, etag) do
     case get_req_header(conn, "if-none-match") do
       [value | _] -> String.trim(value) == etag
       [] -> false
@@ -213,12 +225,5 @@ defmodule ShuttleWeb.RelayHelpers do
   not exist. A missing file's `nil` is itself a stable token — a host that has
   never written the file 304s forever, correctly.
   """
-  def file_token(path) when is_binary(path) do
-    case File.stat(path, time: :posix) do
-      {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
-      _ -> nil
-    end
-  end
-
-  def file_token(_path), do: nil
+  defdelegate file_token(path), to: Shuttle.TokenSpend
 end

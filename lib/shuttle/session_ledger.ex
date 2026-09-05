@@ -60,10 +60,6 @@ defmodule Shuttle.SessionLedger do
 
   @kinds ~w(dispatch claim resume)
 
-  # The ULID felt embeds in `<leaf>-<ULID>-shuttle`. Same shape
-  # `Shuttle.SentFiles` reads (Crockford base32 excludes I, L, O, U).
-  @ulid_in_tmux ~r/-([0-9A-HJKMNP-TV-Z]{26})-shuttle$/
-
   @typedoc "One ledger line, as written and as served."
   @type record :: %{String.t() => String.t() | integer() | nil}
 
@@ -117,7 +113,7 @@ defmodule Shuttle.SessionLedger do
       {:ok,
        Jason.encode!(%{
          "fiber" => fiber,
-         "uid" => presence(Keyword.get(fields, :uid)) || uid_from_tmux(tmux),
+         "uid" => presence(Keyword.get(fields, :uid)) || Shuttle.ULID.from_tmux(tmux),
          "session" => session,
          "harness" => presence(Keyword.get(fields, :harness)),
          "host" => presence(Keyword.get(fields, :host)) || own_host(),
@@ -133,15 +129,6 @@ defmodule Shuttle.SessionLedger do
   defp to_kind(kind) when is_atom(kind) and not is_nil(kind), do: to_kind(Atom.to_string(kind))
   defp to_kind(kind) when kind in @kinds, do: kind
   defp to_kind(_), do: nil
-
-  defp uid_from_tmux(name) when is_binary(name) do
-    case Regex.run(@ulid_in_tmux, name) do
-      [_, ulid] -> ulid
-      nil -> nil
-    end
-  end
-
-  defp uid_from_tmux(_), do: nil
 
   defp own_host do
     Shuttle.Poller.own_host_id()

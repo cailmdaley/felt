@@ -47,7 +47,7 @@ defmodule ShuttleWeb.FileController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, etag_hash: 1, if_none_match?: 2, file_token: 1]
 
   alias Shuttle.OriginRouter
 
@@ -122,9 +122,9 @@ defmodule ShuttleWeb.FileController do
     if Path.type(path) != :absolute do
       conn |> put_status(400) |> json(%{error: "path must be absolute"})
     else
-      case File.stat(path, time: :posix) do
-        {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> found.(mtime, size)
-        _ -> missing.()
+      case file_token(path) do
+        {mtime, size} -> found.(mtime, size)
+        nil -> missing.()
       end
     end
   end
@@ -152,14 +152,7 @@ defmodule ShuttleWeb.FileController do
   # is the fallback a plain `curl`/browser sends on its own. Either one matching
   # is enough — this is a GET, so there is no lost-update race to protect against.
   defp not_modified?(conn, etag, mtime) do
-    if_none_match(conn, etag) || if_modified_since(conn, mtime)
-  end
-
-  defp if_none_match(conn, etag) do
-    case get_req_header(conn, "if-none-match") do
-      [value | _] -> String.trim(value) == etag
-      [] -> false
-    end
+    if_none_match?(conn, etag) || if_modified_since(conn, mtime)
   end
 
   defp if_modified_since(conn, mtime) do
@@ -181,14 +174,7 @@ defmodule ShuttleWeb.FileController do
   # Weak — derived from file metadata (path + mtime + size), not a hash of the
   # served bytes — matching `ShuttleWeb.RelayHelpers.json_with_validator/3`'s
   # rationale for its own weak etags.
-  defp weak_etag(path, mtime, size) do
-    hash =
-      :crypto.hash(:sha256, :erlang.term_to_binary({path, mtime, size}))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 32)
-
-    ~s(W/"#{hash}")
-  end
+  defp weak_etag(path, mtime, size), do: ~s(W/"#{etag_hash({path, mtime, size})}")
 
   @weekdays {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
   @months {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}

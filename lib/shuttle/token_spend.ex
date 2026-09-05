@@ -197,12 +197,22 @@ defmodule Shuttle.TokenSpend do
     ArgumentError -> fold(session, path)
   end
 
-  defp file_token(path) do
+  @doc """
+  Cheap change fingerprint for a file: `{mtime, size}`, or `nil` when it does
+  not exist or is not a regular file. A missing file's `nil` is itself a stable
+  token — a host that has never written the file 304s forever, correctly.
+
+  POSIX seconds (`time: :posix`), which is what both the spend cache key and the
+  HTTP validators (etag and `Last-Modified`) want.
+  """
+  def file_token(path) when is_binary(path) do
     case File.stat(path, time: :posix) do
       {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
       _ -> nil
     end
   end
+
+  def file_token(_path), do: nil
 
   # ── The fold ──
 

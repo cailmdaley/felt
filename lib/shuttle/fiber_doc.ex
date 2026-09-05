@@ -119,7 +119,12 @@ defmodule Shuttle.FiberDoc do
   defp ensure_trailing_newline(""), do: ""
   defp ensure_trailing_newline(body), do: if(String.ends_with?(body, "\n"), do: "", else: "\n")
 
-  defp stringify_keys(map),
+  @doc """
+  Deeply string-key a decoded map — every nested map's keys too, lists mapped
+  element-wise, scalars passed through. The shape felt's frontmatter wants,
+  whether it arrived from YAML or from a JSON request body.
+  """
+  def stringify_keys(map),
     do: Map.new(map, fn {key, value} -> {to_string(key), stringify_value(value)} end)
 
   defp stringify_value(value) when is_map(value), do: stringify_keys(value)
