@@ -9,23 +9,12 @@ import { describe, expect, it } from 'vitest'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import { buildDependents } from './KanbanRules.js'
 import type { KanbanCard } from './KanbanTypes.js'
+import { card as baseCard } from './testFixtures.js'
 
 const at0 = '2026-01-01T00:00:00Z'
 
-const card = (over: Partial<KanbanCard> = {}): KanbanCard => ({
-  id: 'work/a',
-  name: 'A',
-  path: 'work/a.md',
-  originId: 'here',
-  status: 'active',
-  createdAt: at0,
-  dependsOnSatisfied: true,
-  effectiveHorizon: 'now',
-  drifted: false,
-  isCycle: false,
-  cycleStart: null,
-  ...over,
-})
+const card = (over: Partial<KanbanCard> = {}): KanbanCard =>
+  baseCard({ id: 'work/a', name: 'A', path: 'work/a.md', originId: 'here', status: 'active', createdAt: at0, ...over })
 
 const ids = (c: KanbanCard, column: Parameters<typeof moveDestinations>[1] = null): string[] =>
   moveDestinations(c, column).map((d) => d.id)

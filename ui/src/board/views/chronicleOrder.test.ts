@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { buildRows, type ChronicleRow } from './ChronicleView.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
+import { card as baseCard } from '../testFixtures.js'
 import { civilDayToLocalDate } from '../civilDay.js'
 import { buildTimelineDays } from '../KanbanSurfaces.js'
 
@@ -39,21 +40,8 @@ function dayAt(offset: number): string {
   return day.iso
 }
 
-function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
-  return {
-    name: over.name ?? over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'active',
-    createdAt: '2026-01-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  }
-}
+const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+  baseCard({ status: 'active', ...over })
 
 /** `m` is epoch-MILLISECONDS (see `ActivityBucket`'s own doc comment in
  *  TemporalData.ts) — NOT minutes. Dividing by 60_000 here once put every

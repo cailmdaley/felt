@@ -10,6 +10,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { KanbanCard } from '../KanbanTypes.js'
+import { card as baseCard } from '../testFixtures.js'
 import type {
   ActivityBucket,
   ActivityResult,
@@ -243,22 +244,17 @@ const SESSION = `bmodes-2d-${FIBER_ULID}-shuttle`
 // name being exactly a card's live worker. A test that builds a SECOND card
 // alongside this one must override it (to whichever session its own buckets
 // use, or to `undefined`), or the two would collide on this default.
-const card = (over: Partial<KanbanCard> = {}): KanbanCard => ({
-  id: 'work/spt3g_papers/bmodes-2d',
-  uid: FIBER_ULID,
-  runningWorker: SESSION,
-  name: 'Run the 2D B-mode null tests',
-  path: '.felt/x.md',
-  originId: 'local',
-  status: 'active',
-  createdAt: new Date(WIN.startMs).toISOString(),
-  dependsOnSatisfied: true,
-  effectiveHorizon: 'now',
-  drifted: false,
-  isCycle: false,
-  cycleStart: null,
-  ...over,
-})
+const card = (over: Partial<KanbanCard> = {}): KanbanCard =>
+  baseCard({
+    id: 'work/spt3g_papers/bmodes-2d',
+    uid: FIBER_ULID,
+    runningWorker: SESSION,
+    name: 'Run the 2D B-mode null tests',
+    path: '.felt/x.md',
+    status: 'active',
+    createdAt: new Date(WIN.startMs).toISOString(),
+    ...over,
+  })
 
 describe('the drawn frame — how much of the day gets sheet', () => {
   const bucketsAt = (...minutes: number[]): ActivityBucket[] =>

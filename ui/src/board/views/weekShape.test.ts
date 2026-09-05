@@ -43,6 +43,7 @@ import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
 import type { ActivityBucket, CommitRecord, SessionPairing } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
+import { card as baseCard } from '../testFixtures.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const HOUR = 3_600_000;
@@ -77,23 +78,8 @@ const DST_WEEKS: Record<string, string[]> = {
   'Europe/Paris': ['2026-03-23', '2026-10-19'],
 };
 
-function card(over: Partial<KanbanCard> & { id: string }): KanbanCard {
-  return {
-    name: over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'open',
-    createdAt: '2026-08-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    // Required on KanbanCard since the cycles contract landed; a plain card is
-    // not a cycle, and `over` overrides for the ones that are.
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  };
-}
+const card = (over: Partial<KanbanCard> & { id: string }): KanbanCard =>
+  baseCard({ createdAt: '2026-08-01T09:00:00Z', ...over });
 
 describe('the suite runs under a pinned, non-UTC zone', () => {
   it('is one of the two zones `npm test` pins', () => {

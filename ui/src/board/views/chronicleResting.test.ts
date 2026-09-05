@@ -22,6 +22,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildRows, type ChronicleRow } from './ChronicleView.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
+import { card as baseCard } from '../testFixtures.js'
 import { buildTimelineDays } from '../KanbanSurfaces.js'
 
 const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
@@ -35,22 +36,8 @@ function dayAt(offset: number): string {
   return day.iso
 }
 
-function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
-  return {
-    name: over.name ?? over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'open',
-    createdAt: '2026-01-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'stashed',
-    storedHorizon: 'stashed',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  }
-}
+const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+  baseCard({ effectiveHorizon: 'stashed', storedHorizon: 'stashed', ...over })
 
 /** A response carrying exactly one card, on Resting (`stash`) and nowhere
  *  else — the shape a snoozed, workless fiber actually has on the wire. */

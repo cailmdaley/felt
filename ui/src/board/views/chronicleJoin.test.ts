@@ -52,6 +52,7 @@ import { formatSpanMinutes } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
+import { card as baseCard } from '../testFixtures.js'
 import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
 import { buildTimelineDays } from '../KanbanSurfaces.js'
 
@@ -76,21 +77,8 @@ function bucket(m: number, over: Partial<ActivityBucket> = {}): ActivityBucket {
   return { m, s: null, cwd: null, k: 'agent', n: 1, ...over }
 }
 
-function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
-  return {
-    name: over.name ?? over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'active',
-    createdAt: '2026-03-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  }
-}
+const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+  baseCard({ status: 'active', createdAt: '2026-03-01T09:00:00Z', ...over })
 
 /** A cycle as the `cycles` surface delivers it — just the span and a name. */
 function cycle(id: string, start: string | null, due: string | undefined): CycleCard {

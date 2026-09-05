@@ -17,22 +17,10 @@
 import { describe, expect, it } from 'vitest'
 import { columnIndexAtX, overlayDueEdits } from './ChronicleView.js'
 import type { KanbanCard } from '../KanbanTypes.js'
+import { card as baseCard } from '../testFixtures.js'
 
-function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
-  return {
-    name: over.name ?? over.id,
-    path: `.felt/${over.id}.md`,
-    originId: 'local',
-    status: 'active',
-    createdAt: '2026-01-01T09:00:00Z',
-    dependsOnSatisfied: true,
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    ...over,
-  }
-}
+const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+  baseCard({ status: 'active', ...over })
 
 describe('columnIndexAtX — the drag snap math', () => {
   const trackLeft = 100
