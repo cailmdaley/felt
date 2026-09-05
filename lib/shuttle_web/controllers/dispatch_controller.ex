@@ -190,6 +190,15 @@ defmodule ShuttleWeb.DispatchController do
     }
   end
 
+  defp ineligible_detail({:project_dir_held, dir, holder}) do
+    %{
+      detail: "project_dir_held",
+      project_dir: dir,
+      holder_fiber_id: holder,
+      message: "Checkout #{dir} is held by #{holder} — one worker per checkout."
+    }
+  end
+
   defp ineligible_detail(:disabled),
     do: %{detail: "disabled", message: "Draft — set status: active to allow dispatch."}
 

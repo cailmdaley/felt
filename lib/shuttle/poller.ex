@@ -159,6 +159,12 @@ defmodule Shuttle.Poller do
       # runtime-keying bridge and carries none of its semantics — a cold miss
       # falls through to felt, never to a uid→slug runtime translation.
       uid_slug_index: %{},
+      # %{runtime_key => expanded shuttle.project_dir} — rebuilt each poll from
+      # the candidate rows. The checkout-exclusion gate needs a RUNNING worker's
+      # project_dir, and running metadata doesn't carry one (an adopted orphan
+      # never had a fiber map). Rather than persist a new field on every worker,
+      # look the dir up by the same runtime key `running` is keyed by.
+      project_dir_index: %{},
       # %{uid_or_fiber_id => %{modified_at: String.t() | nil, entry: map()}} —
       # daemon-local document cache for the kanban feed. The poll task
       # diffs the cheap shuttle projection's modified_at against this cache and
@@ -1144,6 +1150,16 @@ defmodule Shuttle.Poller do
     end)
   end
 
+  # Builds the runtime_key -> project_dir index the checkout-exclusion gate reads.
+  defp build_project_dir_index(candidates) do
+    Enum.reduce(candidates, %{}, fn fiber, acc ->
+      case declared_project_dir(Map.get(fiber, "shuttle")) do
+        nil -> acc
+        dir -> Map.put(acc, runtime_key_for_fiber(fiber), dir)
+      end
+    end)
+  end
+
   @doc false
   def fiber_address(metadata) when is_map(metadata) do
     case Map.get(metadata, :fiber_id) || Map.get(metadata, "fiber_id") ||
@@ -1269,6 +1285,7 @@ defmodule Shuttle.Poller do
         # Rebuilt (not merged) each poll so a rename or delete can't leave a
         # stale uid→slug entry; an as-yet-unseen uid falls through to felt.
         uid_slug_index: build_uid_slug_index(candidates),
+        project_dir_index: build_project_dir_index(candidates),
         document_cache: document_cache,
         document_cache_stats: document_cache_stats,
         document_cache_ready: true,
@@ -1330,8 +1347,11 @@ defmodule Shuttle.Poller do
           {[], %{state | parked_launches: %{}}}
       end
 
+    # `filter_eligible` ran against the pre-dispatch state, so the checkout gate
+    # is re-checked against the accumulator: two fibers sharing a project_dir
+    # both survive the sweep, and only the first may take the checkout.
     Enum.reduce(dispatchable, state, fn fiber, state_acc ->
-      if available_slots(state_acc) > 0 do
+      if available_slots(state_acc) > 0 and project_dir_holder(fiber, state_acc) == nil do
         {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
         new_state
       else
@@ -1944,6 +1964,14 @@ defmodule Shuttle.Poller do
       preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
         false
 
+      # A checkout is held by one worker at a time. Two workers sharing a
+      # project_dir clobber each other's uncommitted edits (one worker's
+      # discard-local-changes reset wiped the other's live work). Kind-blind:
+      # this is about the filesystem, not the role. Force bypasses it like
+      # every other non-force gate.
+      project_dir_holder(fiber, state) != nil ->
+        false
+
       # Pinned roles need no bespoke branch HERE: this predicate also serves
       # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
       # /dispatch), where a pinned role IS eligible — it's a human asking for
@@ -2006,6 +2034,7 @@ defmodule Shuttle.Poller do
   # daemon: a force-dispatch of a `host: <remote>` fiber that reaches any daemon
   # whose `own_host_id` differs fails `host_owned?` and used to report a flat
   # `not_eligible`. The reason atoms (`:homed_elsewhere`, `:project_dir_missing`,
+  # `:project_dir_held`,
   # `:disabled`, `:closed`, `:no_shuttle_block`,
   # `:not_due_or_blocked`) are surfaced to the UI as accurate copy.
   #
@@ -2017,6 +2046,7 @@ defmodule Shuttle.Poller do
     shuttle = Map.get(fiber, "shuttle")
     status = Map.get(fiber, "status", "")
     forced? = Keyword.get(opts, :force, false)
+    holder = if forced?, do: nil, else: project_dir_holder(fiber, state)
 
     cond do
       not is_map(shuttle) ->
@@ -2027,6 +2057,10 @@ defmodule Shuttle.Poller do
 
       not project_dir_available?(shuttle) ->
         {:not_eligible, {:project_dir_missing, Map.get(shuttle, "project_dir")}}
+
+      holder != nil ->
+        {dir, holder_id} = holder
+        {:not_eligible, {:project_dir_held, dir, holder_id}}
 
       # The remaining cases only gate a NON-forced dispatch (force overrides
       # status). status is the sole gate: a draft
@@ -2069,13 +2103,41 @@ defmodule Shuttle.Poller do
   # absent/empty project_dir is governed by install-time schema validation
   # (enabled blocks must carry one), not re-litigated at every poll.
   defp project_dir_available?(shuttle) when is_map(shuttle) do
-    case Map.get(shuttle, "project_dir") do
-      dir when is_binary(dir) and dir != "" -> File.dir?(Path.expand(dir))
-      _ -> true
+    case declared_project_dir(shuttle) do
+      nil -> true
+      dir -> File.dir?(dir)
     end
   end
 
   defp project_dir_available?(_), do: true
+
+  # The running worker, if any, that holds this fiber's checkout — `{dir,
+  # holder_fiber_id}` or nil. Pure in-memory: the dirs come from
+  # `state.project_dir_index`, keyed by the same runtime key `state.running` is.
+  defp project_dir_holder(fiber, state) do
+    case declared_project_dir(Map.get(fiber, "shuttle")) do
+      nil ->
+        nil
+
+      dir ->
+        own_key = runtime_key_for_fiber(fiber)
+
+        Enum.find_value(state.running, fn {runtime_key, meta} ->
+          if runtime_key != own_key and Map.get(state.project_dir_index, runtime_key) == dir do
+            {dir, fiber_address(meta)}
+          end
+        end)
+    end
+  end
+
+  defp declared_project_dir(shuttle) when is_map(shuttle) do
+    case Map.get(shuttle, "project_dir") do
+      dir when is_binary(dir) and dir != "" -> Path.expand(dir)
+      _ -> nil
+    end
+  end
+
+  defp declared_project_dir(_), do: nil
 
   @doc """
   This daemon's `own_host_id` — the identity it advertises for the

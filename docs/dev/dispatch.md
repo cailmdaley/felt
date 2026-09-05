@@ -11,6 +11,15 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   it carries a `shuttle:` block owned by this host (`shuttle.host` matches),
   its `project_dir` exists here, felt `status` is `active`, and it isn't
   already running/claimed (see `eligible?/2` in poller.ex).
+- **A checkout is held by one worker at a time.** A fiber whose
+  `shuttle.project_dir` matches that of a fiber currently running is ineligible
+  with `{:project_dir_held, dir, holder}` ("checkout <dir> is held by
+  <fiber>") — two workers in one clone clobber each other's uncommitted edits.
+  The rule is kind-blind (standing and pinned roles included; it is about the
+  filesystem) and, like every non-force gate, a force-dispatch bypasses it. The
+  running worker's dir is read from `state.project_dir_index`, a
+  runtime_key→project_dir map rebuilt from the candidate rows each poll, so an
+  adopted orphan — whose metadata never carried a project_dir — is covered too.
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
   persisted `~/.config/felt/stores.json`. There is no implicit default store
   and no legacy shuttle-named registry authority. `POST
