@@ -162,8 +162,3 @@ export function swapSheet<T>(id: string, fn: () => T): T {
   return sharedHistory().swap(id, fn)
 }
 
-/** Test seam: replace the shared stack (and its closers) with a fresh one. */
-export function resetSheetHistoryForTest(next: SheetHistory | null): void {
-  shared = next
-  closers.clear()
-}

@@ -24,8 +24,6 @@ import {
   marksForDay,
   midMorningFraction,
   mondayOfWeek,
-  RAIL_START_HOUR,
-  railBounds,
   railFraction,
   railRuleFractions,
   rasterSlots,
@@ -40,7 +38,7 @@ import {
 } from './WeekView.js';
 import { buildJoinIndex, originOf } from './join.js';
 import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
-import { shiftCivilDay } from './railTime.js';
+import { RAIL_START_HOUR, railBounds, shiftCivilDay } from './railTime.js';
 import type { ActivityBucket, CommitRecord, SessionPairing } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
 

@@ -30,12 +30,7 @@
  */
 
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
-import type {
-  ActivityResult,
-  CommitsResult,
-  MomentResult,
-  SessionsResult,
-} from './TemporalData.js'
+import type { TemporalFetchers } from './TemporalData.js'
 
 export interface TemporalView {
   id: 'chronicle' | 'day' | 'week' | 'shelf'
@@ -46,7 +41,25 @@ export interface TemporalView {
   unmount(): void
 }
 
-export interface ViewContext {
+/**
+ * What a view is handed. It IS a {@link TemporalFetchers} — `activity`,
+ * `sessions`, `commits` and `moment` are that interface's, documented there —
+ * plus the board's own response, cards and gestures.
+ *
+ * The one thing a view must know that the fetchers' own docs do not say: feed
+ * `sessions` to `buildSessionIndex` and join buckets through `lookupTmux`.
+ * That is RUNG 0, a recorded pairing, and it outranks every name-derived rung
+ * because it survives the session ending. Join through `lookupTmux` rather
+ * than `byTmux.get` — a tmux name is unique within a host, not across the
+ * fleet, and the scoped key is what keeps two daemons' identically named
+ * sessions apart. Likewise `commits`: join `record.session` through
+ * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
+ * the fiber is a recorded fact rather than a reading of the subject line.
+ * Both degrade to an empty ledger on an older daemon, so a view that adopts
+ * either must keep its existing rungs. And reach for `moment` only on demand —
+ * a hover, a click — never on a paint: one call reads one transcript file.
+ */
+export interface ViewContext extends TemporalFetchers {
   response: KanbanResponse
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This
@@ -65,49 +78,6 @@ export interface ViewContext {
    * The board resolves it once; a view must never re-resolve it from the env.
    */
   shuttleBase: string
-  activity(fromMs: number, toMs: number): Promise<ActivityResult>
-  /**
-   * The FLEET's session ledger from `sinceMs` onward, oldest first. Pass 0 for
-   * the whole history — the file holds one line per session, not per event.
-   *
-   * Feed it to `buildSessionIndex` and join buckets through `lookupTmux`: that
-   * is RUNG 0, a recorded pairing, and it outranks every name-derived rung
-   * because it survives the session ending. Join through `lookupTmux` rather
-   * than `byTmux.get` — a tmux name is unique within a host, not across the
-   * fleet, and the scoped key is what keeps two daemons' identically named
-   * sessions apart. Degrades to an empty ledger on an older daemon, so a view
-   * that adopts it must still keep its existing rungs.
-   */
-  sessions(sinceMs: number): Promise<SessionsResult>
-  /**
-   * The FLEET's COMMIT ledger over `[sinceMs, untilMs]`, both instants — every
-   * commit the hook recorded, each carrying the harness session that made it.
-   *
-   * This is what retired prefix-parsing: join `record.session` through
-   * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
-   * the fiber is a recorded fact rather than a reading of the subject line. It
-   * covers only commits made since the hook existed — the days before it have
-   * no prose, which is the honest answer rather than a guessed one.
-   */
-  commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
-  /**
-   * The WORDS a session spoke inside a window — what a hovered mark was, in the
-   * conversation's own language, read from the harness transcript on the host
-   * that ran it (`host`; omit it and the daemon consults its session ledger).
-   *
-   * Reach for it only on demand — a hover, a click — never on a paint: one call
-   * reads one transcript file. It never rejects; a daemon that cannot find or
-   * reach the transcript answers with no excerpts, and the honest fallback
-   * The card simply carries no words then, and says nothing about it.
-   */
-  moment(
-    session: string,
-    fromMs: number,
-    toMs: number,
-    host?: string | null,
-    /** Untruncated excerpts — the pinned tooltip's fetch. */
-    full?: boolean,
-  ): Promise<MomentResult>
   /**
    * Open a card's detail panel. Resolves against `cards` AND `response.cycles`,
    * so a cycle band or chip can hand over its id directly — the split above is

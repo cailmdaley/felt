@@ -115,9 +115,6 @@ import {
   railCivilDay,
 } from '../civilDay.js'
 
-// Week's rail vocabulary is the board's; re-exported here because this view's
-// published surface has always carried it.
-export { RAIL_START_HOUR, railBounds, type RailBounds }
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
