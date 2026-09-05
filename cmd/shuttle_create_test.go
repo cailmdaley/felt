@@ -22,7 +22,7 @@ func seedPlainFiber(t *testing.T, storage *felt.Storage, id, status string) {
 
 func TestShuttleInstall_Armed(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
 
@@ -45,7 +45,7 @@ func TestShuttleInstall_Armed(t *testing.T) {
 
 func TestShuttleInstall_Disabled(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 
 	// --disabled needs no --project-dir.
@@ -64,7 +64,7 @@ func TestShuttleInstall_Disabled(t *testing.T) {
 // project_dir — armed, and silently never dispatched.
 func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
 
@@ -82,7 +82,7 @@ func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
 
 func TestShuttleInstall_RequiresProjectDirWhenArmed(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 
 	if _, err := runCommand(t, dir, "shuttle", "install", "task", "--host", "testhost"); err == nil {
@@ -107,7 +107,7 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer saveShuttleGlobals()()
 			withOwnHost(t, "testhost")
-			dir, storage := newShuttleStore(t)
+			dir, storage := newStore(t)
 			pdir := t.TempDir()
 			seedShuttleRole(t, storage, "task", felt.StatusActive, map[string]any{
 				"kind": "oneshot", "agent": "claude-opus", "host": "testhost", "project_dir": pdir,
@@ -135,7 +135,7 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 
 func TestShuttleInstall_RefusesClosed(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", felt.StatusClosed)
 	pdir := t.TempDir()
 
@@ -148,7 +148,7 @@ func TestShuttleInstall_RefusesClosed(t *testing.T) {
 
 func TestShuttleRepeat_Standing(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "role", "")
 	pdir := t.TempDir()
 
@@ -175,7 +175,7 @@ func TestShuttleRepeat_Standing(t *testing.T) {
 
 func TestShuttleRepeat_RejectsBadCron(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "role", "")
 	pdir := t.TempDir()
 
@@ -189,7 +189,7 @@ func TestShuttleRepeat_RejectsBadCron(t *testing.T) {
 
 func TestShuttlePin_Parked(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "hub", "")
 	pdir := t.TempDir()
 
@@ -220,7 +220,7 @@ func TestShuttlePin_Parked(t *testing.T) {
 // fails the typed decode — e.g. a hand-edited schedule written as a scalar.
 func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	pdir := t.TempDir()
 	seedShuttleRole(t, storage, "bad", felt.StatusActive, map[string]any{
 		"kind": "standing", "schedule": "not-a-mapping",
@@ -245,7 +245,7 @@ func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
 func TestShuttleRepeat_RefusesRemoteOwned(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	pdir := t.TempDir()
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "cineca",

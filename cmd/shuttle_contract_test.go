@@ -18,7 +18,7 @@ import (
 // byte on stderr trips contract skew and parks every fresh launch. So we
 // capture both streams and assert stderr is empty as part of the contract.
 func TestShuttleContract_PrintsBareInteger(t *testing.T) {
-	dir, _ := newShuttleStore(t)
+	dir, _ := newStore(t)
 
 	out, errOut := runShuttleContract(t, dir)
 

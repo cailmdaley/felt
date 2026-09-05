@@ -12,11 +12,7 @@ import (
 )
 
 func TestCheckCommandReportsIssues(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 
 	fiber := &felt.Felt{ID: "fiber-a"}
 	if err := fiber.SetExtraField("inputs", []map[string]any{{"id": "catalog", "from": "missing.output"}}); err != nil {
@@ -36,11 +32,7 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 }
 
 func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 
 	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := fiber.SetExtraField("decisions", map[string]any{
@@ -62,11 +54,7 @@ func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
 }
 
 func TestCheckCommandReportsLegacyFormatIssues(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, _ := newStore(t)
 
 	path := filepath.Join(dir, ".felt", "legacy-fiber", "legacy-fiber.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -152,11 +140,7 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 // count it. A fiber can drop out of the assemblage entirely; check must say so,
 // first, and fail.
 func TestCheckCommandCountsUnparseableFiberFirst(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 
 	// A second, lesser problem: a broken body reference. It must still be
 	// reported — and must come after the fiber that no longer exists.

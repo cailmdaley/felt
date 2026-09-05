@@ -66,7 +66,7 @@ func TestComputeState(t *testing.T) {
 func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 	defer saveShuttleGlobals()()
 	statusIncludeOrphans = false
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	// An active oneshot with a live worker, an active standing (idle/scheduled),
 	// a paused (open) role, a closed role, and a pure note (no shuttle facet).
 	seedShuttleRoleUID(t, storage, "proj/runner", "01RUNNERUID0000000000000001", felt.StatusActive, oneshot())
@@ -117,7 +117,7 @@ func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
 	defer saveShuttleGlobals()()
 	statusIncludeOrphans = false
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	withStubbedLiveSessions(t, map[string]bool{})
 
@@ -136,7 +136,7 @@ func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
 func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 	defer saveShuttleGlobals()()
 	statusIncludeOrphans = false
-	dir, _ := newShuttleStore(t)
+	dir, _ := newStore(t)
 	// A live shuttle session that maps to no shuttle: facet in the store.
 	withStubbedLiveSessions(t, map[string]bool{"ghost-shuttle": true})
 
@@ -163,7 +163,7 @@ func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 
 func TestShuttlePs_AttributesOwner(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/worker", "01WORKERUID0000000000000001", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/worker")
 	session := shuttleTmuxSessionName(f.ID, f.UID)
@@ -184,7 +184,7 @@ func TestShuttlePs_AttributesOwner(t *testing.T) {
 
 func TestShuttlePs_Empty(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, _ := newShuttleStore(t)
+	dir, _ := newStore(t)
 	withStubbedLiveSessions(t, map[string]bool{})
 
 	out, err := runCommand(t, dir, "shuttle", "ps")
@@ -200,7 +200,7 @@ func TestShuttlePs_Empty(t *testing.T) {
 
 func TestShuttleSessionName(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/task", "01SESSIONUID000000000000001", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/task")
 	want := shuttleTmuxSessionName(f.ID, f.UID)
@@ -221,7 +221,7 @@ func TestShuttleSessionName(t *testing.T) {
 
 func TestShuttleAttach_NoLiveSession(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	withStubbedTmux(t, map[string]bool{}) // nothing live
 
@@ -237,8 +237,8 @@ func TestShuttleAttach_NoLiveSession(t *testing.T) {
 // ---- cross-store dedup ------------------------------------------------------
 
 func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
-	dirA, storageA := newShuttleStore(t)
-	dirB, storageB := newShuttleStore(t)
+	dirA, storageA := newStore(t)
+	dirB, storageB := newStore(t)
 	// Same fiber reachable from two stores (same intrinsic uid, different slug) —
 	// the aggregate-plus-project-canonical case. Must collapse to one.
 	seedShuttleRoleUID(t, storageA, "ai-futures/shared", "01SHAREDUID0000000000000001", felt.StatusActive, oneshot())
@@ -266,7 +266,7 @@ func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
 
 func TestShuttleStores_Precedence(t *testing.T) {
 	// changeDir wins: an explicit -C / --felt-store scopes to that single store.
-	dir, _ := newShuttleStore(t)
+	dir, _ := newStore(t)
 	prevCD := changeDir
 	t.Cleanup(func() { changeDir = prevCD })
 	changeDir = dir
@@ -308,7 +308,7 @@ func TestShuttleStores_Precedence(t *testing.T) {
 // (here FELT_STORES), by leaf and by full id, regardless of cwd — the parity
 // behavior shuttle-ctl had and a naive resolveProjectRoot port lost.
 func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/deep/task", "01ADDRUID000000000000000001", felt.StatusActive, oneshot())
 
 	prevCD := changeDir
@@ -379,7 +379,7 @@ func TestCanonicalFiberID_SubstoreSymlink(t *testing.T) {
 }
 
 func TestListShuttleFibers_SkipsNotesAndMalformed(t *testing.T) {
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "good", felt.StatusActive, oneshot(), nil)
 	// A pure note (no shuttle facet).
 	note := &felt.Felt{ID: "note", Name: "note", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -438,7 +438,7 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer saveShuttleGlobals()()
 			withStubbedTmux(t, nil)
-			dir, storage := newShuttleStore(t)
+			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", tc.status, map[string]any{
 				"kind": "standing", "host": "testhost", "agent": "claude-opus", "project_dir": pdir,
 				"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
@@ -464,7 +464,7 @@ func TestShuttleStatus_SingleFiberRejectsTableFlags(t *testing.T) {
 	for _, flag := range []string{"--all", "--include-orphans"} {
 		t.Run(flag, func(t *testing.T) {
 			defer saveShuttleGlobals()()
-			dir, storage := newShuttleStore(t)
+			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
 			out, err := runCommand(t, dir, "shuttle", "status", "role", flag)
@@ -482,7 +482,7 @@ func TestShuttleStatus_SingleFiberRejectsTableFlags(t *testing.T) {
 // plain fiber is an error that names the verbs that would make it one.
 func TestShuttleStatus_SingleFiberWithoutBlock(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "note", felt.StatusOpen)
 
 	if _, err := runCommand(t, dir, "shuttle", "status", "note"); err == nil {

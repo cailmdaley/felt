@@ -34,7 +34,7 @@ func standingRole(pdir string) map[string]any {
 func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "role", felt.StatusClosed, standingRole(t.TempDir()), &yes)
 
@@ -79,7 +79,7 @@ func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
 func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
 	out, err := runCommand(t, dir, "shuttle", "reshape", "role", "standing")
@@ -100,7 +100,7 @@ func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
 	out, err := runCommand(t, dir, "shuttle", "reshape", "role", "standing", "--schedule", "0 9 * * 1-5")
@@ -127,7 +127,7 @@ func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
 
 	out, err := runCommand(t, dir, "shuttle", "reshape", "role", "--schedule", "0 7 * * *")
@@ -150,7 +150,7 @@ func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			defer saveShuttleGlobals()()
 			withOwnHost(t, "testhost")
-			dir, storage := newShuttleStore(t)
+			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
 
 			out, err := runCommand(t, dir, "shuttle", "reshape", "role", kind, "--schedule", "0 9 * * 1-5")
@@ -173,7 +173,7 @@ func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "note", felt.StatusOpen)
 
 	out, err := runCommand(t, dir, "shuttle", "reshape", "note", "oneshot")
@@ -193,7 +193,7 @@ func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
 func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "cineca",
 		"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
@@ -218,7 +218,7 @@ func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
 func TestShuttleReshapeVerb_InvalidKind(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
 	before, _ := os.ReadFile(storage.Path("role"))
@@ -248,7 +248,7 @@ func TestShuttleCreate_FreshInstallStillRefusesClosed(t *testing.T) {
 	} {
 		t.Run(args[0], func(t *testing.T) {
 			defer saveShuttleGlobals()()
-			dir, storage := newShuttleStore(t)
+			dir, storage := newStore(t)
 			pdir := t.TempDir()
 			seedPlainFiber(t, storage, "role", felt.StatusClosed)
 

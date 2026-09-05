@@ -370,11 +370,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 }
 
 func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "project/task",
@@ -401,11 +397,7 @@ func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
 }
 
 func TestStorageFindMetadataFastPathPreservesScopedBasenameOrder(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	now := time.Now()
 	for _, f := range []*Felt{
@@ -747,11 +739,7 @@ func TestStoragePathNested(t *testing.T) {
 }
 
 func TestStorageCheckAvailableID(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "quick-gotcha",
@@ -771,11 +759,7 @@ func TestStorageCheckAvailableID(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasename(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis/damping-prior",
@@ -796,11 +780,7 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis/damping-prior",
@@ -817,11 +797,7 @@ func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
 }
 
 func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1105,11 +1081,7 @@ func TestFindProjectRootNotFound(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	parent := &Felt{
 		ID:        "bao-analysis",
@@ -1162,11 +1134,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 }
 
 func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1212,11 +1180,7 @@ func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis",
@@ -1233,11 +1197,7 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1255,11 +1215,7 @@ func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFiles(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacyA := `---
 title: Quick gotcha
@@ -1313,11 +1269,7 @@ Analysis body.
 }
 
 func TestStorageBackfillIntrinsicIDs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	missing := `---
 name: Missing ID
@@ -1400,11 +1352,7 @@ Already identified.
 }
 
 func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	if err := os.WriteFile(filepath.Join(s.root, "README.md"), []byte("not frontmatter\n"), 0644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -1420,11 +1368,7 @@ func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFilesDryRun(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Quick gotcha
@@ -1457,11 +1401,7 @@ Body.
 }
 
 func TestStorageMigrateSingleBareFilePreservedAsEntryPoint(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	// A single bare .md at .felt/ root is the entry-point fiber (the shape
 	// a project's root fiber takes when its `.felt/` is mounted into an
@@ -1492,11 +1432,7 @@ Root narrative.
 }
 
 func TestStorageMigrateRewritesPreExistingDirectoryInputs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	// Flat files that will be migrated (two so migration runs — a single bare
 	// file would be preserved as the entry-point fiber).
@@ -1545,11 +1481,7 @@ Analysis body.
 }
 
 func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Session hub
@@ -1604,11 +1536,7 @@ created-at: 2026-03-16T10:00:00Z
 }
 
 func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Session hub
@@ -2252,4 +2180,15 @@ func TestStorageLookupsKnowTheEnclosingStore(t *testing.T) {
 	if f.ID != "notes/runbook" {
 		t.Fatalf("FindInScope() = %q, want %q", f.ID, "notes/runbook")
 	}
+}
+
+// newStore builds an initialized store rooted at a fresh temp dir.
+func newStore(t *testing.T) (string, *Storage) {
+	t.Helper()
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	return dir, s
 }

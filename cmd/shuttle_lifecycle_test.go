@@ -96,7 +96,7 @@ func saveShuttleGlobals() func() {
 	}
 }
 
-func newShuttleStore(t *testing.T) (string, *felt.Storage) {
+func newStore(t *testing.T) (string, *felt.Storage) {
 	t.Helper()
 	dir := t.TempDir()
 	storage := felt.NewStorage(dir)
@@ -153,7 +153,7 @@ func oneshot() map[string]any {
 
 func TestShuttleClose_Tempered(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
 	if out, err := runCommand(t, dir, "shuttle", "close", "f", "--tempered=true"); err != nil {
@@ -173,7 +173,7 @@ func TestShuttleClose_Tempered(t *testing.T) {
 
 func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), &yes)
 
@@ -193,7 +193,7 @@ func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 
 func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, oneshot(), nil)
 	f0 := mustRead(t, storage, "proj/task")
 	live := shuttleTmuxSessionName(f0.ID, f0.UID)
@@ -213,7 +213,7 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 
 func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	killed := withStubbedTmux(t, map[string]bool{"task-shuttle": true})
 
@@ -232,7 +232,7 @@ func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 
 func TestShuttleReopen_ToActive(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), &yes)
 
@@ -250,7 +250,7 @@ func TestShuttleReopen_ToActive(t *testing.T) {
 
 func TestShuttleReopen_AsDraft(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
 	if out, err := runCommand(t, dir, "shuttle", "reopen", "f", "--as-draft"); err != nil {
@@ -275,7 +275,7 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 
 func TestShuttleResume_DraftToActive(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, oneshot(), nil)
 
 	if out, err := runCommand(t, dir, "shuttle", "resume", "f"); err != nil {
@@ -288,7 +288,7 @@ func TestShuttleResume_DraftToActive(t *testing.T) {
 
 func TestShuttleResume_RefusesClosed(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
 	if _, err := runCommand(t, dir, "shuttle", "resume", "f"); err == nil {
@@ -299,7 +299,7 @@ func TestShuttleResume_RefusesClosed(t *testing.T) {
 func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
@@ -318,7 +318,7 @@ func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
 
 func TestShuttleSetOutcome(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
 	if out, err := runCommand(t, dir, "shuttle", "set-outcome", "f", "--outcome", "Blocked: waiting on token"); err != nil {
@@ -334,7 +334,7 @@ func TestShuttleSetOutcome(t *testing.T) {
 func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	// Awaiting review: standing, closed, untempered, with a prior outcome.
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, Outcome: "prior digest", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := f.SetExtraField("shuttle", map[string]any{
@@ -374,7 +374,7 @@ func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 
 	// A prior dispatch from days ago is the run being accepted now. If accept
 	// fails to advance last_serviced past this, the poller's
@@ -433,7 +433,7 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	// Active (not awaiting) standing role → accept refuses.
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet",
@@ -448,7 +448,7 @@ func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
 func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
 	if _, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
@@ -459,7 +459,7 @@ func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 func TestShuttleAccept_PinnedReParks(t *testing.T) {
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	// Awaiting review: pinned, closed, untempered — the arc finished and is
 	// pending the human verdict. Accept RE-PARKS it to the strip (status: open),
 	// the kind-aware other half of accept (standing re-arms active).
@@ -494,7 +494,7 @@ func TestShuttleAccept_PinnedReParks(t *testing.T) {
 func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "h") // block is host-pinned; own-host must match for the guard to pass
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "h",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
@@ -523,7 +523,7 @@ func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
 
 func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
 	if _, err := runCommand(t, dir, "shuttle", "set-model", "f", "no-such-agent"); err == nil {
@@ -533,7 +533,7 @@ func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
 
 func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus",
 		"session_uuid": "keep-me",
@@ -560,7 +560,7 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 
 func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
 	if out, err := runCommand(t, dir, "shuttle", "uninstall", "f"); err != nil {
@@ -580,7 +580,7 @@ func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
 	}, nil)
@@ -602,7 +602,7 @@ func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 	defer saveShuttleGlobals()()
 	withOwnHost(t, "cineca")
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "owned", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
 	}, nil)

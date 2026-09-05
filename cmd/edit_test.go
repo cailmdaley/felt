@@ -9,11 +9,7 @@ import (
 )
 
 func TestEditMetadataFlags(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -54,11 +50,7 @@ func TestEditMetadataFlags(t *testing.T) {
 }
 
 func TestEditStampsUpdatedAt(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -92,11 +84,7 @@ func TestEditStampsUpdatedAt(t *testing.T) {
 }
 
 func TestEditBodyOverwriteDetection(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -123,11 +111,7 @@ func TestEditBodyOverwriteDetection(t *testing.T) {
 // real boolean in the JSON the board UI reads), --unset removes, and a full
 // horizon round-trip set→unset leaves the frontmatter clean.
 func TestEditSetUnsetExtraScalars(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -192,11 +176,7 @@ func TestEditSetUnsetExtraScalars(t *testing.T) {
 // both verbs, malformed --set is rejected, and --set will not scalar-clobber a
 // structured value (the shuttle: block).
 func TestEditSetUnsetGuards(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	f := &felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",

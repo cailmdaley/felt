@@ -4,16 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/cailmdaley/felt/internal/felt"
 )
 
 func TestAddMintsNativeUID(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 
 	resetAdd := saveAddGlobals()
 	defer resetAdd()
@@ -60,11 +54,7 @@ func TestAddMintsNativeUID(t *testing.T) {
 }
 
 func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 
 	resetAdd := saveAddGlobals()
 	defer resetAdd()

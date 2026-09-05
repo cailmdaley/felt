@@ -47,11 +47,7 @@ func mustShowExtra(t *testing.T, f *felt.Felt, key string, value any) {
 }
 
 func TestShowBodyIncludesStartLine(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -77,11 +73,7 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 }
 
 func TestShowBodyJSONIncludesStartLine(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -111,11 +103,7 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 }
 
 func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	fiber := &felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -145,11 +133,7 @@ func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 // Compact and summary report the body's size so a reader can decide whether a
 // full read is worth paying for before paying for it.
 func TestShowReportsBodySize(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{
 		ID:        "with-body",
@@ -188,11 +172,7 @@ func TestShowReportsBodySize(t *testing.T) {
 }
 
 func TestShowDefaultRendersBody(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -215,11 +195,7 @@ func TestShowDefaultRendersBody(t *testing.T) {
 }
 
 func TestShowFieldReadsOpaqueFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, _ := newStore(t)
 
 	manualPath := dir + "/.felt/fiber-a/fiber-a.md"
 	if err := os.MkdirAll(dir+"/.felt/fiber-a", 0755); err != nil {
@@ -276,11 +252,7 @@ Body here.
 }
 
 func TestShowSelectorsAreMutuallyExclusive(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -340,11 +312,7 @@ func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
 }
 
 func TestShowIncludesCitations(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
 		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
@@ -367,11 +335,7 @@ func TestShowIncludesCitations(t *testing.T) {
 }
 
 func TestShowIncludesConsumers(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior", "type": "data"}})
 	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -395,11 +359,7 @@ func TestShowIncludesConsumers(t *testing.T) {
 }
 
 func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior"}})
 	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -423,11 +383,7 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
 		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
@@ -450,11 +406,7 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
 		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
@@ -478,11 +430,7 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 }
 
 func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Outcome: "Shipped.", Body: "Body paragraph."}
 	mustShowExtra(t, fiber, "inputs", []map[string]any{{"id": "catalog", "from": "upstream.posterior", "description": "Posterior sample"}})
 	mustShowExtra(t, fiber, "outputs", []map[string]any{{"id": "posterior", "description": "MCMC posterior"}})
@@ -519,11 +467,7 @@ func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
 }
 
 func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{
 			ID:        "project/question",
@@ -595,11 +539,7 @@ func mustParseTime(t *testing.T, value string) time.Time {
 }
 
 func TestShowFieldRefusesJSON(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", Status: "active", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}

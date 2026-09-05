@@ -131,11 +131,7 @@ func TestFindCapsTheOuterBlock(t *testing.T) {
 // TestFindInTopLevelStoreIsALocalSearch: a store that encloses nothing has no
 // outer half; find is simply a search of that store, with no separator.
 func TestFindInTopLevelStoreIsALocalSearch(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	writeFixtureFelt(t, storage, "kanban", "Kanban board")
 	writeFixtureFelt(t, storage, "unrelated", "Unrelated")
 	defer saveFindGlobals()()
