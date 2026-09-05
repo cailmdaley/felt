@@ -154,11 +154,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec feeds(GenServer.server()) :: %{String.t() => map()}
   def feeds(server) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :feeds, RegistryCommon.read_timeout_ms())
-    else
-      %{}
-    end
+    RegistryCommon.read(server, :feeds, %{})
   end
 
   @doc """
@@ -208,11 +204,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec refresh(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def refresh(server, name) when is_binary(name) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, {:refresh, name}, RegistryCommon.read_timeout_ms())
-    else
-      {:error, :not_running}
-    end
+    RegistryCommon.read(server, {:refresh, name}, {:error, :not_running})
   end
 
   # ── Server ──

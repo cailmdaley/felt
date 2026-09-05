@@ -120,11 +120,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   @spec entries(GenServer.server()) :: %{String.t() => map()}
   def entries(server) do
-    if RegistryCommon.registry_alive?(server) do
-      GenServer.call(server, :entries, RegistryCommon.read_timeout_ms())
-    else
-      %{}
-    end
+    RegistryCommon.read(server, :entries, %{})
   end
 
   @doc """

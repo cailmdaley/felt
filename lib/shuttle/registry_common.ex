@@ -77,6 +77,23 @@ defmodule Shuttle.RegistryCommon do
   end
 
   @doc """
+  A read call against a registry that may not be running: `GenServer.call` when
+  it is alive, `fallback` when it is not.
+
+  Every registry read is graceful-degradation shaped — a caller asking a
+  registry that never started (or is mid-restart) gets the empty answer rather
+  than an exit, so a dashboard renders without the cross-host half.
+  """
+  @spec read(GenServer.server(), term(), term(), non_neg_integer()) :: term()
+  def read(server, request, fallback, timeout_ms \\ @registry_read_timeout_ms) do
+    if registry_alive?(server) do
+      GenServer.call(server, request, timeout_ms)
+    else
+      fallback
+    end
+  end
+
+  @doc """
   (Re)arm the self-rescheduling tick. Cancels any pending timer, then sends a
   fresh `{:tick, token}` after `delay_ms` and stores its ref in `state`'s
   `:tick_timer_ref` field. Works for any state struct carrying that field.
