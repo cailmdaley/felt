@@ -1234,37 +1234,11 @@ class WeekView implements TemporalView {
 
     const slot = row.slots[pick.index]
     const tip = this.ensureTip()
-    const key = `${row.day}:${slot.index}`
-    renderTip(tip, slotTip(slot, this.moments.peek(key, pin), pin))
-    // The words arrive late or not at all; the tooltip is already correct
-    // without them, and redraws in place when they land. A pin asks again for
-    // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
-    // cannot show the rest of a sentence it was never sent.
-    this.moments.request(
-      key,
-      slot.sources,
-      slot.startMs,
-      slot.endMs,
-      (words) => {
-        // Guard the pin state as well as the mark: a hover answer landing on a
-        // tooltip that has since been pinned would paint the cut text back over
-        // the full text.
-        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
-        renderTip(tip, slotTip(slot, words, pin))
-      },
-      pin,
-    )
-    this.hoveredKey = key
-    this.pinnedKey = pin ? key : null
+    this.paintSlotTip(tip, row.day, slot, pin)
     // The bar goes up in this row's own rail, at the slot the slip is about,
     // and takes the arrows: from here the week is walked slot by slot rather
     // than by chasing four-minute ticks with the pointer.
     if (pin) this.scrub.pin({ laneKey: row.day, atMs: slot.startMs })
-    tip.classList.add('kbn-tip-open')
-    // Pinned, the slip stops being a passing annotation and becomes something
-    // you read: it takes the pointer (so a long transcript can be scrolled) and
-    // is allowed to grow. See momentTip.css.
-    tip.classList.toggle('kbn-tip-pinned', pin)
 
     // Positioned against the grid; the anchor is the slot's own tick.
     const box = grid.getBoundingClientRect()
@@ -1304,28 +1278,47 @@ class WeekView implements TemporalView {
       })
       tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
     } else {
-      const key = `${day}:${slot.index}`
-      renderTip(tip, slotTip(slot, this.moments.peek(key, true), true))
-      this.moments.request(
-        key,
-        slot.sources,
-        slot.startMs,
-        slot.endMs,
-        (words) => {
-          if (this.pinnedKey !== key) return
-          renderTip(tip, slotTip(slot, words, true))
-        },
-        true,
-      )
-      this.hoveredKey = key
-      this.pinnedKey = key
-      tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
+      this.paintSlotTip(tip, day, slot, true)
     }
 
     const box = grid.getBoundingClientRect()
     const rail = row.rail.getBoundingClientRect()
-    const fraction = (startMs - bounds.startMs) / (bounds.endMs - bounds.startMs)
+    const fraction = railFraction(startMs, bounds)
     placeTip(tip, box, rail.left - box.left + fraction * rail.width, rail.top - box.top)
+  }
+
+  /**
+   * Paint an inked slot's slip and ask for its words. The one path both the
+   * hover and the scrub's pinned step take; the caller places it.
+   */
+  private paintSlotTip(tip: HTMLElement, day: string, slot: RasterSlot, pin: boolean): void {
+    const key = `${day}:${slot.index}`
+    renderTip(tip, slotTip(slot, this.moments.peek(key, pin), pin))
+    // The words arrive late or not at all; the tooltip is already correct
+    // without them, and redraws in place when they land. A pin asks again for
+    // the UNTRUNCATED words — the daemon does the cutting, so the pinned slip
+    // cannot show the rest of a sentence it was never sent.
+    this.moments.request(
+      key,
+      slot.sources,
+      slot.startMs,
+      slot.endMs,
+      (words) => {
+        // Guard the pin state as well as the mark: a hover answer landing on a
+        // tooltip that has since been pinned would paint the cut text back over
+        // the full text.
+        if (this.hoveredKey !== key || (this.pinnedKey === key) !== pin) return
+        renderTip(tip, slotTip(slot, words, pin))
+      },
+      pin,
+    )
+    this.hoveredKey = key
+    this.pinnedKey = pin ? key : null
+    tip.classList.add('kbn-tip-open')
+    // Pinned, the slip stops being a passing annotation and becomes something
+    // you read: it takes the pointer (so a long transcript can be scrolled) and
+    // is allowed to grow. See momentTip.css.
+    tip.classList.toggle('kbn-tip-pinned', pin)
   }
 
   /**
@@ -1432,10 +1425,12 @@ class WeekView implements TemporalView {
     // load carries apply for the same reasons: the key alone cannot say
     // "already served" for a past week (its cap never moves), and a late answer
     // for a week that has since been paged away is dropped rather than drawn.
-    const commitsKey = `${monday}:${win.activityToMs}`
-    const commitsServed = this.commitsKey === commitsKey && this.commitsFor === monday
+    // One key for both loads: same week, same cap, same reason to re-ask. The
+    // two latches stay independent — only their key is shared.
+    const key = `${monday}:${win.activityToMs}`
+    const commitsServed = this.commitsKey === key && this.commitsFor === monday
     if (win.activityToMs > win.fromMs && !commitsServed && !this.commitsInFlight) {
-      this.commitsKey = commitsKey
+      this.commitsKey = key
       this.commitsInFlight = true
       void ctx
         .commits(win.fromMs, win.activityToMs)
@@ -1461,7 +1456,6 @@ class WeekView implements TemporalView {
     // rebuilds the identical key — and the early return would then skip the
     // request while `this.activity` still holds the OTHER week, leaving seven
     // blank rails that never recover. The loaded week has to match too.
-    const key = `${monday}:${win.activityToMs}`
     const served = this.activityKey === key && this.activity?.monday === monday
     if (win.activityToMs > win.fromMs && !served && !this.activityInFlight) {
       this.activityKey = key
@@ -1952,6 +1946,7 @@ export function slotTip(slot: RasterSlot, words?: MomentWords, pinned = false): 
   for (const kind of SLOT_KIND_ORDER) {
     const entry = slot.kinds.find((k) => k.kind === kind)
     if (!entry) continue
+    const count = rowCount(kind, entry.count)
     rows.push({
       kind,
       phrase: SLOT_PHRASE[kind],
@@ -1959,7 +1954,7 @@ export function slotTip(slot: RasterSlot, words?: MomentWords, pinned = false): 
       // The bucket tally may be printed only where it counts messages — see
       // `rowCount`. The agent band's own `n` counts harness hook events and is
       // not a count of anything this slip can show, so it is not printed.
-      ...(rowCount(kind, entry.count) === undefined ? {} : { count: rowCount(kind, entry.count) }),
+      ...(count === undefined ? {} : { count }),
       shuttle: entry.shuttle,
     })
   }
