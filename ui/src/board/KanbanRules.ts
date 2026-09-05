@@ -13,8 +13,7 @@ import { dueCivilDay, isoDayLocal } from './civilDay.js';
 // there is no separate scheduled surface, because a `due:` is a date a card
 // wears, never a place it goes. (The old `soon` exiled every future-dated card
 // to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
-const KANBAN_HORIZONS = ['now', 'stashed'] as const;
-export type KanbanHorizon = typeof KANBAN_HORIZONS[number];
+export type KanbanHorizon = 'now' | 'stashed';
 
 /**
  * The set of columns the kanban renders. Differs from KanbanTarget in that
@@ -343,33 +342,20 @@ export function effectiveHorizon(
   // return ticket. A snoozed card is `horizon:stashed` + a future `due:`; when
   // the due day arrives this branch pulls it back onto the desk. Without the
   // override, snooze would be a black hole — the card would rest forever with
-  // a date nobody reads. The branch order IS the rule: drift is checked before
-  // the stashed branch below, never after.
-  if (duePromotesToNow) {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'now',
-      drifted: storedHorizon !== undefined,
-    };
-  }
-
-  // SNOOZED — a future `due:` under a stored `stashed`. The two fields compose:
-  // `stashed` says where the card lives (Resting, off the desk), `due:` says
-  // when it comes back. Only an EXPLICIT snooze takes a card off the desk: a
-  // bare future `due:` falls through to `now` below, so the card keeps its
-  // column and simply wears the date.
-  if (storedHorizon === 'stashed') {
-    return {
-      storedHorizon,
-      effectiveHorizon: 'stashed',
-      drifted: false,
-    };
-  }
-
+  // a date nobody reads. The PRECEDENCE is the rule: drift WINS over a stored
+  // `stashed`, never the other way round.
+  //
+  // SNOOZED — a future `due:` under a stored `stashed` — is the other half. The
+  // two fields compose: `stashed` says where the card lives (Resting, off the
+  // desk), `due:` says when it comes back. Only an EXPLICIT snooze takes a card
+  // off the desk: a bare future `due:` reads `now`, so the card keeps its column
+  // and simply wears the date. (`normalizeHorizon` only ever answers `stashed`
+  // or undefined, so `stashed` below is exactly "there is a stored horizon".)
+  const stashed = storedHorizon === 'stashed';
   return {
     storedHorizon,
-    effectiveHorizon: 'now',
-    drifted: false,
+    effectiveHorizon: duePromotesToNow || !stashed ? 'now' : 'stashed',
+    drifted: duePromotesToNow && stashed,
   };
 }
 
@@ -427,15 +413,15 @@ const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
  * always stays available on the `title`.
  */
 export function humanizeCron(expr: string | undefined): string | undefined {
-  if (typeof expr !== 'string' || !expr.trim()) return undefined;
+  if (!expr?.trim()) return undefined;
   let fields;
   try {
     fields = CronExpressionParser.parse(expr.trim()).fields;
   } catch {
     return undefined;
   }
-  const minutes = [...fields.minute.values];
-  const hours = [...fields.hour.values];
+  const minutes = fields.minute.values;
+  const hours = fields.hour.values;
   if (minutes.length !== 1 || hours.length !== 1) return undefined;
   // Only an unconstrained day-of-month + month can be said as a weekly cadence.
   if (fields.dayOfMonth.values.length !== 31) return undefined;
@@ -477,13 +463,11 @@ export function nextStandingLaunch(
 ): string | undefined {
   if (f.shuttleKind !== 'standing') return undefined;
   if (f.status !== 'active') return undefined;
-  const expr = f.shuttleSchedule?.expr;
-  if (typeof expr !== 'string' || !expr.trim()) return undefined;
-  const rawTz = f.shuttleSchedule?.tz;
-  const tz = typeof rawTz === 'string' && rawTz.trim() ? rawTz : 'UTC';
+  const sched = f.shuttleSchedule;
+  if (!sched?.expr.trim()) return undefined;
   try {
-    const it = CronExpressionParser.parse(expr, {
-      tz,
+    const it = CronExpressionParser.parse(sched.expr, {
+      tz: sched.tz.trim() ? sched.tz : 'UTC',
       currentDate: new Date(nowMs),
     });
     return it.next().toISOString() ?? undefined;
@@ -731,11 +715,11 @@ export function intersectRects(a: ZoneRect, b: ZoneRect): ZoneRect | null {
 export function inStackHotZone(
   rect: { left: number; top: number; width: number; height: number },
   point: { x: number; y: number },
-  fraction = 0.6,
 ): boolean {
   if (rect.width <= 0 || rect.height <= 0) return false;
-  const marginX = (rect.width * (1 - fraction)) / 2;
-  const marginY = (rect.height * (1 - fraction)) / 2;
+  // The inner 60% of the box in each axis; the outer band belongs to the column.
+  const marginX = (rect.width * 0.4) / 2;
+  const marginY = (rect.height * 0.4) / 2;
   return (
     point.x >= rect.left + marginX &&
     point.x <= rect.left + rect.width - marginX &&
@@ -979,7 +963,7 @@ export function unqueueRowWrites(
   queue: readonly string[],
   index: number,
 ): QueueRewrite[] {
-  if (!Number.isInteger(index) || index < 0 || index >= queue.length) return [];
+  if (!Number.isInteger(index) || index < 0) return [];
   const successor = queue[index + 1];
   if (successor === undefined) return [];
   const predecessor = index === 0 ? headId : queue[index - 1];
@@ -1155,10 +1139,9 @@ export function stackDropVerdict(
 
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  // `now` is absence, and legacy `soon` frontmatter reads as absence too: the
-  // surface it named no longer exists, and a card that carried it belongs on
-  // the desk wearing whatever `due:` it has.
-  if (trimmed === 'now' || trimmed === 'soon') return undefined;
-  return trimmed === 'stashed' ? 'stashed' : undefined;
+  // Only `stashed` is a value; everything else is absence. `now` is absence by
+  // definition, and legacy `soon` frontmatter reads as absence too: the surface
+  // it named no longer exists, and a card that carried it belongs on the desk
+  // wearing whatever `due:` it has.
+  return value.trim() === 'stashed' ? 'stashed' : undefined;
 }
