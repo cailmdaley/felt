@@ -2338,8 +2338,9 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
 }
 
 /** The head of a Desk band (Pinned, Resting) — the column head's own parts at
- *  band scale: a small-caps title and the count in mono beside it. No dropcap: the F2/F1 initial needs the column
- *  title's size to read as illumination (see `.kbn-bandhead-title`). */
+ *  band scale: a small-caps title and the count in mono beside it. No dropcap:
+ *  the F2/F1 initial needs the column title's size to read as illumination
+ *  (see `.kbn-bandhead-title`). */
 function renderBandHead(label: string, count: number): HTMLElement {
   const head = document.createElement('div')
   head.className = 'kbn-bandhead'
@@ -2700,12 +2701,6 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
 }
 
 /**
- * Every card the response holds, once each — the collection the dependency
- * graph is built over. Deliberately the same lists `findCardById` searches: a
- * card that can be found must also be able to appear in a chain, or "+N
- * queued" would count differently from what the peek can name.
- */
-/**
  * The part of an element a cursor can actually reach: its box, clipped by every
  * scrolling ancestor and by the viewport.
  *
@@ -2734,6 +2729,12 @@ function visibleRectOf(el: HTMLElement): ZoneRect | null {
   })
 }
 
+/**
+ * Every card the response holds, once each — the collection the dependency
+ * graph is built over. Deliberately the same lists `findCardById` searches: a
+ * card that can be found must also be able to appear in a chain, or "+N
+ * queued" would count differently from what the peek can name.
+ */
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []
   const seen = new Set<string>()
