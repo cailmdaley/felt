@@ -316,7 +316,11 @@ export class KanbanSurfaceRenderer {
     section.append(folio, board)
     if (isMobileViewport()) adoptColumnActions(board, folio)
     this.installFolioPager(board, folio)
-    this.installSectionDragHandlers(section, 'now')
+    this.installSectionDragHandlers(section, {
+      rowDrop: 'now',
+      skipColHead: true,
+      commit: (card) => void this.o.setSurface(card, 'now'),
+    })
     return section
   }
 
@@ -630,7 +634,18 @@ export class KanbanSurfaceRenderer {
       for (const card of ordered) row.append(this.renderPinnedChip(card, staleness[card.originId]))
     }
     section.append(row)
-    this.installPinnedDropHandlers(section)
+    // The "onto the shelf" half of the Pinned strip: dropping a card here
+    // reshapes it to a resting `kind:pinned` role via `reshape` — the off-write
+    // twin of dragging a pinned card onto In-flight (which dispatches it), and
+    // a `/lifecycle` reshape rather than the `/felt-edit` field the Now and
+    // Resting shelves write. A card already on the strip is handled inside
+    // pinRole, which banners "already pinned" rather than no-opping silently.
+    // NO `rowDrop`: a peek row never arms `dragSourceId`, so the shelf stays
+    // inert for it and the release passes through — deliberately.
+    this.installSectionDragHandlers(section, {
+      skipColHead: false,
+      commit: (card) => void this.o.pin(card),
+    })
     return section
   }
 
@@ -704,40 +719,6 @@ export class KanbanSurfaceRenderer {
       this.o.openDetail(card)
     })
     return el
-  }
-
-  /**
-   * The "onto the shelf" half of the Pinned strip: dropping a card here
-   * reshapes it to a resting `kind:pinned` role via `reshape`. The off-write twin
-   * of dragging a pinned card onto In-flight (which dispatches it). Mirrors
-   * `installSectionDragHandlers` (the stash shelf), differing only in the write
-   * it commits — pinning is a `/lifecycle` reshape, not a `/felt-edit` field.
-   * A card already on the strip drops to a no-op (its column is already pinned).
-   */
-  private installPinnedDropHandlers(section: HTMLElement): void {
-    section.addEventListener('dragover', (e) => {
-      if (!this.o.getDragSourceId()) return
-      e.preventDefault()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-      section.classList.add('kbn-section-drop')
-    })
-    section.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget && section.contains(e.relatedTarget as Node)) return
-      section.classList.remove('kbn-section-drop')
-    })
-    section.addEventListener('drop', (e) => {
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
-      section.classList.remove('kbn-section-drop')
-      this.o.setDragSourceId(null)
-      this.o.stopDragAutoScroll()
-      if (!fiberId) return
-      e.preventDefault()
-      const card = findCardById(this.o.getLastResponse(), fiberId)
-      if (!card) return
-      // A card already resting on the strip is handled inside pinRole, which
-      // banners "already pinned" rather than no-opping silently here.
-      void this.o.pin(card)
-    })
   }
 
   /**
@@ -878,7 +859,11 @@ export class KanbanSurfaceRenderer {
     }
 
     section.append(grid)
-    this.installSectionDragHandlers(section, 'stashed')
+    this.installSectionDragHandlers(section, {
+      rowDrop: 'stashed',
+      skipColHead: true,
+      commit: (card) => void this.o.setSurface(card, 'stashed'),
+    })
     return section
   }
 
@@ -1044,14 +1029,25 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Install drop handlers on a section (Now or Stash) - drop anywhere
-   *  inside the section that isn't a column header writes the legacy
-   *  surface command for the card. Now clears horizon; Stash writes
-   *  'stashed'. */
-  private installSectionDragHandlers(section: HTMLElement, horizon: 'now' | 'stashed'): void {
+  /** Install drop handlers on a shelf (Now, Resting, Pinned) — drop anywhere
+   *  inside it that isn't a column header and `commit` writes the shelf's
+   *  meaning for the card. `rowDrop`, when given, also accepts a peek-list row
+   *  (which leaves the queue and takes that horizon); its absence keeps the
+   *  shelf inert for a row, since a row never arms `dragSourceId`. */
+  private installSectionDragHandlers(
+    section: HTMLElement,
+    spec: {
+      rowDrop?: HorizonKind
+      skipColHead: boolean
+      commit: (card: KanbanCard) => void
+    },
+  ): void {
+    const overHead = (e: Event): boolean =>
+      spec.skipColHead && !!(e.target as HTMLElement).closest('.kbn-col-head')
+    const rowInFlight = (): boolean => spec.rowDrop !== undefined && this.queueDrag !== null
     section.addEventListener('dragover', (e) => {
-      if (!this.o.getDragSourceId() && !this.queueDrag) return
-      if ((e.target as HTMLElement).closest('.kbn-col-head')) return
+      if (!this.o.getDragSourceId() && !rowInFlight()) return
+      if (overHead(e)) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       section.classList.add('kbn-section-drop')
@@ -1061,13 +1057,13 @@ export class KanbanSurfaceRenderer {
       section.classList.remove('kbn-section-drop')
     })
     section.addEventListener('drop', (e) => {
-      if ((e.target as HTMLElement).closest('.kbn-col-head')) return
+      if (overHead(e)) return
       section.classList.remove('kbn-section-drop')
-      // A peek-list row landing here leaves the queue; the section still means
+      // A peek-list row landing here leaves the queue; the shelf still means
       // what it means (Now surfaces the card, Resting keeps it at rest).
-      if (this.queueDrag) {
+      if (rowInFlight() && spec.rowDrop) {
         e.preventDefault()
-        this.handleQueueRowDropOut({ horizon })
+        this.handleQueueRowDropOut({ horizon: spec.rowDrop })
         return
       }
       const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
@@ -1077,7 +1073,7 @@ export class KanbanSurfaceRenderer {
       e.preventDefault()
       const card = findCardById(this.o.getLastResponse(), fiberId)
       if (!card) return
-      void this.o.setSurface(card, horizon)
+      spec.commit(card)
     })
   }
 
