@@ -1228,14 +1228,6 @@ describe('the cycle lens — membership is derived, never assigned', () => {
       expect(cycleMembership({}, span, NOW)).toBeNull()
       expect(cycleMembership({ inFlight: false, due: undefined }, span, NOW)).toBeNull()
     })
-
-    it('has the activity rung ready for the day a caller can supply it', () => {
-      // The Desk never fills `workedDays` — the days live in the temporal feeds
-      // it does not fetch — so this rung is dark there and live here.
-      expect(cycleMembership({ workedDays: [dayFromNow(-1)] }, span, NOW)).toBe('worked')
-      expect(cycleMembership({ workedDays: [dayFromNow(-40)] }, span, NOW)).toBeNull()
-      expect(cycleMembership({ workedDays: [] }, span, NOW)).toBeNull()
-    })
   })
 
   describe('lensCycles — which chapters the Desk offers', () => {

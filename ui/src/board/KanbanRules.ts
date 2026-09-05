@@ -103,7 +103,7 @@ export interface CycleDropCandidate {
  * never assigned to a cycle, so there is no field to write, nothing to keep in
  * sync, and no way for a cycle's roster to disagree with the calendar.
  *
- * Three rungs, in the order this function tries them:
+ * Two rungs, in the order this function tries them:
  *
  *   'due'       the fiber's `due:` falls inside the span. The plain reading of
  *               "this is due this sprint".
@@ -118,7 +118,7 @@ export interface CycleDropCandidate {
  *               caller can supply `workedDays` it simply passes them; the Desk
  *               leaves the field undefined and the rung is skipped.
  */
-export type CycleMembershipReason = 'due' | 'in-flight' | 'worked';
+export type CycleMembershipReason = 'due' | 'in-flight';
 
 /** What membership reads off a fiber. Structural, like `CycleDropCandidate`:
  *  the rules module owns no view types, and `KanbanCard` satisfies this. */
@@ -128,9 +128,6 @@ export interface CycleMemberCandidate {
    *  in the In flight column. A fact supplied by the caller, not re-derived
    *  here, so the predicate stays independent of how a surface is assembled. */
   inFlight?: boolean;
-  /** Civil days (`YYYY-MM-DD`) this fiber was worked on. Undefined wherever the
-   *  caller has no activity data — see the `worked` rung above. */
-  workedDays?: readonly string[];
 }
 
 /**
@@ -148,8 +145,6 @@ export function cycleMembership(
 
   const today = isoDayLocal(nowMs);
   if (card.inFlight === true && span.start <= today && today <= span.end) return 'in-flight';
-
-  if (card.workedDays?.some((d) => d >= span.start && d <= span.end)) return 'worked';
 
   return null;
 }
@@ -225,8 +220,7 @@ export function lensCycles(
  * Classify a fiber into the kanban column it belongs in. The single source
  * of truth for "what column is this?". Reads ONLY the document-lifecycle
  * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,
- * live tmux liveness (`runningWorker`), and dependency
- * satisfaction (`dependsOnSatisfied`). There is no `enabled` and no
+ * and live tmux liveness (`runningWorker`). There is no `enabled` and no
  * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
  *
  *   1. A closed fiber is a human verdict, terminal regardless of tags or
@@ -264,8 +258,8 @@ export function lensCycles(
  *                                            inFlight at the liveness branch
  *                                            above — live work shows in Now.)
  *      A blocked-by-deps active oneshot still reads inFlight (launch intent —
- *      it flies when the dep clears), so the oneshot active branch collapses to
- *      a single inFlight regardless of `dependsOnSatisfied`.
+ *      it flies when the dep clears); the dependency gate is applied downstream,
+ *      by `depGated` on this classifier's output, never here.
  *
  * The kanban response splits classifyFiber's output across the
  * surfaces: now, timeline, stash, and the pinned strip. The classifier
@@ -274,7 +268,7 @@ export function lensCycles(
  */
 export function classifyFiber(
   f: Fiber,
-  opts: { runningWorker?: boolean; dependsOnSatisfied?: boolean } = {},
+  opts: { runningWorker?: boolean } = {},
 ): KanbanColumn {
   // A CYCLE is an annotation on time, not work, so it leaves before any
   // lifecycle question is asked. This branch is FIRST on purpose and it is
@@ -556,7 +550,6 @@ export function resolveDependencies(
 /** The shape the gate reads off a card. Structural, so the rules module keeps
  *  owning no view types; `KanbanCard` satisfies it. */
 export interface DepGateCandidate {
-  status: string;
   dependsOnSatisfied: boolean;
   runningWorker?: string;
   /** The human's verdict, when there is one. Only a VERDICT exempts a card
