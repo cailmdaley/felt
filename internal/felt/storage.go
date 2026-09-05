@@ -846,7 +846,7 @@ func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, er
 }
 
 func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
-	frontmatter, body, err := splitFrontmatter(content, true)
+	frontmatter, body, err := SplitFrontmatter(content, true)
 	if err != nil {
 		return nil, false, false, false, err
 	}
@@ -875,7 +875,7 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, er
 }
 
 func backfillIntrinsicID(content []byte) ([]byte, bool, error) {
-	frontmatter, body, err := splitFrontmatter(content, true)
+	frontmatter, body, err := SplitFrontmatter(content, true)
 	if err != nil {
 		return nil, false, err
 	}
@@ -899,17 +899,12 @@ func backfillIntrinsicID(content []byte) ([]byte, bool, error) {
 }
 
 func backfillIntrinsicIDFrontmatter(frontmatter []byte) ([]byte, bool, error) {
-	var node yaml.Node
-	if err := yaml.Unmarshal(frontmatter, &node); err != nil {
-		return nil, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+	mapping, err := frontmatterMappingNode(frontmatter)
+	if err != nil {
+		return nil, false, err
 	}
-	if len(node.Content) == 0 {
+	if mapping == nil {
 		return frontmatter, false, nil
-	}
-
-	mapping := node.Content[0]
-	if mapping.Kind != yaml.MappingNode {
-		return nil, false, fmt.Errorf("frontmatter must be a YAML mapping")
 	}
 
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
@@ -931,12 +926,12 @@ func backfillIntrinsicIDFrontmatter(frontmatter []byte) ([]byte, bool, error) {
 
 // List returns all felts in the storage.
 func (s *Storage) List() ([]*Felt, error) {
-	return s.listWithMode(ParseFull, false)
+	return s.listWithModeHavingFrontmatterFields(ParseFull, false, nil)
 }
 
 // ListMetadata returns all felts with frontmatter only.
 func (s *Storage) ListMetadata() ([]*Felt, error) {
-	return s.listWithMode(ParseMetadataOnly, false)
+	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, false, nil)
 }
 
 // ListMetadataHavingFrontmatterFields returns metadata for fibers whose raw
@@ -950,7 +945,7 @@ func (s *Storage) ListMetadataHavingFrontmatterFields(fields []string) ([]*Felt,
 
 // ListMetadataWithModTime returns metadata plus file modification times.
 func (s *Storage) ListMetadataWithModTime() ([]*Felt, error) {
-	return s.listWithMode(ParseMetadataOnly, true)
+	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, true, nil)
 }
 
 // ListMetadataWithModTimeHavingFrontmatterFields returns metadata plus file
@@ -958,10 +953,6 @@ func (s *Storage) ListMetadataWithModTime() ([]*Felt, error) {
 // top-level keys.
 func (s *Storage) ListMetadataWithModTimeHavingFrontmatterFields(fields []string) ([]*Felt, error) {
 	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, true, fields)
-}
-
-func (s *Storage) listWithMode(mode ParseMode, includeModTime bool) ([]*Felt, error) {
-	return s.listWithModeHavingFrontmatterFields(mode, includeModTime, nil)
 }
 
 func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeModTime bool, fields []string) ([]*Felt, error) {
@@ -1759,7 +1750,7 @@ func readFrontmatterFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	frontmatter, _, err := splitFrontmatter(data, false)
+	frontmatter, _, err := SplitFrontmatter(data, false)
 	return frontmatter, err
 }
 
@@ -1781,12 +1772,8 @@ func frontmatterHasTopLevelFields(frontmatter []byte, fields []string) bool {
 		remaining[field] = struct{}{}
 	}
 
-	var node yaml.Node
-	if err := yaml.Unmarshal(frontmatter, &node); err != nil || len(node.Content) == 0 {
-		return false
-	}
-	mapping := node.Content[0]
-	if mapping.Kind != yaml.MappingNode {
+	mapping, err := frontmatterMappingNode(frontmatter)
+	if err != nil || mapping == nil {
 		return false
 	}
 	for i := 0; i+1 < len(mapping.Content); i += 2 {

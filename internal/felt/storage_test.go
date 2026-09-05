@@ -461,9 +461,9 @@ created-at: 2026-01-01T10:00:00Z
 Body should never be read.
 `)
 
-	frontmatter, _, err := splitFrontmatter(content, false)
+	frontmatter, _, err := SplitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("splitFrontmatter() error: %v", err)
+		t.Fatalf("SplitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -490,9 +490,9 @@ tempered: true
 Body should never be read.
 `)
 
-	frontmatter, _, err := splitFrontmatter(content, false)
+	frontmatter, _, err := SplitFrontmatter(content, false)
 	if err != nil {
-		t.Fatalf("splitFrontmatter() error: %v", err)
+		t.Fatalf("SplitFrontmatter() error: %v", err)
 	}
 
 	got := string(frontmatter)
@@ -554,9 +554,9 @@ func TestReadFrontmatterErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := splitFrontmatter([]byte(tt.content), false)
+			_, _, err := SplitFrontmatter([]byte(tt.content), false)
 			if err == nil {
-				t.Fatalf("splitFrontmatter() error = nil, want error")
+				t.Fatalf("SplitFrontmatter() error = nil, want error")
 			}
 		})
 	}

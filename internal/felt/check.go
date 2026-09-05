@@ -136,7 +136,7 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
-		frontmatter, body, err := splitFrontmatter(data, true)
+		frontmatter, body, err := SplitFrontmatter(data, true)
 		if err != nil {
 			continue
 		}

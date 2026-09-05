@@ -376,7 +376,7 @@ func Parse(id string, content []byte) (*Felt, error) {
 
 // ParseWithMode parses a felt file, optionally skipping body extraction.
 func ParseWithMode(id string, content []byte, mode ParseMode) (*Felt, error) {
-	frontmatter, body, err := splitFrontmatter(content, mode == ParseFull)
+	frontmatter, body, err := SplitFrontmatter(content, mode == ParseFull)
 	if err != nil {
 		return nil, err
 	}
@@ -486,25 +486,21 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	}
 
 	// Capture unknown top-level keys so Marshal can round-trip them.
-	var node yaml.Node
-	if err := yaml.Unmarshal(frontmatter, &node); err == nil && len(node.Content) > 0 {
-		mapping := node.Content[0]
-		if mapping.Kind == yaml.MappingNode {
-			extra := make(map[string]*yaml.Node)
-			var order []string
-			for i := 0; i+1 < len(mapping.Content); i += 2 {
-				key := mapping.Content[i].Value
-				if _, known := knownFrontmatterKeys[key]; !known {
-					if _, seen := extra[key]; !seen {
-						order = append(order, key)
-					}
-					extra[key] = mapping.Content[i+1]
+	if mapping, err := frontmatterMappingNode(frontmatter); err == nil && mapping != nil {
+		extra := make(map[string]*yaml.Node)
+		var order []string
+		for i := 0; i+1 < len(mapping.Content); i += 2 {
+			key := mapping.Content[i].Value
+			if _, known := knownFrontmatterKeys[key]; !known {
+				if _, seen := extra[key]; !seen {
+					order = append(order, key)
 				}
+				extra[key] = mapping.Content[i+1]
 			}
-			if len(extra) > 0 {
-				f.ExtraFields = extra
-				f.ExtraFieldOrder = order
-			}
+		}
+		if len(extra) > 0 {
+			f.ExtraFields = extra
+			f.ExtraFieldOrder = order
 		}
 	}
 
@@ -512,18 +508,30 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 	return f, nil
 }
 
-func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, bool, error) {
+// frontmatterMappingNode parses frontmatter and returns its top-level mapping
+// node, or (nil, nil) for an empty document.
+func frontmatterMappingNode(frontmatter []byte) (*yaml.Node, error) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &node); err != nil {
-		return nil, false, false, fmt.Errorf("parsing YAML frontmatter: %w", err)
+		return nil, fmt.Errorf("parsing YAML frontmatter: %w", err)
 	}
 	if len(node.Content) == 0 {
-		return frontmatter, false, false, nil
+		return nil, nil
 	}
-
 	mapping := node.Content[0]
 	if mapping.Kind != yaml.MappingNode {
-		return nil, false, false, fmt.Errorf("frontmatter must be a YAML mapping")
+		return nil, fmt.Errorf("frontmatter must be a YAML mapping")
+	}
+	return mapping, nil
+}
+
+func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, bool, error) {
+	mapping, err := frontmatterMappingNode(frontmatter)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if mapping == nil {
+		return frontmatter, false, false, nil
 	}
 
 	nameIndex := -1
@@ -597,19 +605,14 @@ func stripLegacyMystAnchor(id, body string) (string, bool) {
 	return strings.Join(lines, "\n"), true
 }
 
-// splitFrontmatter separates YAML frontmatter from markdown body.
-// SplitFrontmatter is the exported entry-point for callers outside the
-// felt package that need raw YAML frontmatter bytes (e.g. `felt show
-// --field <name>` reads the unparsed frontmatter, walks it as a yaml.Node,
-// and emits one field). Mirrors `splitFrontmatter` semantics: returns
+// SplitFrontmatter separates YAML frontmatter from markdown body, returning
 // (frontmatterBytes, body, error). Pass `includeBody=false` to skip body
-// allocation when only frontmatter is needed.
-func SplitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
-	return splitFrontmatter(content, includeBody)
-}
-
+// allocation when only frontmatter is needed (e.g. `felt show --field <name>`
+// reads the unparsed frontmatter, walks it as a yaml.Node, and emits one
+// field).
+//
 // Frontmatter must be delimited by exact column-0 --- lines.
-func splitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
+func SplitFrontmatter(content []byte, includeBody bool) ([]byte, string, error) {
 	frontmatterStart, closingStart, bodyStart, err := frontmatterBounds(content)
 	if err != nil {
 		return nil, "", err

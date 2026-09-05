@@ -94,24 +94,31 @@ func (s *Storage) outerRelationships(targetID string) ([]Citation, []DataFlowCon
 	ids := sortedFeltIDs(felts)
 	outerTarget := path.Join(prefix, targetID)
 
+	citations, consumers := collectRelationships(outside, newScopedIDResolverIn(ids, nil), outerTarget, targetID)
+	return citations, consumers, nil
+}
+
+// collectRelationships walks sources in one iterRefsResolved pass, keeping the
+// refs that resolve to matchID and reporting them against reportID.
+func collectRelationships(sources []*Felt, resolver *scopedIDResolver, matchID, reportID string) ([]Citation, []DataFlowConsumer) {
 	var citations []Citation
 	var consumers []DataFlowConsumer
-	_ = iterRefsResolved(outside, newScopedIDResolverIn(ids, nil), func(r resolvedRef) error {
-		if r.ResolveErr != nil || r.ResolvedID != outerTarget {
+	_ = iterRefsResolved(sources, resolver, func(r resolvedRef) error {
+		if r.ResolveErr != nil || r.ResolvedID != matchID {
 			return nil
 		}
 		switch r.Kind {
 		case refKindReference:
 			citations = append(citations, Citation{
 				SourceID:   r.Source.ID,
-				TargetID:   targetID,
+				TargetID:   reportID,
 				Fragment:   r.Fragment,
 				SourceName: r.Source.DisplayName(),
 			})
 		case refKindDataFlow:
 			consumers = append(consumers, DataFlowConsumer{
 				SourceID:   r.Source.ID,
-				TargetID:   targetID,
+				TargetID:   reportID,
 				OutputID:   r.Fragment,
 				InputID:    r.InputID,
 				SourceName: r.Source.DisplayName(),
@@ -119,38 +126,14 @@ func (s *Storage) outerRelationships(targetID string) ([]Citation, []DataFlowCon
 		}
 		return nil
 	})
-	return citations, consumers, nil
+	return citations, consumers
 }
 
 // RelationshipsFromFelts collects citations and consumers for targetID in one
 // iterRefs pass, dispatching each yielded ref to the matching accumulator.
 func RelationshipsFromFelts(felts []*Felt, targetID string, external *ExternalRefs) ([]Citation, []DataFlowConsumer, error) {
 	ids := sortedFeltIDs(felts)
-	var citations []Citation
-	var consumers []DataFlowConsumer
-	_ = iterRefsResolved(felts, newScopedIDResolverIn(ids, external), func(r resolvedRef) error {
-		if r.ResolveErr != nil || r.ResolvedID != targetID {
-			return nil
-		}
-		switch r.Kind {
-		case refKindReference:
-			citations = append(citations, Citation{
-				SourceID:   r.Source.ID,
-				TargetID:   r.ResolvedID,
-				Fragment:   r.Fragment,
-				SourceName: r.Source.DisplayName(),
-			})
-		case refKindDataFlow:
-			consumers = append(consumers, DataFlowConsumer{
-				SourceID:   r.Source.ID,
-				TargetID:   r.ResolvedID,
-				OutputID:   r.Fragment,
-				InputID:    r.InputID,
-				SourceName: r.Source.DisplayName(),
-			})
-		}
-		return nil
-	})
+	citations, consumers := collectRelationships(felts, newScopedIDResolverIn(ids, external), targetID, targetID)
 	sortCitations(citations)
 	sortConsumers(consumers)
 	return citations, consumers, nil
