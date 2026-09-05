@@ -15,19 +15,7 @@ defmodule ShuttleWeb.QuarantineControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # Transport stub for the forward leg: records the POST and replays a scripted
-  # response, so the cross-host relay is exercised without a real tunnel.
-  defmodule StubPostClient do
-    use Agent
-    def start_link(_ \\ []), do: Agent.start_link(fn -> %{response: nil, last: nil} end, name: __MODULE__)
-    def set_response(r), do: Agent.update(__MODULE__, &Map.put(&1, :response, r))
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
+  alias Shuttle.Test.StubPostClient
 
   # The endpoint calls the globally named Shuttle.Poller. Quiet runner: no
   # felt stores to poll, and every shell-out reports "nothing" so init's
@@ -76,7 +64,10 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   # The forwarded body strips `origin` (the owner runs its own local branch).
   test "release forwards to the owning remote when origin names one" do
     start_supervised!(StubPostClient)
-    StubPostClient.set_response({:ok, 200, Jason.encode!(%{"ok" => true, "boot_quarantine" => false})})
+
+    StubPostClient.set_response(
+      {:ok, 200, Jason.encode!(%{"ok" => true, "boot_quarantine" => false})}
+    )
 
     previous_remotes = Application.get_env(:shuttle, :remotes)
     previous_client = Application.get_env(:shuttle, :write_forward_client)
@@ -95,5 +86,4 @@ defmodule ShuttleWeb.QuarantineControllerTest do
     assert last.url == "http://localhost:4001/api/v1/quarantine/release"
     assert Jason.decode!(last.body) == %{}
   end
-
 end

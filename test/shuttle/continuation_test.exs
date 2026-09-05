@@ -4,26 +4,7 @@ defmodule Shuttle.ContinuationTest do
 
   alias Shuttle.Continuation
 
-  # Records every felt invocation, returns success — lets us assert the daemon
-  # shells the right `felt shuttle mark-runtime` command without running felt.
-  defmodule RecordingRunner do
-    @behaviour Shuttle.Runner
-
-    def start do
-      case Agent.start_link(fn -> [] end, name: __MODULE__) do
-        {:ok, pid} -> {:ok, pid}
-        {:error, {:already_started, pid}} -> Agent.update(pid, fn _ -> [] end) && {:ok, pid}
-      end
-    end
-
-    @impl true
-    def cmd(command, args, opts) do
-      Agent.update(__MODULE__, &(&1 ++ [{command, args, opts}]))
-      {"", 0}
-    end
-
-    def calls, do: Agent.get(__MODULE__, & &1)
-  end
+  alias Shuttle.Test.RecordingRunner
 
   # Non-zero exit — proves the writers are best-effort (return {:error,_}, no raise).
   defmodule FailingRunner do
