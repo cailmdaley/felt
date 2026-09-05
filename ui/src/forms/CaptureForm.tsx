@@ -42,6 +42,7 @@ import {
   injectProjectPickerStyles,
   projectsForHost,
   type PickerHost,
+  type PickerProject,
 } from './ProjectPicker'
 import { useAddProject } from './useAddProject'
 
@@ -68,12 +69,7 @@ const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
 /** A destination project, as Capture consumes it (Stash's `StashProject`
  *  minus `loomPrefix`, which only parent-nesting needs). */
-export interface CaptureProject {
-  id: string
-  name?: string
-  path: string
-  originId: string
-}
+export type CaptureProject = PickerProject
 
 export interface CaptureFormProps {
   /** All connected projects; each carries its own originId + path. */

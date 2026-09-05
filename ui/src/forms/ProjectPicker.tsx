@@ -43,8 +43,10 @@ export interface PickerProject {
   /** Stable key — `${originId}:${path}`. */
   id: string
   name?: string
+  /** `shuttle.project_dir` — the worker cwd AND the create endpoint's felt root. */
   path: string
-  /** `'local'` or a remote host name. */
+  /** Owner-routing key sent as `origin`: `'local'` for the local daemon's own
+   *  projects, else the owning remote's bare name (e.g. `cluster-a`). */
   originId: string
 }
 
