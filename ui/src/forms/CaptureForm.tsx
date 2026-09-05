@@ -37,14 +37,11 @@ import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
-  FALLBACK_HOST,
-  byRecency,
   injectProjectPickerStyles,
-  projectsForHost,
   type PickerHost,
   type PickerProject,
+  useProjectSelection,
 } from './ProjectPicker'
-import { useAddProject } from './useAddProject'
 
 /**
  * Fallback when the registry fetch fails — keeps the dialog usable offline.
@@ -127,26 +124,25 @@ export function CaptureForm({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  // Live project set: seeded from the island's derivation, replaced wholesale
-  // when the directory picker registers one (the island re-derives it).
-  const [cities, setCities] = useState<CaptureProject[]>(availableCities)
-
-  // Same default-selection priority as StashForm: most-recently-active →
-  // alphabetical → null (picker hidden).
-  const sortedCities = [...cities].sort(byRecency(cityActivityById))
-  // Host first: the local daemon's own, unless the caller scoped the form to a
-  // project that lives elsewhere. Defaulting to recency would land on whichever
-  // remote was busiest, and "add a project" would then quietly mean "over
-  // there" — the thing this split exists to prevent.
-  const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
-  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
-  const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(
-    () => projectsForHost(sortedCities, defaultHostId)[0]?.id ?? null,
-  )
-  const hostCities = projectsForHost(sortedCities, selectedHostId)
-  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
-
+  const {
+    hosts,
+    selectedHostId,
+    selectedHost,
+    handleHostChange,
+    cities,
+    hostCities,
+    selectedCityId,
+    setSelectedCityId,
+    selectedCity,
+    addProject,
+  } = useProjectSelection<CaptureProject>({
+    shuttleBase,
+    availableCities,
+    availableHosts,
+    cityActivityById,
+    onProjectAdded,
+    nativeFolderPicker,
+  })
 
   // Autofocus the yap — it's the whole point of the dialog.
   useEffect(() => {
@@ -183,35 +179,6 @@ export function CaptureForm({
     const levels = rec?.effort_levels ?? []
     setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
     if (!(rec?.chrome_capable ?? false)) setChrome(false)
-  }
-
-  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
-
-  // The add-project row — native OS dialog on a local host that has one, the
-  // absolute-path row everywhere else (see useAddProject).
-  const addProject = useAddProject<CaptureProject>({
-    shuttleBase,
-    nativeFolderPicker: selectedHost.isLocal
-      ? selectedHost.nativeFolderPicker || nativeFolderPicker
-      : false,
-    isLocalHost: selectedHost.isLocal,
-    origin: selectedHostId,
-    onProjectAdded,
-    onAdded: (next, path) => {
-      setCities(next)
-      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
-      if (added) setSelectedCityId(added.id)
-    },
-  })
-
-  // Changing the host re-points the project at that host's most recent one — a
-  // selection belonging to the previous host would submit to the wrong machine,
-  // and null would silently block submit. Any open path row belongs to the old
-  // host, so it goes too.
-  const handleHostChange = (id: string): void => {
-    setSelectedHostId(id)
-    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
-    addProject.closePath()
   }
 
   const submit = async (): Promise<void> => {
