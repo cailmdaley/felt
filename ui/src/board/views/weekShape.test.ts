@@ -1052,15 +1052,12 @@ describe('how full a day was', () => {
     const bucket = (m: number, k: ActivityBucket['k'], n = 1): ActivityBucket =>
       ({ m, s: null, cwd: null, k, n });
     // Three kinds in the same minute, then one more minute of agent work.
-    const spend = summarizeSpend(
-      [
+    const spend = summarizeSpend([
         bucket(0, 'agent', 9),
         bucket(0, 'attention'),
         bucket(0, 'notify'),
         bucket(60_000, 'agent', 4),
-      ],
-      60_000,
-    );
+    ]);
     expect(spend.totalMs).toBe(2 * 60_000);
     expect(spend.agentMs).toBe(2 * 60_000);
   });
@@ -1204,11 +1201,11 @@ describe('the raster tick knows whose minute it was', () => {
       rasterSlots([bucket({ m: bounds.startMs, s: 'w-1' })], bounds, bounds.endMs, origin(index))[0],
       rasterSlots([bucket({ m: bounds.startMs, s: 'w-2' })], bounds, bounds.endMs, origin(index))[0],
     ];
-    expect(driven.shuttle).toBe(true);
+    expect(driven.kinds.some((k) => k.shuttle)).toBe(true);
     expect(driven.kinds[0].where).toEqual(['ship it']);
     // A `shuttle:` block is what makes a fiber constitution-driven — a card
     // that merely has a running worker is not.
-    expect(plain.shuttle).toBe(false);
+    expect(plain.kinds.some((k) => k.shuttle)).toBe(false);
     expect(plain.kinds[0].where).toEqual(['notes']);
   });
 
