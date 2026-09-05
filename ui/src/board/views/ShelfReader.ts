@@ -65,7 +65,7 @@ import {
 import { buildReaderWindow, buildTabButton, buildViewCell } from '../ReaderChrome.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
-import { safeStorage } from './shelfLayout.js'
+import { readJSON, writeJSON } from './shelfLayout.js'
 
 export const READER_PERSIST_KEY = 'shuttle:shelf:reader'
 
@@ -156,25 +156,14 @@ function coerceGeometry(raw: unknown): PanelGeometry | null {
 }
 
 export function loadReaderPersist(storage?: Storage): ReaderPersist {
-  const store = storage ?? safeStorage()
-  if (!store) return emptyReaderPersist()
-  try {
-    const raw = store.getItem(READER_PERSIST_KEY)
-    return raw ? coerceReaderPersist(JSON.parse(raw)) : emptyReaderPersist()
-  } catch {
-    return emptyReaderPersist()
-  }
+  return readJSON(READER_PERSIST_KEY, coerceReaderPersist, emptyReaderPersist, storage)
 }
 
 export function saveReaderPersist(state: ReaderPersist, storage?: Storage): void {
-  const store = storage ?? safeStorage()
-  if (!store) return
-  try {
-    if (state.open.length === 0 && !state.geom) store.removeItem(READER_PERSIST_KEY)
-    else store.setItem(READER_PERSIST_KEY, JSON.stringify(state))
-  } catch {
-    /* storage full / disabled — persistence is best-effort */
-  }
+  // Nothing open and nowhere remembered is nothing to remember: drop the record
+  // rather than leaving an empty one behind.
+  const keep = state.open.length > 0 || state.geom ? state : null
+  writeJSON(READER_PERSIST_KEY, keep, storage)
 }
 
 /**
