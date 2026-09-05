@@ -254,20 +254,23 @@ func SlugifyPath(s string) string {
 	return prefix + "/" + slug
 }
 
-// Slugify converts a string to a URL-safe slug.
+// Slugify converts a string to a URL-safe ASCII slug. Latin letters with
+// diacritics fold to their base letter (é → e, ß → ss) so an accented title
+// keeps its words; any other non-ASCII rune is a separator. Restricting the
+// output to ASCII keeps every byte single-width, so the byte-length truncation
+// in GenerateID/truncateAtWord can never split a multibyte rune.
 func Slugify(s string) string {
 	// Strip bracketed tags like [thread:X], [project], etc.
 	s = stripBracketedTags(s)
 	s = strings.ToLower(s)
 
-	// Replace non-ASCII-alphanumeric with hyphens. Restricting to ASCII
-	// (rather than unicode.IsLetter/IsDigit) keeps every byte single-width,
-	// so the byte-length truncation in GenerateID/truncateAtWord can never
-	// split a multibyte rune into invalid UTF-8.
 	var result strings.Builder
 	prevHyphen := false
 	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if folded, ok := latinFold[r]; ok {
+			result.WriteString(folded)
+			prevHyphen = false
+		} else if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			result.WriteRune(r)
 			prevHyphen = false
 		} else if !prevHyphen {
@@ -278,6 +281,19 @@ func Slugify(s string) string {
 
 	// Trim leading/trailing hyphens
 	return strings.Trim(result.String(), "-")
+}
+
+// latinFold maps lower-cased Latin-1 / Latin Extended-A letters to ASCII.
+var latinFold = map[rune]string{
+	'à': "a", 'á': "a", 'â': "a", 'ã': "a", 'ä': "a", 'å': "a", 'ā': "a", 'ă': "a", 'ą': "a", 'æ': "ae",
+	'ç': "c", 'ć': "c", 'č': "c", 'ď': "d", 'đ': "d", 'ð': "d",
+	'è': "e", 'é': "e", 'ê': "e", 'ë': "e", 'ē': "e", 'ė': "e", 'ę': "e", 'ě': "e",
+	'ğ': "g", 'ì': "i", 'í': "i", 'î': "i", 'ï': "i", 'ī': "i", 'ı': "i", 'ł': "l",
+	'ñ': "n", 'ń': "n", 'ň': "n",
+	'ò': "o", 'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o", 'ø': "o", 'ō': "o", 'ő': "o", 'œ': "oe",
+	'ř': "r", 'ś': "s", 'š': "s", 'ş': "s", 'ß': "ss", 'ť': "t", 'þ': "th",
+	'ù': "u", 'ú': "u", 'û': "u", 'ü': "u", 'ū': "u", 'ů': "u", 'ű': "u",
+	'ý': "y", 'ÿ': "y", 'ź': "z", 'ż': "z", 'ž': "z",
 }
 
 // stripBracketedTags removes [tag] patterns from a string.

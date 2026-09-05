@@ -216,6 +216,10 @@ func TestSlugifyASCIIOnly(t *testing.T) {
 		t.Fatalf("GenerateID(%q) = %q exceeds max length 32", title, id)
 	}
 
+	if got := Slugify("Résumé électronique — Straße, Œuvre"); got != "resume-electronique-strasse-oeuvre" {
+		t.Fatalf("diacritics must fold to their base letters, got %q", got)
+	}
+
 	// A title with no ASCII letters at all should be rejected the same way
 	// an all-punctuation title is (see TestGenerateIDRejectsEmptySlug).
 	if _, err := GenerateID("北京市朝阳区"); err == nil {
