@@ -255,13 +255,9 @@ until they are reopened.`,
 		}
 		defer unlock()
 
-		var tempered *bool
-		if closeTempered != "" {
-			parsed, err := parseOptionalBool(closeTempered)
-			if err != nil {
-				return fmt.Errorf("parsing --tempered: %w", err)
-			}
-			tempered = parsed
+		tempered, err := parseOptionalBool(closeTempered)
+		if err != nil {
+			return fmt.Errorf("parsing --tempered: %w", err)
 		}
 
 		f.Status = felt.StatusClosed

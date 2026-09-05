@@ -24,10 +24,7 @@ var shuttleSnapshotCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Print(string(body))
-		if !bytes.HasSuffix(body, []byte("\n")) {
-			fmt.Println()
-		}
+		printDaemonBody(body)
 		return nil
 	},
 }
@@ -46,12 +43,18 @@ var shuttleDispatchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Print(string(body))
-		if !bytes.HasSuffix(body, []byte("\n")) {
-			fmt.Println()
-		}
+		printDaemonBody(body)
 		return nil
 	},
+}
+
+// printDaemonBody echoes a daemon response verbatim, adding the newline the
+// daemon may not have sent so the shell prompt does not land mid-line.
+func printDaemonBody(body []byte) {
+	fmt.Print(string(body))
+	if !bytes.HasSuffix(body, []byte("\n")) {
+		fmt.Println()
+	}
 }
 
 func init() {

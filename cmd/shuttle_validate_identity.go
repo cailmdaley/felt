@@ -159,8 +159,12 @@ func validateIdentityDaemon(baseURL string) identityDaemonReport {
 	report := identityDaemonReport{URL: baseURL}
 
 	var fibers daemonFibersResponse
-	if err := fetchJSON(baseURL+"/api/v1/fibers?shuttle=true", &fibers); err != nil {
+	fibersURL := baseURL + "/api/v1/fibers?shuttle=true"
+	if body, err := getDaemon(fibersURL, daemonReadTimeout); err != nil {
 		report.Error = err.Error()
+		return report
+	} else if err := json.Unmarshal(body, &fibers); err != nil {
+		report.Error = fmt.Errorf("decoding %s: %w", fibersURL, err).Error()
 		return report
 	}
 	report.Host = fibers.Host
@@ -245,17 +249,6 @@ func sortFindings(rows []identityFiberFinding) {
 	})
 }
 
-func fetchJSON(url string, dest any) error {
-	body, err := getDaemon(url, daemonReadTimeout)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, dest); err != nil {
-		return fmt.Errorf("decoding %s: %w", url, err)
-	}
-	return nil
-}
-
 func stringField(m map[string]any, key string) string {
 	if m == nil {
 		return ""
@@ -301,11 +294,18 @@ func printFindingGroup(label string, rows []identityFiberFinding) {
 	if len(rows) == 0 {
 		return
 	}
+	const cap = 12
+	shown := rows
+	if len(shown) > cap {
+		shown = shown[:cap]
+	}
 	fmt.Printf("  %s (%d):\n", label, len(rows))
-	for _, row := range limitFindings(rows, 12) {
+	for _, row := range shown {
 		fmt.Printf("    - %s [status=%s id=%s uid=%s host=%s]\n", row.Slug, row.Status, row.ID, row.UID, row.Host)
 	}
-	printLimitNotice(len(rows), 12)
+	if len(rows) > cap {
+		fmt.Printf("    ... %d more\n", len(rows)-cap)
+	}
 }
 
 func printDuplicateGroup(rows []identityDuplicateUID) {
@@ -315,19 +315,6 @@ func printDuplicateGroup(rows []identityDuplicateUID) {
 	fmt.Printf("  duplicate uid (%d):\n", len(rows))
 	for _, row := range rows {
 		fmt.Printf("    - %s (%d rows)\n", row.UID, row.Count)
-	}
-}
-
-func limitFindings(rows []identityFiberFinding, limit int) []identityFiberFinding {
-	if len(rows) <= limit {
-		return rows
-	}
-	return rows[:limit]
-}
-
-func printLimitNotice(count, limit int) {
-	if count > limit {
-		fmt.Printf("    ... %d more\n", count-limit)
 	}
 }
 

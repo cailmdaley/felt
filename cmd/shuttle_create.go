@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -140,9 +139,6 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			}
 			block.ProjectDir = projectDir
 		}
-		if !installDisabled && strings.TrimSpace(block.Host) == "" {
-			return fmt.Errorf("armed install requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
-		}
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
@@ -265,10 +261,6 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			block.Agent = repeatModel
 		}
 
-		if strings.TrimSpace(block.Host) == "" {
-			return fmt.Errorf("repeat requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
-		}
-
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
 		}
@@ -374,9 +366,6 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 		block := &shuttle.Block{Kind: "pinned", Host: host, ProjectDir: projectDir}
 		if pinModel != "" {
 			block.Agent = pinModel
-		}
-		if strings.TrimSpace(block.Host) == "" {
-			return fmt.Errorf("pinned role requires a host (the owning daemon's host id; pass --host or run on the owning machine)")
 		}
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {

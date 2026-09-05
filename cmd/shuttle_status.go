@@ -366,9 +366,6 @@ func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
 			if key == "" {
 				key = e.Path
 			}
-			if key == "" {
-				key = e.FiberID
-			}
 			if seen[key] {
 				continue
 			}

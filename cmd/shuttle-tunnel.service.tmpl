@@ -52,7 +52,7 @@ WorkingDirectory={{ .Home }}
 # directory instead of ssh's own ControlPath connection hash.
 ExecStart=/bin/sh -c 'while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done'
 {{- else }}
-ExecStart={{ .AutoSSHPath }}{{ if not .HoldCommand }} -N{{ end }} -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes{{ if .SSHAuthSock }} -o IdentityAgent={{ .SSHAuthSock }}{{ end }} -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}{{ if .HoldCommand }} '{{ .HoldCommand }}'{{ end }}
+ExecStart={{ .AutoSSHPath }} -N -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes{{ if .SSHAuthSock }} -o IdentityAgent={{ .SSHAuthSock }}{{ end }} -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}
 {{- end }}
 
 # AUTOSSH_GATETIME=0: never treat a short-lived first connection as a fatal
