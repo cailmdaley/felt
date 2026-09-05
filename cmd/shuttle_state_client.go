@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 )
 
@@ -99,13 +98,9 @@ func fetchComposite() (*CompositeState, error) {
 // fetchCompositeFrom calls the given composite URL and decodes it (tests point
 // it at an httptest stub).
 func fetchCompositeFrom(url string) (*CompositeState, error) {
-	body, err := getDaemon(url, daemonReadTimeout)
+	out, err := getDaemonJSON[CompositeState](url, "parsing daemon response")
 	if err != nil {
 		return nil, err
-	}
-	var out CompositeState
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("parsing daemon response: %w", err)
 	}
 	return &out, nil
 }

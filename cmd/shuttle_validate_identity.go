@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -158,13 +157,10 @@ func validateIdentity(urls []string) identityReport {
 func validateIdentityDaemon(baseURL string) identityDaemonReport {
 	report := identityDaemonReport{URL: baseURL}
 
-	var fibers daemonFibersResponse
 	fibersURL := baseURL + "/api/v1/fibers?shuttle=true"
-	if body, err := getDaemon(fibersURL, daemonReadTimeout); err != nil {
+	fibers, err := getDaemonJSON[daemonFibersResponse](fibersURL, fmt.Sprintf("decoding %s", fibersURL))
+	if err != nil {
 		report.Error = err.Error()
-		return report
-	} else if err := json.Unmarshal(body, &fibers); err != nil {
-		report.Error = fmt.Errorf("decoding %s: %w", fibersURL, err).Error()
 		return report
 	}
 	report.Host = fibers.Host

@@ -87,16 +87,12 @@ type sessionLedgerResponse struct {
 }
 
 func fetchSessionLedger() (*sessionLedgerResponse, error) {
-	body, err := getDaemon(daemonURL()+sessionsCompositePath, daemonReadTimeout)
+	ledger, err := getDaemonJSON[sessionLedgerResponse](daemonURL()+sessionsCompositePath, "parsing session ledger")
 	if err != nil {
 		if isLifecycleTransportError(err) {
 			return nil, fmt.Errorf("reading session provenance: %w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
 		}
 		return nil, err
-	}
-	var ledger sessionLedgerResponse
-	if err := json.Unmarshal(body, &ledger); err != nil {
-		return nil, fmt.Errorf("parsing session ledger: %w", err)
 	}
 	return &ledger, nil
 }
@@ -115,13 +111,9 @@ func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
 		q.Set("host", host)
 	}
 	u.RawQuery = q.Encode()
-	body, err := getDaemon(u.String(), daemonReadTimeout)
+	receipt, err := getDaemonJSON[TranscriptReceipt](u.String(), fmt.Sprintf("parsing transcript receipt for %s", session))
 	if err != nil {
 		return TranscriptReceipt{}, err
-	}
-	var receipt TranscriptReceipt
-	if err := json.Unmarshal(body, &receipt); err != nil {
-		return TranscriptReceipt{}, fmt.Errorf("parsing transcript receipt for %s: %w", session, err)
 	}
 	if receipt.Session == "" {
 		receipt.Session = session
@@ -221,14 +213,10 @@ type compositeFiberRow struct {
 }
 
 func compositeFiberRows() []compositeFiberRow {
-	body, err := getDaemon(daemonURL()+"/api/v1/fibers/composite", daemonReadTimeout)
-	if err != nil {
-		return nil
-	}
-	var response struct {
+	response, err := getDaemonJSON[struct {
 		Fibers []compositeFiberRow `json:"fibers"`
-	}
-	if json.Unmarshal(body, &response) != nil {
+	}](daemonURL()+"/api/v1/fibers/composite", "parsing composite fibers")
+	if err != nil {
 		return nil
 	}
 	return response.Fibers
@@ -341,18 +329,14 @@ type sessionOwner struct {
 // commits made before the hook existed or outside a harness session — it is a
 // coverage boundary, not proof the commit has no session.
 func commitSession(sha string) (string, error) {
-	body, err := getDaemon(daemonURL()+"/api/v1/commits/composite", daemonReadTimeout)
-	if err != nil {
-		return "", err
-	}
-	var response struct {
+	response, err := getDaemonJSON[struct {
 		Records []struct {
 			SHA     string `json:"sha"`
 			Session string `json:"session"`
 		} `json:"records"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("parsing commit ledger: %w", err)
+	}](daemonURL()+"/api/v1/commits/composite", "parsing commit ledger")
+	if err != nil {
+		return "", err
 	}
 	needle := strings.ToLower(sha)
 	matches := map[string]string{}
