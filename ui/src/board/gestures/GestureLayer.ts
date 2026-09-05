@@ -33,7 +33,6 @@ const FRAME_STYLE = `
 .kbn-gesture-handle { position: absolute; width: 10px; height: 10px; box-sizing: border-box; padding: 0; border: 1px solid #fffdf6; border-radius: 2px; background: #2f7d6f; pointer-events: auto; cursor: nwse-resize; }
 .kbn-gesture-handle-n, .kbn-gesture-handle-s { left: 50%; transform: translateX(-50%); cursor: ns-resize; }
 .kbn-gesture-handle-e, .kbn-gesture-handle-w { top: 50%; transform: translateY(-50%); cursor: ew-resize; }
-.kbn-gesture-handle-nw, .kbn-gesture-handle-se { cursor: nwse-resize; }
 .kbn-gesture-handle-ne, .kbn-gesture-handle-sw { cursor: nesw-resize; }
 .kbn-gesture-handle-n, .kbn-gesture-handle-ne, .kbn-gesture-handle-nw { top: -6px; }
 .kbn-gesture-handle-e, .kbn-gesture-handle-ne, .kbn-gesture-handle-se { right: -6px; }
@@ -57,7 +56,7 @@ export interface GestureLayerOptions {
   shuttleBase: string
   fiberId?: string
   filePath?: string
-  sourceUrl?: string
+  sourceUrl: string
 }
 
 interface Selection {
@@ -130,8 +129,6 @@ interface Manipulation {
   top: string
 }
 
-const liveLayers = new WeakMap<HTMLIFrameElement, GestureLayer>()
-
 /** Add the gesture surface to a same-origin document. The layer is deliberately
  * an iframe companion rather than a document script: rendered files remain
  * untouched, and a layer disappears with the frame that hosts it. */
@@ -139,11 +136,7 @@ export function installGestureLayer(
   frame: HTMLIFrameElement,
   options: GestureLayerOptions,
 ): GestureLayer {
-  const existing = liveLayers.get(frame)
-  if (existing) return existing
-  const layer = new GestureLayer(frame, options)
-  liveLayers.set(frame, layer)
-  return layer
+  return new GestureLayer(frame, options)
 }
 
 export class GestureLayer {
@@ -192,7 +185,7 @@ export class GestureLayer {
   constructor(frame: HTMLIFrameElement, options: GestureLayerOptions) {
     this.frame = frame
     this.options = options
-    this.sourceUrl = options.sourceUrl ?? frame.getAttribute('src') ?? frame.src
+    this.sourceUrl = options.sourceUrl
     this.mountChrome()
     document.addEventListener('keydown', this.onParentKeyDown, true)
     frame.addEventListener('load', this.onFrameLoad)
@@ -200,8 +193,7 @@ export class GestureLayer {
   }
 
   destroy(): void {
-    if (this.enabled) this.setEnabled(false)
-    else this.stopPolling()
+    this.setEnabled(false)
     document.removeEventListener('keydown', this.onParentKeyDown, true)
     this.frame.removeEventListener('load', this.onFrameLoad)
     this.chrome?.remove()
@@ -209,7 +201,6 @@ export class GestureLayer {
     this.chrome = null
     this.panel = null
     this.host?.classList.remove('kbn-gesture-host')
-    liveLayers.delete(this.frame)
   }
 
   private mountChrome(): void {
@@ -270,32 +261,28 @@ export class GestureLayer {
   }
 
   private connectDocument(): void {
-    try {
-      const doc = this.frame.contentDocument
-      if (!doc) return
-      if (this.doc === doc) return
-      if (this.doc) this.clearOverlay()
-      this.disconnectDocument()
-      this.doc = doc
-      for (const section of doc.querySelectorAll<HTMLElement>('section')) {
-        this.pristineHeadings.set(section, section.querySelector<HTMLElement>('h1,h2,h3,h4,h5,h6')?.textContent?.trim() ?? '')
-      }
-      if (!doc.querySelector('style[data-kbn-gesture-style]')) {
-        const style = doc.createElement('style')
-        style.dataset.kbnGestureStyle = '1'
-        style.textContent = FRAME_STYLE
-        doc.head?.append(style)
-      }
-      doc.addEventListener('pointerdown', this.onPointerDown, true)
-      doc.addEventListener('pointermove', this.onPointerMove, true)
-      doc.addEventListener('pointerup', this.onPointerUp, true)
-      doc.addEventListener('pointercancel', this.onPointerCancel, true)
-      doc.addEventListener('click', this.onClick, true)
-      doc.addEventListener('dblclick', this.onDoubleClick, true)
-      doc.addEventListener('keydown', this.onKeyDown, true)
-    } catch {
-      this.doc = null
+    const doc = this.frame.contentDocument
+    if (!doc) return
+    if (this.doc === doc) return
+    if (this.doc) this.clearOverlay()
+    this.disconnectDocument()
+    this.doc = doc
+    for (const section of doc.querySelectorAll<HTMLElement>('section')) {
+      this.pristineHeadings.set(section, section.querySelector<HTMLElement>('h1,h2,h3,h4,h5,h6')?.textContent?.trim() ?? '')
     }
+    if (!doc.querySelector('style[data-kbn-gesture-style]')) {
+      const style = doc.createElement('style')
+      style.dataset.kbnGestureStyle = '1'
+      style.textContent = FRAME_STYLE
+      doc.head?.append(style)
+    }
+    doc.addEventListener('pointerdown', this.onPointerDown, true)
+    doc.addEventListener('pointermove', this.onPointerMove, true)
+    doc.addEventListener('pointerup', this.onPointerUp, true)
+    doc.addEventListener('pointercancel', this.onPointerCancel, true)
+    doc.addEventListener('click', this.onClick, true)
+    doc.addEventListener('dblclick', this.onDoubleClick, true)
+    doc.addEventListener('keydown', this.onKeyDown, true)
   }
 
   private disconnectDocument(): void {
@@ -515,7 +502,7 @@ export class GestureLayer {
 
   private isEditableTarget(target: EventTarget | null): boolean {
     const element = this.elementTarget(target)
-    return Boolean(element?.matches('input,textarea,select,[contenteditable="true"],.kbn-gesture-comment-input') || element?.closest('input,textarea,select,[contenteditable="true"],.kbn-gesture-comment-input'))
+    return Boolean(element?.closest('input,textarea,select,[contenteditable="true"],.kbn-gesture-comment-input'))
   }
 
   private beginManipulation(
@@ -899,7 +886,12 @@ export class GestureLayer {
     input.className = 'kbn-gesture-comment-input'
     marker.append(input)
     overlay.append(marker)
-    this.finishInlineInput(input, () => {
+    let closed = false
+    const done = (): void => {
+      if (closed) return
+      closed = true
+      input.removeEventListener('blur', done)
+      input.removeEventListener('keydown', onKeyDown)
       const text = input.value.trim()
       if (text) {
         this.pushRecord({
@@ -913,18 +905,6 @@ export class GestureLayer {
       } else {
         marker.remove()
       }
-    })
-    input.focus()
-  }
-
-  private finishInlineInput(input: HTMLInputElement, finish: () => void): void {
-    let closed = false
-    const done = (): void => {
-      if (closed) return
-      closed = true
-      input.removeEventListener('blur', done)
-      input.removeEventListener('keydown', onKeyDown)
-      finish()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
@@ -940,6 +920,7 @@ export class GestureLayer {
     }
     input.addEventListener('blur', done)
     input.addEventListener('keydown', onKeyDown)
+    input.focus()
   }
 
   private ensureOverlay(space: RuntimeSpace): HTMLElement {
@@ -1047,7 +1028,6 @@ export class GestureLayer {
       if (response.status === 404) {
         this.fallbackText = text
         this.setStatus('no live worker for this fiber')
-        this.addCopyButton(text)
       } else if (!response.ok) {
         this.setStatus(`Couldn’t send gestures (${response.status})`)
       } else {
@@ -1059,7 +1039,6 @@ export class GestureLayer {
     } catch {
       this.fallbackText = text
       this.setStatus('Couldn’t reach the daemon')
-      this.addCopyButton(text)
     } finally {
       this.sending = false
       this.updateChrome()
@@ -1150,43 +1129,39 @@ export class GestureLayer {
     const doc = this.doc ?? this.frame.contentDocument
     const win = this.frame.contentWindow
     if (!doc || !win) return null
-    try {
-      const reveal = (win as unknown as { Reveal?: RevealApi }).Reveal
-      const section = doc.querySelector<HTMLElement>('section.present') ?? doc.querySelector<HTMLElement>('.reveal .slides > section')
-      const slides = doc.querySelector<HTMLElement>('.reveal .slides')
-      if (section && (reveal || slides)) {
-        const sectionRect = section.getBoundingClientRect()
-        const config = reveal?.getConfig?.() ?? {}
-        const logicalWidth = Number(config.width) || 1280
-        const transformScale = scaleFromTransform(slides ? getComputedStyle(slides).transform : null)
-        const scale = Number(reveal?.getScale?.()) || transformScale || sectionRect.width / logicalWidth || 1
-        const indices = reveal?.getIndices?.()
-        const h = indices?.h
-        const v = indices?.v
-        const slideIndex = h === undefined ? undefined : `${h + 1}${v && v > 0 ? `.${v + 1}` : ''}`
-        const heading = this.pristineHeadings.get(section) ?? ''
-        return {
-          kind: 'slide',
-          originX: sectionRect.left,
-          originY: sectionRect.top,
-          scale: scale > 0 ? scale : 1,
-          slideIndex,
-          heading,
-          title: doc.title || this.options.filePath || 'document',
-          root: section,
-        }
-      }
+    const reveal = (win as unknown as { Reveal?: RevealApi }).Reveal
+    const section = doc.querySelector<HTMLElement>('section.present') ?? doc.querySelector<HTMLElement>('.reveal .slides > section')
+    const slides = doc.querySelector<HTMLElement>('.reveal .slides')
+    if (section && (reveal || slides)) {
+      const sectionRect = section.getBoundingClientRect()
+      const config = reveal?.getConfig?.() ?? {}
+      const logicalWidth = Number(config.width) || 1280
+      const transformScale = scaleFromTransform(slides ? getComputedStyle(slides).transform : null)
+      const scale = Number(reveal?.getScale?.()) || transformScale || sectionRect.width / logicalWidth || 1
+      const indices = reveal?.getIndices?.()
+      const h = indices?.h
+      const v = indices?.v
+      const slideIndex = h === undefined ? undefined : `${h + 1}${v && v > 0 ? `.${v + 1}` : ''}`
+      const heading = this.pristineHeadings.get(section) ?? ''
       return {
-        kind: 'page',
-        originX: 0,
-        originY: 0,
-        scale: 1,
-        heading: '',
+        kind: 'slide',
+        originX: sectionRect.left,
+        originY: sectionRect.top,
+        scale: scale > 0 ? scale : 1,
+        slideIndex,
+        heading,
         title: doc.title || this.options.filePath || 'document',
-        root: doc.documentElement,
+        root: section,
       }
-    } catch {
-      return null
+    }
+    return {
+      kind: 'page',
+      originX: 0,
+      originY: 0,
+      scale: 1,
+      heading: '',
+      title: doc.title || this.options.filePath || 'document',
+      root: doc.documentElement,
     }
   }
 
@@ -1250,7 +1225,7 @@ export class GestureLayer {
   private textTarget(element: HTMLElement): HTMLElement | null {
     if (element.matches('section,.reveal,.slides,img,video,canvas,svg,input,button,a')) return null
     const block = element.closest<HTMLElement>('p,h1,h2,h3,h4,h5,h6,li,figcaption,blockquote,td,th,caption')
-    const candidate = block && this.doc?.documentElement.contains(block) ? block : element
+    const candidate = block ?? element
     return this.isStructural(candidate) || !(candidate.textContent ?? '').trim() ? null : candidate
   }
 
@@ -1330,7 +1305,7 @@ function fingerprint(element: HTMLElement): string {
   const tag = element.tagName.toLowerCase()
   const id = element.id ? `#${element.id}` : ''
   const classes = [...element.classList].filter((name) => !name.startsWith('kbn-')).map((name) => `.${name}`).join('')
-  const img = element.tagName.toLowerCase() === 'img'
+  const img = tag === 'img'
     ? element as HTMLImageElement
     : element.querySelector<HTMLImageElement>('img')
   const source = img?.alt?.trim() || (img?.src ? img.src.split('/').pop()?.split(/[?#]/)[0] : '') || (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
@@ -1339,8 +1314,8 @@ function fingerprint(element: HTMLElement): string {
 
 function shortRecord(record: GestureRecord): string {
   switch (record.kind) {
-    case 'move': return `move ${record.fingerprint ?? 'element'}  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
-    case 'resize': return `resize ${record.fingerprint ?? 'element'}  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
+    case 'move':
+    case 'resize': return `${record.kind} ${record.fingerprint ?? 'element'}  ${miniBox(record.beforeBox)} → ${miniBox(record.afterBox)}`
     case 'text': return `text ${record.fingerprint ?? 'element'}: “${preview(record.beforeText)}” → “${preview(record.afterText)}”`
     case 'comment': return `comment @ (${record.point?.x ?? '?'},${record.point?.y ?? '?'}): “${preview(record.commentText)}”`
     case 'group': return record.delta
