@@ -90,17 +90,11 @@ Use --uninstall to remove.`,
 			return uninstallPlugin()
 		}
 
-		// No --source / $FELT_PLUGIN_DIR: register from GitHub. Claude Code
-		// clones the marketplace itself.
-		if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
-			return installPluginViaCLI(defaultMarketplaceRef())
-		}
-
-		repoRoot, err := findMarketplaceRoot(source)
+		marketplaceSource, err := resolveSetupSource(source)
 		if err != nil {
 			return err
 		}
-		return installPluginViaCLI(repoRoot)
+		return installPluginViaCLI(marketplaceSource)
 	},
 }
 
@@ -143,13 +137,9 @@ Use --uninstall to remove.`,
 			return uninstallCodexPlugin()
 		}
 
-		marketplaceSource := defaultMarketplaceRef()
-		if source != "" || os.Getenv("FELT_PLUGIN_DIR") != "" {
-			repoRoot, err := findMarketplaceRoot(source)
-			if err != nil {
-				return err
-			}
-			marketplaceSource = repoRoot
+		marketplaceSource, err := resolveSetupSource(source)
+		if err != nil {
+			return err
 		}
 
 		if err := installCodexPluginViaCLI(marketplaceSource); err != nil {
@@ -288,11 +278,32 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 }
 
+// resolveSetupSource picks what `felt setup claude|codex` registers: with no
+// --source and no $FELT_PLUGIN_DIR, the GitHub ref (the harness clones the
+// marketplace itself); otherwise the resolved local marketplace root.
+func resolveSetupSource(source string) (string, error) {
+	if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
+		return defaultMarketplaceRef(), nil
+	}
+	return findMarketplaceRoot(source)
+}
+
 // hasMarketplaceManifest returns true if dir contains a marketplace manifest at
 // .claude-plugin/marketplace.json (the standard marketplace layout).
 func hasMarketplaceManifest(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".claude-plugin", "marketplace.json"))
 	return err == nil
+}
+
+// absManifestRoot reports dir as an absolute path when it carries a
+// marketplace manifest. Callers rely on every successful findMarketplaceRoot
+// return being absolute.
+func absManifestRoot(dir string) (string, bool) {
+	if !hasMarketplaceManifest(dir) {
+		return "", false
+	}
+	abs, err := filepath.Abs(dir)
+	return abs, err == nil
 }
 
 // findPluginDir returns the plugin directory derived from the marketplace
@@ -314,21 +325,12 @@ func findPluginDir(source string) (string, error) {
 // directory marketplace, then the legacy Claude Code clone path.
 func findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
-		if hasMarketplaceManifest(source) {
-			abs, err := filepath.Abs(source)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(source); ok {
 			return abs, nil
 		}
 		// Allow pointing at the plugin subdir; walk one level up to find
 		// the marketplace root.
-		parent := filepath.Dir(source)
-		if hasMarketplaceManifest(parent) {
-			abs, err := filepath.Abs(parent)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(filepath.Dir(source)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("no marketplace manifest found at %q\n  Expected .claude-plugin/marketplace.json (felt repo root)", source)
@@ -336,12 +338,7 @@ func findMarketplaceRoot(source string) (string, error) {
 
 	if env := os.Getenv("FELT_PLUGIN_DIR"); env != "" {
 		// $FELT_PLUGIN_DIR points at the plugin dir; the repo root is its parent.
-		root := filepath.Dir(env)
-		if hasMarketplaceManifest(root) {
-			abs, err := filepath.Abs(root)
-			if err != nil {
-				return "", err
-			}
+		if abs, ok := absManifestRoot(filepath.Dir(env)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
@@ -352,20 +349,16 @@ func findMarketplaceRoot(source string) (string, error) {
 	// marketplace list --json` keeps us in sync with whatever path the user
 	// registered, even if it differs from where the binary is running from.
 	if entry, ok := marketplaceEntry(marketplaceName); ok && entry.Source == "directory" && entry.Path != "" {
-		if hasMarketplaceManifest(entry.Path) {
-			abs, err := filepath.Abs(entry.Path)
-			if err == nil {
-				return abs, nil
-			}
+		if abs, ok := absManifestRoot(entry.Path); ok {
+			return abs, nil
 		}
 	}
 
 	// Fallback 2: Claude Code clones GitHub-sourced marketplaces to a known
 	// path. If the user has run `felt setup claude` (or otherwise installed
 	// the marketplace from GitHub), the plugin files live there.
-	if cloned := claudeMarketplaceClonePath(); cloned != "" && hasMarketplaceManifest(cloned) {
-		abs, err := filepath.Abs(cloned)
-		if err == nil {
+	if cloned := claudeMarketplaceClonePath(); cloned != "" {
+		if abs, ok := absManifestRoot(cloned); ok {
 			return abs, nil
 		}
 	}
@@ -448,12 +441,6 @@ func installClaudePluginAtSource(repoRoot string) error {
 	return nil
 }
 
-// claudePluginEntry mirrors the structured `claude plugin list --json`
-// output. Only the fields we read are decoded.
-type claudePluginEntry struct {
-	ID string `json:"id"` // "<plugin>@<marketplace>"
-}
-
 // isPluginInstalled reports whether `claude plugin list` knows the given
 // "<plugin>@<marketplace>" ref. Chooses between the install and update paths
 // in installPluginViaCLI. Returns false when the CLI is missing or the call
@@ -464,7 +451,10 @@ func isPluginInstalled(ref string) bool {
 	if err != nil {
 		return false
 	}
-	var entries []claudePluginEntry
+	// Mirrors `claude plugin list --json`; only the fields we read are decoded.
+	var entries []struct {
+		ID string `json:"id"` // "<plugin>@<marketplace>"
+	}
 	if err := json.Unmarshal(out, &entries); err != nil {
 		return false
 	}
@@ -564,11 +554,10 @@ func pruneMarketplaceSkillLinks() []string {
 	if clone == "" {
 		return nil
 	}
-	home, err := os.UserHomeDir()
+	skillsDir, err := homePath(".claude", "skills")
 	if err != nil {
 		return nil
 	}
-	skillsDir := filepath.Join(home, ".claude", "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		return nil
@@ -691,10 +680,9 @@ func linkSkillsFromPlugin(targetDir, pluginDir string) error {
 			continue
 		}
 		name := entry.Name()
-		src, err := filepath.Abs(filepath.Join(skillsDir, name))
-		if err != nil {
-			return err
-		}
+		// skillsDir descends from findMarketplaceRoot, whose every success
+		// return is a filepath.Abs result, so this join is already absolute.
+		src := filepath.Join(skillsDir, name)
 		dest := filepath.Join(targetDir, name)
 
 		if existing, err := os.Readlink(dest); err == nil && existing == src {
@@ -781,22 +769,25 @@ func feltCodexWiringPresent() bool {
 // felt-flagged direct entries (the pre-1.0.8 wiring). Kept around so the
 // lockstep refresh path can clean those up on the next `felt update`.
 func feltCodexLegacyHooksInstalled() bool {
-	hooksPath, err := codexHooksPath()
+	hooksPath, err := homePath(".codex", "hooks.json")
 	if err != nil {
 		return false
 	}
+	// Prunes in memory only — nothing is written back.
 	_, hooks, ok := readHookFile(hooksPath)
-	if !ok {
-		return false
-	}
+	return ok && pruneCodexHookEntries(hooks) > 0
+}
+
+// pruneCodexHookEntries removes felt's legacy direct hook entries from a
+// ~/.codex/hooks.json hook map, returning how many it removed.
+func pruneCodexHookEntries(hooks map[string]interface{}) int {
+	removed := 0
 	for _, event := range []string{"SessionStart", "PreToolUse"} {
 		for _, basename := range []string{"session.sh", "remind.sh"} {
-			if len(pruneFeltHooks(hooks, event, basename)) > 0 {
-				return true
-			}
+			removed += len(pruneFeltHooks(hooks, event, basename))
 		}
 	}
-	return false
+	return removed
 }
 
 // refreshCodexSetupIfInstalled reinstalls the Codex plugin from marketplaceRef
@@ -818,20 +809,13 @@ func refreshCodexSetupIfInstalled(marketplaceRef string) {
 	}
 }
 
-func codexHooksPath() (string, error) {
+// homePath joins parts onto the user's home directory.
+func homePath(parts ...string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
-	return filepath.Join(home, ".codex", "hooks.json"), nil
-}
-
-func claudeSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
+	return filepath.Join(append([]string{home}, parts...)...), nil
 }
 
 // codexPluginRef is the plugin identifier used in `~/.codex/config.toml`'s
@@ -945,7 +929,7 @@ func repointCodexMarketplace(codexSource string) error {
 	if !codexMarketplaceConflict(out) {
 		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
-	previousSource, hadPrevious := codexMarketplaceState()
+	previousSource, _ := codexMarketplaceState()
 
 	fmt.Printf("Repointing marketplace %s → %s\n", marketplaceName, codexSource)
 	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
@@ -954,7 +938,7 @@ func repointCodexMarketplace(codexSource string) error {
 
 	retryOut, retryErr := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if retryErr != nil {
-		if hadPrevious && previousSource != "" {
+		if previousSource != "" {
 			// Re-register the prior source before returning. A failed repoint is
 			// not allowed to strand the user's working marketplace on a missing
 			// source; the outer promotion transaction will restore the cache too.
@@ -999,19 +983,10 @@ func runCodexCLIQuiet(args ...string) (string, error) {
 	return string(out), err
 }
 
-// codexConfigPath returns ~/.codex/config.toml.
-func codexConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("getting home directory: %w", err)
-	}
-	return filepath.Join(home, ".codex", "config.toml"), nil
-}
-
-// readCodexConfig loads ~/.codex/config.toml as a generic map. Returns an
-// empty map if the file doesn't exist.
+// readCodexConfig loads ~/.codex/config.toml as a generic map. Callers only
+// index the result, so a nil map (empty or comment-only document) is fine.
 func readCodexConfig() (map[string]interface{}, error) {
-	path, err := codexConfigPath()
+	path, err := homePath(".codex", "config.toml")
 	if err != nil {
 		return nil, err
 	}
@@ -1026,28 +1001,17 @@ func readCodexConfig() (map[string]interface{}, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if cfg == nil {
-		cfg = map[string]interface{}{}
-	}
 	return cfg, nil
 }
 
 // pruneLegacyCodexHooks removes felt-flagged entries from ~/.codex/hooks.json.
 // Returns the count of pruned entries.
 func pruneLegacyCodexHooks() int {
-	hooksPath, err := codexHooksPath()
+	hooksPath, err := homePath(".codex", "hooks.json")
 	if err != nil {
 		return 0
 	}
-	return pruneHookFile(hooksPath, func(hooks map[string]interface{}) int {
-		removed := 0
-		for _, event := range []string{"SessionStart", "PreToolUse"} {
-			for _, basename := range []string{"session.sh", "remind.sh"} {
-				removed += len(pruneFeltHooks(hooks, event, basename))
-			}
-		}
-		return removed
-	})
+	return pruneHookFile(hooksPath, pruneCodexHookEntries)
 }
 
 // readHookFile decodes a hooks-carrying settings file and hands back both the
@@ -1098,7 +1062,7 @@ func pruneHookFile(path string, prune func(hooks map[string]interface{}) int) in
 // preserve every unrelated Claude hook, and leave the file untouched when it
 // is absent or contains no legacy entry.
 func pruneLegacyClaudeHooks() int {
-	settingsPath, err := claudeSettingsPath()
+	settingsPath, err := homePath(".claude", "settings.json")
 	if err != nil {
 		return 0
 	}
@@ -1115,11 +1079,10 @@ func pruneLegacyClaudeHooks() int {
 // ~/.agents/skills/. Only removes symlinks (not directories) to avoid
 // touching anything the user installed manually.
 func pruneLegacyCodexSkills() int {
-	home, err := os.UserHomeDir()
+	dir, err := homePath(".agents", "skills")
 	if err != nil {
 		return 0
 	}
-	dir := filepath.Join(home, ".agents", "skills")
 	removed := 0
 	for _, skill := range []string{"felt", "ralph"} {
 		target := filepath.Join(dir, skill)
