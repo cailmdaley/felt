@@ -200,10 +200,10 @@ func TestCopyTreeRejectsSymlinkPayload(t *testing.T) {
 func TestLocalPluginSourceWithoutManifestIsRejectedBeforeInstall(t *testing.T) {
 	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
 	called := false
-	err := withStagedPluginCandidate(t.TempDir(), func(string) error {
+	err := withStagedPluginCandidateWithRestore(t.TempDir(), func(string) error {
 		called = true
 		return nil
-	})
+	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "has no marketplace manifest") {
 		t.Fatalf("invalid local source error = %v, want manifest refusal", err)
 	}

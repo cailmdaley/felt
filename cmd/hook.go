@@ -574,9 +574,7 @@ func runPostToolHook(stdin *os.File) error {
 		return nil
 	}
 	f.Touch(now)
-	if err := storage.Write(f); err != nil {
-		return nil
-	}
+	_ = storage.Write(f)
 	return nil
 }
 

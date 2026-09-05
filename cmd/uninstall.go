@@ -45,13 +45,15 @@ func init() {
 func runFeltUninstall() {
 	removedAnything := false
 
-	if _, err := exec.LookPath("claude"); err == nil && isMarketplaceRegistered(marketplaceName) {
-		fmt.Println("Removing Claude Code plugin and marketplace...")
-		if err := uninstallPlugin(); err != nil {
-			fmt.Printf("warning: %v\n", err)
+	if _, err := exec.LookPath("claude"); err == nil {
+		if _, registered := marketplaceEntry(marketplaceName); registered {
+			fmt.Println("Removing Claude Code plugin and marketplace...")
+			if err := uninstallPlugin(); err != nil {
+				fmt.Printf("warning: %v\n", err)
+			}
+			removedAnything = true
+			fmt.Println()
 		}
-		removedAnything = true
-		fmt.Println()
 	}
 
 	if feltCodexWiringPresent() {

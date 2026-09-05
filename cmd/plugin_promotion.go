@@ -5,6 +5,7 @@ package cmd
 // renames must not turn a good checkout into a missing marketplace.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,27 +180,7 @@ func codexMarketplaceState() (string, bool) {
 			}
 		}
 	}
-	// Older Codex builds returned a top-level array. Keep the fallback for
-	// already-installed clients while preferring the current object shape.
-	var entries []map[string]interface{}
-	if json.Unmarshal([]byte(out), &entries) == nil {
-		for _, entry := range entries {
-			name, _ := entry["name"].(string)
-			if name == marketplaceName {
-				return codexEntrySource(entry), true
-			}
-		}
-	}
 	return "", false
-}
-
-func codexEntrySource(entry map[string]interface{}) string {
-	for _, key := range []string{"path", "url", "repo", "source"} {
-		if value, ok := entry[key].(string); ok && value != "" && value != "directory" && value != "git" {
-			return value
-		}
-	}
-	return ""
 }
 
 func codexPluginInstalled() bool {
@@ -216,16 +197,6 @@ func codexPluginInstalled() bool {
 	if json.Unmarshal([]byte(out), &document) == nil && document.Installed != nil {
 		for _, entry := range document.Installed {
 			if entry.PluginID == codexPluginRef || entry.ID == codexPluginRef {
-				return true
-			}
-		}
-	}
-	var entries []struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal([]byte(out), &entries) == nil {
-		for _, entry := range entries {
-			if entry.ID == codexPluginRef {
 				return true
 			}
 		}
@@ -326,7 +297,7 @@ func readJSONFile[T any](path string) (T, error) {
 	if err != nil {
 		return value, err
 	}
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&value); err != nil {
 		return value, fmt.Errorf("%s: %w", path, err)
 	}
@@ -338,6 +309,11 @@ func isRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
+// pluginHookBasenames is the plugin's complete hook set: the files that must
+// exist and be executable, and the only commands hooks.json may reference.
+// The two checks must agree, so they read the same list.
+var pluginHookBasenames = []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"}
+
 func validateHookManifest(path, pluginDir string) error {
 	var document map[string]interface{}
 	data, err := os.ReadFile(path)
@@ -347,17 +323,14 @@ func validateHookManifest(path, pluginDir string) error {
 	if err := json.Unmarshal(data, &document); err != nil {
 		return fmt.Errorf("hooks manifest: %w", err)
 	}
-	for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"} {
+	for _, basename := range pluginHookBasenames {
 		path := filepath.Join(pluginDir, "hooks", basename)
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 			return fmt.Errorf("hook executable %q is missing or not executable", basename)
 		}
 	}
-	if err := validateHookCommands(document); err != nil {
-		return err
-	}
-	return nil
+	return validateHookCommands(document)
 }
 
 func validateHookCommands(value interface{}) error {
@@ -371,7 +344,7 @@ func validateHookCommands(value interface{}) error {
 					if command, ok := child.(string); ok && strings.Contains(command, "/hooks/") {
 						found = true
 						known := false
-						for _, basename := range []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"} {
+						for _, basename := range pluginHookBasenames {
 							if strings.Contains(command, "/hooks/"+basename) {
 								known = true
 							}
@@ -539,8 +512,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		return rollbackPluginPromotion(runtimeDir, current, hadOld, fmt.Errorf("promoting plugin candidate: %w", err))
 	}
 
-	if err := install(current); err != nil {
-		cause := fmt.Errorf("plugin candidate rejected: %w; last known-good preserved", err)
+	fail := func(cause error) error {
 		rollbackErr := rollbackPluginPromotion(runtimeDir, current, hadOld, cause)
 		if restore != nil {
 			if restoreErr := restore(); restoreErr != nil {
@@ -552,18 +524,11 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		}
 		return rollbackErr
 	}
+	if err := install(current); err != nil {
+		return fail(fmt.Errorf("plugin candidate rejected: %w; last known-good preserved", err))
+	}
 	if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "committed", HadOld: hadOld, Native: native}); err != nil {
-		cause := fmt.Errorf("recording committed plugin promotion: %w; last known-good preserved", err)
-		rollbackErr := rollbackPluginPromotion(runtimeDir, current, hadOld, cause)
-		if restore != nil {
-			if restoreErr := restore(); restoreErr != nil {
-				_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
-				rollbackErr = fmt.Errorf("%w; restoring native installation: %v", rollbackErr, restoreErr)
-			}
-		} else if native != nil {
-			_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
-		}
-		return rollbackErr
+		return fail(fmt.Errorf("recording committed plugin promotion: %w; last known-good preserved", err))
 	}
 	if hadOld {
 		_ = os.RemoveAll(previous)
@@ -925,13 +890,10 @@ func currentFeltExecutable() (string, error) {
 	return path, nil
 }
 
-// withStagedPluginCandidate makes every setup source enter the same validated
-// transaction. Remote refs are acquired ephemerally; native harness CLIs see
-// only the promoted local generation and continue to own their caches/config.
-func withStagedPluginCandidate(source string, install func(string) error) error {
-	return withStagedPluginCandidateWithRestore(source, install, nil)
-}
-
+// withStagedPluginCandidateWithRestore makes every setup source enter the same
+// validated transaction. Remote refs are acquired ephemerally; native harness
+// CLIs see only the promoted local generation and continue to own their
+// caches/config.
 func withStagedPluginCandidateWithRestore(source string, install func(string) error, restore func() error) error {
 	// Recover before remote acquisition as well as before local staging. This
 	// makes a retry after an interrupted native phase deterministic even when
@@ -961,15 +923,7 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 			return err
 		}
 		identity, err := remotePluginGeneration(source, checkout, candidate)
-		if err != nil {
-			_ = os.RemoveAll(candidate)
-			return err
-		}
-		if err := sealPluginGeneration(candidate, identity); err != nil {
-			_ = os.RemoveAll(candidate)
-			return err
-		}
-		return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())
+		return sealAndPromote(candidate, identity, err, install, restore)
 	}
 	if !hasMarketplaceManifest(source) {
 		return fmt.Errorf("local plugin source %q has no marketplace manifest", source)
@@ -983,6 +937,12 @@ func withStagedPluginCandidateWithRestore(source string, install func(string) er
 		return err
 	}
 	identity, err := localPluginGeneration(source, candidate)
+	return sealAndPromote(candidate, identity, err, install, restore)
+}
+
+// sealAndPromote finishes a staged candidate: a generation-identity failure
+// discards the candidate before it can reach a harness CLI.
+func sealAndPromote(candidate string, identity pluginGenerationIdentity, err error, install func(string) error, restore func() error) error {
 	if err != nil {
 		_ = os.RemoveAll(candidate)
 		return err
