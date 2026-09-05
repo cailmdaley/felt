@@ -11,7 +11,6 @@ defmodule Shuttle.Dispatcher do
   require Logger
 
   alias Shuttle.Agents
-  import Bitwise
 
   # Codex and pi mint their own session UUIDs after the process starts. A cold
   # harness can spend tens of seconds loading before it writes the transcript
@@ -81,7 +80,7 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_not_running(fiber_id, uid, runner),
          {:ok, agent} <- resolve_agent(fiber),
          :ok <- validate_agent(agent),
-         :ok <- check_work_dir(agent, work_dir),
+         :ok <- check_work_dir(work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       resume_intent =
         if Keyword.get(opts, :force_fresh, false) do
@@ -355,7 +354,7 @@ defmodule Shuttle.Dispatcher do
       message when is_binary(message) ->
         case String.trim(message) do
           "" -> ""
-          trimmed -> render_block("From User", nil, trimmed)
+          trimmed -> render_block("From User", trimmed)
         end
 
       _ ->
@@ -363,38 +362,28 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Render a labeled rule-bordered block. Header is "┌─ <label>[ · <time>] ─…",
+  # Render a labeled rule-bordered block. Header is "┌─ <label> ─…",
   # content is indented two spaces, closed with a matching bottom rule.
   # Total visual width is fixed at @rule_width chars so blocks align in the
   # terminal even when their headers differ in length.
   @rule_width 76
-  defp render_block(label, time_suffix, content) do
-    header_text =
-      case time_suffix do
-        nil -> label
-        "" -> label
-        t -> "#{label} · #{t}"
-      end
-
-    # "┌─ " (3) + header_text + " " (1) + trailing dashes = @rule_width
-    leading = "┌─ #{header_text} "
+  defp render_block(label, content) do
+    # "┌─ " (3) + label + " " (1) + trailing dashes = @rule_width
+    leading = "┌─ #{label} "
     trailing = max(@rule_width - String.length(leading), 3)
     top = leading <> String.duplicate("─", trailing)
     bottom = "└" <> String.duplicate("─", @rule_width - 1)
 
-    body = indent_block(content, "  ")
+    # Inset the content under the box header so multi-line directives stay
+    # visually grouped.
+    body =
+      content
+      |> String.trim()
+      |> String.split("\n")
+      |> Enum.map(&("  " <> &1))
+      |> Enum.join("\n")
 
     "#{top}\n#{body}\n#{bottom}"
-  end
-
-  # Indent every line of `text` by `prefix`. Used to inset event summaries
-  # under the box header so multi-line directives stay visually grouped.
-  defp indent_block(text, prefix) do
-    text
-    |> String.trim()
-    |> String.split("\n")
-    |> Enum.map(&(prefix <> &1))
-    |> Enum.join("\n")
   end
 
   @doc """
@@ -514,7 +503,7 @@ defmodule Shuttle.Dispatcher do
       header,
       render_exit_contract(Keyword.get(opts, :kind, "oneshot")),
       render_headless_notice(Keyword.get(opts, :headless, false)),
-      render_user_message_block(user_message: Keyword.get(opts, :user_message))
+      render_user_message_block(opts)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
@@ -530,7 +519,6 @@ defmodule Shuttle.Dispatcher do
   defp render_headless_notice(true) do
     render_block(
       "Headless",
-      nil,
       "Headless print-mode run: no human can attach to this session — work to completion and exit. The human-gate exception never applies here; if you hit something you would normally pause to ask about, record it in the outcome and `## Status`, keep driving to a clean checkpoint, then exit."
     )
   end
@@ -561,7 +549,6 @@ defmodule Shuttle.Dispatcher do
   defp render_exit_contract("pinned") do
     render_block(
       "Exit Contract",
-      nil,
       "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. (a) While a human is driving and you run out of immediate work, DO NOT exit — stay alive and wait for the next message; the session is the interface. (b) On a long AUTONOMOUS arc, rewrite the constitution's `## Status` then run `felt shuttle handoff <fiber-id>` — only a clean handoff makes the daemon relaunch a fresh worker; an idle exit or crash parks the role back to the strip. (c) When the arc is genuinely done, set `status: closed` FIRST, then hand off — it lands in Awaiting review. Default when idle: (a) stay alive. The shuttle skill's exit semantics carry the rest."
     )
   end
@@ -575,7 +562,6 @@ defmodule Shuttle.Dispatcher do
   defp render_exit_contract(_kind) do
     render_block(
       "Exit Contract",
-      nil,
       "This is an autonomous Shuttle worker — a normal chat final response is not a worker exit. At a clean checkpoint, after updating the fiber (outcome, findings, commits), rewrite the constitution's `## Status` in prose — the handoff the next session lands on, rewritten, never a session log — then your FINAL action is `felt shuttle handoff <fiber-id>`: it marks the session complete and closes it. That mark is what tells the daemon you finished at a checkpoint, so the next worker starts fresh from your `## Status` instead of resuming this transcript mid-thought. Exception: if the directive or constitution asks you to wait for a human, or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), stay alive at that checkpoint instead — do not hand off. The shuttle skill's exit semantics carry the rest."
     )
   end
@@ -623,45 +609,29 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
-         :ok <- check_work_dir(agent, work_dir),
+         :ok <- check_work_dir(work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       session = capture_session_name()
 
-      {command, session_uuid} =
-        case agent.cli do
-          "claude" ->
-            uuid = generate_uuid4()
+      # Only claude can be handed a session id up front; `build_command/3` and
+      # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
+      # as absent, so the other harnesses need no separate path.
+      session_uuid = if agent.cli == "claude", do: generate_uuid4()
 
-            prompt =
-              render_capture_prompt(yap,
-                session: session,
-                felt_store: felt_store,
-                port: port,
-                session_uuid: uuid,
-                agent_id: agent.id,
-                project_dir: work_dir,
-                host: host,
-                effort: effort,
-                chrome: chrome
-              )
+      prompt =
+        render_capture_prompt(yap,
+          session: session,
+          felt_store: felt_store,
+          port: port,
+          session_uuid: session_uuid,
+          agent_id: agent.id,
+          project_dir: work_dir,
+          host: host,
+          effort: effort,
+          chrome: chrome
+        )
 
-            {Agents.build_command(agent, prompt, session_id: uuid), uuid}
-
-          _ ->
-            prompt =
-              render_capture_prompt(yap,
-                session: session,
-                felt_store: felt_store,
-                port: port,
-                agent_id: agent.id,
-                project_dir: work_dir,
-                host: host,
-                effort: effort,
-                chrome: chrome
-              )
-
-            {Agents.build_command(agent, prompt), nil}
-        end
+      command = Agents.build_command(agent, prompt, session_id: session_uuid)
 
       # No `session:` opt: capture sessions are headless by design (the user
       # stays on the board), so the wait-for-client gate would only delay the
@@ -772,7 +742,7 @@ defmodule Shuttle.Dispatcher do
     [
       String.trim(header),
       render_exit_contract("oneshot"),
-      render_block("From User", nil, String.trim(yap))
+      render_block("From User", String.trim(yap))
     ]
     |> Enum.join("\n\n")
     |> String.trim()
@@ -924,85 +894,65 @@ defmodule Shuttle.Dispatcher do
   defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
 
   defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
-    cond do
-      already_clean?(fiber) ->
-        :ok
-
-      closed?(fiber) ->
-        reopen_closed(fiber_id, runner, felt_store)
-
-      true ->
-        reopen_best_effort(fiber_id, runner, felt_store)
+    if already_clean?(fiber) do
+      :ok
+    else
+      reopen(fiber_id, runner, felt_store, closed?(fiber))
     end
   end
 
-  # Authoritative reopen for a closed fiber — failure aborts the dispatch.
-  defp reopen_closed(fiber_id, _runner, nil) do
-    Logger.error(
-      "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
-        "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
-    )
+  # One reopen, two severities. `fatal?` is the closed-fiber case above: a
+  # failure aborts the dispatch (`:reopen_unavailable` / `:reopen_failed`).
+  # Otherwise the worker has a live mandate regardless, so a failure only risks
+  # a sticky kanban column and we log loudly and continue.
+  defp reopen(fiber_id, _runner, nil, fatal?) do
+    if fatal? do
+      Logger.error(
+        "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
+          "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
+      )
 
-    {:error, :reopen_unavailable}
-  end
-
-  defp reopen_closed(fiber_id, runner, felt_store) do
-    case run_reopen(fiber_id, runner, felt_store) do
-      {:ok, output} ->
-        Logger.info("Force-dispatch reopened closed fiber #{fiber_id}: #{String.trim(output)}")
-        :ok
-
-      {:command_error, code, output} ->
-        Logger.error(
-          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` failed " <>
-            "(exit #{code}: #{String.trim(to_string(output))}) — refusing to spawn a worker " <>
-            "against a still-closed fiber"
-        )
-
-        {:error, :reopen_failed}
-
-      {:error, reason} ->
-        Logger.error(
-          "Force-dispatch aborted for #{fiber_id}: `felt shuttle reopen` raised " <>
-            "#{inspect(reason)} — refusing to spawn a worker against a still-closed fiber"
-        )
-
-        {:error, :reopen_failed}
+      {:error, :reopen_unavailable}
+    else
+      Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
+      :ok
     end
   end
 
-  # Best-effort reopen for a non-closed-but-not-clean fiber (e.g. tempered but
-  # active). The worker has a live mandate regardless; a failed reopen only
-  # risks a sticky kanban column, which we log loudly.
-  defp reopen_best_effort(fiber_id, _runner, nil) do
-    Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
-    :ok
-  end
-
-  defp reopen_best_effort(fiber_id, runner, felt_store) do
+  defp reopen(fiber_id, runner, felt_store, fatal?) do
     case run_reopen(fiber_id, runner, felt_store) do
       {:ok, output} ->
         Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
         :ok
 
       {:command_error, code, output} ->
-        Logger.warning(
-          "Force-dispatch reopen failed for #{fiber_id} " <>
-            "(worker will still spawn but kanban card may stick in its prior column): " <>
-            "exit #{code}: #{String.trim(to_string(output))}"
+        reopen_failure(
+          fiber_id,
+          fatal?,
+          "`felt shuttle reopen` failed (exit #{code}: #{String.trim(to_string(output))})"
         )
-
-        :ok
 
       {:error, reason} ->
-        Logger.warning(
-          "Force-dispatch reopen raised for #{fiber_id} " <>
-            "(worker will still spawn but kanban card may stick in its prior column): " <>
-            "#{inspect(reason)}"
-        )
-
-        :ok
+        reopen_failure(fiber_id, fatal?, "`felt shuttle reopen` raised #{inspect(reason)}")
     end
+  end
+
+  defp reopen_failure(fiber_id, true, detail) do
+    Logger.error(
+      "Force-dispatch aborted for #{fiber_id}: #{detail} — refusing to spawn a worker " <>
+        "against a still-closed fiber"
+    )
+
+    {:error, :reopen_failed}
+  end
+
+  defp reopen_failure(fiber_id, false, detail) do
+    Logger.warning(
+      "Force-dispatch reopen failed for #{fiber_id} " <>
+        "(worker will still spawn but kanban card may stick in its prior column): #{detail}"
+    )
+
+    :ok
   end
 
   # Shell `felt shuttle reopen` through the one audited write helper
@@ -1076,7 +1026,7 @@ defmodule Shuttle.Dispatcher do
   # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
   # launch) bypasses eligibility entirely and lands straight here — so this is
   # the only place the forced path can learn it.
-  defp check_work_dir(_agent, work_dir) when is_binary(work_dir) and work_dir != "" do
+  defp check_work_dir(work_dir) when is_binary(work_dir) and work_dir != "" do
     if File.dir?(work_dir) do
       :ok
     else
@@ -1090,7 +1040,7 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp check_work_dir(_agent, _work_dir), do: :ok
+  defp check_work_dir(_work_dir), do: :ok
 
   # The dispatch path's worst silent failure. `Agents.build_command/3` renders
   # the agent's `wrapper` into a script the daemon runs as `bash -l`. When the
@@ -1137,7 +1087,7 @@ defmodule Shuttle.Dispatcher do
 
     # Probed from the work_dir the run script will start in, so a per-directory
     # environment (direnv and kin) is in scope for the probe exactly as it will
-    # be for the worker. `check_work_dir/2` has already established it exists,
+    # be for the worker. `check_work_dir/1` has already established it exists,
     # so a failure here is about the wrapper and nothing else.
     opts = [stderr_to_stdout: true, timeout_ms: @wrapper_probe_timeout_ms]
 
@@ -1223,9 +1173,6 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # The standing run id carried in the prompt context tuple, stamped into the
-  # `shuttle.run_id` field at dispatch. nil for a plain oneshot/constitution
-  # dispatch.
   # The previous worker's session, for the prompt's lineage line. The session
   # ledger is authoritative (UUID + harness, newest line for the fiber's uid);
   # the runtime marker is the fallback for fibers whose sessions predate the
@@ -1245,6 +1192,9 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  # The standing run id carried in the prompt context tuple, stamped into the
+  # `shuttle.run_id` field at dispatch. nil for a plain oneshot/constitution
+  # dispatch.
   defp prompt_context_run_id({:standing_run, run_id}), do: run_id
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
@@ -1310,7 +1260,7 @@ defmodule Shuttle.Dispatcher do
         # show this warning — and a headless `-p` resume has no TTY warning
         # page and no human to attach, so both the dismiss send-keys and the
         # wait-for-client gate are skipped for it.
-        headless = agent[:headless] == true
+        headless = Keyword.fetch!(prompt_opts, :headless)
 
         run_script =
           build_run_script(fiber_id, command, agent.id,
@@ -1321,30 +1271,24 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
-          {:ok, _} = result ->
-            # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
-            # (same session_id — resuming doesn't change session identity, and
-            # the fresh-fallback path above reuses it as well) so the
-            # continuation heuristic compares a subsequent clean-exit or
-            # died-mid-window against THIS run, not the run being resumed. The
-            # session id is already known synchronously here (it's the resume
-            # target itself), unlike fresh codex/pi dispatch — no capture/
-            # backfill needed, one synchronous stamp same as fresh dispatch.
-            record_dispatch_session(fiber_id, session_id, runner,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :resume
-            )
-
-            result
-
-          error ->
-            error
-        end
+        # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
+        # (same session_id — resuming doesn't change session identity, and the
+        # fresh-fallback path above reuses it as well) so the continuation
+        # heuristic compares a subsequent clean-exit or died-mid-window against
+        # THIS run, not the run being resumed. The session id is already known
+        # synchronously here (it's the resume target itself), unlike fresh
+        # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
+        # same as fresh dispatch.
+        spawn_and_record(session, work_dir, run_script, runner, fn ->
+          record_dispatch_session(fiber_id, session_id, runner,
+            felt_store: felt_store,
+            run_id: Keyword.get(opts, :run_id),
+            tmux: session,
+            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+            uid: Keyword.get(opts, :uid),
+            ledger_kind: :resume
+          )
+        end)
 
       :fresh ->
         # Fresh mode: build the full dispatch prompt.
@@ -1359,24 +1303,31 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
-          {:ok, _} = result ->
-            # Store the session UUID in the dispatch marker so "Resume previous"
-            # and the autonomous continuation heuristic can recover it.
-            store_session_id(fiber_id, session_uuid, runner,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :dispatch
-            )
+        # Store the session UUID in the dispatch marker so "Resume previous"
+        # and the autonomous continuation heuristic can recover it.
+        spawn_and_record(session, work_dir, run_script, runner, fn ->
+          store_session_id(fiber_id, session_uuid, runner,
+            felt_store: felt_store,
+            run_id: Keyword.get(opts, :run_id),
+            tmux: session,
+            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+            uid: Keyword.get(opts, :uid),
+            ledger_kind: :dispatch
+          )
+        end)
+    end
+  end
 
-            result
+  # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
+  # propagates unchanged — nothing is stamped for a worker that never started.
+  defp spawn_and_record(session, work_dir, run_script, runner, record_fun) do
+    case spawn_tmux(session, work_dir, run_script, runner) do
+      {:ok, _} = result ->
+        record_fun.()
+        result
 
-          error ->
-            error
-        end
+      error ->
+        error
     end
   end
 
@@ -1389,11 +1340,8 @@ defmodule Shuttle.Dispatcher do
   # launch succeeds), they just don't reuse the id.
   defp fresh_fallback_command(agent, fiber_id, session_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
-
-    case agent.cli do
-      "claude" -> Agents.build_command(agent, prompt, session_id: session_id)
-      _ -> Agents.build_command(agent, prompt)
-    end
+    # `build_command/3` ignores `session_id` for every non-claude harness.
+    Agents.build_command(agent, prompt, session_id: session_id)
   end
 
   # Build the fresh dispatch command. For Claude we generate and inject a UUID
@@ -1538,12 +1486,22 @@ defmodule Shuttle.Dispatcher do
   # default. `uuid` may be `nil` (codex/pi at launch, or `:none` agents) — the
   # marker still gets a `dispatched_at` boundary, just no `session_uuid` yet.
   defp record_dispatch_session(fiber_id, uuid, runner, opts) do
+    write_runtime_marker(fiber_id, uuid, opts, "dispatch marker", fn store ->
+      Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
+        session_uuid: uuid,
+        run_id: Keyword.get(opts, :run_id)
+      })
+    end)
+  end
+
+  # The one runtime-marker writer both entry points share: guard on the felt
+  # store, run the caller's Continuation write, and on success log + append the
+  # structural half to the session ledger. A missing store suppresses the
+  # ledger append too — that is behaviour, not just a skipped write.
+  defp write_runtime_marker(fiber_id, uuid, opts, label, write_fun) do
     case Keyword.get(opts, :felt_store) do
       store when is_binary(store) and store != "" ->
-        case Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
-               session_uuid: uuid,
-               run_id: Keyword.get(opts, :run_id)
-             }) do
+        case write_fun.(store) do
           :ok ->
             if is_binary(uuid) and uuid != "" do
               Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
@@ -1551,23 +1509,23 @@ defmodule Shuttle.Dispatcher do
               Logger.info("Stamped dispatched_at for #{fiber_id} in shuttle.runtime")
             end
 
-            # The structural half of the same fact. `record/1` drops a nil uuid
-            # itself, so the codex/pi launch (boundary stamped, UUID not yet
-            # scraped) contributes no line here — its line comes from the
-            # backfill, once the pairing is actually known.
+            # `record/1` drops a nil uuid itself, so the codex/pi launch
+            # (boundary stamped, UUID not yet scraped) contributes no line
+            # here — its line comes from the backfill, once the pairing is
+            # actually known.
             append_session_ledger(fiber_id, uuid, opts)
 
           {:error, reason} ->
             Logger.warning(
-              "Could not record dispatch marker for #{fiber_id} (#{store}): #{inspect(reason)}"
+              "Could not write #{label} for #{fiber_id} (#{store}): #{inspect(reason)}"
             )
         end
 
       _ ->
-        Logger.debug("record_dispatch_session: no felt_store for #{fiber_id}; skipping")
+        Logger.debug("write_runtime_marker (#{label}): no felt_store for #{fiber_id}; skipping")
     end
   rescue
-    e -> Logger.warning("Could not record session UUID for #{fiber_id}: #{inspect(e)}")
+    e -> Logger.warning("Could not write #{label} for #{fiber_id}: #{inspect(e)}")
   end
 
   # Append the fiber↔session pairing to this host's session ledger. Carries the
@@ -1595,27 +1553,12 @@ defmodule Shuttle.Dispatcher do
   # flag, and mark-runtime only writes fields whose flag is present, so the
   # boundary `record_dispatch_session/4` stamped synchronously at launch is
   # left exactly as it was.
+  # (The ledger line the shared writer appends is the codex/pi `dispatch` line:
+  # that pairing becomes known here, not at launch.)
   defp backfill_session_uuid(fiber_id, uuid, runner, opts) do
-    case Keyword.get(opts, :felt_store) do
-      store when is_binary(store) and store != "" ->
-        case Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid) do
-          :ok ->
-            Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
-            # The codex/pi pairing becomes known here, not at launch — this is
-            # that harness's `dispatch` line.
-            append_session_ledger(fiber_id, uuid, opts)
-
-          {:error, reason} ->
-            Logger.warning(
-              "Could not backfill session UUID for #{fiber_id} (#{store}): #{inspect(reason)}"
-            )
-        end
-
-      _ ->
-        Logger.debug("backfill_session_uuid: no felt_store for #{fiber_id}; skipping")
-    end
-  rescue
-    e -> Logger.warning("Could not backfill session UUID for #{fiber_id}: #{inspect(e)}")
+    write_runtime_marker(fiber_id, uuid, opts, "session UUID backfill", fn store ->
+      Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid)
+    end)
   end
 
   # Poll for the session UUID written by codex/pi to their respective session
@@ -1640,7 +1583,7 @@ defmodule Shuttle.Dispatcher do
 
       case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
         {:ok, path} ->
-          read_uuid_from_jsonl(cli, path, work_dir)
+          read_uuid_from_jsonl(cli, path)
 
         {:error, _} ->
           capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
@@ -1648,98 +1591,70 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  @doc false
-  # Pi's encoded-cwd directory: the absolute path with every "/" replaced by
-  # "-", bracketed by "--" — e.g. /home/user/loom → --home-user-loom--. The
-  # LEADING slash becomes a dash too, so the munge of /a/b starts with three
-  # dashes before the bracket is added; trimming it first is what keeps the
-  # encoding two-dash-fronted like pi's own directories. Public for tests,
-  # same as `codex_session_dirs/0` — this encoding was once wrong in exactly
-  # that leading slash, and every pi dispatch's session capture timed out.
-  def pi_sessions_dir(work_dir) do
-    Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
+  # Candidate transcripts for this harness, newest first. Both harnesses lead
+  # each basename with an ISO stamp, so descending basename order is descending
+  # time — within a day directory and across them. The first candidate that
+  # matches cwd, recency AND content is this dispatch's session; a bare
+  # newest-file pick would steal another worker's session whenever two workers
+  # share a cwd.
+  defp candidate_session_files("codex", _work_dir) do
+    Shuttle.HarnessPaths.codex_session_dirs()
+    |> Enum.flat_map(fn dir ->
+      case File.ls(dir) do
+        {:ok, files} ->
+          files
+          |> Enum.filter(&String.starts_with?(&1, "rollout-"))
+          |> Enum.map(&Path.join(dir, &1))
+
+        {:error, _} ->
+          []
+      end
+    end)
+    |> Enum.sort_by(&Path.basename/1, :desc)
   end
 
-  defp find_session_file("codex", work_dir, fiber_id, dispatched_after) do
-    paths =
-      codex_session_dirs()
-      |> Enum.flat_map(fn dir ->
-        case File.ls(dir) do
-          {:ok, files} ->
-            files
-            |> Enum.filter(&String.starts_with?(&1, "rollout-"))
-            |> Enum.map(&{&1, Path.join(dir, &1)})
+  defp candidate_session_files("pi", work_dir) do
+    dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
 
-          {:error, _} ->
-            []
-        end
-      end)
-      # A rollout basename leads with its local-wall-clock ISO stamp, so
-      # descending basename order is newest-first both within a day directory
-      # and across the three we search.
-      |> Enum.sort_by(&elem(&1, 0), :desc)
-      |> Enum.map(&elem(&1, 1))
+    case File.ls(dir) do
+      {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
+      {:error, _} -> []
+    end
+  end
 
-    case Enum.find(paths, &session_matches?("codex", &1, work_dir, fiber_id, dispatched_after)) do
+  defp candidate_session_files(_cli, _work_dir), do: []
+
+  defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
+    cli
+    |> candidate_session_files(work_dir)
+    |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
+    |> case do
       nil -> {:error, :not_found}
       path -> {:ok, path}
     end
   end
 
-  defp find_session_file("pi", work_dir, fiber_id, dispatched_after) do
-    dir = pi_sessions_dir(work_dir)
-
-    case File.ls(dir) do
-      {:ok, files} ->
-        # Newest-first by filename — pi leads each basename with an ISO stamp,
-        # so descending name order is descending time, within a day and across
-        # them. The first transcript that matches cwd, recency, AND content is
-        # this dispatch's session; a bare newest-file pick would steal another
-        # worker's session whenever two pi workers share a cwd.
-        files
-        |> Enum.sort(:desc)
-        |> Enum.map(&Path.join(dir, &1))
-        |> Enum.find(
-          {:error, :not_found},
-          &session_matches?("pi", &1, work_dir, fiber_id, dispatched_after)
-        )
-        |> case do
-          {:error, :not_found} = miss -> miss
-          path -> {:ok, path}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
-    do: {:error, :unsupported}
-
   # The JSONL first line each harness writes as its session header, reduced to
   # the map that carries `id` / `cwd` / `timestamp`. Codex nests them under
   # `payload` of a `session_meta` event; pi puts them on a top-level `session`
   # event. Everything downstream reads the same three keys.
-  defp session_header("codex", content) do
+  defp session_header(cli, content) do
     with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, %{"type" => "session_meta", "payload" => payload}} <- Jason.decode(first_line),
-         true <- is_map(payload) do
-      {:ok, payload}
+         {:ok, event} <- Jason.decode(first_line) do
+      case {cli, event} do
+        {"codex", %{"type" => "session_meta", "payload" => payload}} when is_map(payload) ->
+          {:ok, payload}
+
+        {"pi", %{"type" => "session"}} ->
+          {:ok, event}
+
+        _ ->
+          :error
+      end
     else
       _ -> :error
     end
   end
-
-  defp session_header("pi", content) do
-    with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, %{"type" => "session"} = event} <- Jason.decode(first_line) do
-      {:ok, event}
-    else
-      _ -> :error
-    end
-  end
-
-  defp session_header(_cli, _content), do: :error
 
   # The transcript's session header names its cwd and start time, but the
   # dispatch prompt's fiber line only appears once the first message lands
@@ -1759,41 +1674,14 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Codex files a rollout under the LOCAL civil day, not the UTC one. Verified
-  # on disk: ~/.codex/sessions/2026/07/22/rollout-2026-07-22T17-41-02-*.jsonl
-  # whose first line carries "timestamp":"2026-07-22T15:41:03.435Z" — 17:41
-  # Paris, filed under the Paris date. Deriving this path from
-  # `Date.utc_today()` therefore names a directory that does not exist for
-  # every dispatch made west of UTC late in the day (at UTC-7: 17:00–23:59
-  # local), and the capture burns its whole retry budget for nothing — the
-  # worker runs, its session_uuid is lost, and it cannot be resumed.
-  #
-  # One day is also not enough on its own: the dispatch and the transcript
-  # write can straddle local midnight in either direction. So search
-  # yesterday / today / tomorrow in local time and take the newest matching
-  # transcript across all three. That window also absorbs a stale zone read —
-  # the BEAM resolves the local zone through libc, which on some platforms
-  # holds the value captured when the OS process started, and no zone on earth
-  # is more than one civil day from another.
-  #
-  # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
-  # equivalent); the YYYY/MM/DD fan-out below applies to it too.
-  @doc false
-  def codex_session_dirs do
-    Shuttle.HarnessPaths.codex_session_dirs()
-  end
-
-  defp read_uuid_from_jsonl(cli, path, work_dir) do
+  # No cwd re-check here: the only caller hands us the path
+  # `find_session_file/4` just returned, and `session_matches?/5` already
+  # required the header's cwd to expand to `work_dir` before returning it.
+  defp read_uuid_from_jsonl(cli, path) do
     with {:ok, content} <- File.read(path),
          {:ok, header} <- session_header(cli, content),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id"),
-         cwd when is_binary(cwd) <- Map.get(header, "cwd") do
-      # Verify the session belongs to this worker's working directory.
-      if Path.expand(cwd) == Path.expand(work_dir) do
-        {:ok, uuid}
-      else
-        {:error, "session cwd mismatch: #{cwd} ≠ #{work_dir}"}
-      end
+         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id") do
+      {:ok, uuid}
     else
       _ -> {:error, "could not parse session UUID from #{path}"}
     end
@@ -1803,17 +1691,12 @@ defmodule Shuttle.Dispatcher do
   # Sets version bits (byte 6 top nibble = 0100) and variant bits
   # (byte 8 top 2 bits = 10) per RFC 4122.
   defp generate_uuid4 do
-    <<b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15>> =
-      :crypto.strong_rand_bytes(16)
+    <<a::48, _::4, b::12, _::2, c::62>> = :crypto.strong_rand_bytes(16)
 
-    v6 = (b6 &&& 0x0F) ||| 0x40
-    v8 = (b8 &&& 0x3F) ||| 0x80
+    <<g1::binary-8, g2::binary-4, g3::binary-4, g4::binary-4, g5::binary-12>> =
+      Base.encode16(<<a::48, 4::4, b::12, 2::2, c::62>>, case: :lower)
 
-    :io_lib.format(
-      "~2.16.0b~2.16.0b~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b-~2.16.0b~2.16.0b~2.16.0b~2.16.0b~2.16.0b~2.16.0b",
-      [b0, b1, b2, b3, b4, b5, v6, b7, v8, b9, b10, b11, b12, b13, b14, b15]
-    )
-    |> IO.chardata_to_string()
+    Enum.join([g1, g2, g3, g4, g5], "-")
   end
 
   # POSIX single-quote a value for safe interpolation into the run script's
