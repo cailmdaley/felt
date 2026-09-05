@@ -752,7 +752,22 @@ describe('renderPinnedSection — the launcher band never pages', () => {
     // The surfaces ask the viewport two questions while building (mobile.ts:
     // is this a phone-width layout, is the pointer a finger). There is no
     // jsdom here, so answer both "no" — this suite is about the wide board.
-    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
+    vi.stubGlobal('window', {
+      matchMedia: () => ({ matches: false }),
+      // The surfaces schedule post-layout work (the folio pager restores its
+      // leaf in a frame; dwell timers arm on a tick). Run both inline so a
+      // failing assertion is the failure, not a missing global.
+      requestAnimationFrame: (fn: FrameRequestCallback) => {
+        fn(0)
+        return 0
+      },
+      cancelAnimationFrame: () => {},
+      setTimeout: (fn: () => void) => {
+        fn()
+        return 0
+      },
+      clearTimeout: () => {},
+    })
     return new KanbanSurfaceRenderer({
       getDragSourceId: () => null,
       setDragSourceId: () => {},

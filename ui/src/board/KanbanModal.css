@@ -2240,10 +2240,8 @@
     gap: 5px;
     min-height: 44px;
     touch-action: pan-x pan-y;
-    /* A full leaf holds more cards than fit its 58vh, and the default
-       `flex-shrink: 1` let the column pay for that by squeezing every card —
-       outcomes vanished and meta rows were sliced in half. The list scrolls;
-       cards keep their own height. */
+    /* A leaf holds more cards than fit its 58vh. The list is what scrolls;
+       every card keeps its own height. */
     flex-shrink: 0;
   }
   .kbn-card-name {

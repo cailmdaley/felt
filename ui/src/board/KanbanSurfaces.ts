@@ -486,19 +486,27 @@ export class KanbanSurfaceRenderer {
         seg.tabIndex = on ? 0 : -1
       })
     }
+    /** Read the leaf off the board and mark it on the strip. The board is the
+     *  only authority: whatever `scrollLeft` says is the page you are on. */
+    const syncFromScroll = (): void => {
+      this.folioIndex = activeFolioIndex(board.scrollLeft, board.clientWidth, segs.length)
+      paint(this.folioIndex)
+    }
     paint(this.folioIndex)
-    board.addEventListener('scroll', () => {
-      const index = activeFolioIndex(board.scrollLeft, board.clientWidth, segs.length)
-      if (index === this.folioIndex) return
-      this.folioIndex = index
-      paint(index)
-    }, { passive: true })
-    // Restore after layout: the section is still detached when this runs, so
-    // `clientWidth` is 0 and any scroll write would be dropped.
+    board.addEventListener('scroll', syncFromScroll, { passive: true })
+    // Restore the leaf after layout — the section is still detached while this
+    // method runs, so `clientWidth` is 0 and a scroll write would be dropped.
+    // The write can still fail (a viewport that crossed back above 700px, a
+    // Desk torn down before the frame arrived), so the mark is re-derived from
+    // the board either way: a strip claiming leaf 2 over a board showing leaf 0
+    // is worse than losing the reader's place.
     if (this.folioIndex > 0) {
+      const wanted = this.folioIndex
       window.requestAnimationFrame(() => {
-        if (!board.isConnected || board.clientWidth === 0) return
-        board.scrollLeft = folioScrollTarget(this.folioIndex, board.clientWidth, segs.length)
+        if (board.isConnected && board.clientWidth > 0) {
+          board.scrollLeft = folioScrollTarget(wanted, board.clientWidth, segs.length)
+        }
+        syncFromScroll()
       })
     }
   }
