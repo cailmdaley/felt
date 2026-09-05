@@ -28,7 +28,7 @@ export type HitOutcome =
 export const CONTAINER_COVERAGE = 0.8
 
 /** Take the innermost candidate that is neither scaffolding nor a container
- * spanning most of the slide. Cail's complaint: a press on a slide would grab
+ * spanning most of the slide. The complaint: a press on a slide would grab
  * the section or a full-bleed wrapper instead of the paragraph he aimed at. */
 export function pickTarget(
   candidates: readonly HitCandidate[],
