@@ -33,20 +33,17 @@ const (
 )
 
 // TranscriptReceipt is the daemon's explicit availability and resolution
-// result. Path is the native path on the host named by Host; SourcePath is
-// accepted as an alias for older daemon responses; source_path is the canonical
-// field. The daemon's raw endpoint supplies exact bytes, with byte_count and
-// sha256 receipts used to verify the transfer before caching.
+// result. SourcePath is the native path on the host named by Host. The
+// daemon's raw endpoint supplies exact bytes, with byte_count and sha256
+// receipts used to verify the transfer before caching.
 type TranscriptReceipt struct {
 	Session      string `json:"session,omitempty"`
 	Availability string `json:"availability"`
-	Path         string `json:"path,omitempty"`
 	SourcePath   string `json:"source_path,omitempty"`
 	Host         string `json:"host,omitempty"`
 	Harness      string `json:"harness,omitempty"`
 	SHA256       string `json:"sha256,omitempty"`
 	ByteCount    int64  `json:"byte_count,omitempty"`
-	Size         int64  `json:"size,omitempty"`
 }
 
 // SessionProvenance mirrors the composite session ledger while leaving the
@@ -89,10 +86,6 @@ type sessionLedgerResponse struct {
 	Origins map[string]any      `json:"origins,omitempty"`
 }
 
-type transcriptMetadataResponse struct {
-	TranscriptReceipt
-}
-
 func fetchSessionLedger() (*sessionLedgerResponse, error) {
 	body, err := getDaemon(daemonURL()+sessionsCompositePath, daemonReadTimeout)
 	if err != nil {
@@ -126,21 +119,14 @@ func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
 	if err != nil {
 		return TranscriptReceipt{}, err
 	}
-	var direct TranscriptReceipt
-	if err := json.Unmarshal(body, &direct); err == nil && (direct.Availability != "" || direct.Path != "" || direct.SourcePath != "") {
-		if direct.Session == "" {
-			direct.Session = session
-		}
-		return direct, nil
-	}
-	var wrapped transcriptMetadataResponse
-	if err := json.Unmarshal(body, &wrapped); err != nil {
+	var receipt TranscriptReceipt
+	if err := json.Unmarshal(body, &receipt); err != nil {
 		return TranscriptReceipt{}, fmt.Errorf("parsing transcript receipt for %s: %w", session, err)
 	}
-	if wrapped.Session == "" {
-		wrapped.Session = session
+	if receipt.Session == "" {
+		receipt.Session = session
 	}
-	return wrapped.TranscriptReceipt, nil
+	return receipt, nil
 }
 
 func enrichSessionReceipt(s SessionProvenance) SessionProvenance {
@@ -226,87 +212,32 @@ func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProv
 	return rows
 }
 
-func compositeFiberUID(query string) string {
-	body, err := getDaemon(daemonURL()+"/api/v1/fibers/composite", daemonReadTimeout)
-	if err != nil {
-		return ""
-	}
-	var response struct {
-		Fibers []struct {
-			Path   string         `json:"path"`
-			Origin string         `json:"origin,omitempty"`
-			Fiber  map[string]any `json:"fiber"`
-		} `json:"fibers"`
-	}
-	if json.Unmarshal(body, &response) != nil {
-		return ""
-	}
-	for _, row := range response.Fibers {
-		id, _ := row.Fiber["id"].(string)
-		slug, _ := row.Fiber["slug"].(string)
-		uid, _ := row.Fiber["uid"].(string)
-		if uid == "" {
-			uid = id
-		}
-		if row.Path == query || id == query || slug == query {
-			return uid
-		}
-	}
-	return ""
+// compositeFiberRow is one entry of GET /api/v1/fibers/composite. Transport or
+// parse failure yields no rows, which every caller already treats as "no match".
+type compositeFiberRow struct {
+	Path   string         `json:"path"`
+	Origin string         `json:"origin,omitempty"`
+	Fiber  map[string]any `json:"fiber"`
 }
 
-func compositeFiberRuntimePending(query string) bool {
+func compositeFiberRows() []compositeFiberRow {
 	body, err := getDaemon(daemonURL()+"/api/v1/fibers/composite", daemonReadTimeout)
 	if err != nil {
-		return false
+		return nil
 	}
 	var response struct {
-		Fibers []struct {
-			Fiber map[string]any `json:"fiber"`
-		} `json:"fibers"`
+		Fibers []compositeFiberRow `json:"fibers"`
 	}
 	if json.Unmarshal(body, &response) != nil {
-		return false
+		return nil
 	}
-	for _, row := range response.Fibers {
-		slug, _ := row.Fiber["slug"].(string)
-		id, _ := row.Fiber["id"].(string)
-		if slug != query && id != query {
-			continue
-		}
-		shuttleBlock, _ := row.Fiber["shuttle"].(map[string]any)
-		dispatched, session := "", ""
-		if value, ok := shuttleBlock["dispatched_at"].(string); ok {
-			dispatched = value
-		}
-		if value, ok := shuttleBlock["session_uuid"].(string); ok {
-			session = value
-		}
-		if runtime, ok := shuttleBlock["runtime"].(map[string]any); ok {
-			if value, ok := runtime["dispatched_at"].(string); ok {
-				dispatched = value
-			}
-			if value, ok := runtime["session_uuid"].(string); ok {
-				session = value
-			}
-		}
-		return strings.TrimSpace(dispatched) != "" && strings.TrimSpace(session) == ""
-	}
-	return false
+	return response.Fibers
 }
 
-func runtimeDispatched(f *felt.Felt) bool {
-	if f == nil || f.ExtraFields == nil {
-		return false
-	}
-	node, ok := f.ExtraFields["shuttle"]
-	if !ok || node == nil {
-		return false
-	}
-	var block map[string]any
-	if err := node.Decode(&block); err != nil {
-		return false
-	}
+// identityPending reports a shuttle block that has been dispatched but has not
+// yet recorded the session UUID that pairs it with a harness session. The
+// runtime sub-map wins over the flat legacy keys when both are present.
+func identityPending(block map[string]any) bool {
 	dispatched, session := "", ""
 	if value, ok := block["dispatched_at"].(string); ok {
 		dispatched = value
@@ -323,6 +254,49 @@ func runtimeDispatched(f *felt.Felt) bool {
 		}
 	}
 	return strings.TrimSpace(dispatched) != "" && strings.TrimSpace(session) == ""
+}
+
+func compositeFiberUID(query string) string {
+	for _, row := range compositeFiberRows() {
+		id, _ := row.Fiber["id"].(string)
+		slug, _ := row.Fiber["slug"].(string)
+		uid, _ := row.Fiber["uid"].(string)
+		if uid == "" {
+			uid = id
+		}
+		if row.Path == query || id == query || slug == query {
+			return uid
+		}
+	}
+	return ""
+}
+
+func compositeFiberRuntimePending(query string) bool {
+	for _, row := range compositeFiberRows() {
+		slug, _ := row.Fiber["slug"].(string)
+		id, _ := row.Fiber["id"].(string)
+		if slug != query && id != query {
+			continue
+		}
+		shuttleBlock, _ := row.Fiber["shuttle"].(map[string]any)
+		return identityPending(shuttleBlock)
+	}
+	return false
+}
+
+func runtimeDispatched(f *felt.Felt) bool {
+	if f == nil || f.ExtraFields == nil {
+		return false
+	}
+	node, ok := f.ExtraFields["shuttle"]
+	if !ok || node == nil {
+		return false
+	}
+	var block map[string]any
+	if err := node.Decode(&block); err != nil {
+		return false
+	}
+	return identityPending(block)
 }
 
 func addIdentityPending(query, uid string, rows []SessionProvenance, addressed *felt.Felt) []SessionProvenance {
@@ -429,19 +403,7 @@ func sessionOwningFiber(records []SessionProvenance, session string) (string, st
 // fiberDisposition reads status and the human verdict from the composite fiber
 // feed. Absence of the fiber (e.g. deleted) leaves both zero-valued.
 func fiberDisposition(uid string) (string, bool) {
-	body, err := getDaemon(daemonURL()+"/api/v1/fibers/composite", daemonReadTimeout)
-	if err != nil {
-		return "", false
-	}
-	var response struct {
-		Fibers []struct {
-			Fiber map[string]any `json:"fiber"`
-		} `json:"fibers"`
-	}
-	if json.Unmarshal(body, &response) != nil {
-		return "", false
-	}
-	for _, row := range response.Fibers {
+	for _, row := range compositeFiberRows() {
 		id, _ := row.Fiber["id"].(string)
 		rowUID, _ := row.Fiber["uid"].(string)
 		if rowUID == "" {
@@ -501,7 +463,7 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 			Host:         row.Transcript.Host,
 			Harness:      row.Transcript.Harness,
 			Availability: row.Transcript.Availability,
-			SourcePath:   transcriptPathForReceipt(row.Transcript),
+			SourcePath:   row.Transcript.SourcePath,
 			ByteCount:    row.Transcript.ByteCount,
 			SHA256:       row.Transcript.SHA256,
 			Events:       row.Events,
@@ -514,7 +476,7 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 		}
 		switch row.Transcript.Availability {
 		case "available_local":
-			item.LocalPath = transcriptPathForReceipt(row.Transcript)
+			item.LocalPath = row.Transcript.SourcePath
 			if item.LocalPath == "" {
 				// Mirror the transcript command's guard: local-without-a-path
 				// must read as an error, never as a silent absence.
@@ -690,13 +652,6 @@ and availability.`,
 	},
 }
 
-func transcriptPathForReceipt(receipt TranscriptReceipt) string {
-	if receipt.SourcePath != "" {
-		return receipt.SourcePath
-	}
-	return receipt.Path
-}
-
 func transcriptCacheDir() (string, error) {
 	if dir := strings.TrimSpace(os.Getenv("FELT_TRANSCRIPT_CACHE_DIR")); dir != "" {
 		return dir, nil
@@ -789,8 +744,6 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 		wantBytes, haveBytes = parsed, true
 	} else if receipt.ByteCount > 0 {
 		wantBytes, haveBytes = receipt.ByteCount, true
-	} else if receipt.Size > 0 {
-		wantBytes, haveBytes = receipt.Size, true
 	}
 	if !haveBytes {
 		return "", fmt.Errorf("transcript %s: daemon omitted byte_count", receipt.Session)
@@ -863,7 +816,7 @@ func transcriptResult(receipt TranscriptReceipt, localPath string) transcriptCom
 	return transcriptCommandResult{
 		Session: receipt.Session, Availability: receipt.Availability,
 		Host: receipt.Host, Harness: receipt.Harness,
-		SourcePath: transcriptPathForReceipt(receipt), LocalPath: localPath,
+		SourcePath: receipt.SourcePath, LocalPath: localPath,
 		ByteCount: receipt.ByteCount, SHA256: receipt.SHA256,
 	}
 }
@@ -896,7 +849,7 @@ felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it.`,
 		}
 		switch receipt.Availability {
 		case "available_local":
-			path := transcriptPathForReceipt(receipt)
+			path := receipt.SourcePath
 			if path == "" {
 				return fmt.Errorf("transcript %s is available_local but daemon returned no native path", args[0])
 			}
@@ -924,7 +877,7 @@ func runTranscriptJSON(receipt TranscriptReceipt) error {
 	if receipt.Availability != "available_remote" {
 		localPath := ""
 		if receipt.Availability == "available_local" {
-			localPath = transcriptPathForReceipt(receipt)
+			localPath = receipt.SourcePath
 		}
 		return outputJSON(transcriptResult(receipt, localPath))
 	}
