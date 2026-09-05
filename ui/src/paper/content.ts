@@ -9,12 +9,8 @@ import type { MastheadFrontmatter, InputEntry, OutputEntry } from '@lightcone/re
 export interface BakedPage {
   slug: string
   title: string
-  level: number
   ast: GenericParent
   frontmatter?: MastheadFrontmatter
-  identifiers?: string[]
-  dependencies?: unknown
-  dois?: unknown
 }
 
 /**

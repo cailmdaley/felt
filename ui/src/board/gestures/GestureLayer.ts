@@ -52,29 +52,25 @@ type RevealApi = {
   getIndices?: () => { h?: number; v?: number }
 }
 
-type RuntimeSpace = CoordinateSpace & { root: HTMLElement; section: HTMLElement | null }
+type RuntimeSpace = CoordinateSpace & { root: HTMLElement }
 
 export interface GestureLayerOptions {
   shuttleBase: string
   fiberId?: string
   filePath?: string
-  originId?: string
   sourceUrl?: string
 }
 
 interface Selection {
   target: HTMLElement
   space: RuntimeSpace
-  before: GestureBox
   boxEl: HTMLElement
-  handles: HTMLElement[]
 }
 
 interface GroupSelection {
   targets: HTMLElement[]
   space: RuntimeSpace
   boxEl: HTMLElement
-  handles: HTMLElement[]
 }
 
 interface OriginalElement {
@@ -122,10 +118,6 @@ interface GroupManipulation {
 
 interface MemberStyle {
   transform: string
-  position: string
-  width: string
-  height: string
-  maxWidth: string
 }
 
 interface Manipulation {
@@ -214,7 +206,8 @@ export class GestureLayer {
   }
 
   destroy(): void {
-    this.disable()
+    if (this.enabled) this.setEnabled(false)
+    else this.stopPolling()
     document.removeEventListener('keydown', this.onParentKeyDown, true)
     this.frame.removeEventListener('load', this.onFrameLoad)
     this.chrome?.remove()
@@ -336,11 +329,6 @@ export class GestureLayer {
       this.clearOverlay()
     }
     this.updateChrome()
-  }
-
-  private disable(): void {
-    if (this.enabled) this.setEnabled(false)
-    else this.stopPolling()
   }
 
   private updateChrome(): void {
@@ -488,7 +476,7 @@ export class GestureLayer {
     if (!space) return
     // Clicking the background drops the selection; clicking inside it keeps it.
     if (this.hitTest(event, space).outcome.kind !== 'empty') return
-    if (!this.pointInSelection(event)) this.deselect()
+    if (!this.pointInSelection(event)) this.removeSelection()
   }
 
   private doubleClick(event: MouseEvent): void {
@@ -537,7 +525,7 @@ export class GestureLayer {
       this.editing.finish()
       return
     }
-    this.deselect()
+    this.removeSelection()
     this.updateChrome()
   }
 
@@ -669,7 +657,7 @@ export class GestureLayer {
         boxesIntersect(box, boxInSpace(element.getBoundingClientRect(), marquee.space, this.scrollX(), this.scrollY())),
       )
       if (targets.length > 0) this.selectGroup(targets, marquee.space)
-      else this.deselect()
+      else this.removeSelection()
       event.preventDefault()
       event.stopPropagation()
     }
@@ -696,24 +684,30 @@ export class GestureLayer {
     })
   }
 
-  private selectGroup(targets: HTMLElement[], space: RuntimeSpace): void {
-    this.removeSelection()
+  /** The selection outline plus its eight resize handles. `null` when the
+   *  frame document has gone away mid-build. */
+  private selectionBox(labelPrefix: string): HTMLElement | null {
     const boxEl = this.doc?.createElement('div')
-    if (!boxEl) return
-    boxEl.className = 'kbn-gesture-selection kbn-gesture-group-selection'
-    const handles: HTMLElement[] = []
+    if (!boxEl) return null
+    boxEl.className = 'kbn-gesture-selection'
     for (const direction of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
       const handle = this.doc?.createElement('button')
-      if (!handle) return
+      if (!handle) return null
       handle.type = 'button'
       handle.className = `kbn-gesture-handle kbn-gesture-handle-${direction}`
       handle.dataset.gestureHandle = direction
-      handle.setAttribute('aria-label', `Resize group ${direction}`)
+      handle.setAttribute('aria-label', `${labelPrefix} ${direction}`)
       boxEl.append(handle)
-      handles.push(handle)
     }
+    return boxEl
+  }
+
+  private selectGroup(targets: HTMLElement[], space: RuntimeSpace): void {
+    this.removeSelection()
+    const boxEl = this.selectionBox('Resize group')
+    if (!boxEl) return
     this.ensureOverlay(space).append(boxEl)
-    this.selection = { targets, space, boxEl, handles }
+    this.selection = { targets, space, boxEl }
     this.renderSelection()
   }
 
@@ -869,24 +863,10 @@ export class GestureLayer {
       return
     }
     this.removeSelection()
-    const before = roundBox(boxInSpace(target.getBoundingClientRect(), space, this.scrollX(), this.scrollY()))
-    const boxEl = this.doc?.createElement('div')
+    const boxEl = this.selectionBox('Resize')
     if (!boxEl) return
-    boxEl.className = 'kbn-gesture-selection'
-    const handles: HTMLElement[] = []
-    for (const direction of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
-      const handle = this.doc?.createElement('button')
-      if (!handle) return
-      handle.type = 'button'
-      handle.className = `kbn-gesture-handle kbn-gesture-handle-${direction}`
-      handle.dataset.gestureHandle = direction
-      handle.setAttribute('aria-label', `Resize ${direction}`)
-      boxEl.append(handle)
-      handles.push(handle)
-    }
-    this.ensureOverlay(space)
-    this.overlay?.append(boxEl)
-    this.selection = { target, space, before, boxEl, handles }
+    this.ensureOverlay(space).append(boxEl)
+    this.selection = { target, space, boxEl }
     this.renderSelection()
   }
 
@@ -901,10 +881,6 @@ export class GestureLayer {
     el.style.top = `${box.y}px`
     el.style.width = `${Math.max(0, box.width)}px`
     el.style.height = `${Math.max(0, box.height)}px`
-  }
-
-  private deselect(): void {
-    this.removeSelection()
   }
 
   private removeSelection(): void {
@@ -1245,7 +1221,6 @@ export class GestureLayer {
           heading,
           title: doc.title || this.options.filePath || 'document',
           root: section,
-          section,
         }
       }
       return {
@@ -1256,7 +1231,6 @@ export class GestureLayer {
         heading: '',
         title: doc.title || this.options.filePath || 'document',
         root: doc.documentElement,
-        section: null,
       }
     } catch {
       return null
@@ -1384,13 +1358,7 @@ function boundingBox(targets: HTMLElement[], space: RuntimeSpace, scrollX: numbe
 }
 
 function memberStyle(target: HTMLElement): MemberStyle {
-  return {
-    transform: target.style.transform,
-    position: target.style.position,
-    width: target.style.width,
-    height: target.style.height,
-    maxWidth: target.style.maxWidth,
-  }
+  return { transform: target.style.transform }
 }
 
 function rectLike(rect: DOMRect): RectLike {

@@ -16,7 +16,7 @@ export interface GestureBox {
   height: number
 }
 
-export interface GesturePoint {
+interface GesturePoint {
   x: number
   y: number
 }
@@ -65,8 +65,8 @@ export function boxInSpace(
   }
 }
 
-export function roundBox(box: GestureBox, precision = 1): GestureBox {
-  const round = (value: number): number => Math.round(value / precision) * precision
+export function roundBox(box: GestureBox): GestureBox {
+  const round = Math.round
   return { x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) }
 }
 
@@ -86,11 +86,11 @@ export function scaleFromTransform(transform: string | null | undefined): number
 /** Is a client-space point inside this rectangle? The group's outline is the
  * hit area for dragging the whole selection, so empty space between members
  * still belongs to the group rather than starting a fresh marquee. */
-export function pointInRect(clientX: number, clientY: number, rect: RectLike, slack = 0): boolean {
+export function pointInRect(clientX: number, clientY: number, rect: RectLike): boolean {
   return (
-    clientX >= rect.left - slack &&
-    clientX <= rect.left + rect.width + slack &&
-    clientY >= rect.top - slack &&
-    clientY <= rect.top + rect.height + slack
+    clientX >= rect.left &&
+    clientX <= rect.left + rect.width &&
+    clientY >= rect.top &&
+    clientY <= rect.top + rect.height
   )
 }

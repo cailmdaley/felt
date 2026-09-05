@@ -52,6 +52,9 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
  */
 export const shuttleOrigin = (originId: string): string => originId.replace(/^remote-/, '')
 
+/** Trailing-slash-insensitive path compare — store-root detection. */
+const norm = (p: string): string => p.replace(/\/+$/, '')
+
 interface ProjectEntry {
   /** Stable key: `${originId}:${path}`. */
   id: string
@@ -67,8 +70,6 @@ interface ProjectEntry {
   isLocal: boolean
   /** Loom-relative substore prefix; `''` when the project is a store root. */
   loomPrefix: string
-  /** Owning felt store path (the store the project's `.felt` resolves into). */
-  feltStore: string
   /** Newest fiber mtime in the project (unix-ms) — recency ranking. */
   lastActivity: number
 }
@@ -91,8 +92,6 @@ export interface HostEntry {
 }
 
 export interface ProjectModel {
-  /** The local daemon's own host id. */
-  host: string
   /** Every origin the pickers can point at, local first. */
   hosts: HostEntry[]
   /** Every distinct project across all origins, recency-ranked. */
@@ -109,7 +108,6 @@ interface StoreRegistryOrigin {
   kind?: 'local' | 'remote' | string
   stale?: boolean
   felt_stores?: string[]
-  feltStores?: string[]
   /** Curated picker-project list (Stash/Capture cities). When present it is
    *  authoritative for this origin — it replaces the felt-store + current-cards
    *  derivation. Absent → fall back to that derivation, so an uncurated host is
@@ -121,7 +119,6 @@ interface StoreRegistryOrigin {
   native_folder_picker?: boolean
   /** Presentation label a remote carries for itself. */
   display?: string
-  last_error?: string
 }
 
 interface StoreRegistry {
@@ -209,7 +206,6 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
     const activityById: Record<string, number> = {}
     for (const p of registryProjects) activityById[p.id] = p.lastActivity
     return {
-      host: registry.host || feed.host,
       hosts: deriveHosts(registry, feed.host, feed.origins),
       projects: registryProjects,
       activityById,
@@ -217,7 +213,6 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
     }
   }
 
-  const norm = (p: string): string => p.replace(/\/+$/, '')
   const projects: ProjectEntry[] = [...groups.values()].map((acc) => {
     const name = basename(acc.path)
     // When project_dir IS its own felt store (no substore symlink — e.g. the
@@ -233,7 +228,6 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
       originId: acc.originId,
       isLocal: feed.origins[acc.originId]?.kind === 'local' || acc.originId === feed.host,
       loomPrefix: isStoreRoot ? '' : substorePrefix(acc.slugs, name),
-      feltStore: acc.feltStore,
       lastActivity: acc.lastActivity,
     }
   })
@@ -248,7 +242,6 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
   for (const p of projects) activityById[p.id] = p.lastActivity
 
   return {
-    host: feed.host,
     hosts: deriveHosts(registry, feed.host, feed.origins),
     projects,
     activityById,
@@ -351,7 +344,7 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
     for (const [originId, raw] of Object.entries(root.origins as Record<string, unknown>)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const rec = raw as Record<string, unknown>
-      const feltStores = stringArray(rec.felt_stores) ?? stringArray(rec.feltStores) ?? []
+      const feltStores = stringArray(rec.felt_stores) ?? []
       origins[originId] = {
         kind: typeof rec.kind === 'string' ? rec.kind : undefined,
         stale: rec.stale === true,
@@ -359,11 +352,10 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
         projects: stringArray(rec.projects),
         native_folder_picker: rec.native_folder_picker === true,
         display: typeof rec.display === 'string' ? rec.display : undefined,
-        last_error: typeof rec.last_error === 'string' ? rec.last_error : undefined,
       }
     }
   } else {
-    const feltStores = stringArray(root.felt_stores) ?? stringArray(root.feltStores) ?? []
+    const feltStores = stringArray(root.felt_stores) ?? []
     if (feltStores.length > 0) origins[host || 'local'] = { kind: 'local', felt_stores: feltStores }
   }
 
@@ -391,7 +383,7 @@ function projectsFromRegistry(
   for (const [originId, origin] of Object.entries(origins)) {
     const curated = origin.projects ?? []
     if (curated.length > 0) curatedOrigins.add(originId)
-    const stores = curated.length > 0 ? curated : origin.felt_stores ?? origin.feltStores ?? []
+    const stores = curated.length > 0 ? curated : origin.felt_stores ?? []
     for (const rawPath of stores) {
       const path = rawPath.trim().replace(/\/+$/, '')
       if (!path) continue
@@ -406,7 +398,6 @@ function projectsFromRegistry(
       // A project that IS its own felt store (the loom root, a private store)
       // has store-root-relative ids → prefix `''`. Structural, so it overrides
       // the basename heuristic (which a stray `loom/`-pathed fiber would mislead).
-      const norm = (p: string): string => p.replace(/\/+$/, '')
       const isStoreRoot = norm(path) === norm(feltStore)
       projects.push({
         id: key,
@@ -415,7 +406,6 @@ function projectsFromRegistry(
         originId,
         isLocal: kind === 'local' || originId === feedHost || originId === registry.host,
         loomPrefix: isStoreRoot ? '' : acc ? substorePrefix(acc.slugs, name) : '',
-        feltStore,
         lastActivity: acc?.lastActivity ?? 0,
       })
     }
@@ -442,7 +432,6 @@ function projectsFromRegistry(
     seen.add(key)
 
     const name = basename(path)
-    const norm = (p: string): string => p.replace(/\/+$/, '')
     const isStoreRoot = norm(path) === norm(acc.feltStore)
     projects.push({
       id: key,
@@ -451,7 +440,6 @@ function projectsFromRegistry(
       originId: acc.originId,
       isLocal: false,
       loomPrefix: isStoreRoot ? '' : substorePrefix(acc.slugs, name),
-      feltStore: acc.feltStore,
       lastActivity: acc.lastActivity,
     })
   }

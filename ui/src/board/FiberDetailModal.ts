@@ -1103,7 +1103,6 @@ export class FiberDetailModal {
         shuttleBase: this.shuttleBase,
         fiberId,
         filePath: frame.dataset.gesturePath,
-        originId: card.originId,
         sourceUrl: src,
       }))
     }

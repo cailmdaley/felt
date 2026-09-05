@@ -1,17 +1,11 @@
-export type PageAttentionState = 'hidden' | 'visible-unfocused' | 'active'
+type PageAttentionState = 'hidden' | 'visible-unfocused' | 'active'
 
 const MIN_UNFOCUSED_POLL_INTERVAL_MS = 60_000
 
 function getPageAttention(): PageAttentionState {
   if (document.hidden) return 'hidden'
-  if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
-    return 'visible-unfocused'
-  }
+  if (!document.hasFocus()) return 'visible-unfocused'
   return 'active'
-}
-
-function nextVisiblePollIntervalMs(activeIntervalMs: number): number {
-  return Math.max(activeIntervalMs * 2, MIN_UNFOCUSED_POLL_INTERVAL_MS)
 }
 
 export function shouldRunVisiblePoll(
@@ -24,6 +18,6 @@ export function shouldRunVisiblePoll(
   if (lastRunAtMs === null) return true
   const interval = attention === 'active'
     ? activeIntervalMs
-    : nextVisiblePollIntervalMs(activeIntervalMs)
+    : Math.max(activeIntervalMs * 2, MIN_UNFOCUSED_POLL_INTERVAL_MS)
   return nowMs - lastRunAtMs >= interval
 }
