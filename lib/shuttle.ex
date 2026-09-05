@@ -30,6 +30,20 @@ defmodule Shuttle do
   end
 
   @doc """
+  The daemon's host-local state directory: `$SHUTTLE_DATA_DIR`, else
+  `~/.shuttle`.
+
+  One resolver for every host-local file the daemon keeps — `sessions.jsonl`,
+  `commits.jsonl`, `events.jsonl`, the remote caches. Per-file override env
+  vars (`SHUTTLE_SESSIONS_FILE`, `SHUTTLE_COMMITS_FILE`,
+  `SHUTTLE_EVENTS_FILE`) are consulted by their own modules *ahead* of this.
+  """
+  @spec data_dir() :: String.t()
+  def data_dir do
+    System.get_env("SHUTTLE_DATA_DIR") || Path.join(System.user_home!(), ".shuttle")
+  end
+
+  @doc """
   The port the local daemon's HTTP surface binds (and is reached on).
 
   `SHUTTLE_PORT` else 4000 — the same resolution

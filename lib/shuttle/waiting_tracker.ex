@@ -161,12 +161,7 @@ defmodule Shuttle.WaitingTracker do
   `cmd/hook_event.go` writes the lines).
   """
   def default_events_file do
-    System.get_env("SHUTTLE_EVENTS_FILE") ||
-      Path.join(
-        System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!() || "/root", ".shuttle"),
-        "events.jsonl"
-      )
+    System.get_env("SHUTTLE_EVENTS_FILE") || Path.join(Shuttle.data_dir(), "events.jsonl")
   end
 
   # ── Server ──

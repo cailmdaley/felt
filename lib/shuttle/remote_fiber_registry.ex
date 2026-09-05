@@ -139,13 +139,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   # The default on-disk home for the per-remote caches, honoring the same env
   # the rest of the daemon's host-local state does.
-  defp default_store_dir do
-    Path.join(
-      System.get_env("SHUTTLE_DATA_DIR") ||
-        Path.join(System.user_home!() || "/root", ".shuttle"),
-      "remote-fibers"
-    )
-  end
+  defp default_store_dir, do: Path.join(Shuttle.data_dir(), "remote-fibers")
 
   @doc """
   Returns the cached feed map keyed by remote name. Each value carries

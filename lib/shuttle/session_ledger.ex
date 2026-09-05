@@ -75,12 +75,7 @@ defmodule Shuttle.SessionLedger do
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_SESSIONS_FILE") ||
-      Path.join(
-        System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!(), ".shuttle"),
-        "sessions.jsonl"
-      )
+    System.get_env("SHUTTLE_SESSIONS_FILE") || Path.join(Shuttle.data_dir(), "sessions.jsonl")
   end
 
   @doc """
@@ -190,10 +185,7 @@ defmodule Shuttle.SessionLedger do
   def read_since(since_ms, opts \\ []) when is_integer(since_ms) do
     path = Keyword.get(opts, :path, default_path())
 
-    [path <> @rotated_suffix, path]
-    |> Enum.filter(&File.regular?/1)
-    |> Enum.flat_map(&stream_records(&1, since_ms))
-    |> Enum.sort_by(& &1["at"])
+    Shuttle.Ledger.read_window(path, since_ms, nil, nil, "session ledger")
   end
 
   @doc """
@@ -291,26 +283,6 @@ defmodule Shuttle.SessionLedger do
     # Vanished or unreadable between the check and the read — a rotation
     # racing this scan. Fall through to the next file.
     _ -> nil
-  end
-
-  defp stream_records(path, since_ms) do
-    path
-    |> File.stream!()
-    |> Stream.flat_map(&parse_line(&1, since_ms))
-    |> Enum.to_list()
-  rescue
-    # Vanished or unreadable between the check and the stream — a rotation
-    # racing this read. Serve what the other file gave us.
-    error ->
-      Logger.debug("session ledger: skipped #{path} — #{Exception.message(error)}")
-      []
-  end
-
-  defp parse_line(line, since_ms) do
-    case Jason.decode(line) do
-      {:ok, %{"at" => at} = record} when is_integer(at) and at >= since_ms -> [record]
-      _ -> []
-    end
   end
 
   @doc """
