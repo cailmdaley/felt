@@ -273,8 +273,6 @@ defmodule Shuttle.Poller.Snapshot do
     Map.new(value, fn {key, value} -> {to_string(key), value} end)
   end
 
-  defp stringify_keys(_), do: %{}
-
   # Stringifies dispatch-failure reasons for the snapshot. Atoms become their
   # name (':missing_session_id' is more useful in the UI than the raw atom);
   # strings pass through; everything else falls back to inspect/1.

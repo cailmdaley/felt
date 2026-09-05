@@ -518,14 +518,6 @@ defmodule Shuttle.Poller do
     )
   end
 
-  @spec orchestrator_state() :: map()
-  def orchestrator_state, do: orchestrator_state(__MODULE__)
-
-  @spec orchestrator_state(GenServer.server()) :: map()
-  def orchestrator_state(server) do
-    GenServer.call(server, :orchestrator_state, @orchestrator_state_call_timeout_ms)
-  end
-
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()
   def orchestrator_state(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
     GenServer.call(server, :orchestrator_state, timeout_ms)
@@ -539,13 +531,10 @@ defmodule Shuttle.Poller do
 
   NOT production API: internal callers resolve through `host_for_fiber/2`
   (or `FeltStores.host_for_fiber/2` / `RelayHelpers.host_for_fiber/1`) directly.
-  This pair is the test seam `poller_test.exs` uses to exercise the private
+  `resolve_fiber_host/2` is the test seam `poller_test.exs` uses to exercise the private
   `host_for_fiber/2` fallback resolver, which needs poller state. It once
   served `GET /api/v1/fiber/host`; that route is gone.
   """
-  @spec resolve_fiber_host(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
-  def resolve_fiber_host(fiber_id), do: resolve_fiber_host(__MODULE__, fiber_id)
-
   @spec resolve_fiber_host(GenServer.server(), String.t()) ::
           {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(server, fiber_id) do
@@ -556,9 +545,6 @@ defmodule Shuttle.Poller do
   Evicts the cached felt-store resolution for `fiber_id`. The daemon
   re-resolves on the next access. Use after a fiber moves between hosts.
   """
-  @spec bust_fiber_host_cache(String.t()) :: :ok
-  def bust_fiber_host_cache(fiber_id), do: bust_fiber_host_cache(__MODULE__, fiber_id)
-
   @spec bust_fiber_host_cache(GenServer.server(), String.t()) :: :ok
   def bust_fiber_host_cache(server, fiber_id) do
     GenServer.call(server, {:bust_fiber_host_cache, fiber_id})
@@ -2290,9 +2276,6 @@ defmodule Shuttle.Poller do
   # design: a failed write (read-only home, a container with no writable
   # `$HOME`) leaves the caller with the in-memory value rather than crashing
   # the daemon at boot.
-  @spec seed_host_config_file(String.t()) :: String.t()
-  defp seed_host_config_file("" = name), do: name
-
   #
   # Writes only into a parent directory that ALREADY exists, and never creates
   # one. The existence of `~/.shuttle` is the gate that distinguishes a shuttle
@@ -2301,6 +2284,7 @@ defmodule Shuttle.Poller do
   # inside `felt hook event` — before that gate is consulted. An `mkdir_p` here
   # would switch a felt-only machine's event stream on. Declining to seed costs
   # nothing; breaking the gate does.
+  @spec seed_host_config_file(String.t()) :: String.t()
   defp seed_host_config_file(name) do
     path = host_config_file()
 
@@ -2322,8 +2306,7 @@ defmodule Shuttle.Poller do
   defp host_config_file_value do
     path = host_config_file()
 
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path) do
+    with {:ok, content} <- File.read(path) do
       content
       |> String.split("\n", parts: 2)
       |> List.first()
