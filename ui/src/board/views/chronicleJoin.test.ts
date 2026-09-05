@@ -52,9 +52,14 @@ import { formatSpanMinutes } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { card as baseCard } from '../testFixtures.js'
+import {
+  card as baseCard,
+  DAY_INDEX,
+  noonOf,
+  TODAY_IDX,
+  WINDOW_DAYS,
+} from '../testFixtures.js'
 import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
-import { buildTimelineDays } from '../KanbanSurfaces.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -323,22 +328,6 @@ describe('folding buckets into civil days', () => {
 })
 
 // ── The lifeline, and the honesty of its close mark ──────────────────────────
-
-// The real column layout: 28 back, 14 forward, today at index 28. Built from
-// the production helper against a fixed LOCAL day, so the fixture is the same
-// shape in both zones.
-const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
-const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
-const TODAY_IDX = 28
-
-/** An INSTANT at local noon on a civil day — safely inside that day's column
- *  in any zone, unlike a midnight that a DST shift can push over the edge. */
-function noonOf(dayISO: string): string {
-  const d = civilDayToLocalDate(dayISO)
-  if (!d) throw new Error(`not a civil day: ${dayISO}`)
-  d.setHours(12, 0, 0, 0)
-  return d.toISOString()
-}
 
 describe('placing a fiber lifeline and its close', () => {
   it('ends the line at a close it can place, and marks it there', () => {

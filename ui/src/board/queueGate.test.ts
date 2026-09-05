@@ -15,8 +15,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { clearQueueGate } from './KanbanModal.js'
-import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { card as baseCard } from './testFixtures.js'
+import type { KanbanCard } from './KanbanTypes.js'
+import { card as baseCard, response } from './testFixtures.js'
 
 const card = (id: string, over: Partial<KanbanCard> = {}): KanbanCard =>
   baseCard({ id, ...over })
@@ -26,20 +26,6 @@ const GATED = {
   dependsOn: ['work/head'],
   dependsOnBlocking: ['work/head'],
   dependsOnShape: 'scalar' as const,
-}
-
-function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
-  return {
-    now: { drafts: [], inFlight: [], awaitingReview: [] },
-    pinned: [],
-    timeline: { past: [], futureDated: [] },
-    stash: [],
-    totals: {},
-    temperedTotal: 0,
-    staleness: {},
-    generatedAt: 0,
-    ...over,
-  } as unknown as KanbanResponse
 }
 
 describe('clearQueueGate', () => {

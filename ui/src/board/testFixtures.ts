@@ -5,7 +5,10 @@
  * `*.spec.ts`, and nothing outside a test file imports this, so it never
  * enters the production bundle's build graph either.
  */
-import type { KanbanCard } from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { surfaceTotals } from './KanbanReadModel.js'
+import { buildTimelineDays } from './KanbanSurfaces.js'
+import { civilDayToLocalDate } from './civilDay.js'
 
 /**
  * A minimally-real KanbanCard: every field the type requires, with an
@@ -28,4 +31,49 @@ export function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): Kanban
     cycleStart: null,
     ...over,
   }
+}
+
+/**
+ * A KanbanResponse holding whatever surfaces it is handed. `totals` is derived
+ * with the production helper — the wire's own invariant — unless a caller
+ * states one.
+ */
+export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
+  const base: Omit<KanbanResponse, 'totals'> = {
+    feltHost: 'local',
+    now: { drafts: [], inFlight: [], awaitingReview: [] },
+    timeline: { past: [], futureDated: [] },
+    stash: [],
+    pinned: [],
+    cycles: [],
+    temperedTotal: 0,
+    staleness: {},
+    generatedAt: 0,
+    ...over,
+  }
+  return { ...base, totals: over.totals ?? surfaceTotals(base) }
+}
+
+// The real Chronicle column layout: 28 back, 14 forward, today fixed at a
+// known LOCAL day. Built from the production helper so the fixture is the same
+// shape in both zones `npm test` pins.
+export const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
+export const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
+export const TODAY_IDX = WINDOW_DAYS.findIndex((d) => d.isToday)
+export const TODAY_DAY = WINDOW_DAYS[TODAY_IDX].iso
+
+/** An INSTANT at local noon on a civil day — safely inside that day's column
+ *  in any zone, unlike a midnight that a DST shift can push over the edge. */
+export function noonOf(dayISO: string): string {
+  const d = civilDayToLocalDate(dayISO)
+  if (!d) throw new Error(`not a civil day: ${dayISO}`)
+  d.setHours(12, 0, 0, 0)
+  return d.toISOString()
+}
+
+/** A civil day N days from today, by index into the fixed window. */
+export function dayAt(offset: number): string {
+  const day = WINDOW_DAYS[TODAY_IDX + offset]
+  if (!day) throw new Error(`offset ${offset} outside fixture window`)
+  return day.iso
 }

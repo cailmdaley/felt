@@ -22,40 +22,22 @@
 import { describe, expect, it } from 'vitest'
 import { buildRows, type ChronicleRow } from './ChronicleView.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
-import { card as baseCard } from '../testFixtures.js'
-import { buildTimelineDays } from '../KanbanSurfaces.js'
-
-const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
-const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
-const TODAY_IDX = WINDOW_DAYS.findIndex((d) => d.isToday)
-const TODAY_DAY = WINDOW_DAYS[TODAY_IDX].iso
-
-function dayAt(offset: number): string {
-  const day = WINDOW_DAYS[TODAY_IDX + offset]
-  if (!day) throw new Error(`offset ${offset} outside fixture window`)
-  return day.iso
-}
+import {
+  card as baseCard,
+  dayAt,
+  DAY_INDEX,
+  response,
+  TODAY_DAY,
+  TODAY_IDX,
+} from '../testFixtures.js'
 
 const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
   baseCard({ effectiveHorizon: 'stashed', storedHorizon: 'stashed', ...over })
 
 /** A response carrying exactly one card, on Resting (`stash`) and nowhere
  *  else — the shape a snoozed, workless fiber actually has on the wire. */
-function restingResponse(resting: readonly KanbanCard[]): KanbanResponse {
-  return {
-    feltHost: 'local',
-    now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [] },
-    stash: [...resting],
-    pinned: [],
-    cycles: [],
-    totals: {
-      drafts: 0, inFlight: 0, awaitingReview: 0, past: 0,
-      futureDated: 0, stash: resting.length, pinned: 0,
-    },
-    temperedTotal: 0,
-  } as unknown as KanbanResponse
-}
+const restingResponse = (resting: readonly KanbanCard[]): KanbanResponse =>
+  response({ stash: [...resting] })
 
 function rows(cards: KanbanCard[], response: KanbanResponse): ChronicleRow[] {
   return buildRows(response, cards, new Map(), DAY_INDEX, TODAY_IDX, TODAY_DAY, {})

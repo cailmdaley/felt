@@ -12,33 +12,15 @@ import { describe, expect, it } from 'vitest'
 import { buildRows, type ChronicleRow } from './ChronicleView.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
-import { card as baseCard } from '../testFixtures.js'
-import { civilDayToLocalDate } from '../civilDay.js'
-import { buildTimelineDays } from '../KanbanSurfaces.js'
-
-// The real column layout: 28 back, 14 forward, today fixed at a known local
-// day. Built from the production helper so the fixture is the same shape in
-// both zones `npm test` pins.
-const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
-const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
-const TODAY_IDX = WINDOW_DAYS.findIndex((d) => d.isToday)
-const TODAY_DAY = WINDOW_DAYS[TODAY_IDX].iso
-
-/** An INSTANT at local noon on a civil day — safely inside that day's column
- *  in any zone, unlike a midnight a DST shift can push over the edge. */
-function noonOf(dayISO: string): string {
-  const d = civilDayToLocalDate(dayISO)
-  if (!d) throw new Error(`not a civil day: ${dayISO}`)
-  d.setHours(12, 0, 0, 0)
-  return d.toISOString()
-}
-
-/** A civil day N days from today, by index into the fixed window. */
-function dayAt(offset: number): string {
-  const day = WINDOW_DAYS[TODAY_IDX + offset]
-  if (!day) throw new Error(`offset ${offset} outside fixture window`)
-  return day.iso
-}
+import {
+  card as baseCard,
+  dayAt,
+  DAY_INDEX,
+  noonOf,
+  response,
+  TODAY_DAY,
+  TODAY_IDX,
+} from '../testFixtures.js'
 
 const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
   baseCard({ status: 'active', ...over })
@@ -53,26 +35,8 @@ function bucket(day: string, over: Partial<ActivityBucket> = {}): ActivityBucket
   return { m: new Date(noonOf(day)).getTime(), s: null, cwd: null, k: 'agent', n: 1, ...over }
 }
 
-function emptyResponse(cards: readonly KanbanCard[]): KanbanResponse {
-  return {
-    feltHost: 'local',
-    now: { drafts: [], inFlight: [], awaitingReview: [] },
-    timeline: { past: [], futureDated: [] },
-    stash: [],
-    pinned: [...cards],
-    cycles: [],
-    totals: {
-      drafts: 0,
-      inFlight: 0,
-      awaitingReview: 0,
-      past: 0,
-      futureDated: 0,
-      stash: 0,
-      pinned: cards.length,
-    },
-    temperedTotal: 0,
-  } as unknown as KanbanResponse
-}
+const emptyResponse = (cards: readonly KanbanCard[]): KanbanResponse =>
+  response({ pinned: [...cards] })
 
 /** Runs `buildRows` with the fixed window and no origins, keyed for lookup. */
 function orderedIds(cards: KanbanCard[], attribution: Map<string, ActivityBucket[]>): string[] {
