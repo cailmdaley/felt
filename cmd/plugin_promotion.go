@@ -751,35 +751,47 @@ func writePluginJournal(path string, journal pluginPromotionJournal) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".promotion-*")
+	return writeFileDurably(path, data, 0o600, ".promotion-*", "creating plugin journal", "", "committing plugin journal")
+}
+
+// writeFileDurably writes data to path atomically and durably: an fsynced
+// temp file in the target directory, a rename, then a parent-directory sync
+// so the rename itself survives power loss — the guarantee the plugin
+// recovery paths depend on. stepMsg wraps the per-step failures when
+// non-empty; callers that report those bare pass "".
+func writeFileDurably(path string, data []byte, perm os.FileMode, tmpPrefix, createMsg, stepMsg, commitMsg string) error {
+	step := func(err error) error {
+		if err == nil || stepMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stepMsg, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), tmpPrefix)
 	if err != nil {
-		return fmt.Errorf("creating plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", createMsg, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return err
+		return step(err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return step(err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("committing plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", commitMsg, err)
 	}
-	// The file itself was fsynced before the rename; syncing the parent
-	// directory makes the rename durable, which the recovery path's power-loss
-	// guarantee depends on.
 	if err := syncParentDir(path); err != nil {
-		return fmt.Errorf("committing plugin journal: %w", err)
+		return fmt.Errorf("%s: %w", commitMsg, err)
 	}
 	return nil
 }
