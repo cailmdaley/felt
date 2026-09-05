@@ -684,23 +684,6 @@ export function chainTail(
 }
 
 /**
- * Would stacking `sourceId` behind `targetId` close a loop?
- *
- * True when the target is the source itself, or is already somewhere in the
- * queue behind the source — dropping a card onto its own descendant. The
- * gesture refuses rather than writing frontmatter that would gate both cards
- * forever with no way out but a text editor.
- */
-export function stackWouldCycle(
-  sourceId: string,
-  targetId: string,
-  dependents: ReadonlyMap<string, readonly string[]>,
-): boolean {
-  if (sourceId === targetId) return true;
-  return queuedBehind(sourceId, dependents).includes(targetId);
-}
-
-/**
  * The card's own hot zone for a stack drop — the inner fraction of its box.
  *
  * A card is a drop target for TWO different gestures: the column under it
@@ -898,10 +881,6 @@ export function queueRowGesture(opts: {
   queueLength: number;
   /** Is every member of the chain scalar-shaped? */
   chainAllScalar: boolean;
-  /** Is a reorder handler wired at all? */
-  canReorder: boolean;
-  /** Is an unqueue handler wired at all? */
-  canUnqueue: boolean;
 }): QueueRowGesture {
   // A hand-written `depends_on:` LIST is the one honest refusal. Dropping the
   // row would have to guess which of several edges the human meant to cut, and
@@ -913,14 +892,7 @@ export function queueRowGesture(opts: {
       hint: 'Waits on a hand-written depends_on: list — open it and edit that list to move it.',
     };
   }
-  const reorderable = opts.canReorder && opts.queueLength > 1 && opts.chainAllScalar;
-  if (!opts.canUnqueue && !reorderable) {
-    return {
-      draggable: false,
-      reorderable: false,
-      hint: 'This board is read-only for sequences right now.',
-    };
-  }
+  const reorderable = opts.queueLength > 1 && opts.chainAllScalar;
   return {
     draggable: true,
     reorderable,
@@ -1069,22 +1041,6 @@ export function queueMemberNote(
   return member.tempered === false ? 'composted' : 'awaiting review';
 }
 
-/**
- * What the "+N queued" chip reads for a queue of this size.
- *
- * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
- * this card in every sense the gesture cares about, and a count that skipped
- * them would disagree with the refusal you get for dropping onto the same card.
- * The chip used to append a second clause counting the settled ones ("· 1 in
- * review"); it made a glance at the desk do arithmetic to answer a question the
- * glance was not asking. How each member sits is a fact about that member, so
- * it belongs where the members are: the peek list, where every row says its own
- * state and wears its own colour (`queueMemberNote`).
- */
-export function queuedChipLabel(total: number): string {
-  return `+${total} queued`;
-}
-
 /** What the stack gesture needs to know about a card to rule on a drop.
  *  `KanbanCard` satisfies it. */
 export interface StackCandidate {
@@ -1184,7 +1140,11 @@ export function stackDropVerdict(
   if (tail === source.id || queuedBehind(target.id, dependents).includes(source.id)) {
     return { ok: false, code: 'alreadyQueued', reason: 'it is already queued behind this one' };
   }
-  if (stackWouldCycle(source.id, tail, dependents)) {
+  // A LOOP: the tail already sits somewhere in the queue behind the source, so
+  // writing the edge would gate both cards forever with no gesture that undoes
+  // it. (`tail === source.id` cannot reach here — the branch above returned
+  // `alreadyQueued` for it.)
+  if (queuedBehind(source.id, dependents).includes(tail)) {
     return { ok: false, reason: 'that would make a loop' };
   }
   if ((source.dependsOn ?? []).length === 1 && source.dependsOn?.[0] === tail) {

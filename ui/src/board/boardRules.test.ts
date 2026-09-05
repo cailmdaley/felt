@@ -26,7 +26,6 @@ import {
   lensCycles,
   queueDropIndex,
   queuedBehind,
-  queuedChipLabel,
   reorderQueueWrites,
   restingUntil,
   stackZoneOffered,
@@ -2089,8 +2088,6 @@ describe('the queue counts every follower a dependency still holds', () => {
 
     // The chip counts, and only counts — how each member sits is the peek
     // list's job, per row, so the desk stays readable at a glance.
-    expect(queuedChipLabel(2)).toBe('+2 queued')
-    expect(queuedChipLabel(1)).toBe('+1 queued')
   })
 })
 
@@ -2216,8 +2213,6 @@ describe('a queued row asks only about itself', () => {
     shape: 'scalar' as const,
     queueLength: 3,
     chainAllScalar: true,
-    canReorder: true,
-    canUnqueue: true,
   }
 
   it('offers both gestures on an ordinary scalar chain', () => {
@@ -2263,23 +2258,9 @@ describe('a queued row asks only about itself', () => {
     // to the owning daemon — and an owner that is genuinely dead fails that
     // forward and is reported then, by name.
     expect(Object.keys(base).sort()).toEqual([
-      'canReorder',
-      'canUnqueue',
       'chainAllScalar',
       'queueLength',
       'shape',
     ])
-  })
-
-  it('goes inert, with a reason, when no sequence handler is wired', () => {
-    const g = queueRowGesture({ ...base, canReorder: false, canUnqueue: false })
-    expect(g.draggable).toBe(false)
-    expect(g.hint).toMatch(/read-only/i)
-  })
-
-  it('still drags when only the unqueue handler is wired', () => {
-    const g = queueRowGesture({ ...base, canReorder: false })
-    expect(g.draggable).toBe(true)
-    expect(g.reorderable).toBe(false)
   })
 })
