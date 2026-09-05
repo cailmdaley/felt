@@ -261,19 +261,6 @@ interface OpenFileEntry extends ZoomableTab {
   tab: HTMLElement
   scroll: number
   viewerBuilt: boolean
-  /** The same-origin iframe, once built — the scroll-restore target. */
-  iframe: HTMLIFrameElement | null
-}
-
-interface FiberBodyRead {
-  body: string
-  outcome: string
-  found: boolean
-  reached: boolean
-  /** The fiber's `modified_at` as the daemon reported it — the body's change
-   *  revision, captured off the very read that painted the page so an edit
-   *  between open and the first tick is caught. */
-  modifiedAt: string | undefined
 }
 
 /** The unchanged sentinel {@link FiberDetailModal.fetchSentFiles} returns on a
@@ -333,7 +320,6 @@ interface AgentRecord {
   effort_levels?: string[]
   default_effort?: string | null
   chrome_capable?: boolean
-  cost_class?: string | null
   alias_of?: string | null
 }
 
@@ -501,10 +487,11 @@ export class FiberDetailModal {
    *     click-away, and it never writes the session's default placement or its
    *     own persisted arrangement — the panel it sits in owns all of that;
    *   · it closes with its tab.
+   *
+   * This field IS that fact: non-null iff the card is linked, holding the
+   * element it renders into (its tab's cell). Null for a card opened from the
+   * board, which builds its own floating window.
    */
-  private readonly linked: boolean
-  /** The element a linked card renders into — its tab's cell. Null for a card
-   *  opened from the board, which builds its own floating window. */
   private readonly host: HTMLElement | null
   /** Ask the panel to close this card's tab (the header ×, for a linked card). */
   private readonly onCloseRequest: (() => void) | null
@@ -521,9 +508,9 @@ export class FiberDetailModal {
    * never appears rather than appearing and doing nothing.
    */
   private readonly moves: MoveBroker | null
-  /** The open move menu (a document.body child — the panel is a size container
-   *  and clips its own fixed descendants), and its teardown. */
-  private moveMenuEl: HTMLElement | null = null
+  /** Teardown for the open move menu (a document.body child — the panel is a
+   *  size container and clips its own fixed descendants). Non-null iff a menu
+   *  is open. */
   private closeMoveMenu: (() => void) | null = null
   /** The head row's Move control, kept so a live tick can hide it when the
    *  board stops offering this card anywhere to go (and show it again when it
@@ -539,7 +526,6 @@ export class FiberDetailModal {
     onTransition?: (card: KanbanCard, target: ColumnKind) => void,
     onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void,
     opts?: {
-      linked?: boolean
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
@@ -550,7 +536,6 @@ export class FiberDetailModal {
     this.onSaved = onSaved
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onOpenWorker
-    this.linked = opts?.linked === true || opts?.host !== undefined
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
@@ -693,8 +678,7 @@ export class FiberDetailModal {
     const titleStack = document.createElement('div')
     titleStack.className = 'kbn-detail-title-stack'
     titleStack.append(title, idEl)
-    if (aloftPill) header.append(titleStack, aloftPill, pill, refreshBtn, closeBtn)
-    else header.append(titleStack, pill, refreshBtn, closeBtn)
+    header.append(titleStack, ...(aloftPill ? [aloftPill] : []), pill, refreshBtn, closeBtn)
     // The header is a drag handle only for a window. In a tab it is just the
     // card's title strip — the panel's own bar is what moves.
     // A sheet's header is a title bar, not a handle — there is nowhere to drag
@@ -711,7 +695,7 @@ export class FiberDetailModal {
     // what you opened to read. A real constitution keeps its actions.
     const shuttleManaged = isAgentCard(card)
     const controls =
-      this.linked && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
+      this.host && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
 
     // ── Fiber body pane ─────────────────────────────────────────────────────
     // The fiber itself: outcome lede, then the markdown body, rendered by the
@@ -720,7 +704,7 @@ export class FiberDetailModal {
     // card is opened; a remote fiber (whose body the local daemon can't read)
     // degrades to its outcome.
     const page = document.createElement('div')
-    page.className = 'kbn-detail-page kbn-detail-page-headerless'
+    page.className = 'kbn-detail-page'
     const prose = document.createElement('article')
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
@@ -741,8 +725,7 @@ export class FiberDetailModal {
     // The card panel is one flex column again — header, controls, launcher,
     // body. The file viewer is a SEPARATE floating window (openViewerWindow),
     // so the card keeps its own size and never grows.
-    if (controls) overlay.append(header, controls, launcher, page)
-    else overlay.append(header, launcher, page)
+    overlay.append(header, ...(controls ? [controls] : []), launcher, page)
     if (this.host) {
       // A tab's card: no frame of its own, no z-order, no registration — it is
       // inside the panel's window, which carries all three for it.
@@ -772,7 +755,7 @@ export class FiberDetailModal {
         if (e.key !== 'Escape') return
         // The move menu unwinds first — the nearest thing you are inside is
         // the thing Escape acts on, the same rule the wikilink panel follows.
-        if (this.moveMenuEl) return
+        if (this.closeMoveMenu) return
         if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
@@ -792,7 +775,7 @@ export class FiberDetailModal {
     // A LINKED card has no click-away at all: it was opened by following a
     // reference, and the next thing you click is very often the card you came
     // from. It closes by its ×, by Escape, or with the card that opened it.
-    if (!this.linked) {
+    if (!this.host) {
       this.outsideHandler = (e: PointerEvent) => {
         const target = e.target as Node | null
         // The panel holding followed references counts as inside — clicking the
@@ -826,7 +809,7 @@ export class FiberDetailModal {
         const geom = fitted(readPanelGeometry(this.overlay))
         applyGeometryTo(this.overlay, geom)
         this.cardGeom = geom
-        if (!this.linked) lastGeometry = geom
+        if (!this.host) lastGeometry = geom
       }
       if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
         this.viewerGeom = fitted(readPanelGeometry(this.viewerWindow))
@@ -948,7 +931,7 @@ export class FiberDetailModal {
     card: KanbanCard,
     overlay: HTMLElement,
     opts: { preserveContent?: boolean } = {},
-  ): Promise<FiberBodyRead | null> {
+  ): Promise<void> {
     const preserveContent = opts.preserveContent === true
     const requestToken = ++this.bodyRequestToken
     const pageScroll = this.bodyPage?.scrollTop ?? 0
@@ -1003,15 +986,14 @@ export class FiberDetailModal {
       if (timer !== null) window.clearTimeout(timer)
     }
     // The panel may have closed (or been replaced) while we awaited.
-    if (this.overlay !== overlay || requestToken !== this.bodyRequestToken) return null
+    if (this.overlay !== overlay || requestToken !== this.bodyRequestToken) return
     // A live refresh must never erase readable content because a transient
     // tunnel failure happened. The explicit retry button remains available on
     // the initial-load path, while the refresh control leaves the old page in
     // place and can try again on its next tick.
-    if (!reached && preserveContent) return null
+    if (!reached && preserveContent) return
 
     const outcome = outcomeFromDaemon ?? (card.outcome ?? '').trim()
-    const read: FiberBodyRead = { body, outcome, found, reached, modifiedAt }
     // Seed/advance the body's change baseline off the read that is about to
     // paint, so the first live tick compares against what the reader sees.
     if (reached) this.bodyRevision = modifiedAt
@@ -1041,13 +1023,13 @@ export class FiberDetailModal {
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
       this.restoreBodyScroll(pageScroll, overlay)
-      return read
+      return
     }
     if (!outcome && reached && found) {
       prose.classList.add('kbn-detail-prose-empty')
       prose.textContent = 'No body or outcome yet.'
       this.restoreBodyScroll(pageScroll, overlay)
-      return read
+      return
     }
     // No body. Three honest cases — remote bodies normally resolve here via the
     // owning daemon, so this is "nothing to show" or "not synced", never a
@@ -1063,13 +1045,10 @@ export class FiberDetailModal {
     prose.innerHTML = lede + `<p class="kbn-detail-prose-note">${note}</p>`
     // The outcome lede cites fibers too — a bodyless card is still navigable.
     void this.installWikilinkNavigation(prose, overlay)
-    if (note.includes('kbn-detail-body-retry')) {
-      prose.querySelector('.kbn-detail-body-retry')?.addEventListener('click', () => {
-        void this.renderFiberBody(prose, card, overlay)
-      })
-    }
+    prose.querySelector('.kbn-detail-body-retry')?.addEventListener('click', () => {
+      void this.renderFiberBody(prose, card, overlay)
+    })
     this.restoreBodyScroll(pageScroll, overlay)
-    return read
   }
 
   private restoreBodyScroll(scrollTop: number, overlay: HTMLElement): void {
@@ -1127,9 +1106,7 @@ export class FiberDetailModal {
       window.clearInterval(this.liveRefreshTimer)
       this.liveRefreshTimer = null
     }
-    if (typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.visibilityHandler)
-    }
+    document.removeEventListener('visibilitychange', this.visibilityHandler)
     this.liveRefreshBusy = false
   }
 
@@ -1333,7 +1310,7 @@ export class FiberDetailModal {
         this.updateOpenFileLabel(entry)
       }
     }
-    this.reconcileOpenBasenames(next)
+    if (this.openFiles.length > 0) this.writePersist()
     this.syncLauncherActiveState()
   }
 
@@ -1669,7 +1646,7 @@ export class FiberDetailModal {
     // A linked card's placement belongs to the chain that opened it — it must
     // not become where the NEXT card opened from the board appears.
     const geom = readPanelGeometry(overlay)
-    if (!this.linked) lastGeometry = geom
+    if (!this.host) lastGeometry = geom
     this.cardGeom = geom
     // Persist the card window's placement for this card so reopening restores
     // it (alongside the viewer geometry written on the viewer's settle).
@@ -2092,7 +2069,6 @@ export class FiberDetailModal {
     // session.id + review history); kind/schedule/tz changes go through
     // `livePatch` → the daemon's `reshape` action, which rewrites the shape
     // keys alone and leaves agent/status/outcome where they are.
-    let agentSelect: HTMLSelectElement | null = null
     const originalAgent = card.shuttleAgent ?? ''
     // The kind editor is the full three-way: One-shot | Standing | Pinned. It
     // used to coerce `pinned` to `oneshot` for its baseline, which made a
@@ -2127,7 +2103,7 @@ export class FiberDetailModal {
     agentLabel.className = 'kbn-detail-label'
     agentLabel.textContent = 'Agent'
 
-    agentSelect = document.createElement('select')
+    const agentSelect = document.createElement('select')
     agentSelect.className = 'kbn-detail-select'
 
     const loadingOpt = document.createElement('option')
@@ -2447,7 +2423,7 @@ export class FiberDetailModal {
     // `set-agent` write (preserves session history, like the old set-model).
     // The picker repopulates effort options + chrome availability from the
     // selected agent's registry metadata and commits on any axis change.
-    if (agentSelect) {
+    {
       let committedAxes = {
         agent: originalAgent,
         effort: card.shuttleEffort ?? '',
@@ -2760,7 +2736,7 @@ export class FiberDetailModal {
     if (promoteBtn) {
       promoteBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        const agent = agentSelect?.value.trim() ?? ''
+        const agent = agentSelect.value.trim()
         if (!agent) {
           promoteErr.textContent = 'Choose an agent to promote this card.'
           promoteErr.style.display = ''
@@ -2874,28 +2850,6 @@ export class FiberDetailModal {
       })
   }
 
-  /**
-   * Once the trail resolves, align each open accordion entry's display label
-   * with the trail's authoritative basename (matched by full path). Without
-   * this, an entry rehydrated from a legacy persist record — or before the
-   * trail's disambiguation ran — would keep the bare path tail, producing two
-   * visually identical `report.html` headers for two genuinely distinct files.
-   */
-  private reconcileOpenBasenames(files: SentFile[]): void {
-    if (this.openFiles.length === 0) return
-    const labelByPath = new Map(files.map((f) => [f.fullPath, f.basename]))
-    for (const entry of this.openFiles) {
-      const label = labelByPath.get(entry.file.fullPath)
-      if (label && label !== entry.file.basename) {
-        entry.file.basename = label
-        const name = entry.tab.querySelector('.kbn-detail-tab-name')
-        if (name) name.textContent = label
-      }
-    }
-    // Persist the corrected labels so the next reload starts from truth.
-    this.writePersist()
-  }
-
   // ── The tabbed full-view ────────────────────────────────────────────────
 
   /**
@@ -2939,7 +2893,6 @@ export class FiberDetailModal {
       scroll,
       zoom,
       viewerBuilt: false,
-      iframe: null,
       zoomTarget: null,
       baseW: 0,
     }
@@ -2990,7 +2943,6 @@ export class FiberDetailModal {
       card.originId,
       scrollable
         ? (iframe) => {
-            entry.iframe = iframe
             // Restore the persisted reading position once the doc has loaded
             // (same-origin: served from the app's own daemon).
             try {
@@ -3061,7 +3013,7 @@ export class FiberDetailModal {
   private writePersist(): void {
     // A linked card is a stop on a path, not a workspace: it must not overwrite
     // the arrangement the reader chose for this fiber's own card.
-    if (this.linked) return
+    if (this.host) return
     const uid = typeof this.card?.uid === 'string' ? this.card.uid : ''
     if (!uid) return
     savePersist(uid, {
@@ -3158,7 +3110,6 @@ export class FiberDetailModal {
   private buildSection(label: string): HTMLElement {
     const sec = document.createElement('div')
     sec.className = 'kbn-detail-section'
-    sec.dataset.section = label.toLowerCase()
     const heading = document.createElement('div')
     heading.className = 'kbn-detail-section-heading'
     heading.textContent = label
@@ -3206,7 +3157,7 @@ export class FiberDetailModal {
     btn.title = 'Move this card — the destinations a drag would accept'
     btn.addEventListener('click', (e) => {
       e.stopPropagation()
-      if (this.moveMenuEl) {
+      if (this.closeMoveMenu) {
         this.dismissMoveMenu()
         return
       }
@@ -3308,7 +3259,6 @@ export class FiberDetailModal {
     }
 
     document.body.append(scrim, menu)
-    this.moveMenuEl = menu
     anchor.setAttribute('aria-expanded', 'true')
     renderRoot()
     if (!sheet) placeMoveMenu(menu, anchor)
@@ -3406,12 +3356,11 @@ export class FiberDetailModal {
   private dismissMoveMenu(): void {
     this.closeMoveMenu?.()
     this.closeMoveMenu = null
-    this.moveMenuEl = null
   }
 
   private buildActionBtn(
     label: string,
-    variant: 'primary' | 'tempered' | 'composted' | 'dispatch',
+    variant: 'primary' | 'tempered' | 'composted',
   ): HTMLButtonElement {
     const btn = document.createElement('button')
     btn.type = 'button'
