@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -98,14 +97,10 @@ func piFeltPackageSource() string {
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".pi", "agent", "settings.json"))
-	if err != nil {
-		return ""
-	}
-	var settings struct {
+	settings, err := readJSONFile[struct {
 		Packages []string `json:"packages"`
-	}
-	if json.Unmarshal(data, &settings) != nil {
+	}](filepath.Join(home, ".pi", "agent", "settings.json"))
+	if err != nil {
 		return ""
 	}
 	gitBase := "git:github.com/" + marketplaceRepo
@@ -131,14 +126,10 @@ func isFeltPackageDir(home, dir string) bool {
 		candidates = append(candidates, filepath.Join(home, dir))
 	}
 	for _, candidate := range candidates {
-		data, err := os.ReadFile(filepath.Join(candidate, "package.json"))
-		if err != nil {
-			continue
-		}
-		var pkg struct {
+		pkg, err := readJSONFile[struct {
 			Name string `json:"name"`
-		}
-		if json.Unmarshal(data, &pkg) == nil && pkg.Name == "felt" {
+		}](filepath.Join(candidate, "package.json"))
+		if err == nil && pkg.Name == "felt" {
 			return true
 		}
 	}

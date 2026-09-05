@@ -1018,12 +1018,8 @@ func pruneLegacyCodexHooks() int {
 // whole document and its "hooks" map, so a caller can prune in place and write
 // the document back untouched apart from the pruning.
 func readHookFile(path string) (map[string]interface{}, map[string]interface{}, bool) {
-	data, err := os.ReadFile(path)
+	settings, err := readJSONFile[map[string]interface{}](path)
 	if err != nil {
-		return nil, nil, false
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, nil, false
 	}
 	hooks, ok := settings["hooks"].(map[string]interface{})

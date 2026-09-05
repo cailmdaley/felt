@@ -345,15 +345,11 @@ func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) Recei
 
 func collectClaudeBundleFallback() []ReceiptBundle {
 	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	settings, err := readJSONFile[receiptClaudeSettings](filepath.Join(home, ".claude", "settings.json"))
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		return []ReceiptBundle{{Harness: "claude", Enabled: true, Status: receiptMismatch, Repair: "repair ~/.claude/settings.json, then rerun `felt setup claude`"}}
-	}
-	var settings receiptClaudeSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
 		return []ReceiptBundle{{Harness: "claude", Enabled: true, Status: receiptMismatch, Repair: "repair ~/.claude/settings.json, then rerun `felt setup claude`"}}
 	}
 	if !settings.EnabledPlugins["felt@"+marketplaceName] {
@@ -376,12 +372,8 @@ func collectClaudeBundleFallback() []ReceiptBundle {
 
 func claudeConfiguredSource() string {
 	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	settings, err := readJSONFile[receiptClaudeSettings](filepath.Join(home, ".claude", "settings.json"))
 	if err != nil {
-		return ""
-	}
-	var settings receiptClaudeSettings
-	if json.Unmarshal(data, &settings) != nil {
 		return ""
 	}
 	return claudeConfiguredSourceFrom(settings)
@@ -392,27 +384,18 @@ func claudeConfiguredSourceFrom(settings receiptClaudeSettings) string {
 	if s, _ := m["source"].(map[string]any); s != nil {
 		kind, _ := s["source"].(string)
 		if kind == "directory" {
-			return stringValue(s["path"])
+			return stringField(s, "path")
 		}
-		if repo := stringValue(s["repo"]); repo != "" {
+		if repo := stringField(s, "repo"); repo != "" {
 			return kind + ":" + repo
 		}
 	}
 	return ""
 }
 
-func stringValue(value any) string {
-	result, _ := value.(string)
-	return result
-}
-
 func readPluginVersion(path string) string {
-	data, err := os.ReadFile(path)
+	manifest, err := readJSONFile[pluginManifest](path)
 	if err != nil {
-		return ""
-	}
-	var manifest pluginManifest
-	if json.Unmarshal(data, &manifest) != nil {
 		return ""
 	}
 	return manifest.Version
@@ -473,12 +456,8 @@ func hookFilesCompatible(pluginRoot string) bool {
 			return false
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(hooks, "hooks.json"))
+	doc, err := readJSONFile[map[string]any](filepath.Join(hooks, "hooks.json"))
 	if err != nil {
-		return false
-	}
-	var doc map[string]any
-	if json.Unmarshal(data, &doc) != nil {
 		return false
 	}
 	hookDoc, ok := doc["hooks"].(map[string]any)
