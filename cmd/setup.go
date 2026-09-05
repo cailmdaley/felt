@@ -401,10 +401,6 @@ func installPluginViaCLI(repoRoot string) error {
 }
 
 func installClaudePluginAtSource(repoRoot string) error {
-	if _, err := exec.LookPath("claude"); err != nil {
-		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
-	}
-
 	pluginRef := "felt@" + marketplaceName
 	// Ask whether the PLUGIN is installed, not whether its marketplace is
 	// registered. The two come apart whenever registration succeeds and the
@@ -450,13 +446,6 @@ func installClaudePluginAtSource(repoRoot string) error {
 	fmt.Println()
 	fmt.Println("Restart Claude Code for changes to take effect.")
 	return nil
-}
-
-// isMarketplaceRegistered returns true if the given marketplace name appears
-// in `claude plugin marketplace list` output.
-func isMarketplaceRegistered(name string) bool {
-	_, ok := marketplaceEntry(name)
-	return ok
 }
 
 // claudePluginEntry mirrors the structured `claude plugin list --json`
@@ -810,39 +799,7 @@ func feltCodexLegacyHooksInstalled() bool {
 	}
 	for _, event := range []string{"SessionStart", "PreToolUse"} {
 		for _, basename := range []string{"session.sh", "remind.sh"} {
-			if hooksReferenceFelt(hooks, event, basename) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// hooksReferenceFelt walks the hook entries for an event and returns true if
-// any inner command path references /hooks/<basename> (the suffix shared by
-// every felt-installed Codex hook regardless of where the plugin lives).
-func hooksReferenceFelt(hooks map[string]interface{}, event, basename string) bool {
-	eventHooks, ok := hooks[event].([]interface{})
-	if !ok {
-		return false
-	}
-	suffix := "/hooks/" + basename
-	for _, hook := range eventHooks {
-		hookMap, ok := hook.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		cmds, ok := hookMap["hooks"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, cmd := range cmds {
-			cmdMap, ok := cmd.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			cmdStr, _ := cmdMap["command"].(string)
-			if strings.Contains(cmdStr, suffix) {
+			if len(pruneFeltHooks(hooks, event, basename)) > 0 {
 				return true
 			}
 		}
@@ -931,10 +888,6 @@ func installCodexPluginViaCLI(marketplaceSource string) error {
 }
 
 func installCodexPluginAtSource(marketplaceSource string) error {
-	if _, err := exec.LookPath("codex"); err != nil {
-		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
-	}
-
 	if err := repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
 	}
