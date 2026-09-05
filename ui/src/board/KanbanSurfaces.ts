@@ -212,31 +212,6 @@ interface KanbanSurfaceRendererOptions {
 }
 
 export class KanbanSurfaceRenderer {
-  private readonly getDragSourceId: () => string | null
-  private readonly setDragSourceId: (id: string | null) => void
-  private readonly getLastResponse: () => KanbanResponse | null
-  private readonly stopDragAutoScroll: () => void
-  private readonly transition: (card: KanbanCard, target: ColumnKind) => void | Promise<void>
-  private readonly setSurface: (
-    card: KanbanCard,
-    horizon: HorizonKind,
-    opts?: { cold?: boolean; due?: string | null },
-  ) => void | Promise<void>
-  private readonly pin: (card: KanbanCard) => void | Promise<void>
-  private readonly stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
-  private readonly reorderQueue?: (writes: QueueRewrite[]) => void | Promise<void>
-  private readonly unqueueRow?: (
-    fiberId: string,
-    splice: QueueRewrite[],
-    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
-  ) => void | Promise<void>
-  private readonly openDetail: (card: KanbanCard) => void
-  private readonly openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
-  private readonly releaseQuarantine?: (shuttleHost?: string) => void | Promise<void>
-  private readonly onStashClick?: () => void
-  private readonly onNewIdeaClick?: () => void
-  private readonly onRefresh: () => void
-  private readonly onDragActivity?: () => void
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -280,24 +255,10 @@ export class KanbanSurfaceRenderer {
   private chainDependentsFor: KanbanResponse | null = null
   private chainDependentsMap: Map<string, string[]> = new Map()
 
+  private readonly o: KanbanSurfaceRendererOptions
+
   constructor(options: KanbanSurfaceRendererOptions) {
-    this.getDragSourceId = options.getDragSourceId
-    this.setDragSourceId = options.setDragSourceId
-    this.getLastResponse = options.getLastResponse
-    this.stopDragAutoScroll = options.stopDragAutoScroll
-    this.transition = options.transition
-    this.setSurface = options.setSurface
-    this.pin = options.pin
-    this.stack = options.stack
-    this.reorderQueue = options.reorderQueue
-    this.unqueueRow = options.unqueueRow
-    this.openDetail = options.openDetail
-    this.openWorker = options.openWorker
-    this.releaseQuarantine = options.releaseQuarantine
-    this.onStashClick = options.onStashClick
-    this.onNewIdeaClick = options.onNewIdeaClick
-    this.onRefresh = options.onRefresh
-    this.onDragActivity = options.onDragActivity
+    this.o = options
   }
 
   /** Render the Now surface: section header + 3-column board. `lens`, when a
@@ -531,7 +492,7 @@ export class KanbanSurfaceRenderer {
     onToggle: (cycleId: string | null) => void,
     nowMs: number = Date.now(),
   ): HTMLElement | null {
-    const resp = this.getLastResponse()
+    const resp = this.o.getLastResponse()
     const chips = lensCycles(resp?.cycles ?? [], nowMs)
     if (chips.length === 0) return null
 
@@ -718,7 +679,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a')) return
-      this.openDetail(card)
+      this.o.openDetail(card)
     })
     return el
   }
@@ -733,7 +694,7 @@ export class KanbanSurfaceRenderer {
    */
   private installPinnedDropHandlers(section: HTMLElement): void {
     section.addEventListener('dragover', (e) => {
-      if (!this.getDragSourceId()) return
+      if (!this.o.getDragSourceId()) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       section.classList.add('kbn-section-drop')
@@ -743,17 +704,17 @@ export class KanbanSurfaceRenderer {
       section.classList.remove('kbn-section-drop')
     })
     section.addEventListener('drop', (e) => {
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
+      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
       section.classList.remove('kbn-section-drop')
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
+      this.o.setDragSourceId(null)
+      this.o.stopDragAutoScroll()
       if (!fiberId) return
       e.preventDefault()
-      const card = findCardById(this.getLastResponse(), fiberId)
+      const card = findCardById(this.o.getLastResponse(), fiberId)
       if (!card) return
       // A card already resting on the strip is handled inside pinRole, which
       // banners "already pinned" rather than no-opping silently here.
-      void this.pin(card)
+      void this.o.pin(card)
     })
   }
 
@@ -953,11 +914,11 @@ export class KanbanSurfaceRenderer {
   private setQueueDrag(drag: KanbanSurfaceRenderer['queueDrag']): void {
     const was = this.queueDrag !== null
     this.queueDrag = drag
-    if (was !== (drag !== null)) this.onDragActivity?.()
+    if (was !== (drag !== null)) this.o.onDragActivity?.()
   }
 
   isDragging(): boolean {
-    return this.getDragSourceId() !== null || this.queueDrag !== null
+    return this.o.getDragSourceId() !== null || this.queueDrag !== null
   }
 
   /**
@@ -1041,7 +1002,7 @@ export class KanbanSurfaceRenderer {
     const EDGE_PX = 80
     const MAX_STEP_PX = 28
     const onDragOver = (e: DragEvent): void => {
-      if (!this.getDragSourceId()) return
+      if (!this.o.getDragSourceId()) return
       const r = wrap.getBoundingClientRect()
       const leftPressure = Math.max(0, EDGE_PX - (e.clientX - r.left))
       const rightPressure = Math.max(0, EDGE_PX - (r.right - e.clientX))
@@ -1070,7 +1031,7 @@ export class KanbanSurfaceRenderer {
     if (this.edgeScrollFrame !== null) return
     const tick = (): void => {
       const target = this.edgeScrollTarget
-      if (!target || !this.getDragSourceId() || this.edgeScrollVelocity === 0) {
+      if (!target || !this.o.getDragSourceId() || this.edgeScrollVelocity === 0) {
         this.stopEdgeScroll()
         return
       }
@@ -1086,7 +1047,7 @@ export class KanbanSurfaceRenderer {
    *  'stashed'. */
   private installSectionDragHandlers(section: HTMLElement, horizon: 'now' | 'stashed'): void {
     section.addEventListener('dragover', (e) => {
-      if (!this.getDragSourceId() && !this.queueDrag) return
+      if (!this.o.getDragSourceId() && !this.queueDrag) return
       if ((e.target as HTMLElement).closest('.kbn-col-head')) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
@@ -1106,14 +1067,14 @@ export class KanbanSurfaceRenderer {
         this.handleQueueRowDropOut({ horizon })
         return
       }
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
+      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
+      this.o.setDragSourceId(null)
+      this.o.stopDragAutoScroll()
       if (!fiberId) return
       e.preventDefault()
-      const card = findCardById(this.getLastResponse(), fiberId)
+      const card = findCardById(this.o.getLastResponse(), fiberId)
       if (!card) return
-      void this.setSurface(card, horizon)
+      void this.o.setSurface(card, horizon)
     })
   }
 
@@ -1142,14 +1103,14 @@ export class KanbanSurfaceRenderer {
     const isDropEligible = (id: string): boolean => {
       const today = isoDay(new Date())
       if (iso < today) return false
-      return !!findCardById(this.getLastResponse(), id)
+      return !!findCardById(this.o.getLastResponse(), id)
     }
     /** The id this drop would act on — the card being dragged, or the fiber the
      *  peek row stands for. Null when nothing eligible is in flight. */
     const heldId = (): string | null => {
       const row = this.queueDrag
       if (row) return isDropEligible(row.fiberId) ? row.fiberId : null
-      const dragSourceId = this.getDragSourceId()
+      const dragSourceId = this.o.getDragSourceId()
       if (!dragSourceId) return null
       return isDropEligible(dragSourceId) ? dragSourceId : null
     }
@@ -1162,7 +1123,7 @@ export class KanbanSurfaceRenderer {
     const dayMeaning = (id: string): { horizon: HorizonKind; due: string | null } =>
       iso === isoDay(new Date())
         ? { horizon: 'now', due: null }
-        : { horizon: dayDropHorizon(this.getLastResponse(), id), due: iso }
+        : { horizon: dayDropHorizon(this.o.getLastResponse(), id), due: iso }
     dropCol.addEventListener('dragover', (e) => {
       if (heldId() === null) return
       e.preventDefault()
@@ -1188,16 +1149,16 @@ export class KanbanSurfaceRenderer {
       }
       e.preventDefault()
       e.stopPropagation()
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
+      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
       setActive(false)
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
+      this.o.setDragSourceId(null)
+      this.o.stopDragAutoScroll()
       if (!fiberId) return
       if (!isDropEligible(fiberId)) return
-      const card = findCardById(this.getLastResponse(), fiberId)
+      const card = findCardById(this.o.getLastResponse(), fiberId)
       if (!card) return
       const { horizon, due } = dayMeaning(card.id)
-      void this.setSurface(card, horizon, { due })
+      void this.o.setSurface(card, horizon, { due })
     })
   }
 
@@ -1325,7 +1286,7 @@ export class KanbanSurfaceRenderer {
       // No text chip — long names overflowed the cluster row. The plum glyph
       // IS the queued mark (a taste call, signed off); the words live on hover.
       const blocking = card.dependsOnBlocking ?? card.dependsOn ?? []
-      const names = blocking.map((id) => findCardById(this.getLastResponse(), id)?.name ?? id)
+      const names = blocking.map((id) => findCardById(this.o.getLastResponse(), id)?.name ?? id)
       // A gated card that is CLOSED-but-unjudged is resting for two reasons at
       // once — it wants a verdict, and it is not its turn — and a row that named
       // only the second would read as work still to do. So the hover says both,
@@ -1358,7 +1319,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
-      this.openDetail(card)
+      this.o.openDetail(card)
     })
     return el
   }
@@ -1417,16 +1378,16 @@ export class KanbanSurfaceRenderer {
         this.handleQueueRowDropOut({ column: kind })
         return
       }
-      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.getDragSourceId()
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
+      const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
+      this.o.setDragSourceId(null)
+      this.o.stopDragAutoScroll()
       if (!fiberId) return
-      const card = findCardById(this.getLastResponse(), fiberId)
+      const card = findCardById(this.o.getLastResponse(), fiberId)
       if (!card) return
-      void this.transition(card, kind)
+      void this.o.transition(card, kind)
     }
     const dragOverColumn = (e: DragEvent): void => {
-      if (!this.getDragSourceId() && !this.queueDrag) return
+      if (!this.o.getDragSourceId() && !this.queueDrag) return
       e.preventDefault()
       e.stopPropagation()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
@@ -1491,19 +1452,19 @@ export class KanbanSurfaceRenderer {
   private makeColumnAction(kind: ColumnKind): HTMLButtonElement | null {
     const spec =
       kind === 'drafts'
-        ? this.onStashClick && {
+        ? this.o.onStashClick && {
             glyph: '+', modifier: 'drafts',
-            label: 'Stash a new fiber (n)', onClick: this.onStashClick,
+            label: 'Stash a new fiber (n)', onClick: this.o.onStashClick,
           }
         : kind === 'inFlight'
-          ? this.onNewIdeaClick && {
+          ? this.o.onNewIdeaClick && {
               glyph: '✶', modifier: 'inFlight',
-              label: 'New idea — speak it into a card', onClick: this.onNewIdeaClick,
+              label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick,
             }
           : kind === 'awaitingReview'
             ? {
                 glyph: '↻', modifier: 'awaitingReview',
-                label: 'Refresh the board', onClick: this.onRefresh, spin: true,
+                label: 'Refresh the board', onClick: this.o.onRefresh, spin: true,
               }
             : null
     if (!spec) return null
@@ -1642,7 +1603,7 @@ export class KanbanSurfaceRenderer {
       temperMetaBtn.setAttribute('aria-label', `Temper fiber: ${card.name}`)
       temperMetaBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        void this.transition(card, 'tempered')
+        void this.o.transition(card, 'tempered')
       })
 
       const compostMetaBtn = document.createElement('button')
@@ -1652,7 +1613,7 @@ export class KanbanSurfaceRenderer {
       compostMetaBtn.setAttribute('aria-label', `Compost fiber: ${card.name}`)
       compostMetaBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        void this.transition(card, 'composted')
+        void this.o.transition(card, 'composted')
       })
 
       reviewMetaActions.append(temperMetaBtn, compostMetaBtn)
@@ -1730,7 +1691,7 @@ export class KanbanSurfaceRenderer {
       heldEl.addEventListener('click', (e) => {
         e.stopPropagation()
         heldEl.disabled = true
-        void Promise.resolve(this.releaseQuarantine?.(host)).finally(() => {
+        void Promise.resolve(this.o.releaseQuarantine?.(host)).finally(() => {
           heldEl.disabled = false
         })
       })
@@ -1767,7 +1728,7 @@ export class KanbanSurfaceRenderer {
       }
       w.addEventListener('click', (e) => {
         e.stopPropagation()
-        this.openWorker?.(tmuxName, card.shuttleHost)
+        this.o.openWorker?.(tmuxName, card.shuttleHost)
       })
       rightChip = w
     }
@@ -1842,7 +1803,7 @@ export class KanbanSurfaceRenderer {
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
-      this.openDetail(card)
+      this.o.openDetail(card)
     })
 
     return el
@@ -1859,7 +1820,7 @@ export class KanbanSurfaceRenderer {
    * a drop for a queue it was not drawing.
    */
   private chainDependents(): Map<string, string[]> {
-    const resp = this.getLastResponse()
+    const resp = this.o.getLastResponse()
     if (resp === this.chainDependentsFor) return this.chainDependentsMap
     this.chainDependentsFor = resp
     this.chainDependentsMap = unsettledDependents(resp)
@@ -1884,7 +1845,7 @@ export class KanbanSurfaceRenderer {
     const queued = queuedBehind(card.id, this.chainDependents())
     if (queued.length === 0) return
 
-    const resp = this.getLastResponse()
+    const resp = this.o.getLastResponse()
     const names = queued.map((id) => findCardById(resp, id)?.name ?? id)
     const notes = queued.map((id) => {
       const member = findCardById(resp, id)
@@ -1919,8 +1880,8 @@ export class KanbanSurfaceRenderer {
         shape: m?.dependsOnShape,
         queueLength: queued.length,
         chainAllScalar,
-        canReorder: !!this.reorderQueue,
-        canUnqueue: !!this.unqueueRow,
+        canReorder: !!this.o.reorderQueue,
+        canUnqueue: !!this.o.unqueueRow,
       })
     const reorderable = members.some((m) => gestureFor(m).reorderable)
     // THE LIST IS ITS OWN DRAG BOUNDARY.
@@ -1997,7 +1958,7 @@ export class KanbanSurfaceRenderer {
       const member = members[i]
       li.addEventListener('click', (e) => {
         e.stopPropagation()
-        if (member) this.openDetail(member)
+        if (member) this.o.openDetail(member)
       })
       if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
       if (gesture.draggable) {
@@ -2093,7 +2054,7 @@ export class KanbanSurfaceRenderer {
       clearMarks()
       const writes = reorderQueueWrites(headId, queue, drag.from, to)
       if (writes.length === 0) return
-      void this.reorderQueue?.(writes)
+      void this.o.reorderQueue?.(writes)
     })
   }
 
@@ -2114,10 +2075,10 @@ export class KanbanSurfaceRenderer {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ): boolean {
     const drag = this.queueDrag
-    if (!drag || !this.unqueueRow) return false
+    if (!drag || !this.o.unqueueRow) return false
     this.setQueueDrag(null)
-    this.stopDragAutoScroll()
-    void this.unqueueRow(
+    this.o.stopDragAutoScroll()
+    void this.o.unqueueRow(
       drag.fiberId,
       unqueueRowWrites(drag.headId, drag.queue, drag.from),
       drop,
@@ -2137,14 +2098,14 @@ export class KanbanSurfaceRenderer {
    * released over a card.
    */
   private installStackTarget(el: HTMLElement, target: KanbanCard): void {
-    if (!this.stack) return
+    if (!this.o.stack) return
     const verdictFor = (): StackVerdict | null => {
-      const sourceId = this.getDragSourceId()
+      const sourceId = this.o.getDragSourceId()
       if (!sourceId || sourceId === target.id) return null
-      const source = findCardById(this.getLastResponse(), sourceId)
+      const source = findCardById(this.o.getLastResponse(), sourceId)
       if (!source) return null
       return stackDropVerdict(source, target, this.chainDependents(), (id) =>
-        findCardById(this.getLastResponse(), id) ?? undefined,
+        findCardById(this.o.getLastResponse(), id) ?? undefined,
       )
     }
     // DWELL: the pointer resting on this card arms it, whatever the geometry
@@ -2182,7 +2143,7 @@ export class KanbanSurfaceRenderer {
     let tailEl: HTMLElement | null = null
     const arm = (tail: string): void => {
       el.classList.add('kbn-card-stack-target')
-      const tailCard = tail === target.id ? target : findCardById(this.getLastResponse(), tail)
+      const tailCard = tail === target.id ? target : findCardById(this.o.getLastResponse(), tail)
       const tailName = tailCard?.name ?? tail
       this.setAim(el, tail === target.id
         ? `queues after “${tailName}”`
@@ -2283,13 +2244,13 @@ export class KanbanSurfaceRenderer {
       }
       e.preventDefault()
       e.stopPropagation()
-      const sourceId = this.getDragSourceId()
+      const sourceId = this.o.getDragSourceId()
       clear()
-      this.setDragSourceId(null)
-      this.stopDragAutoScroll()
-      const source = sourceId ? findCardById(this.getLastResponse(), sourceId) : null
+      this.o.setDragSourceId(null)
+      this.o.stopDragAutoScroll()
+      const source = sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
       if (!source || !verdict?.ok) return
-      void this.stack?.(source, verdict.tail)
+      void this.o.stack?.(source, verdict.tail)
     })
   }
 
@@ -2316,7 +2277,7 @@ export class KanbanSurfaceRenderer {
         e.preventDefault()
         return
       }
-      this.setDragSourceId(card.id)
+      this.o.setDragSourceId(card.id)
       el.classList.add('kbn-card-dragging')
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move'
@@ -2327,9 +2288,9 @@ export class KanbanSurfaceRenderer {
     })
     el.addEventListener('dragend', () => {
       el.classList.remove('kbn-card-dragging')
-      this.setDragSourceId(null)
+      this.o.setDragSourceId(null)
       this.releaseDragGhost()
-      if (includePlainText) this.stopDragAutoScroll()
+      if (includePlainText) this.o.stopDragAutoScroll()
     })
   }
 
