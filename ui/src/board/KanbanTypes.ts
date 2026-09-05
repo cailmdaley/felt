@@ -108,11 +108,6 @@ export interface KanbanCard {
   /** Ms timestamp the boot-quarantine hold began (`parked_at`), for a tooltip. */
   heldSince?: number
   /**
-   * Fiber id in Shuttle's canonical felt store. City-scoped kanban cards may
-   * use project-relative ids for navigation; dispatch must use this id.
-   */
-  shuttleFiberId?: string
-  /**
    * Session UUID of the most recently dispatched worker, IFF the fiber's
    * frontmatter still carries `shuttle.session.id`. Effectively always absent:
    * continuation state lives in the `shuttle:` block's `session_uuid`, resolved
@@ -303,9 +298,5 @@ export interface KanbanResponse {
    * stale badge and to disable drag for stale-origin cards.
    */
   staleness: Record<string, KanbanOriginStaleness>
-  remoteScope?: {
-    originId: string
-    hostname: string
-  }
   generatedAt: number
 }

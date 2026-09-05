@@ -986,7 +986,7 @@ export class FiberDetailModal {
   }
 
   private installGestureFrames(prose: HTMLElement, card: KanbanCard): void {
-    const fiberId = card.shuttleFiberId ?? card.id
+    const fiberId = card.id
     for (const frame of prose.querySelectorAll<HTMLIFrameElement>('iframe[data-gesture-path]')) {
       const src = frame.getAttribute('src') ?? frame.src
       this.gestureLayers.push(installGestureLayer(frame, {
@@ -2819,7 +2819,7 @@ export class FiberDetailModal {
             }
           }
         : undefined,
-      { fiberId: card.shuttleFiberId ?? card.id },
+      { fiberId: card.id },
     )
     entry.cell.append(viewer)
     // Zoom target: the <img> for images (sized in px so it magnifies PAST the

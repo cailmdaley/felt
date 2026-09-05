@@ -44,11 +44,6 @@ export function fiberIndex(shuttleBase: string): Promise<FiberIndexEntry[]> {
   return p
 }
 
-/** Test seam — lets a test install an index without a daemon. */
-export function primeFiberIndex(shuttleBase: string, rows: FiberIndexEntry[]): void {
-  indexCache.set(shuttleBase, Promise.resolve(rows))
-}
-
 /**
  * What fiber does a wikilink's text name?
  *

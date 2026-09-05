@@ -34,8 +34,7 @@ export async function errorMessageFromResponse(res: Response, label: string): Pr
 
 export function isAgentCard(card: KanbanCard): boolean {
   return card.shuttleKind !== undefined ||
-    card.shuttleAgent !== undefined ||
-    card.shuttleFiberId !== undefined
+    card.shuttleAgent !== undefined
 }
 
 /** The structured shape a 422 not_eligible dispatch response can carry. */
