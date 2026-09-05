@@ -119,17 +119,22 @@ func eventsMaxBytes() int64 {
 }
 
 // appendEventLine rotates if needed, then appends one line.
-//
-// One O_APPEND write() per line, no locking: appends to a regular file are
-// atomic against other appenders on both Darwin and Linux as long as the write
-// is a single call, which is why hook_event.go bounds the line size before
-// getting here.
 func appendEventLine(path, line string) error {
 	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
 		// Best-effort: if the rename loses a race with another hook process,
 		// the loser just appends to whichever file now holds the name.
 		_ = os.Rename(path, path+eventsRotatedSuffix)
 	}
+	return appendLine(path, line)
+}
+
+// appendLine appends one line, creating the file if it does not exist.
+//
+// One O_APPEND write() per line, no locking: appends to a regular file are
+// atomic against other appenders on both Darwin and Linux as long as the write
+// is a single call, which is why hook_event.go bounds the line size before
+// getting here.
+func appendLine(path, line string) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return err

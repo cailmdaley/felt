@@ -87,6 +87,16 @@ func resolveProjectRoot() (string, error) {
 	return felt.FindProjectRoot()
 }
 
+// requireStore opens the storage for the enclosing felt project, returning the
+// project root alongside it for callers that also resolve a command scope.
+func requireStore() (*felt.Storage, string, error) {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return nil, "", fmt.Errorf("not in a felt repository")
+	}
+	return felt.NewStorage(root), root, nil
+}
+
 // resolveCommandScope derives the nearest containing fiber ID from the current
 // working directory when the command is run inside `.felt/`.
 func resolveCommandScope(root string) string {
@@ -119,9 +129,6 @@ func resolveCommandScope(root string) string {
 	parts := strings.Split(rel, "/")
 	for i := len(parts); i > 0; i-- {
 		candidate := path.Join(parts[:i]...)
-		if candidate == "." || candidate == "" {
-			continue
-		}
 		fiberPath := filepath.Join(feltRoot, filepath.FromSlash(candidate), path.Base(candidate)+felt.FileExt)
 		if info, err := os.Stat(fiberPath); err == nil && !info.IsDir() {
 			return candidate

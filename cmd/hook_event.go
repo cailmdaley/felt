@@ -287,13 +287,13 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 		}
 	}
 
-	encoded, err := encodeEventLine(line)
+	encoded, err := encodeJSONLine(line)
 	if err != nil {
 		return "", false
 	}
 	if len(encoded) > eventMaxLineBytes && line.ToolInput != nil {
 		line.ToolInput = trimToolInput(line.ToolInput)
-		encoded, err = encodeEventLine(line)
+		encoded, err = encodeJSONLine(line)
 		if err != nil {
 			return "", false
 		}
@@ -301,14 +301,14 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 	return encoded, true
 }
 
-// encodeEventLine renders one compact, newline-terminated line with `<>&` left
-// alone (Go escapes them by default; jq did not, and the stream is read by
-// humans as often as by the daemon).
-func encodeEventLine(line eventLine) (string, error) {
+// encodeJSONLine renders one compact, newline-terminated line with `<>&` left
+// alone (Go escapes them by default; jq did not, and both the event stream and
+// the commit ledger are read by humans as often as by the daemon).
+func encodeJSONLine[T any](v T) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(line); err != nil {
+	if err := enc.Encode(v); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
@@ -334,15 +334,9 @@ func normalizeToolInput(raw json.RawMessage) json.RawMessage {
 	if fp == "" {
 		return raw
 	}
-	encoded, err := json.Marshal(fp)
-	if err != nil {
-		return raw
-	}
+	encoded, _ := json.Marshal(fp)
 	obj["file_path"] = encoded
-	merged, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
+	merged, _ := json.Marshal(obj)
 	return merged
 }
 
@@ -379,10 +373,7 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 			trimmed["file_path"] = v
 		}
 	}
-	out, err := json.Marshal(trimmed)
-	if err != nil {
-		return json.RawMessage(`{"truncated":true}`)
-	}
+	out, _ := json.Marshal(trimmed)
 	return out
 }
 

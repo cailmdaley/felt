@@ -85,12 +85,8 @@ Examples:
 		if addStatus != "" {
 			f.Status = addStatus
 		}
-		if len(addTags) > 0 {
-			for _, raw := range addTags {
-				for _, tag := range splitTags(raw) {
-					f.AddTag(tag)
-				}
-			}
+		for _, tag := range splitListFlag(addTags) {
+			f.AddTag(tag)
 		}
 		if addDue != "" {
 			due, err := time.Parse("2006-01-02", addDue)

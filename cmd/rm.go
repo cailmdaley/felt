@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
 )
 
@@ -13,12 +12,10 @@ var rmCmd = &cobra.Command{
 	Long:  `Permanently removes a felt from the repository.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, root, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 
 		// An id that names a fiber in the enclosing store is deleted there,

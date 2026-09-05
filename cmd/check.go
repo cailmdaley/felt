@@ -25,12 +25,10 @@ Current checks cover:
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 		// The walk's own stderr warning about a file it skipped would duplicate
 		// the issue CheckParseability raises below, and only one of the two
 		// carries an exit code.

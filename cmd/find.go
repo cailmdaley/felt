@@ -60,11 +60,10 @@ unsuppressed by default: every status the filter asked for, every match — pass
 --limit explicitly to cap the outer half.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-		storage := felt.NewStorage(root)
 
 		query := ""
 		if len(args) == 1 {

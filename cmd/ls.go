@@ -56,12 +56,10 @@ folded into that ancestor, which carries a count of what it swallowed. Use -v to
 list every match flat. --json is always uncollapsed.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 		query := ""
 		if len(args) == 1 {
 			query = args[0]
@@ -109,19 +107,12 @@ list every match flat. --json is always uncollapsed.`,
 		if err != nil {
 			return err
 		}
-		exactMatches, filtered, bodyCandidates := search.apply(felts)
-
-		if query != "" && !lsExact && lsBody && len(bodyCandidates) > 0 {
-			filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, search.re, search.queryLower, lsRegex)
-			if err != nil {
-				return err
-			}
+		exactMatches, rest, err := search.match(storage, felts)
+		if err != nil {
+			return err
 		}
+		filtered := append(exactMatches, rest...)
 
-		// Exact name matches first, then the rest
-		filtered = append(exactMatches, filtered...)
-
-		// Sort: --recent sorts by recency, otherwise by priority then creation
 		if lsRecent > 0 {
 			// Sort by most recent activity (closed-at for closed, created-at otherwise)
 			sort.Slice(filtered, func(i, j int) bool {
@@ -135,7 +126,6 @@ list every match flat. --json is always uncollapsed.`,
 				}
 				return ti.After(tj) // Most recent first
 			})
-			// Limit to N
 			if len(filtered) > lsRecent {
 				filtered = filtered[:lsRecent]
 			}
@@ -146,7 +136,6 @@ list every match flat. --json is always uncollapsed.`,
 			})
 		}
 
-		// Output
 		if jsonOutput {
 			if lsBody {
 				filtered, err = hydrateBodies(storage, filtered)
@@ -179,20 +168,11 @@ list every match flat. --json is always uncollapsed.`,
 		// status they asked for. Dropping closed happens after the JSON branch
 		// has already returned, and before the collapse — so a collapsed
 		// ancestor's descendant count counts only lines that would have printed.
-		var closedSuppressed int
-		if suppressClosed {
-			filtered, closedSuppressed = partitionOutClosed(filtered)
-			exactMatches, _ = partitionOutClosed(exactMatches)
-		}
-
+		//
 		// Containment collapse: a query that matches a directory fiber also
 		// matches every descendant by slug, which buries the one hit worth
 		// seeing under its whole subtree. Show the ancestor with a count.
-		shown := filtered
-		var collapsed map[string]int
-		if query != "" && !lsVerbose {
-			shown, collapsed = collapseByContainment(filtered, exactMatches)
-		}
+		shown, filtered, collapsed, closedSuppressed := finish(filtered, exactMatches, suppressClosed, query != "" && !lsVerbose)
 
 		if len(shown) == 0 {
 			if query != "" {
@@ -298,23 +278,41 @@ func compileSearch(query string, status string, widen bool, tags, hasFields []st
 // partitioned out when the caller asks. It is the whole body of a search over
 // a store, so ls and find print the same shape from the same code.
 func (search lsSearch) run(storage *felt.Storage, felts []*felt.Felt, suppressClosed bool) (shown []*felt.Felt, collapsedCounts map[string]int, closed int, err error) {
-	exactMatches, filtered, bodyCandidates := search.apply(felts)
+	exactMatches, filtered, err := search.match(storage, felts)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	shown, _, collapsedCounts, closed = finish(append(exactMatches, filtered...), exactMatches, suppressClosed, !search.verbose)
+	return shown, collapsedCounts, closed, nil
+}
+
+// match splits one store's fibers into the exact name matches (printed first)
+// and the rest, reading bodies when --body asked for a body search.
+func (search lsSearch) match(storage *felt.Storage, felts []*felt.Felt) (exact, rest []*felt.Felt, err error) {
+	exact, rest, bodyCandidates := search.apply(felts)
 	if search.query != "" && !search.exact && search.body && len(bodyCandidates) > 0 {
-		filtered, err = scanBodyMatches(storage, filtered, bodyCandidates, search.re, search.queryLower, search.regex)
+		rest, err = scanBodyMatches(storage, rest, bodyCandidates, search.re, search.queryLower, search.regex)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, err
 		}
 	}
-	matches := append(exactMatches, filtered...)
+	return exact, rest, nil
+}
+
+// finish turns the matches into what prints: the closed ones partitioned out
+// when the caller asks, then containment-collapsed. ls and find gate the
+// collapse differently - a bare `-t` listing is never collapsed - so it is a
+// parameter, not a property of the search.
+func finish(matches, exact []*felt.Felt, suppressClosed, collapse bool) (shown, kept []*felt.Felt, collapsedCounts map[string]int, closed int) {
 	if suppressClosed {
 		matches, closed = partitionOutClosed(matches)
-		exactMatches, _ = partitionOutClosed(exactMatches)
+		exact, _ = partitionOutClosed(exact)
 	}
 	shown = matches
-	if !search.verbose {
-		shown, collapsedCounts = collapseByContainment(matches, exactMatches)
+	if collapse {
+		shown, collapsedCounts = collapseByContainment(matches, exact)
 	}
-	return shown, collapsedCounts, closed, nil
+	return shown, matches, collapsedCounts, closed
 }
 
 // apply splits felts into exact matches (printed first), ordinary matches,
@@ -323,15 +321,11 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 	query, queryLower, re, effectiveStatus, hasFields := search.query, search.queryLower, search.re, search.effectiveStatus, search.hasFields
 	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
 	for _, f := range felts {
-		// Status gate
-		if effectiveStatus == "all" {
-			// No filtering, include everything
-		} else if effectiveStatus != "" {
-			// Specific status: must match
+		if effectiveStatus != "all" && effectiveStatus != "" {
 			if f.Status != effectiveStatus {
 				continue
 			}
-		} else {
+		} else if effectiveStatus == "" {
 			// Default: open+active, must have status
 			if !f.HasStatus() {
 				continue
@@ -341,7 +335,7 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 			}
 		}
 
-		// Tag filter: must have ALL specified tags (AND logic, prefix supported)
+		// AND logic across tags, prefix match supported.
 		if len(tags) > 0 {
 			hasAll := true
 			for _, tag := range tags {
@@ -368,7 +362,6 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 			}
 		}
 
-		// Text search (if query provided)
 		if query != "" {
 			nameLower := strings.ToLower(f.DisplayName())
 			idLower := strings.ToLower(f.ID)
@@ -380,12 +373,10 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 				continue
 			}
 
-			// If --exact, skip partial matches
 			if exact {
 				continue
 			}
 
-			// Substring or regex match against name, SearchText, and id
 			if matchesQuery(f, queryLower, re, regex) {
 				filtered = append(filtered, f)
 				continue
@@ -668,12 +659,10 @@ Use -L/--depth to cap how deep the tree is drawn; elided branches are marked
 with the count of what lies below them. --json is always the full tree.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, _, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
-
-		storage := felt.NewStorage(root)
 
 		// Resolve the argument before listing anything: an id that names a
 		// fiber in the enclosing store draws THAT store's tree — the fiber is

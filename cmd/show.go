@@ -37,9 +37,9 @@ Targeted views:
                     scalars one-per-line, structured values as YAML)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		storage, root, err := requireStore()
 		if err != nil {
-			return fmt.Errorf("not in a felt repository")
+			return err
 		}
 
 		detail := showDetail
@@ -65,7 +65,6 @@ Targeted views:
 			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, or --field")
 		}
 
-		storage := felt.NewStorage(root)
 		scopeID := resolveCommandScope(root)
 
 		// An id that names a fiber in the enclosing store is shown from
@@ -187,8 +186,8 @@ func init() {
 }
 
 type showBodyOutput struct {
-	Body          string `json:"body" yaml:"body"`
-	BodyStartLine int    `json:"body_start_line" yaml:"body_start_line"`
+	Body          string `json:"body"`
+	BodyStartLine int    `json:"body_start_line"`
 }
 
 func outputShowBody(storage *felt.Storage, f *felt.Felt) error {
@@ -279,7 +278,7 @@ func emitFieldNode(n *yaml.Node) error {
 			return nil
 		}
 		fallthrough
-	case yaml.MappingNode, yaml.AliasNode, yaml.DocumentNode:
+	case yaml.MappingNode, yaml.AliasNode:
 		out, err := yaml.Marshal(n)
 		if err != nil {
 			return fmt.Errorf("marshal field value: %w", err)
