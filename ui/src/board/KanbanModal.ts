@@ -334,7 +334,7 @@ export class KanbanModal {
     // spot and for headless QA, which can't press a hotkey. Unknown values
     // fall through to the Desk.
     const wanted = new URLSearchParams(window.location.search).get('view')
-    if (wanted && (wanted === 'desk' || listViews().some((v) => v.id === wanted))) {
+    if (wanted && listViews().some((v) => v.id === wanted)) {
       this.setView(wanted as BoardViewId)
     }
   }
@@ -859,10 +859,9 @@ export class KanbanModal {
     // promote to Now (the "park on desk" half of the gesture), then fall
     // through to the lifecycle verb (the "act on it" half) — never early-return.
     const isNowColumn = target === 'drafts' || target === 'inFlight' || target === 'awaitingReview'
-    const resp = basis
-    const onTimelineOrStash = !!resp && [
-      ...resp.timeline.futureDated,
-      ...resp.stash,
+    const onTimelineOrStash = !!basis && [
+      ...basis.timeline.futureDated,
+      ...basis.stash,
     ].some((c) => c.id === card.id)
     // Park on the desk whenever leftover planning fields would otherwise
     // re-route the card after the lifecycle verb lands: a stale `horizon`
@@ -2174,15 +2173,11 @@ export class KanbanModal {
     if (this.body.scrollWidth <= this.body.clientWidth) return
     if (!e.shiftKey) return
 
-    const verticalDelta = e.deltaY
-    const horizontalDelta = e.deltaX
-    if (Math.abs(verticalDelta) < Math.abs(horizontalDelta)) return
-
-    const boardDelta = verticalDelta
-    if (boardDelta === 0) return
+    if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return
+    if (e.deltaY === 0) return
 
     e.preventDefault()
-    this.body.scrollLeft += boardDelta
+    this.body.scrollLeft += e.deltaY
     this.updateBodyScrollAffordance()
   }
 
@@ -2243,13 +2238,17 @@ export class KanbanModal {
     if (!this.body) return -1
 
     const bodyLeft = this.body.getBoundingClientRect().left
-    const distances = heads.map((head, index) => {
+    let nearest = -1
+    let nearestDistance = Number.POSITIVE_INFINITY
+    heads.forEach((head, index) => {
       const col = head.closest<HTMLElement>('.kbn-col')
       const distance = col ? Math.abs(col.getBoundingClientRect().left - bodyLeft) : Number.POSITIVE_INFINITY
-      return { index, distance }
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearest = index
+      }
     })
-    distances.sort((a, b) => a.distance - b.distance)
-    return distances[0]?.index ?? -1
+    return nearest
   }
 
   private scrollColumnToStart(col: HTMLElement | null): void {
@@ -2598,9 +2597,9 @@ function applyOptimisticTransition(
   resp: KanbanResponse | null,
   cardId: string,
   target: ColumnKind,
-  nowIso: string = new Date().toISOString(),
 ): KanbanResponse | null {
   if (!resp) return null
+  const nowIso = new Date().toISOString()
   const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
