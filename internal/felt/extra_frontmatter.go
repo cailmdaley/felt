@@ -86,12 +86,6 @@ func (f *Felt) ExtraFieldsYAML() string {
 	return strings.TrimSpace(string(data))
 }
 
-// ExtraFieldsSearchText exposes opaque frontmatter to felt ls/search without
-// interpreting any schema beyond serializing the YAML text.
-func (f *Felt) ExtraFieldsSearchText() string {
-	return f.ExtraFieldsYAML()
-}
-
 // DataFlowInputs returns generic input refs extracted from an opaque
 // top-level `inputs:` field when present. felt treats these only as a data-flow
 // convention, not as a native semantic schema.
@@ -295,12 +289,7 @@ func setMappingNode(mapping *yaml.Node, key string, value any) error {
 		return nil
 	}
 	if value == nil {
-		for i := 0; i+1 < len(mapping.Content); i += 2 {
-			if strings.TrimSpace(mapping.Content[i].Value) == key {
-				mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
-				return nil
-			}
-		}
+		removeMappingKey(mapping, key)
 		return nil
 	}
 	var encoded yaml.Node

@@ -128,7 +128,7 @@ func RelationshipsFromFelts(felts []*Felt, targetID string, external *ExternalRe
 	ids := sortedFeltIDs(felts)
 	var citations []Citation
 	var consumers []DataFlowConsumer
-	_ = iterRefs(felts, ids, external, func(r resolvedRef) error {
+	_ = iterRefsResolved(felts, newScopedIDResolverIn(ids, external), func(r resolvedRef) error {
 		if r.ResolveErr != nil || r.ResolvedID != targetID {
 			return nil
 		}
@@ -182,21 +182,15 @@ type resolvedRef struct {
 	ResolveErr error
 }
 
-// iterRefs walks every outbound reference (body references then data-flow
-// inputs) of each felt in document order, resolving each against ids and
-// invoking yield once per ref. Empty/blank data-flow targets are skipped
-// before yielding — matching every existing call site. A non-nil yield error
-// halts iteration and propagates.
+// iterRefsResolved walks every outbound reference (body references then
+// data-flow inputs) of each felt in document order, resolving each against the
+// prebuilt resolver and invoking yield once per ref. Empty/blank data-flow
+// targets are skipped before yielding. A non-nil yield error halts iteration
+// and propagates.
 //
-// The resolver is built once for the whole walk rather than per-ref, since
-// newScopedIDResolverIn rebuilds maps + sorts over every id.
-func iterRefs(felts []*Felt, ids []string, external *ExternalRefs, yield func(resolvedRef) error) error {
-	return iterRefsResolved(felts, newScopedIDResolverIn(ids, external), yield)
-}
-
-// iterRefsResolved is iterRefs against a prebuilt resolver, so a caller that
-// walks many fibers against the same id set builds the resolver once instead
-// of once per fiber.
+// The resolver is passed in, not built here, so a caller that walks many fibers
+// against the same id set builds it once for the whole walk — newScopedIDResolverIn
+// rebuilds maps + sorts over every id.
 func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
 	for _, f := range felts {
 		for _, ref := range ExtractBodyRefs(f.Body) {
