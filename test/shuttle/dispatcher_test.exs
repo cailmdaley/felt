@@ -834,8 +834,7 @@ defmodule Shuttle.DispatcherTest do
     result =
       Dispatcher.dispatch("tests/shuttle-agent-block",
         runner: MockRunner,
-        force: true,
-        store_session_id: false
+        force: true
       )
 
     assert {:ok, _session} = result
@@ -912,7 +911,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "dispatch reads felt's resolved pi agent (pi-tagged fiber)" do
-    result = Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner, store_session_id: false)
+    result = Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner)
     assert {:ok, session} = result
     assert session == Dispatcher.session_name("tests/pi-tagged")
 
@@ -1366,7 +1365,6 @@ defmodule Shuttle.DispatcherTest do
 
     assert Dispatcher.resolve_resume_intent(
              {:standing_run, "adhoc-1770000000000", :ad_hoc},
-             "tests/haiku",
              fiber
            ) == :fresh
   end
@@ -1381,12 +1379,11 @@ defmodule Shuttle.DispatcherTest do
     # Scheduled standing run: defer
     assert Dispatcher.resolve_resume_intent(
              {:standing_run, "20260508T070000+0000"},
-             "tests/haiku",
              fiber
            ) == :fresh
 
     # Plain constitution dispatch: defer
-    assert Dispatcher.resolve_resume_intent(:constitution, "tests/haiku", fiber) == :fresh
+    assert Dispatcher.resolve_resume_intent(:constitution, fiber) == :fresh
   end
 
   describe "check_resume_intent — oneshot resume-on-no-handoff discriminator (frontmatter)" do
@@ -1407,7 +1404,7 @@ defmodule Shuttle.DispatcherTest do
       # A dispatch stamp but no `handed_off_at` after it → died mid-thought →
       # resume the transcript rather than loop a fresh worker.
       assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               Dispatcher.check_resume_intent("task", dispatched_fiber(ctx))
+               Dispatcher.check_resume_intent(dispatched_fiber(ctx))
     end
 
     test "starts fresh when the worker left a clean handoff (handed_off_at >= dispatched_at)",
@@ -1415,7 +1412,7 @@ defmodule Shuttle.DispatcherTest do
       # The worker stamped `handed_off_at` at or after the dispatch → clean close →
       # next worker starts fresh.
       fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
-      assert :fresh = Dispatcher.check_resume_intent("task", fiber)
+      assert :fresh = Dispatcher.check_resume_intent(fiber)
     end
 
     test "an explicit resume_mode=fresh directive overrides the dirty-death resume", ctx do
@@ -1427,14 +1424,14 @@ defmodule Shuttle.DispatcherTest do
       # workers there die without a handoff, so every "New session" silently
       # resumed the dead transcript.
       assert :fresh =
-               Dispatcher.check_resume_intent("task", dispatched_fiber(ctx), resume_mode: "fresh")
+               Dispatcher.check_resume_intent(dispatched_fiber(ctx), resume_mode: "fresh")
     end
 
     test "resume_mode=previous resumes the shuttle block's session", ctx do
       # The human clicked "Resume previous". The session id comes from
       # `shuttle.session_uuid` the daemon stamped (the worker never knew its UUID).
       assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               Dispatcher.check_resume_intent("task", dispatched_fiber(ctx),
+               Dispatcher.check_resume_intent(dispatched_fiber(ctx),
                  resume_mode: "previous"
                )
     end
@@ -1446,21 +1443,21 @@ defmodule Shuttle.DispatcherTest do
       fiber = %{"shuttle" => %{"kind" => "oneshot"}}
 
       assert {:error, :missing_session_id} =
-               Dispatcher.check_resume_intent("task", fiber, resume_mode: "previous")
+               Dispatcher.check_resume_intent(fiber, resume_mode: "previous")
     end
 
     test "a standing role is never auto-resumed (fresh even with no handoff)", ctx do
       # Scope guard: only oneshots use this mechanism. A standing role dispatches
       # discrete scheduled occurrences — always fresh.
       fiber = dispatched_fiber(ctx, %{"kind" => "standing"})
-      assert :fresh = Dispatcher.check_resume_intent("task", fiber)
+      assert :fresh = Dispatcher.check_resume_intent(fiber)
     end
 
     test "no prior session (first run) starts fresh", _ctx do
       # No `session_uuid`/`dispatched_at` on the fiber → no session id to resume →
       # fresh.
       fiber = %{"shuttle" => %{"kind" => "oneshot"}}
-      assert :fresh = Dispatcher.check_resume_intent("fresh-task", fiber)
+      assert :fresh = Dispatcher.check_resume_intent(fiber)
     end
   end
 

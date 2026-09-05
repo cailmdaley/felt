@@ -805,7 +805,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     host: host
   } do
     root = put_codex_sessions_root(Path.join(host, "codex-sessions"))
-    tomorrow = Date.add(Dispatcher.local_today(), 1)
+    tomorrow = Date.add(Shuttle.HarnessPaths.local_today(), 1)
 
     work_dir = File.cwd!()
     timestamp = DateTime.utc_now() |> DateTime.add(30, :second) |> DateTime.to_iso8601()
@@ -859,7 +859,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     {{year, month, day}, _time} = :calendar.local_time()
     local_today = Date.new!(year, month, day)
 
-    assert Dispatcher.local_today() == local_today
+    assert Shuttle.HarnessPaths.local_today() == local_today
 
     expected =
       for offset <- [1, 0, -1] do
@@ -1792,7 +1792,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   end
 
   defp codex_day_dir(root, offset, opts \\ []) do
-    date = Date.add(Dispatcher.local_today(), offset)
+    date = Date.add(Shuttle.HarnessPaths.local_today(), offset)
 
     dir =
       Path.join([
