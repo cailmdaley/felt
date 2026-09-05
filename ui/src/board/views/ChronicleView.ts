@@ -1272,24 +1272,12 @@ class ChronicleView implements TemporalView {
     this.root = page.root
     this.body = page.body
     this.ctx = ctx
-    this.signature = ''
-    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
-    // value" — and they only behave if they move together. Clearing one alone
-    // leaves the view believing it is anchored on a cursor from a previous
-    // visit, so both are cleared here and in unmount, side by side.
-    this.didAnchor = false
-    this.anchoredOn = null
-    this.dayWidthPx = 0
-    this.monthEl = null
     // The head's right end. `titleRow` is `space-between` with an out-of-flow
     // centre, so a third child lands at the right margin without any of the
     // three moving the others.
     page.titleRow.append(this.buildSearch(ctx))
     host.append(page.root)
 
-    // Refit the columns when the board changes width. Only the CSS variable
-    // moves; every mark's position is a calc() over it, so the whole chronicle
-    // rescales without a rebuild.
     this.onEsc = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || this.scopedCycleId === null || !this.ctx) return
       e.stopPropagation() // the board closes itself on Escape; leaving an era comes first
@@ -1297,6 +1285,9 @@ class ChronicleView implements TemporalView {
     }
     document.addEventListener('keydown', this.onEsc, true)
 
+    // Refit the columns when the board changes width. Only the CSS variable
+    // moves; every mark's position is a calc() over it, so the whole chronicle
+    // rescales without a rebuild.
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.fitDayWidth())
       this.resizeObserver.observe(page.body)
@@ -1351,6 +1342,11 @@ class ChronicleView implements TemporalView {
     this.scroller = null
     this.ctx = null
     this.signature = ''
+    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
+    // value" — and they only behave if they move together. Clearing one alone
+    // would leave the next visit believing it is anchored on a cursor from the
+    // last one, so they are cleared side by side. A view is a singleton, and
+    // unmount always runs before the next mount, so this is the only clear.
     this.didAnchor = false
     this.anchoredOn = null
     this.dayWidthPx = 0
@@ -2660,6 +2656,34 @@ class ChronicleView implements TemporalView {
   }
 
   /**
+   * The document-level half of a drag gesture, shared by the three that have
+   * one (edge, due mark, draw-to-create).
+   *
+   * The listeners go on the DOCUMENT, not the element: a drag that leaves the
+   * grid must still track and still commit. The returned detach is also parked
+   * on `this.teardownDraw` so `unmount()` can end a gesture mid-flight, and it
+   * runs before the caller's `onUp` so an up-handler can never re-enter.
+   */
+  private beginDrag(
+    onMove: (ev: MouseEvent) => void,
+    onUp: (ev: MouseEvent) => void,
+  ): () => void {
+    const detach = (): void => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', up)
+      this.stopAutoScroll()
+    }
+    const up = (ev: MouseEvent): void => {
+      detach()
+      onUp(ev)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', up)
+    this.teardownDraw = detach
+    return detach
+  }
+
+  /**
    * Drag a band's edge to move its `start:` or its `due:`.
    *
    * The band is repainted from the cursor as it moves, so the gesture reads as
@@ -2712,9 +2736,6 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const onUp = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
         this.teardownDraw = null
         this.draft = null
         bandEl.classList.remove('chr-band-resizing')
@@ -2725,13 +2746,7 @@ class ChronicleView implements TemporalView {
         const originalDay = edge === 'start' ? originStart : originEnd
         if (dropped !== originalDay) void this.writeCycleEdge(band, edge, dropped, ctx)
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
-      this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
-      }
+      this.beginDrag(onMove, onUp)
     })
   }
 
@@ -2815,10 +2830,7 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const cleanup = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        document.removeEventListener('keydown', onKey, true)
-        this.stopAutoScroll()
+        endGesture()
         this.teardownDraw = null
         this.draft = null
         mark.classList.remove('chr-mark-dragging')
@@ -2846,15 +2858,15 @@ class ChronicleView implements TemporalView {
         cleanup()
         paint()
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+      const detach = this.beginDrag(onMove, onUp)
       document.addEventListener('keydown', onKey, true)
-      this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
+      // Escape is this gesture's own extra listener, so it comes off on both
+      // ways out: the caller's cleanup and unmount's teardown.
+      const endGesture = (): void => {
+        detach()
         document.removeEventListener('keydown', onKey, true)
-        this.stopAutoScroll()
       }
+      this.teardownDraw = endGesture
     })
   }
 
@@ -2946,20 +2958,17 @@ class ChronicleView implements TemporalView {
         this.autoScrollAt(ev.clientX)
       }
       const onUp = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
-        this.stopAutoScroll()
         this.teardownDraw = null
         if (!this.draft) return
         this.draft.naming = true
         const [from, to] = [this.draft.fromDay, this.draft.toDay].sort()
         this.openNameInput(track, ghost, from, to, ctx)
       }
-      document.addEventListener('mousemove', onMove)
-      document.addEventListener('mouseup', onUp)
+      // The ghost survives a normal release — `openNameInput` names the span it
+      // draws — so only the teardown path discards it.
+      const detach = this.beginDrag(onMove, onUp)
       this.teardownDraw = (): void => {
-        document.removeEventListener('mousemove', onMove)
-        document.removeEventListener('mouseup', onUp)
+        detach()
         ghost.remove()
       }
     })
@@ -3039,30 +3048,20 @@ class ChronicleView implements TemporalView {
     input.style.left = ghost.style.left
     input.style.width = `max(${ghost.style.width}, 150px)`
     track.append(input)
-    input.focus()
-
-    let settled = false
-    const finish = (name: string | null): void => {
-      if (settled) return
-      settled = true
-      input.remove()
-      ghost.remove()
-      this.draft = null
-      this.teardownDraw = null
-      if (name) void this.createCycle(name, startDay, endDay, ctx)
-      else if (this.ctx) void this.load(this.ctx)
-    }
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        finish(input.value.trim() || null)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        finish(null)
-      }
-      e.stopPropagation() // the board's own hotkeys must not eat the typing
+    this.editInPlace(input, {
+      // An empty name is an abandoned draw, not a nameless cycle.
+      commit: (value) => {
+        const name = value.trim()
+        if (name) void this.createCycle(name, startDay, endDay, ctx)
+        else if (this.ctx) void this.load(this.ctx)
+      },
+      done: () => {
+        input.remove()
+        ghost.remove()
+        this.draft = null
+        this.teardownDraw = null
+      },
     })
-    input.addEventListener('blur', () => finish(input.value.trim() || null))
   }
 
   /**
