@@ -476,15 +476,14 @@ export interface DayLane {
    *  drawn — so this is also the click target, unconditionally. */
   cardId: string
   /**
-   * Distinct minutes carrying an attention / agent bucket — the figures the
-   * ledger reports as "you 38m · agents 2h 10m".
+   * Distinct minutes carrying an agent bucket — the figure the ledger reports
+   * as "agents 2h 10m".
    *
    * Counted from the buckets, never off the drawn curve. The curve is a
    * kernel-smoothed field: it has no edges to sum, and the smoothing reaches
    * minutes in which nothing happened. Ink and arithmetic answer to the same
    * events, but only one of them is allowed to be blurred.
    */
-  attentionMinutes: number
   agentMinutes: number
   /**
    * Messages you sent to this fiber today — the sum of `n` over its attention
@@ -500,8 +499,6 @@ export interface DayLane {
    *  is: the two halves of an exchange must be in the same unit to be read as
    *  one. Zero on a daemon that does not emit the kind. */
   replyMessages: number
-  /** Distinct active minutes, of any kind — the lane's weight. */
-  weight: number
   /**
    * What actually happened, minute by minute, oldest first — the ground truth
    * BOTH the curve and the hover are built from.
@@ -698,27 +695,11 @@ export function buildDayLanes(
   const folded = foldOrigins(origins)
 
   interface Acc {
-    lane: Omit<
-      DayLane,
-      | 'agent'
-      | 'attention'
-      | 'attentionMinutes'
-      | 'agentMinutes'
-      | 'attentionMessages'
-      | 'replyMessages'
-      | 'weight'
-      | 'beats'
-      | 'host'
-      | 'hostNote'
-      | 'stale'
-      | 'ladder'
-    >
+    lane: Pick<DayLane, 'key' | 'label' | 'state' | 'cardId'>
     /** The card's own claim, the fallback when no bucket carries a host. */
     cardHost: string
     hosts: Map<string, HostTally>
     agent: Set<number>
-    attention: Set<number>
-    all: Set<number>
     /** Attention EVENTS, summed — see `DayLane.attentionMessages`. */
     messages: number
     /** Reply EVENTS, summed — see `DayLane.replyMessages`. */
@@ -763,8 +744,6 @@ export function buildDayLanes(
         cardHost: (card.shuttleHost ?? '').trim().toLowerCase(),
         hosts: new Map(),
         agent: new Set(),
-        attention: new Set(),
-        all: new Set(),
         messages: 0,
         replies: 0,
         beats: new Map(),
@@ -791,12 +770,9 @@ export function buildDayLanes(
         if (bucket.m > held.last) held.last = bucket.m
       } else entry.sessions.set(session, { first: bucket.m, last: bucket.m })
     }
-    entry.all.add(minute)
     if (bucket.k === 'agent') entry.agent.add(minute)
-    else if (bucket.k === 'attention') {
-      entry.attention.add(minute)
-      entry.messages += bucket.n
-    } else if (bucket.k === 'reply') entry.replies += bucket.n
+    else if (bucket.k === 'attention') entry.messages += bucket.n
+    else if (bucket.k === 'reply') entry.replies += bucket.n
 
     let beat = entry.beats.get(minute)
     if (!beat) {
@@ -838,11 +814,9 @@ export function buildDayLanes(
       host,
       hostNote: host && host !== pageHost ? host : '',
       stale: isOriginStale(folded, host || null),
-      attentionMinutes: entry.attention.size,
       agentMinutes: entry.agent.size,
       attentionMessages: entry.messages,
       replyMessages: entry.replies,
-      weight: entry.all.size,
       beats: [...entry.beats.entries()]
         .map(([minute, beat]) => ({
           minute,
@@ -1057,15 +1031,12 @@ export function buildStillAhead(
 const REPORT_FILENAME = 'report.html'
 
 export interface DayPreview {
-  key: string
   cardId: string
   label: string
   /** The fiber's report, when it declares a directory to hold one. */
   reportUrl?: string
   /** Its outcome — the fallback, and a statement in its own right. */
   outcome: string
-  /** Origin, for the owner-routed read of a remote fiber's report. */
-  originId: string
 }
 
 /**
@@ -1087,14 +1058,12 @@ export function buildDayPreviews(
     const card = cardById.get(lane.cardId)
     if (!card) continue
     out.push({
-      key: `preview:${lane.cardId}`,
       cardId: lane.cardId,
       label: lane.label,
       reportUrl: card.fiberDir
         ? fileBytesUrl(shuttleBase, `${card.fiberDir}/${REPORT_FILENAME}`, card.originId)
         : undefined,
       outcome: card.outcome ?? '',
-      originId: card.originId,
     })
   }
   return out
@@ -1164,8 +1133,8 @@ export interface DayEntry {
   originId?: string
   /** Live worker state, when one is in the air for this fiber. */
   chip?: DayChip
-  /** Today's cost, for a lane's entry. Absent on rows that have no rail. */
-  stats?: DayEntryStats
+  /** Today's cost, for a lane's entry. */
+  stats: DayEntryStats
   /** Set when the fiber closed inside this rail. Display only. */
   closed?: { glyph: string; title: string }
 }
@@ -1352,7 +1321,7 @@ export function dayModelSignature(model: DayModel): string {
   const lanes = model.lanes
     .map(
       (lane) =>
-        `${lane.key}|${lane.label}|${lane.state}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|${lane.weight}|` +
+        `${lane.key}|${lane.label}|${lane.state}|${lane.hostNote}|${lane.stale ? 'stale' : ''}|` +
         // The beats ARE the curve's input, so digesting them digests the ink:
         // any minute whose weight or kind changed moves the shape and must
         // repaint. Cheaper than the curve and exactly as sensitive.
@@ -1363,7 +1332,7 @@ export function dayModelSignature(model: DayModel): string {
     .map(
       (e) =>
         `${e.key}|${e.title}|${e.body}|${e.chip?.label ?? ''}|${e.closed?.glyph ?? ''}` +
-        `|${e.stats ? formatEntryStats(e.stats) : ''}`,
+        `|${formatEntryStats(e.stats)}`,
     )
     .join('\n')
   const ahead = model.stillAhead.map((i) => `${i.key}|${i.when ?? ''}`).join(',')
@@ -1691,8 +1660,6 @@ class DayViewImpl implements TemporalView {
   private previewObserver: IntersectionObserver | null = null
   /** url → does this report exist. Remembered so a rebuild costs no probes. */
   private readonly reportProbe = new Map<string, boolean>()
-  /** The session ledger's tmux→fiber pairings — rung 0 of the join. */
-  private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
   private ctx: ViewContext | null = null
   /** The day currently PAINTED. Not authority — the cursor is (see
    *  {@link resolveDayISO}); this only says what the DOM is showing, so a
@@ -1719,6 +1686,8 @@ class DayViewImpl implements TemporalView {
   private lastLoad: {
     dayISO: string
     activity: ActivityResult
+    /** The session ledger's tmux→fiber pairings — rung 0 of the join. */
+    byTmux: ReadonlyMap<string, SessionPairing>
     sessionOrigins?: TemporalOrigins
     ledger: DayLedgerInput
   } | null = null
@@ -1962,9 +1931,9 @@ class DayViewImpl implements TemporalView {
     if (token !== this.loadToken || !this.bodyEl || dayISO !== this.shownDay) return
 
     const index = buildSessionIndex(sessions.records)
-    this.byTmux = index.byTmux
     this.lastLoad = {
       dayISO,
+      byTmux: index.byTmux,
       activity,
       sessionOrigins: sessions.origins,
       ledger: { records: commits.records, bySession: index.bySession, origins: commits.origins },
@@ -2001,7 +1970,7 @@ class DayViewImpl implements TemporalView {
       ctx?.cards ?? [],
       ctx?.shuttleBase ?? '',
       Date.now(),
-      this.byTmux,
+      load.byTmux,
       load.sessionOrigins,
       load.ledger,
       this.zoom,
@@ -2940,7 +2909,7 @@ class DayViewImpl implements TemporalView {
     for (const entry of model.entries) {
       const item = document.createElement('div')
       item.className = 'kbn-day-entry'
-      if (entry.chip || entry.stats) item.classList.add('kbn-day-entry-op')
+      item.classList.add('kbn-day-entry-op')
 
       // The head: what this fiber IS right now. The chip leads because it is
       // the only element here you can act on.
@@ -2968,19 +2937,15 @@ class DayViewImpl implements TemporalView {
       title.addEventListener('click', () => this.ctx?.openCard(entryCardId))
       head.append(title)
 
-      const statLine = entry.stats ? formatEntryStats(entry.stats) : ''
+      const statLine = formatEntryStats(entry.stats)
       if (statLine) {
         const stats = document.createElement('span')
         stats.className = 'kbn-day-entrystats'
         // The diff clause is always the last term (see formatEntryStats):
         // strip it back off the composed string and re-append it as coloured
         // elements rather than teaching the string builder to emit markup.
-        const diffText = entry.stats
-          ? diffClause(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
-          : ''
-        const diffEl = entry.stats
-          ? diffClauseEl(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
-          : null
+        const diffText = diffClause(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
+        const diffEl = diffClauseEl(entry.stats.insertions ?? 0, entry.stats.deletions ?? 0)
         if (diffEl && diffText && statLine.endsWith(diffText)) {
           stats.append(document.createTextNode(statLine.slice(0, -diffText.length)), diffEl)
         } else {
