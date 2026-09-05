@@ -91,15 +91,6 @@ export class RailScrub {
     this.options = options
   }
 
-  /** Where the bar stands, or null when it is not up. */
-  get target(): ScrubTarget | null {
-    return this.at
-  }
-
-  get active(): boolean {
-    return this.at !== null
-  }
-
   /**
    * Raise the bar at `target` and take the keyboard.
    *
@@ -155,12 +146,6 @@ export class RailScrub {
     const stride = this.options.stepMs * (e.shiftKey ? 10 : 1)
     this.move(this.at.atMs + (e.key === 'ArrowLeft' ? -stride : stride))
     return true
-  }
-
-  /** Re-measure and re-place the bar — after a scroll, a resize, or a repaint
-   *  that rebuilt the rail it was standing in. */
-  redraw(): void {
-    if (this.at) this.draw()
   }
 
   private draw(): void {

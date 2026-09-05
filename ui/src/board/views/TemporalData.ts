@@ -174,10 +174,10 @@ export function foldActiveMinutes(
  *  text as the rest — each view decides where those land. */
 const COMMIT_SLUG_RE = /^([A-Za-z0-9][A-Za-z0-9._/-]*):[ \t]+(\S.*)$/
 
-export function parseCommitSlug(subject: string): { slug: string | null; rest: string } {
+export function parseCommitSlug(subject: string): { rest: string } {
   const trimmed = subject.trim()
   const match = COMMIT_SLUG_RE.exec(trimmed)
-  return match ? { slug: match[1], rest: match[2].trim() } : { slug: null, rest: trimmed }
+  return match ? { rest: match[2].trim() } : { rest: trimmed }
 }
 
 /**

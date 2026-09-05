@@ -28,7 +28,6 @@ import {
   railBounds,
   railFraction,
   railRuleFractions,
-  shiftWeekMonday,
   rasterSlots,
   rowWaitingOn,
   slotSamples,
@@ -135,12 +134,6 @@ describe('Monday-start week derivation', () => {
     // Friday 2027-01-01 belongs to the week that started 2026-12-28.
     expect(mondayOfWeek('2027-01-01')).toBe('2026-12-28');
     expect(weekCivilDays('2026-12-28').at(-1)).toBe('2027-01-03');
-  });
-
-  it('steps whole weeks in both directions, across the month boundary', () => {
-    expect(shiftWeekMonday('2026-08-03', -1)).toBe('2026-07-27');
-    expect(shiftWeekMonday('2026-08-03', 1)).toBe('2026-08-10');
-    expect(shiftWeekMonday('2026-08-03', -5)).toBe('2026-06-29');
   });
 });
 
@@ -362,10 +355,10 @@ describe('the week follows the shared temporal cursor', () => {
   it('lands the paged cursor in the neighbouring week, not the same one', () => {
     const monday = weekMondayForFocus('2026-08-05', nowMs);
     expect(weekMondayForFocus(shiftCivilDay('2026-08-05', 7), nowMs)).toBe(
-      shiftWeekMonday(monday, 1),
+      shiftCivilDay(monday, 7),
     );
     expect(weekMondayForFocus(shiftCivilDay('2026-08-05', -7), nowMs)).toBe(
-      shiftWeekMonday(monday, -1),
+      shiftCivilDay(monday, -7),
     );
   });
 });

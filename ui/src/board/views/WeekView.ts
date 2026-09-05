@@ -199,11 +199,6 @@ export function weekCivilDays(monday: string): string[] {
   return days
 }
 
-/** The Monday `weeks` weeks from `monday` (negative goes back). */
-export function shiftWeekMonday(monday: string, weeks: number): string {
-  return shiftCivilDay(monday, weeks * 7)
-}
-
 /**
  * The week to show for a given temporal cursor — the Monday of the week
  * containing the focus day.

@@ -254,10 +254,6 @@ export class ShelfReader {
    */
   onDock: ((split: number | null) => void) | null = null
 
-  isDocked(): boolean {
-    return this.win !== null && this.persist.docked === true
-  }
-
   isOpen(): boolean {
     return this.win !== null
   }
