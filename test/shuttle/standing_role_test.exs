@@ -94,13 +94,13 @@ defmodule Shuttle.StandingRoleTest do
       # next_due placed 30s after now; next_due_from_cron reads it straight off
       # the block (the `now` arg is unused — felt computed the occurrence).
       role = role(-30, 30)
-      assert %DateTime{} = next = StandingRole.next_due_from_cron(role, @now)
+      assert %DateTime{} = next = StandingRole.next_due_from_cron(role)
       assert DateTime.compare(next, DateTime.add(@now, 30, :second)) == :eq
     end
 
     test "returns nil when felt resolved no schedule" do
       role = role(-30, 30, %{"resolved" => %{}})
-      assert StandingRole.next_due_from_cron(role, @now) == nil
+      assert StandingRole.next_due_from_cron(role) == nil
     end
   end
 

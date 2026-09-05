@@ -49,12 +49,9 @@ defmodule Shuttle.LifecycleService do
     if is_pid(Process.whereis(Poller)) do
       Poller.lifecycle_transition(verb, fiber_id, opts)
     else
-      apply(LifecycleStore, verb, lifecycle_store_args(verb, fiber_id, opts))
+      apply(LifecycleStore, verb, [fiber_id, opts])
     end
   end
-
-  defp lifecycle_store_args(:accept, fiber_id, opts), do: [fiber_id, opts]
-  defp lifecycle_store_args(:resume, fiber_id, _opts), do: [fiber_id]
 
   defp fiber_address(identifier) do
     case FeltStores.resolve_fiber(identifier) do

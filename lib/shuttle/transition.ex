@@ -210,8 +210,6 @@ defmodule Shuttle.Transition do
     end
   end
 
-  defp decode_body(_), do: %{}
-
   # ── HTTP status mapping (shared by both controllers) ──
 
   @doc """
@@ -220,8 +218,6 @@ defmodule Shuttle.Transition do
   """
   @spec http_error(term()) :: {non_neg_integer(), String.t()}
   def http_error(:unknown_target), do: {400, "unknown_target"}
-  def http_error(:unknown_action), do: {400, "unknown_action"}
-  def http_error(:action_not_available), do: {409, "action_not_available"}
   def http_error(:already_running), do: {409, "already_running"}
   def http_error(:not_found), do: {404, "not_found"}
 

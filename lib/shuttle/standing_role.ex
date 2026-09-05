@@ -159,16 +159,14 @@ defmodule Shuttle.StandingRole do
   @doc """
   The next scheduled occurrence, for the kanban **display** next_due — felt's
   resolved `next_due` (the next tick strictly after now), read straight off the
-  block. Returns nil when felt resolved no schedule. The `now` argument is
-  accepted for call-site compatibility but unused: felt computed the occurrence.
+  block. Returns nil when felt resolved no schedule.
   """
-  @spec next_due_from_cron(t(), DateTime.t()) :: DateTime.t() | nil
-  def next_due_from_cron(%__MODULE__{next_due_at: %DateTime{} = next}, _now), do: next
-  def next_due_from_cron(_, _), do: nil
+  @spec next_due_from_cron(t()) :: DateTime.t() | nil
+  def next_due_from_cron(%__MODULE__{next_due_at: %DateTime{} = next}), do: next
+  def next_due_from_cron(_), do: nil
 
-  @spec valid?(t()) :: boolean()
-  def valid?(%__MODULE__{validation_errors: []}), do: true
-  def valid?(_), do: false
+  defp valid?(%__MODULE__{validation_errors: []}), do: true
+  defp valid?(_), do: false
 
   @doc """
   Run id for a *scheduled* (non-ad-hoc) standing dispatch — a display label for

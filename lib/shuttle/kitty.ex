@@ -231,12 +231,8 @@ defmodule Shuttle.Kitty do
     "/Applications/kitty.app/Contents/MacOS/kitten"
   ]
 
-  defp kitten_bin do
-    case System.find_executable("kitten") || Enum.find(@kitten_candidates, &File.exists?/1) do
-      nil -> {:error, "kitten not found on this host"}
-      path -> {:ok, path}
-    end
-  end
+  defp kitten_bin,
+    do: find_bin("kitten", @kitten_candidates, "kitten not found on this host")
 
   defp to_opt(nil), do: []
   defp to_opt(socket), do: ["--to", socket]
@@ -313,9 +309,17 @@ defmodule Shuttle.Kitty do
     _ -> :dead
   end
 
-  defp kitty_bin do
-    case System.find_executable("kitty") || Enum.find(@kitty_candidates, &File.exists?/1) do
-      nil -> {:error, "kitty not found on this host (is it installed / on PATH?)"}
+  defp kitty_bin,
+    do:
+      find_bin(
+        "kitty",
+        @kitty_candidates,
+        "kitty not found on this host (is it installed / on PATH?)"
+      )
+
+  defp find_bin(name, candidates, error_message) do
+    case System.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
+      nil -> {:error, error_message}
       path -> {:ok, path}
     end
   end

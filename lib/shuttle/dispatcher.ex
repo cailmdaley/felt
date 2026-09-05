@@ -74,7 +74,7 @@ defmodule Shuttle.Dispatcher do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
     force = Keyword.get(opts, :force, false)
 
-    with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store: felt_store),
+    with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          uid = Map.get(fiber, "uid"),
          :ok <- check_not_closed(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
@@ -84,15 +84,13 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_work_dir(agent, work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       resume_intent =
-        cond do
-          Keyword.get(opts, :force_fresh, false) ->
-            :fresh
-
-          true ->
-            resolve_resume_intent(prompt_context, fiber_id, fiber,
-              force: force,
-              resume_mode: Keyword.get(opts, :resume_mode)
-            )
+        if Keyword.get(opts, :force_fresh, false) do
+          :fresh
+        else
+          resolve_resume_intent(prompt_context, fiber,
+            force: force,
+            resume_mode: Keyword.get(opts, :resume_mode)
+          )
         end
 
       case resume_intent do
@@ -123,7 +121,7 @@ defmodule Shuttle.Dispatcher do
     new run. The kanban modal's manual "Resume" button overrides this by
     passing `force: true`, which routes back through `check_resume_intent`
     so the carried `resume_mode` is honored.
-  - All other contexts defer to `check_resume_intent/3`, which honors the
+  - All other contexts defer to `check_resume_intent/2`, which honors the
     `resume_mode` dispatch parameter (`"previous"` / `"fresh"`), falling back
     to the continuation heuristic (read off the fiber's `shuttle:` block) when no
     directive is carried.
@@ -134,9 +132,9 @@ defmodule Shuttle.Dispatcher do
     * `:resume_mode` — the user's continuation directive (`"previous"` /
       `"fresh"` / absent), carried with the dispatch call.
   """
-  @spec resolve_resume_intent(any(), String.t(), map(), keyword()) ::
+  @spec resolve_resume_intent(any(), map(), keyword()) ::
           :fresh | {:previous, String.t()} | {:error, :missing_session_id}
-  def resolve_resume_intent(prompt_context, fiber_id, fiber, opts \\ []) do
+  def resolve_resume_intent(prompt_context, fiber, opts \\ []) do
     force? = Keyword.get(opts, :force, false)
 
     case prompt_context do
@@ -144,7 +142,7 @@ defmodule Shuttle.Dispatcher do
         :fresh
 
       _ ->
-        check_resume_intent(fiber_id, fiber, resume_mode: Keyword.get(opts, :resume_mode))
+        check_resume_intent(fiber, resume_mode: Keyword.get(opts, :resume_mode))
     end
   end
 
@@ -168,9 +166,9 @@ defmodule Shuttle.Dispatcher do
   Options:
     * `:resume_mode` — `"previous"` / `"fresh"` / absent.
   """
-  @spec check_resume_intent(String.t(), map(), keyword()) ::
+  @spec check_resume_intent(map(), keyword()) ::
           :fresh | {:previous, String.t()} | {:error, :missing_session_id}
-  def check_resume_intent(_fiber_id, fiber, opts \\ []) do
+  def check_resume_intent(fiber, opts \\ []) do
     resume_mode = Keyword.get(opts, :resume_mode)
     session_id = Shuttle.Continuation.resumable_session_id(fiber)
 
@@ -289,23 +287,20 @@ defmodule Shuttle.Dispatcher do
     Fiber: #{prompt_fiber_id}
     """
 
-    compose_prompt(header, fiber_id, opts)
+    compose_prompt(header, opts)
   end
 
-  @doc """
-  Renders the lineage line for fresh dispatch prompts: the previous worker's
-  session UUID (and harness, when the ledger knows it). Returns "" when the
-  fiber has no prior session on this host.
-
-  Why it's in the prompt at all: the `## Status` handoff is the previous
-  worker's *summary*; the transcript is the previous worker's *actual last
-  turns* — searches run, dead ends hit, thinking left mid-flight. The UUID
-  names that transcript on disk, and the shuttle skill's transcript recipes
-  turn it into surgical reads. Resume prompts never carry it (a resumed
-  worker IS the previous session), and a fiber's first dispatch has none.
-  """
-  @spec render_previous_session_line(keyword()) :: String.t()
-  def render_previous_session_line(opts) do
+  # Renders the lineage line for fresh dispatch prompts: the previous worker's
+  # session UUID (and harness, when the ledger knows it). Returns "" when the
+  # fiber has no prior session on this host.
+  #
+  # Why it's in the prompt at all: the `## Status` handoff is the previous
+  # worker's *summary*; the transcript is the previous worker's *actual last
+  # turns* — searches run, dead ends hit, thinking left mid-flight. The UUID
+  # names that transcript on disk, and the shuttle skill's transcript recipes
+  # turn it into surgical reads. Resume prompts never carry it (a resumed
+  # worker IS the previous session), and a fiber's first dispatch has none.
+  defp render_previous_session_line(opts) do
     case Keyword.get(opts, :previous_session) do
       %{uuid: uuid} = prev when is_binary(uuid) and uuid != "" ->
         harness =
@@ -344,21 +339,18 @@ defmodule Shuttle.Dispatcher do
     """
 
     # A resumed worker IS the previous session — no lineage pointer to itself.
-    compose_prompt(header, fiber_id, Keyword.delete(opts, :previous_session))
+    compose_prompt(header, Keyword.delete(opts, :previous_session))
   end
 
-  @doc """
-  Renders the user's dispatch message (the `:user_message` parameter) as a
-  "From User" block for inclusion in the dispatch prompt. Returns "" when no
-  message is carried (or it is blank).
-
-  The message is a transient dispatch parameter — it rides the dispatch call,
-  is inlined here at launch, and is discarded. There is no persistence: a
-  directive arrives *with* its dispatch, so there is no "which comment is
-  current?" to compute, and no stale-directive-replay to guard against.
-  """
-  @spec render_user_message_block(keyword()) :: String.t()
-  def render_user_message_block(opts \\ []) do
+  # Renders the user's dispatch message (the `:user_message` parameter) as a
+  # "From User" block for inclusion in the dispatch prompt. Returns "" when no
+  # message is carried (or it is blank).
+  #
+  # The message is a transient dispatch parameter — it rides the dispatch call,
+  # is inlined here at launch, and is discarded. There is no persistence: a
+  # directive arrives *with* its dispatch, so there is no "which comment is
+  # current?" to compute, and no stale-directive-replay to guard against.
+  defp render_user_message_block(opts) do
     case Keyword.get(opts, :user_message) do
       message when is_binary(message) ->
         case String.trim(message) do
@@ -438,7 +430,7 @@ defmodule Shuttle.Dispatcher do
     # contract is right regardless of how the caller threaded opts. The handoff
     # marker is inert for standing (runs always dispatch fresh); the daemon
     # owns the awaiting transition on worker exit.
-    compose_prompt(header, fiber_id, Keyword.put(opts, :kind, "standing"))
+    compose_prompt(header, Keyword.put(opts, :kind, "standing"))
   end
 
   @doc false
@@ -485,7 +477,7 @@ defmodule Shuttle.Dispatcher do
   # skill prescribes that the worker reads them via `felt show` (outcome +
   # the body's `## Status` block) on arrival, and duplicating either here risks
   # drift between the prompt's snapshot and felt's view.
-  defp compose_prompt(header, _fiber_id, opts) do
+  defp compose_prompt(header, opts) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     # The store line is the worker's absolute anchor. `prompt_fiber_id`
@@ -865,9 +857,7 @@ defmodule Shuttle.Dispatcher do
   # process happens to be running. The default `felt_store` is
   # `default_felt_store/0` (~/loom) — pass `:felt_store` explicitly to point at
   # a different root.
-  defp fetch_fiber(fiber_id, runner, opts) do
-    felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-
+  defp fetch_fiber(fiber_id, runner, felt_store) do
     case run_felt(runner, ["show", fiber_id, "--json"]) do
       {:ok, output} ->
         decode_fiber(output)
@@ -1341,16 +1331,14 @@ defmodule Shuttle.Dispatcher do
             # session id is already known synchronously here (it's the resume
             # target itself), unlike fresh codex/pi dispatch — no capture/
             # backfill needed, one synchronous stamp same as fresh dispatch.
-            if Keyword.get(opts, :store_session_id, true) do
-              record_dispatch_session(fiber_id, session_id, runner,
-                felt_store: felt_store,
-                run_id: Keyword.get(opts, :run_id),
-                tmux: session,
-                harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                uid: Keyword.get(opts, :uid),
-                ledger_kind: :resume
-              )
-            end
+            record_dispatch_session(fiber_id, session_id, runner,
+              felt_store: felt_store,
+              run_id: Keyword.get(opts, :run_id),
+              tmux: session,
+              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+              uid: Keyword.get(opts, :uid),
+              ledger_kind: :resume
+            )
 
             result
 
@@ -1375,16 +1363,14 @@ defmodule Shuttle.Dispatcher do
           {:ok, _} = result ->
             # Store the session UUID in the dispatch marker so "Resume previous"
             # and the autonomous continuation heuristic can recover it.
-            if Keyword.get(opts, :store_session_id, true) do
-              store_session_id(fiber_id, session_uuid, runner,
-                felt_store: felt_store,
-                run_id: Keyword.get(opts, :run_id),
-                tmux: session,
-                harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                uid: Keyword.get(opts, :uid),
-                ledger_kind: :dispatch
-              )
-            end
+            store_session_id(fiber_id, session_uuid, runner,
+              felt_store: felt_store,
+              run_id: Keyword.get(opts, :run_id),
+              tmux: session,
+              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+              uid: Keyword.get(opts, :uid),
+              ledger_kind: :dispatch
+            )
 
             result
 
@@ -1694,7 +1680,7 @@ defmodule Shuttle.Dispatcher do
       |> Enum.sort_by(&elem(&1, 0), :desc)
       |> Enum.map(&elem(&1, 1))
 
-    case Enum.find(paths, &codex_session_matches?(&1, work_dir, fiber_id, dispatched_after)) do
+    case Enum.find(paths, &session_matches?("codex", &1, work_dir, fiber_id, dispatched_after)) do
       nil -> {:error, :not_found}
       path -> {:ok, path}
     end
@@ -1715,7 +1701,7 @@ defmodule Shuttle.Dispatcher do
         |> Enum.map(&Path.join(dir, &1))
         |> Enum.find(
           {:error, :not_found},
-          &pi_session_matches?(&1, work_dir, fiber_id, dispatched_after)
+          &session_matches?("pi", &1, work_dir, fiber_id, dispatched_after)
         )
         |> case do
           {:error, :not_found} = miss -> miss
@@ -1730,17 +1716,40 @@ defmodule Shuttle.Dispatcher do
   defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
     do: {:error, :unsupported}
 
-  # The pi analog of `codex_session_matches?/4`: the transcript's session
-  # header names its cwd and start time, and the dispatch prompt's fiber line
-  # only appears once the first message lands (~1s after the header), so the
-  # whole file is searched — the retry loop above re-reads until it matches.
-  defp pi_session_matches?(path, work_dir, fiber_id, dispatched_after) do
+  # The JSONL first line each harness writes as its session header, reduced to
+  # the map that carries `id` / `cwd` / `timestamp`. Codex nests them under
+  # `payload` of a `session_meta` event; pi puts them on a top-level `session`
+  # event. Everything downstream reads the same three keys.
+  defp session_header("codex", content) do
+    with [first_line | _] <- String.split(content, "\n", parts: 2),
+         {:ok, %{"type" => "session_meta", "payload" => payload}} <- Jason.decode(first_line),
+         true <- is_map(payload) do
+      {:ok, payload}
+    else
+      _ -> :error
+    end
+  end
+
+  defp session_header("pi", content) do
+    with [first_line | _] <- String.split(content, "\n", parts: 2),
+         {:ok, %{"type" => "session"} = event} <- Jason.decode(first_line) do
+      {:ok, event}
+    else
+      _ -> :error
+    end
+  end
+
+  defp session_header(_cli, _content), do: :error
+
+  # The transcript's session header names its cwd and start time, but the
+  # dispatch prompt's fiber line only appears once the first message lands
+  # (~1s after the header), so the WHOLE file is searched — the retry loop
+  # above re-reads until it matches.
+  defp session_matches?(cli, path, work_dir, fiber_id, dispatched_after) do
     with {:ok, content} <- File.read(path),
-         [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line),
-         "session" <- Map.get(event, "type"),
-         cwd when is_binary(cwd) <- Map.get(event, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(event, "timestamp"),
+         {:ok, header} <- session_header(cli, content),
+         cwd when is_binary(cwd) <- Map.get(header, "cwd"),
+         timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
       Path.expand(cwd) == Path.expand(work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
@@ -1774,38 +1783,11 @@ defmodule Shuttle.Dispatcher do
     Shuttle.HarnessPaths.codex_session_dirs()
   end
 
-  # The local civil day, read from the OS zone via `:calendar.local_time/0`.
-  # Needs no TZ variable in the daemon's environment and no time-zone database.
-  @doc false
-  def local_today do
-    Shuttle.HarnessPaths.local_today()
-  end
-
-  defp codex_session_matches?(path, work_dir, fiber_id, dispatched_after) do
+  defp read_uuid_from_jsonl(cli, path, work_dir) do
     with {:ok, content} <- File.read(path),
-         [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line),
-         "session_meta" <- Map.get(event, "type"),
-         payload when is_map(payload) <- Map.get(event, "payload"),
-         cwd when is_binary(cwd) <- Map.get(payload, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(payload, "timestamp"),
-         {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Path.expand(cwd) == Path.expand(work_dir) and
-        DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
-        String.contains?(content, "Fiber: #{fiber_id}")
-    else
-      _ -> false
-    end
-  end
-
-  defp read_uuid_from_jsonl("codex", path, work_dir) do
-    with {:ok, content} <- File.read(path),
-         first_line <- content |> String.split("\n") |> List.first(""),
-         {:ok, event} <- Jason.decode(first_line),
-         "session_meta" <- Map.get(event, "type"),
-         payload when is_map(payload) <- Map.get(event, "payload"),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(payload, "id"),
-         cwd when is_binary(cwd) <- Map.get(payload, "cwd") do
+         {:ok, header} <- session_header(cli, content),
+         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id"),
+         cwd when is_binary(cwd) <- Map.get(header, "cwd") do
       # Verify the session belongs to this worker's working directory.
       if Path.expand(cwd) == Path.expand(work_dir) do
         {:ok, uuid}
@@ -1816,26 +1798,6 @@ defmodule Shuttle.Dispatcher do
       _ -> {:error, "could not parse session UUID from #{path}"}
     end
   end
-
-  defp read_uuid_from_jsonl("pi", path, work_dir) do
-    with {:ok, content} <- File.read(path),
-         first_line <- content |> String.split("\n", parts: 2) |> List.first(""),
-         {:ok, event} <- Jason.decode(first_line),
-         "session" <- Map.get(event, "type"),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(event, "id"),
-         cwd when is_binary(cwd) <- Map.get(event, "cwd") do
-      if Path.expand(cwd) == Path.expand(work_dir) do
-        {:ok, uuid}
-      else
-        {:error, "session cwd mismatch: #{cwd} ≠ #{work_dir}"}
-      end
-    else
-      _ -> {:error, "could not parse session UUID from #{path}"}
-    end
-  end
-
-  defp read_uuid_from_jsonl(_cli, path, _work_dir),
-    do: {:error, "unsupported harness for #{path}"}
 
   # Generates a random UUID v4 using Erlang's :crypto module.
   # Sets version bits (byte 6 top nibble = 0100) and variant bits
