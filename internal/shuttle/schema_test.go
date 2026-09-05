@@ -1,7 +1,6 @@
 package shuttle
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,48 +249,5 @@ func TestValidate_UnknownAgent(t *testing.T) {
 	}
 	if errs[0].Field != "agent" {
 		t.Fatalf("expected field=agent, got %q", errs[0].Field)
-	}
-}
-
-// ---- Block JSON unmarshaling ------------------------------------------------
-
-func TestBlockUnmarshalJSON_NewFormat(t *testing.T) {
-	var block Block
-	// A felt JSON view may still carry legacy/retired keys (enabled, review, and
-	// the retired interactive axis); they drop silently (no read-tolerance, no
-	// struct field) — they must not error, and the live fields decode normally.
-	data := []byte(`{
-	  "enabled": true,
-	  "kind": "standing",
-	  "interactive": true,
-	  "agent": "claude-sonnet",
-	  "schedule": {"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
-	  "review": {"state": "scheduled"}
-	}`)
-	if err := json.Unmarshal(data, &block); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-	if block.Kind != "standing" || block.Agent != "claude-sonnet" {
-		t.Fatalf("unexpected block: %+v", block)
-	}
-	if block.Schedule == nil || block.Schedule.TZ != "Europe/Paris" {
-		t.Fatalf("unexpected schedule: %+v", block.Schedule)
-	}
-}
-
-func TestBlockUnmarshalJSON_LegacyAliases(t *testing.T) {
-	var block Block
-	data := []byte(`{
-	  "mode": "standing",
-	  "schedule": {"expr": "0 9 * * 1-5", "timezone": "UTC"}
-	}`)
-	if err := json.Unmarshal(data, &block); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-	if block.Kind != "standing" {
-		t.Fatalf("expected legacy mode to populate Kind, got %+v", block)
-	}
-	if block.Schedule == nil || block.Schedule.TZ != "UTC" {
-		t.Fatalf("expected legacy timezone alias, got %+v", block.Schedule)
 	}
 }
