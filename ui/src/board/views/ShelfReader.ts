@@ -49,6 +49,7 @@ import {
   attachPanelDrag,
   attachPanelResize,
   readPanelGeometry,
+  PANEL_MIN,
   type PanelGeometry,
 } from '../FloatingPanelChrome.js'
 import { buildFileViewer, isScrollableFile } from '../FileViewerPanel.js'
@@ -61,15 +62,12 @@ import {
   type TabRef,
   type TabState,
 } from '../ReaderTabs.js'
-import { buildTabButton, buildViewCell } from '../ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell } from '../ReaderChrome.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
-import { safeStorage } from './shelfLayout.js'
+import { readJSON, writeJSON } from './shelfLayout.js'
 
 export const READER_PERSIST_KEY = 'shuttle:shelf:reader'
-
-const MIN_WIDTH = 380
-const MIN_HEIGHT = 320
 
 /** What survives a dismissal. */
 export interface ReaderPersist {
@@ -115,12 +113,12 @@ export function clampSplit(split: number): number {
  * window's edge would float away from the canvas it is supposed to be beside.
  */
 export function dockedGeometry(board: PanelGeometry, split: number): PanelGeometry {
-  const width = Math.max(MIN_WIDTH, Math.round(board.width * clampSplit(split)))
+  const width = Math.max(PANEL_MIN.width, Math.round(board.width * clampSplit(split)))
   return {
     left: Math.round(board.left + board.width - width),
     top: board.top,
     width,
-    height: Math.max(MIN_HEIGHT, board.height),
+    height: Math.max(PANEL_MIN.height, board.height),
   }
 }
 
@@ -153,30 +151,19 @@ function coerceGeometry(raw: unknown): PanelGeometry | null {
     typeof v === 'number' && Number.isFinite(v) ? v : null
   const left = n(rec.left), top = n(rec.top), width = n(rec.width), height = n(rec.height)
   if (left === null || top === null || width === null || height === null) return null
-  if (width < MIN_WIDTH || height < MIN_HEIGHT) return null
+  if (width < PANEL_MIN.width || height < PANEL_MIN.height) return null
   return { left, top, width, height }
 }
 
 export function loadReaderPersist(storage?: Storage): ReaderPersist {
-  const store = storage ?? safeStorage()
-  if (!store) return emptyReaderPersist()
-  try {
-    const raw = store.getItem(READER_PERSIST_KEY)
-    return raw ? coerceReaderPersist(JSON.parse(raw)) : emptyReaderPersist()
-  } catch {
-    return emptyReaderPersist()
-  }
+  return readJSON(READER_PERSIST_KEY, coerceReaderPersist, emptyReaderPersist, storage)
 }
 
 export function saveReaderPersist(state: ReaderPersist, storage?: Storage): void {
-  const store = storage ?? safeStorage()
-  if (!store) return
-  try {
-    if (state.open.length === 0 && !state.geom) store.removeItem(READER_PERSIST_KEY)
-    else store.setItem(READER_PERSIST_KEY, JSON.stringify(state))
-  } catch {
-    /* storage full / disabled — persistence is best-effort */
-  }
+  // Nothing open and nowhere remembered is nothing to remember: drop the record
+  // rather than leaving an empty one behind.
+  const keep = state.open.length > 0 || state.geom ? state : null
+  writeJSON(READER_PERSIST_KEY, keep, storage)
 }
 
 /**
@@ -192,8 +179,8 @@ export function onScreen(g: PanelGeometry, vw: number, vh: number): boolean {
  *  viewport, so the canvas stays visible around its edges — the reader is over
  *  the board, not instead of it. */
 export function defaultReaderGeom(vw: number, vh: number): PanelGeometry {
-  const width = Math.max(MIN_WIDTH, Math.min(1100, Math.round(vw * 0.62)))
-  const height = Math.max(MIN_HEIGHT, Math.round(vh * 0.84))
+  const width = Math.max(PANEL_MIN.width, Math.min(1100, Math.round(vw * 0.62)))
+  const height = Math.max(PANEL_MIN.height, Math.round(vh * 0.84))
   return {
     left: Math.max(12, Math.round(vw - width - Math.max(24, vw * 0.05))),
     top: Math.max(12, Math.round((vh - height) / 2)),
@@ -316,40 +303,18 @@ export class ShelfReader {
   private ensureWindow(): void {
     if (this.win) return
 
-    const win = document.createElement('div')
-    // The detail panel's frame and the file-viewer modifier, verbatim: this is
-    // the same kind of window, so it is the same stylesheet.
-    win.className = 'kbn-detail-overlay kbn-fileview-window'
-    win.setAttribute('role', 'dialog')
-    win.setAttribute('aria-label', 'Reader')
-
-    const bar = document.createElement('div')
-    bar.className = 'kbn-fileview-bar'
-
-    const strip = document.createElement('div')
-    strip.className = 'kbn-detail-tabstrip'
-    strip.setAttribute('role', 'tablist')
+    const { win, bar, tabs: strip, closeBtn: close, views } = buildReaderWindow({
+      ariaLabel: 'Reader',
+      closeLabel: 'Close the reader',
+      closeTitle: 'Close the reader',
+    })
     this.strip = strip
-
-    const close = document.createElement('button')
-    close.type = 'button'
-    close.className = 'kbn-fileview-win-close'
-    close.setAttribute('aria-label', 'Close the reader')
-    close.title = 'Close the reader'
-    close.textContent = '×'
     close.addEventListener('click', (e) => {
       e.stopPropagation()
       this.close()
     })
-
-    bar.append(strip, close)
-
-    const views = document.createElement('div')
-    views.className = 'kbn-detail-views'
     views.addEventListener('wheel', (e) => this.onZoomWheel(e), { passive: false })
     this.views = views
-
-    win.append(bar, views)
 
     this.win = win
     win.classList.toggle('kbn-shelf-reader-docked', this.persist.docked === true)
@@ -360,7 +325,6 @@ export class ShelfReader {
       this.write()
     }
     attachPanelDrag(win, bar, {
-      draggingClass: 'kbn-detail-dragging',
       // Dragging the window by its bar is how you take it OFF the dock. The
       // gesture says "I want this somewhere else", and a docked window that
       // refused to move would be a window with a dead title bar.
@@ -368,10 +332,6 @@ export class ShelfReader {
       onSettle: remember,
     })
     attachPanelResize(win, {
-      handleClassPrefix: 'kbn-detail-rh',
-      resizingClass: 'kbn-detail-resizing',
-      minWidth: MIN_WIDTH,
-      minHeight: MIN_HEIGHT,
       // While docked, the west edge IS the divider: every frame of the resize
       // re-reports the split so the canvas reflows under the reader's hand.
       onMove: () => this.reportSplit(),

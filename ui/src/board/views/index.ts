@@ -27,15 +27,5 @@ export {
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'
-export {
-  createTemporalFetchers,
-  parseMoment,
-  type ActivityBucket,
-  type ActivityResult,
-  type CommitRecord,
-  type SessionRecord,
-  type TemporalFetchers,
-  type TemporalOrigin,
-  type TemporalOrigins,
-} from './TemporalData.js'
+export { createTemporalFetchers, type TemporalFetchers } from './TemporalData.js'
 export { createViewFallbackPage } from './ViewPage.js'

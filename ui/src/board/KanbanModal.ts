@@ -710,11 +710,9 @@ export class KanbanModal {
       response,
       cards,
       shuttleBase: this.shuttleBase,
-      activity: (fromMs, toMs) => this.temporal.activity(fromMs, toMs),
-      sessions: (sinceMs) => this.temporal.sessions(sinceMs),
-      commits: (sinceMs, untilMs) => this.temporal.commits(sinceMs, untilMs),
-      moment: (session, fromMs, toMs, host, full) =>
-        this.temporal.moment(session, fromMs, toMs, host, full),
+      // The fetchers ARE the context's temporal half — closures over their own
+      // cache, so spreading them is the same object, not a rebind.
+      ...this.temporal,
       openCard: (cardId) => {
         const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
         if (card) this.detailModal.open(card)

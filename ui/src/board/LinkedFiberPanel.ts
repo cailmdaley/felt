@@ -26,7 +26,7 @@
  * so a reader retraces the path they walked one fiber per press.
  */
 
-import { buildTabButton, buildViewCell } from './ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { activateTab, emptyTabState, type TabState } from './ReaderTabs.js'
 import { closeLinkedTab, insertTab, routeWikilink } from './linkedTabs.js'
 import { isMobileViewport } from './mobile.js'
@@ -39,7 +39,6 @@ import {
   fittedGeometry,
   halfAndHalf,
   isTopPanel,
-  PANEL_MIN,
   readPanelGeometry,
   registerPanel,
   unregisterPanel,
@@ -231,37 +230,16 @@ export class LinkedFiberPanel {
   private ensureWindow(): void {
     if (this.win) return
 
-    const win = document.createElement('div')
-    win.className = 'kbn-detail-overlay kbn-fileview-window kbn-linkview-window'
-    win.setAttribute('role', 'dialog')
-    win.setAttribute('aria-label', 'Followed references')
-
-    // The chrome bar IS the tab strip, exactly as in the file viewer: no
-    // separate title bar (the tabs are the titles), the bar itself drags, and a
-    // trailing ✕ closes every followed fiber at once. The origin card stays.
-    const bar = document.createElement('div')
-    bar.className = 'kbn-fileview-bar'
-
-    const tabs = document.createElement('div')
-    tabs.className = 'kbn-detail-tabstrip'
-    tabs.setAttribute('role', 'tablist')
-
-    const winClose = document.createElement('button')
-    winClose.type = 'button'
-    winClose.className = 'kbn-fileview-win-close'
-    winClose.setAttribute('aria-label', 'Close followed references')
-    winClose.title = 'Close every followed fiber'
-    winClose.textContent = '×'
+    const { win, bar, tabs, closeBtn: winClose, views } = buildReaderWindow({
+      ariaLabel: 'Followed references',
+      extraClass: 'kbn-linkview-window',
+      closeLabel: 'Close followed references',
+      closeTitle: 'Close every followed fiber',
+    })
     winClose.addEventListener('click', (e) => {
       e.stopPropagation()
       this.close()
     })
-
-    bar.append(tabs, winClose)
-
-    const views = document.createElement('div')
-    views.className = 'kbn-detail-views'
-    win.append(bar, views)
 
     // Placement: the reading splits the screen — the origin card takes the left
     // half, the followed references the right. Remembered within the panel's
@@ -289,12 +267,8 @@ export class LinkedFiberPanel {
       const remember = () => {
         this.geom = readPanelGeometry(win)
       }
-      attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: remember })
+      attachPanelDrag(win, bar, { onSettle: remember })
       attachPanelResize(win, {
-        handleClassPrefix: 'kbn-detail-rh',
-        resizingClass: 'kbn-detail-resizing',
-        minWidth: PANEL_MIN.width,
-        minHeight: PANEL_MIN.height,
         onSettle: remember,
       })
     }

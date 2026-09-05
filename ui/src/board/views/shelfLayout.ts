@@ -387,25 +387,11 @@ function num(value: unknown): number | null {
  * with nothing remembered, never an error — the canvas must open either way.
  */
 export function loadShelfPersist(storage?: Storage): ShelfPersist {
-  const store = storage ?? safeStorage()
-  if (!store) return emptyPersist()
-  try {
-    const raw = store.getItem(SHELF_PERSIST_KEY)
-    if (!raw) return emptyPersist()
-    return coercePersist(JSON.parse(raw))
-  } catch {
-    return emptyPersist()
-  }
+  return readJSON(SHELF_PERSIST_KEY, coercePersist, emptyPersist, storage)
 }
 
 export function saveShelfPersist(state: ShelfPersist, storage?: Storage): void {
-  const store = storage ?? safeStorage()
-  if (!store) return
-  try {
-    store.setItem(SHELF_PERSIST_KEY, JSON.stringify(state))
-  } catch {
-    /* storage full / disabled — persistence is best-effort */
-  }
+  writeJSON(SHELF_PERSIST_KEY, state, storage)
 }
 
 /**
@@ -455,5 +441,38 @@ export function safeStorage(): Storage | null {
     return typeof window !== 'undefined' ? window.localStorage : null
   } catch {
     return null
+  }
+}
+
+/** Read one JSON record, best-effort: a missing, unreadable or half-written
+ *  entry is `empty()`, never an error — the caller's surface must open either
+ *  way. `coerce` is the caller's own, because only it knows what an older
+ *  record looks like. */
+export function readJSON<T>(
+  key: string,
+  coerce: (parsed: unknown) => T,
+  empty: () => T,
+  storage?: Storage,
+): T {
+  const store = storage ?? safeStorage()
+  if (!store) return empty()
+  try {
+    const raw = store.getItem(key)
+    return raw ? coerce(JSON.parse(raw)) : empty()
+  } catch {
+    return empty()
+  }
+}
+
+/** Write one JSON record, or REMOVE it when `value` is null — which record is
+ *  worth keeping is the caller's judgement, not this helper's. */
+export function writeJSON(key: string, value: unknown | null, storage?: Storage): void {
+  const store = storage ?? safeStorage()
+  if (!store) return
+  try {
+    if (value === null) store.removeItem(key)
+    else store.setItem(key, JSON.stringify(value))
+  } catch {
+    /* storage full / disabled — persistence is best-effort */
   }
 }

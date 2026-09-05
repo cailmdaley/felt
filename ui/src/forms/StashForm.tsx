@@ -30,13 +30,11 @@ import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
-  FALLBACK_HOST,
-  byRecency,
   injectProjectPickerStyles,
-  projectsForHost,
   type PickerHost,
+  type PickerProject,
+  useProjectSelection,
 } from './ProjectPicker'
-import { useAddProject } from './useAddProject'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
 import { shuttleOrigin } from './projectModel'
@@ -60,14 +58,7 @@ export interface AgentEntry {
 }
 
 /** A destination project, derived by the island from the composite feed. */
-export interface StashProject {
-  id: string
-  name?: string
-  /** `shuttle.project_dir` — the worker cwd AND the create endpoint's felt root. */
-  path: string
-  /** Owner-routing key sent as `origin`: `'local'` for the local daemon's own
-   *  projects, else the owning remote's bare name (e.g. `cluster-a`). */
-  originId: string
+export interface StashProject extends PickerProject {
   /** Loom-relative substore prefix; `''` when the project is a store root.
    *  Used to scope/strip parent candidates to project-relative slugs. */
   loomPrefix: string
@@ -342,24 +333,24 @@ export function StashForm({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Host, then project. The host defaults to the local daemon's own unless the
-  // caller scoped the form to a project living elsewhere: ranking hosts by
-  // recency would point a fresh form at whichever remote was busiest, and "+
-  // Add project…" would then mean "on that remote", which is the confusion the
-  // split exists to remove.
-  const hosts: PickerHost[] = availableHosts.length > 0 ? availableHosts : [FALLBACK_HOST]
-  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
-  const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
-
-  // Project default within that host: most-recently-active → first
-  // alphabetically → null (only when empty).
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(
-    () => projectsForHost(availableCities, defaultHostId).sort(byRecency(cityActivityById))[0]?.id ?? null,
-  )
-  // The live project set: seeded from the island's derivation, then replaced
-  // wholesale when "+ Add project…" registers a directory (the island re-derives
-  // through `deriveProjects`, so shape stays single-sourced there).
-  const [cities, setCities] = useState<StashProject[]>(availableCities)
+  const {
+    hosts,
+    selectedHostId,
+    selectedHost,
+    handleHostChange,
+    cities,
+    hostCities,
+    selectedCityId,
+    setSelectedCityId,
+    selectedCity,
+    addProject,
+  } = useProjectSelection<StashProject>({
+    shuttleBase,
+    availableCities,
+    availableHosts,
+    cityActivityById,
+    onProjectAdded,
+  })
 
   const titleRef = useRef<HTMLInputElement | null>(null)
 
@@ -385,36 +376,6 @@ export function StashForm({
       .catch(() => {})
     return () => { cancelled = true }
   }, [shuttleBase])
-
-  const sortedCities = [...cities].sort(byRecency(cityActivityById))
-  const hostCities = projectsForHost(sortedCities, selectedHostId)
-  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
-  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
-
-  // "+ Add project…" — native OS dialog on a local host that has one, the
-  // absolute-path row everywhere else (see useAddProject).
-  const addProject = useAddProject<StashProject>({
-    shuttleBase,
-    nativeFolderPicker: selectedHost.isLocal && selectedHost.nativeFolderPicker,
-    isLocalHost: selectedHost.isLocal,
-    origin: selectedHostId,
-    onProjectAdded,
-    onAdded: (next, path) => {
-      setCities(next)
-      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
-      if (added) setSelectedCityId(added.id)
-    },
-  })
-
-  // Changing the host re-points the project at that host's most recent one — a
-  // selection belonging to the previous host would create on the wrong machine,
-  // and null would silently block submit. Any open path row belongs to the old
-  // host, so it goes too.
-  const handleHostChange = (id: string): void => {
-    setSelectedHostId(id)
-    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
-    addProject.closePath()
-  }
 
   const tagInputLower = tagInput.trim().toLowerCase()
   const filteredSuggestions = tagSuggestions

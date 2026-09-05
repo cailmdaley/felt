@@ -38,13 +38,16 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useAddProject, type AddProjectFlow } from './useAddProject'
 
 export interface PickerProject {
   /** Stable key — `${originId}:${path}`. */
   id: string
   name?: string
+  /** `shuttle.project_dir` — the worker cwd AND the create endpoint's felt root. */
   path: string
-  /** `'local'` or a remote host name. */
+  /** Owner-routing key sent as `origin`: `'local'` for the local daemon's own
+   *  projects, else the owning remote's bare name (e.g. `cluster-a`). */
   originId: string
 }
 
@@ -389,4 +392,100 @@ export function injectProjectPickerStyles(): void {
     }
   `
   document.head.appendChild(style)
+}
+
+/**
+ * Host-then-project selection — the state both forms run on, once.
+ *
+ * Capture and Stash ask the same question in the same order (which host, then
+ * which of its projects), with the same defaults, the same re-point on a host
+ * change, and the same adopt-and-select on "+ Add project…". Only the JSX
+ * around it differs, so only the JSX stays in the forms.
+ */
+export function useProjectSelection<P extends PickerProject>(opts: {
+  shuttleBase: string
+  availableCities: P[]
+  availableHosts: PickerHost[]
+  cityActivityById: Record<string, number>
+  onProjectAdded?: (path: string) => Promise<P[]>
+  /** An extra way this page knows the local host can raise a dialog, ORed with
+   *  the host's own flag. Remotes never get one: the dialog would open on a
+   *  desktop nobody is sitting at. */
+  nativeFolderPicker?: boolean
+}): {
+  hosts: PickerHost[]
+  selectedHostId: string
+  selectedHost: PickerHost
+  handleHostChange: (id: string) => void
+  cities: P[]
+  sortedCities: P[]
+  hostCities: P[]
+  selectedCityId: string | null
+  setSelectedCityId: (id: string | null) => void
+  selectedCity: P | null
+  addProject: AddProjectFlow
+} {
+  // Live project set: seeded from the island's derivation, replaced wholesale
+  // when the directory picker registers one (the island re-derives it, so the
+  // shape stays single-sourced there).
+  const [cities, setCities] = useState<P[]>(opts.availableCities)
+  // Default-selection priority: most-recently-active → alphabetical → null
+  // (only when the host has none).
+  const sortedCities = [...cities].sort(byRecency(opts.cityActivityById))
+
+  // Host first: the local daemon's own, unless the caller scoped the form to a
+  // project that lives elsewhere. Defaulting to recency would land on whichever
+  // remote was busiest, and "add a project" would then quietly mean "over
+  // there" — the thing this split exists to prevent.
+  const hosts: PickerHost[] =
+    opts.availableHosts.length > 0 ? opts.availableHosts : [FALLBACK_HOST]
+  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
+  const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(
+    () => projectsForHost(sortedCities, defaultHostId)[0]?.id ?? null,
+  )
+  const hostCities = projectsForHost(sortedCities, selectedHostId)
+  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
+  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
+
+  // The add-project row — native OS dialog on a local host that has one, the
+  // absolute-path row everywhere else (see useAddProject).
+  const addProject = useAddProject<P>({
+    shuttleBase: opts.shuttleBase,
+    nativeFolderPicker:
+      selectedHost.isLocal &&
+      (selectedHost.nativeFolderPicker || (opts.nativeFolderPicker ?? false)),
+    isLocalHost: selectedHost.isLocal,
+    origin: selectedHostId,
+    onProjectAdded: opts.onProjectAdded,
+    onAdded: (next, path) => {
+      setCities(next)
+      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
+      if (added) setSelectedCityId(added.id)
+    },
+  })
+
+  // Changing the host re-points the project at that host's most recent one — a
+  // selection belonging to the previous host would act on the wrong machine,
+  // and null would silently block submit. Any open path row belongs to the old
+  // host, so it goes too.
+  const handleHostChange = (id: string): void => {
+    setSelectedHostId(id)
+    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
+    addProject.closePath()
+  }
+
+  return {
+    hosts,
+    selectedHostId,
+    selectedHost,
+    handleHostChange,
+    cities,
+    sortedCities,
+    hostCities,
+    selectedCityId,
+    setSelectedCityId,
+    selectedCity,
+    addProject,
+  }
 }

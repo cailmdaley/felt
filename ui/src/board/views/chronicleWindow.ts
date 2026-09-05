@@ -27,11 +27,7 @@
  */
 
 import { railCivilDay } from '../civilDay.js'
-import { railBounds, RAIL_START_HOUR, shiftCivilDay } from './railTime.js'
-
-// chronicleWindow.test.ts pins the dawn boundary its assertions are written
-// against; the rule itself lives in ./railTime.js.
-export { RAIL_START_HOUR }
+import { railBounds, shiftCivilDay } from './railTime.js'
 
 // ── Shape ────────────────────────────────────────────────────────────────────
 
