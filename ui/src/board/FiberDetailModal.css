@@ -1598,3 +1598,99 @@
    for a session that was never bridged, a stamp without a promise. */
 a.kbn-detail-aloft { text-decoration: none; }
 .kbn-detail-aloft-static { cursor: default; }
+
+/* ── The reader's zoom cluster ─────────────────────────────────────────────
+   − FIT + and a percentage, in the chrome bar of both readers. Mounted only
+   under a coarse pointer (`installTouchZoom` is a no-op otherwise), so these
+   rules simply never find a box on the wide board. Iron gall throughout: it
+   is machinery, and machinery does not get a pigment. */
+.kbn-reader-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+.kbn-reader-zoom-btn {
+  appearance: none;
+  min-width: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: rgba(255, 251, 237, 0.5);
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  border-radius: 3px;
+  color: #5B5347;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.kbn-reader-zoom-btn:active { background: rgba(196, 147, 51, 0.18); }
+.kbn-reader-zoom-fit {
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.1em;
+}
+/* The readout is a fact you glance at, not a control — no box, no target. */
+.kbn-reader-zoom-pct {
+  flex: 0 0 auto;
+  min-width: 40px;
+  padding-left: 2px;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  color: #8C8271;
+  text-align: right;
+}
+
+/* ── The sheet on its side ────────────────────────────────────────────────
+   A phone in landscape opens the same sheet with 400px of height to spend,
+   and the head that reads as a title bar in portrait reads as a lid there.
+   So the head gives up its second line of title and its vertical padding, the
+   controls cluster's expanded body stops being able to swallow the page, and
+   the file viewer's frame keeps everything that is left — which on this shape
+   is the entire point of having opened it. */
+@media (max-height: 500px) and (pointer: coarse) {
+  .kbn-detail-sheet .kbn-detail-header {
+    padding: 2px 8px 2px 12px;
+  }
+  .kbn-detail-sheet .kbn-detail-title {
+    font-size: calc(14.5px * var(--kbn-type-scale, 1));
+    -webkit-line-clamp: 1;
+  }
+  /* Still a real target — 36px is the floor a thumb can hit — but it stops
+     setting the height of a bar it is only a corner of. */
+  .kbn-detail-sheet .kbn-detail-close,
+  .kbn-detail-sheet .kbn-detail-refresh {
+    min-width: 36px;
+    min-height: 36px;
+    font-size: calc(17px * var(--kbn-type-scale, 1));
+  }
+  .kbn-detail-sheet .kbn-detail-controls-toggle {
+    min-height: 36px;
+    padding: 2px 12px 2px 16px;
+  }
+  /* 58dvh of 400 is the page. Half is the most a drawer may take from the
+     thing it is a drawer for, and it scrolls, so nothing is lost. */
+  .kbn-detail-sheet .kbn-detail-controls-body {
+    max-height: 50dvh;
+    padding: 4px 16px 10px;
+  }
+  .kbn-detail-sheet .kbn-detail-action-btn {
+    min-height: 38px;
+    font-size: calc(13.5px * var(--kbn-type-scale, 1));
+  }
+  /* The tab strip is one line of file names; it does not need the padding of
+     a title bar on a page this short. */
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .kbn-reader-zoom-btn { min-width: 32px; min-height: 32px; }
+}

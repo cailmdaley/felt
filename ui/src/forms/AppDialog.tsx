@@ -46,7 +46,7 @@ function injectAppDialogStyles(): void {
       border-radius: 4px;
       animation: app-dialog-card-in 160ms ease-out;
     }
-    @media (max-width: 700px) {
+    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
       .app-dialog-card {
         top: 0;
         left: 0;

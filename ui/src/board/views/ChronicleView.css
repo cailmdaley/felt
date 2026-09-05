@@ -1227,7 +1227,7 @@ button.chr-name:hover {
    record keeps its own horizontal scroll (`.chr-scroll`) so the page body
    never scrolls sideways. The threshold is the board's one mobile breakpoint
    (`../mobile.ts`). */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* A phone gutter is a budget, and the name is what it is for: you scan the
      record by reading names, not by reading evidence about them. So the two
      marginal columns stand down — the host note and the `+A −D` commit

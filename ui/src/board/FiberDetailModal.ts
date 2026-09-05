@@ -42,9 +42,9 @@ import {
   sentFilesRevision,
   type SentFile,
 } from './sentFiles.js'
-import { buildReaderWindow, buildTabButton, buildViewCell } from './ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar } from './ReaderChrome.js'
 import { closeTab, openTab } from './ReaderTabs.js'
-import { applyZoom, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
+import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
 import { humanizeCron } from './KanbanRules.js'
 import {
   civilDayToLocalDate,
@@ -1701,6 +1701,18 @@ export class FiberDetailModal {
 
     // Cmd/Ctrl + wheel zooms the active file (images, HTML, PDF — everything).
     views.addEventListener('wheel', (e) => this.handleZoomWheel(e), { passive: false })
+    // Under a finger there is no Cmd-wheel, so the − / FIT / + cluster is the
+    // only way back from a PDF that fills the sheet. Mounted left of the
+    // download glyph, so the two trailing buttons stay where they were.
+    installTouchZoom({
+      bar,
+      views,
+      before: winDownload,
+      coarse: coarsePointer(),
+      buildBar: buildZoomBar,
+      active: () => this.openFiles.find((x) => x.file.fullPath === this.activePath),
+      onChange: () => this.queueScrollWrite(),
+    })
 
     // ── Geometry ──
     // Remembered placement for this card wins; otherwise the default is
@@ -2927,8 +2939,7 @@ export class FiberDetailModal {
     // column width), else the viewer wrap (CSS `zoom` for iframes). The cell
     // (overflow:auto) is the pan surface. Apply persisted zoom now that the
     // cell is visible — its width is the image's fit base.
-    entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer
-    applyZoom(entry)
+    setZoomTarget(entry, viewer, entry.file.fullPath)
   }
 
   /** Cmd/Ctrl + wheel over the active file zooms it, anchored on the cursor.

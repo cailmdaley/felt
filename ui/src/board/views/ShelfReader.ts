@@ -62,8 +62,9 @@ import {
   type TabRef,
   type TabState,
 } from '../ReaderTabs.js'
-import { buildReaderWindow, buildTabButton, buildViewCell } from '../ReaderChrome.js'
-import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
+import { coarsePointer } from '../mobile.js'
+import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar } from '../ReaderChrome.js'
+import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
 import { readJSON, writeJSON } from './shelfLayout.js'
 
@@ -314,6 +315,16 @@ export class ShelfReader {
       this.close()
     })
     views.addEventListener('wheel', (e) => this.onZoomWheel(e), { passive: false })
+    // The finger's half of the same gesture — see the detail panel's viewer.
+    installTouchZoom({
+      bar,
+      views,
+      before: close,
+      coarse: coarsePointer(),
+      buildBar: buildZoomBar,
+      active: () => this.state.tabs.find((t) => t.path === this.state.active),
+      onChange: () => this.writeSoon(),
+    })
     this.views = views
 
     this.win = win
@@ -533,8 +544,7 @@ export class ShelfReader {
       { fiberId: entry.file.uid },
     )
     entry.cell.append(viewer)
-    entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer
-    applyZoom(entry)
+    setZoomTarget(entry, viewer, entry.file.fullPath)
   }
 
   // ── Zoom ───────────────────────────────────────────────────────────────────

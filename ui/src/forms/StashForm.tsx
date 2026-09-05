@@ -1015,7 +1015,7 @@ export function injectStashFormStyles(): void {
     .stash-row-dispatch {
       grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
     }
-    @media (max-width: 700px) {
+    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
       .stash-row-3,
       .stash-row-dispatch,
       .stash-row-schedule {
@@ -1446,7 +1446,7 @@ export function injectStashFormStyles(): void {
        answering another single class defined above it, so cascade order is
        the only thing that decides — move this block up and the phone
        silently gets the desktop's footer back. */
-    @media (max-width: 700px) {
+    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
       /* The card stops being a card. A phone has no room to float paper over
          anything, so the scrim's padding goes and the form takes the screen —
          header, one scrolling body, and the footer pinned to the bottom edge,

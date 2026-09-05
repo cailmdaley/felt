@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
-import { nextZoom, zoomAnchorScroll, ZOOM_MAX, ZOOM_MIN } from './ReaderZoom.js'
+import {
+  fitPageZoom,
+  fitZoom,
+  nextZoom,
+  stepZoom,
+  zoomAnchorScroll,
+  PAGE_ASPECT,
+  PAGE_PX_H,
+  PAGE_PX_W,
+  ZOOM_MAX,
+  ZOOM_MIN,
+} from './ReaderZoom.js'
 
 /**
  * THE ZOOM GESTURE, AS NUMBERS.
@@ -72,5 +83,84 @@ describe('zoomAnchorScroll — the point under the cursor does not move', () => 
     // arithmetic says so plainly; clamping to 0 is the browser's job, and
     // pretending here would put the anchor somewhere it is not.
     expect(at({ scrollLeft: 0, scrollTop: 0, zOld: 4, zNew: 1 }).scrollLeft).toBeLessThan(0)
+  })
+})
+
+/**
+ * FIT, WHICH IS THE PHONE'S HALF OF THE GESTURE.
+ *
+ * A mouse never needed a floor: a file too big for its column is fine, you
+ * scroll. A finger has no wheel, so a PDF fitted to the width of a phone is a
+ * page you can only read a third of, with no way back. `fitZoom` is the way
+ * back, and the arithmetic is the same for all three kinds of file because at
+ * zoom 1 every one of them is drawn fit to the cell's width.
+ */
+describe('fitZoom', () => {
+  it('lands the whole of a tall page on the cell', () => {
+    // A 400px-wide cell 300px tall showing an A4 sheet. At zoom 1 the page is
+    // 400 x 1.414 = 566 tall; fit must divide that down to 300.
+    const z = fitZoom(300, 400, PAGE_ASPECT)
+    expect(400 * PAGE_ASPECT * z).toBeCloseTo(300, 6)
+  })
+
+  it('never magnifies — fit is a way back, not a way up', () => {
+    // A short report that already fits is left alone rather than blown up to
+    // fill the phone, which is not what anyone means by "fit".
+    expect(fitZoom(800, 400, 0.5)).toBe(1)
+  })
+
+  it('stops at the floor rather than fitting a document into illegibility', () => {
+    expect(fitZoom(100, 400, 40)).toBe(ZOOM_MIN)
+  })
+
+  it('answers 1 for a cell or a base it cannot measure', () => {
+    expect(fitZoom(0, 400, PAGE_ASPECT)).toBe(1)
+    expect(fitZoom(300, 0, PAGE_ASPECT)).toBe(1)
+    expect(fitZoom(300, 400, 0)).toBe(1)
+  })
+})
+
+describe('stepZoom — one press of the button pair', () => {
+  it('is proportional in both directions and round-trips', () => {
+    expect(stepZoom(1, 1)).toBeGreaterThan(1)
+    expect(stepZoom(1, -1)).toBeLessThan(1)
+    expect(stepZoom(stepZoom(2, 1), -1)).toBeCloseTo(2, 12)
+  })
+
+  it('clamps to the same range the wheel does', () => {
+    expect(stepZoom(ZOOM_MAX, 1)).toBe(ZOOM_MAX)
+    expect(stepZoom(ZOOM_MIN, -1)).toBe(ZOOM_MIN)
+  })
+})
+
+/**
+ * A PDF PAGE, WHERE BOTH DIMENSIONS BIND.
+ *
+ * The frame is enlarged and scaled down, so at zoom z its viewport is
+ * `cell / z` in each direction and the page has to fit in both. On a landscape
+ * phone it is the height that binds, by a factor of four; on a portrait one it
+ * can be either.
+ */
+describe('fitPageZoom', () => {
+  it('takes whichever dimension binds', () => {
+    // The measured landscape cell: 750 x 292. Height binds.
+    const z = fitPageZoom(750, 292)
+    expect(z).toBeCloseTo(292 / PAGE_PX_H, 12)
+    expect(750 / z).toBeGreaterThanOrEqual(PAGE_PX_W)
+    expect(292 / z).toBeCloseTo(PAGE_PX_H, 6)
+  })
+
+  it('binds on width when the cell is tall and narrow — a portrait phone', () => {
+    const z = fitPageZoom(390, 3000)
+    expect(z).toBeCloseTo(390 / PAGE_PX_W, 12)
+  })
+
+  it('never magnifies, and answers 1 for a cell it cannot measure', () => {
+    expect(fitPageZoom(4000, 4000)).toBe(1)
+    expect(fitPageZoom(0, 292)).toBe(1)
+  })
+
+  it('agrees with the page aspect it is derived from', () => {
+    expect(PAGE_ASPECT).toBeCloseTo(PAGE_PX_H / PAGE_PX_W, 12)
   })
 })

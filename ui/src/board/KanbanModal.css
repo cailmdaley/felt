@@ -15,10 +15,15 @@
   --kbn-type-scale: 1.18;
 
   /* The board's one mobile threshold, written here so the stylesheet says out
-     loud what `src/board/mobile.ts` exports as MOBILE_MAX_PX. Media queries
-     cannot read a custom property, so every `@media (max-width: 700px)` below
-     is this number by hand — change one, change both. */
+     loud what `src/board/mobile.ts` exports. It is a disjunction, not a width:
+     too narrow OR too short-and-handheld — a phone on its side is 874px wide
+     and 402px tall, and only the second half catches it. Media queries cannot
+     read a custom property, so every
+     `@media (max-width: 700px), (max-height: 500px) and (pointer: coarse)`
+     below is these numbers by hand; `test/mobileMedia.test.ts` keeps them
+     honest. */
   --kbn-mobile-max: 700px;
+  --kbn-mobile-short-max: 500px;
 
   /* ── THE BOARD'S PIGMENTS ──────────────────────────────────────────────
      One meaning per colour, one colour per meaning. Declared here because the
@@ -2013,9 +2018,13 @@
 /* ══════════════════════════════════════════════════════════════════════════
    THE DESK AT PHONE WIDTH
    ══════════════════════════════════════════════════════════════════════════
-   One threshold, 700px, declared as `--kbn-mobile-max` at the top of this file
-   and exported as MOBILE_MAX_PX from `src/board/mobile.ts`. Above it nothing
-   here applies and the desktop board is untouched.
+   One threshold, declared at the top of this file and exported as
+   MOBILE_MEDIA from `src/board/mobile.ts`: narrower than 700px, or shorter
+   than 500px under a finger. Outside it nothing here applies and the desktop
+   board is untouched. The second clause is the phone in LANDSCAPE, which is
+   wider than any laptop window we would call narrow and shorter than all of
+   them; see THE DESK ON ITS SIDE at the end of this file for what that shape
+   additionally gives up.
 
    The move is a change of BOOK, not a change of style. Three columns side by
    side is a desk you stand over; a phone is a codex you hold, so the Now triad
@@ -2043,7 +2052,7 @@
   display: none;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The notch, the home indicator, and the rounded corners. The board is
      `inset: 0` on a `border-box`, so this is padding, not margin. */
   .kbn-modal {
@@ -2375,4 +2384,88 @@
   .kbn-card,
   .kbn-pin-chip,
   .kbn-cluster-item { cursor: pointer; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE DESK ON ITS SIDE
+   ══════════════════════════════════════════════════════════════════════════
+   A phone turned landscape is 874x402: wider than the desk expects and half
+   as tall as anything else we design for. Every rule above already applies
+   (the second clause of the mobile threshold catches this shape), so the
+   codex is already a codex — three leaves, a folio strip, folded bands. What
+   is left to settle is the one thing width cannot buy back, which is HEIGHT.
+
+   The whole argument is a budget. Portrait spends about 90px of 844 on chrome
+   and nobody notices; the same 90px out of 402 is a quarter of the page
+   before a single card. So the strip and the tabs give up their air — not
+   their targets, they stay tappable — and the leaf claims every pixel they
+   release: it stops being a fixed 58vh block on a scrolling page and becomes
+   the page, with Pinned and Resting waiting just below the fold exactly where
+   a thumb expects to find them.
+
+   Note the leaf is now WIDE — one column across 874px is a generous measure,
+   which is the compensation landscape actually offers. Nothing here narrows
+   it back down to a portrait column: a wide leaf holds more of each card's
+   outcome line, and that is the trade the rotation is for. */
+@media (max-height: 500px) and (pointer: coarse) {
+  /* Sides keep their gutter; the vertical padding is what the page cannot
+     afford. The safe-area insets are still honoured by `.kbn-modal` above —
+     in landscape those move to the left and right edges, which is exactly
+     where the notch and the rounded corners now are. */
+  .kbn-body {
+    padding: 2px 10px 6px;
+    gap: 6px;
+  }
+
+  /* The view strip earns its place — it is the only way to reach Day, Week
+     and the rest — but it does not need to be a button bar. Trimmed to a
+     header rule of page names, still a comfortable target because the row's
+     own height, not its padding, is what a thumb lands on. */
+  .kbn-viewtabs {
+    padding-bottom: 2px;
+    gap: 3px;
+  }
+  .kbn-viewtab {
+    padding: 4px 8px;
+    font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  }
+
+  /* The folio strip loses its air and keeps its anatomy: initial, name,
+     count, and the active leaf's action glyph. 34px is under the 44 we hold
+     everywhere else, and it is deliberate — the segment spans a third of an
+     874px screen, so the target is enormous in the axis that is scarce for a
+     thumb and small only in the axis that is scarce for the page. */
+  .kbn-folio-seg {
+    min-height: 34px;
+    padding: 2px 4px 3px;
+  }
+  .kbn-folio-name { font-size: 12px; }
+  .kbn-folio-name .kbn-cap { font-size: 14px; }
+
+  /* The budget, written out: the body's 2px of top padding, the view strip
+     (~27), the gap under it (6), the folio strip (~41) and a little air at
+     the foot — 86px of chrome, and the leaf is everything else. Portrait's
+     `58vh` is a fraction because a tall page can spare one; here the leaf
+     takes what is left after a fixed cost, which is the only way to keep the
+     cost from eating the page.
+
+     `dvh` rather than `vh` because mobile Safari collapses its toolbars as
+     you scroll and `vh` keeps sizing to the tall state, stranding the leaf's
+     foot under the chrome. The leaf is a fixed box on purpose: the list
+     inside scrolls, and Pinned and Resting land exactly one fold below, which
+     is what makes the swipe-down gesture mean something. */
+  .kbn-section-now { min-height: 0; }
+  .kbn-now-board { align-items: stretch; }
+  .kbn-now-board > .kbn-col {
+    height: calc(100dvh - 86px);
+    min-height: 140px;
+  }
+
+  /* Two lines of title is a luxury of a tall page. The card keeps its outcome
+     line — that is the sentence you are actually reading the board for — and
+     gives up the padding around it. */
+  .kbn-card {
+    padding: 7px 10px;
+    gap: 4px;
+  }
 }

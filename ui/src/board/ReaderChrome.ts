@@ -106,3 +106,43 @@ export function buildReaderWindow(opts: {
   win.append(bar, views)
   return { win, bar, tabs, closeBtn, views }
 }
+
+/** The zoom cluster: − , FIT , + , and a percentage that says where you are.
+ *
+ *  Built bare, like everything else here — `installTouchZoom` in `ReaderZoom`
+ *  binds it. It exists for the finger: a mouse has Cmd-wheel, which is a
+ *  better gesture than any three buttons, so the cluster is only mounted on a
+ *  coarse pointer and the wide board never sees it. */
+export function buildZoomBar(): {
+  bar: HTMLElement
+  out: HTMLElement
+  fit: HTMLElement
+  plus: HTMLElement
+  minus: HTMLElement
+} {
+  const bar = document.createElement('div')
+  bar.className = 'kbn-reader-zoom'
+
+  const btn = (label: string, aria: string, cls: string): HTMLElement => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = `kbn-reader-zoom-btn ${cls}`
+    b.setAttribute('aria-label', aria)
+    b.textContent = label
+    return b
+  }
+
+  const minus = btn('−', 'Zoom out', 'kbn-reader-zoom-out')
+  // "FIT" rather than a glyph: every icon for this means something else to
+  // somebody, and the word is two characters wider than the arrows nobody
+  // agrees on.
+  const fit = btn('FIT', 'Fit the whole page', 'kbn-reader-zoom-fit')
+  const plus = btn('+', 'Zoom in', 'kbn-reader-zoom-in')
+
+  const out = document.createElement('span')
+  out.className = 'kbn-reader-zoom-pct'
+  out.textContent = '100%'
+
+  bar.append(minus, fit, plus, out)
+  return { bar, out, fit, plus, minus }
+}

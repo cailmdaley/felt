@@ -342,7 +342,7 @@
    centre takes the next line, full width; the view's own controls take the
    line after that. Nothing is squeezed because nothing shares a line with
    anything it could squeeze. Desktop (≥701px) is untouched. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-view-page { padding: 8px 10px 10px; }
 
   .kbn-view-titlerow {
