@@ -90,7 +90,9 @@ stream.`,
 		if jsonOutput {
 			return outputJSON(records)
 		}
-		printRegistryWarnings(cmd, reg)
+		for _, w := range reg.Warnings() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+		}
 		for _, a := range records {
 			if a.IsAlias() {
 				fmt.Printf("%s %-22s → %s%s\n", sourceMarker(a), a.ID, a.AliasOf, formatAlias(a))
@@ -234,13 +236,6 @@ func registryFooter(reg *shuttle.AgentRegistry) string {
 	}
 	return fmt.Sprintf("registry: %d builtin + %d from %s (builtins: %s) → %d agents",
 		reg.BuiltinCount(), user, reg.UserPath(), reg.BuiltinsMode(), total)
-}
-
-// printRegistryWarnings surfaces non-fatal load problems on stderr.
-func printRegistryWarnings(cmd *cobra.Command, reg *shuttle.AgentRegistry) {
-	for _, w := range reg.Warnings() {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
-	}
 }
 
 func formatConstraints(a shuttle.AgentRecord) string {

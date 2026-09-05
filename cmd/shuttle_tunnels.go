@@ -48,13 +48,12 @@ var tunnelServiceTemplate string
 var hostGOOS = runtime.GOOS
 
 type tunnelSpec struct {
-	Name        string
-	SSHHost     string
-	Label       string
-	UnitName    string
-	LocalPort   int
-	RemotePort  int
-	HoldCommand string
+	Name       string
+	SSHHost    string
+	Label      string
+	UnitName   string
+	LocalPort  int
+	RemotePort int
 	// Multiplex: ride an existing ControlMaster socket (~/.ssh/ctl/%C, the
 	// ssh-config ControlPath) instead of opening independent connections.
 	// For a host behind interactive 2FA a fresh unattended ssh can never
@@ -72,7 +71,6 @@ type tunnelTemplateData struct {
 	SSHHost     string
 	LocalPort   int
 	RemotePort  int
-	HoldCommand string
 	AutoSSHPath string
 	SSHAuthSock string
 	LogPath     string
@@ -200,7 +198,6 @@ func installTunnels(requested []string) error {
 			SSHHost:     spec.SSHHost,
 			LocalPort:   spec.LocalPort,
 			RemotePort:  spec.RemotePort,
-			HoldCommand: spec.HoldCommand,
 			Multiplex:   spec.Multiplex,
 			AutoSSHPath: autosshPath,
 			SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),

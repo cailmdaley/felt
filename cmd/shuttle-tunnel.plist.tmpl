@@ -24,9 +24,7 @@
     <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done</string>
     {{- else }}
     <string>{{ .AutoSSHPath }}</string>
-    {{- if not .HoldCommand }}
     <string>-N</string>
-    {{- end }}
     <string>-M</string>
     <string>0</string>
     <string>-S</string>
@@ -46,9 +44,6 @@
     <string>-L</string>
     <string>{{ .LocalPort }}:localhost:{{ .RemotePort }}</string>
     <string>{{ .SSHHost }}</string>
-    {{- if .HoldCommand }}
-    <string>{{ .HoldCommand }}</string>
-    {{- end }}
     {{- end }}
   </array>
 
