@@ -158,6 +158,32 @@ export interface StashCluster {
   cards: KanbanCard[]
 }
 
+/** One live edge-scroll axis: its rAF handle, current velocity, and the
+ *  element being scrolled. */
+interface AxisScroll {
+  frame: number | null
+  velocity: number
+  target: HTMLElement | null
+}
+
+/** Everything the two edge-scroll axes differ by. Carried rather than
+ *  normalized: the capture phase, the overflow guard and the liveness
+ *  predicate are each a real behavioural difference. */
+interface AxisScrollSpec {
+  axis: 'x' | 'y'
+  state: AxisScroll
+  edgePx: number
+  maxStepPx: number
+  /** Capture phase, for the columns: a card claiming a stack and a peek row
+   *  mid-reorder both `stopPropagation`, which in the bubble phase would
+   *  starve the scroll exactly when the human most needs to reach further. */
+  capture: boolean
+  /** Columns only: a column that does not overflow has nothing to scroll. */
+  requireOverflow: boolean
+  live: () => boolean
+  stop: () => void
+}
+
 interface KanbanSurfaceRendererOptions {
   getDragSourceId: () => string | null
   setDragSourceId: (id: string | null) => void
@@ -215,19 +241,15 @@ export class KanbanSurfaceRenderer {
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
-  private edgeScrollFrame: number | null = null
+  private readonly hScroll: AxisScroll = { frame: null, velocity: 0, target: null }
+  /** Vertical twin of the above, for the columns. A separate record rather
+   *  than a second axis on the same one, because the two run against
+   *  DIFFERENT elements — the horizon strip scrolls sideways while a column
+   *  scrolls down — and can be live at the same time. */
+  private readonly vScroll: AxisScroll = { frame: null, velocity: 0, target: null }
   /** Which leaf of the mobile Now pager the reader is on. Held across renders
    *  so a poll-driven rebuild doesn't turn the page back to Drafts. */
   private folioIndex = 0
-  private edgeScrollVelocity = 0
-  private edgeScrollTarget: HTMLElement | null = null
-  /** Vertical twin of the above, for the columns. Separate fields rather than
-   *  a second axis on the same three, because the two run against DIFFERENT
-   *  elements — the horizon strip scrolls sideways while a column scrolls
-   *  down — and can be live at the same time. */
-  private vScrollFrame: number | null = null
-  private vScrollVelocity = 0
-  private vScrollTarget: HTMLElement | null = null
   /** The horizon's aim readout — the fixed spot that names, in words, the
    *  target under the cursor. Rebuilt with the horizon on every drag. */
   private aimReadoutEl: HTMLElement | null = null
@@ -889,18 +911,69 @@ export class KanbanSurfaceRenderer {
    *  columns' vertical one. Called on drop, on drag-leave, and by the modal on
    *  unmount so no tick outlives the board. */
   stopEdgeScroll(): void {
-    this.edgeScrollVelocity = 0
-    this.edgeScrollTarget = null
-    if (this.edgeScrollFrame !== null) {
-      window.cancelAnimationFrame(this.edgeScrollFrame)
-      this.edgeScrollFrame = null
+    this.stopAxis(this.hScroll)
+    this.stopAxis(this.vScroll)
+  }
+
+  /** Install drag edge-scroll on one axis of `el`. Both axes are the same
+   *  pressure ramp against the near and far edge; everything the two differ
+   *  by rides on `spec`, including which stop they use — the horizontal one
+   *  clears BOTH axes (it is the public `stopEdgeScroll`), the vertical one
+   *  only its own. */
+  private installAxisEdgeScroll(el: HTMLElement, spec: AxisScrollSpec): void {
+    el.addEventListener(
+      'dragover',
+      (e: DragEvent) => {
+        if (!spec.live()) return
+        if (spec.requireOverflow && el.scrollHeight <= el.clientHeight) return
+        const r = el.getBoundingClientRect()
+        const pos = spec.axis === 'y' ? e.clientY : e.clientX
+        const nearPressure = Math.max(0, spec.edgePx - (pos - (spec.axis === 'y' ? r.top : r.left)))
+        const farPressure = Math.max(0, spec.edgePx - ((spec.axis === 'y' ? r.bottom : r.right) - pos))
+        const direction = farPressure > 0 ? 1 : nearPressure > 0 ? -1 : 0
+        const pressure = Math.max(nearPressure, farPressure) / spec.edgePx
+        spec.state.velocity =
+          direction === 0
+            ? 0
+            : direction * Math.max(6, Math.round(Math.pow(pressure, 1.35) * spec.maxStepPx))
+        if (spec.state.velocity === 0) {
+          spec.stop()
+          return
+        }
+        spec.state.target = el
+        this.startAxis(spec)
+      },
+      spec.capture,
+    )
+    el.addEventListener('dragleave', (e: DragEvent) => {
+      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
+      spec.stop()
+    })
+    el.addEventListener('drop', () => spec.stop())
+  }
+
+  private startAxis(spec: AxisScrollSpec): void {
+    const st = spec.state
+    if (st.frame !== null) return
+    const tick = (): void => {
+      const target = st.target
+      if (!target || !spec.live() || st.velocity === 0) {
+        spec.stop()
+        return
+      }
+      if (spec.axis === 'y') target.scrollTop += st.velocity
+      else target.scrollLeft += st.velocity
+      st.frame = window.requestAnimationFrame(tick)
     }
-    this.vScrollVelocity = 0
-    this.vScrollTarget = null
-    if (this.vScrollFrame !== null) {
-      window.cancelAnimationFrame(this.vScrollFrame)
-      this.vScrollFrame = null
-    }
+    st.frame = window.requestAnimationFrame(tick)
+  }
+
+  private stopAxis(st: AxisScroll): void {
+    st.velocity = 0
+    st.target = null
+    if (st.frame === null) return
+    window.cancelAnimationFrame(st.frame)
+    st.frame = null
   }
 
   /** The one write path for `queueDrag`, so the drag horizon opens and closes
@@ -936,58 +1009,16 @@ export class KanbanSurfaceRenderer {
    * hovering something — the moment they most need to reach further.
    */
   private installVerticalEdgeScroll(el: HTMLElement): void {
-    const EDGE_PX = 72
-    const MAX_STEP_PX = 26
-    el.addEventListener(
-      'dragover',
-      (e: DragEvent) => {
-        if (!this.isDragging()) return
-        if (el.scrollHeight <= el.clientHeight) return
-        const r = el.getBoundingClientRect()
-        const topPressure = Math.max(0, EDGE_PX - (e.clientY - r.top))
-        const bottomPressure = Math.max(0, EDGE_PX - (r.bottom - e.clientY))
-        const direction = bottomPressure > 0 ? 1 : topPressure > 0 ? -1 : 0
-        const pressure = Math.max(topPressure, bottomPressure) / EDGE_PX
-        this.vScrollVelocity =
-          direction === 0
-            ? 0
-            : direction * Math.max(6, Math.round(Math.pow(pressure, 1.35) * MAX_STEP_PX))
-        if (this.vScrollVelocity === 0) {
-          this.stopVerticalScroll()
-          return
-        }
-        this.vScrollTarget = el
-        this.startVerticalScroll()
-      },
-      true,
-    )
-    el.addEventListener('dragleave', (e: DragEvent) => {
-      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
-      this.stopVerticalScroll()
+    this.installAxisEdgeScroll(el, {
+      axis: 'y',
+      state: this.vScroll,
+      edgePx: 72,
+      maxStepPx: 26,
+      capture: true,
+      requireOverflow: true,
+      live: () => this.isDragging(),
+      stop: () => this.stopAxis(this.vScroll),
     })
-    el.addEventListener('drop', () => this.stopVerticalScroll())
-  }
-
-  private startVerticalScroll(): void {
-    if (this.vScrollFrame !== null) return
-    const tick = (): void => {
-      const target = this.vScrollTarget
-      if (!target || !this.isDragging() || this.vScrollVelocity === 0) {
-        this.stopVerticalScroll()
-        return
-      }
-      target.scrollTop += this.vScrollVelocity
-      this.vScrollFrame = window.requestAnimationFrame(tick)
-    }
-    this.vScrollFrame = window.requestAnimationFrame(tick)
-  }
-
-  private stopVerticalScroll(): void {
-    this.vScrollVelocity = 0
-    this.vScrollTarget = null
-    if (this.vScrollFrame === null) return
-    window.cancelAnimationFrame(this.vScrollFrame)
-    this.vScrollFrame = null
   }
 
   /** Edge-scroll the drag horizon when a drag approaches its left or right
@@ -995,49 +1026,22 @@ export class KanbanSurfaceRenderer {
    *  only way to reach day fourteen on a narrow board while holding a card.
    *  Velocity rises with how far into the 80px margin the cursor has pushed.
    *
+   *  A PEEK ROW deliberately does not edge-scroll the horizon: the liveness
+   *  predicate is `getDragSourceId` alone, not `isDragging()`.
+   *
    *  (It used to also toggle the ribbon's `.kbn-drag-open` expand class. The
    *  horizon has no closed state to open now: it exists only during a drag.) */
   private installEdgeScroll(wrap: HTMLElement): void {
-    const EDGE_PX = 80
-    const MAX_STEP_PX = 28
-    const onDragOver = (e: DragEvent): void => {
-      if (!this.o.getDragSourceId()) return
-      const r = wrap.getBoundingClientRect()
-      const leftPressure = Math.max(0, EDGE_PX - (e.clientX - r.left))
-      const rightPressure = Math.max(0, EDGE_PX - (r.right - e.clientX))
-      const direction = rightPressure > 0 ? 1 : leftPressure > 0 ? -1 : 0
-      const pressure = Math.max(leftPressure, rightPressure) / EDGE_PX
-      this.edgeScrollVelocity = direction === 0
-        ? 0
-        : direction * Math.max(6, Math.round(Math.pow(pressure, 1.35) * MAX_STEP_PX))
-      if (this.edgeScrollVelocity === 0) {
-        this.stopEdgeScroll()
-        return
-      }
-      this.edgeScrollTarget = wrap
-      this.startEdgeScroll()
-    }
-    const onDragLeave = (e: DragEvent): void => {
-      if (e.relatedTarget && wrap.contains(e.relatedTarget as Node)) return
-      this.stopEdgeScroll()
-    }
-    wrap.addEventListener('dragover', onDragOver)
-    wrap.addEventListener('dragleave', onDragLeave)
-    wrap.addEventListener('drop', () => this.stopEdgeScroll())
-  }
-
-  private startEdgeScroll(): void {
-    if (this.edgeScrollFrame !== null) return
-    const tick = (): void => {
-      const target = this.edgeScrollTarget
-      if (!target || !this.o.getDragSourceId() || this.edgeScrollVelocity === 0) {
-        this.stopEdgeScroll()
-        return
-      }
-      target.scrollLeft += this.edgeScrollVelocity
-      this.edgeScrollFrame = window.requestAnimationFrame(tick)
-    }
-    this.edgeScrollFrame = window.requestAnimationFrame(tick)
+    this.installAxisEdgeScroll(wrap, {
+      axis: 'x',
+      state: this.hScroll,
+      edgePx: 80,
+      maxStepPx: 28,
+      capture: false,
+      requireOverflow: false,
+      live: () => this.o.getDragSourceId() !== null,
+      stop: () => this.stopEdgeScroll(),
+    })
   }
 
   /** Install drop handlers on a section (Now or Stash) - drop anywhere
