@@ -248,8 +248,7 @@ func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	if err != nil {
 		return fmt.Errorf("cannot verify fiber %s ownership (owned by %q): %w", fiber, owner, err)
 	}
-	own = strings.TrimSpace(own)
-	if own == "" || owner == own {
+	if owner == own {
 		return nil
 	}
 	return ownerMismatchError{fiber: fiber, owner: owner, own: own, source: source}

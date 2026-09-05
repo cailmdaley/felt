@@ -159,27 +159,16 @@ func remoteSummaryRow(name string, rs *RemoteSnapshot) *FiberStatus {
 		// Remote configured but never successfully polled — emit a placeholder row
 		// so the user sees the host exists and is stale. Without this, an
 		// unreachable remote is silently missing from the table.
-		return &FiberStatus{Origin: name, State: staleStateLabel(rs), Stale: true}
+		state := "stale"
+		if rs.LastError != "" {
+			state = "stale (" + rs.LastError + ")"
+		}
+		return &FiberStatus{Origin: name, State: state, Stale: true}
 	}
 	return nil
 }
 
-// staleStateLabel summarizes a never-polled remote's status.
-func staleStateLabel(rs *RemoteSnapshot) string {
-	if rs == nil {
-		return "unknown"
-	}
-	if rs.LastError != "" {
-		return "stale (" + rs.LastError + ")"
-	}
-	return "stale"
-}
-
 func recoveryStateLabel(rec *RemoteRecovery) string {
-	if rec == nil || rec.State == "" {
-		return "unknown"
-	}
-
 	switch rec.State {
 	case "reviving", "degraded":
 		detail := rec.LastAction
@@ -228,15 +217,9 @@ func relativeRetry(ts string) string {
 	}
 	if delta < time.Hour {
 		mins := int(delta.Round(time.Minute) / time.Minute)
-		if mins < 1 {
-			mins = 1
-		}
 		return fmt.Sprintf("%dm", mins)
 	}
 	hours := int(delta.Round(time.Hour) / time.Hour)
-	if hours < 1 {
-		hours = 1
-	}
 	return fmt.Sprintf("%dh", hours)
 }
 
@@ -301,9 +284,5 @@ func joinNames(remotes map[string]*RemoteSnapshot) string {
 	if len(names) == 0 {
 		return "<none>"
 	}
-	out := names[0]
-	for _, n := range names[1:] {
-		out += ", " + n
-	}
-	return out
+	return strings.Join(names, ", ")
 }
