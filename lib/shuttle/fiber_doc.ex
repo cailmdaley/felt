@@ -9,9 +9,6 @@ defmodule Shuttle.FiberDoc do
     * `Shuttle.LifecycleStore` — felt-native lifecycle fields (`status`,
       `tempered`, `closed-at`, `outcome`) on accept / resume / mark-awaiting /
       park / rearm.
-    * `Shuttle.Continuation` — the runtime continuation fields nested under
-      `shuttle:` (`session_uuid`, `dispatched_at`, `run_id`, `handed_off_at`)
-      stamped at dispatch and at clean exit.
 
   The write path edits the raw frontmatter TEXT directly (via
   `Shuttle.FrontmatterEdit`) and never round-trips the parsed map through an
@@ -77,19 +74,6 @@ defmodule Shuttle.FiberDoc do
     end
   rescue
     error -> {:error, "malformed fiber document #{path}: #{Exception.message(error)}"}
-  end
-
-  @doc """
-  Read a fiber, apply the surgical edit `ops`, and write it back atomically.
-
-  Returns `:ok` or `{:error, reason}` (propagating a read failure). The two-step
-  read-then-write is the common path for both consumers.
-  """
-  @spec edit(String.t(), [FrontmatterEdit.op()]) :: :ok | {:error, String.t()}
-  def edit(fiber_id, ops) when is_binary(fiber_id) and is_list(ops) do
-    with {:ok, path, raw_fm, _frontmatter, body} <- read(fiber_id) do
-      write!(path, raw_fm, body, ops)
-    end
   end
 
   @doc """

@@ -128,12 +128,6 @@ defmodule Shuttle.Agents do
 
         "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
 
-      "codex" ->
-        "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
-
-      "pi" ->
-        "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
-
       _ ->
         "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
     end

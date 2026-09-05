@@ -63,7 +63,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   defp buckets!(path, from_ms, to_ms) do
-    {:ok, buckets} = Shuttle.Activity.buckets(from_ms, to_ms, events_file: path)
+    {:ok, %{buckets: buckets}} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
     buckets
   end
 
@@ -372,7 +372,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — aggregation" do
+  describe "Shuttle.Activity.window/3 — aggregation" do
     test "counts events sharing a (minute, session, cwd, kind) key into one bucket" do
       path =
         write_fixture([
@@ -420,7 +420,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — kind mapping" do
+  describe "Shuttle.Activity.window/3 — kind mapping" do
     test "user_prompt_submit is attention, notification is notify, all else is agent" do
       path =
         write_fixture([
@@ -502,7 +502,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — waiting spells" do
+  describe "Shuttle.Activity.window/3 — waiting spells" do
     # A notify mark is the ONSET of a waiting spell, not a notification. Claude
     # Code re-fires the idle notification every minute; those repeats are the
     # same unanswered ask.
@@ -635,7 +635,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — window and tolerance" do
+  describe "Shuttle.Activity.window/3 — window and tolerance" do
     test "both window bounds are inclusive and events outside are dropped" do
       path =
         write_fixture([
@@ -669,12 +669,14 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
 
     test "a missing events file yields no buckets (no crash)" do
-      assert Shuttle.Activity.buckets(@t0, @t0 + @minute, events_file: "/no/such/events.jsonl") ==
-               {:ok, []}
+      assert {:ok, %{buckets: buckets}} =
+               Shuttle.Activity.window(@t0, @t0 + @minute, events_file: "/no/such/events.jsonl")
+
+      assert buckets == []
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — rotated sibling" do
+  describe "Shuttle.Activity.window/3 — rotated sibling" do
     test "reads events.jsonl.1 when its mtime falls inside the window" do
       path = write_fixture([event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"})])
 
@@ -709,7 +711,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — tool spans" do
+  describe "Shuttle.Activity.window/3 — tool spans" do
     # The whole point of the fill: a long tool call is one continuous stretch of
     # work, and the minutes between its two stamped events belong to it.
     test "a seven-minute tool call yields seven continuous minutes" do
@@ -828,17 +830,17 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  describe "Shuttle.Activity.buckets/3 — refused windows" do
+  describe "Shuttle.Activity.window/3 — refused windows" do
     test "an inverted window is an error" do
-      assert Shuttle.Activity.buckets(@t0, @t0 - 1) == {:error, :inverted_range}
+      assert Shuttle.Activity.window(@t0, @t0 - 1) == {:error, :inverted_range}
     end
 
     test "a window wider than 120 days is an error, and 120 days exactly is not" do
-      assert Shuttle.Activity.buckets(@t0, @t0 + Shuttle.Activity.max_range_ms() + 1) ==
+      assert Shuttle.Activity.window(@t0, @t0 + Shuttle.Activity.max_range_ms() + 1) ==
                {:error, :range_too_wide}
 
       assert {:ok, _} =
-               Shuttle.Activity.buckets(@t0, @t0 + Shuttle.Activity.max_range_ms(),
+               Shuttle.Activity.window(@t0, @t0 + Shuttle.Activity.max_range_ms(),
                  events_file: "/no/such/events.jsonl"
                )
     end

@@ -111,7 +111,7 @@ func feltStoresRegistryPath() (string, error) {
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
-// preserving first-seen order — matching Shuttle.FeltStores.normalize.
+// preserving first-seen order — matching Shuttle.PathListConfig.normalize.
 func normalizeFeltStores(stores []string) []string {
 	seen := make(map[string]bool, len(stores))
 	out := make([]string, 0, len(stores))

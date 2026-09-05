@@ -51,21 +51,8 @@ defmodule Shuttle.Projects do
   @doc """
   Persist the curated project list, atomically. An empty list deletes the file.
   Returns `{:ok, normalized}` or `{:error, reason}`.
-
-  No production caller today — the file is hand-edited per host, and the only
-  write endpoint (`POST /api/v1/felt-stores`) writes stores, not projects. Kept
-  as the round-trip companion to the reader, and pinned by `projects_test.exs`
-  as this module's conformance check on the shared contract.
   """
   @spec save(project_list()) :: {:ok, project_list()} | {:error, term()}
   def save(projects) when is_list(projects), do: PathListConfig.save(@spec_, projects)
 
-  @spec config_path() :: String.t()
-  def config_path, do: PathListConfig.config_path(@spec_)
-
-  @spec env_projects() :: project_list()
-  def env_projects, do: PathListConfig.from_env(@spec_)
-
-  @spec normalize(list()) :: project_list()
-  def normalize(projects), do: PathListConfig.normalize(projects)
 end

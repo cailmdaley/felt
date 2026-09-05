@@ -356,22 +356,9 @@ defmodule Shuttle.Activity do
   end
 
   @doc """
-  The window's buckets alone — `window/3` for a caller that draws no
-  delegations.
-  """
-  @spec buckets(integer(), integer(), keyword()) ::
-          {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
-  def buckets(from_ms, to_ms, opts \\ []) when is_integer(from_ms) and is_integer(to_ms) do
-    case window(from_ms, to_ms, opts) do
-      {:ok, %{buckets: buckets}} -> {:ok, buckets}
-      error -> error
-    end
-  end
-
-  @doc """
   Validates a window without reading anything.
 
-  Split out of `buckets/3` so the endpoint can refuse a bad window — and settle
+  Split out of `window/3` so the endpoint can refuse a bad window — and settle
   a conditional fetch — before paying for the scan.
   """
   @spec check_range(integer(), integer()) :: :ok | {:error, :inverted_range | :range_too_wide}
@@ -757,8 +744,6 @@ defmodule Shuttle.Activity do
   # spawns arrive start-sorted, so an earlier spawn gets first refusal on a
   # directory two of them could plausibly claim — which is the right tiebreak
   # when two workflows launched inside the same slack window.
-  defp match_workflows(spans, [], _now), do: spans
-
   defp match_workflows(spans, dirs, now) do
     {enriched, _left} =
       Enum.map_reduce(spans, dirs, fn span, available ->

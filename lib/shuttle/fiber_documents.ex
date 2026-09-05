@@ -274,7 +274,7 @@ defmodule Shuttle.FiberDocuments do
   end
 
   defp list_store(store, with_body?, mode) do
-    args = list_args(with_body?, mode)
+    args = list_args(with_body?)
 
     # Do NOT fold stderr into stdout: felt prints `warning: failed to parse …`
     # for stray non-fiber `.md` files (SPEC.md, README.md) to stderr while still
@@ -336,9 +336,9 @@ defmodule Shuttle.FiberDocuments do
   # builds the owner feed; this direct path serves only the unfiltered readers.
   # `mode` still reaches `decode_store/3`, where `filter_rows(:owned)` applies
   # the owner predicate in memory.
-  defp list_args(true, _mode), do: ["ls", "-s", "all", "-j", "--body"]
+  defp list_args(true), do: ["ls", "-s", "all", "-j", "--body"]
 
-  defp list_args(false, _mode), do: ["ls", "-s", "all", "-j"]
+  defp list_args(false), do: ["ls", "-s", "all", "-j"]
 
   defp decode_store(store, output, mode) do
     with {:ok, decoded} when is_list(decoded) <- Jason.decode(output) do

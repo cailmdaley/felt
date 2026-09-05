@@ -149,9 +149,7 @@ defmodule Shuttle.Moment do
   pattern reaches the filesystem.
   """
 
-  require Logger
-
-  @max_window_ms 2 * 60 * 60 * 1000
+    @max_window_ms 2 * 60 * 60 * 1000
   @cap 6
   @max_chars 280
 
@@ -246,16 +244,6 @@ defmodule Shuttle.Moment do
         }
 
   @doc """
-  The transcript root — `$SHUTTLE_CLAUDE_PROJECTS_DIR`, else
-  `~/.claude/projects`. The env override exists so a test can point at a
-  fixture tree; nothing in production sets it. `Shuttle.HarnessPaths` owns
-  this layout alongside the pi and Codex roots, so the dispatcher and the
-  temporal reader cannot quietly disagree about where a session lives.
-  """
-  @spec projects_root() :: String.t()
-  def projects_root, do: Shuttle.HarnessPaths.claude_projects_root()
-
-  @doc """
   Validate a window without reading anything, so a controller can refuse a bad
   one before paying for the scan. Mirrors `Shuttle.Activity.check_range/2`.
   """
@@ -286,21 +274,6 @@ defmodule Shuttle.Moment do
   def max_chars(full? \\ false)
   def max_chars(true), do: @full_max_chars
   def max_chars(_), do: @max_chars
-
-  @doc """
-  Up to #{@cap} excerpts from `session`'s transcript inside the inclusive
-  window `from_ms..to_ms`, oldest first.
-
-  Never raises and never signals absence as an error: an unknown session, a
-  unknown harness, and a transcript with nothing in the window all return `[]`.
-
-  Opts (for tests): `:root` (Claude transcript root), `:pi_root`, `:codex_root`,
-  `:cap`, `:max_chars`.
-  """
-  @spec excerpts(String.t(), integer(), integer(), keyword()) :: [excerpt()]
-  def excerpts(session, from_ms, to_ms, opts \\ []) do
-    moment(session, from_ms, to_ms, opts).excerpts
-  end
 
   @doc """
   Everything the transcript can say about the window: the words, the tools that
@@ -501,9 +474,8 @@ defmodule Shuttle.Moment do
       [
         Path.join(claude_root(opts), "*/#{session}.jsonl"),
         Path.join(pi_root(opts), "*/*#{session}.jsonl"),
-        codex_paths(session, opts)
+        Shuttle.HarnessPaths.codex_session_glob(session, opts)
       ]
-      |> List.flatten()
       |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.find(&File.regular?/1)
     end
@@ -512,20 +484,6 @@ defmodule Shuttle.Moment do
   defp claude_root(opts), do: Shuttle.HarnessPaths.claude_projects_root(opts)
 
   defp pi_root(opts), do: Shuttle.HarnessPaths.pi_sessions_root(opts)
-
-  defp codex_paths(session, opts) do
-    [Shuttle.HarnessPaths.codex_session_glob(session, opts)]
-  end
-
-  @doc """
-  The pi sessions root — `$SHUTTLE_PI_SESSIONS_DIR`, else
-  `~/.pi/agent/sessions`. The env override exists for tests, mirroring
-  `projects_root/0`; nothing in production sets it.
-  """
-  @spec pi_sessions_root() :: String.t()
-  def pi_sessions_root do
-    Shuttle.HarnessPaths.pi_sessions_root()
-  end
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the
   # spawn ids seen so far. Tools accumulate reversed — `tool_summary/1` is given

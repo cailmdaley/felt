@@ -67,33 +67,21 @@ defmodule Shuttle.CommitLedger do
     System.get_env("SHUTTLE_COMMITS_FILE") ||
       Path.join(
         System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!() || "/root", ".shuttle"),
+          Path.join(System.user_home!(), ".shuttle"),
         "commits.jsonl"
       )
-  end
-
-  @doc """
-  Every commit stamped at or after `since_ms`, oldest first.
-
-  Streams the rotated sibling then the live file, so a window reaching back
-  past a rotation is whole. Malformed lines, records with no usable `at`, and
-  records with no `sha` are skipped silently; an absent file yields `[]`.
-
-  A record with no sha is dropped for the same reason the session ledger drops
-  a record with no session UUID: the sha is the join key every reader dedupes
-  on, and a row without one is a row every caller would have to filter.
-
-  Opts (for tests): `:path`.
-  """
-  @spec read_since(integer(), keyword()) :: [record()]
-  def read_since(since_ms, opts \\ []) when is_integer(since_ms) do
-    read_between(since_ms, nil, opts)
   end
 
   @doc """
   Every commit in the inclusive window `since_ms..until_ms`, oldest first. A
   `nil` `until_ms` is open-ended — the temporal views ask for one day, the
   cross-host registry asks for everything.
+
+  Malformed lines, records with no usable `at`, and records with no `sha` are
+  skipped silently; an absent file yields `[]`. A record with no sha is dropped
+  for the same reason the session ledger drops a record with no session UUID:
+  the sha is the join key every reader dedupes on, and a row without one is a
+  row every caller would have to filter.
 
   Opts (for tests): `:path`.
   """
