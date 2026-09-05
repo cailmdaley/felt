@@ -76,11 +76,6 @@ import {
   viewFallbackKind,
 } from './views/index.js'
 
-// (Action-button helpers removed — drag is the only transition surface for
-// now. The DnD drop handler reads `target` from the column the card lands
-// on, no per-card mapping needed. Re-introduce TRANSITIONS_FROM if a
-// keyboard / context-menu path returns later.)
-
 interface KanbanModalOptions {
   /**
    * Called when the user clicks a card's running-worker indicator. The host
@@ -1869,9 +1864,6 @@ export class KanbanModal {
 
     const scrollSnapshot = this.captureScrollSnapshot()
     const { now, pinned, staleness } = data
-    // The masthead stats line dissolved (board-chrome-redesign) — the board
-    // speaks for itself (column counts, the Pinned/Resting sections), and stale
-    // origins already dim their cards + show "waiting on <host>".
 
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
@@ -1929,21 +1921,6 @@ export class KanbanModal {
    * the column with at most 3 visible cards. The goal: maximize on-
    * screen space utilization while never showing more than three cards
    * in a single column at once.
-   *
-   * Algorithm per column:
-   *   1. effectiveN = min(card_count, 3) — how many cards we want
-   *      visible at once. Beyond 3, the column scrolls and unseen cards
-   *      stay at the same height as the visible ones.
-   *   2. targetCardHeight = (column_height - gaps_between_visible_cards)
-   *      / effectiveN. The height each card should grow toward.
-   *   3. avgNonOutcomeHeight = (sum of non-outcome height across cards
-   *      in the column) / N. The ambient overhead — header + name +
-   *      slug + meta + padding + gaps — varies card-to-card so we
-   *      average it.
-   *   4. targetOutcomeHeight = targetCardHeight - avgNonOutcomeHeight.
-   *   5. targetLines = floor(targetOutcomeHeight / line_height).
-   *   6. Clamp lives in [4, 16]. Apply to .kbn-col so all cards
-   *      inherit via the cascade.
    *
    * Floor() biases toward undershoot. The clamp is per-column so
    * sparser columns can show longer outcomes — each column is sized
@@ -2529,13 +2506,6 @@ export class KanbanModal {
 
 }
 
-// ── Fiber Detail Modal ───────────────────────────────────────────────────────
-//
-// Intermediate console-style modal for editing a kanban card without opening
-// full vellum. Opens on card click; provides editable outcome, shuttle agent
-// selector, and parent-fiber autocomplete. "Open in vellum" deep-links to
-// the fiber's full editor for more advanced changes.
-
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
 /**
@@ -2628,9 +2598,8 @@ export function clearQueueGate(
 
 /**
  * Reassemble a response from mutated surfaces with the length-derived totals
- * recomputed so the masthead stats line stays honest until the reconcile
- * lands. `temperedTotal` is a historical count that can exceed the recent-N
- * `past` slice, so it's supplied explicitly rather than recounted.
+ * recomputed. `temperedTotal` is a historical count that can exceed the
+ * recent-N `past` slice, so it's supplied explicitly rather than recounted.
  */
 function withSurfaces(
   resp: KanbanResponse,
