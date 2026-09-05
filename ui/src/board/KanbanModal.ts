@@ -76,6 +76,9 @@ import {
   viewFallbackKind,
 } from './views/index.js'
 
+/** The message a thrown/rejected value carries, for a banner or an announce. */
+const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
+
 interface KanbanModalOptions {
   /**
    * Called when the user clicks a card's running-worker indicator. The host
@@ -976,18 +979,11 @@ export class KanbanModal {
         // target that doesn't kill (it's a (re)dispatch, and a pinned card
         // dragged here is at rest, not running).
         await this.killWorkerIfRunning(card)
-        const res = await fetch(this.transitionUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fiber_id: card.id, target, origin: card.originId }),
-        })
-        if (!res.ok) {
-          throw new Error(await errorMessageFromResponse(res, 'Transition failed'))
-        }
+        await this.postTransition(card, target, 'Transition failed')
       }
       this.announce(`Moved “${card.name}” to ${COLUMN_TITLES[target]}.`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
       this.announce(`Move failed: ${msg}`)
     }
@@ -1020,7 +1016,7 @@ export class KanbanModal {
     // the worker on the owning host (owner-routed by `origin`).
     let requeueRes: Response
     try {
-      requeueRes = await fetch(this.requeueUrl(), {
+      requeueRes = await fetch(`${this.shuttleBase}/api/v1/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1035,7 +1031,7 @@ export class KanbanModal {
         }),
       })
     } catch (err: unknown) {
-      const detail = (err as { message?: string })?.message ?? String(err)
+      const detail = errText(err)
       throw new Error(`Couldn't reach the Shuttle daemon: ${detail}`)
     }
     if (!requeueRes.ok) {
@@ -1076,7 +1072,7 @@ export class KanbanModal {
       })
       this.announce(`“${card.name}” now waits on “${tailName}”; it rests until that is tempered.`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't queue “${card.name}” behind “${tailName}”: ${msg}`, 'error')
       this.announce(`Sequence edit failed: ${msg}`)
     }
@@ -1112,7 +1108,7 @@ export class KanbanModal {
         })
         moved += 1
       } catch (err: unknown) {
-        const msg = (err as { message?: string })?.message ?? String(err)
+        const msg = errText(err)
         this.showBanner(
           `Couldn't reorder the queue — “${card?.name ?? write.fiberId}” did not move: ${msg}`,
           'error',
@@ -1204,7 +1200,7 @@ export class KanbanModal {
         }
         this.announce(`“${card.name}” is out of the queue.`)
       } catch (err: unknown) {
-        const msg = (err as { message?: string })?.message ?? String(err)
+        const msg = errText(err)
         // Names the daemon's own message, which for an owner this desk cannot
         // reach is the forward failing by name. That is the honest moment to
         // report it — the gesture was offered, attempted, and refused by the
@@ -1248,12 +1244,7 @@ export class KanbanModal {
     payload: Record<string, unknown>,
     label = 'Sequence edit failed',
   ): Promise<void> {
-    const res = await fetch(this.horizonUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
+    await this.postJson('/api/v1/felt-edit', payload, label)
   }
 
   /**
@@ -1285,7 +1276,7 @@ export class KanbanModal {
       await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, unset })
       this.announce(`“${card.name}” is out of the queue and back on the desk.`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
       this.announce(`Sequence edit failed: ${msg}`)
     }
@@ -1474,14 +1465,7 @@ export class KanbanModal {
       // a Desk column carries a shuttle block, so the lifecycle verbs always
       // apply — see `shouldIncludeInKanban`.
       if (card.status !== 'open') {
-        const parkRes = await fetch(this.transitionUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fiber_id: card.id, target: 'drafts', origin: card.originId }),
-        })
-        if (!parkRes.ok) {
-          throw new Error(await errorMessageFromResponse(parkRes, 'Park-as-draft failed'))
-        }
+        await this.postTransition(card, 'drafts', 'Park-as-draft failed')
       }
       // Port of the backend `computeHorizonPatch`: the horizon "surface" is not
       // stored verbatim — Now is absence (clear `horizon`+`cold`), future
@@ -1506,7 +1490,7 @@ export class KanbanModal {
       await this.postFeltEdit(payload, 'Surface edit failed')
       this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${msg}`, 'error')
       this.announce(`Surface move failed: ${msg}`)
     }
@@ -1655,7 +1639,7 @@ export class KanbanModal {
       await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId })
       this.announce(`Pinned “${card.name}”.`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't pin “${card.name}”: ${msg}`, 'error')
       this.announce(`Pin failed: ${msg}`)
     }
@@ -1666,14 +1650,7 @@ export class KanbanModal {
    *  Undefined body fields are dropped so the daemon sees only what's set. */
   private async postLifecycle(body: Record<string, unknown>): Promise<void> {
     const clean = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined))
-    const res = await fetch(this.lifecycleUrl(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(clean),
-    })
-    if (!res.ok) {
-      throw new Error(await errorMessageFromResponse(res, 'Lifecycle action failed'))
-    }
+    await this.postJson('/api/v1/lifecycle', clean, 'Lifecycle action failed')
   }
 
   private announce(msg: string): void {
@@ -1719,7 +1696,7 @@ export class KanbanModal {
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
-      const res = await fetch(this.kanbanUrl())
+      const res = await fetch(`${this.shuttleBase}/api/v1/fibers/composite`)
       if (token !== this.inflightFetchToken) return
       if (!res.ok) {
         this.markFetchFailed(`Server returned ${res.status}`)
@@ -1753,7 +1730,7 @@ export class KanbanModal {
       this.render(data)
     } catch (err: unknown) {
       if (token !== this.inflightFetchToken) return
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.markFetchFailed(msg)
     }
   }
@@ -2078,46 +2055,27 @@ export class KanbanModal {
 
   // ── URL + chrome helpers ───────────────────────────────────────────────────
 
-  /** GET the loom-wide composite fiber feed from the Shuttle daemon.
-   *  `buildKanbanResponseFromComposite` classifies it frontend-side. */
-  private kanbanUrl(): string {
-    return `${this.shuttleBase}/api/v1/fibers/composite`
+  /**
+   * POST one JSON body to a daemon write route, throwing the daemon's own
+   * message on a non-2xx. Every route here is owner-routed by the `origin`
+   * field in the body, so the board can drive a fiber whose owning host is
+   * not this one.
+   */
+  private async postJson(path: string, body: unknown, label: string): Promise<void> {
+    const res = await fetch(`${this.shuttleBase}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
   }
 
-  /** POST a drag transition to the daemon. The daemon maps the column `target`
-   *  → a lifecycle action and owner-routes by `origin`, carried in the body. */
-  private transitionUrl(): string {
-    return `${this.shuttleBase}/api/v1/transition`
+  /** The drag/menu lifecycle write: the daemon maps the column `target` -> a
+   *  lifecycle action. */
+  private async postTransition(card: KanbanCard, target: ColumnKind, label: string): Promise<void> {
+    await this.postJson('/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, label)
   }
 
-  /** POST a felt frontmatter edit (horizon / cold / due) to the daemon,
-   *  owner-routed by `origin`. */
-  private horizonUrl(): string {
-    return `${this.shuttleBase}/api/v1/felt-edit`
-  }
-
-  /** POST a force/ad-hoc dispatch to the daemon, owner-routed by `origin`. */
-  private requeueUrl(): string {
-    return `${this.shuttleBase}/api/v1/dispatch`
-  }
-
-  /** POST a shuttle lifecycle verb (install/repeat/pin/uninstall/…) to the
-   *  daemon, owner-routed by `origin`. */
-  private lifecycleUrl(): string {
-    return `${this.shuttleBase}/api/v1/lifecycle`
-  }
-
-  /** POST a hard-kill of a fiber's live worker to the daemon, owner-routed by
-   *  `origin`. */
-  private killUrl(): string {
-    return `${this.shuttleBase}/api/v1/kill`
-  }
-
-  /** POST a boot-quarantine release to the daemon, owner-routed by `origin`
-   *  (the held card's owning host). */
-  private releaseUrl(): string {
-    return `${this.shuttleBase}/api/v1/quarantine/release`
-  }
 
   /**
    * Release the boot quarantine on a held card's owning host — the `⏹︎ held` →
@@ -2130,19 +2088,11 @@ export class KanbanModal {
    */
   private async releaseQuarantine(shuttleHost?: string): Promise<void> {
     try {
-      const res = await fetch(this.releaseUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin: shuttleHost }),
-      })
-      if (!res.ok) {
-        this.showBanner(`Couldn't release the hold${shuttleHost ? ` on ${shuttleHost}` : ''}: ${await errorMessageFromResponse(res, 'release failed')}`, 'error')
-        return
-      }
+      await this.postJson('/api/v1/quarantine/release', { origin: shuttleHost }, 'release failed')
       this.announce(`Released held launches${shuttleHost ? ` on ${shuttleHost}` : ''}; dispatch resumes on the next tick.`)
       await this.fetchAndRender()
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't release the hold${shuttleHost ? ` on ${shuttleHost}` : ''}: ${msg}`, 'error')
     }
   }
@@ -2167,16 +2117,13 @@ export class KanbanModal {
   private async killWorkerIfRunning(card: KanbanCard): Promise<void> {
     if (!card.runningWorker) return
     try {
-      const res = await fetch(this.killUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: card.id, origin: card.shuttleHost ?? card.originId }),
-      })
-      if (!res.ok) {
-        this.showBanner(`Couldn't stop the worker for “${card.name}”: ${await errorMessageFromResponse(res, 'kill failed')}`, 'error')
-      }
+      await this.postJson(
+        '/api/v1/kill',
+        { fiber_id: card.id, origin: card.shuttleHost ?? card.originId },
+        'kill failed',
+      )
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't stop the worker for “${card.name}”: ${msg}`, 'error')
     }
   }
@@ -2497,7 +2444,7 @@ export class KanbanModal {
       })
       this.announce(`Unpinned “${card.name}”.`)
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
+      const msg = errText(err)
       this.showBanner(`Couldn't unpin “${card.name}”: ${msg}`, 'error')
       this.announce(`Unpin failed: ${msg}`)
     }
