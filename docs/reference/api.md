@@ -51,7 +51,7 @@ is not enough.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /agents` | local | The effective agent registry (shells `felt shuttle agents --json`) |
-| `GET /felt-stores` | fleet-aggregating | The registered store list, this host's and each remote's |
+| `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |

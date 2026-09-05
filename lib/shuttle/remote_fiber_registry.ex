@@ -143,8 +143,9 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @doc """
   Returns the cached feed map keyed by remote name. Each value carries
-  `:fibers` (the list of owner-served entry maps), `:last_polled_at`, `:stale`,
-  and `:last_error`.
+  `:fibers` (the list of owner-served entry maps), `:stores` (that host's
+  store-registry origin block, which `/api/v1/felt-stores` serves),
+  `:last_polled_at`, `:stale`, and `:last_error`.
 
   An empty map means no remotes are configured (or the registry isn't running —
   callers tolerate this for graceful degradation).
@@ -421,12 +422,12 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp decode_feed(body, etag) do
     case Jason.decode(body) do
       {:ok, %{"fibers" => fibers} = env} when is_list(fibers) ->
-        {:ok, {fibers, etag, Map.get(env, "cache")}}
+        {:ok, {fibers, etag, Map.get(env, "cache"), Map.get(env, "stores")}}
 
       # Well-formed envelope without a fibers list (e.g. an error envelope):
       # treat as zero owned fibers rather than a transport failure.
       {:ok, %{} = env} ->
-        {:ok, {[], etag, Map.get(env, "cache")}}
+        {:ok, {[], etag, Map.get(env, "cache"), Map.get(env, "stores")}}
 
       _ ->
         {:error, :malformed_json}
@@ -451,6 +452,10 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp initial_entry(%Remote{} = remote) do
     %{
       fibers: [],
+      # The owner's store-registry origin block (felt stores, picker projects,
+      # native-folder-picker flag), carried on the same feed so the local
+      # `/api/v1/felt-stores` never has to fetch a loaded remote live.
+      stores: nil,
       last_polled_at: nil,
       last_attempt_at: nil,
       last_error: nil,
@@ -492,17 +497,18 @@ defmodule Shuttle.RemoteFiberRegistry do
   # staleness stays honest (time-since-last-WARM-success) until a warm feed
   # arrives. `restored?` is left alone for the same reason: a cold feed has not
   # confirmed the rows we restored, so they stay flagged as remembered.
-  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache}}, now) do
+  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache, _stores}}, now) do
     %{entry | etag: etag, cache: cache, last_attempt_at: now, last_error: nil}
   end
 
   # A warm 200 REPLACES the rows wholesale — restored or not — so nothing on
   # disk can resurrect a fiber the owner has since dropped, closed, or handed to
   # another host.
-  defp apply_result(entry, {:ok, {fibers, etag, cache}}, now) do
+  defp apply_result(entry, {:ok, {fibers, etag, cache, stores}}, now) do
     %{
       entry
       | fibers: fibers,
+        stores: stores,
         etag: etag,
         cache: cache,
         last_polled_at: now,
@@ -532,6 +538,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       {name,
        %{
          fibers: entry.fibers,
+         stores: entry.stores,
          last_polled_at: entry.last_polled_at,
          stale: stale?(entry, now),
          last_error: entry.last_error,
@@ -593,6 +600,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp encode_entry(entry) do
     %{
       "fibers" => entry.fibers,
+      "stores" => entry.stores,
       "etag" => entry.etag,
       "cache" => entry.cache,
       "last_polled_at" => RegistryCommon.encode_dt(entry.last_polled_at)
@@ -615,6 +623,7 @@ defmodule Shuttle.RemoteFiberRegistry do
         %{
           initial_entry(remote)
           | fibers: fibers,
+            stores: map_or_nil(persisted["stores"]),
             etag: string_or_nil(persisted["etag"]),
             cache: map_or_nil(persisted["cache"]),
             last_polled_at: RegistryCommon.decode_dt(persisted["last_polled_at"]),

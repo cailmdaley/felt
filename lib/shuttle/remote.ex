@@ -254,12 +254,6 @@ defmodule Shuttle.Remote do
     do: base(url) <> "/api/v1/sent-files/all?since_ms=0"
 
   @doc """
-  The full `GET /api/v1/felt-stores` URL for this remote.
-  """
-  @spec felt_stores_url(t()) :: String.t()
-  def felt_stores_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/felt-stores"
-
-  @doc """
   Returns `true` when `last_polled_at` is older than
   `stale_multiplier × poll_interval_ms` from `now`. A `nil`
   `last_polled_at` is always stale.

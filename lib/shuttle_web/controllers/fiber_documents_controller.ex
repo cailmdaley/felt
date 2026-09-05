@@ -80,13 +80,17 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp serve_owner_feed(conn) do
     case cached_owner_feed() do
       {:ok, body} ->
+        # The store registry rides the owner feed so a viewer's `/felt-stores`
+        # can serve this host's picker origin from its cached feed instead of a
+        # live fetch that blinks out whenever this host is loaded.
+        body = Map.put(body, :stores, ShuttleWeb.FeltStoresController.local_origin(body.host))
         conn = put_cache_header(conn, body)
         cold? = get_in(body, [:cache, :state]) == "cold"
 
         if cold? do
           json(conn, body)
         else
-          etag = feed_etag(body.fibers)
+          etag = feed_etag({body.fibers, body.stores})
           conn = put_resp_header(conn, "etag", etag)
 
           if if_none_match?(conn, etag),
@@ -109,11 +113,12 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   defp put_cache_header(conn, _body), do: conn
 
-  # Strong etag over the stamped entries only (not `generated_at` or the cache
-  # timestamps, which change every tick without the feed changing). SHA-256 of
-  # the term-encoded entries, hex, truncated — collision-resistant enough for a
-  # cache validator.
-  defp feed_etag(entries), do: ~s("#{etag_hash(entries)}")
+  # Strong etag over the stamped entries and the store-registry block only (not
+  # `generated_at` or the cache timestamps, which change every tick without the
+  # feed changing) — a registry edit must invalidate too, or a viewer's picker
+  # would 304 against a stale store list. SHA-256, hex, truncated —
+  # collision-resistant enough for a cache validator.
+  defp feed_etag(payload), do: ~s("#{etag_hash(payload)}")
 
   @doc """
   `GET /api/v1/fibers/:id` — resolve one fiber by canonical id. The id is a

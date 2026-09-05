@@ -146,35 +146,42 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "felt_stores"
   end
 
-  # A remote origin is read over the SAME transport the write plane forwards
-  # with — `OriginRouter.forward_client/0`, resolved from `:write_forward_client`.
-  # Stubbing that one key has to reach this read path, or the two planes have
-  # drifted back apart.
-  defmodule StubClient do
+  # A remote origin is served from `RemoteFiberRegistry`'s cached owner feed —
+  # each host carries its own store registry as that feed's `stores` block — so
+  # a loaded remote answering slowly can never blink out of the picker. Nothing
+  # on this path may touch the network: the write-plane transport is stubbed
+  # with a client that blows up if it is called at all.
+  defmodule FeedClient do
     @behaviour Shuttle.RemoteRegistry.Client
 
     @impl true
-    def get(url, _timeout) do
-      send(self(), {:registry_get, url})
-
+    def get(_url, _timeout) do
       {:ok,
        Jason.encode!(%{
          "host" => "candide",
-         "origins" => %{"candide" => %{"felt_stores" => ["/remote/loom"]}}
+         "fibers" => [],
+         "stores" => %{
+           "kind" => "local",
+           "host" => "candide",
+           "felt_stores" => ["/remote/loom"],
+           "expanded_felt_stores" => ["/remote/loom/expanded"],
+           "projects" => ["/remote/talks"],
+           "native_folder_picker" => false
+         }
        })}
     end
   end
 
-  defmodule RaisingClient do
+  defmodule ForbiddenClient do
     @behaviour Shuttle.RemoteRegistry.Client
 
     @impl true
-    def get(_url, _timeout), do: raise("boom")
+    def get(url, _timeout), do: raise("felt-stores fetched #{url} live")
   end
 
-  defp with_remote_client(module, fun) do
+  defp with_candide(fun) do
     previous = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :write_forward_client, module)
+    Application.put_env(:shuttle, :write_forward_client, ForbiddenClient)
 
     Application.put_env(:shuttle, :remotes, [
       %{name: "candide", url: "http://candide.example:4000"}
@@ -190,30 +197,52 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     end
   end
 
-  test "reads a remote origin over the write plane's transport" do
-    with_remote_client(StubClient, fn ->
+  defp start_feed_registry(client) do
+    dir = Path.join(System.tmp_dir!(), "fsc-store-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    start_supervised!(
+      {Shuttle.RemoteFiberRegistry,
+       name: Shuttle.RemoteFiberRegistry,
+       remotes: [%Shuttle.Remote{name: "candide", url: "http://candide.example:4000"}],
+       client: client,
+       auto_poll: false,
+       store_dir: dir}
+    )
+  end
+
+  test "serves a remote origin from the cached feed, without a live fetch" do
+    with_candide(fn ->
+      start_feed_registry(FeedClient)
+      Shuttle.RemoteFiberRegistry.refresh_now()
+
       conn = get(api_conn(), "/api/v1/felt-stores")
 
       assert conn.status == 200
       body = Jason.decode!(conn.resp_body)
 
-      assert_received {:registry_get, "http://candide.example:4000/api/v1/felt-stores"}
       assert get_in(body, ["origins", "candide", "kind"]) == "remote"
       assert get_in(body, ["origins", "candide", "stale"]) == false
       assert get_in(body, ["origins", "candide", "felt_stores"]) == ["/remote/loom"]
+      assert get_in(body, ["origins", "candide", "projects"]) == ["/remote/talks"]
+      assert get_in(body, ["origins", "candide", "native_folder_picker"]) == false
+      # The expanded poll list is the owner's business, not the picker's.
+      refute Map.has_key?(get_in(body, ["origins", "candide"]), "expanded_felt_stores")
     end)
   end
 
-  test "a transport blow-up degrades the remote origin to stale, not a 500" do
-    with_remote_client(RaisingClient, fn ->
+  test "an unpolled remote degrades to a stale origin, not a 500" do
+    with_candide(fn ->
+      start_feed_registry(FeedClient)
+
       conn = get(api_conn(), "/api/v1/felt-stores")
 
       assert conn.status == 200
       body = Jason.decode!(conn.resp_body)
 
+      assert get_in(body, ["origins", "candide", "kind"]) == "remote"
       assert get_in(body, ["origins", "candide", "stale"]) == true
       assert get_in(body, ["origins", "candide", "felt_stores"]) == []
-      assert get_in(body, ["origins", "candide", "last_error"]) =~ "boom"
     end)
   end
 end
