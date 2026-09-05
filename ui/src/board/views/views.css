@@ -329,3 +329,41 @@
 
 /* Declared on the view host so both sheets and both keys read one value. */
 .kbn-view-page { --curve-spine: #BC4538; }
+
+/* ── The head on a phone ─────────────────────────────────────────────────────
+   `@media (max-width: 700px)` is the board's one mobile threshold (see
+   `../mobile.ts`). At that width the three-part head cannot hold: the middle
+   and the ends squeeze the illuminated title until the dropcap breaks from its
+   own word — "D" over "AY" — which is the one thing on the page that must
+   never happen, the cap being a letter of the word and not an ornament.
+
+   So the head stops being a row and becomes a small stack. The title takes a
+   full-width line of its own and never wraps; whatever the page hangs in the
+   centre takes the next line, full width; the view's own controls take the
+   line after that. Nothing is squeezed because nothing shares a line with
+   anything it could squeeze. Desktop (≥701px) is untouched. */
+@media (max-width: 700px) {
+  .kbn-view-page { padding: 8px 10px 10px; }
+
+  .kbn-view-titlerow {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  /* Its own line, and unsqueezable on it: `flex: none` so the row can never
+     take width back off the word, `nowrap` so cap and stem stay one line. */
+  .kbn-view-title {
+    flex: 0 0 100%;
+    white-space: nowrap;
+  }
+  /* No longer the middle of anything — a full line under the title, reading
+     from the left like the marginalia it is. */
+  .kbn-view-titlecenter {
+    flex: 1 1 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    text-overflow: clip;
+  }
+  /* The controls wrap onto the line beneath, and the period's name keeps its
+     chevrons beside it rather than breaking mid-phrase. */
+  .kbn-view-nav { white-space: nowrap; }
+}

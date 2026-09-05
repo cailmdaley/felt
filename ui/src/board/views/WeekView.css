@@ -450,3 +450,10 @@
 /* The hover tooltip itself lives in momentTip.css — Day draws the same slip of
    paper, so the styles moved out with the renderer. Only the box it is
    positioned against (`.wk-grid { position: relative }`) is Week's. */
+
+/* On a phone the head is a stack (views.css) — the week's name gets a line of
+   its own, so it should use it as one line rather than breaking after "Week". */
+@media (max-width: 700px) {
+  .wk-head { flex: 1 1 100%; flex-wrap: wrap; gap: 10px; }
+  .wk-weeklabel { white-space: nowrap; }
+}

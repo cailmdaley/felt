@@ -1219,3 +1219,27 @@ button.chr-name:hover {
 .chr-found.chr-track {
   background: rgba(196, 147, 51, 0.10);
 }
+
+/* ── The record on a phone ───────────────────────────────────────────────────
+   A 400px name gutter is wider than the viewport, so the almanac head had
+   nowhere to be drawn and the whole calendar sat off the right edge. Narrow
+   the gutter to a phone measure: names truncate, the days are visible, and the
+   record keeps its own horizontal scroll (`.chr-scroll`) so the page body
+   never scrolls sideways. The threshold is the board's one mobile breakpoint
+   (`../mobile.ts`). */
+@media (max-width: 700px) {
+  /* A phone gutter is a budget, and the name is what it is for: you scan the
+     record by reading names, not by reading evidence about them. So the two
+     marginal columns stand down — the host note and the `+A −D` commit
+     clause, which between them cost more of the line than a name gets — and
+     the day count stays, being the row's own shape rather than a figure about
+     it. What they give back goes to the name: 220px shows two or three words
+     before the ellipsis where 150px showed "Can…". */
+  .chr-scroll { --chr-label-w: 220px; }
+  .chr-label { gap: 7px; padding-right: 8px; }
+  .chr-note,
+  .chr-diff { display: none; }
+
+  .chr-search { flex: 1 1 100%; }
+  .chr-search-input { width: 100%; }
+}
