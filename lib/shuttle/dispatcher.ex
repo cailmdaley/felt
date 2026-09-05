@@ -1680,7 +1680,7 @@ defmodule Shuttle.Dispatcher do
       |> Enum.sort_by(&elem(&1, 0), :desc)
       |> Enum.map(&elem(&1, 1))
 
-    case Enum.find(paths, &codex_session_matches?(&1, work_dir, fiber_id, dispatched_after)) do
+    case Enum.find(paths, &session_matches?("codex", &1, work_dir, fiber_id, dispatched_after)) do
       nil -> {:error, :not_found}
       path -> {:ok, path}
     end
@@ -1701,7 +1701,7 @@ defmodule Shuttle.Dispatcher do
         |> Enum.map(&Path.join(dir, &1))
         |> Enum.find(
           {:error, :not_found},
-          &pi_session_matches?(&1, work_dir, fiber_id, dispatched_after)
+          &session_matches?("pi", &1, work_dir, fiber_id, dispatched_after)
         )
         |> case do
           {:error, :not_found} = miss -> miss
@@ -1716,17 +1716,40 @@ defmodule Shuttle.Dispatcher do
   defp find_session_file(_cli, _work_dir, _fiber_id, _dispatched_after),
     do: {:error, :unsupported}
 
-  # The pi analog of `codex_session_matches?/4`: the transcript's session
-  # header names its cwd and start time, and the dispatch prompt's fiber line
-  # only appears once the first message lands (~1s after the header), so the
-  # whole file is searched — the retry loop above re-reads until it matches.
-  defp pi_session_matches?(path, work_dir, fiber_id, dispatched_after) do
+  # The JSONL first line each harness writes as its session header, reduced to
+  # the map that carries `id` / `cwd` / `timestamp`. Codex nests them under
+  # `payload` of a `session_meta` event; pi puts them on a top-level `session`
+  # event. Everything downstream reads the same three keys.
+  defp session_header("codex", content) do
+    with [first_line | _] <- String.split(content, "\n", parts: 2),
+         {:ok, %{"type" => "session_meta", "payload" => payload}} <- Jason.decode(first_line),
+         true <- is_map(payload) do
+      {:ok, payload}
+    else
+      _ -> :error
+    end
+  end
+
+  defp session_header("pi", content) do
+    with [first_line | _] <- String.split(content, "\n", parts: 2),
+         {:ok, %{"type" => "session"} = event} <- Jason.decode(first_line) do
+      {:ok, event}
+    else
+      _ -> :error
+    end
+  end
+
+  defp session_header(_cli, _content), do: :error
+
+  # The transcript's session header names its cwd and start time, but the
+  # dispatch prompt's fiber line only appears once the first message lands
+  # (~1s after the header), so the WHOLE file is searched — the retry loop
+  # above re-reads until it matches.
+  defp session_matches?(cli, path, work_dir, fiber_id, dispatched_after) do
     with {:ok, content} <- File.read(path),
-         [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line),
-         "session" <- Map.get(event, "type"),
-         cwd when is_binary(cwd) <- Map.get(event, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(event, "timestamp"),
+         {:ok, header} <- session_header(cli, content),
+         cwd when is_binary(cwd) <- Map.get(header, "cwd"),
+         timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
       Path.expand(cwd) == Path.expand(work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
@@ -1760,31 +1783,11 @@ defmodule Shuttle.Dispatcher do
     Shuttle.HarnessPaths.codex_session_dirs()
   end
 
-  defp codex_session_matches?(path, work_dir, fiber_id, dispatched_after) do
+  defp read_uuid_from_jsonl(cli, path, work_dir) do
     with {:ok, content} <- File.read(path),
-         [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line),
-         "session_meta" <- Map.get(event, "type"),
-         payload when is_map(payload) <- Map.get(event, "payload"),
-         cwd when is_binary(cwd) <- Map.get(payload, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(payload, "timestamp"),
-         {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Path.expand(cwd) == Path.expand(work_dir) and
-        DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
-        String.contains?(content, "Fiber: #{fiber_id}")
-    else
-      _ -> false
-    end
-  end
-
-  defp read_uuid_from_jsonl("codex", path, work_dir) do
-    with {:ok, content} <- File.read(path),
-         first_line <- content |> String.split("\n") |> List.first(""),
-         {:ok, event} <- Jason.decode(first_line),
-         "session_meta" <- Map.get(event, "type"),
-         payload when is_map(payload) <- Map.get(event, "payload"),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(payload, "id"),
-         cwd when is_binary(cwd) <- Map.get(payload, "cwd") do
+         {:ok, header} <- session_header(cli, content),
+         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id"),
+         cwd when is_binary(cwd) <- Map.get(header, "cwd") do
       # Verify the session belongs to this worker's working directory.
       if Path.expand(cwd) == Path.expand(work_dir) do
         {:ok, uuid}
@@ -1795,26 +1798,6 @@ defmodule Shuttle.Dispatcher do
       _ -> {:error, "could not parse session UUID from #{path}"}
     end
   end
-
-  defp read_uuid_from_jsonl("pi", path, work_dir) do
-    with {:ok, content} <- File.read(path),
-         first_line <- content |> String.split("\n", parts: 2) |> List.first(""),
-         {:ok, event} <- Jason.decode(first_line),
-         "session" <- Map.get(event, "type"),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(event, "id"),
-         cwd when is_binary(cwd) <- Map.get(event, "cwd") do
-      if Path.expand(cwd) == Path.expand(work_dir) do
-        {:ok, uuid}
-      else
-        {:error, "session cwd mismatch: #{cwd} ≠ #{work_dir}"}
-      end
-    else
-      _ -> {:error, "could not parse session UUID from #{path}"}
-    end
-  end
-
-  defp read_uuid_from_jsonl(_cli, path, _work_dir),
-    do: {:error, "unsupported harness for #{path}"}
 
   # Generates a random UUID v4 using Erlang's :crypto module.
   # Sets version bits (byte 6 top nibble = 0100) and variant bits

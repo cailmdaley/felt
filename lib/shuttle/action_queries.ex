@@ -12,8 +12,6 @@ defmodule Shuttle.ActionQueries do
 
   alias Shuttle.{Actions, Dispatcher, FiberDocuments, Runner}
 
-  @type query_result :: {:ok, map()} | {:error, term()}
-
   @spec actions_for(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def actions_for(fiber_id, opts \\ []) when is_binary(fiber_id) do
     with {:ok, fiber} <- fetch_fiber(fiber_id, opts) do
@@ -28,9 +26,8 @@ defmodule Shuttle.ActionQueries do
     end
   end
 
-  @spec fetch_fiber(String.t(), keyword()) :: query_result()
-  def fetch_fiber(fiber_id, opts \\ []) when is_binary(fiber_id) do
-    query_opts = Keyword.take(opts, [:felt_stores, :with_body])
+  defp fetch_fiber(fiber_id, opts) do
+    query_opts = Keyword.take(opts, [:felt_stores])
 
     case FiberDocuments.get(fiber_id, query_opts) do
       {:ok, %{fibers: [%{fiber: fiber} | _]}} when is_map(fiber) ->
@@ -44,12 +41,7 @@ defmodule Shuttle.ActionQueries do
     end
   end
 
-  defp running?(fiber, opts) do
-    case Keyword.fetch(opts, :running) do
-      {:ok, value} -> value == true
-      :error -> is_binary(live_session(fiber, opts))
-    end
-  end
+  defp running?(fiber, opts), do: is_binary(live_session(fiber, opts))
 
   defp live_session(fiber, opts) do
     fiber
