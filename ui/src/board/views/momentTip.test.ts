@@ -141,6 +141,7 @@ describe('the moment fetcher', () => {
 
     expect(result.excerpts).toHaveLength(1)
     const params = calls[0].params
+    expect(params.get('session')).toBe('sess-1')
     expect(params.get('from_ms')).toBe('10')
     expect(params.get('to_ms')).toBe('70')
     expect(params.get('host')).toBe('kelvin')

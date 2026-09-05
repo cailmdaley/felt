@@ -1751,8 +1751,10 @@ export class KanbanModal {
   private computeResponseSignature(data: KanbanResponse): string {
     // Hash the three surfaces + staleness — stale-origin cards dim and
     // disable drag even when the card lists themselves are unchanged.
-    // `totals`/`temperedTotal` are pure `.length` derivations of the same
-    // surfaces, so hashing them could only produce redundant work.
+    // `totals` is a pure `.length` derivation of those same surfaces;
+    // `temperedTotal` is a historical count the daemon sends and this file only
+    // passes through, and a card tempering moves `timeline.past` with it. So
+    // hashing either could only produce redundant work.
     return JSON.stringify({
       n: data.now,
       tl: data.timeline,

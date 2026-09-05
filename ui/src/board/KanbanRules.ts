@@ -1025,6 +1025,22 @@ export function queueMemberNote(
   return member.tempered === false ? 'composted' : 'awaiting review';
 }
 
+/**
+ * What the "+N queued" chip reads for a queue of this size.
+ *
+ * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
+ * this card in every sense the gesture cares about, and a count that skipped
+ * them would disagree with the refusal you get for dropping onto the same card.
+ * The chip used to append a second clause counting the settled ones ("· 1 in
+ * review"); it made a glance at the desk do arithmetic to answer a question the
+ * glance was not asking. How each member sits is a fact about that member, so
+ * it belongs where the members are: the peek list, where every row says its own
+ * state and wears its own colour (`queueMemberNote`).
+ */
+export function queuedChipLabel(total: number): string {
+  return `+${total} queued`;
+}
+
 /** What the stack gesture needs to know about a card to rule on a drop.
  *  `KanbanCard` satisfies it. */
 export interface StackCandidate {

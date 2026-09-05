@@ -29,6 +29,7 @@ import {
   queueMemberNote,
   queueRowGesture,
   queuedBehind,
+  queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
   unqueueRowWrites,
@@ -1844,16 +1845,7 @@ export class KanbanSurfaceRenderer {
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'kbn-card-queued'
-    // ONE NUMBER, and it is the WHOLE chain — the closed members are queued
-    // behind this card in every sense the gesture cares about, and a count that
-    // skipped them would disagree with the refusal you get for dropping onto the
-    // same card. The chip used to append a second clause counting the settled
-    // ones ("· 1 in review"); it made a glance at the desk do arithmetic to
-    // answer a question the glance was not asking. How each member sits is a
-    // fact about that member, so it belongs where the members are: the peek
-    // list, where every row says its own state and wears its own colour
-    // (`queueMemberNote`).
-    chip.textContent = `+${queued.length} queued`
+    chip.textContent = queuedChipLabel(queued.length)
     chip.setAttribute('aria-expanded', 'false')
     chip.setAttribute(
       'aria-label',

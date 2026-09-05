@@ -29,7 +29,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   The local daemon's `GET /api/v1/fibers/composite` concatenates this registry's
   cached remote feeds with the local owner feed (from
-  `Shuttle.Poller.cached_fiber_documents/0`). Each feed row is the same
+  `Shuttle.Poller.cached_fiber_documents/1`). Each feed row is the same
   owner-served entry shape (`felt_store` / `path` / `fiber` / `runtime`), so the
   composite is a flat per-fiber list with reconciled liveness: each host stamps
   its own workers' tmux liveness at serve time, so there is exactly one observer

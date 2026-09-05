@@ -12,6 +12,7 @@ import {
   buildDependents,
   cardDragArms,
   queueMemberNote,
+  queuedChipLabel,
   queueRowGesture,
   chainTail,
   classifyFiber,
@@ -2051,6 +2052,8 @@ describe('the queue counts every follower a dependency still holds', () => {
 
     // The chip counts, and only counts — how each member sits is the peek
     // list's job, per row, so the desk stays readable at a glance.
+    expect(queuedChipLabel(2)).toBe('+2 queued')
+    expect(queuedChipLabel(1)).toBe('+1 queued')
   })
 })
 

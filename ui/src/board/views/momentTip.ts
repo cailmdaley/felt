@@ -673,9 +673,10 @@ export function renderTip(host: HTMLElement, tip: SlotTip): void {
     ))
     line.append(el('span', 'kbn-tip-phrase', row.phrase))
     if (row.where) line.append(el('span', 'kbn-tip-where', row.where))
-    // A count of 1 is what a single event looks like; printing "×1" would make
-    // every ordinary minute look like it had been measured. `rowCount` has
-    // already refused every count that was not a count of messages.
+    // Whatever `rowCount` let through is printable by construction: it refuses
+    // every count that is not a count of messages, and every count of 1 — a
+    // printed "×1" would make every ordinary minute look like it had been
+    // measured. So there is no second guard here.
     if (row.count !== undefined) line.append(el('span', 'kbn-tip-count', `×${row.count}`))
     // The qualifier: a span, a unit, or the admission that the message this
     // row names was not recovered. See `reconcileRows`.
