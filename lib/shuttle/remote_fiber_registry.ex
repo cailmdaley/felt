@@ -497,8 +497,10 @@ defmodule Shuttle.RemoteFiberRegistry do
   # staleness stays honest (time-since-last-WARM-success) until a warm feed
   # arrives. `restored?` is left alone for the same reason: a cold feed has not
   # confirmed the rows we restored, so they stay flagged as remembered.
-  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache, _stores}}, now) do
-    %{entry | etag: etag, cache: cache, last_attempt_at: now, last_error: nil}
+  # The store block rides every owner feed, cold or warm — the picker wants it
+  # from the first successful poll, not the first warm one.
+  defp apply_result(entry, {:ok, {[], etag, %{"state" => "cold"} = cache, stores}}, now) do
+    %{entry | etag: etag, cache: cache, stores: stores, last_attempt_at: now, last_error: nil}
   end
 
   # A warm 200 REPLACES the rows wholesale — restored or not — so nothing on

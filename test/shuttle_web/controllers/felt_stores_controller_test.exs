@@ -47,7 +47,6 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     :ok
   end
 
-
   test "shows the configured base stores as the local origin" do
     path = Path.expand(System.get_env("FELT_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
@@ -172,6 +171,28 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     end
   end
 
+  defmodule ColdFeedClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+
+    @impl true
+    def get(_url, _timeout) do
+      {:ok,
+       Jason.encode!(%{
+         "host" => "candide",
+         "fibers" => [],
+         "cache" => %{"state" => "cold"},
+         "stores" => %{"kind" => "local", "host" => "candide", "felt_stores" => ["/remote/loom"]}
+       })}
+    end
+  end
+
+  defmodule FailingClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+
+    @impl true
+    def get(_url, _timeout), do: {:error, :boom}
+  end
+
   defmodule ForbiddenClient do
     @behaviour Shuttle.RemoteRegistry.Client
 
@@ -228,6 +249,26 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       assert get_in(body, ["origins", "candide", "native_folder_picker"]) == false
       # The expanded poll list is the owner's business, not the picker's.
       refute Map.has_key?(get_in(body, ["origins", "candide"]), "expanded_felt_stores")
+    end)
+  end
+
+  test "a cold owner feed still carries the store block" do
+    with_candide(fn ->
+      start_feed_registry(ColdFeedClient)
+      Shuttle.RemoteFiberRegistry.refresh_now()
+
+      body = Jason.decode!(get(api_conn(), "/api/v1/felt-stores").resp_body)
+      assert get_in(body, ["origins", "candide", "felt_stores"]) == ["/remote/loom"]
+    end)
+  end
+
+  test "a failed poll surfaces its error on the origin" do
+    with_candide(fn ->
+      start_feed_registry(FailingClient)
+      Shuttle.RemoteFiberRegistry.refresh_now()
+
+      body = Jason.decode!(get(api_conn(), "/api/v1/felt-stores").resp_body)
+      assert get_in(body, ["origins", "candide", "last_error"]) =~ "boom"
     end)
   end
 
