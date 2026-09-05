@@ -237,9 +237,6 @@ export class KanbanSurfaceRenderer {
   /** The offscreen node handed to `setDragImage`, kept only until the drag
    *  ends (the browser needs it alive for the snapshot, not after). */
   private dragGhostEl: HTMLElement | null = null
-  /** Reverse dependency edges for the response currently on screen, built once
-   *  per response rather than once per card. Keyed by the response object
-   *  itself, so a new poll rebuilds and a re-render does not. */
   /** The peek row currently being dragged, and which list it belongs to — the
    *  queue reorder's entire drag state. Deliberately NOT `dragSourceId`: see
    *  `installQueueRowDrag`. */
@@ -252,6 +249,9 @@ export class KanbanSurfaceRenderer {
     headId: string
     queue: readonly string[]
   } | null = null
+  /** Reverse dependency edges for the response currently on screen, built once
+   *  per response rather than once per card. Keyed by the response object
+   *  itself, so a new poll rebuilds and a re-render does not. */
   private chainDependentsFor: KanbanResponse | null = null
   private chainDependentsMap: Map<string, string[]> = new Map()
 
@@ -767,7 +767,6 @@ export class KanbanSurfaceRenderer {
       // nodes pretending to be one.
       const cell = buildDayCell(day)
       cell.classList.add('kbn-timeline-dropcol', 'kbn-draghorizon-day')
-      cell.dataset.timelineDayIso = day.iso
       this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day), cell)
       row.append(cell)
     }
@@ -904,11 +903,6 @@ export class KanbanSurfaceRenderer {
     }
   }
 
-  /** True while ANY drag this renderer owns is in flight — a card or a peek-list
-   *  row. The edge-scrolls and the modal's body scroll both key off this, so a
-   *  queue row can reach an off-screen part of the board exactly as a card can.
-   *  (A row drag deliberately never sets `dragSourceId`; see
-   *  `installQueueRowDrag`.) */
   /** The one write path for `queueDrag`, so the drag horizon opens and closes
    *  with a row exactly as it does with a card. */
   private setQueueDrag(drag: KanbanSurfaceRenderer['queueDrag']): void {
@@ -917,6 +911,11 @@ export class KanbanSurfaceRenderer {
     if (was !== (drag !== null)) this.o.onDragActivity?.()
   }
 
+  /** True while ANY drag this renderer owns is in flight — a card or a peek-list
+   *  row. The edge-scrolls and the modal's body scroll both key off this, so a
+   *  queue row can reach an off-screen part of the board exactly as a card can.
+   *  (A row drag deliberately never sets `dragSourceId`; see
+   *  `installQueueRowDrag`.) */
   isDragging(): boolean {
     return this.o.getDragSourceId() !== null || this.queueDrag !== null
   }
@@ -1097,7 +1096,7 @@ export class KanbanSurfaceRenderer {
   private installTimelineDayDropHandlers(
     dropCol: HTMLElement,
     iso: string,
-    aimLabel?: string,
+    aimLabel: string,
     axisCell?: HTMLElement,
   ): void {
     const isDropEligible = (id: string): boolean => {
@@ -1117,7 +1116,7 @@ export class KanbanSurfaceRenderer {
     const setActive = (active: boolean): void => {
       dropCol.classList.toggle('kbn-timeline-dropcol-active', active)
       axisCell?.classList.toggle('kbn-timeline-day-drop-active', active)
-      if (aimLabel) this.setAim(dropCol, active ? aimLabel : null)
+      this.setAim(dropCol, active ? aimLabel : null)
     }
     /** What this day means for `id`, as the drop payload both paths share. */
     const dayMeaning = (id: string): { horizon: HorizonKind; due: string | null } =>
@@ -1328,7 +1327,7 @@ export class KanbanSurfaceRenderer {
    * Render one Now-surface column (Drafts / In Flight / Awaiting). The
    * column header doubles as the lifecycle-transition drop target.
    */
-  renderColumn(
+  private renderColumn(
     kind: NowColumnKind,
     cards: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
@@ -1449,7 +1448,7 @@ export class KanbanSurfaceRenderer {
    * target). Refresh spins its glyph briefly so in-flight state rides the
    * button, not a `.kbn-status` text line.
    */
-  private makeColumnAction(kind: ColumnKind): HTMLButtonElement | null {
+  private makeColumnAction(kind: NowColumnKind): HTMLButtonElement | null {
     const spec =
       kind === 'drafts'
         ? this.o.onStashClick && {
@@ -1461,12 +1460,10 @@ export class KanbanSurfaceRenderer {
               glyph: '✶', modifier: 'inFlight',
               label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick,
             }
-          : kind === 'awaitingReview'
-            ? {
-                glyph: '↻', modifier: 'awaitingReview',
-                label: 'Refresh the board', onClick: this.o.onRefresh, spin: true,
-              }
-            : null
+          : {
+              glyph: '↻', modifier: 'awaitingReview',
+              label: 'Refresh the board', onClick: this.o.onRefresh, spin: true,
+            }
     if (!spec) return null
 
     const btn = document.createElement('button')
@@ -1495,7 +1492,7 @@ export class KanbanSurfaceRenderer {
    * Render one grid card. Title click opens the reading surface in vellum;
    * body click opens the action detail modal.
    */
-  renderCard(
+  private renderCard(
     card: KanbanCard,
     kind: NowColumnKind,
     originStaleness?: KanbanOriginStaleness,
@@ -1592,31 +1589,25 @@ export class KanbanSurfaceRenderer {
     // badge / held pill / worker pill are the RIGHT region, built further
     // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
-    if ((kind === 'drafts' || kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
+    if (!isStale) {
       reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
-
-      const temperMetaBtn = document.createElement('button')
-      temperMetaBtn.type = 'button'
-      temperMetaBtn.className = 'kbn-action kbn-action-tempered kbn-review-meta-btn'
-      temperMetaBtn.textContent = 'Temper'
-      temperMetaBtn.setAttribute('aria-label', `Temper fiber: ${card.name}`)
-      temperMetaBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void this.o.transition(card, 'tempered')
-      })
-
-      const compostMetaBtn = document.createElement('button')
-      compostMetaBtn.type = 'button'
-      compostMetaBtn.className = 'kbn-action kbn-action-drafts kbn-review-meta-btn'
-      compostMetaBtn.textContent = 'Compost'
-      compostMetaBtn.setAttribute('aria-label', `Compost fiber: ${card.name}`)
-      compostMetaBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void this.o.transition(card, 'composted')
-      })
-
-      reviewMetaActions.append(temperMetaBtn, compostMetaBtn)
+      const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.className = `kbn-action kbn-action-${modifier} kbn-review-meta-btn`
+        btn.textContent = label
+        btn.setAttribute('aria-label', `${label} fiber: ${card.name}`)
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          void this.o.transition(card, target)
+        })
+        return btn
+      }
+      reviewMetaActions.append(
+        verdictBtn('Temper', 'tempered', 'tempered'),
+        verdictBtn('Compost', 'drafts', 'composted'),
+      )
     }
 
     // A phase badge and a live-worker pill exclude each other. The worker-less
@@ -1705,18 +1696,14 @@ export class KanbanSurfaceRenderer {
         // The human-attention phase IS the button — the chip opens the worker,
         // and (for `waiting`, plus a long-unanswered `attention`) says how long
         // it has been standing there.
-        const age = card.lastActivityAt !== undefined
-          ? humanizeIdleAge(Date.now() - card.lastActivityAt)
-          : null
+        const age = Number.isFinite(idleMs) ? humanizeIdleAge(idleMs) : null
         w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
         w.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
-        if (card.runtimePhase === 'attention') {
-          w.setAttribute('aria-label', `Worker needs you — open terminal: ${tmuxName}`)
-          w.title = `Worker raised its hand${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
-        } else {
-          w.setAttribute('aria-label', `Worker waiting for you — open terminal: ${tmuxName}`)
-          w.title = `Worker paused on input${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
-        }
+        const [aria, verb] = card.runtimePhase === 'attention'
+          ? ['Worker needs you', 'Worker raised its hand']
+          : ['Worker waiting for you', 'Worker paused on input']
+        w.setAttribute('aria-label', `${aria} — open terminal: ${tmuxName}`)
+        w.title = `${verb}${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
       } else {
         // `-aloft` is the modifier the touch layout keys off: a pill whose
         // only job is opening a native terminal has nothing to offer a phone,
@@ -1743,22 +1730,20 @@ export class KanbanSurfaceRenderer {
     // room rather than flush against whichever side claims it first; the
     // right chip then lands flush against the row's own right edge, same as
     // it always has.
-    if (reviewMetaActions || rightChip) {
-      if (reviewMetaActions) {
-        const before = document.createElement('div')
-        before.className = 'kbn-card-meta-spacer'
-        const after = document.createElement('div')
-        after.className = 'kbn-card-meta-spacer'
-        meta.append(before, reviewMetaActions, after)
+    if (reviewMetaActions) {
+      const before = document.createElement('div')
+      before.className = 'kbn-card-meta-spacer'
+      const after = document.createElement('div')
+      after.className = 'kbn-card-meta-spacer'
+      meta.append(before, reviewMetaActions, after)
+    }
+    if (rightChip) {
+      if (!reviewMetaActions) {
+        const spacer = document.createElement('div')
+        spacer.className = 'kbn-card-meta-spacer'
+        meta.append(spacer)
       }
-      if (rightChip) {
-        if (!reviewMetaActions) {
-          const spacer = document.createElement('div')
-          spacer.className = 'kbn-card-meta-spacer'
-          meta.append(spacer)
-        }
-        meta.append(rightChip)
-      }
+      meta.append(rightChip)
     }
     el.append(meta)
 
@@ -1846,11 +1831,9 @@ export class KanbanSurfaceRenderer {
     if (queued.length === 0) return
 
     const resp = this.o.getLastResponse()
-    const names = queued.map((id) => findCardById(resp, id)?.name ?? id)
-    const notes = queued.map((id) => {
-      const member = findCardById(resp, id)
-      return member ? queueMemberNote(member) : null
-    })
+    const members = queued.map((id) => findCardById(resp, id))
+    const names = members.map((m, i) => m?.name ?? queued[i])
+    const notes = members.map((m) => (m ? queueMemberNote(m) : null))
 
     const chip = document.createElement('button')
     chip.type = 'button'
@@ -1873,7 +1856,6 @@ export class KanbanSurfaceRenderer {
     // row's own fiber, so it stays offered even in a queue of one and even when
     // some other member of the chain was assembled by hand. See
     // `queueRowGesture` for why nothing about the head card is an input.
-    const members = queued.map((id) => findCardById(resp, id))
     const chainAllScalar = members.every((m) => m?.dependsOnShape === 'scalar')
     const gestureFor = (m: KanbanCard | null | undefined): QueueRowGesture =>
       queueRowGesture({
@@ -1883,7 +1865,8 @@ export class KanbanSurfaceRenderer {
         canReorder: !!this.o.reorderQueue,
         canUnqueue: !!this.o.unqueueRow,
       })
-    const reorderable = members.some((m) => gestureFor(m).reorderable)
+    const gestures = members.map(gestureFor)
+    const reorderable = gestures.some((g) => g.reorderable)
     // THE LIST IS ITS OWN DRAG BOUNDARY.
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
@@ -1946,7 +1929,7 @@ export class KanbanSurfaceRenderer {
         suffix.textContent = ` · ${note}`
         li.append(suffix)
       }
-      const gesture = gestureFor(members[i])
+      const gesture = gestures[i]
       // The row SAYS what its drag can do — or, when it has none, why. A row
       // that silently refuses to move reads as a broken board.
       li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${gesture.hint}`
@@ -2355,10 +2338,9 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
 }
 
 /** The head of a Desk band (Pinned, Resting) — the column head's own parts at
- *  band scale: a small-caps title, the count in mono beside it, and an
- *  optional italic gloss. No dropcap: the F2/F1 initial needs the column
+ *  band scale: a small-caps title and the count in mono beside it. No dropcap: the F2/F1 initial needs the column
  *  title's size to read as illumination (see `.kbn-bandhead-title`). */
-function renderBandHead(label: string, count: number, gloss?: string): HTMLElement {
+function renderBandHead(label: string, count: number): HTMLElement {
   const head = document.createElement('div')
   head.className = 'kbn-bandhead'
 
@@ -2372,12 +2354,6 @@ function renderBandHead(label: string, count: number, gloss?: string): HTMLEleme
     countEl.className = 'kbn-bandhead-count'
     countEl.textContent = String(count)
     head.append(countEl)
-  }
-  if (gloss) {
-    const glossEl = document.createElement('span')
-    glossEl.className = 'kbn-bandhead-gloss'
-    glossEl.textContent = gloss
-    head.append(glossEl)
   }
   return head
 }
@@ -2459,11 +2435,9 @@ function buildDayCell(day: TimelineDay): HTMLElement {
   const el = document.createElement('div')
   const classes = ['kbn-timeline-day']
   if (day.isToday) classes.push('kbn-timeline-day-today')
-  if (day.isPast) classes.push('kbn-timeline-day-past')
   if (day.isWeekend) classes.push('kbn-timeline-day-weekend')
   if (day.weekBoundary) classes.push('kbn-timeline-day-week-boundary')
   el.className = classes.join(' ')
-  el.dataset.dayIso = day.iso
 
   const dow = document.createElement('span')
   dow.className = 'kbn-timeline-day-dow'
@@ -2700,7 +2674,7 @@ export function formatDue(iso: string): string {
  * A drop on TODAY never routes here: today means "onto the desk now", which is
  * `setSurface(card, 'now', { due: null })` at the call sites.
  */
-export function dayDropHorizon(resp: KanbanResponse | null, id: string): HorizonKind {
+function dayDropHorizon(resp: KanbanResponse | null, id: string): HorizonKind {
   if (!resp) return 'now'
   if (resp.now.drafts.some((c) => c.id === id)) return 'stashed'
   if (resp.now.awaitingReview.some((c) => c.id === id)) return 'stashed'
@@ -2744,7 +2718,7 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
  * Returns null when the element is scrolled entirely out of view — there is no
  * point on it to hit, and callers should treat that as "not over it".
  */
-export function visibleRectOf(el: HTMLElement): ZoneRect | null {
+function visibleRectOf(el: HTMLElement): ZoneRect | null {
   let rect: ZoneRect | null = el.getBoundingClientRect()
   for (let node = el.parentElement; node && rect; node = node.parentElement) {
     const overflow = window.getComputedStyle(node)

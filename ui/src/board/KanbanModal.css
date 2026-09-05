@@ -396,15 +396,6 @@
   font-size: calc(12px * var(--kbn-type-scale, 1));
   color: #7A6F5C;
 }
-/* The gloss under Resting — the board's marginal-line idiom (italic serif in
-   the fleuron grey), so it whispers the way an empty column does. */
-.kbn-bandhead-gloss {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
-  color: #A89B83;
-}
-
 /* Pinned band — schedule-less umbrella roles, dispatchable on demand. A slim
    launcher strip above the Now board. Pinned is a *launcher*, not a monitor:
    the user arrives with intent and scans for a role, so this reads as a dense
