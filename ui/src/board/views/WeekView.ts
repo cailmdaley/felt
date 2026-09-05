@@ -148,10 +148,7 @@ const MID_MORNING_HOUR = 10
  * fraction only for a day that will not parse.
  */
 export function midMorningFraction(day: string, bounds: RailBounds): number {
-  const at = civilDayNoon(day)
-  if (!at) return (MID_MORNING_HOUR - RAIL_START_HOUR) / 24
-  at.setHours(MID_MORNING_HOUR, 0, 0, 0)
-  return railFraction(at.getTime(), bounds)
+  return hourFraction(day, MID_MORNING_HOUR, bounds) ?? (MID_MORNING_HOUR - RAIL_START_HOUR) / 24
 }
 
 /** Day-weight thresholds. Internal vocabulary, deliberately three words wide:
@@ -239,6 +236,16 @@ export function weekStepTarget(focusDate: string | null, delta: number, nowMs: n
   return mondayOfWeek(next) === weekMondayForFocus(null, nowMs) ? null : next
 }
 
+/** Get-or-create, for the maps this view folds buckets into. */
+function ensure<K, V>(map: Map<K, V>, key: K, make: () => V): V {
+  let found = map.get(key)
+  if (found === undefined) {
+    found = make()
+    map.set(key, found)
+  }
+  return found
+}
+
 /** Where an instant sits on a rail, as 0…1. Outside the rail it clamps, so a
  *  caller that has already decided the instant belongs to this day never
  *  positions a mark off the edge. */
@@ -261,18 +268,24 @@ export function railFraction(ms: number, bounds: RailBounds): number {
 export function railRuleFractions(day: string, bounds: RailBounds): number[] {
   const out: number[] = []
   for (let step = 1; step < 6; step += 1) {
-    const hour = RAIL_START_HOUR + step * 4
-    const at = civilDayNoon(day)
-    if (!at) continue
-    // 26 is 2am tomorrow — the rail crosses midnight, so the late rules belong
-    // to the next calendar day. On a spring-forward rail that 2am does not
-    // exist; `setHours` resolves it to 03:00, which is exactly where the rule
-    // belongs — the first instant at or after where 2am would have been.
-    if (hour >= 24) at.setDate(at.getDate() + 1)
-    at.setHours(hour % 24, 0, 0, 0)
-    out.push(railFraction(at.getTime(), bounds))
+    const at = hourFraction(day, RAIL_START_HOUR + step * 4, bounds)
+    if (at !== null) out.push(at)
   }
   return out
+}
+
+/** Where a wall-clock hour of `day`'s rail falls on it, or null for a day that
+ *  will not parse. Hours at or past 24 are tomorrow's. */
+function hourFraction(day: string, hour: number, bounds: RailBounds): number | null {
+  const at = civilDayNoon(day)
+  if (!at) return null
+  // 26 is 2am tomorrow — the rail crosses midnight, so the late rules belong
+  // to the next calendar day. On a spring-forward rail that 2am does not
+  // exist; `setHours` resolves it to 03:00, which is exactly where the rule
+  // belongs — the first instant at or after where 2am would have been.
+  if (hour >= 24) at.setDate(at.getDate() + 1)
+  at.setHours(hour % 24, 0, 0, 0)
+  return railFraction(at.getTime(), bounds)
 }
 
 // ── The read window ──────────────────────────────────────────────────────────
@@ -1485,9 +1498,7 @@ class WeekView implements TemporalView {
     for (const bucket of res.buckets) {
       const hit = edges.find((e) => bucket.m >= e.bounds.startMs && bucket.m < e.bounds.endMs)
       if (!hit) continue
-      const list = byDay.get(hit.day)
-      if (list) list.push(bucket)
-      else byDay.set(hit.day, [bucket])
+      ensure(byDay, hit.day, () => []).push(bucket)
     }
     const origins = res.origins ?? {}
     // Staleness is in the print: a remote falling out of contact changes what
@@ -1663,10 +1674,10 @@ class WeekView implements TemporalView {
       const spend = activity ? summarizeSpend(buckets) : null
       const dayDiff = ledger.byDay.get(row.day) ?? null
       const annotText = annotationFor(spend, isPast, isToday, inFlight.length, dayDiff)
-      row.annot.textContent = ''
       const dayDiffEl = dayDiff ? diffClauseEl(dayDiff.insertions, dayDiff.deletions) : null
       const dayDiffText = dayDiff ? diffClause(dayDiff.insertions, dayDiff.deletions) : ''
-      if (dayDiffEl && dayDiffText && annotText.endsWith(dayDiffText)) {
+      if (dayDiffEl && annotText.endsWith(dayDiffText)) {
+        row.annot.textContent = ''
         row.annot.append(
           document.createTextNode(annotText.slice(0, -dayDiffText.length)),
           dayDiffEl,
@@ -1898,31 +1909,16 @@ export function rasterSlots(
     const who = origin(b)
     if (!who) continue
     const index = Math.floor((b.m - bounds.startMs) / RASTER_SLOT_MS)
-    let kinds = byIndex.get(index)
-    if (!kinds) {
-      kinds = new Map()
-      byIndex.set(index, kinds)
-    }
-    let entry = kinds.get(b.k)
-    if (!entry) {
-      entry = { kind: b.k, count: 0, where: [], shuttle: false }
-      kinds.set(b.k, entry)
-    }
+    const kinds = ensure(byIndex, index, () => new Map<DrawnKind, SlotKind>())
+    const kind = b.k
+    const entry = ensure(kinds, kind, () => ({ kind, count: 0, where: [], shuttle: false }))
     entry.count += b.n
     if (!entry.where.includes(who.label)) entry.where.push(who.label)
     if (who.shuttle) entry.shuttle = true
     if (b.k === 'attention') {
-      const minutes = humanByIndex.get(index)
-      const at = (b.m - bounds.startMs) / 60_000
-      if (minutes) minutes.push(at)
-      else humanByIndex.set(index, [at])
+      ensure(humanByIndex, index, () => []).push((b.m - bounds.startMs) / 60_000)
     }
-    let found = sourcesByIndex.get(index)
-    if (!found) {
-      found = []
-      sourcesByIndex.set(index, found)
-    }
-    found.push(who.source)
+    ensure(sourcesByIndex, index, () => []).push(who.source)
   }
 
   const slots: RasterSlot[] = []
