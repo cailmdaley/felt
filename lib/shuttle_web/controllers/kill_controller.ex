@@ -21,6 +21,7 @@ defmodule ShuttleWeb.KillController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
 
   alias Shuttle.{OriginRouter, Poller, RemoteFiberRegistry}
 
@@ -32,7 +33,10 @@ defmodule ShuttleWeb.KillController do
         # RemoteFiberRegistry feed cache so the board stops showing it live before
         # the next remote poll.
         RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-        relay(conn, result)
+
+        relay_json(conn, result, fn name, reason ->
+          %{error: "forward to #{name} failed: #{inspect(reason)}"}
+        end)
 
       :local ->
         case Poller.kill_session(fiber_id) do
@@ -54,19 +58,5 @@ defmodule ShuttleWeb.KillController do
 
   def create(conn, _params) do
     conn |> put_status(400) |> json(%{error: "fiber_id is required"})
-  end
-
-  # Relay a forwarded remote response verbatim (JSON), or surface a tunnel failure.
-  defp relay(conn, {:forwarded, status, body}) do
-    conn
-    |> put_status(status)
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, body)
-  end
-
-  defp relay(conn, {:error, {:forward_failed, name, reason}}) do
-    conn
-    |> put_status(502)
-    |> json(%{error: "forward to #{name} failed: #{inspect(reason)}"})
   end
 end

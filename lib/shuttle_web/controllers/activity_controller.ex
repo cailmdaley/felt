@@ -123,10 +123,7 @@ defmodule ShuttleWeb.ActivityController do
     start_ms = Composite.item_ms(span, :start_ms)
     end_ms = Composite.item_ms(span, :end_ms)
 
-    cond do
-      is_nil(start_ms) or is_nil(end_ms) -> true
-      true -> start_ms <= to_ms and end_ms >= from_ms
-    end
+    is_nil(start_ms) or is_nil(end_ms) or (start_ms <= to_ms and end_ms >= from_ms)
   end
 
   # The covered window, as the object the UI reads. `nil` when a remote has

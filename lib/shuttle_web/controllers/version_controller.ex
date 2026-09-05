@@ -48,7 +48,6 @@ defmodule ShuttleWeb.VersionController do
     end
   end
 
-  defp short_sha("unknown"), do: "unknown"
   defp short_sha(sha) when is_binary(sha), do: String.slice(sha, 0, 7)
 
   # The Poller probes once at boot and caches the result (`contract_check`

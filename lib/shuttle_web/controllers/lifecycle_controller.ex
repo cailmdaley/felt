@@ -94,11 +94,7 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
-  defp execute(action, params) do
-    action
-    |> args_for(params)
-    |> run_elem()
-  end
+  defp execute(action, _params), do: {:error, "missing required fields for #{action}"}
 
   defp refresh_card(%{"fiber" => fiber}) do
     case resolve_fiber(fiber) do
@@ -121,7 +117,6 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
-  defp run_elem(args, felt_store \\ nil)
   defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
   defp run_elem(error, _felt_store), do: error
 
@@ -166,10 +161,6 @@ defmodule ShuttleWeb.LifecycleController do
        |> add_string_flag("--schedule", params["schedule"])
        |> add_string_flag("--tz", params["tz"])}
     end
-  end
-
-  defp args_for("accept", %{"fiber" => fiber} = params) do
-    {:ok, ["accept", fiber] |> add_bool_flag("--keep-outcome", params["keep_outcome"])}
   end
 
   defp args_for("set-model", %{"fiber" => fiber, "agent" => agent}),

@@ -93,7 +93,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
     with {:ok, body} <- fetch_remote_registry(url, timeout),
          {:ok, decoded} <- Jason.decode(body),
-         %{} = origin <- origin_for_remote(decoded, remote.name) do
+         %{} = origin <- origin_for_remote(decoded) do
       origin
       |> Map.put("kind", "remote")
       |> Map.put("stale", false)
@@ -108,15 +108,15 @@ defmodule ShuttleWeb.FeltStoresController do
     end
   end
 
-  defp origin_for_remote(%{"origins" => origins, "host" => host}, _name)
+  defp origin_for_remote(%{"origins" => origins, "host" => host})
        when is_map(origins) and is_binary(host) do
     Map.get(origins, host)
   end
 
-  defp origin_for_remote(%{"felt_stores" => stores} = decoded, _name) when is_list(stores),
+  defp origin_for_remote(%{"felt_stores" => stores} = decoded) when is_list(stores),
     do: decoded
 
-  defp origin_for_remote(_, _name), do: nil
+  defp origin_for_remote(_), do: nil
 
   defp remote_error(%Remote{name: name} = remote, reason) do
     %{

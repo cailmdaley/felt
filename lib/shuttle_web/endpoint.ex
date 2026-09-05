@@ -29,7 +29,6 @@ defmodule ShuttleWeb.Endpoint do
     json_decoder: Phoenix.json_library()
 
   plug ShuttleWeb.CORSPlug
-  plug Plug.MethodOverride
   plug Plug.Head
   plug ShuttleWeb.Router
 end

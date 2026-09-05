@@ -50,13 +50,11 @@ defmodule ShuttleWeb.StateController do
 
   # Render remotes as a JSON-friendly map. `last_polled_at` is a
   # DateTime — serialize as an ISO8601 string for the kanban frontend.
-  defp render_remotes(remotes) when is_map(remotes) do
+  defp render_remotes(remotes) do
     Map.new(remotes, fn {name, entry} ->
       {name, render_entry(entry)}
     end)
   end
-
-  defp render_remotes(_), do: %{}
 
   defp poller_state do
     {:ok, Shuttle.Poller.orchestrator_state(Shuttle.Poller, @state_timeout_ms)}
