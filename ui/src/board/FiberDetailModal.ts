@@ -28,7 +28,6 @@ import {
   isTopPanel,
   registerPanel,
   unregisterPanel,
-  PANEL_MIN,
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
@@ -43,7 +42,7 @@ import {
   sentFilesRevision,
   type SentFile,
 } from './sentFiles.js'
-import { buildTabButton, buildViewCell } from './ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell } from './ReaderChrome.js'
 import { closeTab, openTab } from './ReaderTabs.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
 import { humanizeCron } from './KanbanRules.js'
@@ -1662,23 +1661,18 @@ export class FiberDetailModal {
     if (this.viewerWindow || !this.overlay) return
     const card = this.overlay
 
-    const win = document.createElement('div')
-    win.className = 'kbn-detail-overlay kbn-fileview-window'
-    win.setAttribute('role', 'dialog')
-    win.setAttribute('aria-label', 'Sent files')
-
-    // ── Chrome bar: the tab strip IS the window chrome ──
-    // No separate title bar — the tabs are the titles, and the bar itself is
-    // the drag handle (empty areas drag; the tab/✕ buttons opt out of drag).
-    // A trailing ✕, pinned right of the horizontally-scrolling tabs, closes the
-    // whole viewer (every file) at once; the card stays.
-    const bar = document.createElement('div')
-    bar.className = 'kbn-fileview-bar'
-
-    const tabs = document.createElement('div')
-    tabs.className = 'kbn-detail-tabstrip'
-    tabs.setAttribute('role', 'tablist')
+    const { win, bar, tabs, closeBtn: winClose, views } = buildReaderWindow({
+      ariaLabel: 'Sent files',
+      closeLabel: 'Close file viewer',
+      closeTitle: 'Close all files',
+    })
     this.tabStrip = tabs
+    this.rightCol = views
+    winClose.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.closeViewerWindow()
+      this.writePersist()
+    })
 
     // Download the active file to ~/Downloads — restores the save affordance the
     // retired Portolan `:4004` route carried (⤓). Pinned right of the tabs, left
@@ -1694,28 +1688,10 @@ export class FiberDetailModal {
       void this.downloadActiveFile()
     })
 
-    const winClose = document.createElement('button')
-    winClose.type = 'button'
-    winClose.className = 'kbn-fileview-win-close'
-    winClose.setAttribute('aria-label', 'Close file viewer')
-    winClose.title = 'Close all files'
-    winClose.textContent = '×'
-    winClose.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.closeViewerWindow()
-      this.writePersist()
-    })
-
-    bar.append(tabs, winDownload, winClose)
-
-    const views = document.createElement('div')
-    views.className = 'kbn-detail-views'
-    this.rightCol = views
+    bar.insertBefore(winDownload, winClose)
 
     // Cmd/Ctrl + wheel zooms the active file (images, HTML, PDF — everything).
     views.addEventListener('wheel', (e) => this.handleZoomWheel(e), { passive: false })
-
-    win.append(bar, views)
 
     // ── Geometry ──
     // Remembered placement for this card wins; otherwise the default is
@@ -1759,12 +1735,8 @@ export class FiberDetailModal {
       // Drag (header bar) + resize (eight edge/corner zones) — independent of
       // the card, reusing the same chrome helpers + handle CSS. Both remember
       // the window's new geometry for this card.
-      attachPanelDrag(win, bar, { draggingClass: 'kbn-detail-dragging', onSettle: rememberViewer })
+      attachPanelDrag(win, bar, { onSettle: rememberViewer })
       attachPanelResize(win, {
-        handleClassPrefix: 'kbn-detail-rh',
-        resizingClass: 'kbn-detail-resizing',
-        minWidth: PANEL_MIN.width,
-        minHeight: PANEL_MIN.height,
         onSettle: rememberViewer,
       })
     }
@@ -1845,7 +1817,6 @@ export class FiberDetailModal {
    *  selection; a title bar doesn't). Buttons and form fields opt out. */
   private attachDrag(overlay: HTMLElement, handle: HTMLElement): void {
     attachPanelDrag(overlay, handle, {
-      draggingClass: 'kbn-detail-dragging',
       onSettle: () => this.rememberGeometry(overlay),
     })
   }
@@ -1854,10 +1825,6 @@ export class FiberDetailModal {
    *  same lifecycle as drag; min size keeps the header + dropdown usable. */
   private attachResizeHandles(overlay: HTMLElement): void {
     attachPanelResize(overlay, {
-      handleClassPrefix: 'kbn-detail-rh',
-      resizingClass: 'kbn-detail-resizing',
-      minWidth: PANEL_MIN.width,
-      minHeight: PANEL_MIN.height,
       onSettle: () => this.rememberGeometry(overlay),
     })
   }

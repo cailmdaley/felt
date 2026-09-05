@@ -49,3 +49,60 @@ export function buildViewCell(): HTMLElement {
   cell.hidden = true
   return cell
 }
+
+/**
+ * The floating reader window itself — the frame all three readers share.
+ *
+ * The same element tree, class for class: the card's vellum frame
+ * (`.kbn-detail-overlay`) with the file-viewer modifier that lays it out as a
+ * flex column, a chrome bar that IS the tab strip (no separate title bar — the
+ * tabs are the titles, and the bar's empty areas are the drag handle), and the
+ * full-bleed view area under it. A trailing ✕, pinned right of the
+ * horizontally-scrolling tabs, closes the whole reader at once.
+ *
+ * Handed back with NO listeners and nothing else appended: the close handler,
+ * any extra bar buttons (insert them before `closeBtn`), the wheel-zoom and
+ * the geometry are the parts that genuinely differ, and stay with the caller.
+ */
+export function buildReaderWindow(opts: {
+  ariaLabel: string
+  /** An extra modifier class on the frame, for a reader whose stylesheet
+   *  narrows the shared one. */
+  extraClass?: string
+  closeLabel: string
+  closeTitle: string
+}): {
+  win: HTMLElement
+  bar: HTMLElement
+  tabs: HTMLElement
+  closeBtn: HTMLElement
+  views: HTMLElement
+} {
+  const win = document.createElement('div')
+  win.className = 'kbn-detail-overlay kbn-fileview-window'
+  if (opts.extraClass) win.classList.add(opts.extraClass)
+  win.setAttribute('role', 'dialog')
+  win.setAttribute('aria-label', opts.ariaLabel)
+
+  const bar = document.createElement('div')
+  bar.className = 'kbn-fileview-bar'
+
+  const tabs = document.createElement('div')
+  tabs.className = 'kbn-detail-tabstrip'
+  tabs.setAttribute('role', 'tablist')
+
+  const closeBtn = document.createElement('button')
+  closeBtn.type = 'button'
+  closeBtn.className = 'kbn-fileview-win-close'
+  closeBtn.setAttribute('aria-label', opts.closeLabel)
+  closeBtn.title = opts.closeTitle
+  closeBtn.textContent = '\u00d7'
+
+  bar.append(tabs, closeBtn)
+
+  const views = document.createElement('div')
+  views.className = 'kbn-detail-views'
+
+  win.append(bar, views)
+  return { win, bar, tabs, closeBtn, views }
+}

@@ -153,11 +153,14 @@ export function attachPanelDrag(
   overlay: HTMLElement,
   handle: HTMLElement,
   opts: {
-    draggingClass: string
+    /** Defaults to `kbn-detail-dragging` — every window in the set is the
+     *  same frame, styled by the one stylesheet. */
+    draggingClass?: string
     onMoved?: () => void
     onSettle?: () => void
   },
 ): void {
+  const dragClass = opts.draggingClass ?? 'kbn-detail-dragging'
   handle.addEventListener('pointerdown', (e: PointerEvent) => {
     const target = e.target as HTMLElement
     if (target.closest('button, input, textarea, select')) return
@@ -166,7 +169,7 @@ export function attachPanelDrag(
     const startY = e.clientY
     const startLeft = overlay.offsetLeft
     const startTop = overlay.offsetTop
-    overlay.classList.add(opts.draggingClass)
+    overlay.classList.add(dragClass)
     const onMove = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
         opts.onMoved?.()
@@ -178,7 +181,7 @@ export function attachPanelDrag(
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
-      overlay.classList.remove(opts.draggingClass)
+      overlay.classList.remove(dragClass)
       opts.onSettle?.()
     }
     window.addEventListener('pointermove', onMove)
@@ -194,10 +197,12 @@ export function attachPanelDrag(
 export function attachPanelResize(
   overlay: HTMLElement,
   opts: {
-    handleClassPrefix: string
-    resizingClass: string
-    minWidth: number
-    minHeight: number
+    /** All four default to the shared frame's values — the same stylesheet
+     *  styles every window in the set, and {@link PANEL_MIN} is its floor. */
+    handleClassPrefix?: string
+    resizingClass?: string
+    minWidth?: number
+    minHeight?: number
     /** Fires on every frame of the resize. A panel that DIVIDES a layout (the
      *  board's docked reader) has to reflow what is beside it as the edge
      *  moves; settling only at the end would make the divider feel detached
@@ -206,10 +211,14 @@ export function attachPanelResize(
     onSettle?: () => void
   },
 ): void {
+  const prefix = opts.handleClassPrefix ?? 'kbn-detail-rh'
+  const resizingClass = opts.resizingClass ?? 'kbn-detail-resizing'
+  const minWidth = opts.minWidth ?? PANEL_MIN.width
+  const minHeight = opts.minHeight ?? PANEL_MIN.height
   const dirs = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const
   for (const dir of dirs) {
     const h = document.createElement('div')
-    h.className = `${opts.handleClassPrefix} ${opts.handleClassPrefix}-${dir}`
+    h.className = `${prefix} ${prefix}-${dir}`
     h.addEventListener('pointerdown', (e: PointerEvent) => {
       e.preventDefault()
       e.stopPropagation()
@@ -219,7 +228,7 @@ export function attachPanelResize(
       const startTop = overlay.offsetTop
       const startW = overlay.offsetWidth
       const startH = overlay.offsetHeight
-      overlay.classList.add(opts.resizingClass)
+      overlay.classList.add(resizingClass)
       const onMove = (ev: PointerEvent) => {
         const dx = ev.clientX - startX
         const dy = ev.clientY - startY
@@ -237,13 +246,13 @@ export function attachPanelResize(
           ht = startH - dy
           top = startTop + dy
         }
-        if (w < opts.minWidth) {
-          if (dir.includes('w')) left -= opts.minWidth - w
-          w = opts.minWidth
+        if (w < minWidth) {
+          if (dir.includes('w')) left -= minWidth - w
+          w = minWidth
         }
-        if (ht < opts.minHeight) {
-          if (dir.includes('n')) top -= opts.minHeight - ht
-          ht = opts.minHeight
+        if (ht < minHeight) {
+          if (dir.includes('n')) top -= minHeight - ht
+          ht = minHeight
         }
         overlay.style.left = `${left}px`
         overlay.style.top = `${Math.max(0, top)}px`
@@ -255,7 +264,7 @@ export function attachPanelResize(
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         window.removeEventListener('pointercancel', onUp)
-        overlay.classList.remove(opts.resizingClass)
+        overlay.classList.remove(resizingClass)
         opts.onSettle?.()
       }
       window.addEventListener('pointermove', onMove)
