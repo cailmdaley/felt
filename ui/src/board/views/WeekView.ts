@@ -99,6 +99,7 @@ import {
   tipContent,
   type DrawnKind,
   type MomentWords,
+  ensureTipHost,
   type SlotTip,
   type SlotTipRow,
 } from './momentTip.js'
@@ -197,11 +198,6 @@ export function weekCivilDays(monday: string): string[] {
     d.setDate(d.getDate() + 1)
   }
   return days
-}
-
-/** The Monday `weeks` weeks from `monday` (negative goes back). */
-export function shiftWeekMonday(monday: string, weeks: number): string {
-  return shiftCivilDay(monday, weeks * 7)
 }
 
 /**
@@ -587,12 +583,8 @@ export function advanceSwipe(state: SwipeState, deltaX: number, atMs: number): S
     step: 0,
     // Negated: swiping right-to-left (positive deltaX) walks FORWARD in time,
     // so the sheet slides left and the next week comes in from the right.
-    nudge: clamp(-offset * SWIPE_NUDGE_RATIO, -SWIPE_NUDGE_CAP_PX, SWIPE_NUDGE_CAP_PX),
+    nudge: Math.min(SWIPE_NUDGE_CAP_PX, Math.max(-SWIPE_NUDGE_CAP_PX, -offset * SWIPE_NUDGE_RATIO)),
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
 }
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
@@ -1351,12 +1343,8 @@ class WeekView implements TemporalView {
   }
 
   private ensureTip(): HTMLElement {
-    if (this.tip?.isConnected) return this.tip
-    const tip = document.createElement('div')
-    tip.className = 'kbn-tip'
-    this.grid?.append(tip)
-    this.tip = tip
-    return tip
+    this.tip = ensureTipHost(this.grid, this.tip)
+    return this.tip
   }
 
   /** Close the slip. A pinned one ignores this — the pointer wandering off is
@@ -1569,7 +1557,7 @@ class WeekView implements TemporalView {
     // Only explain ink that is on the page.
     if (this.key) this.key.style.display = (activity?.week.totalMs ?? 0) > 0 ? '' : 'none'
 
-    this.paintCycles(cyclesInWeek(ctx.response.cycles ?? [], this.rows.map((r) => r.day), now))
+    this.paintCycles(cyclesInWeek(ctx.response.cycles, this.rows.map((r) => r.day), now))
 
     const inFlight = ctx.response.now.inFlight
     // Who did each minute of work, and whether a constitution is driving it.

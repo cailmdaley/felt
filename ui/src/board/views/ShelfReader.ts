@@ -64,6 +64,7 @@ import {
 import { buildTabButton, buildViewCell } from '../ReaderChrome.js'
 import { applyZoom, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
+import { safeStorage } from './shelfLayout.js'
 
 export const READER_PERSIST_KEY = 'shuttle:shelf:reader'
 
@@ -178,14 +179,6 @@ export function saveReaderPersist(state: ReaderPersist, storage?: Storage): void
   }
 }
 
-function safeStorage(): Storage | null {
-  try {
-    return typeof window !== 'undefined' ? window.localStorage : null
-  } catch {
-    return null
-  }
-}
-
 /**
  * A remembered geometry is usable only if it still lands on-screen — the
  * viewport may have shrunk, or moved to a smaller display, since it was saved.
@@ -253,10 +246,6 @@ export class ShelfReader {
    * than a window sitting on top of the work.
    */
   onDock: ((split: number | null) => void) | null = null
-
-  isDocked(): boolean {
-    return this.win !== null && this.persist.docked === true
-  }
 
   isOpen(): boolean {
     return this.win !== null

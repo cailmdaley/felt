@@ -1693,7 +1693,7 @@ class ChronicleView implements TemporalView {
     }
     // The cycle strip. Its own surface, so it is invisible to the per-card loop
     // below — and a band moves with its span, not just with its existence.
-    for (const c of ctx.response.cycles ?? []) {
+    for (const c of ctx.response.cycles) {
       parts.push(`y:${c.id}|${c.name}|${c.cycleStart ?? ''}|${c.due ?? ''}`)
     }
     for (const c of cards) {
@@ -1953,7 +1953,7 @@ class ChronicleView implements TemporalView {
   ): CycleBand[] {
     // Cycles have their own surface — they are deliberately absent from
     // `ctx.cards`, so a cycle can never be mistaken for a piece of work.
-    const served: CycleCard[] = ctx.response.cycles ?? []
+    const served: CycleCard[] = ctx.response.cycles
     this.pendingCycles = retirePendingCycles(this.pendingCycles, served)
 
     // Lay any un-echoed edge drag over the served card, and retire the override
@@ -2353,8 +2353,7 @@ class ChronicleView implements TemporalView {
           buildSessionIndex(sessions.records).bySession,
         ),
       }
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
     } finally {
       if (this.ledgerInFlight === key) this.ledgerInFlight = null
     }
@@ -2370,8 +2369,7 @@ class ChronicleView implements TemporalView {
     if (this.scopedCycleId === null) return
     const ledger = buildLedgerNarration(commits.records, ctx.cards, buildSessionIndex(sessions.records).bySession)
     this.lookback = { key, groups: groupNarration(ledger, ctx.cards) }
-    this.signature = ''
-    if (this.ctx) void this.load(this.ctx)
+    this.repaintNow()
   }
 
   /** The intention line, read once from the cycle fiber's body. */
@@ -2384,8 +2382,7 @@ class ChronicleView implements TemporalView {
       const text = firstParagraph(fiberBodyOf(await res.json()))
       if (!text) return
       this.intentions.set(id, text)
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
     } catch {
       // No intention line is a fine outcome; the face stands without one.
     }
@@ -2526,22 +2523,15 @@ class ChronicleView implements TemporalView {
     // A ghost is renamed in place too, or the retirement match (by name, for a
     // create still in flight) would look for a name nothing carries.
     for (const p of this.pendingCycles) if (p.id === band.id || p.name === band.name) p.name = name
-    this.signature = ''
-    if (this.ctx) void this.load(this.ctx)
+    this.repaintNow()
     try {
-      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: band.id, origin: shuttleOrigin(band.originId), name }),
-      })
-      if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+      await this.feltEdit(ctx, { fiber_id: band.id, origin: shuttleOrigin(band.originId), name })
       ctx.requestRefresh()
     } catch (err) {
       // Put the old name back rather than leave the strip claiming a rename the
       // store never took.
       this.cycleNames.delete(band.id)
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
       window.console.error('[chronicle] could not rename cycle', err)
     }
   }
@@ -2556,16 +2546,28 @@ class ChronicleView implements TemporalView {
    * silently delete everything under it.
    */
   private async writeIntention(band: CycleBand, body: string, ctx: ViewContext): Promise<void> {
+    await this.feltEdit(ctx, { fiber_id: band.id, origin: shuttleOrigin(band.originId), body })
+    this.intentions.set(band.id, firstParagraph(body))
+    this.repaintNow()
+    ctx.requestRefresh()
+  }
+
+  /** Drop the render signature and repaint from the store as it now stands —
+   *  how every optimistic edit and its rollback reach the surface. */
+  private repaintNow(): void {
+    this.signature = ''
+    if (this.ctx) void this.load(this.ctx)
+  }
+
+  /** Every Chronicle write goes out as one owner-routed `felt-edit` POST;
+   *  the throw is what each caller's own catch (or lack of one) hangs on. */
+  private async feltEdit(ctx: ViewContext, payload: object): Promise<void> {
     const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fiber_id: band.id, origin: shuttleOrigin(band.originId), body }),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
-    this.intentions.set(band.id, firstParagraph(body))
-    this.signature = ''
-    if (this.ctx) void this.load(this.ctx)
-    ctx.requestRefresh()
   }
 
   /** The fiber's body as it stands right now — what the intention editor opens
@@ -2594,12 +2596,7 @@ class ChronicleView implements TemporalView {
       .join(' · ')
     if (!text) throw new Error('nothing to inscribe')
     const origin = shuttleOrigin(band.originId)
-    const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fiber_id: band.id, origin, set: { outcome: text } }),
-    })
-    if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+    await this.feltEdit(ctx, { fiber_id: band.id, origin, set: { outcome: text } })
     ctx.requestRefresh()
   }
 
@@ -2761,8 +2758,7 @@ class ChronicleView implements TemporalView {
     const id = band.id
     const previous = this.cycleEdits.get(id)
     this.cycleEdits.set(id, { ...previous, [edge]: day })
-    this.signature = ''
-    if (this.ctx) void this.load(this.ctx)
+    this.repaintNow()
 
     // The CARD's origin, not the board's: a remote-owned cycle has to be
     // written where it lives, and same-host the two happen to agree.
@@ -2772,19 +2768,13 @@ class ChronicleView implements TemporalView {
         ? { fiber_id: id, origin, set: { start: day } }
         : { fiber_id: id, origin, due: day }
     try {
-      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+      await this.feltEdit(ctx, payload)
       ctx.requestRefresh()
     } catch (err) {
       // Snap back rather than leave the band somewhere the fiber is not.
       if (previous) this.cycleEdits.set(id, previous)
       else this.cycleEdits.delete(id)
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
       window.console.error('[chronicle] could not move cycle edge', err)
     }
   }
@@ -2895,24 +2885,17 @@ class ChronicleView implements TemporalView {
   ): Promise<void> {
     const previous = this.dueEdits.get(cardId)
     this.dueEdits.set(cardId, day)
-    this.signature = ''
-    if (this.ctx) void this.load(this.ctx)
+    this.repaintNow()
 
     const origin = shuttleOrigin(originId)
     try {
-      const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: cardId, origin, due: day }),
-      })
-      if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+      await this.feltEdit(ctx, { fiber_id: cardId, origin, due: day })
       ctx.requestRefresh()
     } catch (err) {
       // Snap back rather than leave the mark somewhere the fiber is not.
       if (previous !== undefined) this.dueEdits.set(cardId, previous)
       else this.dueEdits.delete(cardId)
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
       window.console.error('[chronicle] could not move due date', err)
     }
   }
@@ -3263,16 +3246,14 @@ class ChronicleView implements TemporalView {
       // and be wrong — it matches no card, so entering the era would drop its
       // face the moment a poll landed.
       held.id = body.id
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
       ctx.requestRefresh()
     } catch (err) {
       // Drop the optimistic band rather than leave a cycle on screen that does
       // not exist on disk — a chronicle that shows work that never happened is
       // the one failure this page cannot afford.
       this.pendingCycles = this.pendingCycles.filter((p) => p !== held)
-      this.signature = ''
-      if (this.ctx) void this.load(this.ctx)
+      this.repaintNow()
       window.console.error('[chronicle] could not create cycle', err)
     }
   }
@@ -3638,7 +3619,7 @@ class ChronicleView implements TemporalView {
    * the cursor moves; otherwise a render restores whatever the reader had
    * scrolled to.
    */
-  private anchorDay(scroller: HTMLElement, idx: number, fraction = TODAY_ANCHOR): void {
+  private anchorDay(scroller: HTMLElement, idx: number, fraction: number): void {
     requestAnimationFrame(() => {
       if (this.scroller !== scroller) return
       const styles = getComputedStyle(scroller)

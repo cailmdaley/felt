@@ -101,7 +101,7 @@ export function createViewFallbackPage(
  * column. The fleurons are drawn by CSS (`.kbn-view-empty::before/::after`),
  * matching `.kbn-empty` in KanbanModal.css — pass the text alone.
  */
-export function createViewEmptyState(text = '— not yet inked —'): HTMLElement {
+export function createViewEmptyState(text: string): HTMLElement {
   const el = document.createElement('div')
   el.className = 'kbn-view-empty'
   el.textContent = text

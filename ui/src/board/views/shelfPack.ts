@@ -234,7 +234,7 @@ function clusterByFiber(cards: readonly PackCard[]): PackCard[][] {
  * arrangement is always the same arrangement, which is what lets a drag be
  * re-solved every frame without the surface shivering.
  */
-export function pushApart(bodies: readonly Body[], gap = PACK_GAP): Body[] {
+export function pushApart(bodies: readonly Body[]): Body[] {
   const out = bodies.map((b) => ({ ...b }))
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let moved = false
@@ -243,12 +243,12 @@ export function pushApart(bodies: readonly Body[], gap = PACK_GAP): Body[] {
         const a = out[i]
         const b = out[j]
         if (a.rank === 'hard' && b.rank === 'hard') continue
-        if (!intersects(a, b, gap)) continue
+        if (!intersects(a, b, PACK_GAP)) continue
         // Penetration depth on each axis, from the centres.
         const dx = a.x + a.w / 2 - (b.x + b.w / 2)
         const dy = a.y + a.h / 2 - (b.y + b.h / 2)
-        const overlapX = (a.w + b.w) / 2 + gap - Math.abs(dx)
-        const overlapY = (a.h + b.h) / 2 + gap - Math.abs(dy)
+        const overlapX = (a.w + b.w) / 2 + PACK_GAP - Math.abs(dx)
+        const overlapY = (a.h + b.h) / 2 + PACK_GAP - Math.abs(dy)
         if (overlapX <= 0 || overlapY <= 0) continue
         // Two bodies at the same centre have no direction to separate along;
         // break the tie sideways rather than dividing by zero.
@@ -279,8 +279,8 @@ export function pushApart(bodies: readonly Body[], gap = PACK_GAP): Body[] {
  * The map is keyed by card key; a card the packer did not move still appears,
  * so the caller can paint from one source.
  */
-export function packShelf(cards: readonly PackCard[], gap = PACK_GAP): Map<string, Rect> {
-  const settled = pushApart(arrangeStacks(cards), gap)
+export function packShelf(cards: readonly PackCard[]): Map<string, Rect> {
+  const settled = pushApart(arrangeStacks(cards))
   const byKey = new Map<string, Rect>()
   const sizes = new Map(cards.map((c) => [c.key, c]))
   for (const body of settled) {

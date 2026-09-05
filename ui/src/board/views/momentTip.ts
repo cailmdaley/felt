@@ -850,6 +850,16 @@ const TIP_GAP_PX = 9
  * differs per view (a pointer position, a minute fraction, a slot fraction) and
  * stays with the view; how a slip hangs off it does not, and lives here.
  */
+/** The one floating slip element, made once and re-used: `held` unless the
+ *  view rebuilt its chart out from under it. */
+export function ensureTipHost(parent: HTMLElement | null, held: HTMLElement | null): HTMLElement {
+  if (held?.isConnected) return held
+  const tip = document.createElement('div')
+  tip.className = 'kbn-tip'
+  parent?.append(tip)
+  return tip
+}
+
 export function placeTip(tip: HTMLElement, box: DOMRect, anchorX: number, topPx: number): void {
   const flip = anchorX > box.width * TIP_FLIP_FRACTION
   tip.style.top = `${topPx}px`
@@ -918,7 +928,7 @@ function orderSources(sources: readonly MomentSource[]): MomentSource[] {
  * delegation register (`return` — a subagent's report, a teammate message),
  * which nobody typed; only `prose` is speech.
  */
-function pickExcerpts(excerpts: readonly MomentExcerpt[], cap = MAX_EXCERPTS): MomentExcerpt[] {
+function pickExcerpts(excerpts: readonly MomentExcerpt[], cap: number): MomentExcerpt[] {
   const human = (e: MomentExcerpt): boolean => e.role === 'user' && (e.kind ?? 'prose') === 'prose'
   const inTime = [...excerpts].sort((a, b) => a.at_ms - b.at_ms)
   if (inTime.length <= cap) return inTime
