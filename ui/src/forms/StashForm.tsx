@@ -37,7 +37,8 @@ import {
   type PickerHost,
 } from './ProjectPicker'
 import { useAddProject } from './useAddProject'
-import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
+import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
+import { fiberIndex } from '../board/wikilinks'
 import { shuttleOrigin } from './projectModel'
 
 // ---------------------------------------------------------------------------
@@ -91,18 +92,8 @@ export interface StashFormProps {
    *  (the island re-derives it from the daemon). Absent → the picker offers no
    *  "+ Add project…" row. */
   onProjectAdded?: (path: string) => Promise<StashProject[]>
-  /** The local daemon can raise its own OS folder dialog. True → "+ Add
-   *  project…" on the local host opens Finder/zenity; every other case asks for
-   *  the absolute path on the selected host. Redundant with `availableHosts`'
-   *  local entry, and the fallback when no host list came through. */
-  nativeFolderPicker?: boolean
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
-}
-
-interface CreateFiberResponse {
-  id?: string
-  error?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -122,16 +113,6 @@ function slugStem(title: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
-}
-
-/** Submit variant — a timestamp keeps an alphanumeric-free title addressable. */
-function slugify(title: string): string {
-  return slugStem(title) || `stash-${Date.now()}`
-}
-
-/** Preview variant — an ellipsis stands in for the not-yet-known timestamp. */
-function previewSlug(title: string): string {
-  return slugStem(title) || 'stash-…'
 }
 
 /** The shuttle block, assembled client-side (lean: only true/non-empty
@@ -179,6 +160,11 @@ function validateParentSlug(raw: string): string | null {
   return null
 }
 
+const KIND_SEGMENTS = [
+  ['oneshot', 'One-shot', 'drafts, manual launch'],
+  ['standing', 'Standing', 'cron-scheduled role'],
+] as const
+
 /** Human-readable label for an agent entry. */
 function agentLabel(a: AgentEntry): string {
   return a.model ? `${a.id} · ${a.model}` : a.id
@@ -187,16 +173,6 @@ function agentLabel(a: AgentEntry): string {
 // ---------------------------------------------------------------------------
 // Parent-fiber picker — project-scoped, project-relative
 // ---------------------------------------------------------------------------
-
-// One daemon index fetch per page load, shared across picker opens.
-let stashFiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
-function loadStashFiberIndex(shuttleBase: string): Promise<Array<{ id: string; name: string }>> {
-  stashFiberIndex ??= fetchFiberIndex(shuttleBase).catch((err: unknown) => {
-    stashFiberIndex = null
-    throw err
-  })
-  return stashFiberIndex
-}
 
 interface ParentPickerProps {
   value: string
@@ -219,7 +195,7 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
   // strip the loomPrefix so candidates are project-relative — exactly the id
   // space the create endpoint expects for this project_dir.
   const fetchResults = (query: string): void => {
-    loadStashFiberIndex(shuttleBase)
+    fiberIndex(shuttleBase)
       .then((all) => {
         const scoped = scopePrefix
           ? all
@@ -250,10 +226,6 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
     onChange(v)
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(() => fetchResults(v.trim()), 200)
-  }
-
-  const handleFocus = (): void => {
-    fetchResults(value.trim())
   }
 
   const commit = (r: FiberSearchResult): void => {
@@ -298,7 +270,7 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
         className="stash-input"
         value={value}
         onChange={handleInput}
-        onFocus={handleFocus}
+        onFocus={() => fetchResults(value.trim())}
         onKeyDown={handleKeyDown}
         placeholder="standalone-kanban  ·  backend/…"
         autoComplete="off"
@@ -344,11 +316,10 @@ export function StashForm({
   availableCities = [],
   availableHosts = [],
   cityActivityById = {},
-  tagSuggestions,
+  tagSuggestions = [],
   shuttleBase = '',
   onCreated,
   onProjectAdded,
-  nativeFolderPicker = false,
   onCancel,
 }: StashFormProps): JSX.Element {
   // Core stash fields
@@ -418,16 +389,13 @@ export function StashForm({
   const sortedCities = [...cities].sort(byRecency(cityActivityById))
   const hostCities = projectsForHost(sortedCities, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
-  const selectedCity =
-    selectedCityId !== null ? hostCities.find((c) => c.id === selectedCityId) ?? null : null
+  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
 
   // "+ Add project…" — native OS dialog on a local host that has one, the
   // absolute-path row everywhere else (see useAddProject).
   const addProject = useAddProject<StashProject>({
     shuttleBase,
-    nativeFolderPicker: selectedHost.isLocal
-      ? selectedHost.nativeFolderPicker || nativeFolderPicker
-      : false,
+    nativeFolderPicker: selectedHost.isLocal && selectedHost.nativeFolderPicker,
     isLocalHost: selectedHost.isLocal,
     origin: selectedHostId,
     onProjectAdded,
@@ -448,11 +416,9 @@ export function StashForm({
     addProject.closePath()
   }
 
-  const allSuggestions = tagSuggestions ?? []
   const tagInputLower = tagInput.trim().toLowerCase()
-  const filteredSuggestions = allSuggestions
-    .filter((t) => !tags.includes(t))
-    .filter((t) => (tagInputLower ? t.toLowerCase().includes(tagInputLower) : true))
+  const filteredSuggestions = tagSuggestions
+    .filter((t) => !tags.includes(t) && (!tagInputLower || t.toLowerCase().includes(tagInputLower)))
     .slice(0, 8)
 
   const addTag = (raw: string): void => {
@@ -505,7 +471,7 @@ export function StashForm({
     // Build the project-relative id + native frontmatter, then POST Shuttle's
     // own create shape. `parentSlug` is already project-relative (the picker is
     // scoped to this project), so the id derivation is the plain join.
-    const childSlug = slugify(trimmedTitle)
+    const childSlug = slugStem(trimmedTitle) || `stash-${Date.now()}`
     const parentRel = parentSlug.trim().replace(/^\/+|\/+$/g, '')
     const id = parentRel ? `${parentRel}/${childSlug}` : childSlug
 
@@ -538,7 +504,7 @@ export function StashForm({
           origin: shuttleOrigin(selectedCity.originId),
         }),
       })
-      const data = (await res.json().catch(() => ({}))) as CreateFiberResponse
+      const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
       if (!res.ok || !data.id) {
         throw new Error(data.error || `Server returned ${res.status}`)
       }
@@ -577,7 +543,6 @@ export function StashForm({
 
   // Clamp axes whenever the constraint agent shifts under them.
   useEffect(() => {
-    if (effort !== effectiveEffort) setEffort(effectiveEffort)
     if (chrome && !chromeCapable) setChrome(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [constraintAgent?.id, agents])
@@ -587,7 +552,6 @@ export function StashForm({
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
     const levels = rec?.effort_levels ?? []
     setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
-    if (!(rec?.chrome_capable ?? false)) setChrome(false)
   }
 
   return (
@@ -704,7 +668,7 @@ export function StashForm({
                   <span className="stash-receipt-key">slug</span>
                   <span className="stash-receipt-sep">›</span>
                   <code className="stash-receipt-val">
-                    {parentSlug ? `${parentSlug}/` : ''}{previewSlug(title)}
+                    {parentSlug ? `${parentSlug}/` : ''}{slugStem(title) || 'stash-…'}
                   </code>
                 </div>
               )}
@@ -828,40 +792,24 @@ export function StashForm({
               <div className="stash-field">
                 <span className="stash-label">Kind</span>
                 <div className="stash-segmented" role="radiogroup" aria-label="Dispatch kind">
-                  <label
-                    className={
-                      kind === 'oneshot'
-                        ? 'stash-segment stash-segment-active'
-                        : 'stash-segment'
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="stash-kind"
-                      value="oneshot"
-                      checked={kind === 'oneshot'}
-                      onChange={() => setKind('oneshot')}
-                    />
-                    <span className="stash-segment-name">One-shot</span>
-                    <span className="stash-segment-hint">drafts, manual launch</span>
-                  </label>
-                  <label
-                    className={
-                      kind === 'standing'
-                        ? 'stash-segment stash-segment-active'
-                        : 'stash-segment'
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="stash-kind"
-                      value="standing"
-                      checked={kind === 'standing'}
-                      onChange={() => setKind('standing')}
-                    />
-                    <span className="stash-segment-name">Standing</span>
-                    <span className="stash-segment-hint">cron-scheduled role</span>
-                  </label>
+                  {KIND_SEGMENTS.map(([value, name, hint]) => (
+                    <label
+                      key={value}
+                      className={
+                        kind === value ? 'stash-segment stash-segment-active' : 'stash-segment'
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name="stash-kind"
+                        value={value}
+                        checked={kind === value}
+                        onChange={() => setKind(value)}
+                      />
+                      <span className="stash-segment-name">{name}</span>
+                      <span className="stash-segment-hint">{hint}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
             </div>
@@ -869,7 +817,7 @@ export function StashForm({
             {/* Schedule + timezone, only when kind=standing */}
             {kind === 'standing' && (
               <div className="stash-row stash-row-schedule">
-                <label className="stash-field stash-field-cron">
+                <label className="stash-field">
                   <span className="stash-label">Schedule</span>
                   <input
                     type="text"
@@ -883,7 +831,7 @@ export function StashForm({
                     5-field cron · e.g. <code>0 9 * * 1-5</code> (weekdays 09:00)
                   </div>
                 </label>
-                <label className="stash-field stash-field-tz">
+                <label className="stash-field">
                   <span className="stash-label">Timezone</span>
                   <input
                     type="text"
@@ -957,8 +905,6 @@ export function StashForm({
 
 /**
  * Inject the StashForm's CSS once. Idempotent — safe to call on every open.
- * The trailing `.stash-trigger` note refers to the kanban header button the
- * board already renders.
  */
 export function injectStashFormStyles(): void {
   if (typeof document === 'undefined') return
@@ -1109,7 +1055,6 @@ export function injectStashFormStyles(): void {
       grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
     }
     @media (max-width: 700px) {
-      .stash-row-2,
       .stash-row-3,
       .stash-row-dispatch,
       .stash-row-schedule {
@@ -1178,7 +1123,6 @@ export function injectStashFormStyles(): void {
     .stash-textarea {
       resize: vertical;
       min-height: 64px;
-      font-family: var(--font-main, 'EB Garamond', serif);
       line-height: 1.45;
     }
     .stash-input:focus,
@@ -1205,7 +1149,6 @@ export function injectStashFormStyles(): void {
     .stash-hint-warn {
       color: #8C5A1A;
       font-style: normal;
-      font-size: 12px;
     }
     .stash-receipt {
       display: inline-flex;
@@ -1233,8 +1176,6 @@ export function injectStashFormStyles(): void {
     .stash-receipt-val {
       font-family: inherit;
       color: #2E2A26;
-      background: transparent;
-      padding: 0;
     }
     .stash-chips {
       display: flex;
@@ -1283,9 +1224,6 @@ export function injectStashFormStyles(): void {
       padding: 2px 4px;
       background: transparent;
       box-shadow: none !important;
-    }
-    .stash-tag-input:focus {
-      box-shadow: none;
     }
     .stash-suggestions {
       display: flex;
@@ -1404,7 +1342,6 @@ export function injectStashFormStyles(): void {
     .stash-segment-name {
       font-size: 13px;
       font-weight: 600;
-      color: inherit;
       line-height: 1.2;
     }
     .stash-segment-hint {
