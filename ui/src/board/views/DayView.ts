@@ -68,8 +68,7 @@
 
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
 import { phasePillLabel } from '../KanbanSurfaces.js'
-import { humanizeIdleAge } from '../utils.js'
-import { fileBytesUrl, renderMarkdown } from '../utils.js'
+import { fileBytesUrl, humanizeIdleAge, renderMarkdown } from '../utils.js'
 import { normalizeSentFiles, sentFilesInWindow, type SentFile } from '../sentFiles.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
@@ -143,7 +142,6 @@ import {
   SLOT_KIND_ORDER,
   SLOT_PHRASE,
   tipContent,
-  type DrawnKind,
   type LastExchange,
   type MarkPick,
   type MomentSource,
@@ -277,13 +275,27 @@ export function drawnWindow(
   // the last action and this moment is itself the day's news.
   let endMs = Math.max(last + MINUTE_MS, live ? nowMs : -Infinity) + pad
 
-  const shortfall = FRAME_MIN_MINUTES * MINUTE_MS - (endMs - startMs)
+  return fitToRail(startMs, endMs, rail, FRAME_MIN_MINUTES)
+}
+
+/**
+ * A raw span, made into a frame on `rail`: widened around its own centre to
+ * `minMinutes`, clamped inside the rail, snapped to whole minutes.
+ *
+ * Overflow at one edge pushes the frame the other way rather than truncating
+ * it, so the minimum span survives a burst at dawn or at dusk.
+ */
+function fitToRail(
+  startMs: number,
+  endMs: number,
+  rail: DayWindow,
+  minMinutes: number,
+): DayWindow {
+  const shortfall = minMinutes * MINUTE_MS - (endMs - startMs)
   if (shortfall > 0) {
     startMs -= shortfall / 2
     endMs += shortfall / 2
   }
-  // Overflow at one edge pushes the frame the other way rather than truncating
-  // it, so the minimum span survives a burst at dawn or at dusk.
   if (startMs < rail.startMs) {
     endMs += rail.startMs - startMs
     startMs = rail.startMs
@@ -294,7 +306,7 @@ export function drawnWindow(
   }
   startMs = Math.max(rail.startMs, Math.floor(startMs / MINUTE_MS) * MINUTE_MS)
   endMs = Math.min(rail.endMs, Math.ceil(endMs / MINUTE_MS) * MINUTE_MS)
-  return { startMs, endMs, minutes: Math.round((endMs - startMs) / MINUTE_MS) }
+  return { startMs, endMs, minutes: Math.max(1, Math.round((endMs - startMs) / MINUTE_MS)) }
 }
 
 // ── Drag to zoom ─────────────────────────────────────────────────────────────
@@ -331,24 +343,12 @@ export function clampZoom(
   zoom: { startMs: number; endMs: number },
   rail: DayWindow,
 ): DayWindow {
-  let startMs = Math.min(zoom.startMs, zoom.endMs)
-  let endMs = Math.max(zoom.startMs, zoom.endMs)
-  const shortfall = ZOOM_MIN_MINUTES * MINUTE_MS - (endMs - startMs)
-  if (shortfall > 0) {
-    startMs -= shortfall / 2
-    endMs += shortfall / 2
-  }
-  if (startMs < rail.startMs) {
-    endMs += rail.startMs - startMs
-    startMs = rail.startMs
-  }
-  if (endMs > rail.endMs) {
-    startMs -= endMs - rail.endMs
-    endMs = rail.endMs
-  }
-  startMs = Math.max(rail.startMs, Math.floor(startMs / MINUTE_MS) * MINUTE_MS)
-  endMs = Math.min(rail.endMs, Math.ceil(endMs / MINUTE_MS) * MINUTE_MS)
-  return { startMs, endMs, minutes: Math.max(1, Math.round((endMs - startMs) / MINUTE_MS)) }
+  return fitToRail(
+    Math.min(zoom.startMs, zoom.endMs),
+    Math.max(zoom.startMs, zoom.endMs),
+    rail,
+    ZOOM_MIN_MINUTES,
+  )
 }
 
 /** The spacings the hour hand is allowed to use, coarsest last. Half an hour is
@@ -1102,7 +1102,7 @@ export function buildDayPreviews(
 
 export interface DayEntryStats {
   /** Messages you sent this fiber today. Your half of the day is COUNTED, not
-   *  timed — see {@link countMessages}. */
+   *  timed — see {@link countExchange}. */
   messages: number
   /** Minutes its agents were working. Theirs still is time. */
   agent: number
@@ -1219,19 +1219,16 @@ export function buildDayEntries(
         deletions: recorded?.deletions,
       },
     }
-    entries.push(
-      subjects.length > 0
-        ? { key: `lane:${lane.key}`, title: lane.label, body: subjects.join('; '), ...operational }
-        : {
-            // Worked, but said nothing: its own outcome stands in, in italic,
-            // so the line cannot be mistaken for something the day reported.
-            key: `lane:${lane.key}`,
-            title: lane.label,
-            body: firstSentence(card?.outcome) || 'worked, wrote nothing down',
-            fallback: true,
-            ...operational,
-          },
-    )
+    const said = subjects.length > 0
+    entries.push({
+      key: `lane:${lane.key}`,
+      title: lane.label,
+      // Worked, but said nothing: its own outcome stands in, in italic, so the
+      // line cannot be mistaken for something the day reported.
+      body: said ? subjects.join('; ') : firstSentence(card?.outcome) || 'worked, wrote nothing down',
+      ...(said ? {} : { fallback: true }),
+      ...operational,
+    })
   }
   return entries
 }
@@ -1406,14 +1403,6 @@ function formatHourTick(ms: number): string {
 
 function pct(value: number): string {
   return `${(value * 100).toFixed(4)}%`
-}
-
-/** Day's swatch per drawn kind. There is one wash pigment now, and a reply is
- *  agent work like any other: what you did is the spine, not a colour. */
-const DAY_KEY_CLASS: Record<DrawnKind, string> = {
-  agent: 'kbn-day-key-agent',
-  attention: 'kbn-day-key-agent',
-  reply: 'kbn-day-key-agent',
 }
 
 /** One entry in the key: the mark itself, in miniature, then what it means. */
@@ -2200,14 +2189,14 @@ class DayViewImpl implements TemporalView {
     this.frame = null
     this.nowEl = null
     this.gridEl = null
-    if (model.lanes.length === 0 && model.entries.length === 0) {
+    if (model.lanes.length === 0) {
       body.append(createViewEmptyState('— an unwritten day —'))
       // A day with nothing behind it can still have something in front of it.
       if (model.stillAhead.length > 0) body.append(this.buildStillAheadStrip(model.stillAhead))
       return
     }
     if (model.lanes.length > 0) body.append(this.buildChart(model))
-    if (model.entries.length > 0) body.append(this.buildNarration(model))
+    if (model.lanes.length > 0) body.append(this.buildNarration(model))
     if (model.previews.length > 0) body.append(this.buildPreviews(model))
     if (model.stillAhead.length > 0) body.append(this.buildStillAheadStrip(model.stillAhead))
   }
@@ -2590,7 +2579,7 @@ class DayViewImpl implements TemporalView {
     legend.style.gridRow = String(model.lanes.length + 2)
     const stateKey = buildStateKey(new Set(model.lanes.map((lane) => lane.state)))
     legend.append(
-      buildKey(DAY_KEY_CLASS.agent, MOUND_KEY_LABEL),
+      buildKey('kbn-day-key-agent', MOUND_KEY_LABEL),
       buildKey('kbn-day-key-spine', SPINE_KEY_LABEL),
       ...(model.lanes.some((lane) => lane.ladder.length > 0)
         ? [buildKey('kbn-day-key-aloft', ALOFT_KEY_LABEL)]
