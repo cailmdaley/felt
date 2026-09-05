@@ -109,11 +109,7 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 }
 
 func TestCheckLegacyFormatReportsTitleDependsOnAndMystAnchor(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, s := newStore(t)
 
 	content := `---
 title: Legacy Fiber
@@ -164,11 +160,7 @@ Body.
 }
 
 func TestCheckLegacyFormatSkipsMalformedFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, s := newStore(t)
 
 	path := filepath.Join(dir, DirName, "broken-fiber", "broken-fiber.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -339,11 +331,7 @@ func TestRelationshipsDropForeignCitations(t *testing.T) {
 }
 
 func TestCheckParseabilityReportsMalformedFrontmatterAsError(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, s := newStore(t)
 
 	// The failure from the field: an unquoted scalar carrying a colon-space,
 	// which YAML reads as a nested mapping.
@@ -395,11 +383,7 @@ Body.
 }
 
 func TestCheckParseabilityQuietOnHealthyStore(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 	if err := s.Write(&Felt{ID: "fiber-a", Name: "Fiber A"}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -418,11 +402,7 @@ func TestCheckParseabilityQuietOnHealthyStore(t *testing.T) {
 // outcome written through the CLI must NOT be reported. Only hand-edited
 // frontmatter can land here.
 func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 	if err := s.Write(&Felt{ID: "venue", Name: "Venue", Outcome: "booked 8/1: deposit paid"}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}

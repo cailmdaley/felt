@@ -107,7 +107,7 @@ func TestStorageWriteRead(t *testing.T) {
 		CreatedAt: time.Now(),
 		Body:      "Test body content.",
 	}
-	mustExtraField(t, f, "inputs", []map[string]any{{"id": "dep_a", "from": "dep-a.output"}})
+	mustExtra(t, f, "inputs", []map[string]any{{"id": "dep_a", "from": "dep-a.output"}})
 
 	// Write
 	if err := s.Write(f); err != nil {
@@ -370,11 +370,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 }
 
 func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "project/task",
@@ -401,11 +397,7 @@ func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
 }
 
 func TestStorageFindMetadataFastPathPreservesScopedBasenameOrder(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	now := time.Now()
 	for _, f := range []*Felt{
@@ -747,11 +739,7 @@ func TestStoragePathNested(t *testing.T) {
 }
 
 func TestStorageCheckAvailableID(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "quick-gotcha",
@@ -771,11 +759,7 @@ func TestStorageCheckAvailableID(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasename(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis/damping-prior",
@@ -796,11 +780,7 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis/damping-prior",
@@ -817,11 +797,7 @@ func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
 }
 
 func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1105,11 +1081,7 @@ func TestFindProjectRootNotFound(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	parent := &Felt{
 		ID:        "bao-analysis",
@@ -1117,11 +1089,11 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	child := &Felt{ID: "damping-prior", Name: "Damping Prior", CreatedAt: time.Now()}
-	mustExtraField(t, child, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis.posterior"}})
+	mustExtra(t, child, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis.posterior"}})
 	grandchild := &Felt{ID: "damping-prior/contour-plot", Name: "Contour Plot", CreatedAt: time.Now()}
-	mustExtraField(t, grandchild, "inputs", []map[string]any{{"id": "plot_input", "from": "damping-prior.fit"}})
+	mustExtra(t, grandchild, "inputs", []map[string]any{{"id": "plot_input", "from": "damping-prior.fit"}})
 	consumer := &Felt{ID: "consumer", Name: "Consumer", CreatedAt: time.Now()}
-	mustExtraField(t, consumer, "inputs", []map[string]any{{"id": "consumer_input", "from": "damping-prior/contour-plot.figure"}})
+	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "consumer_input", "from": "damping-prior/contour-plot.figure"}})
 
 	for _, f := range []*Felt{parent, child, grandchild, consumer} {
 		if err := s.Write(f); err != nil {
@@ -1162,11 +1134,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 }
 
 func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1212,11 +1180,7 @@ func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	f := &Felt{
 		ID:        "bao-analysis",
@@ -1233,11 +1197,7 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	for _, f := range []*Felt{
 		{ID: "bao-analysis", Name: "BAO Analysis", CreatedAt: time.Now()},
@@ -1255,11 +1215,7 @@ func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFiles(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacyA := `---
 title: Quick gotcha
@@ -1313,11 +1269,7 @@ Analysis body.
 }
 
 func TestStorageBackfillIntrinsicIDs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	missing := `---
 name: Missing ID
@@ -1400,11 +1352,7 @@ Already identified.
 }
 
 func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	if err := os.WriteFile(filepath.Join(s.root, "README.md"), []byte("not frontmatter\n"), 0644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -1420,11 +1368,7 @@ func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFilesDryRun(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Quick gotcha
@@ -1457,11 +1401,7 @@ Body.
 }
 
 func TestStorageMigrateSingleBareFilePreservedAsEntryPoint(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	// A single bare .md at .felt/ root is the entry-point fiber (the shape
 	// a project's root fiber takes when its `.felt/` is mounted into an
@@ -1492,11 +1432,7 @@ Root narrative.
 }
 
 func TestStorageMigrateRewritesPreExistingDirectoryInputs(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	// Flat files that will be migrated (two so migration runs — a single bare
 	// file would be preserved as the entry-point fiber).
@@ -1521,7 +1457,7 @@ Analysis body.
 		CreatedAt: time.Now(),
 		Body:      "(session-hub)=\n# Session hub",
 	}
-	mustExtraField(t, preExisting, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis-d34db33f.posterior"}})
+	mustExtra(t, preExisting, "inputs", []map[string]any{{"id": "analysis_input", "from": "bao-analysis-d34db33f.posterior"}})
 	if err := s.Write(preExisting); err != nil {
 		t.Fatalf("write pre-existing: %v", err)
 	}
@@ -1545,11 +1481,7 @@ Analysis body.
 }
 
 func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Session hub
@@ -1604,11 +1536,7 @@ created-at: 2026-03-16T10:00:00Z
 }
 
 func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStorage(dir)
-	if err := s.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	_, s := newStore(t)
 
 	legacy := `---
 title: Session hub
@@ -1756,14 +1684,7 @@ func TestStorageListSymlinkedSubstoreLiftsIds(t *testing.T) {
 	if err := innerS.Init(); err != nil {
 		t.Fatalf("inner init: %v", err)
 	}
-	deepDir := filepath.Join(innerS.root, "section", "subsection", "leaf")
-	if err := os.MkdirAll(deepDir, 0755); err != nil {
-		t.Fatalf("mkdir deep: %v", err)
-	}
-	deepMd := filepath.Join(deepDir, "leaf.md")
-	if err := os.WriteFile(deepMd, []byte("---\nname: leaf\n---\n"), 0644); err != nil {
-		t.Fatalf("write deep: %v", err)
-	}
+	writeRawFiber(t, innerS.root, "section/subsection/leaf")
 
 	// Mount inner under outer via a symlinked subdirectory.
 	mountAt := filepath.Join(outerS.root, "mounts", "guest")
@@ -1875,26 +1796,15 @@ func TestStorageListSymlinkedFeltDirIntoOuter(t *testing.T) {
 		t.Fatalf("outer init: %v", err)
 	}
 	projectDir := filepath.Join(outerS.root, "projects", "alpha")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		t.Fatalf("mkdir project: %v", err)
-	}
 	// Project root fiber. From inside the project (via the symlink set up
 	// below), `.felt/alpha.md` is the bare entry-point shape. From the
 	// outer view, the same file at `<.felt>/projects/alpha/alpha.md`
 	// reads as the directory-form fiber `projects/alpha` — its parent
 	// dir name matches the slug, so the existing fiberIDFromRelativePath
 	// shape rule treats it as a directory-form fiber, not a bare-at-depth.
-	if err := os.WriteFile(filepath.Join(projectDir, "alpha.md"), []byte("---\nname: alpha\n---\n"), 0644); err != nil {
-		t.Fatalf("write project root: %v", err)
-	}
+	writeRawFiber(t, outerS.root, "projects/alpha")
 	// One nested fiber inside the project subtree.
-	nestedDir := filepath.Join(projectDir, "feature")
-	if err := os.MkdirAll(nestedDir, 0755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(nestedDir, "feature.md"), []byte("---\nname: feature\n---\n"), 0644); err != nil {
-		t.Fatalf("write nested: %v", err)
-	}
+	writeRawFiber(t, outerS.root, "projects/alpha/feature")
 
 	// Project view: the project's `.felt/` is a symlink into the outer
 	// store's project subtree. felt walks should treat the symlink target
@@ -1969,14 +1879,7 @@ func newSubstoreFixture(t *testing.T) (loomProj, subProj string) {
 	}
 	// Fibers that live elsewhere in the enclosing store.
 	for _, id := range []string{"commons", "ai-futures/portolan/debug"} {
-		dir := filepath.Join(loom.root, filepath.FromSlash(id))
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", id, err)
-		}
-		file := filepath.Join(dir, filepath.Base(id)+FileExt)
-		if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
-			t.Fatalf("write %s: %v", id, err)
-		}
+		writeRawFiber(t, loom.root, id)
 	}
 
 	// The substore's content lives inside the enclosing store, under the
@@ -1987,14 +1890,7 @@ func newSubstoreFixture(t *testing.T) (loomProj, subProj string) {
 	}
 	// Local fibers, which the enclosing store also sees — under the prefix.
 	for _, id := range []string{"debug", "notes/runbook"} {
-		dir := filepath.Join(content, filepath.FromSlash(id))
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", id, err)
-		}
-		file := filepath.Join(dir, filepath.Base(id)+FileExt)
-		if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
-			t.Fatalf("write %s: %v", id, err)
-		}
+		writeRawFiber(t, content, id)
 	}
 	subProj = filepath.Join(tmp, "project")
 	if err := os.MkdirAll(subProj, 0755); err != nil {
@@ -2251,5 +2147,30 @@ func TestStorageLookupsKnowTheEnclosingStore(t *testing.T) {
 	}
 	if f.ID != "notes/runbook" {
 		t.Fatalf("FindInScope() = %q, want %q", f.ID, "notes/runbook")
+	}
+}
+
+// newStore builds an initialized store rooted at a fresh temp dir.
+func newStore(t *testing.T) (string, *Storage) {
+	t.Helper()
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	return dir, s
+}
+
+// writeRawFiber plants a minimal directory-form fiber under root, bypassing
+// storage so the walk logic sees only what is on disk.
+func writeRawFiber(t *testing.T, root, id string) {
+	t.Helper()
+	dir := filepath.Join(root, filepath.FromSlash(id))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", id, err)
+	}
+	file := filepath.Join(dir, filepath.Base(id)+FileExt)
+	if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
+		t.Fatalf("write %s: %v", id, err)
 	}
 }

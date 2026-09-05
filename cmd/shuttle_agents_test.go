@@ -277,7 +277,7 @@ func TestShuttleAgentsInit_WritesRefusesAndForces(t *testing.T) {
 // with no change to the create path.
 func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 	defer saveShuttleGlobals()()
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
 

@@ -11,31 +11,16 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// writeMalformedFiber drops a fiber dir whose `<slug>.md` has truncated
-// frontmatter — used to confirm commands tolerate a single broken fiber
-// without failing the whole walk.
-func writeMalformedFiber(t *testing.T, dir string) {
+// writeBrokenFiber plants a fiber dir whose `<slug>.md` holds the given raw
+// bytes, bypassing storage so unparseable frontmatter can reach disk.
+func writeBrokenFiber(t *testing.T, dir, slug string, content []byte) {
 	t.Helper()
-	badDir := filepath.Join(dir, ".felt", "broken", "broken")
+	badDir := filepath.Join(dir, ".felt", slug, slug)
 	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll malformed fiber dir: %v", err)
+		t.Fatalf("MkdirAll %s fiber dir: %v", slug, err)
 	}
-	if err := os.WriteFile(filepath.Join(badDir, "broken.md"), []byte("---\nname: Broken\n"), 0644); err != nil {
-		t.Fatalf("WriteFile malformed fiber: %v", err)
-	}
-}
-
-// writeInvalidYAMLFiber drops a fiber whose frontmatter is syntactically
-// invalid YAML — only a command that walks every fiber should trip on it.
-func writeInvalidYAMLFiber(t *testing.T, dir string) {
-	t.Helper()
-	badDir := filepath.Join(dir, ".felt", "broken-yaml", "broken-yaml")
-	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll invalid YAML fiber dir: %v", err)
-	}
-	content := []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n")
-	if err := os.WriteFile(filepath.Join(badDir, "broken-yaml.md"), content, 0644); err != nil {
-		t.Fatalf("WriteFile invalid YAML fiber: %v", err)
+	if err := os.WriteFile(filepath.Join(badDir, slug+".md"), content, 0644); err != nil {
+		t.Fatalf("WriteFile %s fiber: %v", slug, err)
 	}
 }
 
@@ -47,11 +32,7 @@ func mustShowExtra(t *testing.T, f *felt.Felt, key string, value any) {
 }
 
 func TestShowBodyIncludesStartLine(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -77,11 +58,7 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 }
 
 func TestShowBodyJSONIncludesStartLine(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -111,11 +88,7 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 }
 
 func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	fiber := &felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -145,11 +118,7 @@ func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 // Compact and summary report the body's size so a reader can decide whether a
 // full read is worth paying for before paying for it.
 func TestShowReportsBodySize(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{
 		ID:        "with-body",
@@ -188,11 +157,7 @@ func TestShowReportsBodySize(t *testing.T) {
 }
 
 func TestShowDefaultRendersBody(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
 		Name:      "Fiber A",
@@ -215,11 +180,7 @@ func TestShowDefaultRendersBody(t *testing.T) {
 }
 
 func TestShowFieldReadsOpaqueFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, _ := newStore(t)
 
 	manualPath := dir + "/.felt/fiber-a/fiber-a.md"
 	if err := os.MkdirAll(dir+"/.felt/fiber-a", 0755); err != nil {
@@ -276,11 +237,7 @@ Body here.
 }
 
 func TestShowSelectorsAreMutuallyExclusive(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -339,12 +296,10 @@ func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
 	}
 }
 
-func TestShowIncludesCitations(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+// citationStore seeds a question plus an analysis whose body cites it.
+func citationStore(t *testing.T) string {
+	t.Helper()
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
 		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
@@ -353,6 +308,31 @@ func TestShowIncludesCitations(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
+	return dir
+}
+
+// consumerStore seeds a question with an output plus an analysis consuming it.
+func consumerStore(t *testing.T, outputType string) string {
+	t.Helper()
+	dir, storage := newStore(t)
+	output := map[string]any{"id": "posterior"}
+	if outputType != "" {
+		output["type"] = outputType
+	}
+	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	mustShowExtra(t, question, "outputs", []map[string]any{output})
+	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
+	for _, fiber := range []*felt.Felt{question, analysis} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+	return dir
+}
+
+func TestShowIncludesCitations(t *testing.T) {
+	dir := citationStore(t)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -367,20 +347,7 @@ func TestShowIncludesCitations(t *testing.T) {
 }
 
 func TestShowIncludesConsumers(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior", "type": "data"}})
-	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
-	for _, fiber := range []*felt.Felt{question, analysis} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := consumerStore(t, "data")
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -395,20 +362,7 @@ func TestShowIncludesConsumers(t *testing.T) {
 }
 
 func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-	question := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, question, "outputs", []map[string]any{{"id": "posterior"}})
-	analysis := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	mustShowExtra(t, analysis, "inputs", []map[string]any{{"id": "catalog", "from": "question.posterior"}})
-	for _, fiber := range []*felt.Felt{question, analysis} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := consumerStore(t, "")
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -423,19 +377,7 @@ func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-	for _, fiber := range []*felt.Felt{
-		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
-		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
+	dir := citationStore(t)
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -450,20 +392,10 @@ func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
 }
 
 func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
-	for _, fiber := range []*felt.Felt{
-		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
-		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]]."},
-	} {
-		if err := storage.Write(fiber); err != nil {
-			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
-		}
-	}
-	writeMalformedFiber(t, dir)
+	dir := citationStore(t)
+	// A fiber with truncated frontmatter: commands must tolerate a single
+	// broken fiber without failing the whole walk.
+	writeBrokenFiber(t, dir, "broken", []byte("---\nname: Broken\n"))
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -478,11 +410,7 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 }
 
 func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Outcome: "Shipped.", Body: "Body paragraph."}
 	mustShowExtra(t, fiber, "inputs", []map[string]any{{"id": "catalog", "from": "upstream.posterior", "description": "Posterior sample"}})
 	mustShowExtra(t, fiber, "outputs", []map[string]any{{"id": "posterior", "description": "MCMC posterior"}})
@@ -519,11 +447,7 @@ func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
 }
 
 func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{
 			ID:        "project/question",
@@ -546,7 +470,9 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	writeInvalidYAMLFiber(t, dir)
+	// Syntactically invalid YAML frontmatter — only a command that walks
+	// every fiber should trip on it.
+	writeBrokenFiber(t, dir, "broken-yaml", []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n"))
 
 	reset := saveShowGlobals()
 	defer reset()
@@ -595,11 +521,7 @@ func mustParseTime(t *testing.T, value string) time.Time {
 }
 
 func TestShowFieldRefusesJSON(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", Status: "active", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}

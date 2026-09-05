@@ -52,11 +52,7 @@ func TestTreeDisplayID(t *testing.T) {
 // which errors out on null — a single user with no active fibers shouldn't
 // have to handle two distinct empty shapes.
 func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, _ := newStore(t)
 
 	reset := saveLsGlobals()
 	defer reset()
@@ -78,11 +74,7 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 }
 
 func TestLsBodySearchScansMarkdown(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "nothing special"},
 		{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "The body-only needle lives here."},
@@ -111,11 +103,7 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 // pointing at that sibling); a fiber without one omits/empties the field. Both
 // the plain walk and the --json-field projection must agree.
 func TestLsJSONReportPath(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/reported", Name: "Reported", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
 		{ID: "project/plain", Name: "Plain", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -186,11 +174,7 @@ func TestLsJSONReportPath(t *testing.T) {
 // ancestor stands in for its descendants with a count; -v restores the flat
 // listing; --json stays uncollapsed for the daemon and hook consumers.
 func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
 		{ID: "portolan/swarm", Name: "Swarm", CreatedAt: created},
@@ -255,11 +239,7 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 // An exact match is the likeliest target of the query, so it survives collapse
 // even when an ancestor also matches.
 func TestLsCollapseKeepsExactMatch(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
 		{ID: "swarm-tools", Name: "Swarm tools", CreatedAt: created},
@@ -289,11 +269,7 @@ func TestLsCollapseKeepsExactMatch(t *testing.T) {
 // matches are counted rather than printed — a store holds far more finished
 // work than live work.
 func TestLsQueryHidesClosedBehindHint(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -386,11 +362,7 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 // Closed suppression runs before the containment collapse, so a collapsed
 // ancestor's count describes lines that would actually have printed.
 func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -419,11 +391,7 @@ func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
 }
 
 func TestTreeDepthLimit(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init() error: %v", err)
-	}
+	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
 		{ID: "project", Name: "Project", CreatedAt: created},

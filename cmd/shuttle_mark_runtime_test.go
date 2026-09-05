@@ -53,7 +53,7 @@ func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1") // closed port: any round-trip fails loudly
 	withOwnHost(t, "candide")
 
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "candide",
 	}, nil)
@@ -92,7 +92,7 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	withOwnHost(t, "candide")
 
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "candide",
 	}, nil)
@@ -119,7 +119,7 @@ func TestShuttleMarkRuntime_AliasGuardWithoutOverride(t *testing.T) {
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	withOwnHost(t, "candide")
 
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
 	}, nil)

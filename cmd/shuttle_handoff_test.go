@@ -22,7 +22,7 @@ import (
 // SHUTTLE_FIBER_PATH names for a worker), so they must serialize through the
 // same lock file rather than each acquiring an independent one.
 func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
-	_, storage := newShuttleStore(t)
+	_, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 	seeded := mustRead(t, storage, "f")
 	if err := seeded.SetExtraField("counters", map[string]any{"run_id": 0}); err != nil {
@@ -139,7 +139,7 @@ func chdir(t *testing.T, dir string) {
 // self-kill). Self-handoff and the resolution-failure fallback keep the old
 // env-authoritative behavior.
 func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "sibling", felt.StatusActive, oneshot(), nil)
 	chdir(t, dir)
@@ -184,7 +184,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 // the daemon-worker reality when project_dir isn't a felt repo — falls back to
 // the env path, self=true.
 func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
-	dir, storage := newShuttleStore(t)
+	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "parent/nested-card", felt.StatusActive, oneshot(), nil)
 	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))

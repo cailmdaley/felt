@@ -108,16 +108,18 @@ func writeExecutable(t *testing.T, path, body string) {
 	}
 }
 
-const claudeSetupFake = `#!/bin/sh
+// nativeFakePrologue is the shell prologue both harness fakes share.
+// materialize_cache mimics the real CLI: a successful install copies the
+// registered source's plugin payload into a private cache, and plugin list
+// reports that cache path. Tamper modes let tests exercise a lying zero exit;
+// stale-update mirrors the real CLI's documented behavior where update on an
+// unchanged version keeps the old cache but a fresh install re-copies (only
+// the Claude fixture drives that mode).
+const nativeFakePrologue = `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_NATIVE_LOG"
 source_file="$FAKE_NATIVE_STATE/source"
 installed_file="$FAKE_NATIVE_STATE/installed"
-# materialize_cache mimics the real CLI: a successful install copies the
-# registered source's plugin payload into a private cache, and plugin list
-# reports that cache path. Tamper modes let tests exercise a lying zero exit;
-# stale-update mirrors the real CLI's documented behavior where update on an
-# unchanged version keeps the old cache but a fresh install re-copies.
 materialize_cache() {
   verb="${1:-install}"
   cache="$FAKE_NATIVE_STATE/cache"
@@ -147,7 +149,9 @@ materialize_cache() {
       ;;
   esac
 }
-if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
+`
+
+const claudeSetupFake = nativeFakePrologue + `if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
     printf '[{"name":"cailmdaley-felt","source":"directory","path":"%s"}]\n' "$source"
@@ -194,33 +198,7 @@ fi
 exit 0
 `
 
-const codexSetupFake = `#!/bin/sh
-set -eu
-printf '%s\n' "$*" >> "$FAKE_NATIVE_LOG"
-source_file="$FAKE_NATIVE_STATE/source"
-installed_file="$FAKE_NATIVE_STATE/installed"
-materialize_cache() {
-  cache="$FAKE_NATIVE_STATE/cache"
-  src=$(cat "$source_file")
-  case "${FAKE_NATIVE_TAMPER:-}" in
-    stale)
-      if [ ! -d "$cache" ]; then
-        mkdir -p "$cache"
-        cp -R "$src/claude-plugin/." "$cache/"
-      fi
-      ;;
-    *)
-      rm -rf "$cache"
-      mkdir -p "$cache"
-      cp -R "$src/claude-plugin/." "$cache/"
-      case "${FAKE_NATIVE_TAMPER:-}" in
-        alter) printf 'tampered\n' >> "$cache/skills/felt/SKILL.md";;
-        missing-marker) rm -f "$cache/.felt-generation.json";;
-      esac
-      ;;
-  esac
-}
-if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
+const codexSetupFake = nativeFakePrologue + `if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
     printf '{"marketplaces":[{"name":"cailmdaley-felt","root":"%s","marketplaceSource":{"sourceType":"directory","source":"%s"}}]}\n' "$source" "$source"
@@ -312,64 +290,48 @@ func (f *remoteSetupFixture) assertNativeUsesCurrent(t *testing.T) {
 	}
 }
 
-func TestRemoteClaudeSetupUsesValidatedPromotion(t *testing.T) {
-	f := newRemoteSetupFixture(t, "claude")
-	if err := installPluginViaCLI(f.remote); err != nil {
-		t.Fatalf("first remote Claude setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "one" {
-		t.Fatalf("first promoted generation = %q, want one", got)
-	}
+func TestRemoteSetupUsesValidatedPromotion(t *testing.T) {
+	for _, h := range nativeHarnesses {
+		t.Run(h.name, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, h.name)
+			if err := h.install(f.remote); err != nil {
+				t.Fatalf("first remote %s setup: %v", h.name, err)
+			}
+			if got := f.currentGeneration(t); got != "one" {
+				t.Fatalf("first promoted generation = %q, want one", got)
+			}
 
-	f.setGeneration(t, "two")
-	if err := installPluginViaCLI(f.remote + "#second"); err != nil {
-		t.Fatalf("repeated remote Claude setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "two" {
-		t.Fatalf("repeated promoted generation = %q, want two", got)
-	}
+			f.setGeneration(t, "two")
+			if err := h.install(f.remote + "#second"); err != nil {
+				t.Fatalf("repeated remote %s setup: %v", h.name, err)
+			}
+			if got := f.currentGeneration(t); got != "two" {
+				t.Fatalf("repeated promoted generation = %q, want two", got)
+			}
 
-	f.setGeneration(t, "failed")
-	t.Setenv("FAKE_NATIVE_FAIL_ONCE", "1")
-	if err := installPluginViaCLI(f.remote + "#failed"); err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
-		t.Fatalf("reported native failure = %v, want preserved-promotion error", err)
+			f.setGeneration(t, "failed")
+			t.Setenv("FAKE_NATIVE_FAIL_ONCE", "1")
+			if err := h.install(f.remote + "#failed"); err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
+				t.Fatalf("reported native failure = %v, want preserved-promotion error", err)
+			}
+			if got := f.currentGeneration(t); got != "two" {
+				t.Fatalf("failed promotion replaced current generation with %q, want two", got)
+			}
+			if _, err := os.Stat(filepath.Join(f.stateDir, "installed")); err != nil {
+				t.Fatalf("native %s installation was not restored: %v", h.name, err)
+			}
+			f.assertNativeUsesCurrent(t)
+		})
 	}
-	if got := f.currentGeneration(t); got != "two" {
-		t.Fatalf("failed promotion replaced current generation with %q, want two", got)
-	}
-	if _, err := os.Stat(filepath.Join(f.stateDir, "installed")); err != nil {
-		t.Fatalf("native Claude installation was not restored: %v", err)
-	}
-	f.assertNativeUsesCurrent(t)
 }
 
-func TestRemoteCodexSetupUsesValidatedPromotion(t *testing.T) {
-	f := newRemoteSetupFixture(t, "codex")
-	if err := installCodexPluginViaCLI(f.remote); err != nil {
-		t.Fatalf("first remote Codex setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "one" {
-		t.Fatalf("first promoted generation = %q, want one", got)
-	}
-
-	f.setGeneration(t, "two")
-	if err := installCodexPluginViaCLI(f.remote + "#second"); err != nil {
-		t.Fatalf("repeated remote Codex setup: %v", err)
-	}
-	if got := f.currentGeneration(t); got != "two" {
-		t.Fatalf("repeated promoted generation = %q, want two", got)
-	}
-
-	f.setGeneration(t, "failed")
-	t.Setenv("FAKE_NATIVE_FAIL_ONCE", "1")
-	if err := installCodexPluginViaCLI(f.remote + "#failed"); err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
-		t.Fatalf("reported native failure = %v, want preserved-promotion error", err)
-	}
-	if got := f.currentGeneration(t); got != "two" {
-		t.Fatalf("failed promotion replaced current generation with %q, want two", got)
-	}
-	if _, err := os.Stat(filepath.Join(f.stateDir, "installed")); err != nil {
-		t.Fatalf("native Codex installation was not restored: %v", err)
-	}
-	f.assertNativeUsesCurrent(t)
+// nativeHarnesses pairs each harness's fixture name with its production
+// installer entry point, so harness-agnostic setup behaviour is asserted once
+// against both real code paths.
+var nativeHarnesses = []struct {
+	name    string
+	install func(string) error
+}{
+	{"claude", installPluginViaCLI},
+	{"codex", installCodexPluginViaCLI},
 }

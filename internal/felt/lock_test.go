@@ -59,11 +59,7 @@ func TestLockFiberFile_MutualExclusion(t *testing.T) {
 // read was stale on. With the lock (acquire -> read -> mutate -> write ->
 // release) it must be exact every time.
 func TestStorage_LockFiber_GuardsConcurrentRMW(t *testing.T) {
-	dir := t.TempDir()
-	st := NewStorage(dir)
-	if err := st.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	_, st := newStore(t)
 
 	seed := &Felt{ID: "f", Name: "f", Status: StatusOpen}
 	if err := seed.SetExtraField("counters", map[string]any{"a": 0, "b": 0}); err != nil {

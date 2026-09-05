@@ -13,21 +13,11 @@ import (
 // can be planted on disk to prove that the next felt edit rejects it.
 func seedShuttleFiber(t *testing.T, storage *felt.Storage, id string, block map[string]any) {
 	t.Helper()
-	f := &felt.Felt{ID: id, Name: id, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if err := f.SetExtraField("shuttle", block); err != nil {
-		t.Fatalf("SetExtraField: %v", err)
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
+	seedFiber(t, storage, id, "", "", block, nil)
 }
 
 func TestEditValidatesShuttleFacet(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "good", map[string]any{"kind": "oneshot", "agent": "claude-opus"})
 	seedShuttleFiber(t, storage, "bad", map[string]any{"kind": "bogus"})
 
@@ -66,11 +56,7 @@ func TestEditValidatesShuttleFacet(t *testing.T) {
 // (not a mapping) must round-trip opaquely and NOT crash or fail the listing —
 // otherwise one malformed block anywhere takes down dispatch.
 func TestLsJSONToleratesMalformedShuttleBlock(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "valid", map[string]any{"kind": "oneshot", "agent": "claude-opus"})
 	// A degenerate scalar shuttle: value — felt must treat it as an opaque field.
 	scalar := &felt.Felt{ID: "scalar", Name: "scalar", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -106,11 +92,7 @@ func TestLsJSONToleratesMalformedShuttleBlock(t *testing.T) {
 // seam: a plain felt add succeeds and writes no shuttle key (it can never be
 // rejected by ValidateShuttleFacet, which returns before loading the registry).
 func TestAddPaysNoShuttleCost(t *testing.T) {
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	dir, storage := newStore(t)
 	if out, err := runCommand(t, dir, "add", "plain", "A plain note"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
 	}
