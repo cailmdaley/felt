@@ -276,21 +276,6 @@ defmodule Shuttle.Moment do
   def max_chars(_), do: @max_chars
 
   @doc """
-  Up to #{@cap} excerpts from `session`'s transcript inside the inclusive
-  window `from_ms..to_ms`, oldest first.
-
-  Never raises and never signals absence as an error: an unknown session, a
-  unknown harness, and a transcript with nothing in the window all return `[]`.
-
-  Opts (for tests): `:root` (Claude transcript root), `:pi_root`, `:codex_root`,
-  `:cap`, `:max_chars`.
-  """
-  @spec excerpts(String.t(), integer(), integer(), keyword()) :: [excerpt()]
-  def excerpts(session, from_ms, to_ms, opts \\ []) do
-    moment(session, from_ms, to_ms, opts).excerpts
-  end
-
-  @doc """
   Everything the transcript can say about the window: the words, the tools that
   ran, and — the part that keeps a client honest — HOW MANY OF EACH THERE WERE.
 

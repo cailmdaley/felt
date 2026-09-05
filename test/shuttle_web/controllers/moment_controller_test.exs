@@ -97,11 +97,11 @@ defmodule ShuttleWeb.MomentControllerTest do
     ])
   end
 
-  describe "Shuttle.Moment.excerpts/4 (the reader)" do
+  describe "Shuttle.Moment.moment/4 — excerpts (the reader)" do
     test "recovers user, assistant and notification words inside the window" do
       root = default_tree()
 
-      excerpts = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      excerpts = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
 
       assert Enum.map(excerpts, &{&1.role, &1.text}) == [
                {"user", "hi french class! pasting some vocab"},
@@ -114,26 +114,26 @@ defmodule ShuttleWeb.MomentControllerTest do
 
     test "a window with nothing in it is empty, not an error" do
       root = default_tree()
-      assert Moment.excerpts(@session, @t0 + 100_000, @t0 + 200_000, root: root) == []
+      assert Moment.moment(@session, @t0 + 100_000, @t0 + 200_000, root: root).excerpts == []
     end
 
     test "window edges are inclusive on both bounds" do
       root = default_tree()
 
-      assert [%{at_ms: at}] = Moment.excerpts(@session, @t0 + 1_000, @t0 + 1_000, root: root)
+      assert [%{at_ms: at}] = Moment.moment(@session, @t0 + 1_000, @t0 + 1_000, root: root).excerpts
       assert at == @t0 + 1_000
     end
 
     test "an unknown session, a non-uuid session and a missing root are all empty" do
       root = default_tree()
 
-      assert Moment.excerpts("11111111-2222-3333-4444-555555555555", @t0, @t0 + 10_000,
+      assert Moment.moment("11111111-2222-3333-4444-555555555555", @t0, @t0 + 10_000,
                root: root
-             ) == []
+             ).excerpts == []
 
       # A non-UUID session never reaches the filesystem as a glob.
-      assert Moment.excerpts("../../*", @t0, @t0 + 10_000, root: root) == []
-      assert Moment.excerpts(@session, @t0, @t0 + 10_000, root: "/nope/not/here") == []
+      assert Moment.moment("../../*", @t0, @t0 + 10_000, root: root).excerpts == []
+      assert Moment.moment(@session, @t0, @t0 + 10_000, root: "/nope/not/here").excerpts == []
     end
 
     test "caps the excerpt count and the text length" do
@@ -143,7 +143,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            for(i <- 1..20, do: user(@t0 + i * 100, String.duplicate("mot ", 200)))}
         ])
 
-      excerpts = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      excerpts = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
 
       assert length(excerpts) == 6
       assert Enum.all?(excerpts, &(String.length(&1.text) == 280))
@@ -189,7 +189,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [excerpt] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [excerpt] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
 
       assert excerpt.kind == "spawn"
       assert excerpt.name == "chart-hand"
@@ -214,7 +214,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [first, second] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [first, second] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert first.name == "Explore"
       assert second.name == "Sweep the views"
     end
@@ -230,7 +230,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert Moment.excerpts(@session, @t0, @t0 + 10_000, root: root) == []
+      assert Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts == []
     end
 
     test "a tool result closing a spawn is the report coming back" do
@@ -247,7 +247,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [_spawn, _spawn2, report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [_spawn, _spawn2, report] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert report.kind == "return"
       assert report.name == "chart-hand"
       assert report.text == "Found it: the lane never joined a ledger row."
@@ -266,7 +266,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [report] = Moment.excerpts(@session, @t0 + 30_000, @t0 + 90_000, root: root)
+      assert [report] = Moment.moment(@session, @t0 + 30_000, @t0 + 90_000, root: root).excerpts
       assert report.name == "chart-hand"
     end
 
@@ -286,7 +286,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [only] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [only] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert only.kind == "spawn"
     end
 
@@ -302,7 +302,7 @@ defmodule ShuttleWeb.MomentControllerTest do
 
       root = write_tree([{"-slug", @session, [user(@t0 + 1_000, text)]}])
 
-      assert [report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [report] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert report.kind == "return"
       assert report.name == "Explain the moment words"
       assert report.text == "The chain is bucket → ledger → transcript."
@@ -327,7 +327,7 @@ defmodule ShuttleWeb.MomentControllerTest do
           {"-slug", @session, [user(@t0 + 1_000, report_text), user(@t0 + 2_000, idle)]}
         ])
 
-      assert [report] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [report] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert report.name == "type-pass"
       assert report.text == "Typography pass done. Nothing committed."
     end
@@ -347,7 +347,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [only] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [only] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert only.text == "the parent speaking"
       assert only.kind == "prose"
     end
@@ -365,14 +365,14 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      assert [brief] = Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert [brief] = Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
       assert String.length(brief.text) == 200
 
       assert [full] =
-               Moment.excerpts(@session, @t0, @t0 + 10_000,
+               Moment.moment(@session, @t0, @t0 + 10_000,
                  root: root,
                  max_chars: Moment.max_chars(true)
-               )
+               ).excerpts
 
       assert String.length(full.text) > 1_000
     end
@@ -380,7 +380,7 @@ defmodule ShuttleWeb.MomentControllerTest do
     test "prose carries the register too, so a client never has to guess" do
       root = default_tree()
 
-      assert Moment.excerpts(@session, @t0, @t0 + 10_000, root: root)
+      assert Moment.moment(@session, @t0, @t0 + 10_000, root: root).excerpts
              |> Enum.all?(&(&1.kind == "prose" and is_nil(&1.name)))
     end
   end
@@ -763,7 +763,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       root = pi_tree()
 
       assert Enum.map(
-               Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root),
+               Moment.moment(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root).excerpts,
                &{&1.role, &1.text}
              ) == [
                {"user", "hi french class! pasting some vocab"},
@@ -808,7 +808,7 @@ defmodule ShuttleWeb.MomentControllerTest do
            ]}
         ])
 
-      excerpts = Moment.excerpts(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root)
+      excerpts = Moment.moment(@session, @t0, @t0 + 10_000, root: @absent_root, pi_root: root).excerpts
 
       assert Enum.map(excerpts, &{&1.kind, &1.name, &1.text}) == [
                {"spawn", "reviewer", "Read the diff and report findings."},
@@ -916,11 +916,11 @@ defmodule ShuttleWeb.MomentControllerTest do
              ) =~ "#{@session}.jsonl"
 
       assert [%{text: "old codex turn"}] =
-               Moment.excerpts(@session, @t0, @t0 + 10_000,
+               Moment.moment(@session, @t0, @t0 + 10_000,
                  root: @absent_root,
                  pi_root: @absent_root,
                  codex_root: root
-               )
+               ).excerpts
     end
 
     test "normalizes words, tools, delegation and peer returns into the shared reader" do
@@ -1006,11 +1006,11 @@ defmodule ShuttleWeb.MomentControllerTest do
         ])
 
       assert Enum.map(
-               Moment.excerpts(@session, @t0, @t0 + 10_000,
+               Moment.moment(@session, @t0, @t0 + 10_000,
                  root: @absent_root,
                  pi_root: @absent_root,
                  codex_root: root
-               ),
+               ).excerpts,
                &{&1.kind, &1.name, &1.text}
              ) == [
                {"spawn", "reviewer", "reviewer"},
@@ -1052,11 +1052,11 @@ defmodule ShuttleWeb.MomentControllerTest do
         ])
 
       assert Enum.map(
-               Moment.excerpts(@session, @t0, @t0 + 10_000,
+               Moment.moment(@session, @t0, @t0 + 10_000,
                  root: @absent_root,
                  pi_root: @absent_root,
                  codex_root: root
-               ),
+               ).excerpts,
                &{&1.kind, &1.name, &1.text}
              ) == [
                {"return", "reviewer", "child report"},
