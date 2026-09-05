@@ -149,9 +149,7 @@ defmodule Shuttle.Moment do
   pattern reaches the filesystem.
   """
 
-  require Logger
-
-  @max_window_ms 2 * 60 * 60 * 1000
+    @max_window_ms 2 * 60 * 60 * 1000
   @cap 6
   @max_chars 280
 
@@ -491,9 +489,8 @@ defmodule Shuttle.Moment do
       [
         Path.join(claude_root(opts), "*/#{session}.jsonl"),
         Path.join(pi_root(opts), "*/*#{session}.jsonl"),
-        codex_paths(session, opts)
+        Shuttle.HarnessPaths.codex_session_glob(session, opts)
       ]
-      |> List.flatten()
       |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.find(&File.regular?/1)
     end
@@ -502,10 +499,6 @@ defmodule Shuttle.Moment do
   defp claude_root(opts), do: Shuttle.HarnessPaths.claude_projects_root(opts)
 
   defp pi_root(opts), do: Shuttle.HarnessPaths.pi_sessions_root(opts)
-
-  defp codex_paths(session, opts) do
-    [Shuttle.HarnessPaths.codex_session_glob(session, opts)]
-  end
 
   # One pass, three harvests: the excerpts, the tool calls behind them, and the
   # spawn ids seen so far. Tools accumulate reversed — `tool_summary/1` is given

@@ -12,7 +12,7 @@ defmodule Shuttle.HarnessPaths do
   @spec claude_projects_root(keyword()) :: String.t()
   def claude_projects_root(opts \\ []) do
     configured_path(opts, [:claude_root, :root], "SHUTTLE_CLAUDE_PROJECTS_DIR", fn ->
-      Path.join([System.user_home!() || "/root", ".claude", "projects"])
+      Path.join([System.user_home!(), ".claude", "projects"])
     end)
   end
 
@@ -20,7 +20,7 @@ defmodule Shuttle.HarnessPaths do
   @spec pi_sessions_root(keyword()) :: String.t()
   def pi_sessions_root(opts \\ []) do
     configured_path(opts, [:pi_root], "SHUTTLE_PI_SESSIONS_DIR", fn ->
-      Path.join([System.user_home!() || "/root", ".pi", "agent", "sessions"])
+      Path.join([System.user_home!(), ".pi", "agent", "sessions"])
     end)
   end
 

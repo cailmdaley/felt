@@ -46,9 +46,8 @@ defmodule Shuttle.FolderPicker do
   POSIX path of chosen
   """
 
-  @doc "The available native mechanism, or `nil` when the host has none."
-  @spec mechanism() :: :osascript | :zenity | :kdialog | nil
-  def mechanism do
+  # The available native mechanism, or `nil` when the host has none.
+  defp mechanism do
     case Application.get_env(:shuttle, :folder_picker_mechanism) do
       nil -> detect()
       :none -> nil

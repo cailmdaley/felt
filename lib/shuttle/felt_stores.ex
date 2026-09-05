@@ -80,23 +80,20 @@ defmodule Shuttle.FeltStores do
   @spec configured_base_hosts() :: host_list()
   def configured_base_hosts, do: PathListConfig.configured(@spec_)
 
-  @doc """
-  Expand a store list with the project roots of any **symlinked substores**
-  reachable from each store's `.felt/`.
-
-  A project-canonical substore — `~/loom/.felt/science/group/project ->
-  .../code/project/.felt` — is physically rooted *outside* the store it is
-  linked into, and the poller enumerates a fiber only from the store where it
-  physically roots. Following the link makes configuring just `~/loom`
-  sufficient: the project root is auto-discovered, no per-substore config. The
-  scan recurses (substores nest as `science/group/project`, so a shallow scan
-  would silently drop them), and dedup is by `store_felt_realpath/1` — the same
-  canonicalization the ownership check uses — so a store reached two ways is
-  listed once and no two stores enumerate the same fibers. Dangling symlinks and
-  links resolving back inside the linking store are skipped.
-  """
-  @spec expand_with_symlinked_substores(host_list()) :: host_list()
-  def expand_with_symlinked_substores(stores) do
+  # Expand a store list with the project roots of any **symlinked substores**
+  # reachable from each store's `.felt/`.
+  #
+  # A project-canonical substore — `~/loom/.felt/science/group/project ->
+  # .../code/project/.felt` — is physically rooted *outside* the store it is
+  # linked into, and the poller enumerates a fiber only from the store where it
+  # physically roots. Following the link makes configuring just `~/loom`
+  # sufficient: the project root is auto-discovered, no per-substore config. The
+  # scan recurses (substores nest as `science/group/project`, so a shallow scan
+  # would silently drop them), and dedup is by `store_felt_realpath/1` — the same
+  # canonicalization the ownership check uses — so a store reached two ways is
+  # listed once and no two stores enumerate the same fibers. Dangling symlinks and
+  # links resolving back inside the linking store are skipped.
+  defp expand_with_symlinked_substores(stores) do
     discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
 
     (stores ++ discovered)

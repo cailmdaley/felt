@@ -78,7 +78,7 @@ defmodule Shuttle.SessionLedger do
     System.get_env("SHUTTLE_SESSIONS_FILE") ||
       Path.join(
         System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!() || "/root", ".shuttle"),
+          Path.join(System.user_home!(), ".shuttle"),
         "sessions.jsonl"
       )
   end

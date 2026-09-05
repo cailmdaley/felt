@@ -405,8 +405,6 @@ defmodule Shuttle.TokenSpend do
     end
   end
 
-  defp merge_codex_models(models, _state), do: models
-
   defp merge_codex_model(models, model, counts, messages) when is_binary(model) do
     if positive_counts?(counts) or messages > 0 do
       merge_model(models, model, counts, messages)
@@ -482,7 +480,7 @@ defmodule Shuttle.TokenSpend do
 
   defp bump_message_model(messages, _model), do: messages
 
-  defp merge_model(models, model, counts, messages) when is_binary(model) do
+  defp merge_model(models, model, counts, messages) do
     model_counts = Map.put(counts, :messages, messages)
 
     Map.update(models, model, model_counts, fn prior ->
@@ -495,8 +493,6 @@ defmodule Shuttle.TokenSpend do
       }
     end)
   end
-
-  defp merge_model(models, _model, _counts, _messages), do: models
 
   defp counted?(id, seen) when is_binary(id), do: MapSet.member?(seen, id)
   defp counted?(_id, _seen), do: false

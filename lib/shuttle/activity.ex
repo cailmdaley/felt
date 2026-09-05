@@ -744,8 +744,6 @@ defmodule Shuttle.Activity do
   # spawns arrive start-sorted, so an earlier spawn gets first refusal on a
   # directory two of them could plausibly claim — which is the right tiebreak
   # when two workflows launched inside the same slack window.
-  defp match_workflows(spans, [], _now), do: spans
-
   defp match_workflows(spans, dirs, now) do
     {enriched, _left} =
       Enum.map_reduce(spans, dirs, fn span, available ->

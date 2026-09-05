@@ -67,7 +67,7 @@ defmodule Shuttle.CommitLedger do
     System.get_env("SHUTTLE_COMMITS_FILE") ||
       Path.join(
         System.get_env("SHUTTLE_DATA_DIR") ||
-          Path.join(System.user_home!() || "/root", ".shuttle"),
+          Path.join(System.user_home!(), ".shuttle"),
         "commits.jsonl"
       )
   end
