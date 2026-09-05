@@ -505,24 +505,20 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 		carriedPath = resolved
 	}
 
+	var f *Felt
 	if mode == ParseMetadataOnly {
-		f, err := readMetadataFile(path, id)
+		var err error
+		if f, err = readMetadataFile(path, id); err != nil {
+			return nil, fmt.Errorf("reading file %s: %w", path, err)
+		}
+	} else {
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("reading file %s: %w", path, err)
 		}
-		// Carry the on-disk path so consumers read it instead of
-		// reconstructing it from the id.
-		f.Path = carriedPath
-		return f, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading file %s: %w", path, err)
-	}
-	f, err := ParseWithMode(id, data, mode)
-	if err != nil {
-		return nil, err
+		if f, err = ParseWithMode(id, data, mode); err != nil {
+			return nil, err
+		}
 	}
 	// Carry the on-disk path so consumers read it instead of
 	// reconstructing it from the id.
@@ -797,11 +793,11 @@ func (s *Storage) NormalizeFiberFiles(dryRun bool) ([]string, []string, []string
 			return nil, nil, nil, fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
 
-		rewritten, renamedTitle, removedDependsOn, strippedAnchor, changed, err := normalizeFiberFile(file.id, data)
+		rewritten, renamedTitle, removedDependsOn, strippedAnchor, err := normalizeFiberFile(file.id, data)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("normalize fiber %s: %w", file.path, err)
 		}
-		if !changed {
+		if !renamedTitle && !removedDependsOn && !strippedAnchor {
 			continue
 		}
 		if renamedTitle {
@@ -863,20 +859,19 @@ func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, er
 	return result, nil
 }
 
-func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bool, error) {
+func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
 	frontmatter, body, err := splitFrontmatter(content, true)
 	if err != nil {
-		return nil, false, false, false, false, err
+		return nil, false, false, false, err
 	}
 
 	rewrittenFrontmatter, renamedTitle, removedDependsOn, err := normalizeLegacyFrontmatter(frontmatter)
 	if err != nil {
-		return nil, false, false, false, false, err
+		return nil, false, false, false, err
 	}
 	rewrittenBody, strippedAnchor := stripLegacyMystAnchor(id, body)
-	changed := renamedTitle || removedDependsOn || strippedAnchor
-	if !changed {
-		return content, false, false, false, false, nil
+	if !renamedTitle && !removedDependsOn && !strippedAnchor {
+		return content, false, false, false, nil
 	}
 
 	var out bytes.Buffer
@@ -890,7 +885,7 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, bo
 			out.WriteString("\n")
 		}
 	}
-	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, true, nil
+	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, nil
 }
 
 func backfillIntrinsicID(content []byte) ([]byte, bool, error) {
@@ -991,15 +986,18 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 
 	var felts []*Felt
 	evicted := 0 // iCloud-dataless files that couldn't be materialized during the walk
+	note := func(p string, err error) {
+		if isEvictedFileError(err) {
+			evicted++
+		} else if !s.quietWalk {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", p, err)
+		}
+	}
 	for _, file := range files {
 		if len(fields) > 0 && mode == ParseMetadataOnly {
 			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
 			if err != nil {
-				if isEvictedFileError(err) {
-					evicted++
-				} else if !s.quietWalk {
-					fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-				}
+				note(file.path, err)
 				continue
 			}
 			if !matched {
@@ -1008,11 +1006,7 @@ func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeMod
 		}
 		f, err := s.readPathWithMode(file.path, file.id, mode)
 		if err != nil {
-			if isEvictedFileError(err) {
-				evicted++
-			} else if !s.quietWalk {
-				fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", file.path, err)
-			}
+			note(file.path, err)
 			continue
 		}
 		if includeModTime {
@@ -1391,9 +1385,6 @@ func ParentPath(id string) string {
 //     fully-qualify the slug or opt into top-level placement.
 func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritten bool, err error) {
 	slug = path.Clean(strings.TrimSpace(slug))
-	if slug == "" || slug == "." {
-		return slug, false, nil
-	}
 	if !strings.Contains(slug, "/") {
 		return slug, false, nil
 	}
@@ -1403,11 +1394,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 	// leading segment contributes its parent directory. Parents are
 	// deduplicated because two fibers can't share the same id, but two
 	// fibers can share a basename in different subtrees.
-	type candidate struct {
-		parent   string
-		resolved string
-	}
-	var candidates []candidate
+	var candidates []string
 	seenParents := map[string]struct{}{}
 	for _, id := range existingIDs {
 		if path.Base(id) != leading {
@@ -1424,7 +1411,7 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 		} else {
 			resolvedPath = parent + "/" + slug
 		}
-		candidates = append(candidates, candidate{parent: parent, resolved: resolvedPath})
+		candidates = append(candidates, resolvedPath)
 	}
 
 	if len(candidates) == 0 {
@@ -1434,26 +1421,20 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 	// If the user's input already matches one of the candidate placements
 	// (e.g. they passed a fully-qualified path or top-level was the right
 	// answer), use it as-is — no rewrite, no info chatter.
-	for _, c := range candidates {
-		if c.resolved == slug {
-			return slug, false, nil
-		}
+	if slices.Contains(candidates, slug) {
+		return slug, false, nil
 	}
 
 	if len(candidates) == 1 {
-		return candidates[0].resolved, true, nil
+		return candidates[0], true, nil
 	}
 
 	// Ambiguous: stable-sorted candidate list for a deterministic error.
-	paths := make([]string, len(candidates))
-	for i, c := range candidates {
-		paths[i] = c.resolved
-	}
-	sort.Strings(paths)
+	sort.Strings(candidates)
 	return "", false, fmt.Errorf(
 		"%q could resolve to multiple existing locations:\n  %s\npass a fully-qualified path or --top-level to disambiguate",
 		slug,
-		strings.Join(paths, "\n  "),
+		strings.Join(candidates, "\n  "),
 	)
 }
 
@@ -1805,14 +1786,7 @@ func readFrontmatterFile(path string) ([]byte, error) {
 }
 
 func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error) {
-	if len(fields) == 0 {
-		return true, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	frontmatter, _, err := splitFrontmatter(data, false)
+	frontmatter, err := readFrontmatterFile(path)
 	if err != nil {
 		return false, err
 	}
