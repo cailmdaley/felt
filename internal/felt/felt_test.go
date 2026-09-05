@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 func TestNew(t *testing.T) {
@@ -190,6 +192,34 @@ func TestSlugify(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("Slugify(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestSlugifyASCIIOnly(t *testing.T) {
+	// A long non-ASCII title must not be cut mid-rune by the byte-length
+	// truncation in GenerateID/truncateAtWord: Slugify must strip non-ASCII
+	// letters up front so every resulting slug is valid UTF-8 and ASCII-only.
+	title := "résumé électronique en français très long et détaillé sur plusieurs mots"
+	id, err := GenerateID(title)
+	if err != nil {
+		t.Fatalf("GenerateID(%q) error: %v", title, err)
+	}
+	if !utf8.ValidString(id) {
+		t.Fatalf("GenerateID(%q) = %q is not valid UTF-8", title, id)
+	}
+	for _, r := range id {
+		if r > unicode.MaxASCII {
+			t.Fatalf("GenerateID(%q) = %q contains non-ASCII rune %q", title, id, r)
+		}
+	}
+	if len(id) > 32 {
+		t.Fatalf("GenerateID(%q) = %q exceeds max length 32", title, id)
+	}
+
+	// A title with no ASCII letters at all should be rejected the same way
+	// an all-punctuation title is (see TestGenerateIDRejectsEmptySlug).
+	if _, err := GenerateID("北京市朝阳区"); err == nil {
+		t.Fatal("GenerateID should reject titles with no ASCII alphanumeric characters")
 	}
 }
 
