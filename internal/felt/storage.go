@@ -1570,41 +1570,33 @@ func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, 
 		return query, true, nil
 	}
 
-	if strings.Contains(query, "/") {
-		for _, scope := range scopeChain(scopeID) {
+	segmented := strings.Contains(query, "/")
+	for _, scope := range scopeChain(scopeID) {
+		var matches []string
+		if segmented {
 			candidate := scopedQuery(scope, query)
 			// An exact id match wins over descendant prefix matches: resolving
 			// [[a/parent]] must not be defeated into ambiguity by a/parent/child.
 			if _, ok := r.exact[candidate]; ok {
 				return candidate, true, nil
 			}
-			matches := r.prefixMatches(candidate)
-			switch len(matches) {
-			case 0:
-				continue
-			case 1:
-				return matches[0], true, nil
-			default:
-				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
-			}
-		}
-	} else {
-		for _, scope := range scopeChain(scopeID) {
-			matches := r.basenamePrefixMatches(scope, query)
+			matches = r.prefixMatches(candidate)
+		} else {
+			matches = r.basenamePrefixMatches(scope, query)
 			// Exact basename match takes priority over prefix matches: entries
 			// are sorted by (base, id), so an exact base sorts strictly before
 			// any entry that merely has query as a prefix.
 			if len(matches) > 0 && path.Base(matches[0]) == query {
 				return matches[0], true, nil
 			}
-			switch len(matches) {
-			case 0:
-				continue
-			case 1:
-				return matches[0], true, nil
-			default:
-				return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
-			}
+		}
+		switch len(matches) {
+		case 0:
+			continue
+		case 1:
+			return matches[0], true, nil
+		default:
+			return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 		}
 	}
 
