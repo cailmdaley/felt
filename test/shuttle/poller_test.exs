@@ -4533,6 +4533,10 @@ defmodule Shuttle.PollerTest do
     File.mkdir_p!(project_dir)
     on_exit(fn -> File.rm_rf(project_dir) end)
 
+    # The gate compares symlink-resolved paths (tmp_dir is itself a symlink on
+    # macOS), so that is what a refusal names.
+    {:ok, resolved_dir} = Shuttle.Realpath.resolve(project_dir)
+
     shuttle = """
     enabled: true
     kind: oneshot
@@ -4570,8 +4574,24 @@ defmodule Shuttle.PollerTest do
     # (a) The other fiber is not dispatched, and its refusal names the holder.
     refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == waiter))
 
-    assert {:error, {:not_eligible, {:project_dir_held, ^project_dir, ^holder}}} =
+    assert {:error, {:not_eligible, {:project_dir_held, ^resolved_dir, ^holder}}} =
              Poller.dispatch_fiber(poller, waiter, [])
+
+    # ...and it SHOWS as blocked rather than vanishing from every list — the
+    # refusal is recorded like any other dispatch failure.
+    assert %{reason: reason} =
+             Enum.find(Poller.snapshot(poller).blocked, &(&1.fiber_id == waiter))
+
+    assert reason == "checkout #{resolved_dir} is held by #{holder}"
+
+    # A draft sharing the busy checkout reports the draft: the status gates
+    # come first, so it is not sent off waiting for a checkout it was never
+    # going to take.
+    draft_id = "tests/checkout-draft"
+    MockRunner.set_fiber(draft_id, make_fiber(draft_id, %{"status" => "open"}))
+    MockRunner.set_shuttle(draft_id, shuttle, "open")
+
+    assert {:error, {:not_eligible, :disabled}} = Poller.dispatch_fiber(poller, draft_id, [])
 
     # (b) Once the holder exits, the checkout is free and the waiter dispatches.
     # The holder is closed alongside so it cannot race the waiter for the
@@ -4587,15 +4607,73 @@ defmodule Shuttle.PollerTest do
              Enum.any?(:sys.get_state(poller).running, fn {_k, m} -> m.fiber_id == waiter end)
            end)
 
+    # The blocked row is gone with the hold — no stale reason survives the
+    # holder's exit.
+    refute Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == waiter))
+
     # (c) Force bypasses the hold like every other non-force gate.
     forced_id = "tests/checkout-forced"
     MockRunner.set_fiber(forced_id, make_fiber(forced_id))
     MockRunner.set_shuttle(forced_id, shuttle)
 
-    assert {:error, {:not_eligible, {:project_dir_held, ^project_dir, ^waiter}}} =
+    assert {:error, {:not_eligible, {:project_dir_held, ^resolved_dir, ^waiter}}} =
              Poller.dispatch_fiber(poller, forced_id, [])
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, forced_id, force: true)
+  end
+
+  test "one checkout reached by two symlink paths is one holder" do
+    # The gate keys on the physical checkout: a fiber naming it through a
+    # symlink must not dispatch alongside one naming it directly.
+    suffix = System.unique_integer([:positive])
+    project_dir = Path.join(System.tmp_dir!(), "shuttle-test-symlink-real-#{suffix}")
+    link_dir = Path.join(System.tmp_dir!(), "shuttle-test-symlink-alias-#{suffix}")
+
+    File.mkdir_p!(project_dir)
+    File.ln_s!(project_dir, link_dir)
+
+    on_exit(fn ->
+      File.rm_rf(link_dir)
+      File.rm_rf(project_dir)
+    end)
+
+    {:ok, resolved_dir} = Shuttle.Realpath.resolve(project_dir)
+
+    block = fn dir -> """
+      enabled: true
+      kind: oneshot
+      agent: claude-sonnet
+      host: test-host
+      project_dir: #{dir}
+      """
+    end
+
+    direct_id = "tests/symlink-direct"
+    aliased_id = "tests/symlink-alias"
+
+    MockRunner.set_fiber(direct_id, make_fiber(direct_id))
+    MockRunner.set_shuttle(direct_id, block.(project_dir))
+    MockRunner.set_fiber(aliased_id, make_fiber(aliased_id))
+    MockRunner.set_shuttle(aliased_id, block.(link_dir))
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_project_dir_symlink,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    sync_poll_cycle!(poller)
+
+    assert map_size(:sys.get_state(poller).running) == 1
+    [{_key, meta}] = Enum.to_list(:sys.get_state(poller).running)
+    holder = meta.fiber_id
+    waiter = if holder == direct_id, do: aliased_id, else: direct_id
+
+    assert {:error, {:not_eligible, {:project_dir_held, ^resolved_dir, ^holder}}} =
+             Poller.dispatch_fiber(poller, waiter, [])
   end
 
   test "poller adopts orphan sessions with literal hyphenated fiber ids" do
