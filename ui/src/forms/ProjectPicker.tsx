@@ -69,12 +69,9 @@ export interface ProjectPickerProps {
   onSelect: (id: string) => void
   /** The "Add a new project…" option's handler. Absent → no add option. */
   onAddProject?: () => void
-  /** Field id, so a caller's `<label>` can point at the select. */
-  inputId?: string
   /** The host form's own select class, so the project sits in the same visual
-   *  family as the agent/effort selects beside it. Defaults to the pickers'
-   *  own sheet, which Capture uses. */
-  className?: string
+   *  family as the agent/effort selects beside it. */
+  className: string
 }
 
 const ADD_LABEL = 'Add a new project…'
@@ -123,8 +120,7 @@ export function ProjectPicker({
   selectedId,
   onSelect,
   onAddProject,
-  inputId,
-  className = 'projpick-select',
+  className,
 }: ProjectPickerProps): JSX.Element {
   // Only a project actually on this host may show as selected; a stale id from
   // the previous host falls back to the placeholder rather than a blank field.
@@ -144,7 +140,7 @@ export function ProjectPicker({
   }
 
   return (
-    <select id={inputId} className={className} value={value} onChange={handleChange}>
+    <select className={className} value={value} onChange={handleChange}>
       {value === '' && (
         <option value="" disabled>
           {projects.length > 0 ? 'Choose a project…' : 'No projects on this host yet'}
@@ -172,9 +168,8 @@ export interface HostPickerProps {
   hosts: PickerHost[]
   selectedId: string | null
   onSelect: (id: string) => void
-  inputId?: string
   /** See `ProjectPickerProps.className`. */
-  className?: string
+  className: string
 }
 
 /**
@@ -186,12 +181,10 @@ export function HostPicker({
   hosts,
   selectedId,
   onSelect,
-  inputId,
-  className = 'projpick-select',
+  className,
 }: HostPickerProps): JSX.Element {
   return (
     <select
-      id={inputId}
       className={className}
       value={selectedId ?? ''}
       onChange={(e) => onSelect(e.target.value)}
@@ -309,8 +302,7 @@ export function injectProjectPickerStyles(): void {
   const style = document.createElement('style')
   style.id = 'project-picker-styles'
   style.textContent = `
-    .projpick-input,
-    .projpick-select {
+    .projpick-input {
       width: 100%;
       box-sizing: border-box;
       padding: 6px 8px;
@@ -321,8 +313,7 @@ export function injectProjectPickerStyles(): void {
       border: 1px solid rgba(46, 42, 38, 0.20);
       border-radius: 3px;
     }
-    .projpick-input:focus,
-    .projpick-select:focus {
+    .projpick-input:focus {
       outline: none;
       border-color: rgba(154, 123, 53, 0.55);
       box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.16);
