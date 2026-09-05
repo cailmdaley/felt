@@ -3,6 +3,7 @@ import {
   cacheBustUrl,
   fileBytesUrl,
   fileInfoUrl,
+  humanizeIdleAge,
   prepareIframeExternalLinks,
   renderEmbeds,
   renderMarkdown,
@@ -554,18 +555,6 @@ export class FiberDetailModal {
     // Bind the card + load its persisted viewer state. The launcher and tabbed
     // viewer read these; the persistence writer keys off `card.uid`.
     this.card = card
-    this.openFiles = []
-    this.activePath = null
-    this.sentFiles = []
-    this.bodyPage = null
-    this.proseEl = null
-    this.sentWrap = null
-    this.sentList = null
-    this.bodyRevision = undefined
-    this.sentFilesRevision = ''
-    this.sentFilesEtag = null
-    this.sentFilesFallbackTried = false
-    this.resourceRevisions.clear()
     const persist = loadPersist(typeof card.uid === 'string' ? card.uid : '')
     // Restore this card's remembered window arrangement: the card to its saved
     // spot (overriding the session default applyGeometry just set), and stash
@@ -3050,10 +3039,10 @@ export class FiberDetailModal {
     return `${this.shuttleBase}/api/v1/dispatch`
   }
 
-  /** POST one `/api/v1/lifecycle` action; the daemon answers plain text, so
+  /** POST one JSON body to a daemon route; the daemon answers plain text, so
    *  a !ok body is the error message verbatim. */
-  private async postLifecycle(body: Record<string, unknown>): Promise<void> {
-    const res = await fetch(`${this.shuttleBase}/api/v1/lifecycle`, {
+  private async postJson(path: string, body: Record<string, unknown>): Promise<void> {
+    const res = await fetch(`${this.shuttleBase}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -3062,6 +3051,10 @@ export class FiberDetailModal {
       const errText = await res.text().catch(() => `${res.status}`)
       throw new Error(errText || `Save failed: ${res.status}`)
     }
+  }
+
+  private async postLifecycle(body: Record<string, unknown>): Promise<void> {
+    await this.postJson('/api/v1/lifecycle', body)
   }
 
   /** The `project_dir` for a card's shuttle install — the block's own
@@ -3573,15 +3566,11 @@ export class FiberDetailModal {
       // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`
       // on the owning host. The grid refetch reconciles the changed id.
       if ('parentId' in changes) {
-        const res = await fetch(`${this.shuttleBase}/api/v1/felt-nest`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fiber_id: fiberId, origin, parent: changes.parentId ?? null }),
+        await this.postJson('/api/v1/felt-nest', {
+          fiber_id: fiberId,
+          origin,
+          parent: changes.parentId ?? null,
         })
-        if (!res.ok) {
-          const errText = await res.text().catch(() => `${res.status}`)
-          throw new Error(errText || `Save failed: ${res.status}`)
-        }
       }
 
       // `due:` — the same door every other due write on the board knocks on:
@@ -3592,15 +3581,11 @@ export class FiberDetailModal {
       // `null` clears it, a string sets it — so the branch tests for the key,
       // not for a truthy value.
       if ('due' in changes) {
-        const res = await fetch(`${this.shuttleBase}/api/v1/felt-edit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fiber_id: fiberId, origin, due: changes.due ?? null }),
+        await this.postJson('/api/v1/felt-edit', {
+          fiber_id: fiberId,
+          origin,
+          due: changes.due ?? null,
         })
-        if (!res.ok) {
-          const errText = await res.text().catch(() => `${res.status}`)
-          throw new Error(errText || `Save failed: ${res.status}`)
-        }
       }
 
       // Refresh the kanban so the change shows up in the grid (and in any
@@ -3680,11 +3665,7 @@ function relativeTime(timestamp: number): string {
   if (!timestamp) return ''
   const deltaMs = Date.now() - timestamp
   if (deltaMs < 60_000) return 'just now'
-  const minutes = Math.floor(deltaMs / 60_000)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+  return `${humanizeIdleAge(deltaMs)} ago`
 }
 
 /**

@@ -45,7 +45,6 @@ import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
-  humanizeIdleAge,
   KanbanSurfaceRenderer,
   phasePillLabel,
   sortDatedByReturn,
@@ -54,6 +53,7 @@ import {
 } from './KanbanSurfaces.js'
 import { chromeRestartDirective, chromeRestartNeeded, sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
+import { humanizeIdleAge } from './utils.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
 const DAY = 86_400_000

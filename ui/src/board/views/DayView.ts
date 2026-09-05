@@ -67,7 +67,8 @@
  */
 
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
-import { humanizeIdleAge, phasePillLabel } from '../KanbanSurfaces.js'
+import { phasePillLabel } from '../KanbanSurfaces.js'
+import { humanizeIdleAge } from '../utils.js'
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { normalizeSentFiles, sentFilesInWindow, type SentFile } from '../sentFiles.js'
 import type { KanbanCard } from '../KanbanTypes.js'

@@ -595,3 +595,19 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
     setTimeout(() => toast.remove(), 300)
   }, duration)
 }
+
+/**
+ * An idle duration as a human reads a clock face — `12m`, `3h`, `2d`. One unit,
+ * coarsening as it grows: minutes under an hour, hours under a day, days after.
+ * No seconds — the board repaints on a 15s poll, so a seconds figure would be
+ * wrong more often than right, and "how long has this been sitting?" is never a
+ * question answered in seconds. Negative or absent input gives `0m`.
+ */
+export function humanizeIdleAge(ms: number | undefined): string {
+  const safe = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0
+  const minutes = Math.floor(safe / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}

@@ -69,11 +69,10 @@ export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
       return 'The fiber\'s project_dir does not exist on the owning host.'
     case 'no_shuttle_block':
       return 'Fiber has no shuttle: block to dispatch.'
-    case 'not_due':
     case 'not_due_or_blocked':
       return 'Not yet due, or blocked by an unmet dependency.'
     case 'disabled':
-      return 'Disabled — set shuttle.enabled: true to allow dispatch.'
+      return 'Draft — set status: active to allow dispatch.'
     case 'closed':
       return 'Fiber is closed — reopen it before dispatching.'
     case 'not_eligible':

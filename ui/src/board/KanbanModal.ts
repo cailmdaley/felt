@@ -922,16 +922,10 @@ export class KanbanModal {
       // would pull the card back, so clearing it is what makes the rest of the
       // gesture stick. See the `unstacks` note in `transition`.
       if (unstacks) {
-        const res = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fiber_id: card.id,
-            origin: card.originId,
-            unset: ['depends_on'],
-          }),
-        })
-        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Unstack failed'))
+        await this.postFeltEdit(
+          { fiber_id: card.id, origin: card.originId, unset: ['depends_on'] },
+          'Unstack failed',
+        )
         this.announce(`“${card.name}” is out of the queue.`)
       }
 
@@ -943,14 +937,7 @@ export class KanbanModal {
           fiber_id: card.id, origin: card.originId, unset: ['horizon', 'cold'],
         }
         if (target === 'drafts' && card.due !== undefined) surfaceBody.due = null
-        const surfaceRes = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(surfaceBody),
-        })
-        if (!surfaceRes.ok) {
-          throw new Error(await errorMessageFromResponse(surfaceRes, 'Park-on-desk failed'))
-        }
+        await this.postFeltEdit(surfaceBody, 'Park-on-desk failed')
       }
 
       if (target === 'inFlight') {
@@ -1054,16 +1041,11 @@ export class KanbanModal {
     const tail = findCardById(this.lastResponse, tailId)
     const tailName = tail?.name ?? tailId
     try {
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fiber_id: card.id,
-          origin: card.originId,
-          set: { depends_on: tailId },
-        }),
+      await this.postFeltEdit({
+        fiber_id: card.id,
+        origin: card.originId,
+        set: { depends_on: tailId },
       })
-      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
       this.announce(`“${card.name}” now waits on “${tailName}”; it rests until that is tempered.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -1095,16 +1077,11 @@ export class KanbanModal {
     for (const write of writes) {
       const card = findCardById(this.lastResponse, write.fiberId)
       try {
-        const res = await fetch(this.horizonUrl(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fiber_id: write.fiberId,
-            origin: card?.originId,
-            set: { depends_on: write.newDep },
-          }),
+        await this.postFeltEdit({
+          fiber_id: write.fiberId,
+          origin: card?.originId,
+          set: { depends_on: write.newDep },
         })
-        if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
         moved += 1
       } catch (err: unknown) {
         const msg = (err as { message?: string })?.message ?? String(err)
@@ -1239,13 +1216,16 @@ export class KanbanModal {
   /** POST one frontmatter edit, owner-routed by `origin`, throwing the
    *  daemon's own message on failure. The shared half of every sequence
    *  write. */
-  private async postFeltEdit(payload: Record<string, unknown>): Promise<void> {
+  private async postFeltEdit(
+    payload: Record<string, unknown>,
+    label = 'Sequence edit failed',
+  ): Promise<void> {
     const res = await fetch(this.horizonUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+    if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
   }
 
   /**
@@ -1274,12 +1254,7 @@ export class KanbanModal {
       ? ['depends_on', 'horizon', 'cold']
       : ['depends_on']
     try {
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiber_id: card.id, origin: card.originId, unset }),
-      })
-      if (!res.ok) throw new Error(await errorMessageFromResponse(res, 'Sequence edit failed'))
+      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, unset })
       this.announce(`“${card.name}” is out of the queue and back on the desk.`)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
@@ -1500,14 +1475,7 @@ export class KanbanModal {
       if (Object.keys(set).length > 0) payload.set = set
       if (unset.length > 0) payload.unset = unset
       if (opts.due !== undefined) payload.due = opts.due
-      const res = await fetch(this.horizonUrl(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        throw new Error(await errorMessageFromResponse(res, 'Surface edit failed'))
-      }
+      await this.postFeltEdit(payload, 'Surface edit failed')
       this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
