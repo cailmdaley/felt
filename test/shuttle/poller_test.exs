@@ -4522,6 +4522,82 @@ defmodule Shuttle.PollerTest do
     assert Poller.snapshot(poller).eligible == []
   end
 
+  test "a checkout is held by one worker at a time" do
+    # Two workers sharing one project_dir clobber each other's uncommitted
+    # edits, so a plain dispatch of a fiber whose checkout is already held by a
+    # running worker is ineligible and NAMES the holder. Force overrides it —
+    # the human is asserting they know what the two workers are doing.
+    project_dir =
+      Path.join(System.tmp_dir!(), "shuttle-test-held-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(project_dir)
+    on_exit(fn -> File.rm_rf(project_dir) end)
+
+    shuttle = """
+    enabled: true
+    kind: oneshot
+    agent: claude-sonnet
+    host: test-host
+    project_dir: #{project_dir}
+    """
+
+    holder_id = "tests/checkout-holder"
+    waiter_id = "tests/checkout-waiter"
+
+    for id <- [holder_id, waiter_id] do
+      MockRunner.set_fiber(id, make_fiber(id))
+      MockRunner.set_shuttle(id, shuttle)
+    end
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_project_dir_held,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+
+    # Exactly one of the two takes the checkout on the tick that sees both.
+    sync_poll_cycle!(poller)
+
+    assert map_size(:sys.get_state(poller).running) == 1
+    [{_key, meta}] = Enum.to_list(:sys.get_state(poller).running)
+    holder = meta.fiber_id
+    waiter = if holder == holder_id, do: waiter_id, else: holder_id
+
+    # (a) The other fiber is not dispatched, and its refusal names the holder.
+    refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == waiter))
+
+    assert {:error, {:not_eligible, {:project_dir_held, ^project_dir, ^holder}}} =
+             Poller.dispatch_fiber(poller, waiter, [])
+
+    # (b) Once the holder exits, the checkout is free and the waiter dispatches.
+    # The holder is closed alongside so it cannot race the waiter for the
+    # checkout it just released.
+    MockRunner.remove_tmux_session(meta.session)
+    MockRunner.set_fiber(holder, make_fiber(holder, %{"status" => "closed"}))
+    MockRunner.set_shuttle(holder, shuttle, "closed")
+
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+
+    assert wait_until(fn ->
+             Enum.any?(:sys.get_state(poller).running, fn {_k, m} -> m.fiber_id == waiter end)
+           end)
+
+    # (c) Force bypasses the hold like every other non-force gate.
+    forced_id = "tests/checkout-forced"
+    MockRunner.set_fiber(forced_id, make_fiber(forced_id))
+    MockRunner.set_shuttle(forced_id, shuttle)
+
+    assert {:error, {:not_eligible, {:project_dir_held, ^project_dir, ^waiter}}} =
+             Poller.dispatch_fiber(poller, forced_id, [])
+
+    assert {:ok, _session} = Poller.dispatch_fiber(poller, forced_id, force: true)
+  end
+
   test "poller adopts orphan sessions with literal hyphenated fiber ids" do
     fiber_id = "ai-futures/shuttle/constitution-shuttle-standalone"
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
