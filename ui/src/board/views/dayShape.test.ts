@@ -622,7 +622,7 @@ describe('lanes', () => {
     expect(lanes[0].beats.map((b) => b.minute)).toEqual([60, 61])
     expect(lanes[0].beats[0].kinds).toEqual([{ kind: 'agent', count: 1 }])
     expect(lanes[0].beats[1].kinds).toEqual([{ kind: 'attention', count: 1 }])
-    expect(lanes[0].weight).toBe(2)
+    expect(lanes[0].beats.length).toBe(2)
     // The page's own host is printed once in the head, so a lane that ran
     // there says nothing; only a lane that ran ELSEWHERE names its host.
     expect(lanes[0].hostNote).toBe('')
@@ -688,7 +688,7 @@ describe('lanes', () => {
       [card()],
       WIN,
     )
-    expect(mixed[0].weight).toBe(1)
+    expect(mixed[0].beats.length).toBe(1)
     expect(mixed[0].beats.map((b) => b.minute)).toEqual([10])
   })
 
@@ -836,7 +836,7 @@ describe('rung 0 — the session ledger', () => {
       new Map([[SESSION, pairing('work/spt3g_papers/bmodes-2d', FIBER_ULID)]]),
     )
     expect(agreeing[0].cardId).toBe(without[0].cardId)
-    expect(agreeing[0].weight).toBe(without[0].weight)
+    expect(agreeing[0].beats.length).toBe(without[0].beats.length)
   })
 
   it('conjures no lane from a pairing whose session did no work today', () => {
@@ -1108,7 +1108,6 @@ describe('what a day cost, per fiber', () => {
     )
     expect(lanes[0].beats.map((b) => b.minute)).toEqual([100, 106, 200])
     expect(lanes[0].agentMinutes).toBe(2)
-    expect(lanes[0].attentionMinutes).toBe(1)
   })
 
   it('does not double-count a minute that carried several buckets', () => {
@@ -1122,7 +1121,6 @@ describe('what a day cost, per fiber', () => {
       WIN,
     )
     expect(lanes[0].agentMinutes).toBe(1)
-    expect(lanes[0].attentionMinutes).toBe(1)
   })
 
   it('reports the lane minutes and the commit count on the entry', () => {
@@ -1156,7 +1154,6 @@ describe('what a day cost, per fiber', () => {
       [card()],
       WIN,
     )
-    expect(lanes[0].attentionMinutes).toBe(2)
     expect(lanes[0].attentionMessages).toBe(4)
   })
 
