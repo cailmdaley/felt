@@ -43,7 +43,12 @@ import { civilDayToLocalDate, isoDayLocal, railCivilDay } from '../civilDay.js';
 import { shiftCivilDay } from './railTime.js';
 import type { ActivityBucket, CommitRecord } from './TemporalData.js';
 import type { KanbanCard } from '../KanbanTypes.js';
-import { card as baseCard, commit as baseCommit, pairings } from '../testFixtures.js'
+import {
+  card as baseCard,
+  commit as baseCommit,
+  expectPinnedZone,
+  pairings,
+} from '../testFixtures.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const HOUR = 3_600_000;
@@ -83,9 +88,7 @@ const card = (over: Partial<KanbanCard> & { id: string }): KanbanCard =>
 
 describe('the suite runs under a pinned, non-UTC zone', () => {
   it('is one of the two zones `npm test` pins', () => {
-    expect(TZ, 'run via `npm test` — the zone is what this suite tests').toMatch(
-      /^(America\/Los_Angeles|Europe\/Paris)$/,
-    );
+    expectPinnedZone();
   });
 });
 

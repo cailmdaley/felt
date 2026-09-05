@@ -54,6 +54,7 @@ import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
   card as baseCard,
+  expectPinnedZone,
   commit as baseCommit,
   pairings as basePairings,
   DAY_INDEX,
@@ -258,10 +259,7 @@ describe('attributing activity to fibers', () => {
 
 describe('folding buckets into civil days', () => {
   it('runs under a pinned, non-UTC timezone', () => {
-    expect(TZ, 'run via `npm test` — the zone is what this suite tests').toMatch(
-      /^(America\/Los_Angeles|Europe\/Paris)$/,
-    )
-    expect(new Date(2026, 2, 1).getTimezoneOffset()).not.toBe(0)
+    expectPinnedZone()
   })
 
   // The page groups by 6am RAILS, not midnights, so that it agrees with Day and

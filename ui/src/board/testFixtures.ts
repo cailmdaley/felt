@@ -5,6 +5,7 @@
  * `*.spec.ts`, and nothing outside a test file imports this, so it never
  * enters the production bundle's build graph either.
  */
+import { expect, vi } from 'vitest'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { surfaceTotals } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
@@ -72,6 +73,23 @@ export function noonOf(dayISO: string): string {
   return d.toISOString()
 }
 
+/**
+ * The pinned-zone guard, asserted per suite.
+ *
+ * `npm test` runs the board suite TWICE, under TZ=America/Los_Angeles
+ * (negative offset) and TZ=Europe/Paris (positive), because a UTC-only run
+ * passes against broken civil-day code. Each zone-sensitive suite keeps its
+ * OWN `it()` calling this, so it fails loudly on its own when run unpinned
+ * rather than relying on one guard somewhere else in the tree.
+ */
+export function expectPinnedZone(): void {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  expect(tz, 'run via `npm test` — the zone is what this suite tests').toMatch(
+    /^(America\/Los_Angeles|Europe\/Paris)$/,
+  )
+  expect(new Date(2026, 6, 1).getTimezoneOffset()).not.toBe(0)
+}
+
 /** One ledger commit. Only what the joins and the totals read is worth
  *  overriding; the rest is the shape the wire always carries. */
 export function commit(
@@ -103,6 +121,25 @@ export function pairings(
     ]),
   )
 }
+
+export interface FetchCall {
+  url: string
+  params: URLSearchParams
+}
+
+/** Stub `fetch`, recording each URL. `respond` shapes the reply. */
+export function captureFetch(respond: () => Response): FetchCall[] {
+  const calls: FetchCall[] = []
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    const url = String(input)
+    calls.push({ url, params: new URL(url, 'http://daemon.test').searchParams })
+    return respond()
+  })
+  return calls
+}
+
+export const ok = (body: unknown) => () =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
 /** A civil day N days from today, by index into the fixed window. */
 export function dayAt(offset: number): string {

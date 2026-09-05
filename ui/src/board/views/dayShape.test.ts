@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { card as baseCard, commit as baseCommit } from '../testFixtures.js'
+import { card as baseCard, commit as baseCommit, expectPinnedZone } from '../testFixtures.js'
 import type {
   ActivityBucket,
   ActivityResult,
@@ -61,10 +61,7 @@ const at = (y: number, m: number, d: number, h = 0, min = 0): number =>
 
 describe('the pinned test zone', () => {
   it('runs under a non-UTC zone — the civil day is what this suite tests', () => {
-    expect(TZ, 'run via `npm test`, which pins TZ on both passes').toMatch(
-      /^(America\/Los_Angeles|Europe\/Paris)$/,
-    )
-    expect(new Date(2026, 7, 4).getTimezoneOffset()).not.toBe(0)
+    expectPinnedZone()
   })
 })
 
