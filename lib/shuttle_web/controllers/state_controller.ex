@@ -12,6 +12,10 @@ defmodule ShuttleWeb.StateController do
 
   use Phoenix.Controller, formats: [:json]
 
+  # `:httpc` failure reasons are erlang terms (often tuples); `render_error/1`
+  # makes them strings so the JSON encoder need not know about them.
+  import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
+
   @state_timeout_ms 1_500
 
   def show(conn, _params) do
@@ -103,9 +107,6 @@ defmodule ShuttleWeb.StateController do
     }
   end
 
-  defp format_dt(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
-  defp format_dt(_), do: nil
-
   defp render_recovery(%{} = recovery) do
     %{
       state: recovery |> Map.get(:state, :healthy) |> to_string(),
@@ -117,11 +118,4 @@ defmodule ShuttleWeb.StateController do
   end
 
   defp render_recovery(_), do: nil
-
-  # `:httpc` failure reasons are erlang terms (often tuples). Render as
-  # a string so the JSON encoder doesn't need to know about them.
-  defp render_error(nil), do: nil
-  defp render_error(reason) when is_binary(reason), do: reason
-  defp render_error(reason) when is_atom(reason), do: to_string(reason)
-  defp render_error(reason), do: inspect(reason)
 end

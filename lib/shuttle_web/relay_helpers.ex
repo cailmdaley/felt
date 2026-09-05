@@ -23,8 +23,6 @@ defmodule ShuttleWeb.RelayHelpers do
   as-is. On a forward failure, `on_failure.(name, reason)` builds the JSON map
   the endpoint surfaces (its `*: false` envelope plus `origin`/`error`).
   """
-  def relay_json(conn, forward_result, on_failure)
-
   def relay_json(conn, {:forwarded, status, body}, _on_failure) do
     conn |> put_resp_content_type("application/json") |> send_resp(status, body)
   end
@@ -43,8 +41,6 @@ defmodule ShuttleWeb.RelayHelpers do
   by the owner-routing GET endpoints (`/file`, `/astra`, `/sent-files`,
   `/api/v1/fibers/:id`), whose owning daemon returns raw bytes + a content-type.
   """
-  def relay_bytes(conn, forward_result)
-
   def relay_bytes(conn, {:forwarded, status, content_type, body}) do
     conn |> put_resp_content_type(content_type, nil) |> send_resp(status, body)
   end
@@ -59,8 +55,6 @@ defmodule ShuttleWeb.RelayHelpers do
   Identical across the felt-edit / felt-nest / lifecycle endpoints, whose
   owning daemon returns `text/plain`.
   """
-  def relay_text(conn, forward_result)
-
   def relay_text(conn, {:forwarded, status, body}) do
     conn |> put_resp_content_type("text/plain") |> send_resp(status, body)
   end
@@ -84,8 +78,6 @@ defmodule ShuttleWeb.RelayHelpers do
   `felt shuttle` verbs). A caller that needs a side effect on success (a document
   refresh) keeps its own 200 branch and routes only the `else` failures here.
   """
-  def send_cli_result(conn, tool, result)
-
   def send_cli_result(conn, _tool, {:ok, output}) do
     conn |> put_resp_content_type("text/plain") |> send_resp(200, output)
   end
@@ -159,17 +151,16 @@ defmodule ShuttleWeb.RelayHelpers do
   def epoch_ms_message(key), do: "#{key} is required and must be an integer (epoch ms)"
 
   @doc """
-  The 400 sentence for an OPTIONAL epoch-millisecond bound — no "is required".
+  Render `{:bad_param, key}` from `integer_param/3` as a 400.
 
-  Kept next to `epoch_ms_message/1` so the one word between them is visible at
-  the definition site: `/activity`'s bounds must be present, while the temporal
-  feeds' `since_ms`/`until_ms` default to an open window and only have to parse.
+  Note the one word this sentence lacks against `epoch_ms_message/1`:
+  `/activity`'s bounds must be present, while the temporal feeds'
+  `since_ms`/`until_ms` default to an open window and only have to parse.
   """
-  def optional_epoch_ms_message(key), do: "#{key} must be an integer (epoch ms)"
-
-  @doc "Render `{:bad_param, key}` from `integer_param/3` as a 400."
   def bad_param(conn, key) do
-    conn |> Plug.Conn.put_status(400) |> Phoenix.Controller.json(%{error: optional_epoch_ms_message(key)})
+    conn
+    |> Plug.Conn.put_status(400)
+    |> Phoenix.Controller.json(%{error: "#{key} must be an integer (epoch ms)"})
   end
 
   @doc """

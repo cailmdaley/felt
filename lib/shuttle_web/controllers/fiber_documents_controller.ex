@@ -27,6 +27,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
+  import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
   alias Shuttle.OriginRouter
   alias Shuttle.Poller.Snapshot
@@ -330,14 +331,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
   defp stamp_origin(entry, origin) when is_map(entry), do: Map.put(entry, "origin", origin)
 
   defp own_host_id, do: Shuttle.Poller.own_host_id()
-
-  defp format_dt(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
-  defp format_dt(_), do: nil
-
-  defp render_error(nil), do: nil
-  defp render_error(reason) when is_binary(reason), do: reason
-  defp render_error(reason) when is_atom(reason), do: to_string(reason)
-  defp render_error(reason), do: inspect(reason)
 
   # The owner-only kanban feed (`GET /api/v1/fibers?shuttle=true`) — the path
   # remote viewers poll every 5s over the SSH tunnel. Served ALWAYS from the

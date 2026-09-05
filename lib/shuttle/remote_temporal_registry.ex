@@ -165,7 +165,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
       window_ms: Keyword.get(opts, :window_ms, @window_ms),
       entries:
         Map.new(remotes, fn remote ->
-          {remote.name, restore(Map.get(persisted, RegistryCommon.safe_name(remote.name)), remote)}
+          {remote.name,
+           restore(Map.get(persisted, RegistryCommon.safe_name(remote.name)), remote)}
         end)
     }
 
@@ -331,13 +332,10 @@ defmodule Shuttle.RemoteTemporalRegistry do
           also: ["spawns"]
         ),
       sessions:
-        fetch(client, Remote.sessions_url(remote), etags[:sessions], timeout_ms,
-          key: "records"
-        ),
+        fetch(client, Remote.sessions_url(remote), etags[:sessions], timeout_ms, key: "records"),
       commits:
         fetch(client, Remote.commits_url(remote), etags[:commits], timeout_ms, key: "records"),
-      spend:
-        fetch(client, Remote.spend_url(remote), etags[:spend], timeout_ms, key: "sessions"),
+      spend: fetch(client, Remote.spend_url(remote), etags[:spend], timeout_ms, key: "sessions"),
       sent_files:
         fetch(client, Remote.sent_files_all_url(remote), etags[:sent_files], timeout_ms,
           key: "files"
@@ -552,5 +550,4 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   defp decode_etags(_), do: %{}
-
 end

@@ -189,5 +189,4 @@ defmodule Shuttle.RemotesTest do
     on_exit(fn -> File.rm_rf(dir) end)
     dir
   end
-
 end

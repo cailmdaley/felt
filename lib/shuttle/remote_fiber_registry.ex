@@ -242,7 +242,8 @@ defmodule Shuttle.RemoteFiberRegistry do
       store_dir: store_dir,
       feeds:
         Map.new(remotes, fn remote ->
-          {remote.name, restore(Map.get(persisted, RegistryCommon.safe_name(remote.name)), remote)}
+          {remote.name,
+           restore(Map.get(persisted, RegistryCommon.safe_name(remote.name)), remote)}
         end)
     }
 
@@ -644,5 +645,4 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   defp map_or_nil(%{} = value), do: value
   defp map_or_nil(_), do: nil
-
 end
