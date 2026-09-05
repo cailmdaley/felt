@@ -143,7 +143,6 @@ import {
   SLOT_PHRASE,
   tipContent,
   type LastExchange,
-  type MarkPick,
   type MomentSource,
   type MomentWords,
   ensureTipHost,
@@ -1507,12 +1506,20 @@ export function beatTip(
       shuttle: false,
     })
   }
+  return slip(`${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`, rows, words, pinned)
+}
+
+/** A slip: its heading, its recorded rows, and whatever the moment fetch has
+ *  so far to say about them. The rows are reconciled against the words rather
+ *  than concatenated — see `reconcileRows`. */
+function slip(
+  time: string,
+  rows: SlotTipRow[],
+  words: MomentWords | undefined,
+  pinned: boolean,
+): SlotTip {
   const content = tipContent(words, pinned)
-  return {
-    time: `${clockTime(startMs)}–${clockTime(startMs + MINUTE_MS)}`,
-    rows: reconcileRows(rows, content),
-    ...content,
-  }
+  return { time, rows: reconcileRows(rows, content), ...content }
 }
 
 /**
@@ -1589,12 +1596,45 @@ export function magnetTip(
   // the surface cannot show. The lane's name is not here for the reason it is
   // not on the rows: it is already on this row, to the left.
   const last = exchange.toolsAfter?.atMs ?? exchange.turns[exchange.turns.length - 1]?.atMs
-  const content = tipContent(words, pinned)
-  return {
-    time: last === undefined ? '' : `last at ${clockTime(last)}`,
-    rows: reconcileRows(rows, content),
-    ...content,
-  }
+  return slip(last === undefined ? '' : `last at ${clockTime(last)}`, rows, words, pinned)
+}
+
+/** A slip that follows the pointer, for the marks that have no column of their
+ *  own to sit over. */
+function placeAtPointer(tip: HTMLElement, chart: HTMLElement, e: MouseEvent): void {
+  const chartBox = chart.getBoundingClientRect()
+  placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
+}
+
+/** Every transcript the lane's beats inside `[fromMs, toMs)` point at — an
+ *  exchange or a delegation may cross more than one session on a lane that was
+ *  handed between workers. */
+function sourcesIn(
+  lane: DayLane,
+  fromMs: number,
+  toMs: number,
+  win: DayWindow,
+): MomentSource[] {
+  return dedupeSources(
+    lane.beats
+      .filter((b) => {
+        const at = win.startMs + b.minute * MINUTE_MS
+        return at >= fromMs && at < toMs
+      })
+      .flatMap((b) => b.sources),
+  )
+}
+
+/** A section of the day's prose: its own class, and the rubric head every one
+ *  of them wears. */
+function daySection(className: string, heading: string): HTMLElement {
+  const section = document.createElement('section')
+  section.className = className
+  const head = document.createElement('h3')
+  head.className = 'kbn-day-narrhead'
+  head.textContent = heading
+  section.append(head)
+  return section
 }
 
 class DayViewImpl implements TemporalView {
@@ -2004,14 +2044,12 @@ class DayViewImpl implements TemporalView {
    */
   private readonly onDragDown = (e: MouseEvent): void => {
     if (e.button !== 0) return
-    const chart = this.chartEl
     const win = this.frame
-    if (!chart || !win) return
+    if (!win) return
     // Only the rails are draggable. A press on the legend or the hour hand is
     // not a gesture about a span of time, and treating it as one would zoom the
     // page whenever somebody swept a selection over the caption.
-    if (!(e.target instanceof Element) || !e.target.closest('.kbn-day-rail')) return
-    const rail = chart.querySelector<HTMLElement>('.kbn-day-rail')
+    const rail = e.target instanceof Element ? e.target.closest<HTMLElement>('.kbn-day-rail') : null
     if (!rail) return
     const box = rail.getBoundingClientRect()
     if (box.width <= 0 || e.clientX < box.left || e.clientX > box.right) return
@@ -2083,50 +2121,39 @@ class DayViewImpl implements TemporalView {
   private showAloftTip(lane: DayLane, line: LadderLine, e: MouseEvent, pin = false): void {
     if (this.pinnedKey !== null && !pin) return
     const chart = this.chartEl
-    if (!chart) return
+    const win = this.frame
+    if (!chart || !win) return
     const minutes = Math.max(1, Math.round((line.endMs - line.startMs) / MINUTE_MS))
     const tip = this.ensureTip()
     const key = `${lane.key}:aloft:${line.kind}:${line.startMs}:${line.row}`
-    const words = (w?: MomentWords): SlotTip => {
-      const content = tipContent(w, pin)
-      return {
-        time: `${clockTime(line.startMs)}–${clockTime(line.endMs)}`,
-        rows: reconcileRows(
-          [
-            {
-              kind: 'agent',
-              phrase: aloftPhrase(line),
-              where: '',
-              // How long it was up — a duration, so it says "min" rather than
-              // wearing a `×N` that would read as a count of the lines below.
-              note: `${minutes} min`,
-              shuttle: false,
-            },
-          ],
-          content,
-        ),
-        ...content,
-      }
-    }
+    const words = (w?: MomentWords): SlotTip =>
+      slip(
+        `${clockTime(line.startMs)}–${clockTime(line.endMs)}`,
+        [
+          {
+            kind: 'agent',
+            phrase: aloftPhrase(line),
+            where: '',
+            // How long it was up — a duration, so it says "min" rather than
+            // wearing a `×N` that would read as a count of the lines below.
+            note: `${minutes} min`,
+            shuttle: false,
+          },
+        ],
+        w,
+        pin,
+      )
     // Sources come from the minutes the line spans — the same transcripts the
     // beats under it point at, which is what makes the delegation register
     // available here at all.
-    const sources = dedupeSources(
-      lane.beats
-        .filter((b) => {
-          const at = (this.frame?.startMs ?? 0) + b.minute * MINUTE_MS
-          return at >= line.startMs && at < line.endMs
-        })
-        .flatMap((b) => b.sources),
-    )
+    const sources = sourcesIn(lane, line.startMs, line.endMs, win)
     this.openMoment(tip, key, pin, sources, line.startMs, line.endMs, words)
     // A rung is an interval, and the bar marks where it BEGAN — the instant the
     // delegation went out, which is the one point on the rung a reader can act
     // on. Stepping from there walks the span it covers.
     if (pin) this.scrub.pin({ laneKey: lane.key, atMs: line.startMs })
 
-    const chartBox = chart.getBoundingClientRect()
-    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
+    placeAtPointer(tip, chart, e)
   }
 
   private render(model: DayModel): void {
@@ -2429,13 +2456,8 @@ class DayViewImpl implements TemporalView {
         if (this.drag) return
         this.showBeatTip(lane, rail, win, e)
       })
-      rail.addEventListener('mouseleave', () => {
-        // The magnet goes with the pointer even when a pinned slip is holding
-        // the tooltip open — it marks where the POINTER is being caught, not
-        // what the slip is showing.
-        if (this.pinnedKey === null) this.markMagnet(rail, null, 0)
-        this.hideTip()
-      })
+      // `hideTip` clears every magnet in the chart, this rail's included.
+      rail.addEventListener('mouseleave', () => this.hideTip())
       // A click fixes the slip where the pointer already is, so what you were
       // reading stops fleeing when you move to read it. The stopPropagation is
       // load-bearing: the document listener that unpins would otherwise see
@@ -2578,40 +2600,6 @@ class DayViewImpl implements TemporalView {
   // ── Hover ──────────────────────────────────────────────────────────────────
 
   /**
-   * Report the lane-minute under the pointer, or nothing.
-   *
-   * SNAPS to the nearest BEAT rather than hit-testing the ink. Two reasons, and
-   * the second is the important one: the ink can be a hairline nobody can land
-   * on, and the washes are merged runs that bridge idle minutes — so
-   * hit-testing the drawn mark would happily report a minute in which nothing
-   * happened. The beats are the unmerged record, so snapping to them can only
-   * name a minute that is real. Empty rail — no beat within
-   * {@link BEAT_SNAP_PX} — hides the tooltip rather than answering about the
-   * nearest work on the row.
-   */
-  /**
-   * Which mark the pointer resolves to, or null for empty paper — the one
-   * question the click handler and the hover handler must never answer
-   * differently, which is why they both ask it here.
-   */
-  private beatUnder(
-    lane: DayLane,
-    rail: HTMLElement,
-    win: DayWindow,
-    e: MouseEvent,
-  ): MarkPick | null {
-    if (lane.beats.length === 0) return null
-    const box = rail.getBoundingClientRect()
-    if (box.width <= 0 || win.minutes <= 0) return null
-    const perMinute = box.width / win.minutes
-    return pickMark(
-      lane.beats.map((b) => (b.minute + 0.5) * perMinute),
-      e.clientX - box.left,
-      BEAT_SNAP_PX,
-    )
-  }
-
-  /**
    * Is the pointer standing in the part of the day that has HAPPENED?
    *
    * The one question the click rule turns on — see the rail's click handler.
@@ -2645,25 +2633,18 @@ class DayViewImpl implements TemporalView {
     const tip = this.ensureTip()
     const startMs = win.startMs + minute * MINUTE_MS
 
-    if (!beat) {
-      // No fetch: there is no session behind a minute with no bucket, so there
-      // is nothing to ask and nobody to ask it of.
-      this.moments.cancel()
-      this.hoveredKey = null
-      this.pinnedKey = `${laneKey}:${minute}`
-      renderTip(tip, emptyMinuteTip(startMs))
-      tip.classList.add('kbn-tip-open', 'kbn-tip-pinned')
-    } else {
-      this.openMoment(
-        tip,
-        `${laneKey}:${beat.minute}`,
-        true,
-        beat.sources,
-        startMs,
-        startMs + MINUTE_MS,
-        (words) => beatTip(beat, win, words, true),
-      )
-    }
+    // No fetch behind a minute with no bucket: there is no session to ask and
+    // nobody to ask it of, which an empty source list already means to the
+    // loader.
+    this.openMoment(
+      tip,
+      `${laneKey}:${minute}`,
+      true,
+      beat?.sources ?? [],
+      startMs,
+      startMs + MINUTE_MS,
+      (words) => (beat ? beatTip(beat, win, words, true) : emptyMinuteTip(startMs)),
+    )
 
     const chartBox = chart.getBoundingClientRect()
     const railBox = held.rail.getBoundingClientRect()
@@ -2697,7 +2678,19 @@ class DayViewImpl implements TemporalView {
     // beat IN THE FRAME, which is what makes this follow a zoom for free: the
     // lanes are rebuilt against the drawn window, so a beat outside it is not
     // in `lane.beats` at all.
-    const pick = this.beatUnder(lane, rail, win, e)
+    // SNAPS to the nearest BEAT rather than hit-testing the ink. Two reasons,
+    // and the second is the important one: the ink can be a hairline nobody
+    // can land on, and the washes are merged runs that bridge idle minutes —
+    // so hit-testing the drawn mark would happily report a minute in which
+    // nothing happened. The beats are the unmerged record, so snapping to them
+    // can only name a minute that is real. Empty rail — no beat within
+    // BEAT_SNAP_PX — hides the tooltip rather than answering about the nearest
+    // work on the row.
+    const pick = pickMark(
+      lane.beats.map((b) => (b.minute + 0.5) * perMinute),
+      e.clientX - box.left,
+      BEAT_SNAP_PX,
+    )
     if (!pick) return this.hideTip(pin)
     this.markMagnet(rail, pick.magnetized ? lane.beats[pick.index] : null, perMinute)
     // Out in the dead zone the question is about the LANE, not about a minute,
@@ -2766,11 +2759,7 @@ class DayViewImpl implements TemporalView {
     const toMs = at(lastBeat) + MINUTE_MS
     const first = exchange.turns[0]?.atMs ?? toMs - MINUTE_MS
     const fromMs = Math.max(first, toMs - MAGNET_LOOKBACK_MINUTES * MINUTE_MS)
-    // Every transcript the spanned minutes point at — the exchange may cross
-    // more than one session on a lane that was handed between workers.
-    const sources = dedupeSources(
-      lane.beats.filter((b) => at(b) >= fromMs && at(b) < toMs).flatMap((b) => b.sources),
-    )
+    const sources = sourcesIn(lane, fromMs, toMs, win)
 
     const tip = this.ensureTip()
     // Keyed on the lane rather than on a minute: the magnet is one answer per
@@ -2786,8 +2775,7 @@ class DayViewImpl implements TemporalView {
     // there walks back into the day, which is the only direction there is.
     if (pin) this.scrub.pin({ laneKey: lane.key, atMs: at(lastBeat) })
 
-    const chartBox = chart.getBoundingClientRect()
-    placeTip(tip, chartBox, e.clientX - chartBox.left, e.clientY - chartBox.top)
+    placeAtPointer(tip, chart, e)
   }
 
   /**
@@ -2896,13 +2884,7 @@ class DayViewImpl implements TemporalView {
   }
 
   private buildNarration(model: DayModel): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'kbn-day-narr'
-
-    const head = document.createElement('h3')
-    head.className = 'kbn-day-narrhead'
-    head.textContent = 'the day, by fiber'
-    section.append(head)
+    const section = daySection('kbn-day-narr', 'the day, by fiber')
 
     const list = document.createElement('div')
     list.className = 'kbn-day-entries'
@@ -3072,13 +3054,7 @@ class DayViewImpl implements TemporalView {
     if (this.previewsEl && this.previewsKey === key) return this.previewsEl
 
     this.disconnectPreviewObserver()
-    const section = document.createElement('section')
-    section.className = 'kbn-day-previews'
-
-    const head = document.createElement('h3')
-    head.className = 'kbn-day-narrhead'
-    head.textContent = 'where things stand'
-    section.append(head)
+    const section = daySection('kbn-day-previews', 'where things stand')
 
     const strip = document.createElement('div')
     strip.className = 'kbn-day-previewstrip'
@@ -3275,13 +3251,7 @@ class DayViewImpl implements TemporalView {
    * about a future that has resolved.
    */
   private buildStillAheadStrip(items: StillAheadItem[]): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'kbn-day-ahead'
-
-    const head = document.createElement('h3')
-    head.className = 'kbn-day-narrhead'
-    head.textContent = 'still ahead'
-    section.append(head)
+    const section = daySection('kbn-day-ahead', 'still ahead')
 
     const list = document.createElement('div')
     list.className = 'kbn-day-aheaditems'
