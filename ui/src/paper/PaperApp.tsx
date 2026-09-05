@@ -173,7 +173,6 @@ export function PaperApp(args: LoadPaperArgs) {
     document.documentElement.setAttribute(THEME_ATTRIBUTE, theme)
   }, [theme])
 
-  const setThemeAndPersist = useCallback((next: Theme) => setTheme(next), [])
 
   useEffect(() => {
     let live = true
@@ -266,7 +265,7 @@ export function PaperApp(args: LoadPaperArgs) {
   const sectionHrefBase = isSub ? `/${activeSlug}` : '/'
 
   return (
-    <ThemeProvider theme={theme} setTheme={setThemeAndPersist} renderers={renderers}>
+    <ThemeProvider theme={theme} setTheme={setTheme} renderers={renderers}>
       <div onClick={onClickInterceptNav}>
         {route.outputId ? (
           <OutputDetail
