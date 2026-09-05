@@ -250,22 +250,10 @@ func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
 	fmt.Println(strings.Repeat("─", 122))
 
 	for _, r := range rows {
-		origin := r.Origin
-		if origin == "" {
-			origin = "(local)"
-		}
-		agent := r.Agent
-		if agent == "" {
-			agent = "(default)"
-		}
-		next := r.NextDueAt
-		if next == "" {
-			next = "-"
-		}
-		kind := r.Kind
-		if kind == "" {
-			kind = "-"
-		}
+		origin := shuttleNonEmpty(r.Origin, "(local)")
+		agent := shuttleNonEmpty(r.Agent, "(default)")
+		next := shuttleNonEmpty(r.NextDueAt, "-")
+		kind := shuttleNonEmpty(r.Kind, "-")
 		state := r.State
 		if r.Stale {
 			state = state + " [stale]"

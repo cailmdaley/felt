@@ -160,14 +160,7 @@ func managedTunnel(manager string) bool {
 // feltRemotesPath is the canonical fleet file location for reads AND writes:
 // $FELT_REMOTES_FILE, else ~/.config/felt/remotes.json.
 func feltRemotesPath() (string, error) {
-	if env := os.Getenv("FELT_REMOTES_FILE"); env != "" {
-		return expandUserPath(env)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".config", "felt", "remotes.json"), nil
+	return feltConfigPath("FELT_REMOTES_FILE", "remotes.json")
 }
 
 // loadRemotesFileRaw parses the fleet file WITHOUT filling defaults. Edit verbs

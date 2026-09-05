@@ -110,7 +110,7 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 		// The failed candidate may have installed the plugin before returning an
 		// error. Best effort uninstall is safe for the absent-plugin case.
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
-		if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing failed marketplace: %w", err)
 		}
 		return nil
@@ -119,11 +119,11 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 	if source == "" {
 		return errors.New("previous Claude marketplace source is not recoverable from CLI JSON")
 	}
-	if err := runClaudeCLI("plugin", "marketplace", "add", source); err != nil {
+	if err := runHarnessCLI("claude", "plugin", "marketplace", "add", source); err != nil {
 		return fmt.Errorf("restoring Claude marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runClaudeCLI("plugin", "update", pluginRef); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "update", pluginRef); err != nil {
 			return fmt.Errorf("restoring Claude plugin: %w", err)
 		}
 	} else {
@@ -189,10 +189,7 @@ func codexPluginInstalled() bool {
 		return false
 	}
 	var document struct {
-		Installed []struct {
-			PluginID string `json:"pluginId"`
-			ID       string `json:"id"`
-		} `json:"installed"`
+		Installed []receiptInstalledPlugin `json:"installed"`
 	}
 	if json.Unmarshal([]byte(out), &document) == nil && document.Installed != nil {
 		for _, entry := range document.Installed {
@@ -224,7 +221,7 @@ func restoreCodexInstallation(state codexInstallationState) error {
 		return fmt.Errorf("restoring Codex marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runCodexCLI("plugin", "add", codexPluginRef); err != nil {
+		if err := runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 			return fmt.Errorf("restoring Codex plugin: %w", err)
 		}
 	} else {
@@ -671,7 +668,7 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
 		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
-		if err := runClaudeCLI("plugin", "marketplace", "remove", marketplaceName); err != nil {
+		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing Claude marketplace: %w", err)
 		}
 	} else {
@@ -679,7 +676,7 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 			return fmt.Errorf("reinstalling Claude from restored current: %w", err)
 		}
 		if !intent.Installed {
-			if err := runClaudeCLI("plugin", "uninstall", pluginRef); err != nil {
+			if err := runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
 				return fmt.Errorf("restoring absent Claude plugin: %w", err)
 			}
 		}

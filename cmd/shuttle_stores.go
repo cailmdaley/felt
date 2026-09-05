@@ -100,14 +100,20 @@ func registeredFeltStores() ([]string, error) {
 // feltStoresRegistryPath is the canonical registry location for WRITES:
 // $FELT_STORES_FILE, else ~/.config/felt/stores.json.
 func feltStoresRegistryPath() (string, error) {
-	if env := os.Getenv("FELT_STORES_FILE"); env != "" {
+	return feltConfigPath("FELT_STORES_FILE", "stores.json")
+}
+
+// feltConfigPath resolves a ~/.config/felt/<leaf> file, letting envVar override
+// it outright.
+func feltConfigPath(envVar, leaf string) (string, error) {
+	if env := os.Getenv(envVar); env != "" {
 		return expandUserPath(env)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "felt", "stores.json"), nil
+	return filepath.Join(home, ".config", "felt", leaf), nil
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
