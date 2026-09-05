@@ -48,10 +48,6 @@ defmodule Shuttle.Dispatcher do
       against different felt stores (e.g. one for `~/loom`, another for a
       standalone project root) is the supported way to span felt stores.
     * `:prompt_context` — `:constitution` (default) or `:standing_run`.
-    * `:force_fresh` — when true, ignore any prior resume intent and start a
-      new session. Used for autonomous continuation loops; explicit
-      human-triggered "Resume previous" remains the only path that reuses a
-      transcript.
     * `:force` — explicit manual dispatch override. When true, the dispatcher
       stops refusing closed fibers (the Poller already relaxes eligibility
       under force) and `resolve_resume_intent` ignores the ad-hoc
@@ -83,14 +79,10 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_work_dir(work_dir),
          :ok <- preflight_wrapper(agent, work_dir, runner) do
       resume_intent =
-        if Keyword.get(opts, :force_fresh, false) do
-          :fresh
-        else
-          resolve_resume_intent(prompt_context, fiber,
-            force: force,
-            resume_mode: Keyword.get(opts, :resume_mode)
-          )
-        end
+        resolve_resume_intent(prompt_context, fiber,
+          force: force,
+          resume_mode: Keyword.get(opts, :resume_mode)
+        )
 
       case resume_intent do
         {:error, _} = error ->
