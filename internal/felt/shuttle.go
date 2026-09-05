@@ -254,13 +254,16 @@ func (f *Felt) SetShuttleConfig(block *shuttle.Block) error {
 	return nil
 }
 
-// ValidateShuttleFacet validates the fiber's shuttle: facet (kind enum, agent
-// resolution against the registry, pinned-forbids-schedule, standing-requires a
-// valid cron + timezone). It is a no-op for a pure note (or a degenerate
-// non-mapping shuttle value) — and only loads the agent registry when a facet is
-// actually present, so notes pay nothing. felt's write verbs call this before
-// persisting, making felt the schema authority: an invalid shuttle: block fails
-// the write loudly rather than reaching disk.
+// ValidateShuttleFacet validates the structure of the fiber's shuttle: facet
+// (kind enum, pinned-forbids-schedule, standing-requires a valid cron +
+// timezone). It deliberately does NOT resolve the agent: a content edit on a
+// fiber whose agent id has since been retired from the registry must still
+// succeed — the agent is validated where it is consumed (install, repeat, pin,
+// set-agent, resume, reopen, and the daemon's dispatch), never on a write that
+// only touches content. A no-op for a pure note (or a degenerate non-mapping
+// shuttle value), so notes pay nothing. felt's write verbs call this before
+// persisting, making felt the schema authority: a structurally invalid
+// shuttle: block fails the write loudly rather than reaching disk.
 func (f *Felt) ValidateShuttleFacet() error {
 	b, ok, err := f.ShuttleBlock()
 	if err != nil {
@@ -269,11 +272,7 @@ func (f *Felt) ValidateShuttleFacet() error {
 	if !ok {
 		return nil
 	}
-	reg, err := shuttle.LoadAgentRegistry()
-	if err != nil {
-		return fmt.Errorf("loading agent registry: %w", err)
-	}
-	if errs := shuttle.Validate(b, reg); len(errs) > 0 {
+	if errs := shuttle.Validate(b, nil); len(errs) > 0 {
 		return fmt.Errorf("invalid shuttle: block:\n%s", errs.Error())
 	}
 	return nil

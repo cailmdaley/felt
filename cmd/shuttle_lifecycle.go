@@ -181,6 +181,9 @@ armed straight to active. Refuses on a tempered/composted close — use
 			return err
 		}
 		defer unlock()
+		if err := resolveBlockAgent(block); err != nil {
+			return err
+		}
 
 		// A standing role awaiting review (status:closed + untempered) re-arms
 		// through the owning daemon, which clears the awaiting marker and
@@ -223,6 +226,29 @@ armed straight to active. Refuses on a tempered/composted close — use
 		}
 		return nil
 	},
+}
+
+// resolveBlockAgent is the arming gate: a verb that makes a fiber dispatchable
+// resolves its agent against the registry first, so a retired id (kept on
+// closed fibers as history — content edits never check it) is refused with the
+// registry's list rather than failing later inside the daemon.
+func resolveBlockAgent(block *shuttle.Block) error {
+	reg, err := shuttle.LoadAgentRegistry()
+	if err != nil {
+		return err
+	}
+	name := block.Agent
+	if name == "" {
+		def, err := reg.Default()
+		if err != nil {
+			return err
+		}
+		name = def.ID
+	}
+	if _, _, err := reg.Resolve(name, block.Effort, block.Chrome); err != nil {
+		return fmt.Errorf("cannot arm: %w (felt shuttle set-agent to pick a current one)", err)
+	}
+	return nil
 }
 
 // ---- close -----------------------------------------------------------------
@@ -290,7 +316,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
+		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
@@ -299,6 +325,8 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 		status := felt.StatusActive
 		if reopenAsDraft {
 			status = felt.StatusOpen
+		} else if err := resolveBlockAgent(block); err != nil {
+			return err
 		}
 		statusBefore := f.Status
 		f.Status = status

@@ -153,11 +153,13 @@ func TestShuttleFacet_RejectsBadKind(t *testing.T) {
 	}
 }
 
-func TestShuttleFacet_RejectsUnknownAgent(t *testing.T) {
+// A retired agent id (a closed constitution that still says `agent: codex`)
+// must never block a content write: the agent is resolved only where the block
+// is armed or dispatched.
+func TestShuttleFacet_ToleratesUnknownAgent(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "no-such-agent"})
-	err := f.ValidateShuttleFacet()
-	if err == nil || !strings.Contains(err.Error(), "agent") {
-		t.Fatalf("unknown agent must fail mentioning agent, got: %v", err)
+	if err := f.ValidateShuttleFacet(); err != nil {
+		t.Fatalf("unknown agent must not fail a content write, got: %v", err)
 	}
 }
 

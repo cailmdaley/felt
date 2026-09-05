@@ -623,3 +623,37 @@ func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 		t.Fatal("owned close should write tempered: true")
 	}
 }
+
+// ---- retired agents --------------------------------------------------------
+
+// A closed constitution that still names a retired agent id is history, not a
+// dispatch: content edits go through; arming verbs refuse until the agent is
+// changed to a current one.
+func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
+
+	if out, err := runCommand(t, dir, "edit", "f", "-o", "still editable"); err != nil {
+		t.Fatalf("edit with a retired agent must succeed: %v\n%s", err, out)
+	}
+	if got := mustRead(t, storage, "f").Outcome; got != "still editable" {
+		t.Fatalf("outcome not written, got %q", got)
+	}
+
+	if out, err := runCommand(t, dir, "shuttle", "resume", "f"); err == nil {
+		t.Fatalf("resume must refuse a retired agent\n%s", out)
+	} else if !strings.Contains(err.Error()+out, "retired-agent") {
+		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)
+	}
+	if mustRead(t, storage, "f").Status != felt.StatusOpen {
+		t.Fatal("refused resume must not arm the fiber")
+	}
+
+	if out, err := runCommand(t, dir, "shuttle", "reopen", "f"); err == nil {
+		t.Fatalf("reopen must refuse a retired agent\n%s", out)
+	}
+	if out, err := runCommand(t, dir, "shuttle", "reopen", "--as-draft", "f"); err != nil {
+		t.Fatalf("reopen --as-draft arms nothing and must pass: %v\n%s", err, out)
+	}
+}
