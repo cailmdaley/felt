@@ -1469,7 +1469,6 @@ type scopedIDResolver struct {
 	external     *ExternalRefs
 	ids          []string
 	exact        map[string]struct{}
-	parentBases  map[string]map[string]string
 	parentSorted map[string][]scopedIDEntry
 	byBase       map[string][]string
 }
@@ -1484,7 +1483,6 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 		external:     external,
 		ids:          make([]string, 0, len(ids)),
 		exact:        make(map[string]struct{}, len(ids)),
-		parentBases:  map[string]map[string]string{},
 		parentSorted: map[string][]scopedIDEntry{},
 		byBase:       map[string][]string{},
 	}
@@ -1495,10 +1493,6 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 
 		parent := ParentPath(cleanID)
 		base := path.Base(cleanID)
-		if resolver.parentBases[parent] == nil {
-			resolver.parentBases[parent] = map[string]string{}
-		}
-		resolver.parentBases[parent][base] = cleanID
 		resolver.parentSorted[parent] = append(resolver.parentSorted[parent], scopedIDEntry{base: base, id: cleanID})
 		resolver.byBase[base] = append(resolver.byBase[base], cleanID)
 	}
@@ -1516,22 +1510,14 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 }
 
 func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
-	id, ok, resolutionErr := r.resolve(scopeID, query)
-	if ok {
-		return id, nil
-	}
-	return "", resolutionErr
-}
-
-func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", false, fmt.Errorf("no felt found matching %q", query)
+		return "", fmt.Errorf("no felt found matching %q", query)
 	}
 
 	if id, ok, err := r.resolveInStore(scopeID, query); ok || err != nil {
-		return id, ok, err
+		return id, err
 	}
 
 	// A target spelled from the enclosing store's namespace but pointing back
@@ -1541,7 +1527,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// spelling — and a miss keeps the query the caller typed in its error.
 	if local, stripped := r.external.Localize(query); stripped {
 		if id, ok, _ := r.resolveInStore(scopeID, local); ok {
-			return id, true, nil
+			return id, nil
 		}
 	}
 
@@ -1560,7 +1546,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// (`felt -C ...`), while the misresolution it replaces silently answered
 	// with the wrong fiber — and `felt rm` and `felt nest` act on that answer.
 	if id, inferred, ok := r.externalHit(scopeID, query); ok {
-		return "", false, r.external.err(query, id, inferred)
+		return "", r.external.err(query, id, inferred)
 	}
 
 	// Last resort: the query's final segment names exactly one fiber. This is
@@ -1571,10 +1557,10 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, bool, error) 
 	// that misreads a foreign path as a local slug, which is why an id known to
 	// the enclosing store is refused above before ever reaching here.
 	if ids := r.byBase[path.Base(query)]; len(ids) == 1 {
-		return ids[0], true, nil
+		return ids[0], nil
 	}
 
-	return "", false, fmt.Errorf("no felt found matching %q", query)
+	return "", fmt.Errorf("no felt found matching %q", query)
 }
 
 // externalHit asks the enclosing store about a query this store could not
@@ -1637,11 +1623,13 @@ func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, 
 		}
 	} else {
 		for _, scope := range scopeChain(scopeID) {
-			// Exact basename match takes priority over prefix matches.
-			if exact, ok := r.exactBasenameMatch(scope, query); ok {
-				return exact, true, nil
-			}
 			matches := r.basenamePrefixMatches(scope, query)
+			// Exact basename match takes priority over prefix matches: entries
+			// are sorted by (base, id), so an exact base sorts strictly before
+			// any entry that merely has query as a prefix.
+			if len(matches) > 0 && path.Base(matches[0]) == query {
+				return matches[0], true, nil
+			}
 			switch len(matches) {
 			case 0:
 				continue
@@ -1705,15 +1693,6 @@ func (r *scopedIDResolver) prefixMatches(candidate string) []string {
 		matches = append(matches, id)
 	}
 	return matches
-}
-
-func (r *scopedIDResolver) exactBasenameMatch(scopeID, query string) (string, bool) {
-	byBase := r.parentBases[scopeID]
-	if byBase == nil {
-		return "", false
-	}
-	id, ok := byBase[query]
-	return id, ok
 }
 
 func (r *scopedIDResolver) basenamePrefixMatches(scopeID, query string) []string {
