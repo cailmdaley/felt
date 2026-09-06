@@ -73,8 +73,13 @@ if [ "${1:-}" = "--loop" ]; then
   # dispatch history survives tmux scrollback — a Linux host running this
   # respawn loop otherwise logs only to its pane, and a failed force-reopen
   # warning (or any crash reason) is lost the moment the pane rotates. Size-rotate at
-  # 50MB keeping one previous generation, so the log never becomes the 238MB
+  # 64MB keeping one previous generation, so the log never becomes the 238MB
   # monster that once outran diagnosis. Override the path with $SHUTTLE_LOG.
+  # 64MB is Shuttle.LogRotator's @default_max_bytes: this rotation and the
+  # daemon's in-process one bound the same file by different means (here
+  # between daemon processes with mv, there hourly inside a running daemon by
+  # copytruncate), and two mechanisms disagreeing about "too big" is only
+  # confusing. Keep the numbers together if you change either.
   LOG="${SHUTTLE_LOG:-$HOME/.shuttle/shuttle.log}"
   mkdir -p "$(dirname "$LOG")"
   # Export the resolved path, not just the override: Shuttle.LogRotator caps
@@ -85,7 +90,7 @@ if [ "${1:-}" = "--loop" ]; then
   export SHUTTLE_LOG="$LOG"
   backoff=2
   while :; do
-    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 67108864 ]; then
       mv -f "$LOG" "$LOG.1" 2>/dev/null || true
     fi
     started=$(date +%s)

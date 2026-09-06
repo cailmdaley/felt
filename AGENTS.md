@@ -89,8 +89,12 @@ lives in the docs site (`docs/`, published to
   same file at runtime, so nothing about your hosts is baked at build time.
   `felt shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
   validator. `test/fixtures/remotes/` enforces Go/Elixir parity, and
-  `cmd/hygiene_test.go` fails the build on a personal hostname in `config/`,
-  `lib/`, `cmd/`, or `share/`.
+  `cmd/hygiene_test.go` fails the build on a personal hostname or path anywhere
+  in the published surface: `config/`, `lib/`, `cmd/`, `share/`, `ui/`, `bin/`,
+  **every `.md` in the repo** (docs and skills ship as content), plus `Makefile`
+  and `bootstrap.sh`. Prose counts — naming one of your own hosts in a doc
+  fails the build, so write incidents generically and keep the host's name in
+  the fiber instead.
 - **`shuttle.agent` field drives agent selection.** The `shuttle:` block's
   `agent:` field resolves against the registry. Default agent is
   `claude-sonnet`.

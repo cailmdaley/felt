@@ -39,14 +39,14 @@ Documentation=https://cailmdaley.github.io/felt/shuttle/installation/
 Type=simple
 WorkingDirectory=__SHUTTLE_DIR__
 # StandardOutput=append: (below) never rotates on its own, unlike the tmux
-# respawn loop's own log (bin/shuttle-launch), which size-rotates at 50MB on
+# respawn loop's own log (bin/shuttle-launch), which size-rotates at 64MB on
 # every iteration. Mirror that here so a systemd-supervised daemon gets the
-# same fidelity: on each restart, if the log has grown past 50MB, move it to
+# same fidelity: on each restart, if the log has grown past 64MB, move it to
 # .1 (clobbering any previous .1) before the new instance starts appending.
 # $$ (not $) below: systemd itself expands bare $VAR/$() in ExecStart lines
 # before handing the string to the shell, so dollars meant for /bin/sh must be
 # doubled to survive systemd's own pass.
-ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 52428800 ]; then mv -f "__LOG__" "__LOG__.1"; fi'
+ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 67108864 ]; then mv -f "__LOG__" "__LOG__.1"; fi'
 # `start --force` skips the already-running guard, so a restart never refuses.
 ExecStart=__SHUTTLE_DIR__/bin/shuttle start --force
 

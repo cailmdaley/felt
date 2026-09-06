@@ -15,7 +15,14 @@ defmodule Shuttle.LogRotator do
   respawn loop, and the systemd unit's `ExecStartPre` — but both only fire *at
   restart*, and both use `mv`. That is safe for them precisely because they run
   while nothing holds the file open. It is exactly what this module must not
-  do.
+  do. They cover the one case this module cannot — a daemon that won't boot at
+  all — and they share `@default_max_bytes` verbatim, because two mechanisms
+  bounding one file while disagreeing about "too big" is only confusing. Change
+  one threshold and change all three.
+
+  macOS has no launchd analog of that `ExecStartPre`, so on a Mac this module
+  is the only rotation there is. That asymmetry is why the hub's log reached
+  343MB while the Linux hosts' did not.
 
   ## Why copytruncate, not rename
 
