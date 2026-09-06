@@ -10,6 +10,7 @@ import {
   showToast,
 } from './utils.js'
 import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
+import { agentGroups } from '../forms/agentGroups.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
@@ -311,6 +312,7 @@ function savePersist(uid: string, state: DetailPersist): void {
  */
 interface AgentRecord {
   id: string
+  cli?: string
   model?: string
   default?: boolean
   effort_levels?: string[]
@@ -3533,14 +3535,19 @@ export class FiberDetailModal {
     const defaultAgent = current.agent
       ? undefined
       : base.find((a) => a.default)?.id
-    for (const agent of base) {
-      const opt = document.createElement('option')
-      opt.value = agent.id
-      opt.textContent = agent.model ? `${agent.id} (${agent.model})` : agent.id
-      if (agent.id === current.agent || (!current.agent && agent.id === defaultAgent)) {
-        opt.selected = true
+    for (const group of agentGroups(base)) {
+      const optgroup = document.createElement('optgroup')
+      optgroup.label = group.label
+      for (const agent of group.agents) {
+        const opt = document.createElement('option')
+        opt.value = agent.id
+        opt.textContent = agent.model ? `${agent.id} (${agent.model})` : agent.id
+        if (agent.id === current.agent || (!current.agent && agent.id === defaultAgent)) {
+          opt.selected = true
+        }
+        optgroup.append(opt)
       }
-      agentSelect.append(opt)
+      agentSelect.append(optgroup)
     }
     // A current agent absent from the registry stays selectable as a custom
     // entry so an unknown id isn't silently rewritten on the next edit.

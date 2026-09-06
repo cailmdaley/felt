@@ -26,6 +26,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { agentGroups } from './agentGroups'
 import {
   AddProjectPath,
   HostPicker,
@@ -45,6 +46,7 @@ import { shuttleOrigin } from './projectModel'
 
 export interface AgentEntry {
   id: string
+  cli?: string
   model?: string
   default: boolean
   /** Harness-native effort tokens this agent accepts; empty/absent = no effort axis. */
@@ -713,10 +715,14 @@ export function StashForm({
                     onChange={(e) => handleAgentChange(e.target.value)}
                   >
                     <option value="">Default ({defaultAgentLabel})</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {agentLabel(a)}{a.default ? ' (default)' : ''}
-                      </option>
+                    {agentGroups(agents).map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.agents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {agentLabel(a)}{a.default ? ' (default)' : ''}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 ) : (

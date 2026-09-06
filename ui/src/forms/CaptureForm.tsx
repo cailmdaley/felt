@@ -32,6 +32,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import type { AgentEntry } from './StashForm'
+import { agentGroups } from './agentGroups'
 import { shuttleOrigin } from './projectModel'
 import {
   AddProjectPath,
@@ -288,10 +289,14 @@ export function CaptureForm({
               value={agent}
               onChange={(e) => handleAgentChange(e.target.value)}
             >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.id}{a.id === CAPTURE_DEFAULT_AGENT ? ' (default)' : ''}
-                </option>
+              {agentGroups(agents).map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.id}{a.id === CAPTURE_DEFAULT_AGENT ? ' (default)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>
