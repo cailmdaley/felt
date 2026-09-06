@@ -66,6 +66,16 @@ defmodule Shuttle.RemoteRegistry do
   # the auto-heal path (one successful probe resets the breaker).
   @default_tripped_poll_floor_ms 60_000
 
+  # A tripped breaker is a pause, never a verdict. Expiring SSH credentials
+  # are ordinary weather on this fleet: the hub cannot fix them, and the
+  # remote cannot recover on its own, because the daemon that a passive probe
+  # would reach is exactly what the cascade's `restart_remote` step exists to
+  # revive. So a breaker that only un-trips on a successful passive probe is
+  # a permanent give-up wearing a retry's clothes. After each cooldown the
+  # breaker re-arms and climbs the ladder once more, spacing the attempts out
+  # as repeated trips make a quick recovery less likely.
+  @default_trip_cooldown_schedule_ms [900_000, 1_800_000, 3_600_000]
+
   defmodule Recovery do
     @moduledoc false
     defstruct state: :healthy,
@@ -73,6 +83,7 @@ defmodule Shuttle.RemoteRegistry do
               consecutive_failures: 0,
               attempt: 0,
               backoff_index: 0,
+              trip_count: 0,
               last_error: nil,
               last_action: nil,
               next_retry_at: nil,
@@ -93,6 +104,7 @@ defmodule Shuttle.RemoteRegistry do
       :restart_wait_ms,
       :backoff_schedule_ms,
       :tripped_poll_floor_ms,
+      :trip_cooldown_schedule_ms,
       :user_uid,
       :remotes_token,
       reload_from_file?: false,
@@ -123,8 +135,9 @@ defmodule Shuttle.RemoteRegistry do
       recovery cascade starts. Defaults to 3.
     * `:trip_threshold` — full cascade attempts that may fail before
       the circuit breaker trips. Once tripped the registry keeps the
-      cheap passive HTTP polling but takes no recovery actions until a
-      probe succeeds or `reset_breaker/2` is called. Defaults to 3.
+      cheap passive HTTP polling and takes no recovery actions until a
+      probe succeeds, the trip cooldown elapses, or `reset_breaker/2`
+      is called. Defaults to 3.
     * `:bounce_wait_ms` — wait after `launchctl kickstart` before the
       post-bounce probe. Defaults to 5_000.
     * `:restart_wait_ms` — wait after restarting the remote daemon
@@ -135,6 +148,16 @@ defmodule Shuttle.RemoteRegistry do
       breaker has tripped (the remote's own `poll_interval_ms` still
       wins when larger). Defaults to 60_000; tests set it low to keep
       driving tripped remotes deterministically.
+    * `:trip_cooldown_schedule_ms` — how long a tripped breaker waits
+      before re-arming itself and running one more full cascade,
+      indexed by how many times it has already tripped. Defaults to
+      `[900_000, 1_800_000, 3_600_000]` (15min, 30min, then hourly for
+      every trip after that). The cap is deliberately short: the fleet's
+      most common outage is an expired SSH credential, which the human
+      fixes on their own schedule, and the hub should notice within the
+      hour rather than waiting for someone to remember it exists. There
+      is no terminal state — the breaker paces recovery attempts, it
+      never abandons a remote.
     * `:user_uid` — override the local GUI UID used for `launchctl`
       labels (tests). Defaults to `$UID` / `id -u`.
     * `:auto_poll` — whether to schedule the registry's background
@@ -233,6 +256,9 @@ defmodule Shuttle.RemoteRegistry do
     tripped_poll_floor_ms =
       Keyword.get(opts, :tripped_poll_floor_ms, @default_tripped_poll_floor_ms)
 
+    trip_cooldown_schedule_ms =
+      Keyword.get(opts, :trip_cooldown_schedule_ms, @default_trip_cooldown_schedule_ms)
+
     backoff_schedule_ms =
       Keyword.get(opts, :backoff_schedule_ms, @default_backoff_schedule_ms)
 
@@ -260,6 +286,7 @@ defmodule Shuttle.RemoteRegistry do
       restart_wait_ms: restart_wait_ms,
       backoff_schedule_ms: backoff_schedule_ms,
       tripped_poll_floor_ms: tripped_poll_floor_ms,
+      trip_cooldown_schedule_ms: trip_cooldown_schedule_ms,
       user_uid: user_uid,
       snapshots: snapshots,
       reload_from_file?: reload_from_file?,
@@ -383,6 +410,9 @@ defmodule Shuttle.RemoteRegistry do
 
   defp poll_remote(%{recovery: %Recovery{} = recovery} = entry, state, now, now_ms) do
     cond do
+      trip_cooldown_elapsed?(recovery, now) ->
+        rearm_breaker(entry, now)
+
       recovery_action_due?(recovery, now) ->
         run_recovery_step(entry, state, now)
 
@@ -632,8 +662,13 @@ defmodule Shuttle.RemoteRegistry do
             # shuttle-launch over SSH) only adds load — fall back to
             # passive polling until a probe succeeds or an operator
             # calls `reset_breaker/2`.
+            trip_count = recovery.trip_count + 1
+            cooldown_ms = trip_cooldown_ms(trip_count, state.trip_cooldown_schedule_ms)
+            retry_at = add_ms(now, cooldown_ms)
+
             Logger.warning(
-              "RemoteRegistry: #{remote.name} circuit tripped after #{recovery.attempt} revive attempts; passive polling only"
+              "RemoteRegistry: #{remote.name} circuit tripped after #{recovery.attempt} revive attempts; " <>
+                "passive polling only, retrying the cascade at #{DateTime.to_iso8601(retry_at)}"
             )
 
             with_recovery(
@@ -643,9 +678,10 @@ defmodule Shuttle.RemoteRegistry do
                 | state: :tripped,
                   step: nil,
                   action_due_at: nil,
-                  next_retry_at: nil,
+                  next_retry_at: retry_at,
+                  trip_count: trip_count,
                   last_error:
-                    "circuit tripped after #{recovery.attempt} revive attempts; passive polling only",
+                    "circuit tripped after #{recovery.attempt} revive attempts; passive polling until #{DateTime.to_iso8601(retry_at)}",
                   last_action: "circuit breaker tripped"
               }
             )
@@ -804,6 +840,41 @@ defmodule Shuttle.RemoteRegistry do
 
   defp next_backoff_ms(_recovery, _schedule), do: List.last(@default_backoff_schedule_ms)
 
+  # The tripped breaker's one exit that needs no human and no lucky passive
+  # probe: the cooldown runs out and the cascade gets another full run.
+  defp trip_cooldown_elapsed?(%Recovery{state: :tripped, next_retry_at: %DateTime{} = at}, now) do
+    DateTime.compare(now, at) != :lt
+  end
+
+  defp trip_cooldown_elapsed?(_recovery, _now), do: false
+
+  defp rearm_breaker(%{remote: remote, recovery: recovery} = entry, now) do
+    Logger.info(
+      "RemoteRegistry: #{remote.name} trip cooldown elapsed (trip #{recovery.trip_count}); re-running recovery cascade"
+    )
+
+    with_recovery(entry, %{
+      recovery
+      | state: :degraded,
+        step: :bounce_tunnel,
+        action_due_at: now,
+        next_retry_at: nil,
+        attempt: 0,
+        backoff_index: 0,
+        last_action: "trip cooldown elapsed; re-running recovery cascade"
+    })
+  end
+
+  # Trip 1 waits the first entry, trip 2 the second, and every trip after
+  # that the last — a remote nobody can reach settles at the widest spacing
+  # instead of being abandoned.
+  defp trip_cooldown_ms(trip_count, schedule) when is_list(schedule) and schedule != [] do
+    Enum.at(schedule, trip_count - 1, List.last(schedule))
+  end
+
+  defp trip_cooldown_ms(_trip_count, _schedule),
+    do: List.last(@default_trip_cooldown_schedule_ms)
+
   defp with_recovery(entry, %Recovery{} = recovery), do: Map.put(entry, :recovery, recovery)
 
   defp add_ms(%DateTime{} = dt, ms) when is_integer(ms) do
@@ -935,6 +1006,7 @@ defmodule Shuttle.RemoteRegistry do
     %{
       state: recovery.state,
       attempt: recovery.attempt,
+      trip_count: recovery.trip_count,
       last_error: recovery.last_error,
       last_action: recovery.last_action,
       next_retry_at: recovery.next_retry_at

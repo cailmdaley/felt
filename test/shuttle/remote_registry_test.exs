@@ -470,6 +470,11 @@ defmodule Shuttle.RemoteRegistryTest do
           # Most breaker tests keep driving the tripped remote with rapid
           # poll_now calls; the production floor (60s) would freeze them.
           tripped_poll_floor_ms: Keyword.get(opts, :tripped_poll_floor_ms, 1),
+          # Production waits 30min before re-arming; most breaker tests want
+          # the tripped state to hold still, so only the re-arm tests shorten
+          # it.
+          trip_cooldown_schedule_ms:
+            Keyword.get(opts, :trip_cooldown_schedule_ms, [1_800_000]),
           user_uid: "501"
         )
     end
@@ -493,10 +498,63 @@ defmodule Shuttle.RemoteRegistryTest do
       tripped = RemoteRegistry.snapshot(:reg_trip, "candide")
       assert tripped.recovery.state == :tripped
       assert tripped.recovery.attempt == 2
-      assert tripped.recovery.next_retry_at == nil
+      assert tripped.recovery.trip_count == 1
 
-      assert tripped.recovery.last_error ==
-               "circuit tripped after 2 revive attempts; passive polling only"
+      # The trip schedules its own re-arm rather than parking forever.
+      assert %DateTime{} = tripped.recovery.next_retry_at
+      assert DateTime.compare(tripped.recovery.next_retry_at, DateTime.utc_now()) == :gt
+
+      assert tripped.recovery.last_error =~
+               "circuit tripped after 2 revive attempts; passive polling until "
+    end
+
+    test "re-arms and re-runs the cascade once the trip cooldown elapses" do
+      # A one-millisecond cooldown: the very next poll finds it elapsed.
+      start_breaker_registry(:reg_trip_rearm, trip_cooldown_schedule_ms: [1])
+      trip_breaker(:reg_trip_rearm)
+      calls_at_trip = length(MockRunner.calls())
+
+      Process.sleep(5)
+      :ok = RemoteRegistry.poll_now(:reg_trip_rearm)
+
+      rearmed = RemoteRegistry.snapshot(:reg_trip_rearm, "candide")
+      assert rearmed.recovery.state == :degraded
+      assert rearmed.recovery.next_retry_at == nil
+      # The attempt counter resets, so the re-armed breaker gets a full
+      # cascade rather than re-tripping on its first failed rung.
+      assert rearmed.recovery.attempt == 0
+      assert rearmed.recovery.last_action == "trip cooldown elapsed; re-running recovery cascade"
+
+      # And it really climbs the ladder again — launchctl/ssh actions fire.
+      run_failed_cascade(:reg_trip_rearm)
+      assert length(MockRunner.calls()) > calls_at_trip
+    end
+
+    test "each successive trip waits longer, and the schedule's last entry is the floor" do
+      start_breaker_registry(:reg_trip_backoff, trip_cooldown_schedule_ms: [1, 1, 1_800_000])
+      trip_breaker(:reg_trip_backoff)
+      assert RemoteRegistry.snapshot(:reg_trip_backoff, "candide").recovery.trip_count == 1
+
+      # Cooldown 1 elapses -> re-arm (attempt back to 0) -> the re-armed
+      # cascade burns its full trip_threshold of attempts -> trip 2, which
+      # draws the second cooldown.
+      rearm_and_fail = fn ->
+        Process.sleep(5)
+        :ok = RemoteRegistry.poll_now(:reg_trip_backoff)
+        Enum.each(1..3, fn _ -> run_failed_cascade(:reg_trip_backoff) end)
+      end
+
+      rearm_and_fail.()
+      assert RemoteRegistry.snapshot(:reg_trip_backoff, "candide").recovery.trip_count == 2
+
+      # Cooldown 2 elapses the same way; trip 3 runs off the end of the
+      # schedule and takes the last (widest) entry — never a give-up.
+      rearm_and_fail.()
+
+      third = RemoteRegistry.snapshot(:reg_trip_backoff, "candide")
+      assert third.recovery.state == :tripped
+      assert third.recovery.trip_count == 3
+      assert DateTime.diff(third.recovery.next_retry_at, DateTime.utc_now()) > 1_000
     end
 
     test "takes no recovery actions while tripped but keeps passive polling" do
@@ -534,6 +592,7 @@ defmodule Shuttle.RemoteRegistryTest do
       refute healed.stale
       assert healed.recovery.state == :healthy
       assert healed.recovery.attempt == 0
+      assert healed.recovery.trip_count == 0
       assert healed.recovery.last_error == nil
     end
 

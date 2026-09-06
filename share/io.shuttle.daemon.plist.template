@@ -92,6 +92,17 @@
         -->
         <key>SSH_AUTH_SOCK</key>
         <string>__SSH_AUTH_SOCK__</string>
+        <!--
+          SHUTTLE_LOG names the very file StandardOutPath/StandardErrorPath
+          below redirect to — all three render from the same placeholder. It
+          exists purely so the daemon can know where its own stdout lands:
+          launchd never tells the process it supervises, and Shuttle.LogRotator
+          has to be able to cap that file (unrotated, the hub's reached 343MB).
+          Without it the rotator falls back to the platform default, which is
+          right for a default install and wrong for any `--log` override.
+        -->
+        <key>SHUTTLE_LOG</key>
+        <string>__LOG__</string>
     </dict>
 
     <key>WorkingDirectory</key>

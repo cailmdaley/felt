@@ -76,6 +76,7 @@ defmodule Shuttle.Application do
     {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
     {:start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
     {:start_waiting_tracker, Shuttle.WaitingTracker},
+    {:start_log_rotator, Shuttle.LogRotator},
     {:start_poller, Shuttle.Poller}
   ]
 

@@ -470,6 +470,10 @@ obvious approach failed:
   hands the daemon a bare per-session Keychain agent that holds only the default
   key, which breaks every SSH the daemon makes to a remote host. Point
   `--ssh-auth-sock` elsewhere if your socket lives elsewhere.
+- **`SHUTTLE_LOG`** — the same file `StandardOutPath` redirects to, rendered
+  from the same `--log`. launchd never tells a process where its stdout went,
+  and the daemon needs to know in order to rotate it (see
+  [Log rotation](#log-rotation)).
 
 Logs go to `~/Library/Logs/shuttle.log` (`make logs` tails it from a checkout).
 Remove the agent with `shuttle uninstall-agent`.
@@ -510,11 +514,38 @@ journalctl --user -u shuttle-daemon        # unit-level events
 tail -f ~/.shuttle/shuttle.log             # the daemon's own log (make logs, in a checkout)
 ```
 
+The unit also exports `SHUTTLE_LOG`, the same file it appends stdout to, so the
+daemon knows where its own log is and can rotate it (see
+[Log rotation](#log-rotation)).
+
 Logs go to `~/.shuttle/shuttle.log` on Linux — beside the daemon's other state,
 and the same file `make start` and the respawn loop write, so `make logs` finds
 it whichever path is running. Remove the unit with `shuttle uninstall-agent`.
 
 `install-agent` kills the tmux respawn loop first; both would bind `:4000`.
+
+### Log rotation
+
+The daemon rotates its own log, and every autossh tunnel log under
+`~/.local/state/shuttle/`, on an hourly timer: a file past **64MB** is copied to
+`<file>.1` (replacing the previous generation) and truncated back to zero. One
+pass also runs at daemon startup, so a restart onto an already-huge log caps it
+immediately. Unrotated, these grow without bound — one hub's `shuttle.log`
+reached 343MB.
+
+It **copies and truncates** rather than renaming, because the supervisor holds
+the log open on an append-mode fd for the daemon's whole lifetime. A rename
+follows the inode, so the renamed file would keep receiving every write while
+the new one stayed empty forever. Truncating in place keeps the inode, and the
+holder's next append lands at the new EOF. `bin/shuttle-launch` and the systemd
+unit's `ExecStartPre` still `mv` at 50MB — that is safe for them, and only for
+them, because they run between daemon processes, while nothing holds the file.
+
+This is why the rendered job carries `SHUTTLE_LOG`: neither launchd nor systemd
+tells a process where its stdout was redirected. Without it the daemon falls
+back to the platform default (`~/Library/Logs/shuttle.log`,
+`~/.shuttle/shuttle.log`), which is right for a default install and wrong for
+any `--log` override. The tmux respawn loop rides that fallback by design.
 
 ### Linux without systemd (tmux respawn loop)
 

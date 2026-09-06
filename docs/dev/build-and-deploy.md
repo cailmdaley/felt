@@ -140,16 +140,32 @@ still bound. **A host with large felt stores can take minutes to start** — it
 walks every store and adopts orphan sessions before binding `:4000`; wait it
 out, don't assume a crash.
 
-**`RemoteRegistry`'s circuit breaker — a remote gets 3 failed revive cascades,
-then a human.** Each configured remote is driven by a recovery state machine;
-after `trip_threshold` (default 3) consecutive failed revive cascades it trips
-and stops taking recovery action — the RemoteRegistry keeps passively polling
-the remote's health at a decimated cadence (an unhealthy remote is polled far
-less often than a healthy one) but will not itself re-attempt revival. The
-breaker auto-heals on a successful probe (no human step needed when the remote
-just comes back). To force one more cascade before that: `bin/shuttle reset
-<remote>` or `POST /api/v1/remotes/:name/reset` — one reset buys exactly one
-cascade, and it 409s if the breaker isn't currently tripped.
+**`RemoteRegistry`'s circuit breaker paces revival attempts; it never abandons
+a remote.** Each configured remote is driven by a recovery state machine; after
+`trip_threshold` (default 3) consecutive failed revive cascades it trips and
+stops taking recovery action — the RemoteRegistry keeps passively polling the
+remote's health at a decimated cadence (an unhealthy remote is polled far less
+often than a healthy one). A tripped breaker has three exits, and needing a
+human is only one of them:
+
+- **The passive probe succeeds** — the remote came back on its own, and the
+  breaker resets with no human step.
+- **The trip cooldown elapses** — the breaker re-arms itself and runs one more
+  full cascade, with the attempt counter reset so it gets the whole ladder
+  again. `trip_cooldown_schedule_ms` (default 15min, 30min, then hourly)
+  widens the gap with each successive trip.
+- **`bin/shuttle reset <remote>`** or `POST /api/v1/remotes/:name/reset` —
+  forces a cascade now instead of waiting out the cooldown. One reset buys
+  exactly one cascade, and it 409s if the breaker isn't currently tripped.
+
+The cooldown exists because the fleet's most common outage — an expired SSH
+credential — is one neither end can fix and a passive probe can never see
+through: the tunnel is down, so the remote daemon is unreachable, and the
+cascade's `restart_remote` rung is the only thing that could revive it. A
+breaker whose sole automatic exit was a successful passive probe would
+therefore be a permanent give-up wearing a retry's clothes, and was: a hub once
+sat on a tripped remote for twelve hours across that host's reboot, waiting for
+a human who did not know to look.
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
 kanban with Stash/Capture and the fiber/file viewer, plus the Day, Week,

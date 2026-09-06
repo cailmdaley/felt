@@ -7,6 +7,9 @@ config :shuttle,
   # true` to Poller.start_link explicitly.
   boot_quarantine: false,
   start_waiting_tracker: false,
+  # Left off in the suite so no test run can copytruncate the developer's real
+  # ~/Library/Logs/shuttle.log. log_rotator_test starts its own against tmp_dir.
+  start_log_rotator: false,
   start_remote_registry: false,
   start_remote_fiber_registry: false,
   start_remote_temporal_registry: false,

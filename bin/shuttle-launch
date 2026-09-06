@@ -77,6 +77,12 @@ if [ "${1:-}" = "--loop" ]; then
   # monster that once outran diagnosis. Override the path with $SHUTTLE_LOG.
   LOG="${SHUTTLE_LOG:-$HOME/.shuttle/shuttle.log}"
   mkdir -p "$(dirname "$LOG")"
+  # Export the resolved path, not just the override: Shuttle.LogRotator caps
+  # this same file on an hourly timer (the mv below only fires between
+  # respawns), and it must never rotate a different file than the one the loop
+  # is appending to. The rendered plist/unit export SHUTTLE_LOG for the same
+  # reason.
+  export SHUTTLE_LOG="$LOG"
   backoff=2
   while :; do
     if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then

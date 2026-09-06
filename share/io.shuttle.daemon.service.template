@@ -65,6 +65,13 @@ Environment=FELT_STORES=__FELT_STORES__
 # from the rendered unit when the value is empty — on Linux the agent socket
 # has no canonical path, and an empty setting is worse than none.
 Environment=SSH_AUTH_SOCK=__SSH_AUTH_SOCK__
+# SHUTTLE_LOG names the same file StandardOutput/StandardError append to below
+# — all three render from the same placeholder. It exists so the daemon can
+# know where its own stdout lands, which systemd never tells it: Shuttle.LogRotator caps that
+# file on an hourly timer, where the ExecStartPre above only fires at restart.
+# Without it the rotator falls back to the platform default, right for a
+# default install and wrong for any `--log` override.
+Environment=SHUTTLE_LOG=__LOG__
 
 # The launchd analogs: KeepAlive + ThrottleInterval 10.
 Restart=always

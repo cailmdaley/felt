@@ -107,7 +107,7 @@ today — the time views count minutes from activity buckets, not tokens.
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (owner-routed; `bin/shuttle release`) |
-| `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+| `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/version | jq
