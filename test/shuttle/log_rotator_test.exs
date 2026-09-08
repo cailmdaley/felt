@@ -12,7 +12,11 @@ defmodule Shuttle.LogRotatorTest do
   # :tunnel_log_dir exist for exactly that.
   defp start_rotator(opts) do
     opts = Keyword.merge([interval_ms: :timer.hours(24), name: nil], opts)
-    start_supervised!({LogRotator, opts})
+    pid = start_supervised!({LogRotator, opts})
+    # start_link returns before handle_continue completes. Wait for the
+    # startup pass before callers create files for a manual rotation.
+    :sys.get_state(pid)
+    pid
   end
 
   defp write(path, bytes), do: File.write!(path, String.duplicate("x", bytes))
@@ -66,9 +70,7 @@ defmodule Shuttle.LogRotatorTest do
       write(log, 4_000)
 
       capture_log(fn ->
-        pid = start_rotator(paths: [log], tunnel_log_dir: nil, max_bytes: 1_000)
-        # A call is ordered after the handle_continue that runs the pass.
-        :sys.get_state(pid)
+        start_rotator(paths: [log], tunnel_log_dir: nil, max_bytes: 1_000)
       end)
 
       assert File.stat!(log).size == 0
