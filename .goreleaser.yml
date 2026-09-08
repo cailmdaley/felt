@@ -13,7 +13,8 @@ before:
     # release whose manifests still show the previous version means no
     # client actually picks up the new content. Use scripts/release.sh
     # to keep these in sync automatically.
-    - bash -c 'claude_v=$(jq -r .version claude-plugin/.claude-plugin/plugin.json); codex_v=$(jq -r .version claude-plugin/.codex-plugin/plugin.json); if [ "$claude_v" != "{{ .Version }}" ] || [ "$codex_v" != "{{ .Version }}" ]; then echo "plugin manifests at $claude_v / $codex_v, tag at {{ .Version }} — bump via scripts/release.sh" >&2; exit 1; fi'
+    - >-
+      bash -c 'claude_v=$(jq -r .version claude-plugin/.claude-plugin/plugin.json); codex_v=$(jq -r .version claude-plugin/.codex-plugin/plugin.json); if [ "$claude_v" != "$codex_v" ]; then echo "plugin manifests disagree: claude=$claude_v codex=$codex_v" >&2; exit 1; fi; case "{{ .Version }}" in *-SNAPSHOT-*) exit 0 ;; esac; if [ "$claude_v" != "{{ .Version }}" ]; then echo "plugin manifests at $claude_v / $codex_v, tag at {{ .Version }} — bump via scripts/release.sh" >&2; exit 1; fi'
 
 builds:
   - env:
@@ -28,7 +29,8 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -37,7 +39,8 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 # A tag carrying a prerelease segment (v1.1.0-rc.1) is published as a GitHub
 # *prerelease*. That single flag is what makes release candidates safe: both
@@ -48,6 +51,14 @@ archives:
 # Without this block `prerelease` defaults to false and an RC would ship to
 # everyone as a normal release.
 release:
+  # The daemon artifacts are built and boot-tested in a native matrix after
+  # GoReleaser. Keep the GitHub release private until every required asset has
+  # passed that matrix; the final workflow job removes the draft flag.
+  draft: true
+  # A failed native matrix leaves this draft behind. Re-running the tag should
+  # repair that release rather than collide with its existing CLI assets.
+  use_existing_draft: true
+  replace_existing_artifacts: true
   prerelease: auto
 
 changelog:
@@ -71,7 +82,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/cailmdaley/felt
-    description: DAG-native task tracker. Markdown files with dependencies.
+    description: Markdown-native fiber tracker and autonomous work orchestrator.
     license: MIT
     test: |
       system "#{bin}/felt", "--help"
@@ -80,9 +91,9 @@ brews:
     # Refresh integrations in lockstep with the binary so users who
     # `brew upgrade felt` pick up new hooks and skills without a separate
     # step. The Claude plugin refresh is skipped silently if the claude CLI
-    # isn't on PATH; the Codex refresh is gated by `felt update`'s own
-    # detection of an installed Codex setup, so a no-Codex machine is a
-    # no-op.
+    # isn't on PATH; Codex and pi refreshes are gated on their existing
+    # integrations, so upgrading felt never installs a new harness integration
+    # just because its CLI happens to be present.
     post_install: |
       if which("claude")
         system "#{bin}/felt", "setup", "claude"
@@ -102,8 +113,21 @@ brews:
       if codex_installed && which("codex")
         system "#{bin}/felt", "setup", "codex"
       end
+      # pi stores package sources in ~/.pi/agent/settings.json. Match only
+      # Felt's GitHub package here: a local development checkout is owned by
+      # the developer and must not be replaced by a Homebrew upgrade.
+      pi_settings = "#{ENV["HOME"]}/.pi/agent/settings.json"
+      pi_installed = File.exist?(pi_settings) && File.read(pi_settings).include?("git:github.com/cailmdaley/felt")
+      if pi_installed && which("pi")
+        system "#{bin}/felt", "setup", "pi"
+      end
     # Snapshot first, deliberately: Go's `or` short-circuits, so a local
     # `goreleaser --snapshot` never reaches .Env.GITHUB_REPOSITORY (an unset
     # key there is a hard template error). .Prerelease is the tag's suffix —
     # "rc.1" for v1.1.0-rc.1, empty for v1.1.0.
-    skip_upload: '{{ if or .IsSnapshot (ne .Prerelease "") (ne .Env.GITHUB_REPOSITORY "cailmdaley/felt") }}true{{ else }}false{{ end }}'
+    # The GitHub release is deliberately a draft while the native daemon
+    # matrix is running. Do not update the tap during that window either: a
+    # formula pointing at draft assets is just as broken as a public release
+    # missing its daemon assets. The final workflow job retrieves this formula
+    # after publishing the complete release and writes it to the tap.
+    skip_upload: '{{ if or .IsSnapshot .IsDraft (ne .Prerelease "") (ne .Env.GITHUB_REPOSITORY "cailmdaley/felt") }}true{{ else }}false{{ end }}'

@@ -99,7 +99,7 @@ jobs:
         run: mix test
 
   ui:
-    name: UI (board bundle — vite build)
+    name: UI (board bundle — tests + vite build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -114,6 +114,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # npm test deliberately runs the board suite twice under pinned
+      # America/Los_Angeles and Europe/Paris offsets. The civil-day logic can
+      # pass in one timezone and fail in the other, so this is a release gate.
+      - name: Run board tests
+        run: npm test
 
       # Ambient declarations in src/paper/lightcone.d.ts satisfy the typecheck
       # even without the private lightcone-ui checkout, and vite.config's

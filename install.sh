@@ -72,6 +72,33 @@ download_asset() {
   fi
 }
 
+# Validate an extracted asset before replacing anything in the user's PATH.
+# A GitHub tag can exist with an incomplete or mismatched asset if a release
+# was interrupted; fail while the old installation is still intact.
+verify_cli() {
+  _binary="$1"
+  _expected="${TAG#v}"
+  _line="$("$_binary" --version 2>/dev/null | head -1 || true)"
+  _actual="$(printf '%s\n' "$_line" | awk '{print $3}')"
+  if [ "$_actual" != "$_expected" ]; then
+    echo "Downloaded felt reports version '${_actual:-unknown}', expected ${_expected}." >&2
+    echo "Refusing to replace ${INSTALL_DIR}/felt." >&2
+    exit 1
+  fi
+}
+
+verify_shuttle() {
+  _binary="$1"
+  _expected="${TAG#v}"
+  _line="$("$_binary" version 2>/dev/null | head -1 || true)"
+  _actual="$(printf '%s\n' "$_line" | awk '{print $2}')"
+  if [ "$_actual" != "$_expected" ]; then
+    echo "Downloaded shuttle reports version '${_actual:-unknown}', expected ${_expected}." >&2
+    echo "Refusing to replace ${SHUTTLE_HOME}." >&2
+    exit 1
+  fi
+}
+
 echo "Installing felt ${TAG} (${OS}/${ARCH})..."
 
 # Download and extract
@@ -80,18 +107,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 download_asset "felt_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/felt.tar.gz"
 tar xzf "$TMPDIR/felt.tar.gz" -C "$TMPDIR"
-
-# Install
-mkdir -p "$INSTALL_DIR"
-mv "$TMPDIR/felt" "$INSTALL_DIR/felt"
-
-echo "felt ${TAG} installed to ${INSTALL_DIR}/felt"
-
-# Check PATH
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
-esac
+verify_cli "$TMPDIR/felt"
 
 # ── shuttle daemon (opt-in) ────────────────────────────────────────────────
 # SHUTTLE=1 also installs the shuttle daemon: an ERTS-bundled Mix release
@@ -104,6 +120,24 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   echo "Installing shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
   download_asset "shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttle.tar.gz"
   tar xzf "$TMPDIR/shuttle.tar.gz" -C "$TMPDIR"
+  verify_shuttle "$TMPDIR/shuttle/bin/shuttled"
+fi
+
+# Both assets have been downloaded and checked before either installation is
+# changed. A missing or mismatched optional daemon asset therefore leaves an
+# existing CLI untouched as well.
+mkdir -p "$INSTALL_DIR"
+mv "$TMPDIR/felt" "$INSTALL_DIR/felt"
+
+echo "felt ${TAG} installed to ${INSTALL_DIR}/felt"
+
+# Check PATH
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*) ;;
+  *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
+esac
+
+if [ "${SHUTTLE:-0}" = "1" ]; then
   rm -rf "$SHUTTLE_HOME"
   mkdir -p "$(dirname "$SHUTTLE_HOME")"
   mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"

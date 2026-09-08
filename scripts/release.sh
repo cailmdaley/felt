@@ -39,9 +39,39 @@ fi
 # Run from the repo root regardless of where it was invoked from.
 cd "$(git rev-parse --show-toplevel)"
 
+# A release is always cut from the public main branch after it has caught up
+# with origin. This prevents a stale checkout from creating a tag that the
+# printed `git push origin main ...` command cannot reproduce.
+if [ "$(git branch --show-current)" != "main" ]; then
+    echo "ERROR: releases must be cut from the main branch" >&2
+    exit 1
+fi
+if ! git fetch --quiet origin main --tags; then
+    echo "ERROR: could not refresh origin/main and tags; refusing to release" >&2
+    exit 1
+fi
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+    echo "ERROR: HEAD is not aligned with origin/main; push or integrate changes before releasing" >&2
+    git rev-list --left-right --count HEAD...origin/main >&2 || true
+    exit 1
+fi
+
+MANIFESTS=(
+    claude-plugin/.claude-plugin/plugin.json
+    claude-plugin/.codex-plugin/plugin.json
+)
+
 # Refuse if working tree is dirty (other than the manifests we're about
 # to bump). Releasing on top of unrelated WIP creates muddy commits.
-if ! git diff --quiet --ignore-submodules HEAD -- ':!claude-plugin/.claude-plugin/plugin.json' ':!claude-plugin/.codex-plugin/plugin.json'; then
+dirty_path=""
+while IFS= read -r status_line; do
+    path="${status_line:3}"
+    case "$path" in
+        "${MANIFESTS[0]}"|"${MANIFESTS[1]}") ;;
+        *) dirty_path="$path"; break ;;
+    esac
+done < <(git status --porcelain=v1 --untracked-files=all)
+if [ -n "$dirty_path" ]; then
     echo "ERROR: working tree has uncommitted changes outside the plugin manifests" >&2
     git status -s | head -10 >&2
     exit 1
@@ -50,6 +80,14 @@ fi
 # Refuse if tag already exists.
 if git rev-parse --verify --quiet "$TAG" >/dev/null; then
     echo "ERROR: tag $TAG already exists" >&2
+    exit 1
+fi
+if ! REMOTE_TAGS="$(git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
+    echo "ERROR: could not check whether $TAG already exists on origin" >&2
+    exit 1
+fi
+if [ -n "$REMOTE_TAGS" ]; then
+    echo "ERROR: tag $TAG already exists on origin" >&2
     exit 1
 fi
 
@@ -78,11 +116,6 @@ if [ "${SKIP_DOCS_AUDIT:-0}" != "1" ]; then
     esac
 fi
 
-MANIFESTS=(
-    claude-plugin/.claude-plugin/plugin.json
-    claude-plugin/.codex-plugin/plugin.json
-)
-
 for f in "${MANIFESTS[@]}"; do
     if [ ! -f "$f" ]; then
         echo "ERROR: missing $f" >&2
@@ -101,7 +134,7 @@ done
 
 # Only commit if anything actually changed. Re-running for the same
 # version is a no-op (e.g. the bump was already committed manually).
-if ! git diff --quiet -- "${MANIFESTS[@]}"; then
+if ! git diff --quiet HEAD -- "${MANIFESTS[@]}"; then
     git add "${MANIFESTS[@]}"
     git commit -m "Bump plugin manifests to $VERSION"
     echo "✓ Committed version bump"
