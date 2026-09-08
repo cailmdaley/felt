@@ -15,18 +15,13 @@ Either way the daemon needs `tmux` and the `felt` CLI at runtime: workers run in
 tmux sessions, and the daemon shells out to `felt` for every store walk and
 every write.
 
-!!! warning "This path is currently fleet-oriented"
-    shuttle runs on one person's machines: a macOS hub and a few HPC login
-    nodes, and it is still shaped around that — see
-    [Honest scoping](index.md#honest-scoping). [Sharp edges](#sharp-edges) below
-    names each rough patch you will actually trip over.
-
-    **Platform:** Linux and macOS both support single-host use — the daemon,
-    the board, and workers on one machine, with a real keep-alive (a
-    supervisor that restarts the daemon if it crashes — more on this below)
-    on either. Multi-host tunnel management (`felt shuttle tunnels`) installs
-    launchd jobs on macOS and systemd user units on Linux, so a hub can be
-    either. macOS gets the most use. Windows is unsupported.
+!!! note "Platform and operating modes"
+    Linux and macOS support single-host use — the daemon, board, and workers on
+    one machine, with a keep-alive supervisor that restarts the daemon if it
+    crashes. Multi-host tunnel management (`felt shuttle tunnels`) installs
+    launchd jobs on macOS and systemd user units on Linux. Multi-host operation
+    needs SSH access and additional host configuration; see [Honest
+    scoping](index.md#honest-scoping). Windows is unsupported.
 
 This page gets you from nothing to a worker running on the board. The
 [Keep-alive](#keep-alive) internals, store/agent/remote configuration, and the
@@ -49,7 +44,7 @@ needs:
 | Tool | Required | Purpose |
 | --- | --- | --- |
 | `go` 1.23+ | yes | Builds the `felt` CLI from the same checkout, so the CLI and the daemon never skew. |
-| `elixir` 1.19+ / OTP 28 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a release runs the OTP that built it. |
+| `elixir` 1.19+ / OTP 28 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. A fetched daemon ships the bundle already built. |
 
 `bootstrap.sh` checks all of these and names what is missing.
@@ -85,14 +80,16 @@ same tarball — `shuttle install-agent`, walked through step by step for macOS 
 [Set up a supervised daemon on macOS](#set-up-a-supervised-daemon-on-macos) and
 covered in full under [Keep-alive](#keep-alive).
 
-What you downloaded is a Mix release: the daemon's compiled modules, the Erlang
-runtime they run on, and the board bundle, in one directory tree. It reads
-nothing from the host's toolchain, which is why this path asks for no Elixir
-and no Node. The bundled runtime is also what makes the tarball
-platform-specific — compiled BEAM modules and the runtime itself both target
-one OS, architecture and OTP version — so CI builds each tarball on a native
-runner instead of cross-compiling one, and boot-tests it there before attaching
-it. The matrix covers four: `shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+What you downloaded is a Mix release: the daemon's compiled modules, the
+bundled Erlang runtime and native components, and the board bundle, in one
+directory tree. It reads nothing from the host's toolchain, which is why this
+path asks for no Elixir and no Node. The bundled runtime and native components
+make each tarball platform-specific: the target needs a matching OS and CPU
+architecture plus compatible system libraries such as libc, but it does not
+need an installed OTP because the release carries its own runtime. CI builds
+each tarball on a native runner instead of cross-compiling one, and boot-tests
+it there before attaching it. The matrix covers four:
+`shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
 
 Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The
@@ -209,31 +206,26 @@ That unloads the job and deletes the plist, which stops the running daemon too.
 Nothing else goes: the release, your store, and the daemon's state in
 `~/.shuttle` all survive, and `install-agent` puts the job back.
 
-### Release candidates
+<a id="release-candidates"></a>
+### Pin a release
 
-A tag with a prerelease segment — `v1.1.0-rc.1` — publishes as a GitHub
-*prerelease*: the same build, the same assets, flagged. Nothing routes to it.
-The install script and `felt update` both resolve a version through GitHub's
-`releases/latest` API, and that endpoint answers with the newest release that is
-*not* a prerelease, so a candidate is invisible to both. The Homebrew tap skips
-prereleases for the same reason from the other side: a tap has no channel
-concept, so bumping the formula would hand every `brew upgrade felt` user a
-candidate.
-
-Pinning `FELT_VERSION` is the way in. It skips the `releases/latest` lookup and
-fetches that exact tag — the CLI and the daemon together, both stamped with it:
+The installer and `felt update` select the latest stable GitHub release by
+default. Set `FELT_VERSION` when you need an exact tag; it skips the
+`releases/latest` lookup and fetches that tag for the CLI and daemon together:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=1.1.0-rc.1 SHUTTLE=1 sh
+  | FELT_VERSION=1.1.0 SHUTTLE=1 sh
 ```
 
-Both variables sit after the pipe, for the reason above, and this is the case
-where getting it wrong hurts most: an install that silently drops
-`FELT_VERSION` hands you the latest stable while reporting success. The tag is
-accepted with or without its leading `v`. If it publishes no daemon tarball for
-your platform, the install fails naming the tag and the asset it looked for
-rather than leaving a bare `curl` error.
+Replace `1.1.0` with the tag you want. Both variables sit after the pipe, for
+the reason above: an install that silently drops `FELT_VERSION` fetches the
+latest stable instead. The tag is accepted with or without its leading `v`. If
+it has no daemon tarball for your platform, the install names the tag and the
+missing asset rather than leaving a bare `curl` error.
+
+Prerelease tags and release candidates are excluded from latest and Homebrew
+selection. Pin one explicitly with `FELT_VERSION` when you want to test it.
 
 A fetched daemon reports the tag it was built from, so you can check what you
 are actually running:
@@ -242,11 +234,9 @@ are actually running:
 curl -s http://127.0.0.1:4000/api/v1/version    # mix_vsn is the release tag
 ```
 
-To leave a candidate behind, `felt update` takes the CLI back to the latest
-stable: it compares your version against `releases/latest` and swaps whenever
-the two differ, so a candidate reads as out of date and updates *downward*. The
-daemon has no self-update — run the install line again without `FELT_VERSION`
-and the stable tarball replaces `$SHUTTLE_HOME`.
+To return to the latest stable, run `felt update` without a pin. The daemon has
+no self-update — run the install line again without `FELT_VERSION` and the
+stable tarball replaces `$SHUTTLE_HOME`.
 
 ## Build from a checkout
 
@@ -305,8 +295,11 @@ started in the foreground logs to your terminal instead.
 Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
 
 The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
-construction. It carries no auth layer, because nothing off the machine can
-reach it.
+construction, but it carries no authentication layer. Treat it as a trusted
+single-user admin surface: anyone who can reach it through an SSH forward,
+Tailscale Serve, or another proxy can read and edit fibers, control workers,
+and launch agents. Keep any forwarding limited to people and networks you
+trust; do not publish the port to the open internet.
 
 ## From an empty board to a first dispatch
 
@@ -748,13 +741,22 @@ tailscale serve status
 The first `serve` prints a one-time link to enable Serve on the tailnet;
 approve it in the browser and the command completes. Any device signed into
 the same tailnet (the Tailscale iOS app, say) opens the URL directly; the URL
-is tailnet-only, TLS is Tailscale's. The board composites the whole fleet from
-that daemon's `remotes.json`, so which host fronts it is a question of
-uptime, not reach — a laptop asleep is a board offline.
+is tailnet-only, TLS is Tailscale's. Tailnet membership therefore grants access
+to the daemon's full trusted-user surface, not a read-only dashboard. The board
+composites the whole fleet from that daemon's `remotes.json`, so which host
+fronts it is a question of uptime, not reach — a laptop asleep is a board
+offline.
 
 ## Sharp edges
 
 Roughly in the order a new installer hits them.
+
+**Fiber files are trusted content.** `/file` serves arbitrary absolute paths so
+reports and companion artifacts can render. HTML artifacts run inside the board
+as same-origin iframes, and interactive reports may execute JavaScript. Do not
+point a publicly reachable daemon at stores containing untrusted HTML or
+reports; the daemon's trusted-user boundary applies to files as well as API
+writes.
 
 **Every restart arms a boot quarantine.** On every (re)start the daemon parks
 each dispatchable candidate it has never observed running into `pending_launch`.
@@ -854,17 +856,18 @@ window, not the daemon failing. Answer it and the board fills; warm, the same
 walk is instant. So after pointing the daemon at a store in iCloud or any other
 location macOS guards, go find the prompt before you judge an empty board.
 
-**`make restart` silently no-ops under a supervisor.** `make stop` matches the
-daemon by a relative-path pattern; launchd and systemd both launch it by
-absolute path. So once the agent is installed, `make restart` rebuilds the
-release, stops nothing, and reports "already running." Bounce it properly:
+**A supervisor respawns the daemon after `make stop`.** The Makefile's release
+pattern matches `bin/rel` in both relative and absolute paths, so `make restart`
+can rebuild and cycle a supervisor-owned checkout. Use the supervisor directly
+when you want its service state to be explicit:
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
 systemctl --user restart shuttle-daemon                 # Linux
 ```
 
-`make restart` works only when you started the daemon with `make start`.
+`make restart` also works for a daemon started with `make start`; in either case,
+the command waits for `/api/v1/version` after the replacement boots.
 
 **`felt shuttle tunnels` needs a fleet file first.** It renders autossh jobs
 from `~/.config/felt/remotes.json` — launchd plists on macOS, systemd user units

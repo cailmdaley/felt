@@ -97,7 +97,7 @@ lives in the docs site (`docs/`, published to
   the fiber instead.
 - **`shuttle.agent` field drives agent selection.** The `shuttle:` block's
   `agent:` field resolves against the registry. Default agent is
-  `claude-sonnet`.
+  `claude-opus` (from `internal/shuttle/agents.builtin.json`).
 - **`shuttle.host` field drives daemon affinity — strictly.** A daemon
   dispatches a block iff `block.host == own_host_id` (`SHUTTLE_HOST`, else
   `~/.shuttle/host`, else the normalized OS hostname, seeded into that file so
@@ -146,11 +146,11 @@ cd ui && npm test          # vitest, run TWICE under two pinned TZs
                            # (America/Los_Angeles, Europe/Paris)
 ```
 
-**The board suite runs twice on purpose, and CI does not run it at all.** The
+**The board suite runs twice on purpose, in both local tests and CI.** The
 second pinned offset is where the civil-day logic breaks, so a hand-run `npx
-vitest run` can go green on a change `make test` would fail. CI type-checks and
-builds the bundle but never invokes vitest — `cd ui && npm test` is a local-only
-gate, which makes it the easiest one to skip and the one worth not skipping.
+vitest run` can go green on a change `make test` would fail. CI runs `npm test`
+under America/Los_Angeles and Europe/Paris, then type-checks and builds the
+bundle with `npm run build`.
 
 ### Deploying
 

@@ -37,10 +37,13 @@ is not enough.
 | `POST /kill` | owner-routed | Hard-kill a fiber's live worker |
 | `POST /claim` | owner-routed | Register an externally-spawned tmux session as a fiber's worker |
 | `POST /capture` | owner-routed | Launch a session from a free-text prompt; it files the fiber and claims itself |
+| `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /felt-stores` | local | Persist this daemon's registered felt stores |
+| `POST /projects` | owner-routed | Register a picker project and initialize its `.felt/` when needed |
+| `POST /choose-folder` | owner-routed | Open the owning host's native folder picker and return the chosen path |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
 
 ## Read plane
@@ -50,6 +53,7 @@ is not enough.
 | `GET /fibers` | local | Every fiber this daemon's stores expose |
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
+| `GET /search` | local | Search constitution bodies in this daemon's configured stores |
 | `GET /agents` | local | The effective agent registry (shells `felt shuttle agents --json`) |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
@@ -98,6 +102,16 @@ name the machine that ran the session, or omit it and the daemon consults its
 own session ledger. A transcript is one machine's file, not a feed to merge, so
 there is deliberately no `/moment/composite`. `/spend` has no board consumer
 today — the time views count minutes from activity buckets, not tokens.
+
+The composite siblings are:
+
+| Route | Reads | Serves |
+|---|---|---|
+| `GET /activity/composite` | local feed + remote caches | Cross-host activity buckets with per-origin freshness |
+| `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings |
+| `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
+| `GET /spend/composite` | local transcripts + remote caches | Cross-host token rollups |
+| `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
 
 ## Operator routes
 

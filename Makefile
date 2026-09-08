@@ -1,6 +1,6 @@
 # felt — unified CLI + Shuttle daemon
 #
-# Two artifacts live in this one repo:
+# Three shipped artifacts live in this one repo:
 #   - felt         (Go binary)      — the CLI (`felt …`, incl. `felt shuttle <verb>`).
 #                                     `make cli` builds it; `make cli-install` installs
 #                                     it to ~/.local/bin.
@@ -8,8 +8,11 @@
 #     tracked bin/shuttle shim. The release loads its BEAMs at boot, so
 #                                     `make restart` rebuilds + bounces it (the
 #                                     load-bearing daemon dev target).
+#   - ui/dist      (TypeScript bundle) — the board UI served by the daemon. Build it
+#                                     with `cd ui && npm run build`.
 #
-# `make build` builds both. `make install` runs the full from-source bootstrap
+# `make build` builds the CLI and daemon release; it does not build ui/dist.
+# `make install` runs the full from-source bootstrap
 # (bootstrap.sh): build+install the CLI, build the daemon release, place ui/dist,
 # register the loom hook, install the keep-alive. The Elixir daemon embeds no
 # agent registry — it reads the already-resolved record off felt's
@@ -73,8 +76,8 @@ AGENT_PATH ?=
         logs status clean help install install-agent uninstall-agent lint-personal
 
 help:
-	@echo "felt + shuttle (one repo, two artifacts):"
-	@echo "  make build       — build BOTH: felt CLI + daemon release"
+	@echo "felt + shuttle (one repo, three shipped artifacts):"
+	@echo "  make build       — build felt CLI + daemon release (UI: cd ui && npm run build)"
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"

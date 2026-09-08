@@ -2,10 +2,11 @@
 
 Thank you for your interest in felt.
 
-felt is one repo with two code artifacts — the **felt CLI** (Go; the data layer,
-including the `felt shuttle <verb>` subcommands) and the **shuttle daemon**
-(Elixir/OTP Mix release; the dispatcher) — plus the served board **UI**
-(TypeScript; a kanban desk plus four temporal views). See `AGENTS.md` for the full architecture and operator guide.
+felt is one repo with three shipped artifacts — the **felt CLI** (Go; the data
+layer, including the `felt shuttle <verb>` subcommands), the **shuttle daemon**
+(Elixir/OTP Mix release; the dispatcher), and the served board **UI**
+(TypeScript; a kanban desk, three temporal views, and a file canvas). See
+`AGENTS.md` for the full architecture and operator guide.
 
 ## Getting started
 
@@ -14,7 +15,7 @@ git clone https://github.com/cailmdaley/felt
 cd felt
 go build .                    # the felt CLI
 mix deps.get && mix compile   # the daemon
-make build                    # both (CLI + daemon release)
+make build                    # CLI + daemon release; build ui/dist separately
 ```
 
 Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+. Working on the felt CLI
@@ -35,9 +36,8 @@ make test                           # all four
 
 CI runs `go build`/`go test ./...`, `scripts/test-plugin-hooks.sh`, a check
 that the two plugin manifests agree on version, `mix compile
---warnings-as-errors` + `mix test`, and `npm run build` of the board on every
-PR. Note that CI type-checks and builds the board bundle but does not run the
-board's vitest suite — `cd ui && npm test` is a local-only gate today.
+--warnings-as-errors` + `mix test`, and both `npm test` (under the two
+pinned time zones) and `npm run build` for the board on every PR.
 
 ## Invariants
 

@@ -9,7 +9,7 @@ description: >
   **Authoring:** the user mentions a **constitution** (writing, drafting,
   "stash this as a constitution", "shuttle this", "let's shuttle <X>"), or
   names a **shuttle agent** by registry id (`claude-opus`, `claude-fable`,
-  `codex`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
+  `codex-terra`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
   that implies dispatch. The phrase **"shuttle [with] <model-name>"** is
   the canonical author trigger.
   **Operator questions:** the user asks about shuttle itself, the kanban

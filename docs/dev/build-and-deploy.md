@@ -43,14 +43,21 @@ rebinds `:4000`; every `<leaf>-<uid>-shuttle` tmux session keeps running untouch
 re-adopted on boot. So an in-session worker can deploy its own fix and restart the
 daemon freely — never hold a restart because "there's a live session."
 
-**Restarting a launchd-managed daemon needs `launchctl`, not `make restart`.**
-After `make install-agent`, the daemon runs under launchd (`io.shuttle.daemon`)
-with an *absolute* `bin/shuttle` path. `make stop`'s `PIDPATTERN` only matches a
-relative-path shell launch, so against the launchd daemon `make restart` rebuilds
-the release but its stop/start no-ops (start then hits "already running"). Bounce
-it with **`launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon`** — KeepAlive
-respawns the rebuilt release. (`make restart` is right only when the daemon was
-shell-started via `make start`.)
+**A supervisor owns the daemon's restart policy.** After `make install-agent`,
+launchd (`io.shuttle.daemon`) or the systemd user unit starts the daemon with an
+absolute path. `make stop` identifies the release boot path under `bin/rel`
+whether that path is absolute or relative, but a supervisor immediately
+respawns a process that it owns. Use the supervisor for an explicit cycle:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
+systemctl --user restart shuttle-daemon                 # Linux
+```
+
+After rebuilding with `make daemon`, `make restart` also works: it stops the
+matching release process and `make start` waits for the supervisor's replacement
+to answer. A daemon started by `make start` follows the same target without a
+supervisor.
 
 ## Deploying
 
@@ -108,12 +115,12 @@ model choice); even then, surface the alternatives in the fiber and keep moving
 rather than treating the deploy *mechanics* as the gate.
 
 **Deploying to a remote host:** push to your git remote first, then build on the
-host. A release bundles its own ERTS, so a tarball built for the same OS/arch
-*would* run elsewhere — but a checkout host still builds on-host via
-`make daemon`, both because that's the fleet's normal deploy path and because
-BEAM bytecode format varies across OTP versions, so a release built under a
-different OTP than the one on the target host will crash on startup. The
-respawn loop is driven by `~/.local/bin/shuttle-launch` — a
+host. The checkout deployment convention builds on-host via `make daemon`, which
+keeps the source revision and native release environment aligned. A packaged
+release carries its own ERTS, so the target's installed OTP version does not
+need to match the build host; it is still platform-specific, and the target
+must have a compatible OS, CPU architecture, libc, and runtime environment.
+The respawn loop is driven by `~/.local/bin/shuttle-launch` — a
 copy of the tracked `bin/shuttle-launch` that `bootstrap.sh` installs (repo
 resolved via `SHUTTLE_DIR` or the script's own location; the loop backs off
 exponentially on fast daemon exits, 2s→300s).
@@ -127,18 +134,21 @@ payload. A new `git_short_sha` only proves `BuildInfo` was rebuilt; if the live
 payload still has old semantics, run `make clean && make daemon`, then let the
 respawn loop restart the daemon from the clean release.
 
-**A supervised daemon is not yours to cycle with `make stop`/`make all`.** Under
-systemd, use `systemctl --user restart shuttle-daemon`. Where `shuttle-launch
---loop` runs in tmux session `shuttle-daemon` instead,
-that loop owns the live daemon. `make stop`/`make all` target the
-pidfile that `make start` writes, which is *not* the respawn-spawned daemon, so
-they can build a fresh release yet leave the old one serving `:4000`. To
-actually cycle to the new release, **kill the `:4000` listener directly**
-(`lsof -ti:4000 -sTCP:LISTEN | xargs kill`) — the respawn loop restarts it from
-the rebuilt release. Confirm `git_short_sha` flipped; if not, the old process is
-still bound. **A host with large felt stores can take minutes to start** — it
-walks every store and adopts orphan sessions before binding `:4000`; wait it
-out, don't assume a crash.
+**A supervisor owns the live daemon.** Under systemd, use
+`systemctl --user restart shuttle-daemon`; under launchd, use the `launchctl`
+command above. `make stop` can find a release started by either a relative or an
+absolute path, but it is not a durable stop while the supervisor is enabled.
+Where `shuttle-launch --loop` runs in tmux session `shuttle-daemon`, kill the
+`:4000` listener directly so the loop respawns it from the rebuilt release:
+
+```bash
+lsof -ti:4000 -sTCP:LISTEN | xargs kill
+```
+
+Confirm `git_short_sha` flipped; if not, the old process is still bound. **A
+host with large felt stores can take minutes to start** — it walks every store
+and adopts orphan sessions before binding `:4000`; wait it out, don't assume a
+crash.
 
 **`RemoteRegistry`'s circuit breaker paces revival attempts; it never abandons
 a remote.** Each configured remote is driven by a recovery state machine; after
@@ -214,27 +224,22 @@ built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon release**
 (`bin/rel`, from `lib/`, launched through the tracked `bin/shuttle` shim); and
 the **UI bundle** (`ui/dist`, from `ui/`).
 Editing `lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
-`make cli-install`); editing the UI needs `cd ui && npm test` (CI never runs it)
-plus `npm run build` + rsync.
+`make cli-install`); editing the UI needs `cd ui && npm test` (the two pinned
+time zones also run in CI) plus `npm run build` + rsync.
 
 **`bin/rel` is a Mix release** — an ERTS-bundled directory built by
 `MIX_ENV=prod mix release shuttled --overwrite --path bin/rel`, launched via
 `bin/rel/bin/shuttled`. A restart without `make daemon` is a no-op for picking
 up source edits. `make restart` always.
 
-**The release loads modules lazily, and that keeps one escript-era hazard
-alive.** Mix releases run in `:interactive` code-loading mode (verified:
-`bin/rel/bin/shuttled eval 'IO.inspect(:code.get_mode())'` → `:interactive`;
-nothing in `vm.args` sets `-mode embedded`). So modules load from
-`bin/rel/lib/*/ebin` on first reference, exactly as the escript loaded them
-from its own file — and rebuilding under a running daemon can still let a
-not-yet-referenced module (`Shuttle.BuildInfo`) load from the NEW build while
-the long-booted Poller keeps running the OLD code. That is why deploy
-verification checks `booted_at` as well as `git_short_sha`: a sha alone can be
-told by a stale daemon, a boot time cannot. `bin/shuttle` itself is a tracked POSIX shell shim, not a build
-artifact — it execs the release launcher for `start` and speaks HTTP to the
-running daemon for the read verbs (snapshot, status, dispatch, release, reset,
-version).
+**A running release does not switch to a newly built release.** `bin/rel` is a
+Mix release — an ERTS-bundled directory with compiled modules — and a running
+BEAM process keeps using the release it booted. Rebuild and restart together;
+then verify both `booted_at` and `git_short_sha` so the response proves that the
+new process is serving. `bin/shuttle` itself is a tracked POSIX shell shim, not a
+build artifact — it execs the release launcher for `start` and speaks HTTP to
+the running daemon for the read verbs (snapshot, status, dispatch, release,
+reset, version).
 
 If `mix release` warns about a stale build shadowing a fresh one, run
 `make clean` first — stray `.beam` files at the project root shadow the real

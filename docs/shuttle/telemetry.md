@@ -28,7 +28,7 @@ event; `Shuttle.Activity` folds those lines into a **per-minute histogram** —
 one bucket per `{minute, tmux session, cwd, kind}` — which is what the time
 views draw.
 
-The eight hook types collapse into three kinds, plus one facet laid over them:
+The seven hook types collapse into three kinds, plus one facet laid over them:
 
 - **attention** — a human typed (`UserPromptSubmit`), unless the event carries
   `machine: true`, meaning the harness injected that prompt and nobody was

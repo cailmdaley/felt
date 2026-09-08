@@ -64,12 +64,11 @@ bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandbox
 SHUTTLE_REAL_HARNESS_SMOKE=1 mix test --only integration test/shuttle/real_harness_smoke_test.exs
 ```
 
-**The board suite runs twice on purpose, and CI does not run it at all.** The
+**The board suite runs twice on purpose, in both local tests and CI.** The
 second pinned offset is where the civil-day logic breaks, so a hand-run `npx
-vitest run` can go green on a change `make test` would fail. CI type-checks and
-builds the bundle (`npm run build`) but never invokes vitest — `cd ui && npm
-test` is a local-only gate, which makes it the easiest one to skip and the one
-worth not skipping.
+vitest run` can go green on a change `make test` would fail. CI runs `npm test`
+under America/Los_Angeles and Europe/Paris, then type-checks and builds the
+bundle with `npm run build`.
 
 The real harness smoke is deliberately outside ordinary `mix test`. It uses
 tmux session names like `shuttle-harness-smoke-<harness>-<unique>`, records

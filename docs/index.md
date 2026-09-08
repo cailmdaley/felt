@@ -3,14 +3,9 @@
 **felt tracks the durable trail that builds up around work, from the command
 line.**
 
-!!! warning "A personal experiment, evolving fast"
-
-    felt is a personal experiment in agentic working practices, and it will keep
-    evolving with the state of the field. It moves fast, it is shaped by one
-    person's daily use, and it makes no promise of backwards compatibility —
-    expect commands, formats and defaults to change between versions. Your
-    fibers are plain markdown in your own git repository, so the trail survives
-    whatever felt does next. That is the guarantee on offer.
+felt is a personal-scale tool for a trusted user working with coding agents.
+Your fibers remain plain Markdown in your own Git repository, so the trail stays
+readable and versioned alongside the work.
 
 Each entry — a *fiber* — lives in its own directory under `.felt/`. The
 directory holds a `<slug>.md` file with YAML frontmatter and a plain markdown
@@ -61,7 +56,8 @@ tools can layer their own schema without felt claiming it.
 
 ## felt and shuttle
 
-This repository builds two things.
+This repository ships three artifacts across two layers: the **felt** CLI, the
+**shuttle** daemon, and the board UI served by that daemon.
 
 **felt** gives you the CLI and the data model. Most people need nothing more.
 It runs with no daemon, no server, and no runtime dependencies. Only `felt
@@ -77,8 +73,7 @@ per eligible fiber, and serves a [board](shuttle/board.md) at
 views for seeing where the time went. Workers hand off to each other through
 the fiber, so a piece of work can span many sessions.
 
-shuttle stays the more experimental half, and it runs the author's machines
-every day. The daemon installs the way the CLI does:
+The daemon installs the way the CLI does:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
@@ -87,9 +82,14 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | S
 That fetches a prebuilt daemon for your platform, carrying its own Erlang
 runtime and the board bundle, so the host needs no toolchain to run it. (The
 variable goes after the pipe, on `sh`. In front of `curl` it sets curl's
-environment and the script never sees it.) What is still rough is operating it:
+environment and the script never sees it.) Single-host use is supported on
+Linux and macOS. Multi-host operation adds SSH tunnels and host configuration;
 see [Honest scoping](shuttle/index.md#honest-scoping). Ignore shuttle and felt
 behaves the same.
+
+![Shuttle board with example data](assets/shuttle-board-example.png)
+
+*Shuttle board with example data.*
 
 ## Where to go next
 

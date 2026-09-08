@@ -109,7 +109,7 @@ tags:
   - <topic>
 shuttle:
   kind: standing
-  agent: claude-opus            # or claude-sonnet, codex, any registry id
+  agent: claude-opus            # or claude-sonnet, codex-terra, any registry id
   host: <owning-daemon-host-id>
   project_dir: /abs/path/on/host
   schedule:

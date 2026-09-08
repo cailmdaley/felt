@@ -45,17 +45,18 @@ So when authoring: if a flow has a human-gated step, **write the gate into the s
 
 ## Agent selection
 
-Felt ships a small built-in registry. It covers the Claude CLI, the Codex CLI, and a `human` pseudo-agent for work only a person can do.
+Felt ships a small built-in registry for the Claude, Codex, and pi CLIs. There
+is no reserved `human` agent; write a human gate into the constitution when a
+step needs the person.
 
 | Agent | Use for |
 |---|---|
-| `claude-opus` | **The recommended default for real work.** The bulk of dispatches — taste-y implementation, design/UX/narrative, architecture, exploratory work. Defaults to `xhigh` effort. |
+| `claude-opus` | **The recommended default for real work.** The bulk of dispatches — taste-y implementation, design/UX/narrative, architecture, exploratory work. Defaults to `medium` effort. |
 | `claude-fable` | The heavyweight. Subagent/workflow orchestration (fan-out surveys, migrations, in-session adversarial review), the hardest architecture and taste work, arcs that should converge in one dispatch instead of five. Reach for it when the task earns it, not by default. |
-| `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. This is also the bare fallback when a fiber names no agent. |
+| `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. Choose it explicitly when you want that tier; an unnamed fiber uses the registry default, `claude-opus`. |
 | `claude-haiku` | Cheap and fast. Easy, repetitive, or low-stakes tasks. |
-| `codex` | Hard well-defined implementation — gritty refactors, tight algorithmic problems, work that wants the codex CLI's harness (sandbox, head-down focus). |
-| `codex-luna` | The price-performance outlier: roughly a tenth of the comparable Claude tiers (luna high outperforms sonnet high; luna max is comparable to opus low). The default for cheap or high-volume dispatches where the codex harness fits. |
-| `human` | The step no agent should take. Parks the card for a person. |
+| `codex-sol`, `codex-terra`, `codex-luna` | Hard well-defined implementation — gritty refactors and tight algorithmic problems that suit the Codex CLI's sandboxed, head-down harness. Choose the tier that fits the task. |
+| `pi-luna`, `pi-openai-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash` | Provider-backed pi dispatches. Use `felt shuttle agents` to see which providers are configured on this host. |
 
 `claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
 
