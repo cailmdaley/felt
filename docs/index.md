@@ -84,7 +84,7 @@ runtime and the board bundle, so the host needs no toolchain to run it. (The
 variable goes after the pipe, on `sh`. In front of `curl` it sets curl's
 environment and the script never sees it.) Single-host use is supported on
 Linux and macOS. Multi-host operation adds SSH tunnels and host configuration;
-see [Honest scoping](shuttle/index.md#honest-scoping). Ignore shuttle and felt
+see [Installation](shuttle/installation.md). Ignore shuttle and felt
 behaves the same.
 
 ![Shuttle board with example data](assets/shuttle-board-example.png)

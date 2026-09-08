@@ -10,12 +10,12 @@
 #                                             # no live master — human must approve
 #
 # Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
-# safe"): pull → make daemon → cycle the daemon (kill the :4000 listener, then
+# safe"): pull → make build → cycle the daemon (kill the :4000 listener, then
 # let the host's own supervisor bring it back — launchd kickstart on macOS, a
 # systemd user unit's Restart=always, or the tmux respawn loop) → verify
 # git_short_sha flipped → release the boot quarantine the restart armed.
-# Remote hosts also get ui/dist rsync'd (clusters don't build the UI; macOS is
-# the build host). The operator agent registry is synced too: the board reads
+# Each host builds its CLI, daemon, and UI using its login-shell environment.
+# The operator agent registry is synced too: the board reads
 # the local registry, while owner-routed mutations resolve agents on the
 # owning host.
 #
@@ -35,7 +35,7 @@ AGENTS_FILE="${FELT_AGENTS_FILE:-$HOME/.config/felt/agents.json}"
 
 # The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags.
 # jq if it is installed, python3 otherwise — the file is read on the deploy host
-# only, so this needs no cluster-side dependency. Both accept either document
+# only, so this needs no remote-side dependency. Both accept either document
 # shape the Go and Elixir readers accept: {"remotes": [...]} or a bare list.
 read_fleet() {
   [ -f "$FLEET_FILE" ] || return 0
@@ -107,12 +107,9 @@ try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
   return 1
 }
 
-# Clusters keep their toolchain under ~/.local (kerl OTP + precompiled Elixir +
-# Go), not on the default PATH of a non-interactive ssh shell. The build step
-# also runs under `bash -lc`, so a host whose toolchain lives wherever its own
-# login shell says (asdf shims relocated off a quota'd $HOME, say) still finds
-# `mix` without this list knowing about it.
-REMOTE_PATH='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:$HOME/.local/elixir/bin:$HOME/.local/otp/27/bin:$PATH'
+# SSH joins its command arguments into shell text. Quote both the checkout
+# path inside the build command and that command inside the remote bash call.
+shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
 ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
@@ -163,12 +160,10 @@ version_sha() { # $1 = "" (local) | host
   version_json "$1" | sed -n 's/.*"git_short_sha":"\([^"]*\)".*/\1/p'
 }
 
-# The daemon's runtime boot stamp. Load-bearing alongside the sha: the escript
-# loads modules lazily from disk, so git_short_sha can report the FRESH build
-# out of a STALE long-booted daemon (BuildInfo first referenced after the
-# escript file was replaced). A daemon is only verified when the sha matches
-# AND it booted after this deploy started. Old daemons without booted_at
-# return "" — treated as unverified.
+# Verify a fresh daemon boot as well as the build SHA: rebuilding a release
+# does not restart the running BEAM. A daemon is verified only when its SHA
+# matches and it booted after this deploy started. Missing booted_at is
+# treated as unverified.
 version_booted_at() { # $1 = "" | host
   version_json "$1" | sed -n 's/.*"booted_at":"\([^"]*\)".*/\1/p'
 }
@@ -195,28 +190,29 @@ wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA from
 
 deploy_local() {
   say "local ($TARGET_SHA)"
-  (cd "$REPO" && make daemon >/dev/null) || { bad "make daemon failed"; return 1; }
+  bash -lc "cd $(shell_quote "$REPO") && make build" >/dev/null \
+    || { bad "make build failed"; return 1; }
   # Kill the :4000 listener FIRST: the daemon may be running outside launchd
   # (a hand-started `bin/shuttle start`), where kickstart restarts nothing and
-  # the old BEAM keeps running stale code while lazily serving the new
-  # BuildInfo sha. The booted_at check in wait_for_sha catches that lie; this
-  # makes the cycle actually happen.
+  # the old BEAM keeps running the previous release. The booted_at check in
+  # wait_for_sha verifies that the cycle actually happened.
   lsof -ti:4000 -sTCP:LISTEN | xargs -r kill 2>/dev/null; sleep 2
   launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
-    || (cd "$REPO" && make restart >/dev/null)
+    || bash -lc "cd $(shell_quote "$REPO") && make restart" >/dev/null
   wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
   release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
 }
 
 deploy_remote() {
-  local host="$1" dir dest flags
+  local host="$1" dir dest flags build_cmd
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
-  ssh $flags "$dest" "bash -lc '$REMOTE_PATH && cd $dir && git pull --ff-only -q && make daemon'" >/dev/null \
+  build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && make build"
+  ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
     || { bad "pull/build failed"; return 1; }
   if [ -f "$AGENTS_FILE" ]; then
     ssh $flags "$dest" "mkdir -p ~/.config/felt" \
@@ -224,9 +220,7 @@ deploy_remote() {
     rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:.config/felt/agents.json" \
       || { bad "could not sync agent registry"; return 1; }
   fi
-  rsync -az -e "ssh $flags" "$REPO/ui/dist/" "$dest:$dir/ui/dist/" 2>/dev/null || true
-  # Cycle: the respawn loop owns the daemon; kill the :4000 listener and it
-  # restarts from the rebuilt escript (make stop targets the wrong pidfile).
+  # Cycle the listener; the host's supervisor starts the rebuilt release.
   ssh $flags "$dest" "lsof -ti:4000 -sTCP:LISTEN | xargs -r kill" 2>/dev/null
   wait_for_sha "$host" \
     || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }

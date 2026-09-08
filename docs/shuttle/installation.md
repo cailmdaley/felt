@@ -20,8 +20,7 @@ every write.
     one machine, with a keep-alive supervisor that restarts the daemon if it
     crashes. Multi-host tunnel management (`felt shuttle tunnels`) installs
     launchd jobs on macOS and systemd user units on Linux. Multi-host operation
-    needs SSH access and additional host configuration; see [Honest
-    scoping](index.md#honest-scoping). Windows is unsupported.
+    needs SSH access and configured remote daemons. Windows is unsupported.
 
 This page gets you from nothing to a worker running on the board. The
 [Keep-alive](#keep-alive) internals, store/agent/remote configuration, and the
@@ -45,7 +44,7 @@ needs:
 | --- | --- | --- |
 | `go` 1.23+ | yes | Builds the `felt` CLI from the same checkout, so the CLI and the daemon never skew. |
 | `elixir` 1.19+ / OTP 28 | yes | `daemon/mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
-| `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. A fetched daemon ships the bundle already built. |
+| `node` 22+ / `npm` | yes | Source builds compile the board into `ui/dist` on each host. A fetched daemon ships the bundle already built. |
 
 `scripts/bootstrap.sh` checks all of these and names what is missing.
 
@@ -255,12 +254,11 @@ Six steps run in order.
    the run before anything is built.
 2. **`felt` CLI.** `GOBIN=~/.local/bin go install .` from *this* checkout — not
    the release binary. The daemon shells the CLI, so the two must never skew.
-3. **Daemon release.** `(cd daemon && mix deps.get)`, then `make daemon`, which assembles the
+3. **Daemon release.** `make daemon` assembles the
    release into `bin/rel` and leaves `bin/shuttle` — a tracked shell shim — as
    the front door. The step records the checkout path in `~/.shuttle/repo`, so
    remote revival over SSH can find it without an environment.
-4. **`ui/dist`.** The served board bundle. Built by default when Node is on
-   PATH, skipped otherwise — rsync it from a host that has Node instead.
+4. **`ui/dist`.** Builds the served board bundle with Node and npm on this host.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match the binary. Then it pipes a probe
    payload through `felt hook event` and checks the line it writes. Details in
@@ -270,7 +268,7 @@ Six steps run in order.
    macOS, a systemd user unit on Linux (or a tmux respawn loop where there is
    no systemd user session). Details in [Keep-alive](#keep-alive).
 
-Useful flags: `--dry-run`, `--skip-ui`, `--build-ui`, `--skip-hook`,
+Useful flags: `--dry-run`, `--skip-hook`,
 `--skip-cli`, `--with-tunnels`.
 
 Editing daemon source means rebuilding: the release runs the compiled modules
@@ -809,13 +807,11 @@ default. A record whose CLI is absent or unauthenticated fails at dispatch, not
 at install. Use `builtins: "restrict"` when a host should expose only the
 subset it can run — see [Configuring agents](#configuring-agents).
 
-**`make daemon` refreshes the felt CLI when Go is available.** The daemon
-shells the felt CLI for its writes, so a stale installed CLI can break
-daemon-shelled commands mid-dispatch — `make daemon` rebuilds it first whenever
-Go is on PATH. On a host with no Go toolchain, `make daemon` builds only the
-daemon release, against whatever `felt` is already installed there.
-`scripts/bootstrap.sh --skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it
-skips the CLI rebuild too, even on a host that has Go.
+**Source builds compile all three components on each host.** `make build` builds
+the CLI, the UI, and the daemon release; `make daemon` builds only the release.
+Go, Elixir/OTP, and Node/npm must be available in the build shell.
+The fleet deploy helper uses each host's login shell to load its toolchain.
+Fetched releases need none of these build tools.
 
 **The UI build needs no private checkout.** `npm run build` runs `tsc --noEmit
 && vite build`. The `src/paper` entry imports `@lightcone/renderer`, a private

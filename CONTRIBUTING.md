@@ -15,10 +15,10 @@ git clone https://github.com/cailmdaley/felt
 cd felt
 go build .                    # the felt CLI
 (cd daemon && mix deps.get && mix compile)  # the daemon
-make build                    # CLI + daemon release; build ui/dist separately
+make build                    # CLI + UI + daemon release
 ```
 
-Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+. Working on the felt CLI
+Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+, Node 22+ and npm. Working on the felt CLI
 alone needs only Go. `tmux` matters once you touch the shuttle daemon or its
 dispatch path — it launches each worker in a tmux session. Node 22+ is needed to
 build the UI bundle (`cd ui && npm run build`) and to run the board's test

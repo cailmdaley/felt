@@ -34,6 +34,7 @@ felt/
 `daemon/deps/` and `daemon/_build/` are Mix-managed and gitignored.
 The tracked `bin/shuttle` shim launches `bin/rel/bin/shuttled`.
 Run root Make targets for the daily loop; run direct Mix commands inside `daemon/`.
+`make build` builds the CLI, UI, and daemon; `make ui` builds just the board.
 The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
 
 The UI harnesses mount real components against a mocked daemon.

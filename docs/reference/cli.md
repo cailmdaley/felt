@@ -148,5 +148,4 @@ untouched by any of this.
 !!! note
     `felt shuttle remotes`, `tunnels`, `validate-identity`, `mark-runtime`, and
     `migrate-runtime` serve daemon and fleet plumbing. An adopter running
-    shuttle solo will not need them — see
-    [Honest scoping](../shuttle/index.md#honest-scoping).
+    shuttle solo will not need them.

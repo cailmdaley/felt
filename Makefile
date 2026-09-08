@@ -11,7 +11,7 @@
 #   - ui/dist      (TypeScript bundle) — the board UI served by the daemon. Build it
 #                                     with `cd ui && npm run build`.
 #
-# `make build` builds the CLI and daemon release; it does not build ui/dist.
+# `make build` builds the CLI, UI bundle, and daemon release.
 # `make install` runs the full from-source bootstrap
 # (scripts/bootstrap.sh): build+install the CLI, build the daemon release, place ui/dist,
 # register the loom hook, install the keep-alive. The Elixir daemon embeds no
@@ -26,12 +26,8 @@
 # way: the autossh jobs it installs are launchd LaunchAgents on macOS and
 # systemd --user units on Linux, so either platform can be the fleet's hub.
 #
-# On Linux hosts without a Go toolchain, `make all` / `make daemon`
-# build only the daemon release automatically (no Go on PATH -> no CLI rebuild). On a
-# host that DOES have Go, daemon rebuilds the CLI first to keep the two in
-# lockstep; pass SKIP_CLI=1 to force-skip that and build against whatever felt
-# is already on PATH (this is what scripts/bootstrap.sh --skip-cli does). `make build`
-# (both) is a Mac/dev convenience and needs `go` on PATH.
+# Source builds use Go, Elixir/OTP, and Node/npm on the host's PATH.
+# `make daemon SKIP_CLI=1` can reuse an already-installed felt CLI.
 
 # SKIP_CLI=1 makes `daemon` skip the felt-CLI rebuild step (see daemon: below).
 SKIP_CLI ?=
@@ -71,13 +67,14 @@ PIDPATTERN := [b]in/rel/releases/.*/start
 AGENT_FELT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install daemon test go-test mix-test js-test plugin-hooks-test \
+.PHONY: build cli cli-install ui daemon test go-test mix-test js-test plugin-hooks-test bootstrap-test \
         all start stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
 help:
 	@echo "felt + shuttle (one repo, three shipped artifacts):"
-	@echo "  make build       — build felt CLI + daemon release (UI: cd ui && npm run build)"
+	@echo "  make build       — build felt CLI + UI bundle + daemon release"
+	@echo "  make ui          — build the board bundle (npm ci + npm run build)"
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"
@@ -87,7 +84,7 @@ help:
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
 	@echo "daemon lifecycle:"
-	@echo "  make restart     — daemon (rebuild release) + stop + start  [load-bearing]"
+	@echo "  make restart     — UI + daemon (rebuild release) + stop + start  [load-bearing]"
 	@echo "  make all         — restart"
 	@echo "  make start       — start daemon detached (logs → $(LOG))"
 	@echo "  make stop        — SIGTERM the running daemon"
@@ -98,11 +95,14 @@ help:
 	@echo "  make clean       — remove daemon/_build, stray .beam files, built binaries"
 
 # ── build ──────────────────────────────────────────────────────────────────
-# `build` is the everything-target; `cli` and `daemon` are the per-artifact ones.
-build: cli daemon
+# `build` is the everything-target; `cli`, `ui`, and `daemon` build individual artifacts.
+build: cli ui daemon
 
 cli:
 	go build .
+
+ui:
+	cd ui && npm ci && npm run build
 
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install .
@@ -145,7 +145,7 @@ endif
 	mv bin/rel.next bin/rel
 
 # ── test ─────────────────────────────────────────────────────────────────
-test: go-test mix-test js-test plugin-hooks-test
+test: go-test mix-test js-test plugin-hooks-test bootstrap-test
 
 go-test:
 	go test ./...
@@ -161,6 +161,9 @@ js-test:
 # The shell shim layer the Go and Elixir suites cannot reach: hooks.json's
 # ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT} fallback and felt-bin.sh's PATH
 # resolution for GUI-launched agents. Runs with HOME and PATH sandboxed.
+bootstrap-test:
+	bash scripts/test-bootstrap.sh
+
 plugin-hooks-test:
 	bash scripts/test-plugin-hooks.sh
 
@@ -218,9 +221,10 @@ stop:
 	  echo "shuttle not running"; \
 	fi
 
-# Rebuild the daemon release (NOT the Go CLI) then bounce — the fast daemon dev loop,
-# safe on a host with no Go toolchain.
-restart: daemon stop start
+# Rebuild the UI and daemon together before restarting the service.
+restart: ui daemon
+	$(MAKE) stop
+	$(MAKE) start
 
 # ── One-command bootstrap ─────────────────────────────────────────────────
 # The full fresh-machine install: prerequisites → felt CLI → daemon release →

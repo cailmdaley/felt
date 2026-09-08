@@ -87,34 +87,12 @@ prior transcript.
   Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
   liveness, and the activity, session and commit [ledgers](telemetry.md) for
   every host it can reach (the **fleet** — one or more daemons working
-  together, aggregated at a hub; see [Honest scoping](#honest-scoping) below).
+  together, aggregated at a hub).
   It holds no state of its own. Skip it if you like:
   the CLI covers every lifecycle operation. (Cycles are the one thing only the
   board draws — see [Cycles and eras](cycles.md).)
 - **The agent registry** — maps an agent id (`claude-opus`, `codex-terra`,
   `pi-luna`, …) to a CLI invocation. `felt shuttle agents` prints it.
-
-## Honest scoping
-
-One thing is still rough, and the other pages point here for it. It is about
-operating a fleet rather than running the daemon.
-
-**Deploy assumes a hub that builds the board.** `bin/shuttle-deploy` pulls and
-rebuilds on every host in the fleet file, and rsyncs `ui/dist` out from the
-machine you run it on, because a cluster login node is not expected to have
-Node. Each of those hosts is a checkout.
-
-Everything else that used to sit in this list is closed. The release pipeline
-builds a daemon tarball per platform — Linux and macOS, x86_64 and arm64 — each
-carrying its own Erlang runtime and the board bundle, so running the daemon
-needs no Erlang, Elixir or Node. That tarball also carries its own keep-alive:
-`shuttle install-agent` renders the launchd plist or the systemd user unit from
-templates inside the release, so a fetched daemon supervises itself with no
-checkout and no `make` (see [Installation](installation.md#keep-alive)). A Linux
-machine can be a hub as well as a remote — `felt shuttle tunnels install` writes
-systemd user units there and launchd jobs on macOS. The commit ledger has a
-shipped writer, so the Chronicle narrates without a hand-installed hook. The
-examples name no particular store.
 
 ## Next
 

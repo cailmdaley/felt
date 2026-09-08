@@ -39,6 +39,9 @@ jobs:
       - name: Plugin hook tests
         run: bash scripts/test-plugin-hooks.sh
 
+      - name: Bootstrap login shell and failure handling
+        run: bash scripts/test-bootstrap.sh
+
       # The two plugin manifests ship as one plugin; .goreleaser.yml refuses to
       # release when they disagree. Catch the drift at PR time instead.
       - name: Plugin manifests agree on version

@@ -122,16 +122,17 @@ lives in the docs site (`docs/`, published to
 ## The daily loop
 
 ```bash
-make build                 # felt CLI (go build .) + daemon release
+make build                 # felt CLI + UI + daemon release
 make cli-install           # felt CLI only → ~/.local/bin
-make restart               # rebuild release + stop + start  [daemon dev loop]
+make restart               # rebuild UI + release, then stop + start
 make status / make logs    # ps + snapshot / tail the daemon log
 ```
 
 Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing the Go CLI needs `make cli`.
-Editing `ui/` needs `cd ui && npm test` + `npm run build` + rsync of `ui/dist`.
-Under launchd/systemd, `make restart` silently no-ops — bounce with
+Editing `ui/` needs `cd ui && npm test`, then `make restart` from the root.
+Source builds require Go, Elixir/OTP, and Node/npm on each host.
+To cycle a supervised daemon directly, use
 `launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon` or
 `systemctl --user restart shuttle-daemon`.
 
@@ -158,16 +159,16 @@ the watcher, so restarting the daemon never kills running jobs. An autonomous
 worker that has built and verified a change SHOULD deploy it.
 
 ```
-push → on the host: pull → make daemon → rsync ui/dist → cycle the :4000
+push → on the host: pull → make build → cycle the :4000
 listener (the host's supervisor brings it back) → poll /api/v1/version until
 git_short_sha and booted_at both move → bin/shuttle release
 ```
 
-`bin/shuttle-deploy` scripts exactly that across the fleet in
+`bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
 `~/.config/felt/remotes.json`. **Every restart arms the boot quarantine** — no
 autonomous dispatch of any kind proceeds until `bin/shuttle release`. A daemon
-route change is a bundle-rebuild event: rebuild and rsync `ui/dist`, or the
-stale bundle 404s silently. Details:
+route change must ship with the matching UI; `make build` builds both.
+Fetched-release users do not need this checkout deployment helper. Details:
 [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
 
 ## License

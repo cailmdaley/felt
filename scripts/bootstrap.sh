@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # felt + shuttle from-source bootstrap — stand up the full local surface on a
-# fresh machine with a single command, branching by host type.
+# fresh machine with a single command.
 #
 # This is the FLEET / dev installer: it builds everything from this checkout.
 # (End users who only want the `felt` CLI use the release installer instead:
@@ -9,10 +9,10 @@
 #
 # Composes what were separate manual steps into one bootstrap:
 #
-#   1. prerequisites   — honest check (go, elixir/OTP, node, tmux; jq optional)
+#   1. prerequisites   — check (go, elixir/OTP, node, tmux; jq optional)
 #   2. felt CLI        — go install . → ~/.local/bin/felt (the daemon shells to it)
 #   3. daemon release  — mix deps.get + mix release → bin/rel (fronted by bin/shuttle)
-#   4. ui/dist         — the served kanban board (built with npm; rsync'd to hosts without Node)
+#   4. ui/dist         — the served kanban board (built locally with npm)
 #   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
 #   6. keep-alive      — launchd LaunchAgent (macOS) / systemd user unit (Linux),
 #                        falling back to the shuttle-daemon tmux respawn loop
@@ -24,8 +24,6 @@
 # Usage:
 #   ./scripts/bootstrap.sh                 full bootstrap for this host
 #   ./scripts/bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
-#   ./scripts/bootstrap.sh --skip-ui       don't build ui/dist (default when Node isn't on PATH — rsync it instead)
-#   ./scripts/bootstrap.sh --build-ui      force the ui/dist build (default when Node is on PATH)
 #   ./scripts/bootstrap.sh --skip-hook     don't touch the event-stream step
 #   ./scripts/bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
 #   ./scripts/bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (hub-side)
@@ -34,6 +32,10 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if ! shopt -q login_shell; then
+  exec bash -l "$REPO/scripts/bootstrap.sh" "$@"
+fi
+
 OS="$(uname -s)"
 CLI_INSTALL_DIR="${FELT_INSTALL_DIR:-$HOME/.local/bin}"
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -57,12 +59,9 @@ usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 
 
 # ── flags ────────────────────────────────────────────────────────────────
 DRY_RUN=0; SKIP_HOOK=0; SKIP_CLI=0; WITH_TUNNELS=0
-UI_MODE=auto   # auto | build | skip
 for arg in "$@"; do
   case "$arg" in
     --dry-run)      DRY_RUN=1 ;;
-    --skip-ui)      UI_MODE=skip ;;
-    --build-ui)     UI_MODE=build ;;
     --skip-hook)    SKIP_HOOK=1 ;;
     --skip-cli)     SKIP_CLI=1 ;;
     --with-tunnels) WITH_TUNNELS=1 ;;
@@ -71,20 +70,10 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve UI default: build it here if Node is on PATH, else skip (rsync
-# ui/dist from a host that has Node — see AGENTS.md). npm run build needs no
-# private checkout; the ambient src/paper/lightcone.d.ts declarations satisfy
-# its typecheck and the Vite build drops the paper entry when the optional
-# lightcone-ui renderer source isn't present.
-if [ "$UI_MODE" = auto ]; then
-  have node && have npm && UI_MODE=build || UI_MODE=skip
-fi
-
 printf '%s\n' "${BOLD}felt + shuttle bootstrap${RESET}  ${DIM}($OS · $REPO)${RESET}"
 
 # ── 1. prerequisites ───────────────────────────────────────────────────────
-# "Honest about prerequisites" — name what's missing AND how to get it, rather
-# than failing opaquely deep in a build.
+# Check prerequisites before changing the installation.
 step "Prerequisites"
 MISSING_REQUIRED=0
 require() { # name, command, why, hint
@@ -98,7 +87,7 @@ optional() { # name, command, why, hint
 
 if [ "$SKIP_CLI" = 0 ]; then
   require "go"        go      "needed to build the felt CLI (the daemon shells out to it)." \
-          "install Go 1.23+ (brew install go / asdf)."
+          "install the Go version declared in go.mod (brew install go / asdf)."
 fi
 require "elixir/mix"  mix     "needed to build the daemon release." \
         "install Erlang/OTP 28+ and Elixir 1.19+ (brew install elixir / asdf)."
@@ -109,10 +98,8 @@ if [ "$SKIP_CLI" = 1 ]; then
           "drop --skip-cli to build it from this checkout, or put it on PATH (~/.local/bin)."
 fi
 
-if [ "$UI_MODE" = build ]; then
-  require "node"  node "needed to build the served ui/dist board." "install Node 22+ (brew install node / nvm)."
-  require "npm"   npm  "needed to build the served ui/dist board." "ships with Node."
-fi
+require "node"  node "needed to build the served ui/dist board." "install Node 22+ (brew install node / nvm)."
+require "npm"   npm  "needed to build the served ui/dist board." "ships with Node."
 
 # jq is a nicety now, not a dependency: the event stream is written by the felt
 # binary, and the SessionStart hook falls back to `felt hook session` when jq is
@@ -128,12 +115,6 @@ keepalive_desc() {
   elif have_systemd_user; then echo "systemd user unit (make install-agent: render + enable --now shuttle-daemon.service)"
   else echo "shuttle-daemon respawn loop (tmux: while true; ./bin/shuttle start) — no systemd user session here"; fi
 }
-ui_desc() {
-  case "$UI_MODE" in
-    build) echo "cd ui && npm run build  → ui/dist" ;;
-    skip)  echo "SKIP (rsync ui/dist from a host with Node — see AGENTS.md)" ;;
-  esac
-}
 cli_desc() {
   if [ "$SKIP_CLI" = 1 ]; then echo "SKIP (--skip-cli; felt already on PATH)"
   else echo "go install . → $CLI_INSTALL_DIR/felt"; fi
@@ -143,7 +124,7 @@ if [ "$DRY_RUN" = 1 ]; then
   step "Plan (dry-run — nothing will change)"
   note "2. felt CLI : $(cli_desc)"
   note "3. daemon   : make daemon (fetch deps + build) → bin/rel (fronted by bin/shuttle)"
-  note "4. ui/dist  : $(ui_desc)"
+  note "4. ui/dist  : make ui (npm ci + npm run build) → ui/dist"
   note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
   note "6. keepalive: $(keepalive_desc)"
   [ "$WITH_TUNNELS" = 1 ] && note "+  tunnels  : felt shuttle tunnels install"
@@ -193,17 +174,8 @@ ok "checkout recorded → ~/.shuttle/repo ($REPO)."
 
 # ── 4. ui/dist ─────────────────────────────────────────────────────────────
 step "UI bundle (ui/dist)"
-if [ "$UI_MODE" = build ]; then
-  ( cd "$REPO/ui" && { [ -d node_modules ] || npm ci || npm install; } && npm run build ) \
-    && ok "ui/dist built." \
-    || { warn "ui/dist build failed."
-         note "build ui/dist on a host with Node and rsync it over:"
-         note "  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; }
-else
-  if [ -d "$REPO/ui/dist" ]; then ok "ui/dist present (not rebuilt)."
-  else warn "ui/dist absent and not built on this host."
-       note "build it on a host with Node and rsync it over:  rsync -az --delete ui/dist/ <host>:$REPO/ui/dist/"; fi
-fi
+make -C "$REPO" ui || die "UI bundle build failed."
+ok "ui/dist built."
 
 # ── 5. event stream ─────────────────────────────────────────────────────────
 # The daemon derives per-session activity + the sent-files trail from this

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Acceptance test: clean-Linux-container bootstrap.sh run (the stranger test).
 # Runs inside elixir:1.19 (debian) as an unprivileged user with no systemd,
-# no node — exercising the honest degradation paths.
+# and the source-build toolchain installed.
 set -euo pipefail
 
 fail() { echo "ACCEPTANCE-FAIL: $1"; exit 1; }
@@ -9,7 +9,7 @@ fail() { echo "ACCEPTANCE-FAIL: $1"; exit 1; }
 echo "=== [1/5] prerequisites a stranger would install ==="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null || fail "apt update"
-apt-get install -y -qq tmux git jq curl ca-certificates procps >/dev/null || fail "apt install"
+apt-get install -y -qq tmux git jq curl ca-certificates procps nodejs npm >/dev/null || fail "apt install"
 
 ARCH="$(dpkg --print-architecture)"   # amd64 | arm64
 GO_VERSION="$(awk '$1 == "go" { minimum = $2 } $1 == "toolchain" { preferred = substr($2, 3) } END { print preferred ? preferred : minimum }' /src/go.mod)"
