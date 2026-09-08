@@ -70,6 +70,12 @@ CI is a release gate as well as a pull-request check. The UI job runs
 `America/Los_Angeles` and `Europe/Paris` timezones, and then runs the
 production bundle build. A green Go and daemon suite without this UI test is
 not a release-ready result.
+CI also runs `govulncheck` for reachable Go vulnerabilities, `mix_audit` for
+Elixir dependency advisories, and `npm audit --omit=dev` for shipped UI
+dependencies. Resolve findings before cutting a stable tag.
+The `toolchain` directive in `go.mod` pins the compiler used by source builds,
+CI, and release packaging; the `go` directive remains the language minimum.
+Keep the toolchain on a supported security patch release.
 
 Release: `scripts/release.sh <version>` first requires the main checkout to be
 cleanly aligned with `origin/main` and checks that the new tag is absent both

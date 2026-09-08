@@ -2,6 +2,8 @@ module github.com/cailmdaley/felt
 
 go 1.23.4
 
+toolchain go1.27.1
+
 require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.1

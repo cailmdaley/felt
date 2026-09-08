@@ -12,7 +12,7 @@ apt-get update -qq >/dev/null || fail "apt update"
 apt-get install -y -qq tmux git jq curl ca-certificates procps >/dev/null || fail "apt install"
 
 ARCH="$(dpkg --print-architecture)"   # amd64 | arm64
-GO_VERSION="$(awk '$1 == "go" { print $2; exit }' /src/go.mod)"
+GO_VERSION="$(awk '$1 == "go" { minimum = $2 } $1 == "toolchain" { preferred = substr($2, 3) } END { print preferred ? preferred : minimum }' /src/go.mod)"
 [ -n "$GO_VERSION" ] || fail "could not read Go version from /src/go.mod"
 GO_TGZ="go${GO_VERSION}.linux-${ARCH}.tar.gz"
 curl -fsSL "https://go.dev/dl/${GO_TGZ}" -o /tmp/go.tgz || fail "go download"
