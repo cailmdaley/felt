@@ -92,8 +92,8 @@ brews:
     # `brew upgrade felt` pick up new hooks and skills without a separate
     # step. The Claude plugin refresh is skipped silently if the claude CLI
     # isn't on PATH; Codex and pi refreshes are gated on their existing
-    # integrations, so upgrading felt never installs a new harness integration
-    # just because its CLI happens to be present.
+    # integrations. Claude setup runs whenever its CLI is present; Codex and
+    # pi setup only refresh integrations the user already installed.
     post_install: |
       if which("claude")
         system "#{bin}/felt", "setup", "claude"
