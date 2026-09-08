@@ -29,7 +29,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
-import { parseMoment } from '../src/board/views/index.js'
+import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
   ActivityResult,

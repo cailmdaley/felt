@@ -731,7 +731,7 @@ export function StashForm({
                     className="stash-input"
                     value={agentId}
                     onChange={(e) => setAgentId(e.target.value)}
-                    placeholder="claude-sonnet (default)"
+                    placeholder="Use the registry default"
                   />
                 )}
               </div>
