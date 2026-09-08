@@ -6,8 +6,12 @@ defmodule Shuttle.Test.ApiConn do
   import Phoenix.ConnTest
   import Plug.Conn
 
+  def local_conn(method \\ :get, path \\ "/", body \\ nil) do
+    %{build_conn(method, path, body) | host: "127.0.0.1", port: 4000}
+  end
+
   def api_conn do
-    build_conn()
+    local_conn()
     |> put_req_header("accept", "application/json")
     |> put_req_header("content-type", "application/json")
   end

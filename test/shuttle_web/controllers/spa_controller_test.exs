@@ -8,6 +8,7 @@ defmodule ShuttleWeb.SpaControllerTest do
   override that the compile-time design intentionally doesn't offer.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -20,7 +21,7 @@ defmodule ShuttleWeb.SpaControllerTest do
   end
 
   test "GET / serves index.html when built, else 404s with a build hint" do
-    conn = get(build_conn(), "/")
+    conn = get(local_conn(), "/")
     index = Path.join(ShuttleWeb.Assets.dist(), "index.html")
 
     if File.regular?(index) do

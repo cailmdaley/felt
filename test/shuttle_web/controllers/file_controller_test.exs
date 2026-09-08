@@ -156,7 +156,7 @@ defmodule ShuttleWeb.FileControllerTest do
       on_exit(fn -> File.rm(path) end)
 
       conn =
-        build_conn()
+        local_conn()
         |> Plug.Conn.put_req_header("accept", "application/pdf")
         |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
 

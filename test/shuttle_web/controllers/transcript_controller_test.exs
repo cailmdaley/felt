@@ -1,5 +1,6 @@
 defmodule ShuttleWeb.TranscriptControllerTest do
   use ExUnit.Case, async: false
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
 
   import Phoenix.ConnTest
@@ -42,7 +43,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     bytes: bytes
   } do
     body =
-      build_conn()
+      local_conn()
       |> get("/api/v1/transcript", %{"session" => @session})
       |> json_response(200)
 
@@ -53,7 +54,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
   end
 
   test "raw local response is byte-for-byte native and carries digest headers", %{bytes: bytes} do
-    conn = build_conn() |> get("/api/v1/transcript/raw", %{"session" => @session})
+    conn = local_conn() |> get("/api/v1/transcript/raw", %{"session" => @session})
 
     assert response(conn, 200) == bytes
 
@@ -68,12 +69,12 @@ defmodule ShuttleWeb.TranscriptControllerTest do
 
   test "invalid UUID is a 400 and unknown valid UUID is transcript_missing" do
     assert %{"error" => "session must be a UUID"} =
-             build_conn()
+             local_conn()
              |> get("/api/v1/transcript", %{"session" => "not-a-uuid"})
              |> json_response(400)
 
     assert %{"availability" => "transcript_missing"} =
-             build_conn()
+             local_conn()
              |> get("/api/v1/transcript", %{"session" => "11111111-2222-3333-4444-555555555555"})
              |> json_response(200)
   end
@@ -109,7 +110,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       )
 
       body =
-        build_conn()
+        local_conn()
         |> get("/api/v1/transcript", %{"session" => @session, "host" => "candide"})
         |> json_response(200)
 
@@ -124,7 +125,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       StubGetFileClient.set_response({:ok, 200, "application/x-ndjson", bytes})
 
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/transcript/raw", %{"session" => @session, "host" => "candide"})
 
       assert response(conn, 200) == bytes
@@ -142,12 +143,12 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       StubGetFileClient.set_response({:error, :econnrefused})
 
       assert %{"availability" => "host_unreachable"} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/transcript", %{"session" => @session, "host" => "candide"})
                |> json_response(200)
 
       assert %{"availability" => "host_unreachable"} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/transcript/raw", %{"session" => @session, "host" => "candide"})
                |> json_response(503)
     end

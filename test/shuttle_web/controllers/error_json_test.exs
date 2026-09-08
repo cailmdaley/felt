@@ -8,6 +8,7 @@ defmodule ShuttleWeb.ErrorJSONTest do
   """
 
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
@@ -21,7 +22,7 @@ defmodule ShuttleWeb.ErrorJSONTest do
   end
 
   test "an unknown route renders a JSON 404, not a render crash" do
-    conn = post(build_conn(), "/api/v1/this-route-does-not-exist", %{})
+    conn = post(local_conn(), "/api/v1/this-route-does-not-exist", %{})
 
     assert conn.status == 404
     assert json_response(conn, 404) == %{"errors" => %{"detail" => "Not Found"}}

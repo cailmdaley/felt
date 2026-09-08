@@ -13,6 +13,7 @@ defmodule ShuttleWeb.MomentControllerTest do
   """
   use ExUnit.Case, async: false
   alias Shuttle.Test.StubGetFileClient
+  import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
   import Shuttle.Test.EnvHelpers
 
@@ -654,7 +655,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       on_exit(fn -> System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR") end)
 
       wordless =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",
@@ -666,7 +667,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       assert wordless["tools"] == "Bash — run the tests\nRead — a.ex\nBash"
 
       spoken =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",
@@ -1097,7 +1098,7 @@ defmodule ShuttleWeb.MomentControllerTest do
 
     test "serves the words with this host's stamp" do
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",
@@ -1122,7 +1123,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
 
       ask = fn params ->
-        build_conn()
+        local_conn()
         |> get(
           "/api/v1/moment",
           Map.merge(
@@ -1152,7 +1153,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
 
       %{"excerpts" => [excerpt]} =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @other,
           "from_ms" => "#{@t0}",
@@ -1166,7 +1167,7 @@ defmodule ShuttleWeb.MomentControllerTest do
 
     test "a session with no transcript is an empty 200, not a 500" do
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => "11111111-2222-3333-4444-555555555555",
           "from_ms" => "#{@t0}",
@@ -1178,19 +1179,19 @@ defmodule ShuttleWeb.MomentControllerTest do
 
     test "a missing session or bound is a 400" do
       assert %{"error" => "session is required"} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/moment", %{"from_ms" => "1", "to_ms" => "2"})
                |> json_response(400)
 
       assert %{"error" => _} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/moment", %{"session" => @session, "to_ms" => "2"})
                |> json_response(400)
     end
 
     test "an inverted or over-wide window is a 400" do
       assert %{"error" => "to_ms must be >= from_ms"} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/moment", %{
                  "session" => @session,
                  "from_ms" => "#{@t0}",
@@ -1199,7 +1200,7 @@ defmodule ShuttleWeb.MomentControllerTest do
                |> json_response(400)
 
       assert %{"error" => "window too wide: at most 120 minutes"} =
-               build_conn()
+               local_conn()
                |> get("/api/v1/moment", %{
                  "session" => @session,
                  "from_ms" => "#{@t0}",
@@ -1238,7 +1239,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       StubGetFileClient.set_response({:ok, 200, "application/json", body})
 
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",
@@ -1264,7 +1265,7 @@ defmodule ShuttleWeb.MomentControllerTest do
         {:ok, 200, "application/json", Jason.encode!(%{host: "candide", excerpts: []})}
       )
 
-      build_conn()
+      local_conn()
       |> get("/api/v1/moment", %{
         "session" => @session,
         "from_ms" => "#{@t0}",
@@ -1281,7 +1282,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       StubGetFileClient.set_response({:error, :econnrefused})
 
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",
@@ -1302,7 +1303,7 @@ defmodule ShuttleWeb.MomentControllerTest do
       on_exit(fn -> System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR") end)
 
       conn =
-        build_conn()
+        local_conn()
         |> get("/api/v1/moment", %{
           "session" => @session,
           "from_ms" => "#{@t0}",

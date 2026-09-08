@@ -9,6 +9,7 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
   "dialog" is a scripted `{output, status}` tuple.
   """
   use ExUnit.Case
+  import Shuttle.Test.ApiConn
   import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
@@ -80,7 +81,7 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
       Application.put_env(:shuttle, :folder_picker_mechanism, :zenity)
       assert FolderPicker.available?()
 
-      conn = build_conn() |> get("/api/v1/felt-stores")
+      conn = local_conn() |> get("/api/v1/felt-stores")
       body = Jason.decode!(conn.resp_body)
       own = body["host"]
       assert body["origins"][own]["native_folder_picker"] == true
@@ -186,7 +187,7 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
   end
 
   defp post_choose(params \\ %{}) do
-    build_conn()
+    local_conn()
     |> put_req_header("accept", "application/json")
     |> put_req_header("content-type", "application/json")
     |> post("/api/v1/choose-folder", Jason.encode!(params))
