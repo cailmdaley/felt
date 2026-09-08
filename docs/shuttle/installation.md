@@ -747,6 +747,12 @@ composites the whole fleet from that daemon's `remotes.json`, so which host
 fronts it is a question of uptime, not reach — a laptop asleep is a board
 offline.
 
+For another reverse proxy, preserve the browser-facing host and scheme in
+`X-Forwarded-Host` and `X-Forwarded-Proto`, replacing any client-supplied values.
+The daemon accepts direct requests only under loopback hostnames and rejects
+browser writes from unrelated origins. These checks protect the local browser
+boundary; they do not authenticate clients or replace access controls on the proxy.
+
 ## Sharp edges
 
 Roughly in the order a new installer hits them.
