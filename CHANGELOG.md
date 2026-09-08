@@ -4,7 +4,7 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-09-08
 
 Shuttle joins felt in its first stable release: an agent dispatcher, a browser board, and a markdown work journal in one repository.
 The CLI still works on its own; install the daemon when you want agents to carry work across sessions.
@@ -75,6 +75,11 @@ The CLI still works on its own; install the daemon when you want agents to carry
 - Temporal views refresh with the board, attribute activity through ledgers, and handle civil days in both tested timezones.
 - Empty Desk columns explain how to create, launch, and review work.
 - Updated document-renderer dependencies remove known production dependency advisories.
+- The daemon rejects browser writes from unrelated origins and checks request hosts to protect the loopback API from DNS rebinding.
+- Invalid daemon ports and remote timing settings are rejected before they reach runtime operations.
+- Release publication waits for every platform's daemon artifact to build and boot successfully; the Homebrew formula uses the checksums of the published CLI archives.
+- The installer checks downloaded versions before replacing an existing installation.
+- Updated HTTP dependencies and the Go build toolchain address known security advisories; CI now checks Go, Elixir, and production JavaScript dependencies.
 
 ### Upgrading from 1.0
 
