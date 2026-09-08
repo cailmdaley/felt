@@ -1311,7 +1311,7 @@
    fleuron to make absence feel intentional rather than missing. */
 .kbn-empty {
   text-align: center;
-  color: #A89B83;
+  color: #746650;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(13px * var(--kbn-type-scale, 1));

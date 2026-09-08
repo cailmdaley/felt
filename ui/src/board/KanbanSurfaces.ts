@@ -1404,7 +1404,11 @@ export class KanbanSurfaceRenderer {
       const empty = document.createElement('div')
       empty.className = 'kbn-empty'
       empty.setAttribute('role', 'listitem')
-      empty.textContent = '— nothing here —'
+      empty.textContent = kind === 'drafts'
+        ? (this.o.onStashClick ? 'Use + to create a draft. Describe what done looks like.' : 'Drafts appear here before you launch them.')
+        : kind === 'inFlight'
+          ? 'Drag a draft here to start its agent.'
+          : 'Work returns here when its agent hands it back for review.'
       list.append(empty)
     } else {
       for (const card of cards) {
