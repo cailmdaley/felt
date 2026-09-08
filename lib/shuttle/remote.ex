@@ -59,7 +59,8 @@ defmodule Shuttle.Remote do
   @default_remote_port 4_000
 
   @doc """
-  Parses a single entry. Returns `nil` when the required fields are missing.
+  Parses a single entry. Returns `nil` when required fields are missing or a
+  numeric setting is malformed.
 
   Defaults:
     * `ssh` — `name` (the SSH destination usually IS the routing name; they
@@ -90,24 +91,31 @@ defmodule Shuttle.Remote do
   def from_config(%__MODULE__{} = remote), do: remote
 
   def from_config(%{} = entry) do
-    name = fetch(entry, :name)
-    port = fetch(entry, :port)
+    name = string_or(fetch(entry, :name), nil)
+    port = normalize_port(fetch(entry, :port))
     url = fetch(entry, :url) || derived_url(port)
 
-    if is_binary(name) and name != "" and is_binary(url) and url != "" do
+    with {:ok, port} <- port,
+         {:ok, remote_port} <- normalize_remote_port(fetch(entry, :remote_port)),
+         {:ok, poll_interval_ms} <- positive_integer(fetch(entry, :poll_interval_ms), 5_000),
+         {:ok, request_timeout_ms} <- positive_integer(fetch(entry, :request_timeout_ms), 2_000),
+         {:ok, stale_multiplier} <- positive_integer(fetch(entry, :stale_multiplier), 4),
+         true <- is_binary(name) and name != "" and is_binary(url) and url != "" do
       %__MODULE__{
         name: name,
         url: url,
         ssh: string_or(fetch(entry, :ssh), name),
         display: string_or(fetch(entry, :display), name),
         port: port,
-        remote_port: fetch(entry, :remote_port) || @default_remote_port,
+        remote_port: remote_port,
         tunnel: tunnel_from(fetch(entry, :tunnel)),
         enabled: fetch(entry, :enabled) != false,
-        poll_interval_ms: fetch(entry, :poll_interval_ms) || 5_000,
-        request_timeout_ms: fetch(entry, :request_timeout_ms) || 2_000,
-        stale_multiplier: fetch(entry, :stale_multiplier) || 4
+        poll_interval_ms: poll_interval_ms,
+        request_timeout_ms: request_timeout_ms,
+        stale_multiplier: stale_multiplier
       }
+    else
+      _ -> nil
     end
   end
 
@@ -117,8 +125,30 @@ defmodule Shuttle.Remote do
 
   def from_config(_), do: nil
 
-  defp derived_url(port) when is_integer(port) and port > 0, do: "http://127.0.0.1:#{port}"
+  defp derived_url({:ok, port}) when is_integer(port), do: "http://127.0.0.1:#{port}"
   defp derived_url(_), do: nil
+
+  # The fleet file is operator-editable JSON, so the daemon must validate the
+  # values independently of the Go CLI. Invalid optional values drop just that
+  # remote instead of leaking strings/negative integers into timer, HTTP, and
+  # arithmetic code downstream. `nil` and zero retain the sparse-file defaults.
+  defp normalize_port(nil), do: {:ok, nil}
+  defp normalize_port(0), do: {:ok, nil}
+  defp normalize_port(port) when is_integer(port) and port in 1..65_535, do: {:ok, port}
+  defp normalize_port(_), do: :error
+
+  defp normalize_remote_port(nil), do: {:ok, @default_remote_port}
+  defp normalize_remote_port(0), do: {:ok, @default_remote_port}
+
+  defp normalize_remote_port(port) when is_integer(port) and port in 1..65_535,
+    do: {:ok, port}
+
+  defp normalize_remote_port(_), do: :error
+
+  defp positive_integer(nil, default), do: {:ok, default}
+  defp positive_integer(0, default), do: {:ok, default}
+  defp positive_integer(value, _default) when is_integer(value) and value > 0, do: {:ok, value}
+  defp positive_integer(_value, _default), do: :error
 
   defp string_or(value, _fallback) when is_binary(value) and value != "", do: value
   defp string_or(_value, fallback), do: fallback

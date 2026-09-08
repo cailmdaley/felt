@@ -136,6 +136,47 @@ defmodule Shuttle.RemoteRegistryTest do
     test "returns nil when url is missing" do
       assert Remote.from_config(%{name: "candide"}) == nil
     end
+
+    test "rejects malformed numeric settings instead of leaking them downstream" do
+      for key <- [:port, :remote_port, :poll_interval_ms, :request_timeout_ms, :stale_multiplier] do
+        entry =
+          Map.merge(%{name: "candide", url: "http://localhost:4001"}, %{key => "not-a-number"})
+
+        assert Remote.from_config(entry) == nil
+      end
+    end
+
+    test "rejects non-positive numeric settings" do
+      for key <- [:port, :remote_port, :poll_interval_ms, :request_timeout_ms, :stale_multiplier] do
+        entry = Map.merge(%{name: "candide", url: "http://localhost:4001"}, %{key => -1})
+        assert Remote.from_config(entry) == nil
+      end
+
+      assert Remote.from_config(%{
+               name: "candide",
+               url: "http://localhost:4001",
+               remote_port: 65_536
+             }) == nil
+    end
+
+    test "zero numeric settings use the sparse-file defaults" do
+      remote =
+        Remote.from_config(%{
+          name: "candide",
+          url: "http://localhost:4001",
+          port: 0,
+          remote_port: 0,
+          poll_interval_ms: 0,
+          request_timeout_ms: 0,
+          stale_multiplier: 0
+        })
+
+      assert remote.port == nil
+      assert remote.remote_port == 4000
+      assert remote.poll_interval_ms == 5000
+      assert remote.request_timeout_ms == 2000
+      assert remote.stale_multiplier == 4
+    end
   end
 
   describe "Remote.stale?/3" do
@@ -473,8 +514,7 @@ defmodule Shuttle.RemoteRegistryTest do
           # Production waits 30min before re-arming; most breaker tests want
           # the tripped state to hold still, so only the re-arm tests shorten
           # it.
-          trip_cooldown_schedule_ms:
-            Keyword.get(opts, :trip_cooldown_schedule_ms, [1_800_000]),
+          trip_cooldown_schedule_ms: Keyword.get(opts, :trip_cooldown_schedule_ms, [1_800_000]),
           user_uid: "501"
         )
     end

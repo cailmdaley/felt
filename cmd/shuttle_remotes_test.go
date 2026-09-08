@@ -164,6 +164,11 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 		{"duplicate port", `[{"name":"a","port":4001},{"name":"b","port":4001}]`, "already used by"},
 		{"port too high", `[{"name":"a","port":70000}]`, "out of range"},
 		{"port negative", `[{"name":"a","port":-1}]`, "out of range"},
+		{"remote port too high", `[{"name":"a","port":4001,"remote_port":70000}]`, "remote_port"},
+		{"remote port negative", `[{"name":"a","port":4001,"remote_port":-1}]`, "remote_port"},
+		{"poll interval negative", `[{"name":"a","port":4001,"poll_interval_ms":-1}]`, "poll_interval_ms"},
+		{"request timeout negative", `[{"name":"a","port":4001,"request_timeout_ms":-1}]`, "request_timeout_ms"},
+		{"stale multiplier negative", `[{"name":"a","port":4001,"stale_multiplier":-1}]`, "stale_multiplier"},
 		{"no port, no url", `[{"name":"a"}]`, "needs a port or an explicit url"},
 	}
 	for _, tc := range cases {

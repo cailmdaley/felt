@@ -52,11 +52,25 @@ defmodule Shuttle do
   """
   @spec daemon_port() :: pos_integer()
   def daemon_port do
-    case System.get_env("SHUTTLE_PORT") do
-      value when is_binary(value) and value != "" -> String.to_integer(value)
-      _ -> 4000
+    resolve_daemon_port(System.get_env("SHUTTLE_PORT"))
+  end
+
+  @doc false
+  @spec resolve_daemon_port(String.t() | nil, term()) :: pos_integer()
+  def resolve_daemon_port(value, fallback \\ 4000)
+
+  def resolve_daemon_port(nil, fallback), do: valid_port_or_default(fallback)
+  def resolve_daemon_port("", fallback), do: valid_port_or_default(fallback)
+
+  def resolve_daemon_port(value, _fallback) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {port, ""} when port in 1..65_535 -> port
+      _ -> raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535"
     end
   end
+
+  defp valid_port_or_default(port) when is_integer(port) and port in 1..65_535, do: port
+  defp valid_port_or_default(_), do: 4000
 end
 
 defmodule Shuttle.Application do
@@ -149,10 +163,7 @@ defmodule Shuttle.Application do
     http = Keyword.get(existing, :http, [])
 
     port =
-      case System.get_env("SHUTTLE_PORT") do
-        value when is_binary(value) and value != "" -> String.to_integer(value)
-        _ -> Keyword.get(http, :port, 4000)
-      end
+      Shuttle.resolve_daemon_port(System.get_env("SHUTTLE_PORT"), Keyword.get(http, :port, 4000))
 
     merged =
       Keyword.merge(existing,

@@ -263,6 +263,9 @@ func normalizeRemotes(doc *remotesFile) error {
 		if r.RemotePort == 0 {
 			r.RemotePort = defaultRemoteDaemonPort
 		}
+		if r.RemotePort < 1 || r.RemotePort > 65535 {
+			return fmt.Errorf("remote %q: remote_port %d out of range 1-65535", r.Name, r.RemotePort)
+		}
 
 		if r.Port != 0 {
 			if r.Port < 1 || r.Port > 65535 {
@@ -298,6 +301,15 @@ func normalizeRemotes(doc *remotesFile) error {
 		}
 		if r.StaleMultiplier == 0 {
 			r.StaleMultiplier = firstNonZero(defaults.StaleMultiplier, defaultRemoteStaleMultiplier)
+		}
+		if r.PollIntervalMS < 1 {
+			return fmt.Errorf("remote %q: poll_interval_ms must be positive", r.Name)
+		}
+		if r.RequestTimeoutMS < 1 {
+			return fmt.Errorf("remote %q: request_timeout_ms must be positive", r.Name)
+		}
+		if r.StaleMultiplier < 1 {
+			return fmt.Errorf("remote %q: stale_multiplier must be positive", r.Name)
 		}
 	}
 

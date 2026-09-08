@@ -19,6 +19,15 @@ defmodule ShuttleTest do
     assert Shuttle.daemon_port() == 4321
   end
 
+  test "daemon_port rejects an invalid SHUTTLE_PORT with a useful error" do
+    System.put_env("SHUTTLE_PORT", "not-a-port")
+    on_exit(fn -> System.delete_env("SHUTTLE_PORT") end)
+
+    assert_raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535", fn ->
+      Shuttle.daemon_port()
+    end
+  end
+
   # `configure_endpoint/0` is the daemon's RUNTIME config layer. It matters
   # because a release bakes evaluated compile-time config into the artifact —
   # so the port, the server flag, and the signing key must be decidable on the
@@ -52,6 +61,12 @@ defmodule ShuttleTest do
       config = configured([http: [port: 4000], server: true], %{"SHUTTLE_PORT" => "4321"})
       assert config[:http][:port] == 4321
       assert config[:http][:ip] == {127, 0, 0, 1}
+    end
+
+    test "an invalid SHUTTLE_PORT fails before the endpoint binds" do
+      assert_raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535", fn ->
+        configured([http: [port: 4000], server: true], %{"SHUTTLE_PORT" => "not-a-port"})
+      end
     end
 
     test "port falls back to the configured value, then to 4000" do
