@@ -34,7 +34,7 @@
 # (force_dispatch_eligible? — host-match only), and the probe fibers are born
 # `status: open` so the autonomous 30s poll tick NEVER races us.
 #
-# Usage:  test/e2e/handoff_live.sh
+# Usage:  daemon/test/e2e/handoff_live.sh
 #   FELT=<path>          override the felt binary (default: `felt` on PATH)
 #   SHUTTLE_E2E_PORT=<n> override the daemon port (default: 4071)
 #
@@ -44,7 +44,7 @@
 # torn down on EXIT.
 set -uo pipefail
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 FELT=${FELT:-felt}
 PORT=${SHUTTLE_E2E_PORT:-4071}
 HOST=e2e-host
@@ -170,7 +170,7 @@ info "building daemon release (port comes from SHUTTLE_PORT at run time)"
 # like any other runtime value. The release is built in place (bin/rel) and
 # run through the tracked bin/shuttle shim — nothing test-specific is baked
 # into the artifact, so nothing needs cleaning up afterwards.
-( cd "$REPO" && MIX_ENV=prod mix release shuttled --overwrite --path bin/rel >/dev/null 2>&1 ) \
+( cd "$REPO/daemon" && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel >/dev/null 2>&1 ) \
   || { echo "release build failed"; exit 2; }
 DAEMON="$REPO/bin/shuttle"
 

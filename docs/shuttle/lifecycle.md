@@ -116,7 +116,7 @@ bundle.
 
 A fiber dispatches if and only if all of these hold. The daemon evaluates them
 in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
-`lib/shuttle/poller.ex`).
+`daemon/lib/shuttle/poller.ex`).
 
 1. It lives in a felt store the daemon polls.
 2. It carries a `shuttle:` block. That block alone defines "shuttle-managed";

@@ -139,7 +139,7 @@ export interface ActiveMinutes {
  * Distinct active minutes by kind, inside an optional half-open span.
  *
  * A bucket IS a minute: `Shuttle.Activity` keys every event by
- * `div(ts, 60_000) * 60_000` unconditionally (lib/shuttle/activity.ex), so
+ * `div(ts, 60_000) * 60_000` unconditionally (daemon/lib/shuttle/activity.ex), so
  * distinct `m` values ARE the minute count. Counting buckets, or summing `n`,
  * would count events — and a busy minute is still one minute.
  *

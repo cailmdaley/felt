@@ -20,8 +20,8 @@ import (
 // didn't know --host, silently failing every dispatch write). Concretely, bump
 // on:
 //   - a flag added, removed, or renamed on mark-runtime, reopen, or any other
-//     lifecycle verb the daemon shells (see lib/shuttle/continuation.ex,
-//     lib/shuttle/dispatcher.ex run_reopen, lib/shuttle/transition.ex)
+//     lifecycle verb the daemon shells (see daemon/lib/shuttle/continuation.ex,
+//     daemon/lib/shuttle/dispatcher.ex run_reopen, daemon/lib/shuttle/transition.ex)
 //   - a change to what a shelled verb's stdout/exit-code means, where the
 //     daemon parses it (e.g. mark-runtime's success text, an exit code the
 //     daemon now branches on)
@@ -40,7 +40,7 @@ import (
 // override carried no correctness and a CLI that still expects it (or a
 // daemon that still sends it against a CLI that dropped it) is exactly the
 // kind of flag-shape skew this level exists to catch. Bumped in lockstep
-// with lib/shuttle/contract.ex's @expected_level.
+// with daemon/lib/shuttle/contract.ex's @expected_level.
 const ShuttleContractLevel = 2
 
 var shuttleContractCmd = &cobra.Command{

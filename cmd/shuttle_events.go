@@ -11,8 +11,8 @@ import (
 // stream and the commit ledger live, when they may be written, and how the
 // stream is bounded. It sits beside shuttle_host.go and shuttle_stores.go as
 // the third "mirror the Elixir resolver in Go" module — the daemon reads these
-// files (lib/shuttle/waiting_tracker.ex, lib/shuttle/sent_files.ex,
-// lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
+// files (daemon/lib/shuttle/waiting_tracker.ex, daemon/lib/shuttle/sent_files.ex,
+// daemon/lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
 // write them, and the two sides must never disagree about the paths.
 
 const (

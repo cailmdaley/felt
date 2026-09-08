@@ -13,7 +13,7 @@
 #
 # `make build` builds the CLI and daemon release; it does not build ui/dist.
 # `make install` runs the full from-source bootstrap
-# (bootstrap.sh): build+install the CLI, build the daemon release, place ui/dist,
+# (scripts/bootstrap.sh): build+install the CLI, build the daemon release, place ui/dist,
 # register the loom hook, install the keep-alive. The Elixir daemon embeds no
 # agent registry — it reads the already-resolved record off felt's
 # `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]`.
@@ -30,7 +30,7 @@
 # build only the daemon release automatically (no Go on PATH -> no CLI rebuild). On a
 # host that DOES have Go, daemon rebuilds the CLI first to keep the two in
 # lockstep; pass SKIP_CLI=1 to force-skip that and build against whatever felt
-# is already on PATH (this is what bootstrap.sh --skip-cli does). `make build`
+# is already on PATH (this is what scripts/bootstrap.sh --skip-cli does). `make build`
 # (both) is a Mac/dev convenience and needs `go` on PATH.
 
 # SKIP_CLI=1 makes `daemon` skip the felt-CLI rebuild step (see daemon: below).
@@ -95,7 +95,7 @@ help:
 	@echo "  make uninstall-agent — remove it"
 	@echo "  make logs        — tail -f the daemon log"
 	@echo "  make status      — felt shuttle ps + snapshot summary"
-	@echo "  make clean       — remove _build, stray .beam files, built binaries"
+	@echo "  make clean       — remove daemon/_build, stray .beam files, built binaries"
 
 # ── build ──────────────────────────────────────────────────────────────────
 # `build` is the everything-target; `cli` and `daemon` are the per-artifact ones.
@@ -111,7 +111,7 @@ cli-install:
 # the felt CLI for its writes (reopen --host, mark-runtime, …), so the two
 # artifacts must never skew — a daemon built against an older installed CLI
 # silently breaks daemon-shelled commands (unknown flags exit 1 mid-dispatch).
-# SKIP_CLI=1 forces that rebuild off (bootstrap.sh --skip-cli passes it) so
+# SKIP_CLI=1 forces that rebuild off (scripts/bootstrap.sh --skip-cli passes it) so
 # daemon builds only the release, trusting whatever felt is already on PATH.
 # With no Go toolchain the rebuild is skipped automatically either way.
 daemon:
@@ -122,15 +122,16 @@ else ifneq ($(shell command -v go 2>/dev/null),)
 else
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
 endif
-	mix shuttle.gen_version
+	cd daemon && mix deps.get
+	cd daemon && mix shuttle.gen_version
 	@# Regenerate the .app spec before assembling. Mix rewrites it only when
 	@# mix.exs is NEWER than the existing spec, and mix.exs now takes its
 	@# version from $$SHUTTLE_VERSION — an env change touches no mtime. So a
 	@# build that once stamped a release tag would keep reporting that tag from
 	@# every later plain `make daemon` (verified: it does). --force makes the
 	@# local path match what release.yml does for the same reason.
-	MIX_ENV=prod mix compile
-	MIX_ENV=prod mix compile.app --force
+	cd daemon && MIX_ENV=prod mix compile
+	cd daemon && MIX_ENV=prod mix compile.app --force
 	@# Assemble beside the live release and swap, never in place. A running
 	@# daemon holds NIF .so files open under bin/rel/lib; on an NFS home that
 	@# turns every unlink into a .nfs* silly-rename stub, and `--overwrite`'s
@@ -138,7 +139,7 @@ endif
 	@# lives on as bin/rel.prev (the running BEAM keeps its inodes) until the
 	@# next build, by which time the cycle has retired it.
 	rm -rf bin/rel.next
-	MIX_ENV=prod mix release shuttled --overwrite --path bin/rel.next
+	cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel.next
 	rm -rf bin/rel.prev
 	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
 	mv bin/rel.next bin/rel
@@ -150,7 +151,7 @@ go-test:
 	go test ./...
 
 mix-test:
-	mix test
+	cd daemon && mix test
 
 # The board's own suite. `npm test` runs it twice, once per pinned timezone —
 # the civil-day rules are only meaningful against a real UTC offset.
@@ -224,10 +225,10 @@ restart: daemon stop start
 # ── One-command bootstrap ─────────────────────────────────────────────────
 # The full fresh-machine install: prerequisites → felt CLI → daemon release →
 # ui/dist → loom hook → keep-alive (launchd on macOS / systemd user unit on
-# Linux). bootstrap.sh holds the host-branching logic; this is
+# Linux). scripts/bootstrap.sh holds the host-branching logic; this is
 # the entry point. Pass flags through:  make install ARGS="--dry-run"
 install:
-	@bash bootstrap.sh $(ARGS)
+	@bash scripts/bootstrap.sh $(ARGS)
 
 # ── Durable launch (launchd on macOS / systemd user unit on Linux) ────────
 # Shuttle's own keep-alive, independent of any other process: restart the
@@ -235,12 +236,12 @@ install:
 #
 # The implementation lives in `bin/shuttle install-agent`, not here, because a
 # fetched tarball has no Makefile and still has to be able to install a
-# supervisor. The shim renders the same two templates in share/ (which ship
-# inside the release too — see mix.exs's :copy_support_files), resolves
+# supervisor. The shim renders the same two templates in daemon/share/ (which ship
+# inside the release too — see daemon/mix.exs's :copy_support_files), resolves
 # __SHUTTLE_DIR__ from its own location rather than $(CURDIR), and owns the
 # per-OS branching, the systemd probe, the tmux-loop retirement and the stop.
 # These targets are a build step plus a pass-through of the AGENT_* knobs, so
-# the checkout workflow (bootstrap.sh calls `make install-agent`) is unchanged
+# the checkout workflow (scripts/bootstrap.sh calls `make install-agent`) is unchanged
 # and there is exactly one renderer.
 #
 # AGENT_LOG is passed rather than left to the shim's (identical) per-OS
@@ -273,6 +274,6 @@ status:
 	  2>/dev/null || echo "(daemon not responding)"
 
 clean:
-	rm -rf _build
+	rm -rf daemon/_build
 	rm -rf bin/rel bin/rel.next bin/rel.prev
 	rm -f Elixir.*.beam felt felt-linux

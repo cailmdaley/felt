@@ -18,8 +18,8 @@ make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttl
 make stop         # SIGTERM with 5s grace
 make logs         # tail -f the log
 make status       # felt shuttle ps + snapshot summary
-make clean        # rm _build, stray Elixir.*.beam, built binaries
-make install      # full from-source bootstrap (bootstrap.sh)
+make clean        # rm daemon/_build, stray Elixir.*.beam, built binaries
+make install      # full from-source bootstrap (scripts/bootstrap.sh)
 make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / systemd user unit (Linux)
 ```
 
@@ -121,7 +121,7 @@ release carries its own ERTS, so the target's installed OTP version does not
 need to match the build host; it is still platform-specific, and the target
 must have a compatible OS, CPU architecture, libc, and runtime environment.
 The respawn loop is driven by `~/.local/bin/shuttle-launch` — a
-copy of the tracked `bin/shuttle-launch` that `bootstrap.sh` installs (repo
+copy of the tracked `bin/shuttle-launch` that `scripts/bootstrap.sh` installs (repo
 resolved via `SHUTTLE_DIR` or the script's own location; the loop backs off
 exponentially on fast daemon exits, 2s→300s).
 
@@ -214,21 +214,21 @@ change is also a docs event: `docs/reference/api.md` tabulates the surface and
 nothing in CI checks it against the router, so update it in the same commit.
 
 **`GET /api/v1/astra` is a maintainer-only integration.** It is owner-routed and
-shells out to `priv/mystra/bake.mjs`, which needs `node` plus a built MySTRA
+shells out to `daemon/priv/mystra/bake.mjs`, which needs `node` plus a built MySTRA
 checkout beside the repo on the host that owns the astra.yaml. A host without
 them fails `/astra` cleanly; the board and fibers are unaffected.
 
 **The repo builds three things.** The **felt CLI** (Go: `main.go`, `cmd/`,
 `internal/`) — including the `felt shuttle <verb>` subcommands, which ARE Go code
 built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon release**
-(`bin/rel`, from `lib/`, launched through the tracked `bin/shuttle` shim); and
+(`bin/rel`, from `daemon/lib/`, launched through the tracked `bin/shuttle` shim); and
 the **UI bundle** (`ui/dist`, from `ui/`).
-Editing `lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
+Editing `daemon/lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
 `make cli-install`); editing the UI needs `cd ui && npm test` (the two pinned
 time zones also run in CI) plus `npm run build` + rsync.
 
 **`bin/rel` is a Mix release** — an ERTS-bundled directory built by
-`MIX_ENV=prod mix release shuttled --overwrite --path bin/rel`, launched via
+`(cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel)`, launched via
 `bin/rel/bin/shuttled`. A restart without `make daemon` is a no-op for picking
 up source edits. `make restart` always.
 

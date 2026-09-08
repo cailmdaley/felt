@@ -13,7 +13,7 @@ import (
 // TestShuttleContract_PrintsBareInteger locks in the output contract the
 // Elixir Poller boot-check codes against verbatim: `felt shuttle contract`
 // exits 0 and prints exactly one integer, with NOTHING on stderr. The Elixir
-// consumer (lib/shuttle/contract.ex) shells this with stderr_to_stdout: true
+// consumer (daemon/lib/shuttle/contract.ex) shells this with stderr_to_stdout: true
 // and parses the MERGED stream as exactly the bare integer — a single stray
 // byte on stderr trips contract skew and parks every fresh launch. So we
 // capture both streams and assert stderr is empty as part of the contract.

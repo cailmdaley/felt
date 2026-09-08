@@ -27,10 +27,11 @@ nanobanana-output/
 
 # ── Shuttle daemon (Elixir/Mix) ──────────────────────────────────────────
 # `_build/` and `dist/` above already cover Mix's build dir and ui/dist.
-/deps/
-/cover/
-/doc/
+/daemon/deps/
+/daemon/cover/
+/daemon/doc/
 /tmp/
+/daemon/tmp/
 erl_crash.dump
 *.ez
 shuttle-*.tar
@@ -39,8 +40,8 @@ shuttle-*.tar
 /bin/rel/
 /bin/rel.next/
 /bin/rel.prev/
-/priv/ui/
-/lib/shuttle/build_info.ex
+/daemon/priv/ui/
+/daemon/lib/shuttle/build_info.ex
 
 # ── Shuttle UI (offline verification harness build output) ───────────────
 ui/harness-dist/
@@ -56,8 +57,8 @@ node_modules/
 
 # ── Source artwork ───────────────────────────────────────────────────────
 # Masters stay on disk, out of the pack; only the small derived assets ship.
-# design/README.md says where each one is used and how to regenerate it.
-/design/*.png
+# docs/dev/artwork.md says where each one is used and how to regenerate it.
+/ui/design/*.png
 
 # ── Agent harness state ──────────────────────────────────────────────────
 # Claude Code writes these into any checkout it works in. Untracked by nature

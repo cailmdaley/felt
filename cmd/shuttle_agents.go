@@ -83,7 +83,7 @@ stream.`,
 
 		// --json is a machine surface and stays silent apart from the array. Not
 		// merely "stdout stays clean": the daemon shells this verb through
-		// Shuttle.Felt.run, which always sets stderr_to_stdout (lib/shuttle/felt.ex),
+		// Shuttle.Felt.run, which always sets stderr_to_stdout (daemon/lib/shuttle/felt.ex),
 		// so a footer on stderr would land inside the bytes it hands to
 		// Jason.decode and empty the browser's agent picker. Provenance and
 		// warnings are for a person reading a terminal — they ride the table.

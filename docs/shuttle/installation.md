@@ -6,7 +6,7 @@ machine.
 - **Fetch the release.** A prebuilt daemon for your platform, carrying its own
   Erlang runtime, the board bundle, and its keep-alive supervisor inside it. One
   command, no toolchain, no checkout.
-- **Build from a checkout.** `bootstrap.sh` builds the felt CLI and the daemon
+- **Build from a checkout.** `scripts/bootstrap.sh` builds the felt CLI and the daemon
   from source, places the board bundle, and installs the same keep-alive. This
   is the fleet path — what the deploy script updates, and what you want if you
   are changing daemon code.
@@ -44,10 +44,10 @@ needs:
 | Tool | Required | Purpose |
 | --- | --- | --- |
 | `go` 1.23+ | yes | Builds the `felt` CLI from the same checkout, so the CLI and the daemon never skew. |
-| `elixir` 1.19+ / OTP 28 | yes | `mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
+| `elixir` 1.19+ / OTP 28 | yes | `daemon/mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
 | `node` 22+ / `npm` | only for the board | Builds the kanban bundle into `ui/dist`. A fetched daemon ships the bundle already built. |
 
-`bootstrap.sh` checks all of these and names what is missing.
+`scripts/bootstrap.sh` checks all of these and names what is missing.
 
 ## Fetch the release
 
@@ -245,8 +245,8 @@ Clone the repo, then run the bootstrap. `make install` runs the same thing.
 ```bash
 git clone https://github.com/cailmdaley/felt ~/dev/felt
 cd ~/dev/felt
-./bootstrap.sh --dry-run     # check prerequisites, print the plan, change nothing
-./bootstrap.sh               # or: make install
+./scripts/bootstrap.sh --dry-run     # check prerequisites, print the plan, change nothing
+./scripts/bootstrap.sh               # or: make install
 ```
 
 Six steps run in order.
@@ -255,7 +255,7 @@ Six steps run in order.
    the run before anything is built.
 2. **`felt` CLI.** `GOBIN=~/.local/bin go install .` from *this* checkout — not
    the release binary. The daemon shells the CLI, so the two must never skew.
-3. **Daemon release.** `mix deps.get`, then `make daemon`, which assembles the
+3. **Daemon release.** `(cd daemon && mix deps.get)`, then `make daemon`, which assembles the
    release into `bin/rel` and leaves `bin/shuttle` — a tracked shell shim — as
    the front door. The step records the checkout path in `~/.shuttle/repo`, so
    remote revival over SSH can find it without an environment.
@@ -373,7 +373,8 @@ make install-agent AGENT_FELT_STORES=~/dev/myproject
 Neither front door is on your `PATH`; the rest of this section writes `shuttle`
 for whichever one you have.
 
-Both arms render a template from `share/`, which ships in the tarball and is
+Both arms render a template from `daemon/share/` in a checkout or `share/`
+in a fetched installation. The templates ship in the tarball and are
 tracked in the repo — the same two files, never forked. The templates' one
 placeholder for a location, `__SHUTTLE_DIR__`, resolves to whatever directory
 holds `bin/shuttle`: the checkout root in a checkout, the unpacked release root
@@ -437,7 +438,8 @@ uninstall-agent` calls the same verb.
 
 ### macOS (launchd)
 
-`install-agent` renders `share/io.shuttle.daemon.plist.template` into
+`install-agent` renders `daemon/share/io.shuttle.daemon.plist.template`
+(`share/` in a fetched installation) into
 `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it (bootstrap step 6
 does this through `make install-agent`). The agent sets `RunAtLoad` and
 `KeepAlive`, so the daemon starts at login and restarts on crash. A daemon you
@@ -477,7 +479,8 @@ see [Sharp edges](#sharp-edges).
 
 ### Linux (systemd user unit)
 
-`install-agent` renders `share/io.shuttle.daemon.service.template` into
+`install-agent` renders `daemon/share/io.shuttle.daemon.service.template`
+(`share/` in a fetched installation) into
 `~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
 enable --now`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
 `WantedBy=default.target` starts the daemon at login. It bakes in the same
@@ -549,7 +552,7 @@ respawn loop's command line instead of writing a unit nothing will read.
 
 That loop is `bin/shuttle-launch`, and it ships in the tarball as well as the
 repo. Both installers also place a copy at `~/.local/bin/shuttle-launch`:
-`bootstrap.sh` on a checkout, `install.sh` on a fetched install. That exact path
+`scripts/bootstrap.sh` on a checkout, `install.sh` on a fetched install. That exact path
 is what a hub runs over SSH to revive a dead remote daemon, so it exists on
 every Linux host whether or not you drive it yourself. On a host with no systemd
 user session, bootstrap goes one step further and starts a tmux session named
@@ -586,7 +589,7 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
     A hub revives a dead remote by running `~/.local/bin/shuttle-launch` over
     SSH with no environment. The script then resolves the daemon's directory
     from `$SHUTTLE_DIR`, else the state file `~/.shuttle/repo`, else its own
-    parent directory — and only `bootstrap.sh` writes that state file. After a
+    parent directory — and only `scripts/bootstrap.sh` writes that state file. After a
     fetched install, write it yourself or revival exits without starting
     anything:
 
@@ -811,7 +814,7 @@ shells the felt CLI for its writes, so a stale installed CLI can break
 daemon-shelled commands mid-dispatch — `make daemon` rebuilds it first whenever
 Go is on PATH. On a host with no Go toolchain, `make daemon` builds only the
 daemon release, against whatever `felt` is already installed there.
-`bootstrap.sh --skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it
+`scripts/bootstrap.sh --skip-cli` passes `SKIP_CLI=1` through to `make daemon`, so it
 skips the CLI rebuild too, even on a host that has Go.
 
 **The UI build needs no private checkout.** `npm run build` runs `tsc --noEmit
@@ -877,7 +880,7 @@ the command waits for `/api/v1/version` after the replacement boots.
 
 **`felt shuttle tunnels` needs a fleet file first.** It renders autossh jobs
 from `~/.config/felt/remotes.json` — launchd plists on macOS, systemd user units
-on Linux. With no remotes configured it has nothing to write, and `bootstrap.sh
+on Linux. With no remotes configured it has nothing to write, and `scripts/bootstrap.sh
 --with-tunnels` does nothing useful. A Linux host with no systemd user session
 cannot start a unit, so `install` says so and writes nothing; `--write-only`
 renders the units for you to supervise yourself.
@@ -886,7 +889,7 @@ renders the units for you to supervise yourself.
 refuses to create its own directory, so a felt-only install records nothing.
 Degradation is graceful — the board still serves — but the activity ranking and
 the sent-files trail stay empty. Both daemon installs create the directory:
-`bootstrap.sh` for a checkout, and `install.sh` under `SHUTTLE=1` for a fetched
+`scripts/bootstrap.sh` for a checkout, and `install.sh` under `SHUTTLE=1` for a fetched
 release (it writes `~/.shuttle/repo` there too). So a host with the daemon on it
 is already enabled. The gap is a felt-only install — no `SHUTTLE=1`, no
 checkout — where nothing has made the directory yet: run `mkdir -p ~/.shuttle`
@@ -895,7 +898,7 @@ ledgers](#the-event-stream-and-the-ledgers).
 
 ## License
 
-The felt CLI and the board UI carry the MIT license. The daemon (`lib/`)
+The felt CLI and the board UI carry the MIT license. The daemon (`daemon/lib/`)
 contains code derived from OpenAI's Symphony under the Apache License
 2.0, preserved in
 [`NOTICE`](https://github.com/cailmdaley/felt/blob/main/NOTICE).

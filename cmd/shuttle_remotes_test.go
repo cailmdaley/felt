@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// remoteFixture is one row of test/fixtures/remotes/expected.json — the shared
+// remoteFixture is one row of daemon/test/fixtures/remotes/expected.json — the shared
 // expectation the Elixir suite asserts against too.
 type remoteFixture struct {
 	Name             string `json:"name"`
@@ -28,10 +28,10 @@ type remoteFixtureDoc struct {
 	Remotes            []remoteFixture `json:"remotes"`
 }
 
-const remotesFixtureDir = "../test/fixtures/remotes"
+const remotesFixtureDir = "../daemon/test/fixtures/remotes"
 
 // TestRemotesFixtureParity is the anti-drift device: the Go reader and the
-// Elixir reader (test/shuttle/remotes_test.exs) read the SAME fixture files and
+// Elixir reader (daemon/test/shuttle/remotes_test.exs) read the SAME fixture files and
 // assert the SAME expected.json. A default that changes in one language fails in
 // both. FELT_STORES parity is guarded only by comments; this one is executable.
 func TestRemotesFixtureParity(t *testing.T) {

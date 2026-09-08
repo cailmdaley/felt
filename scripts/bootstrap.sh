@@ -19,21 +19,21 @@
 #
 # `felt shuttle install <fiber>` already means "install a fiber as a dispatch
 # role", so the system bootstrap deliberately is NOT that verb. It is reached
-# via `make install` (which runs this script) or `./bootstrap.sh` directly.
+# via `make install` (which runs this script) or `./scripts/bootstrap.sh` directly.
 #
 # Usage:
-#   ./bootstrap.sh                 full bootstrap for this host
-#   ./bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
-#   ./bootstrap.sh --skip-ui       don't build ui/dist (default when Node isn't on PATH — rsync it instead)
-#   ./bootstrap.sh --build-ui      force the ui/dist build (default when Node is on PATH)
-#   ./bootstrap.sh --skip-hook     don't touch the event-stream step
-#   ./bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
-#   ./bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (hub-side)
-#   ./bootstrap.sh -h | --help     this help
+#   ./scripts/bootstrap.sh                 full bootstrap for this host
+#   ./scripts/bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
+#   ./scripts/bootstrap.sh --skip-ui       don't build ui/dist (default when Node isn't on PATH — rsync it instead)
+#   ./scripts/bootstrap.sh --build-ui      force the ui/dist build (default when Node is on PATH)
+#   ./scripts/bootstrap.sh --skip-hook     don't touch the event-stream step
+#   ./scripts/bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
+#   ./scripts/bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (hub-side)
+#   ./scripts/bootstrap.sh -h | --help     this help
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OS="$(uname -s)"
 CLI_INSTALL_DIR="${FELT_INSTALL_DIR:-$HOME/.local/bin}"
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -142,7 +142,7 @@ cli_desc() {
 if [ "$DRY_RUN" = 1 ]; then
   step "Plan (dry-run — nothing will change)"
   note "2. felt CLI : $(cli_desc)"
-  note "3. daemon   : mix deps.get && make daemon → bin/rel (fronted by bin/shuttle)"
+  note "3. daemon   : make daemon (fetch deps + build) → bin/rel (fronted by bin/shuttle)"
   note "4. ui/dist  : $(ui_desc)"
   note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
   note "6. keepalive: $(keepalive_desc)"
@@ -178,7 +178,6 @@ fi
 
 # ── 3. daemon release ──────────────────────────────────────────────────────
 step "Build the daemon release"
-( cd "$REPO" && mix deps.get ) || die "mix deps.get failed."
 make -C "$REPO" daemon SKIP_CLI="$SKIP_CLI" || die "daemon release build failed."
 ok "bin/shuttle built."
 
@@ -295,7 +294,7 @@ else
 
   if have_systemd_user; then
     # Same Makefile target as macOS, systemd arm: it captures the login PATH
-    # and renders share/io.shuttle.daemon.service.template. It needs
+    # and renders daemon/share/io.shuttle.daemon.service.template. It needs
     # AGENT_FELT_STORES (make inherits it from this environment) — without one
     # it refuses, and the respawn loop is still a working keep-alive, so warn
     # and fall back rather than aborting a bootstrap that got this far.
@@ -334,6 +333,6 @@ note "workers:  felt shuttle ps"
 # would make a fully successful bootstrap exit 1, so the explicit `exit 0`
 # below closes it out (caught by the clean-container acceptance run).
 if [ "$WITH_TUNNELS" = 0 ]; then
-  note "remotes:  ./bootstrap.sh --with-tunnels  (or: felt shuttle tunnels install)"
+  note "remotes:  ./scripts/bootstrap.sh --with-tunnels  (or: felt shuttle tunnels install)"
 fi
 exit 0

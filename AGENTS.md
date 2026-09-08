@@ -5,8 +5,8 @@ One repo, one checkout, three artifacts:
 - **felt CLI** (Go) — the **data layer**. A directory-based markdown fiber
   tracker / agent memory, and the home of the `felt shuttle <verb>`
   subcommands. Built here.
-- **shuttle daemon** (Elixir/OTP Mix release, launched through the tracked
-  `bin/shuttle` shim) — the **dispatcher**.
+- **shuttle daemon** (`daemon/`, an Elixir/OTP Mix release) — launched
+  through the tracked `bin/shuttle` shim, the **dispatcher**.
   Polls the felt tree, launches one tmux worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
 - **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
@@ -82,17 +82,16 @@ lives in the docs site (`docs/`, published to
   malformed user file fails loud with its path, a missing one is silent. The
   daemon reads the already-resolved record off felt's
   `shuttle.resolved.agent` JSON and shells `felt shuttle agents [resolve]` for
-  the registry / no-fiber cases. There is no daemon-embedded `share/agents.json`
-  and no `config/agents.exs`.
+  the registry / no-fiber cases. There is no daemon-embedded agent registry.
 - **Remote daemons live in `~/.config/felt/remotes.json`.** The Go CLI
-  (`cmd/shuttle_remotes.go`) and the daemon (`lib/shuttle/remotes.ex`) read the
+  (`cmd/shuttle_remotes.go`) and the daemon (`daemon/lib/shuttle/remotes.ex`) read the
   same file at runtime, so nothing about your hosts is baked at build time.
   `felt shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
-  validator. `test/fixtures/remotes/` enforces Go/Elixir parity, and
+  validator. `daemon/test/fixtures/remotes/` enforces Go/Elixir parity, and
   `cmd/hygiene_test.go` fails the build on a personal hostname or path anywhere
-  in the published surface: `config/`, `lib/`, `cmd/`, `share/`, `ui/`, `bin/`,
+  in the published surface: `daemon/config/`, `daemon/lib/`, `cmd/`, `daemon/share/`, `ui/`, `bin/`,
   **every `.md` in the repo** (docs and skills ship as content), plus `Makefile`
-  and `bootstrap.sh`. Prose counts — naming one of your own hosts in a doc
+  and `scripts/bootstrap.sh`. Prose counts — naming one of your own hosts in a doc
   fails the build, so write incidents generically and keep the host's name in
   the fiber instead.
 - **`shuttle.agent` field drives agent selection.** The `shuttle:` block's
@@ -129,7 +128,7 @@ make restart               # rebuild release + stop + start  [daemon dev loop]
 make status / make logs    # ps + snapshot / tail the daemon log
 ```
 
-Editing `lib/*.ex` needs `make restart` (a restart without `make daemon` is a
+Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing the Go CLI needs `make cli`.
 Editing `ui/` needs `cd ui && npm test` + `npm run build` + rsync of `ui/dist`.
 Under launchd/systemd, `make restart` silently no-ops — bounce with
@@ -141,7 +140,7 @@ Under launchd/systemd, `make restart` silently no-ops — bounce with
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks
 go test ./...              # Go (felt CLI)
-mix test                   # full Elixir suite
+make mix-test              # full Elixir suite
 cd ui && npm test          # vitest, run TWICE under two pinned TZs
                            # (America/Los_Angeles, Europe/Paris)
 ```
@@ -173,7 +172,7 @@ stale bundle 404s silently. Details:
 
 ## License
 
-The repo is **MIT** (the felt CLI + UI). The shuttle daemon (`lib/`) contains
+The repo is **MIT** (the felt CLI + UI). The shuttle daemon (`daemon/lib/`) contains
 code derived from OpenAI's Symphony under the **Apache License 2.0**, preserved
 in `NOTICE` and `LICENSE-APACHE`.
 

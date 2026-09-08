@@ -81,29 +81,33 @@ jobs:
       - name: Cache deps
         uses: actions/cache@v4
         with:
-          path: deps
+          path: daemon/deps
           key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-mix-
 
       - name: Cache _build
         uses: actions/cache@v4
         with:
-          path: _build
+          path: daemon/_build
           key: ${{ runner.os }}-build-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-build-
 
       - name: Install dependencies
+        working-directory: daemon
         run: mix deps.get
 
       - name: Check dependency security advisories
+        working-directory: daemon
         run: |
           mix escript.install hex mix_audit 2.1.5 --force
           "$HOME/.mix/escripts/mix_audit"
 
       - name: Compile (warnings as errors)
+        working-directory: daemon
         run: mix compile --warnings-as-errors
 
       - name: Run tests
+        working-directory: daemon
         run: mix test
 
   ui:

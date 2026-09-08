@@ -9,7 +9,7 @@ The shuttle daemon binds `127.0.0.1:4000` and serves its whole surface under
     is paired with a bundle rebuild, not with a deprecation window. Script
     against it for your own machine; do not build a product on it.
 
-    `lib/shuttle_web/router.ex` is the authority, and it carries per-route
+    `daemon/lib/shuttle_web/router.ex` is the authority, and it carries per-route
     rationale comments this page does not repeat.
 
 ## How a route is routed

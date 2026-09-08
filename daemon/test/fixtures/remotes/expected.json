@@ -1,5 +1,5 @@
 {
-  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil).",
+  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil).",
   "canonical.json": {
     "launchd_label_prefix": "com.example",
     "remotes": [

@@ -109,7 +109,7 @@ behaves the same.
 
 The felt CLI and the board UI ship under the
 [MIT License](https://github.com/cailmdaley/felt/blob/main/LICENSE). The shuttle
-daemon (`lib/`) contains code derived from OpenAI's Symphony under the
+daemon (`daemon/lib/`) contains code derived from OpenAI's Symphony under the
 [Apache License 2.0](https://github.com/cailmdaley/felt/blob/main/LICENSE-APACHE),
 preserved in [`NOTICE`](https://github.com/cailmdaley/felt/blob/main/NOTICE).
 

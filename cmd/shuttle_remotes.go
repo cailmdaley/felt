@@ -15,7 +15,7 @@ import (
 // what local port each one's SSH tunnel lands on, and how to reach them.
 //
 // This is the Go half of a two-reader contract. `Shuttle.Remotes` (Elixir) reads
-// the same file with the same defaults, and `test/fixtures/remotes/*.json` is
+// the same file with the same defaults, and `daemon/test/fixtures/remotes/*.json` is
 // read by BOTH suites so the two readers cannot drift. Nothing here shells the
 // daemon and nothing in the daemon shells this — the file is the contract.
 //

@@ -87,7 +87,7 @@ the cascade's ssh check.
 worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
 Linux. What is mac-specific is only the `osascript` call that raises the kitty
 window, and that is already a no-op off macOS (`activate/1` in
-`lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `felt
+`daemon/lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `felt
 shuttle attach <fiber>` always works.
 
 Windows is unsupported.

@@ -656,7 +656,7 @@ type goldenEvent struct {
 // finishes.
 //
 // The Elixir side asserts the phases and the sent-files trail these produce
-// (test/shuttle/events_parity_test.exs). Keep the two in step.
+// (daemon/test/shuttle/events_parity_test.exs). Keep the two in step.
 func goldenEvents(home string) []goldenEvent {
 	const workerA = "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
 	const workerB = "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
@@ -818,7 +818,7 @@ func TestNotificationKindRecorded(t *testing.T) {
 }
 
 // TestEventGoldenParity pins the wire bytes. The same checked-in file is read
-// by the Elixir readers in test/shuttle/events_parity_test.exs — one fixture,
+// by the Elixir readers in daemon/test/shuttle/events_parity_test.exs — one fixture,
 // two languages, so writer drift fails a test instead of quietly emptying the
 // board.
 func TestEventGoldenParity(t *testing.T) {

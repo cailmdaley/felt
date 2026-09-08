@@ -19,7 +19,7 @@ defmodule ShuttleWeb.AstraControllerTest do
 
   # Sibling LightconeResearch checkout's canonical example, if present.
   @iris_dir Path.expand(
-              Path.join([__DIR__, "..", "..", "..", "..", "LightconeResearch", "ASTRA", "examples", "iris"])
+              Path.join([__DIR__, "..", "..", "..", "..", "..", "LightconeResearch", "ASTRA", "examples", "iris"])
             )
 
   describe "local validation" do

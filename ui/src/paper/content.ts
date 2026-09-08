@@ -2,7 +2,7 @@ import type { GenericParent } from 'myst-common'
 import type { MastheadFrontmatter, InputEntry, OutputEntry } from '@lightcone/renderer'
 
 /**
- * One baked page, as MySTRA's `buildAllPages` emits it (see priv/mystra/bake.mjs).
+ * One baked page, as MySTRA's `buildAllPages` emits it (see daemon/priv/mystra/bake.mjs).
  * `ast` is the mdast root the renderer consumes; the root analysis is slug
  * `index`, sub-analyses get their own slugs.
  */
@@ -17,7 +17,7 @@ export interface BakedPage {
  * The structured ASTRA data for one page — what the decisions/outputs/inputs
  * SURFACES render from (the narrative page renders from mdast alone). Produced
  * by MySTRA's `buildASTRADataMap`, keyed by page slug ('index' = root) in
- * `BakedPaper.astra` (see priv/mystra/bake.mjs).
+ * `BakedPaper.astra` (see daemon/priv/mystra/bake.mjs).
  */
 export interface AstraPageData {
   outputs: OutputEntry[]
@@ -53,7 +53,7 @@ export interface LoadPaperArgs {
  * Fetch the baked paper. Production path: the daemon's owner-routed
  * `GET /api/v1/astra?path=&origin=&universe=` shells out to bake.mjs and
  * returns `{ pages }`. Dev path: `?fixture=iris` loads a locally-baked,
- * gitignored fixture (regenerate via priv/mystra/bake.mjs) so the render is
+ * gitignored fixture (regenerate via daemon/priv/mystra/bake.mjs) so the render is
  * verifiable without a running daemon or MySTRA. Dead-code-eliminated in a
  * production build (`import.meta.env.DEV` is statically false).
  */

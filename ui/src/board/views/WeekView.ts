@@ -334,7 +334,7 @@ export function weekWindow(monday: string, nowMs: number): WeekWindow {
  *
  * The wire contract is fixed: `Shuttle.Activity` keys every event by
  * `div(ts, @minute_ms) * @minute_ms` with `@minute_ms 60_000`
- * (lib/shuttle/activity.ex), unconditionally — there is no width parameter and
+ * (daemon/lib/shuttle/activity.ex), unconditionally — there is no width parameter and
  * no window-dependent coarsening, and the controller serves those buckets
  * untouched.
  *

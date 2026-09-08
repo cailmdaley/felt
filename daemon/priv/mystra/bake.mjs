@@ -27,7 +27,7 @@ function resolveMystraDist() {
   const candidates = [
     fromEnv && join(fromEnv, 'dist', 'index.js'),
     // sibling of the projects dir: <projects>/LightconeResearch/MySTRA
-    resolve(dirname(fileURLToPath(import.meta.url)), '../../../LightconeResearch/MySTRA/dist/index.js'),
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../../LightconeResearch/MySTRA/dist/index.js'),
   ].filter(Boolean)
   const hit = candidates.find((p) => existsSync(p))
   if (!hit) {

@@ -3,8 +3,8 @@
 #
 # Tracked source of truth for the loop that keeps the daemon alive on hosts
 # without a supervisor — a Linux host with no systemd user session, typically an
-# HPC login node. bootstrap.sh installs this to
-# ~/.local/bin/shuttle-launch; lib/shuttle/remote_registry.ex invokes that
+# HPC login node. scripts/bootstrap.sh installs this to
+# ~/.local/bin/shuttle-launch; daemon/lib/shuttle/remote_registry.ex invokes that
 # installed copy over SSH to revive a dead remote daemon.
 #
 # Modes:
@@ -13,7 +13,7 @@
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
 # Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
-# file bootstrap.sh writes at install time, so remote revival over SSH needs
+# file scripts/bootstrap.sh writes at install time, so remote revival over SSH needs
 # no env to find the bootstrapped checkout); else the script's own directory
 # if it looks like <repo>/bin. If none of those resolve to a checkout with
 # bin/shuttle, this exits loudly rather than guessing a path.
@@ -25,7 +25,7 @@
 #
 # `--force` is load-bearing: bare `start` probes :4000 and halt(1)s if a
 # daemon answers, which would busy-respawn during the documented
-# "kill the :4000 listener to cycle" procedure. See bootstrap.sh.
+# "kill the :4000 listener to cycle" procedure. See scripts/bootstrap.sh.
 
 set -u
 

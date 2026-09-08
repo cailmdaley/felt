@@ -6,7 +6,7 @@
  * and must not wait for the network, so {@link localHits} runs on every
  * keystroke. What the board does NOT hold is the BODY of every constitution —
  * that is a `felt ls --body` away, behind `GET /api/v1/search` (see
- * lib/shuttle_web/controllers/search_controller.ex), debounced and merged in
+ * daemon/lib/shuttle_web/controllers/search_controller.ex), debounced and merged in
  * when it lands. The list you are reading is therefore always current on names
  * and a beat behind on bodies, which is the right way round: a name match is
  * what you usually meant, and it appears instantly.

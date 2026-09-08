@@ -36,7 +36,7 @@ func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
 }
 
 // TestShuttleMarkRuntime_DaemonDispatchArgv locks in the exact argv
-// Shuttle.Continuation.write_dispatch/4 shells (lib/shuttle/continuation.ex,
+// Shuttle.Continuation.write_dispatch/4 shells (daemon/lib/shuttle/continuation.ex,
 // the `mark_runtime/4` private helper), post-C1:
 //
 //	felt shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --run-id <run_id>
@@ -80,7 +80,7 @@ func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 }
 
 // TestShuttleMarkRuntime_DaemonHandoffArgv locks in the exact argv
-// Shuttle.Continuation.mark_handed_off/3 shells (lib/shuttle/continuation.ex)
+// Shuttle.Continuation.mark_handed_off/3 shells (daemon/lib/shuttle/continuation.ex)
 // — the daemon-side conclude write after an accept/resume/rearm, post-C1:
 //
 //	felt shuttle mark-runtime <fiber_id> --handed-off-at <ts>

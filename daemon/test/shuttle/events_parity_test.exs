@@ -22,7 +22,7 @@ defmodule Shuttle.EventsParityTest do
   # file, then stopping; worker B (Codex) ending blocked on a human; worker C
   # stopping with two detached shells still running and then being hit by the
   # harness's idle timer; and a subagent stopping outside any tmux session.
-  @golden Path.expand("../../cmd/testdata/events_golden.jsonl", __DIR__)
+  @golden Path.expand("../../../cmd/testdata/events_golden.jsonl", __DIR__)
   @worker_a "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
   @worker_b "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
   @worker_c "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"

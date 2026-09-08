@@ -12,7 +12,7 @@
 # half — a live daemon deciding fresh-vs-resume off the stamped fields, with a
 # real worker in tmux — is exercised separately.
 #
-# Usage:  test/e2e/handoff_roundtrip.sh
+# Usage:  daemon/test/e2e/handoff_roundtrip.sh
 #   FELT=<path>  overrides the felt binary (defaults to `felt` on PATH; any felt
 #                works — the shuttle: block is opaque frontmatter it round-trips).
 #
@@ -20,7 +20,6 @@
 # call here runs under `env -u TMUX` so it can never kill the caller's session.
 set -euo pipefail
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WORK=$(mktemp -d /tmp/shuttle-handoff-e2e.XXXXXX)
 FELT=${FELT:-felt}
 FAIL=0

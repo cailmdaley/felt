@@ -1038,7 +1038,7 @@ describe('how full a day was', () => {
   });
 
   it('counts replies from k:"reply" buckets, which duplicate agent minutes', () => {
-    // The daemon emits both kinds for one `stop` (lib/shuttle/activity.ex), so
+    // The daemon emits both kinds for one `stop` (daemon/lib/shuttle/activity.ex), so
     // the reply count must not disturb the agent time it shadows.
     const reply = (m: number, n: number): ActivityBucket =>
       ({ m, s: 'a-shuttle', cwd: null, k: 'reply' as ActivityBucket['k'], n });
@@ -1073,7 +1073,7 @@ describe('how full a day was', () => {
 
   it('counts one minute per bucket — the wire grid is fixed, never inferred', () => {
     // `Shuttle.Activity` keys every event by div(ts, 60_000) * 60_000
-    // unconditionally (lib/shuttle/activity.ex), so a bucket IS a minute.
+    // unconditionally (daemon/lib/shuttle/activity.ex), so a bucket IS a minute.
     expect(BUCKET_MS).toBe(60_000);
     // 360 minute-buckets = 6h = the `full` threshold, exactly.
     const buckets: ActivityBucket[] = [];

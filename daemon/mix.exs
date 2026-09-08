@@ -83,7 +83,7 @@ defmodule Shuttle.MixProject do
   defp copy_support_files(release) do
     for name <- ["shuttle", "shuttle-launch"] do
       dst = Path.join([release.path, "bin", name])
-      File.cp!(Path.expand("bin/#{name}", __DIR__), dst)
+      File.cp!(Path.expand("../bin/#{name}", __DIR__), dst)
       File.chmod!(dst, 0o755)
     end
 

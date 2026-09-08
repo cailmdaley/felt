@@ -17,7 +17,7 @@ defmodule ShuttleWeb.Assets do
      build-on-host path, where the bundle is built or rsynced beside the code.
   """
 
-  @src_dist Path.expand(Path.join([__DIR__, "..", "..", "ui", "dist"]))
+  @src_dist Path.expand(Path.join([__DIR__, "..", "..", "..", "ui", "dist"]))
 
   @doc "Absolute path to the built UI bundle directory."
   @spec dist() :: String.t()

@@ -143,7 +143,7 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"
 
   # Remote revival over SSH runs `$HOME/.local/bin/shuttle-launch` verbatim
-  # (lib/shuttle/remote_registry.ex) — a hardcoded path only bootstrap.sh used
+  # (daemon/lib/shuttle/remote_registry.ex) — a hardcoded path only scripts/bootstrap.sh used
   # to populate. Without this, a fetched host is supervisable locally but a hub
   # cannot bring it back after a death, which is the one recovery step that has
   # no human in it.
@@ -159,7 +159,7 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   #           this file, else its own parent directory. Revived over SSH it has
   #           no environment, and its parent here is ~/.local — which holds no
   #           bin/shuttle — so without this file a fetched host cannot be
-  #           revived by its hub at all. bootstrap.sh writes it for checkouts;
+  #           revived by its hub at all. scripts/bootstrap.sh writes it for checkouts;
   #           this is the fetched equivalent.
   #   dir    — the plugin's activity-event hook writes events only when the
   #           directory already exists, so the board's activity views stay

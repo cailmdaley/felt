@@ -14,7 +14,7 @@ layer, including the `felt shuttle <verb>` subcommands), the **shuttle daemon**
 git clone https://github.com/cailmdaley/felt
 cd felt
 go build .                    # the felt CLI
-mix deps.get && mix compile   # the daemon
+(cd daemon && mix deps.get && mix compile)  # the daemon
 make build                    # CLI + daemon release; build ui/dist separately
 ```
 
@@ -28,8 +28,8 @@ suite, so `make test` needs it too.
 
 ```bash
 go test ./...                       # Go (felt CLI)
-mix test                            # Elixir (daemon)
-cd ui && npm test                   # TypeScript (board) — runs twice, once per pinned timezone
+make mix-test                       # Elixir (daemon)
+(cd ui && npm test)                 # TypeScript (board) — runs twice, once per pinned timezone
 bash scripts/test-plugin-hooks.sh   # shell hook shims (claude-plugin/hooks/*)
 make test                           # all four
 ```
@@ -38,14 +38,15 @@ CI runs `go build`/`go test ./...`, `scripts/test-plugin-hooks.sh`, a check
 that the two plugin manifests agree on version, `mix compile
 --warnings-as-errors` + `mix test`, and both `npm test` (under the two
 pinned time zones) and `npm run build` for the board on every PR.
+Mix commands run inside `daemon/`.
 
 ## Invariants
 
 Before opening a PR, verify:
 
 - `go test ./...` passes
-- `mix compile --warnings-as-errors` passes
-- `mix test` passes
+- `(cd daemon && mix compile --warnings-as-errors)` passes
+- `make mix-test` passes
 - `cd ui && npm test` passes
 - `bash scripts/test-plugin-hooks.sh` passes
 - No personal hostnames, usernames, or absolute home paths (`/Users/...`) in
@@ -77,6 +78,6 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-repository's MIT license. Note that the shuttle daemon (`lib/`) contains code
+repository's MIT license. Note that the shuttle daemon (`daemon/lib/`) contains code
 derived from OpenAI's Symphony under the Apache License 2.0, preserved in
 `NOTICE` and `LICENSE-APACHE`.

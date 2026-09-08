@@ -92,7 +92,7 @@ if [ -n "$REMOTE_TAGS" ]; then
 fi
 
 # ── Docs-freshness gate ──────────────────────────────────────────────
-# The docs site (docs/ + mkdocs.yml) and README must not fall more than
+# The docs site (docs/ + docs/mkdocs.yml) and README must not fall more than
 # one release behind the code. Before tagging, an agent audits the
 # release range for user-facing changes the docs don't reflect and
 # reports PASS or FAIL. Requires the `claude` CLI; skip explicitly with
@@ -105,7 +105,7 @@ if [ "${SKIP_DOCS_AUDIT:-0}" != "1" ]; then
     PREV_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
     RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
     echo "→ Docs audit over $RANGE (claude -p, this takes a minute)…"
-    VERDICT="$(claude -p --model claude-sonnet-4-5 "You are the docs-freshness gate for a felt release. Review 'git log --stat $RANGE' for user-facing changes (CLI verbs/flags, frontmatter schema, install steps, daemon behavior) and check whether docs/, mkdocs.yml, and README.md reflect them. Ignore internal refactors. Reply with exactly one line: 'PASS' or 'FAIL: <the drifted claims, briefly>'.")"
+    VERDICT="$(claude -p --model claude-sonnet-4-5 "You are the docs-freshness gate for a felt release. Review 'git log --stat $RANGE' for user-facing changes (CLI verbs/flags, frontmatter schema, install steps, daemon behavior) and check whether docs/, docs/mkdocs.yml, and README.md reflect them. Ignore internal refactors. Reply with exactly one line: 'PASS' or 'FAIL: <the drifted claims, briefly>'.")"
     echo "$VERDICT"
     case "$VERDICT" in
         PASS*) echo "✓ Docs audit passed" ;;

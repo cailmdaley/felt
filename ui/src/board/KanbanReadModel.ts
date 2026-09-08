@@ -64,7 +64,7 @@ export interface BuildKanbanResponseOptions {
  * surface, so it never reaches a Desk column.
  *
  * The daemon's feed is WIDER than this on purpose (`--has-field due` is one of
- * its three admission walks, see lib/shuttle/fiber_documents.ex): it serves
+ * its three admission walks, see daemon/lib/shuttle/fiber_documents.ex): it serves
  * every row the board might want, and this predicate is where the board says
  * which of them it draws. A due-only row arriving on the wire is expected and
  * simply not admitted here.

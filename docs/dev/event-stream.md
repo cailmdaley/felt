@@ -19,7 +19,7 @@ writer and the readers cannot drift.
 in `claude-plugin/hooks/hooks.json` on SessionStart, UserPromptSubmit,
 PreToolUse, Stop, SubagentStop, Notification, and SessionEnd. `.codex-plugin`
 points at the same file, so Codex sessions feed the stream too. Install with
-`felt setup claude` / `felt setup codex`; `bootstrap.sh` step 5 does both and
+`felt setup claude` / `felt setup codex`; `scripts/bootstrap.sh` step 5 does both and
 then probes the writer. No `jq`, `perl`, or `hostname` — the whole line is built
 in Go, which is what makes it work on a bare remote login node.
 
@@ -70,7 +70,7 @@ Past the bound the session categorizes as if the count were zero.
 
 `cmd/testdata/events_golden.jsonl` is the cross-language contract: written
 byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
-`test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's
+`daemon/test/shuttle/events_parity_test.exs`. Each host's daemon tails its own host's
 `~/.shuttle/events.jsonl`.
 
 ## The two ledgers
@@ -78,10 +78,10 @@ byte-for-byte by `cmd/hook_event_test.go`, parsed by both Elixir readers in
 Beside the event stream sit two append-only ledgers, both read by the temporal
 views as **join rung 0** — the structural pairing that replaces an inference.
 
-- `~/.shuttle/sessions.jsonl` (`lib/shuttle/session_ledger.ex`) pairs a fiber
+- `~/.shuttle/sessions.jsonl` (`daemon/lib/shuttle/session_ledger.ex`) pairs a fiber
   with the harness session dispatched against it. **The daemon writes it**, at
   dispatch / claim / resume.
-- `~/.shuttle/commits.jsonl` (`lib/shuttle/commit_ledger.ex`) pairs a commit
+- `~/.shuttle/commits.jsonl` (`daemon/lib/shuttle/commit_ledger.ex`) pairs a commit
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces
   parsing a fiber name out of a commit subject. **The hook writes it** —

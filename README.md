@@ -115,6 +115,6 @@ welcome.
 
 ## License
 
-The felt CLI and the board UI are under the [MIT License](LICENSE). The shuttle daemon (`lib/`)
+The felt CLI and the board UI are under the [MIT License](LICENSE). The shuttle daemon (`daemon/lib/`)
 contains code derived from OpenAI's Symphony under the [Apache License 2.0](LICENSE-APACHE),
 preserved in [`NOTICE`](NOTICE).

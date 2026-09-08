@@ -21,7 +21,7 @@ import (
 // Appends one JSONL line per commit to ~/.shuttle/commits.jsonl, pairing the
 // commit with the session that made it. The pairing is knowable only inside
 // the session's own process tree, which is why the writer is a hook and the
-// daemon is only a reader (lib/shuttle/commit_ledger.ex); anything else would
+// daemon is only a reader (daemon/lib/shuttle/commit_ledger.ex); anything else would
 // be back to guessing the author from a commit subject.
 //
 // The reader takes a line as a commit when `at` is an integer and `sha` a

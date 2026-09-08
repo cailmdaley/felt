@@ -34,10 +34,10 @@ echo "=== [2/5] clone as the stranger ==="
 su - ada -c 'git config --global --add safe.directory /src && git config --global --add safe.directory /src/.git && git clone -q /src /home/ada/felt' || fail "clone"
 
 echo "=== [3/5] bootstrap.sh --dry-run ==="
-su - ada -c 'cd ~/felt && ./bootstrap.sh --dry-run' || fail "dry-run exited nonzero"
+su - ada -c 'cd ~/felt && ./scripts/bootstrap.sh --dry-run' || fail "dry-run exited nonzero"
 
 echo "=== [4/5] bootstrap.sh (full) ==="
-su - ada -c 'cd ~/felt && ./bootstrap.sh' || fail "bootstrap exited nonzero"
+su - ada -c 'cd ~/felt && ./scripts/bootstrap.sh' || fail "bootstrap exited nonzero"
 
 echo "=== [5/5] post-conditions ==="
 su - ada -c 'test -x ~/.local/bin/felt' || fail "felt CLI not installed"

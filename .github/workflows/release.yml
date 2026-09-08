@@ -92,8 +92,8 @@ jobs:
           cd ui
           npm ci
           npm run build
-          mkdir -p ../priv/ui
-          cp -R dist ../priv/ui/dist
+          mkdir -p ../daemon/priv/ui
+          cp -R dist ../daemon/priv/ui/dist
 
       # SHUTTLE_VERSION stamps the tag into mix.exs's `version:`, which Mix
       # bakes into the app spec inside the artifact — that is what
@@ -101,6 +101,7 @@ jobs:
       # it every release would claim the mix.exs fallback. The leading "v" is
       # stripped here because a tag is not a SemVer string.
       - name: Assemble the release
+        working-directory: daemon
         run: |
           export SHUTTLE_VERSION="${GITHUB_REF_NAME#v}"
           mix deps.get --only prod
@@ -115,7 +116,7 @@ jobs:
           # the .app would record an empty module list).
           MIX_ENV=prod mix compile
           MIX_ENV=prod mix compile.app --force
-          MIX_ENV=prod mix release shuttled --path out/shuttle
+          MIX_ENV=prod mix release shuttled --path ../out/shuttle
 
       - name: Boot-test the artifact
         run: |

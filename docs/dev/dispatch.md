@@ -5,7 +5,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 
 ## How dispatch works
 
-- **Poller** (`lib/shuttle/poller.ex`) owns the tick. It walks each
+- **Poller** (`daemon/lib/shuttle/poller.ex`) owns the tick. It walks each
   configured felt store, pulls candidate metadata via `felt ls --json` and
   per-fiber detail via `felt show -j`, and considers a fiber eligible iff
   it carries a `shuttle:` block owned by this host (`shuttle.host` matches),
@@ -77,7 +77,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   (There was a third shape — an in-browser directory browser over `GET
   /api/v1/browse`. It is gone: once the host is chosen up front, walking a
   remote filesystem a click at a time bought nothing a pasted path doesn't.)
-- **Dispatcher** (`lib/shuttle/dispatcher.ex`) resolves the agent, spawns
+- **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `<leaf>-<uid>-shuttle` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
   Scheduled runs dispatch only when `next_due_at` is due AND `review.state`

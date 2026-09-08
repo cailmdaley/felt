@@ -53,7 +53,7 @@ api_post() {
 # `install-agent` / `uninstall-agent` hand the daemon to a supervisor —
 # launchd on macOS, a systemd *user* unit on Linux — by rendering the
 # templates that ship in share/ beside this shim. One implementation serves
-# both worlds: in a checkout share/ is the tracked directory and ROOT is the
+# both worlds: in a checkout daemon/share/ is the tracked directory and ROOT is the
 # repo; in a fetched tarball mix.exs's :copy_support_files step put the same
 # files there and ROOT is the unpacked release. The templates' __SHUTTLE_DIR__
 # is *the directory holding bin/shuttle* — the checkout root or the release
@@ -62,6 +62,11 @@ api_post() {
 # `make install-agent` is a thin wrapper over these verbs, so there is nothing
 # to keep in sync.
 ROOT=$(dirname -- "$SELF_DIR")
+if [ -x "$SELF_DIR/shuttled" ]; then
+  TEMPLATE_DIR="$ROOT/share"
+else
+  TEMPLATE_DIR="$ROOT/daemon/share"
+fi
 
 # The supervisor's identity, overridable with --label so a SECOND instance can
 # be supervised beside the real one. That is what makes this path testable on a
@@ -96,7 +101,7 @@ sed_escape() { printf '%s' "$1" | sed -e 's/[\\&#]/\\&/g'; }
 agent_os_defaults() {
   case "$AGENT_OS" in
     Darwin)
-      AGENT_TEMPLATE="$ROOT/share/io.shuttle.daemon.plist.template"
+      AGENT_TEMPLATE="$TEMPLATE_DIR/io.shuttle.daemon.plist.template"
       AGENT_LOG_DEFAULT="$HOME/Library/Logs/shuttle.log"
       # The user's PERSISTENT login ssh-agent, not launchd's per-session
       # Keychain agent — that one only ever holds the default key, so creds
@@ -106,7 +111,7 @@ agent_os_defaults() {
       AGENT_SSH_DEFAULT="$HOME/.ssh/agent.sock"
       ;;
     Linux)
-      AGENT_TEMPLATE="$ROOT/share/io.shuttle.daemon.service.template"
+      AGENT_TEMPLATE="$TEMPLATE_DIR/io.shuttle.daemon.service.template"
       # No conventional log home on Linux: join the daemon's other state under
       # ~/.shuttle, which is where the respawn loop already writes.
       AGENT_LOG_DEFAULT="$HOME/.shuttle/shuttle.log"
@@ -440,7 +445,7 @@ install_agent() {
   agent_os_defaults
   [ -f "$AGENT_TEMPLATE" ] || {
     echo "supervisor template missing: $AGENT_TEMPLATE" >&2
-    echo "(a release ships share/ beside bin/; a checkout has it tracked — reinstall or re-fetch)" >&2
+    echo "(a release ships share/ beside bin/; a checkout has daemon/share/ tracked — reinstall or re-fetch)" >&2
     exit 1
   }
 

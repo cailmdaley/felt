@@ -15,7 +15,7 @@ import (
 // dispatch predicate (block.host == own_host_id) has a value to match, and no
 // host-less block is produced by normal flows.
 //
-// Precedence mirrors the Elixir daemon's own_host_id (lib/shuttle/poller.ex)
+// Precedence mirrors the Elixir daemon's own_host_id (daemon/lib/shuttle/poller.ex)
 // exactly: explicit --host (cross-host install, an explicit per-invocation
 // override — checked first because it's a deliberate ask, not an ambient
 // identity source) → SHUTTLE_HOST env var → the `~/.shuttle/host` file (its

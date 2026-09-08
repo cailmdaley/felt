@@ -1,6 +1,8 @@
 site_name: felt
 site_url: https://cailmdaley.github.io/felt/
 repo_url: https://github.com/cailmdaley/felt
+docs_dir: .
+site_dir: ../site
 
 theme:
   name: material
@@ -72,6 +74,7 @@ nav:
       - Event stream and ledgers: dev/event-stream.md
       - Releasing: dev/releasing.md
       - Codebase layout and tests: dev/layout.md
+      - Artwork: dev/artwork.md
   - Reference:
       - CLI: reference/cli.md
       - Daemon HTTP API: reference/api.md

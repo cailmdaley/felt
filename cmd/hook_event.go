@@ -23,11 +23,11 @@ import (
 // daemon tails (see cmd/shuttle_events.go for the path and the write gate).
 // Two readers consume it, and only these fields:
 //
-//   - lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`,
+//   - daemon/lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`,
 //     plus the two fields that say whether an idle-looking session is really
 //     waiting on a HUMAN: `notificationKind` and `backgroundTasks`.
 //     Last-event-wins per session, so duplicate lines are idempotent.
-//   - lib/shuttle/sent_files.ex — `tool == "SendUserFile"`, `toolInput.files`,
+//   - daemon/lib/shuttle/sent_files.ex — `tool == "SendUserFile"`, `toolInput.files`,
 //     `sessionId`, `cwd`, `timestamp`, `tmuxSession`; deduped by path.
 //
 // Everything else on the line (`id`, `harness`, `originName`) is written for
@@ -108,7 +108,7 @@ type eventHookInput struct {
 
 // eventLine is the wire shape, in wire order. Field set and names are pinned
 // by cmd/testdata/events_golden.jsonl, which the Elixir readers parse in
-// test/shuttle/events_parity_test.exs — change either side and that test fails.
+// daemon/test/shuttle/events_parity_test.exs — change either side and that test fails.
 type eventLine struct {
 	ID          string `json:"id"`
 	Timestamp   int64  `json:"timestamp"`
@@ -154,7 +154,7 @@ var machinePromptPrefixes = []string{
 	"[SYSTEM NOTIFICATION",
 	"<system-notification",
 	// The dispatcher's own preamble. All three variants (fiber, ad-hoc role,
-	// scheduled role — lib/shuttle/dispatcher.ex) open with this clause, so the
+	// scheduled role — daemon/lib/shuttle/dispatcher.ex) open with this clause, so the
 	// shared head is the anchor rather than any one of the three.
 	"The orchestration system Shuttle dispatched you",
 	// A slash command expands into as many as three prompt submissions. The
@@ -170,7 +170,7 @@ var machinePromptPrefixes = []string{
 	// The /loop skill's injected tick.
 	"# Autonomous loop tick",
 	// The dispatcher's other two injected openings: a resumed session's
-	// wake-up prompt and a capture session's framing (lib/shuttle/dispatcher.ex
+	// wake-up prompt and a capture session's framing (daemon/lib/shuttle/dispatcher.ex
 	// render_resume_prompt/2, render_capture_prompt/2). Same module, same
 	// here-string delivery, same UserPromptSubmit — no human typed either.
 	"Shuttle resumed your previous session",
@@ -182,7 +182,7 @@ var machinePromptPrefixes = []string{
 // This is the ONLY place the question can be answered: the daemon receives an
 // event with no prompt text in it, and a daemon that sniffed content to guess
 // would be inventing a fact it cannot know. So the writer decides and the
-// reader trusts the flag (lib/shuttle/activity.ex buckets a flagged prompt as
+// reader trusts the flag (daemon/lib/shuttle/activity.ex buckets a flagged prompt as
 // agent activity instead of as your attention).
 func machinePrompt(prompt string) bool {
 	trimmed := strings.TrimLeft(prompt, " \t\r\n")
