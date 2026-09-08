@@ -88,7 +88,7 @@ never appended. See
 
 ## Sent files (shuttle only)
 
-A shuttle worker can also push a file at you directly, with `SendUserFile`.
+A shuttle worker can also push a file at you directly, with `felt shuttle send-file <path> [path...]`.
 `felt hook event` records that push on the host's event stream
 (`~/.shuttle/events.jsonl`), and the board surfaces it two ways: a per-card
 sent-files trail in the fiber viewer, and the [Board

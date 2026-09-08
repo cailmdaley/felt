@@ -632,6 +632,8 @@ defmodule Shuttle.Activity do
   # `[]` for a notification swallowed by an open spell — and the spell map
   # after the event. See the moduledoc for why a repeat notification is not a
   # second demand, and why `stop` contributes two kinds rather than one.
+  defp classify("file_sent", _event, _identity, spells), do: {[], spells}
+
   defp classify("notification", _event, identity, spells) do
     if Map.has_key?(spells, identity) do
       {[], spells}

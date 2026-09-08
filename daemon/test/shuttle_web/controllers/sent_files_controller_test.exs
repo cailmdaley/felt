@@ -54,6 +54,34 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     path
   end
 
+  test "explicit CLI deliveries share the legacy trail without tool or harness spoofing" do
+    line =
+      Jason.encode!(%{
+        "type" => "file_sent",
+        "sessionId" => @session_only_uid,
+        "timestamp" => 2000,
+        "files" => ["/tmp/report.html"],
+        "cwd" => "/tmp"
+      })
+
+    path =
+      write_fixture([
+        line,
+        event(%{
+          "sessionId" => @session_only_uid,
+          "tmuxSession" => "",
+          "toolInput" => %{"files" => ["/tmp/legacy.html"]}
+        })
+      ])
+
+    files = Shuttle.SentFiles.for_uid(@session_only_uid, events_file: path)
+    assert Enum.map(files, & &1.fullPath) == ["/tmp/report.html", "/tmp/legacy.html"]
+
+    assert Enum.map(Shuttle.SentFiles.all_since(1500, events_file: path), & &1.uid) == [
+             @session_only_uid
+           ]
+  end
+
   describe "Shuttle.SentFiles.for_uid/2 (the reader)" do
     test "matches by tmux-embedded ULID and flattens toolInput.files" do
       path =

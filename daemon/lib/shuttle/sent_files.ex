@@ -3,14 +3,13 @@ defmodule Shuttle.SentFiles do
   Read the sent-files trail for a fiber from the host-local Claude/Codex hook
   stream (`~/.shuttle/events.jsonl`).
 
-  The standalone Shuttle board shows the artifacts a worker pushed with
-  `SendUserFile` on each card. Those sends are recorded — always fresh, server
-  independent — by `felt hook event` as `pre_tool_use` events with
-  `tool == "SendUserFile"`, carrying `toolInput.files` (absolute, or relative to
-  the event's `cwd` — resolved to absolute here so the `/file` route can serve
-  them),
-  `tmuxSession` (e.g. `morning-post-<ULID>-shuttle`, the embedded 26-char
-  Crockford ULID being the fiber id = card `uid`), `sessionId`, and `timestamp`.
+  The standalone Shuttle board shows artifacts registered with
+  `felt shuttle send-file`. The command writes `file_sent` events with top-level
+  `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. Legacy
+  `SendUserFile` hook events carry paths in `toolInput.files` and remain readable.
+  Paths are absolute or resolved against the owning host's recorded `cwd`.
+  A worker's tmux-embedded ULID associates the delivery with its fiber; other
+  sessions are addressed by `sessionId`.
   A derived, server-owned index would be stale the moment that server stops —
   events.jsonl is ground truth. (See finding 01KVC1N5XMAAMYXDAGR4V6QA9G.)
 
@@ -92,9 +91,8 @@ defmodule Shuttle.SentFiles do
   # older than `since_ms` all collapse to `[]`.
   defp entries_since_line(line, since_ms) do
     with {:ok, event} <- Jason.decode(line),
-         "SendUserFile" <- event["tool"],
-         timestamp when is_integer(timestamp) and timestamp >= since_ms <- event["timestamp"],
-         files when is_list(files) <- get_in(event, ["toolInput", "files"]) do
+         files when is_list(files) <- sent_paths(event),
+         timestamp when is_integer(timestamp) and timestamp >= since_ms <- event["timestamp"] do
       session_id = event["sessionId"]
       cwd = event["cwd"]
       uid = event_uid(event)
@@ -115,6 +113,11 @@ defmodule Shuttle.SentFiles do
     end
   end
 
+  # Explicit CLI deliveries are harness-independent. Keep legacy hook events readable.
+  defp sent_paths(%{"type" => "file_sent", "files" => files}), do: files
+  defp sent_paths(%{"tool" => "SendUserFile", "toolInput" => %{"files" => files}}), do: files
+  defp sent_paths(_), do: nil
+
   defp default_events_file, do: Shuttle.WaitingTracker.default_events_file()
 
   # One JSONL line → the (possibly empty) list of entries it contributes for
@@ -122,9 +125,8 @@ defmodule Shuttle.SentFiles do
   # collapse to `[]` so a single bad line never breaks the stream.
   defp entries_for_line(line, uid) do
     with {:ok, event} <- Jason.decode(line),
-         "SendUserFile" <- event["tool"],
-         true <- event_uid(event) == uid,
-         files when is_list(files) <- get_in(event, ["toolInput", "files"]) do
+         files when is_list(files) <- sent_paths(event),
+         true <- event_uid(event) == uid do
       session_id = event["sessionId"]
       timestamp = event["timestamp"]
       cwd = event["cwd"]

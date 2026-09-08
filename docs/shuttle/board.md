@@ -173,7 +173,7 @@ reading a `slug:` prefix out of a commit subject or a directory name.
 
 ## Board — what the work produced
 
-Hotkey `5`. Every file a worker pushed with `SendUserFile` in the last 30 days,
+Hotkey `5`. Every file a worker pushed with `felt shuttle send-file <path> [path...]` in the last 30 days,
 laid out on a canvas as cards that render their own contents: the report
 renders inside its frame, the plot draws, the page is the thing itself rather
 than a link to it. A list of filenames is an index of work; a wall of rendered

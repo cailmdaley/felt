@@ -25,7 +25,7 @@ description: >
 
 shuttle turns fibers into autonomous work. A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. The daemon polls the fiber tree and keeps one tmux **worker** per eligible fiber (carries the block, felt `status: active`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains — work commonly spans sessions. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
 
-The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure view, with five hotkey-switchable tabs — **Desk** (the kanban, described below), **Day** (fiber lanes over a 6am→6am axis, one lane per fiber with two clocks — solid marks where you were steering, wash where an agent was working), **Week** (past days as rows of ink rasters, today marked by a gold seam, future rows hollow), **Chronicle** (fibers as multi-day lifelines across calendar days, with **cycles/eras** as named bands over the top — drag across days to draw one), and — sharing the surface's name — the **Board** tab (every artifact a worker pushed with `SendUserFile` in the last month, each file rendered as a card on a canvas rather than listed as a filename; the ↗ opens it in the Reader overlay). The first four view fibers and sessions; the Board views sent files. Use Desk to stash ideas, launch dispatches, steer workers, review what comes back; use Day/Week/Chronicle to see where time actually went; use the Board tab to find what came back by recognising it. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; the operator guide lives at <https://cailmdaley.github.io/felt/> (AGENTS.md in the felt repo, for contributors).
+The human's surfaces: the **board** (served by the daemon at `:4000`) is a pure view, with five hotkey-switchable tabs — **Desk** (the kanban, described below), **Day** (fiber lanes over a 6am→6am axis, one lane per fiber with two clocks — solid marks where you were steering, wash where an agent was working), **Week** (past days as rows of ink rasters, today marked by a gold seam, future rows hollow), **Chronicle** (fibers as multi-day lifelines across calendar days, with **cycles/eras** as named bands over the top — drag across days to draw one), and — sharing the surface's name — the **Board** tab (every artifact a worker pushed with `felt shuttle send-file <path> [path...]` in the last month, each file rendered as a card on a canvas rather than listed as a filename; the ↗ opens it in the Reader overlay). The first four view fibers and sessions; the Board views sent files. Use Desk to stash ideas, launch dispatches, steer workers, review what comes back; use Day/Week/Chronicle to see where time actually went; use the Board tab to find what came back by recognising it. The **agent registry** (`felt shuttle agents`) maps a fiber's `shuttle.agent` to the CLI + model each dispatch runs. The daemon ships with felt; the operator guide lives at <https://cailmdaley.github.io/felt/> (AGENTS.md in the felt repo, for contributors).
 
 For runtime truth, `felt setup receipt --json` reports the harness bundles
 actually loaded, resolved felt executable, hook compatibility, and the live
@@ -142,3 +142,13 @@ Three cases, asked in order:
 3. **More work, not blocked?** Status stays `active`; just `felt shuttle handoff`. The next worker reads `## Status` and continues.
 
 **`tempered: true` is human-only — never self-temper.** **Don't self-uninstall the shuttle block on close** — the block stays as historical record (see operating.md, "When to uninstall"). If you arrive and the work is plainly already done, update the outcome, set `status: closed`, exit — don't invent further work.
+
+### Delivering artifacts
+
+Use `felt shuttle send-file /absolute/path/report.html` from either Claude or
+Codex to put finished artifacts on the Shuttle Board and sent-files trail.
+Pass multiple paths in one call. The command checks every file before recording
+and reports failures; keep the files on their owning host for later viewing.
+Session identity is detected from the harness environment or tmux ledger; if
+unavailable, supply `--session <actual-native-session-id>`; never invent an ID. Success confirms recording,
+not that a client has already downloaded the file.

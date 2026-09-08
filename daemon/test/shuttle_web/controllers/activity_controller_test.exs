@@ -507,6 +507,23 @@ defmodule ShuttleWeb.ActivityControllerTest do
     # A notify mark is the ONSET of a waiting spell, not a notification. Claude
     # Code re-fires the idle notification every minute; those repeats are the
     # same unanswered ask.
+    test "file delivery leaves a notification spell intact and adds no activity" do
+      path =
+        write_fixture([
+          event(%{"type" => "notification"}),
+          event(%{
+            "type" => "file_sent",
+            "timestamp" => @t0 + @minute,
+            "files" => ["/tmp/report.html"]
+          }),
+          event(%{"type" => "notification", "timestamp" => @t0 + 2 * @minute})
+        ])
+
+      assert buckets!(path, @t0, @t0 + 3 * @minute) == [
+               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1}
+             ]
+    end
+
     test "repeat notifications inside one spell collapse to a single onset" do
       path =
         write_fixture(

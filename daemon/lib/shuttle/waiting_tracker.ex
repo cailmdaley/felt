@@ -302,6 +302,7 @@ defmodule Shuttle.WaitingTracker do
     with {:ok, file} <- File.open(path, [:read, :binary]) do
       try do
         :file.position(file, offset)
+
         case :file.read(file, length) do
           {:ok, data} -> {:ok, data}
           other -> other
@@ -318,6 +319,9 @@ defmodule Shuttle.WaitingTracker do
   # line missing it (shouldn't happen, but we never invent a worse-than-now age).
   defp apply_event(line, sessions, now) do
     case Jason.decode(line) do
+      {:ok, %{"type" => "file_sent"}} ->
+        sessions
+
       {:ok, %{"type" => type, "tmuxSession" => session} = ev}
       when is_binary(type) and is_binary(session) and session != "" ->
         if Shuttle.Dispatcher.shuttle_session?(session) do

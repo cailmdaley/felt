@@ -61,6 +61,14 @@ defmodule Shuttle.WaitingTrackerTest do
 
   # ── Category derivation per last event type ──
 
+  test "file delivery preserves waiting state and timestamp", %{events: events} do
+    prewrite(events, "stop", "foo-01J-shuttle", @base - 1000)
+    prewrite(events, "file_sent", "foo-01J-shuttle", @base)
+    name = start(events)
+    assert phase(name, "foo-01J-shuttle") == "waiting"
+    assert last_event_at(name, "foo-01J-shuttle") == @base - 1000
+  end
+
   test "a stop event yields phase \"waiting\"", %{events: events} do
     name = start(events)
     append(events, "stop", "foo-01J-shuttle")
