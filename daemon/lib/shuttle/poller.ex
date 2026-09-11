@@ -165,6 +165,15 @@ defmodule Shuttle.Poller do
       # never had a fiber map). Rather than persist a new field on every worker,
       # look the dir up by the same runtime key `running` is keyed by.
       project_dir_index: %{},
+      # %{expanded project_dir => {physical path | :unresolvable, stamp}} — the
+      # symlink-resolution memo the checkout-exclusion gate reads. Resolving a
+      # path is a per-segment `:file.read_link` walk, i.e. the poller's only
+      # remaining filesystem touch on a project_dir; memoizing it makes a tick
+      # over a stable world walk nothing at all. `stamp` is the
+      # `project_dir_stamp/1` of the fiber the entry was taken for (`nil` for a
+      # running holder's dir, which has no candidate map here), so an edited
+      # fiber re-resolves. Pruned each poll to the paths still declared.
+      physical_dirs: %{},
       # %{uid_or_fiber_id => %{modified_at: String.t() | nil, entry: map()}} —
       # daemon-local document cache for the kanban feed. The poll task
       # diffs the cheap shuttle projection's modified_at against this cache and
@@ -1150,7 +1159,9 @@ defmodule Shuttle.Poller do
     end)
   end
 
-  # Builds the runtime_key -> project_dir index the checkout-exclusion gate reads.
+  # Builds the runtime_key -> project_dir index the checkout-exclusion gate
+  # reads. Runs over every candidate each tick, so it stays pure:
+  # `declared_project_dir/1` expands the declared path and touches nothing.
   defp build_project_dir_index(candidates) do
     Enum.reduce(candidates, %{}, fn fiber, acc ->
       case declared_project_dir(Map.get(fiber, "shuttle")) do
@@ -1275,6 +1286,7 @@ defmodule Shuttle.Poller do
     state = reconcile(%{state | felt_stores: felt_stores})
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
+    project_dir_index = build_project_dir_index(candidates)
 
     # Merge newly resolved host entries into the cache. Existing entries
     # are not evicted — earlier-configured hosts win for ID collisions,
@@ -1285,7 +1297,8 @@ defmodule Shuttle.Poller do
         # Rebuilt (not merged) each poll so a rename or delete can't leave a
         # stale uid→slug entry; an as-yet-unseen uid falls through to felt.
         uid_slug_index: build_uid_slug_index(candidates),
-        project_dir_index: build_project_dir_index(candidates),
+        project_dir_index: project_dir_index,
+        physical_dirs: Map.take(state.physical_dirs, Map.values(project_dir_index)),
         document_cache: document_cache,
         document_cache_stats: document_cache_stats,
         document_cache_ready: true,
@@ -1342,14 +1355,15 @@ defmodule Shuttle.Poller do
           # polling and already-observed resumes stay alive. Unlike boot
           # quarantine, skew has no release endpoint — a restart (after the
           # skew is actually fixed) is what re-probes and clears it.
-          candidates
-          |> filter_eligible(state)
+          {eligible, state} = filter_eligible(candidates, state)
+
+          eligible
           |> sort_candidates()
           |> park_autonomous_launches(state)
 
         available_slots(state) > 0 ->
-          {candidates |> filter_eligible(state) |> sort_candidates(),
-           %{state | parked_launches: %{}}}
+          {eligible, state} = filter_eligible(candidates, state)
+          {sort_candidates(eligible), %{state | parked_launches: %{}}}
 
         true ->
           # Slots full, no quarantine: nothing to park, nothing to dispatch.
@@ -1366,11 +1380,11 @@ defmodule Shuttle.Poller do
 
         true ->
           case project_dir_holder(fiber, state_acc) do
-            nil ->
+            {nil, state_acc} ->
               {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
               new_state
 
-            {dir, holder} ->
+            {{dir, holder}, state_acc} ->
               record_dispatch_failure(state_acc, fiber, {:project_dir_held, dir, holder})
           end
       end
@@ -1379,15 +1393,28 @@ defmodule Shuttle.Poller do
 
   # Records a `blocked` row for every candidate a running worker's hold on its
   # checkout refuses this tick, and drops the row for every candidate no longer
-  # held. Cheap and in-memory: `project_dir_holder/2` reads only runtime maps.
+  # held. Cheap and in-memory — and genuinely so only because
+  # `declared_project_dir/1` is pure: this walks EVERY candidate each tick, so a
+  # filesystem touch reintroduced there is a touch per fiber per poll.
   defp record_held_checkouts(%State{} = state, candidates) do
     Enum.reduce(candidates, state, fn fiber, acc ->
-      case {Map.get(fiber, "status"), project_dir_holder(fiber, acc)} do
-        {"active", {dir, holder}} ->
-          record_dispatch_failure(acc, fiber, {:project_dir_held, dir, holder})
+      # Status FIRST, so a parked or closed fiber never even computes a holder:
+      # only an active fiber was going to dispatch, and only it can be blocked.
+      # A fiber whose project_dir is remembered unavailable is skipped whole:
+      # the holder gate's symlink leg would walk the very path the stat was
+      # just refused (or denied) on.
+      if Map.get(fiber, "status") == "active" and
+           remembered_project_dir_failure(acc, runtime_key_for_fiber(fiber)) !=
+             project_dir_stamp(fiber) do
+        case project_dir_holder(fiber, acc) do
+          {{dir, holder}, acc} ->
+            record_dispatch_failure(acc, fiber, {:project_dir_held, dir, holder})
 
-        _ ->
-          clear_held_checkout(acc, runtime_key_for_fiber(fiber))
+          {nil, acc} ->
+            clear_held_checkout(acc, runtime_key_for_fiber(fiber))
+        end
+      else
+        clear_held_checkout(acc, runtime_key_for_fiber(fiber))
       end
     end)
   end
@@ -1858,15 +1885,28 @@ defmodule Shuttle.Poller do
   # `felt shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
   # a human can always start or continue a pinned role by hand.
   # See [[ai-futures/shuttle/findings/finding-pinned-roles-are-interfaces-not-loops]].
+  # Returns `{eligible, state}`: the filter WRITES, because the one filesystem
+  # gate it runs (`project_dir_available?/3`) remembers its own refusals in
+  # `state.dispatch_failures` so it does not repeat the stat every tick.
   defp filter_eligible(candidates, state) do
-    Enum.filter(candidates, fn fiber ->
-      # `tick_kind_eligible?/1` is pure (in-memory only) and rejects most
-      # pinned roles, so it must run before `eligible?/2`, which touches the
-      # filesystem (project_dir_available?/1) — check the free predicate
-      # first so the filesystem stat only happens for a fiber that is
-      # otherwise still in the running.
-      tick_kind_eligible?(fiber) and eligible?(fiber, state)
-    end)
+    {eligible, state} =
+      Enum.reduce(candidates, {[], state}, fn fiber, {kept, state} ->
+        # `tick_kind_eligible?/1` is pure (in-memory only) and rejects most
+        # pinned roles, so it must run before `eligible?/2`, which touches the
+        # filesystem (project_dir_available?/3) — check the free predicate
+        # first so the filesystem stat only happens for a fiber that is
+        # otherwise still in the running.
+        if tick_kind_eligible?(fiber) do
+          case eligible?(fiber, state) do
+            {true, state} -> {[fiber | kept], state}
+            {false, state} -> {kept, state}
+          end
+        else
+          {kept, state}
+        end
+      end)
+
+    {Enum.reverse(eligible), state}
   end
 
   # Kind-specific autonomous-tick gate layered on top of `eligible?`. Pinned is
@@ -1943,18 +1983,39 @@ defmodule Shuttle.Poller do
   defp eligible?(fiber, state) do
     shuttle = Map.get(fiber, "shuttle")
 
-    # `project_dir_available?/1` is the only predicate in this function that
-    # touches the filesystem — it stats `shuttle.project_dir`. For a
-    # project_dir hosted in a macOS file provider (iCloud Drive,
-    # `~/Library/CloudStorage`), a per-tick stat raises a repeating TCC
-    # "access data from other apps" prompt that cannot be granted away. It
-    # is evaluated LAST, after every cheap in-memory gate, so the stat only
-    # happens for a fiber that is otherwise about to dispatch — a fiber
-    # already rejected by a pure predicate never reaches it.
+    # Only the last two steps here can touch the filesystem — the
+    # `project_dir` stat in `project_dir_available?/3` and the symlink walk
+    # behind `project_dir_holder/2`. For a project_dir hosted in a macOS file
+    # provider (iCloud Drive, `~/Library/CloudStorage`), any per-tick touch
+    # raises a repeating TCC "access data from other apps" prompt that cannot
+    # be granted away. So every pure gate runs first, and both filesystem
+    # steps are memoized in state (a failed stat until the fiber is edited, a
+    # resolved physical path until its fiber is edited or the checkout is
+    # released): a fiber rejected by a pure predicate never reaches them, and
+    # a stable world walks nothing tick to tick.
     #
     # A non-map `shuttle` fails `dispatch_gates_pass?/3`'s `host_owned?` gate,
-    # so the `and` short-circuits before the stat.
-    dispatch_gates_pass?(fiber, shuttle, state) and project_dir_available?(shuttle)
+    # so the `with` stops before the stat.
+    with true <- dispatch_gates_pass?(fiber, shuttle, state),
+         {true, state} <- project_dir_available?(fiber, shuttle, state) do
+      # A checkout is held by one worker at a time. Two workers sharing a
+      # project_dir clobber each other's uncommitted edits (one worker's
+      # discard-local-changes reset wiped the other's live work). Kind-blind:
+      # this is about the filesystem, not the role. Force bypasses it like
+      # every other non-force gate.
+      #
+      # It sits HERE rather than among the pure gates in
+      # `dispatch_gates_pass?/3` because it can write: its symlink leg
+      # memoizes what it resolves, and a predicate that threw that away would
+      # re-walk the same paths every tick.
+      case project_dir_holder(fiber, state) do
+        {nil, state} -> {true, state}
+        {{_dir, _holder}, state} -> {false, state}
+      end
+    else
+      false -> {false, state}
+      {false, state} -> {false, state}
+    end
   end
 
   defp dispatch_gates_pass?(fiber, shuttle, state) do
@@ -2006,14 +2067,6 @@ defmodule Shuttle.Poller do
       preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
         false
 
-      # A checkout is held by one worker at a time. Two workers sharing a
-      # project_dir clobber each other's uncommitted edits (one worker's
-      # discard-local-changes reset wiped the other's live work). Kind-blind:
-      # this is about the filesystem, not the role. Force bypasses it like
-      # every other non-force gate.
-      project_dir_holder(fiber, state) != nil ->
-        false
-
       # Pinned roles need no bespoke branch HERE: this predicate also serves
       # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
       # /dispatch), where a pinned role IS eligible — it's a human asking for
@@ -2060,11 +2113,16 @@ defmodule Shuttle.Poller do
   # `ad_hoc` also sets `force` (the controller folds `force: force or ad_hoc`,
   # `Shuttle.Transition` passes both), and the autonomous tick reaches
   # `do_dispatch_fiber/2` directly without ever entering this call.
+  # The human-dispatch path answers a single call, so it drops the state
+  # `eligible?/2` hands back: a person clicking dispatch is entitled to a fresh
+  # look at the filesystem, and remembering their one-off refusal would only
+  # make the NEXT click lie.
   defp dispatch_eligible?(fiber, state, opts) do
     if Keyword.get(opts, :force, false) do
       force_dispatch_eligible?(fiber, state)
     else
-      eligible?(fiber, state)
+      {eligible, _state} = eligible?(fiber, state)
+      eligible
     end
   end
 
@@ -2092,7 +2150,15 @@ defmodule Shuttle.Poller do
     shuttle = Map.get(fiber, "shuttle")
     status = Map.get(fiber, "status", "")
     forced? = Keyword.get(opts, :force, false)
-    holder = if forced?, do: nil, else: project_dir_holder(fiber, state)
+    # Human-dispatch path: the memo write is dropped with the rest of the
+    # state, exactly as the availability check's is.
+    holder =
+      if forced? do
+        nil
+      else
+        {holder, _state} = project_dir_holder(fiber, state)
+        holder
+      end
 
     cond do
       not is_map(shuttle) ->
@@ -2151,6 +2217,14 @@ defmodule Shuttle.Poller do
   # misdispatch root cause #2). This *disqualifies, does not downgrade*. An
   # absent/empty project_dir is governed by install-time schema validation
   # (enabled blocks must carry one), not re-litigated at every poll.
+  #
+  # `File.dir?/1` here is the poller's ONLY filesystem touch on a declared
+  # project_dir, and it is reached only for a fiber that is otherwise about to
+  # dispatch (`eligible?/2` evaluates it last) or for an explicit dispatch
+  # request. Everything on the per-tick path — the index, the holder gate — is
+  # pure, which is what keeps a parked fiber whose project_dir sits in a
+  # TCC-protected location (iCloud Drive, `~/Library/CloudStorage`) from
+  # raising an unclearable "access data from other apps" prompt every poll.
   defp project_dir_available?(shuttle) when is_map(shuttle) do
     case declared_project_dir(shuttle) do
       nil -> true
@@ -2160,41 +2234,185 @@ defmodule Shuttle.Poller do
 
   defp project_dir_available?(_), do: true
 
-  # The running worker, if any, that holds this fiber's checkout — `{dir,
-  # holder_fiber_id}` or nil. Pure in-memory: the dirs come from
-  # `state.project_dir_index`, keyed by the same runtime key `state.running` is.
-  defp project_dir_holder(fiber, state) do
-    case declared_project_dir(Map.get(fiber, "shuttle")) do
+  # The tick's memo-aware form: `{available?, state}`.
+  #
+  # A stat that says "no" is REMEMBERED, against the fiber's own stamp
+  # (`project_dir_stamp/1`), as an ordinary `:project_dir_missing` dispatch
+  # failure — the same row the kanban already renders as `blocked`. While that
+  # memory stands, the tick neither stats the directory nor lets the
+  # checkout-holder gate walk it, so the fiber costs nothing per tick.
+  #
+  # Why remembering matters beyond cost: a directory the daemon is DENIED and a
+  # directory that is absent are the same `false` here. For a project_dir under
+  # a macOS file provider the denial arrives as an un-grantable TCC prompt, so
+  # the un-memoized version re-prompted every tick, forever, on exactly the
+  # configuration that could never come good on its own.
+  #
+  # The memory is released by an edit to the fiber — a new `updated_at` or a
+  # changed `shuttle:` block — which is the human saying "try again", and by
+  # `evict_stale_by_candidates/2` when the fiber stops being dispatchable at
+  # all. A human clicking dispatch is never held by it (`dispatch_eligible?/3`
+  # takes the fresh `project_dir_available?/1` answer and discards this memo).
+  defp project_dir_available?(fiber, shuttle, state) when is_map(shuttle) do
+    case declared_project_dir(shuttle) do
       nil ->
-        nil
+        {true, state}
 
       dir ->
-        own_key = runtime_key_for_fiber(fiber)
+        runtime_key = runtime_key_for_fiber(fiber)
+        stamp = project_dir_stamp(fiber)
 
-        Enum.find_value(state.running, fn {runtime_key, meta} ->
-          if runtime_key != own_key and Map.get(state.project_dir_index, runtime_key) == dir do
-            {dir, fiber_address(meta)}
+        cond do
+          remembered_project_dir_failure(state, runtime_key) == stamp ->
+            {false, state}
+
+          File.dir?(dir) ->
+            {true, clear_project_dir_failure(state, runtime_key)}
+
+          true ->
+            {false,
+             record_dispatch_failure(state, fiber, {:project_dir_missing, dir}, %{
+               project_dir_stamp: stamp
+             })}
+        end
+    end
+  end
+
+  defp project_dir_available?(_fiber, _shuttle, state), do: {true, state}
+
+  # What "the fiber changed" means for the memo: the felt `updated-at` a write
+  # bumps, plus the `shuttle:` block itself, so an edit that fixes `project_dir`
+  # invalidates the memory even on a store whose fibers carry no timestamp.
+  defp project_dir_stamp(fiber) do
+    {Map.get(fiber, "updated_at"), Map.get(fiber, "shuttle")}
+  end
+
+  # The stamp a remembered `:project_dir_missing` refusal was taken against, or
+  # `nil` when there is no such memory. Any other blocked reason (a held
+  # checkout, a failed preflight) is NOT a project_dir memory.
+  defp remembered_project_dir_failure(%State{} = state, runtime_key) do
+    case Map.get(state.dispatch_failures, runtime_key) do
+      %{reason: {:project_dir_missing, _dir}, project_dir_stamp: stamp} -> stamp
+      _ -> nil
+    end
+  end
+
+  defp clear_project_dir_failure(%State{} = state, runtime_key) do
+    case Map.get(state.dispatch_failures, runtime_key) do
+      %{reason: {:project_dir_missing, _dir}} ->
+        %{state | dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)}
+
+      _ ->
+        state
+    end
+  end
+
+  # The running worker, if any, that holds this fiber's checkout — `{dir,
+  # holder_fiber_id}` or nil.
+  #
+  # Two legs, cheapest first, because this runs for every active candidate each
+  # tick. Leg 1 is pure: both sides are `Path.expand/1`-ed frontmatter, so two
+  # fibers that spell one checkout the same way match with no filesystem access
+  # at all — and a fiber with NO other worker running short-circuits before
+  # either leg. Leg 2 is the symlink case (`match_physical_checkout/2`): two
+  # spellings of one physical checkout must still count as one, and only a
+  # `Shuttle.Realpath.resolve/1` walk can tell. It runs only when some other
+  # worker is actually running and no spelling matched — never on a plain tick
+  # over an idle fleet, and never for a fiber the status gate already dropped.
+  defp project_dir_holder(fiber, state) do
+    with dir when is_binary(dir) <- declared_project_dir(Map.get(fiber, "shuttle")),
+         [_ | _] = held <- held_checkouts(state, runtime_key_for_fiber(fiber)) do
+      case Enum.find(held, fn {held_dir, _holder} -> held_dir == dir end) do
+        {held_dir, holder} -> {{held_dir, holder}, state}
+        nil -> match_physical_checkout(dir, held, project_dir_stamp(fiber), state)
+      end
+    else
+      _ -> {nil, state}
+    end
+  end
+
+  # `{declared_dir, holder_fiber_id}` for every running worker other than this
+  # fiber's own. In-memory: `state.running` and `state.project_dir_index` are
+  # keyed by the same runtime key.
+  defp held_checkouts(%State{} = state, own_key) do
+    for {runtime_key, meta} <- state.running,
+        runtime_key != own_key,
+        dir = Map.get(state.project_dir_index, runtime_key),
+        is_binary(dir),
+        do: {dir, fiber_address(meta)}
+  end
+
+  # The filesystem leg, and the ONLY place the poller resolves symlinks on a
+  # project_dir. A path it can't resolve (a symlink loop) simply doesn't match —
+  # `project_dir_available?/1` reports a nonexistent dir separately. A match
+  # names the PHYSICAL path, since that is the only name the two spellings share.
+  defp match_physical_checkout(dir, held, stamp, state) do
+    case physical_dir(state, dir, stamp) do
+      {:unresolvable, state} ->
+        {nil, state}
+
+      {physical, state} ->
+        Enum.reduce_while(held, {nil, state}, fn {held_dir, holder}, {_none, state} ->
+          case physical_dir(state, held_dir, nil) do
+            {^physical, state} -> {:halt, {{physical, holder}, state}}
+            {_other, state} -> {:cont, {nil, state}}
           end
         end)
     end
   end
 
-  # Symlink-resolved, not merely expanded: the checkout-exclusion gate compares
-  # these strings, so two fibers naming ONE checkout through different symlink
-  # paths must produce one key. `Shuttle.Realpath` is the same resolver felt
-  # store ownership uses; a path it can't resolve (a symlink loop) keeps the
-  # expanded form — `project_dir_available?/1` reports a nonexistent dir
-  # separately.
-  defp declared_project_dir(shuttle) when is_map(shuttle) do
-    case Map.get(shuttle, "project_dir") do
-      dir when is_binary(dir) and dir != "" ->
-        case Shuttle.Realpath.resolve(dir) do
-          {:ok, resolved} -> resolved
-          {:error, _} -> Path.expand(dir)
-        end
+  # The memoized resolution itself: `{physical | :unresolvable, state}`. A path
+  # is walked the FIRST time it is needed and never again while it stays
+  # declared and its fiber unedited — so the steady state of a running fleet
+  # costs no filesystem access here, however many ticks pass. A path that
+  # cannot be resolved (a symlink loop) memoizes that fact too, rather than
+  # re-walking it every tick to fail the same way.
+  defp physical_dir(%State{} = state, dir, stamp) do
+    case Map.get(state.physical_dirs, dir) do
+      {physical, ^stamp} ->
+        {physical, state}
+
+      # A `nil` stamp is a HOLDER's dir, looked up on behalf of a running
+      # worker whose candidate map isn't at hand: it accepts whatever is
+      # memoized rather than replacing it. Without this the two sides of a
+      # comparison overwrite each other's entry with their own stamp and the
+      # memo thrashes — every tick a fresh walk, which is the bug it exists
+      # to fix.
+      {physical, _other_stamp} when is_nil(stamp) ->
+        {physical, state}
 
       _ ->
-        nil
+        physical =
+          case Shuttle.Realpath.resolve(dir) do
+            {:ok, resolved} -> resolved
+            {:error, _} -> :unresolvable
+          end
+
+        {physical, %{state | physical_dirs: Map.put(state.physical_dirs, dir, {physical, stamp})}}
+    end
+  end
+
+  # PURE — `Path.expand/1` and nothing else. This runs for EVERY
+  # candidate on EVERY tick (`build_project_dir_index/1`, `project_dir_holder/2`
+  # via `record_held_checkouts/2`), regardless of status, so anything it touches
+  # is touched once per fiber per poll forever. It used to call
+  # `Shuttle.Realpath.resolve/1`, a per-segment `:file.read_link` walk: for a
+  # parked fiber whose project_dir lives in a macOS file provider (iCloud Drive,
+  # `~/Library/CloudStorage`) that walk raised the un-grantable "access data
+  # from other apps" TCC prompt once per tick — the daemon's loudest violation
+  # of its own never-touch-a-protected-path doctrine, from a fiber it had no
+  # intention of dispatching.
+  #
+  # What the symlink resolution bought — unification, so that two fibers
+  # naming ONE checkout through different symlink spellings cannot both
+  # dispatch and clobber each other's uncommitted edits — is NOT given up. It
+  # moved to `match_physical_checkout/2`, which resolves only when a worker is
+  # actually running, no declared spelling matched, and a dispatch decision
+  # hangs on the answer.
+  defp declared_project_dir(shuttle) when is_map(shuttle) do
+    case Map.get(shuttle, "project_dir") do
+      dir when is_binary(dir) and dir != "" -> Path.expand(dir)
+      _ -> nil
     end
   end
 
@@ -2791,7 +3009,7 @@ defmodule Shuttle.Poller do
   # entry is surfaced in `build_snapshot/1` under `blocked` so the kanban can
   # show why a fiber is stuck — replacing the silent-warning-log failure mode
   # where a `:missing_session_id` block could persist for days unnoticed.
-  defp record_dispatch_failure(%State{} = state, fiber, reason) do
+  defp record_dispatch_failure(%State{} = state, fiber, reason, extra \\ %{}) do
     now = DateTime.utc_now()
     runtime_key = runtime_key_for_fiber(fiber)
     slug = fiber_address(fiber)
@@ -2800,17 +3018,23 @@ defmodule Shuttle.Poller do
     entry =
       case Map.get(state.dispatch_failures, runtime_key) do
         %{reason: ^reason, attempts: n} = e ->
-          %{e | attempts: n + 1, attempted_at: now}
+          # `extra` is merged on the refresh too: a re-recorded
+          # `:project_dir_missing` carries the stamp it was just checked
+          # against, not the one from the first attempt.
+          Map.merge(%{e | attempts: n + 1, attempted_at: now}, extra)
 
         _ ->
-          %{
-            reason: reason,
-            attempts: 1,
-            attempted_at: now,
-            first_attempted_at: now,
-            fiber_id: slug,
-            uid: uid
-          }
+          Map.merge(
+            %{
+              reason: reason,
+              attempts: 1,
+              attempted_at: now,
+              first_attempted_at: now,
+              fiber_id: slug,
+              uid: uid
+            },
+            extra
+          )
       end
 
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}

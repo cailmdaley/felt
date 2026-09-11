@@ -4451,6 +4451,290 @@ defmodule Shuttle.PollerTest do
     assert Poller.snapshot(poller).eligible == []
   end
 
+  test "poller touches no filesystem path under a parked fiber's project_dir (per-tick TCC guard)" do
+    # The per-tick project_dir path must be PURE. `build_project_dir_index/1`
+    # and `record_held_checkouts/2` call `declared_project_dir/1` for EVERY
+    # candidate on EVERY tick regardless of status, so any filesystem call it
+    # makes happens once per fiber per poll, forever. That is what the
+    # `Shuttle.Realpath.resolve/1` it used to call did: a per-segment
+    # `:file.read_link` walk, which for a project_dir inside a macOS file
+    # provider raises the un-grantable "access data from other apps" TCC prompt
+    # on every tick — for a fiber (here `status: open`) the poller never
+    # intended to dispatch.
+    #
+    # HOME is repointed so the project_dir is a genuine file-provider path, and
+    # the directory really exists, so a regression cannot pass by virtue of an
+    # early "nothing there" return. Both `:file.read_link/1` (the realpath
+    # walk) and `File.dir?/1` (the dispatch-time stat) are traced inside the
+    # poller process; neither may be called with anything under that root.
+    home = Path.join(System.tmp_dir!(), "shuttle-test-home-#{System.unique_integer([:positive])}")
+    protected_root = Path.join([home, "Library", "Mobile Documents"])
+    project_dir = Path.join(protected_root, "checkout")
+    File.mkdir_p!(project_dir)
+    previous_home = System.get_env("HOME")
+    System.put_env("HOME", home)
+
+    # BOTH spellings of the fake home. `System.tmp_dir!/0` is `/var/folders/…`
+    # on macOS, but `/var` is a symlink, so the realpath walk this test exists
+    # to catch emits `/private/var/folders/…` — matching only the unresolved
+    # prefix would make every assertion below vacuously true.
+    home_prefixes =
+      case Shuttle.Realpath.resolve(home) do
+        {:ok, resolved} -> Enum.uniq([home, resolved])
+        {:error, _} -> [home]
+      end
+
+    on_exit(fn ->
+      restore_env("HOME", previous_home)
+      File.rm_rf(home)
+    end)
+
+    fiber = make_fiber("tests/parked-icloud-project-dir", %{"status" => "open"})
+    MockRunner.set_fiber("tests/parked-icloud-project-dir", fiber)
+
+    MockRunner.set_shuttle(
+      "tests/parked-icloud-project-dir",
+      "kind: oneshot\nhost: test-host\nproject_dir: #{project_dir}\n",
+      "open"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_parked_protected_project_dir,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    # Same :dbg setup as the pinned-sentinel test above — runtime_tools is on
+    # disk but not on this project's code path, and :dbg is reached through
+    # apply/3 so the compiler never sees an unavailable module.
+    [runtime_tools_ebin] =
+      :code.root_dir()
+      |> to_string()
+      |> Path.join("lib/runtime_tools-*/ebin")
+      |> Path.wildcard()
+
+    :code.add_pathz(String.to_charlist(runtime_tools_ebin))
+    {:ok, _} = Application.ensure_all_started(:runtime_tools)
+
+    test_pid = self()
+
+    apply(:dbg, :tracer, [
+      :process,
+      {fn msg, n ->
+         send(test_pid, {:dbg_relay, msg})
+         n + 1
+       end, 0}
+    ])
+
+    apply(:dbg, :p, [poller, [:call]])
+    apply(:dbg, :tpl, [File, :dir?, :x])
+    apply(:dbg, :tpl, [:file, :read_link, :x])
+
+    on_exit(fn -> apply(:dbg, :stop_clear, []) end)
+
+    send(poller, :run_poll_cycle)
+    Process.sleep(150)
+
+    apply(:dbg, :stop_clear, [])
+
+    touched =
+      Stream.repeatedly(fn ->
+        receive do
+          {:dbg_relay, {:trace, _pid, :call, {_mod, _fun, [arg]}}} -> {:ok, to_string(arg)}
+          {:dbg_relay, _other} -> {:ok, ""}
+        after
+          0 -> :done
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.map(fn {:ok, arg} -> arg end)
+      |> Enum.filter(fn arg -> Enum.any?(home_prefixes, &String.starts_with?(arg, &1)) end)
+
+    assert touched == [],
+           "poller touched a TCC-protected path on a plain tick: #{inspect(touched)}"
+
+    refute Enum.any?(
+             Poller.snapshot(poller).eligible,
+             &(&1.fiber_id == "tests/parked-icloud-project-dir")
+           )
+  end
+
+  test "an active fiber's unavailable project_dir is stat'd once, not every tick" do
+    # The residual the memo closes. A project_dir the daemon cannot reach reads
+    # as `false` whether it is absent or DENIED, and under a macOS file
+    # provider the denial arrives as an un-grantable TCC prompt — so the
+    # un-memoized poller re-prompted every tick on exactly the configuration
+    # that could never come good by itself. The refusal is remembered against
+    # the fiber's stamp: no second stat, and no symlink walk from the
+    # checkout-holder gate either, until a human edits the fiber.
+    home = Path.join(System.tmp_dir!(), "shuttle-test-home-#{System.unique_integer([:positive])}")
+    project_dir = Path.join([home, "Library", "Mobile Documents", "unreachable"])
+    File.mkdir_p!(Path.join([home, "Library", "Mobile Documents"]))
+    previous_home = System.get_env("HOME")
+    System.put_env("HOME", home)
+
+    on_exit(fn ->
+      restore_env("HOME", previous_home)
+      File.rm_rf(home)
+    end)
+
+    expanded_dir = Path.expand(project_dir)
+    fiber_id = "tests/unreachable-project-dir"
+    shuttle = "enabled: true\nkind: oneshot\nhost: test-host\nproject_dir: #{project_dir}\n"
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_unreachable_project_dir,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+
+    [runtime_tools_ebin] =
+      :code.root_dir()
+      |> to_string()
+      |> Path.join("lib/runtime_tools-*/ebin")
+      |> Path.wildcard()
+
+    :code.add_pathz(String.to_charlist(runtime_tools_ebin))
+    {:ok, _} = Application.ensure_all_started(:runtime_tools)
+
+    test_pid = self()
+
+    apply(:dbg, :tracer, [
+      :process,
+      {fn msg, n ->
+         send(test_pid, {:dbg_relay, msg})
+         n + 1
+       end, 0}
+    ])
+
+    apply(:dbg, :p, [poller, [:call]])
+    apply(:dbg, :tpl, [File, :dir?, :x])
+    apply(:dbg, :tpl, [:file, :read_link, :x])
+
+    on_exit(fn -> apply(:dbg, :stop_clear, []) end)
+
+    drain = fn ->
+      Stream.repeatedly(fn ->
+        receive do
+          {:dbg_relay, {:trace, _pid, :call, {mod, fun, [arg]}}} ->
+            {:ok, {mod, fun, to_string(arg)}}
+
+          {:dbg_relay, _other} ->
+            {:ok, nil}
+        after
+          0 -> :done
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.map(fn {:ok, call} -> call end)
+      |> Enum.filter(fn
+        {_mod, _fun, arg} -> String.contains?(arg, "Mobile Documents")
+        nil -> false
+      end)
+    end
+
+    # Registered only now: the settling ticks above would otherwise have taken
+    # the one stat this test is here to observe.
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"updated_at" => "2026-04-28T00:00:00Z"})
+    )
+
+    MockRunner.set_shuttle(fiber_id, shuttle)
+
+    sync_poll_cycle!(poller)
+    first = drain.()
+
+    assert first == [{File, :dir?, expanded_dir}],
+           "first tick must stat the project_dir exactly once: #{inspect(first)}"
+
+    # The refusal shows as a blocked row rather than the fiber silently
+    # vanishing — the memo IS that row.
+    assert %{reason: reason} =
+             Enum.find(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
+
+    assert reason =~ "project_dir"
+
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+
+    assert drain.() == [], "a remembered refusal must not be re-stat'd or walked"
+
+    # Editing the fiber is the human's "try again": a new updated-at retires the
+    # memory and the next tick looks at the filesystem again.
+    # Edit in place — a fresh `make_fiber` would drop the shuttle block this
+    # fiber's candidacy depends on.
+    MockRunner.set_fiber(
+      fiber_id,
+      Map.put(MockRunner.fiber(fiber_id), "updated_at", "2026-04-29T00:00:00Z")
+    )
+
+    sync_poll_cycle!(poller)
+
+    assert drain.() == [{File, :dir?, expanded_dir}],
+           "an edited fiber must be re-checked exactly once"
+
+    refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == fiber_id))
+
+    # ── A stable fleet resolves no symlinks at all ──
+    #
+    # Two healthy checkouts under the same provider root, both dispatched: from
+    # then on each tick's holder gate compares one running worker's declared
+    # checkout against the other's, they differ as strings, and only the
+    # symlink leg can say whether they are one directory. That leg walked both
+    # paths every tick. It is now a once-per-path fact, so after the tick that
+    # first sees them, three more ticks resolve nothing — with the
+    # memoized-missing fiber above still in the candidate set.
+    for leaf <- ["checkout-a", "checkout-c"] do
+      dir = Path.join([home, "Library", "Mobile Documents", leaf])
+      File.mkdir_p!(dir)
+      id = "tests/#{leaf}"
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "enabled: true\nkind: oneshot\nhost: test-host\nproject_dir: #{dir}\n"
+      )
+    end
+
+    assert wait_until(fn ->
+             sync_poll_cycle!(poller)
+
+             running =
+               :sys.get_state(poller).running
+               |> Enum.map(fn {_k, meta} -> meta.fiber_id end)
+               |> MapSet.new()
+
+             MapSet.subset?(MapSet.new(["tests/checkout-a", "tests/checkout-c"]), running)
+           end)
+
+    # Two more ticks first: dispatching stamps `dispatched_at`/`session_uuid`
+    # into the shuttle block, which IS a fiber edit, so the freshly launched
+    # pair legitimately re-resolves once. Discard those first-sight walks; from
+    # here the world is stable.
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+    drain.()
+
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+
+    later = drain.()
+
+    assert Enum.filter(later, fn {mod, fun, _arg} -> {mod, fun} == {:file, :read_link} end) == [],
+           "a stable fleet must resolve no project_dir symlinks: #{inspect(later)}"
+
+    refute Enum.any?(later, fn {_mod, _fun, arg} -> arg == expanded_dir end),
+           "the remembered-missing fiber must stay untouched: #{inspect(later)}"
+  end
+
   test "a checkout is held by one worker at a time" do
     # Two workers sharing one project_dir clobber each other's uncommitted
     # edits, so a plain dispatch of a fiber whose checkout is already held by a
@@ -4462,9 +4746,11 @@ defmodule Shuttle.PollerTest do
     File.mkdir_p!(project_dir)
     on_exit(fn -> File.rm_rf(project_dir) end)
 
-    # The gate compares symlink-resolved paths (tmp_dir is itself a symlink on
-    # macOS), so that is what a refusal names.
-    {:ok, resolved_dir} = Shuttle.Realpath.resolve(project_dir)
+    # Two fibers spelling the checkout the same way match on the declared path
+    # alone — no symlink resolution, and so no filesystem touch — which is what
+    # a refusal names here. (`tmp_dir` is itself a symlink on macOS, so the
+    # physical path differs; the symlink case has its own test below.)
+    declared_dir = Path.expand(project_dir)
 
     shuttle = """
     enabled: true
@@ -4503,7 +4789,7 @@ defmodule Shuttle.PollerTest do
     # (a) The other fiber is not dispatched, and its refusal names the holder.
     refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == waiter))
 
-    assert {:error, {:not_eligible, {:project_dir_held, ^resolved_dir, ^holder}}} =
+    assert {:error, {:not_eligible, {:project_dir_held, ^declared_dir, ^holder}}} =
              Poller.dispatch_fiber(poller, waiter, [])
 
     # ...and it SHOWS as blocked rather than vanishing from every list — the
@@ -4511,7 +4797,7 @@ defmodule Shuttle.PollerTest do
     assert %{reason: reason} =
              Enum.find(Poller.snapshot(poller).blocked, &(&1.fiber_id == waiter))
 
-    assert reason == "checkout #{resolved_dir} is held by #{holder}"
+    assert reason == "checkout #{declared_dir} is held by #{holder}"
 
     # A draft sharing the busy checkout reports the draft: the status gates
     # come first, so it is not sent off waiting for a checkout it was never
@@ -4545,7 +4831,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber(forced_id, make_fiber(forced_id))
     MockRunner.set_shuttle(forced_id, shuttle)
 
-    assert {:error, {:not_eligible, {:project_dir_held, ^resolved_dir, ^waiter}}} =
+    assert {:error, {:not_eligible, {:project_dir_held, ^declared_dir, ^waiter}}} =
              Poller.dispatch_fiber(poller, forced_id, [])
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, forced_id, force: true)
@@ -4568,7 +4854,8 @@ defmodule Shuttle.PollerTest do
 
     {:ok, resolved_dir} = Shuttle.Realpath.resolve(project_dir)
 
-    block = fn dir -> """
+    block = fn dir ->
+      """
       enabled: true
       kind: oneshot
       agent: claude-sonnet
