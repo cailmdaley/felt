@@ -1692,11 +1692,12 @@ describe('chains, tails and the drop that authors them', () => {
     expect(stackDropVerdict(card('d', { dependsOnShape: 'scalar' }), card('a'), chain).ok).toBe(true)
   })
 
-  it('refuses the sources a sequence position would be dead frontmatter on', () => {
-    // A CLOSED source is not among them: see 'who may be stacked, and behind
-    // what' — only a tempered TAIL is refused on lifecycle grounds.
-    expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(false)
-    expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(false)
+  it('queues any kind of source — the edge is ordering for the eye', () => {
+    expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(true)
+    expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(true)
+  })
+
+  it('refuses a cycle on either end — a span of time is not a step in a queue', () => {
     expect(stackDropVerdict(card('d', { isCycle: true }), card('a'), chain).ok).toBe(false)
     expect(stackDropVerdict(card('d'), card('a', { isCycle: true }), chain).ok).toBe(false)
   })
@@ -2060,6 +2061,14 @@ describe('a card must be substantially on screen to be aimed at', () => {
     expect(stackZoneOffered(60, 50)).toBe(true)
     // …and for a tall card the fraction is what bites, not the floor.
     expect(stackZoneOffered(400, 60)).toBe(false)
+  })
+
+  it('offers a zone on a compact row that is entirely on screen', () => {
+    // A 22px Resting cluster item or pinned chip is not a sliver of anything;
+    // the pixel floor is capped at the card's own height so compact surfaces
+    // are stackable at all. Half of one is still refused.
+    expect(stackZoneOffered(22, 22)).toBe(true)
+    expect(stackZoneOffered(22, 11)).toBe(false)
   })
 
   it('offers nothing for a card with no visible height at all', () => {

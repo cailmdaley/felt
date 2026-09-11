@@ -197,10 +197,9 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
         action: { kind: 'unstack' },
       })
     }
-    // The source refusals `stackDropVerdict` makes without looking at a
-    // target: a standing role runs on its schedule, a pinned one waits on the
-    // strip. Both would be dead frontmatter.
-    if (card.shuttleKind !== 'standing' && card.shuttleKind !== 'pinned') {
+    // Any kind may be queued: the edge is ordering for the eye, so a standing
+    // or pinned role filed after something is exactly that and nothing more.
+    {
       out.push({
         id: 'queue',
         label: 'Queue behind…',

@@ -39,18 +39,23 @@ describe('moveDestinations', () => {
   })
 
   // setSurface's standing guard: "it runs on its schedule".
-  it('withholds both surfaces from a standing role, and the queue with them', () => {
+  it('withholds both surfaces from a standing role, but still offers the queue', () => {
     const d = ids(card({ shuttleKind: 'standing', effectiveHorizon: 'stashed' }), null)
     expect(d).not.toContain('now')
     expect(d).not.toContain('stashed')
-    expect(d).not.toContain('queue')
+    expect(d).toContain('queue')
     expect(d).toContain('inFlight') // drag-to-In-flight still runs it now
   })
 
   // setSurface's pinned-at-rest guard, and pinRole's "already pinned".
-  it('offers a resting pinned role only the unpin and the lifecycle moves', () => {
+  it('offers a resting pinned role the lifecycle moves, the queue, and unpin', () => {
     const d = ids(card({ shuttleKind: 'pinned', status: 'active' }), null)
-    expect(d).toEqual(['inFlight', 'drafts', 'unpin'])
+    expect(d).toContain('inFlight')
+    expect(d).toContain('drafts')
+    expect(d).toContain('queue')
+    expect(d).toContain('unpin')
+    expect(d).not.toContain('now')
+    expect(d).not.toContain('stashed')
   })
 
   // pinRole ~1611: refusing this was a bug — a once-pinned card left closed

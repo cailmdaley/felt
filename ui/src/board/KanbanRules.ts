@@ -761,7 +761,10 @@ export function stackClaimsDrop(
  */
 export function stackZoneOffered(cardHeight: number, visibleHeight: number): boolean {
   if (visibleHeight <= 0 || cardHeight <= 0) return false;
-  return visibleHeight >= Math.max(cardHeight * 0.4, MIN_STACK_ZONE_PX);
+  // The pixel floor guards against SLIVERS, so it is capped at the card's own
+  // height: a 22px Resting row or pinned chip that is entirely on screen is not
+  // a sliver of anything, and refusing it made every compact surface un-stackable.
+  return visibleHeight >= Math.max(cardHeight * 0.4, Math.min(cardHeight, MIN_STACK_ZONE_PX));
 }
 
 /** The smallest visible strip that may carry a hot zone. Under this a card is
@@ -1066,12 +1069,9 @@ export function stackDropVerdict(
   // ordering for the eye, so queuing behind finished work says exactly what it
   // says — "this comes after that" — and a pinned hub is the canonical thing
   // to file a pile of related work under.
-  if (source.shuttleKind === 'standing') {
-    return { ok: false, reason: 'a standing role runs on its schedule' };
-  }
-  if (source.shuttleKind === 'pinned') {
-    return { ok: false, reason: 'a pinned role waits on the strip, not in a queue' };
-  }
+  // Nor the source's KIND: a standing or pinned role filed after something is
+  // still just filed after it — the daemon reads neither the edge nor this
+  // gesture, so there is nothing to protect.
   // The cycle test runs against the TAIL, because the tail is what the edge is
   // actually written to. Testing the card under the cursor passes a real loop:
   // with X waiting on both T and S, dropping S onto T resolves the tail to X —
