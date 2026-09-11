@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { dispatchIneligibleReason } from './KanbanModalShared'
 
 describe('dispatchIneligibleReason', () => {
-  it('prefers the daemon message, which names the checkout and its holder', () => {
+  it('prefers the daemon message over any per-detail copy', () => {
     expect(
       dispatchIneligibleReason({
         reason: 'not_eligible',
-        detail: 'project_dir_held',
-        message: 'Checkout /home/me/dev/felt is held by tests/holder — one worker per checkout.',
+        detail: 'project_dir_missing',
+        message: "The fiber's project_dir (/home/me/dev/felt) does not exist on the owning host.",
       }),
-    ).toBe('Checkout /home/me/dev/felt is held by tests/holder — one worker per checkout.')
+    ).toBe("The fiber's project_dir (/home/me/dev/felt) does not exist on the owning host.")
   })
 
-  it('falls back to per-detail copy for a held checkout', () => {
-    expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'project_dir_held' }))
-      .toBe("Another worker holds this fiber's checkout — one worker per checkout.")
+  it('falls back to per-detail copy when the daemon sends no message', () => {
+    expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'project_dir_missing' }))
+      .toBe("The fiber's project_dir does not exist on the owning host.")
   })
 })

@@ -9,27 +9,37 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   configured felt store, pulls candidate metadata via `felt ls --json` and
   per-fiber detail via `felt show -j`, and considers a fiber eligible iff
   it carries a `shuttle:` block owned by this host (`shuttle.host` matches),
-  its `project_dir` exists here, felt `status` is `active`, and it isn't
-  already running/claimed (see `eligible?/2` in poller.ex).
-- **A checkout is held by one worker at a time.** A fiber whose
-  `shuttle.project_dir` matches that of a fiber currently running is ineligible
-  with `{:project_dir_held, dir, holder}` ("checkout <dir> is held by
-  <fiber>") — two workers in one clone clobber each other's uncommitted edits.
-  The rule is kind-blind (standing and pinned roles included; it is about the
-  filesystem) and, like every non-force gate, a force-dispatch bypasses it. The
-  running worker's dir is read from `state.project_dir_index`, a
-  runtime_key→project_dir map rebuilt from the candidate rows each poll, so an
-  adopted orphan — whose metadata never carried a project_dir — is covered too.
-  Paths are compared symlink-resolved (`Shuttle.Realpath`), so two fibers
-  naming one checkout by different symlink paths are still one holder. The
-  holder is anything in `state.running`: a worker this daemon dispatched, an
-  orphan it adopted at boot, or a session a human claimed via
-  `POST /api/v1/claim` — a person editing in a checkout is exactly what the
-  gate protects. There is no fairness or queueing: a long-lived holder keeps
-  the checkout until it exits, and the waiting fiber simply retries each tick.
-  While held, the fiber is recorded as a dispatch refusal so it appears in the
-  snapshot's `blocked` list with that reason instead of vanishing from the
-  board; the record is rebuilt each poll and gone the tick the holder exits.
+  felt `status` is `active`, and it isn't already running/claimed (see
+  `eligible?/2` in poller.ex).
+- **Eligibility is pure; the filesystem is the dispatch action's business.**
+  `eligible?/2` reads fiber frontmatter and in-memory runtime maps and nothing
+  else. Whether a `project_dir` exists is decided inside
+  `do_dispatch_fiber/3` — for a fiber that has passed every pure gate and is
+  about to have a worker spawned into that directory. The reason is TCC: a
+  `project_dir` in a macOS file provider (iCloud Drive,
+  `~/Library/CloudStorage`) answers every touch with an "access data from other
+  apps" prompt that cannot be granted to a launchd-run daemon, so the cost of a
+  touch is a dialog on someone's screen, not a syscall. A fiber the poller
+  merely looks at each tick — parked, closed, or refused — is never touched,
+  however long it sits there.
+- **A missing `project_dir` refuses the dispatch.** Present-but-missing means
+  the checkout lives on another machine, so the fiber is refused with
+  `{:project_dir_missing, dir}` rather than having its worker silently
+  downgraded to a felt store as its cwd. A force-dispatch skips the check like
+  every other non-force gate. The refusal is recorded as a dispatch failure, so
+  the fiber appears in the snapshot's `blocked` list with its reason instead of
+  vanishing from the board, and a successful dispatch clears the row. It also
+  rides the preflight cooldown (`@preflight_cooldown_ms`, 5 minutes): a
+  directory that is absent — or that this daemon is denied, which is the same
+  `File.dir?` answer — will not appear between two ticks, so it is retried once
+  per window rather than once per tick.
+- **Workers are NOT excluded from sharing a checkout.** Several workers may run
+  in one `project_dir` at once, and shuttle says nothing about it. An earlier
+  rule refused the second with `:project_dir_held`, on the grounds that two
+  workers in one clone clobber each other's uncommitted edits; it is gone,
+  along with the symlink resolution that existed only to decide when two
+  spellings named one directory. Coordinating concurrent work in a shared
+  checkout is the operator's call, not the dispatcher's.
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
   persisted `~/.config/felt/stores.json`. There is no implicit default store
   and no legacy shuttle-named registry authority. `POST

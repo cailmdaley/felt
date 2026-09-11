@@ -118,8 +118,7 @@ defmodule Shuttle.Poller.Snapshot do
       # no live tmux session is simply eligible again on the next tick. The key
       # stays (empty) for snapshot-shape stability with API/kanban consumers.
       retrying: [],
-      standing_roles:
-        StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
+      standing_roles: StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
       claimed_count: map_size(state.running),
       max_concurrent: state.max_concurrent_workers,
       document_cache:
@@ -300,9 +299,6 @@ defmodule Shuttle.Poller.Snapshot do
   defp format_block_reason({tag, message})
        when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(message),
        do: message
-
-  defp format_block_reason({:project_dir_held, dir, holder}),
-    do: "checkout #{dir} is held by #{holder}"
 
   defp format_block_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp format_block_reason(reason) when is_binary(reason), do: reason
