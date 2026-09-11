@@ -246,9 +246,7 @@ export function lensCycles(
  *                                            not dispatchable)
  *        - status:open           → drafts   (draft / paused — NOT dispatched;
  *                                            launch is open → active)
- *        - status:active oneshot → inFlight (armed: dispatches when deps are
- *                                            met — the daemon's call, but the
- *                                            card reads In flight either way)
+ *        - status:active oneshot → inFlight (armed: the daemon dispatches it)
  *        - status:active standing→ scheduled(armed but action-needed-nothing:
  *                                            it fires on its own cron, so it
  *                                            belongs on the timeline at its
@@ -256,9 +254,9 @@ export function lensCycles(
  *                                            *running* standing role returned
  *                                            inFlight at the liveness branch
  *                                            above — live work shows in Now.)
- *      A blocked-by-deps active oneshot still reads inFlight (launch intent —
- *      it flies when the dep clears); the dependency gate is applied downstream,
- *      by `depGated` on this classifier's output, never here.
+ *      `depends_on:` is not consulted anywhere in here, or anywhere downstream
+ *      of here: a card's column is its own status. The field decides only where
+ *      a card is DRAWN (`foldHeadId`), never what it is.
  *
  * The kanban response splits classifyFiber's output across the
  * surfaces: now, timeline, stash, and the pinned strip. The classifier
@@ -476,102 +474,84 @@ export function nextStandingLaunch(
   }
 }
 
-// ─── SEQUENCE GATING ──────────────────────────────────────────────────────
+// ─── SEQUENCES ────────────────────────────────────────────────────────────
 //
 // `depends_on:` is a project-owned frontmatter field (felt does not interpret
-// it), and it says one thing: this card is the NEXT one, behind that one. The
-// board reads it as a sequence — a chain of cards where only the head is on
-// the desk and the rest wait their turn in Resting.
+// it), and it says one thing: this card is the NEXT one, behind that one. It
+// is ORDERING FOR THE EYE — "this is filed after that" — and nothing else.
+// Nothing dispatches, rests, or unlocks because of it: the daemon does not
+// read the field at all, and a card's column is always its own status.
 //
-// Every rule below is a pure derivation over the feed. Nothing about a gate is
-// stored: when the dep tempers, the card returns to its natural column on the
-// very next poll because the derivation now answers differently. There is no
-// "ungate" write, no state to reconcile, and no way for the board to disagree
-// with the documents.
-
-/** What a dependency edge points at, as far as the gate is concerned. Only
- *  `tempered` unlocks — the same rung `toCard` has always read. */
-export interface DepTarget {
-  tempered?: boolean;
-}
-
-/** How one card's `depends_on:` list resolved against the feed. */
-export interface DependencyResolution {
-  /** True when nothing KNOWN stands in the way. FAIL-OPEN: a dep id the feed
-   *  cannot resolve does not block — see `unresolved`. */
-  satisfied: boolean;
-  /** Deps that resolved to a real fiber that is not tempered yet. These are
-   *  the ones actually holding the card back. */
-  blocking: string[];
-  /** Dep ids nothing in the feed answers to — a typo, a fiber from a store
-   *  this board cannot see, or a rename. They are NOT treated as blocking:
-   *  hiding a card behind an id that resolves to nothing is how work
-   *  disappears with no way to find it. The card stays where it is and wears a
-   *  warning instead. (`felt check` is the place that scolds about it.) */
-  unresolved: string[];
-}
+// What the board does with it is DRAW a chain as one thing: a card queued
+// behind another is folded under it (`foldHeadId`), reachable through the
+// head's "+N queued" chip, so a pile of related work reads as one queue
+// instead of six cards. Every rule below is a pure derivation over the feed —
+// nothing about a fold is stored, so the moment an edge is cleared the card is
+// simply drawn in its own column again.
 
 /**
- * Resolve a card's `depends_on:` against a lookup over the whole feed.
- *
- * `lookup` rather than a map so a caller can resolve by uid as well as by id
- * without this module knowing how the feed is indexed.
+ * Dep ids nothing in the feed answers to — a typo, a fiber from a store this
+ * board cannot see, or a rename. They hold nothing back (there is nothing to
+ * hold back), but a chain that silently is not one is worth saying out loud,
+ * so the card wears a warning badge. (`felt check` names them too.)
  */
-export function resolveDependencies(
+export function unresolvedDependencies(
   dependsOn: readonly string[] | undefined,
-  lookup: (id: string) => DepTarget | undefined,
-): DependencyResolution {
-  const blocking: string[] = [];
-  const unresolved: string[] = [];
-  for (const id of dependsOn ?? []) {
-    const target = lookup(id);
-    if (target === undefined) unresolved.push(id);
-    else if (target.tempered !== true) blocking.push(id);
-  }
-  return { satisfied: blocking.length === 0, blocking, unresolved };
-}
-
-/** The shape the gate reads off a card. Structural, so the rules module keeps
- *  owning no view types; `KanbanCard` satisfies it. */
-export interface DepGateCandidate {
-  dependsOnSatisfied: boolean;
-  runningWorker?: string;
-  /** The human's verdict, when there is one. Only a VERDICT exempts a card
-   *  from the gate — `status:closed` on its own does not. */
-  tempered?: boolean;
+  known: (id: string) => boolean,
+): string[] {
+  return (dependsOn ?? []).filter((id) => !known(id));
 }
 
 /**
- * Does the dependency gate hold this card off the desk?
- *
- * Two exemptions, and each is a case where resting would LIE about the card:
- *   • satisfied deps (or none)  → nothing to wait for.
- *   • a VERDICT already given   → tempered or composted is history, not an
- *                                 attention claim. Resting it would file a
- *                                 finished thing under "waiting its turn".
- *   • a LIVE worker             → the thing is happening right now. Whatever
- *                                 the frontmatter says, hiding a running
- *                                 worker in Resting is the board disagreeing
- *                                 with reality.
- *
- * NOT exempt, though it is `status:closed`: an AWAITING-REVIEW card — closed,
- * no verdict yet — with an unsatisfied dep. A review that cannot usefully
- * happen until the work ahead of it lands is exactly the thing queuing exists
- * to take off the desk; leaving it in the Awaiting review column while its own
- * head advertises it as "+1 queued" is the board saying both at once. It rests,
- * and returns to Awaiting review by itself the moment the dep tempers — the
- * same derivation, answering differently, with nothing stored.
- *
- * Everything else — a draft, an armed oneshot, a scheduled role — rests until
- * the dep tempers. This composes with `effectiveHorizon` by ADDITION, never by
- * override: an explicitly stashed card rests because it was put down, a gated
- * card rests because it is not its turn, and a card that is both rests once.
+ * One node as the fold walk sees it: who it waits on, and whether a card
+ * folded under it would actually be reachable — `foldable` is true for the
+ * surfaces that draw a head with its queue (the desk columns, the pinned
+ * strip, Resting) and false for everything else (the past lane, cycles, and
+ * any id the board is not drawing at all).
  */
-export function depGated(card: DepGateCandidate): boolean {
-  if (card.dependsOnSatisfied) return false;
-  if (card.tempered !== undefined) return false;
-  if (card.runningWorker) return false;
-  return true;
+export interface FoldNode {
+  id: string;
+  dependsOn?: readonly string[];
+  foldable: boolean;
+}
+
+/**
+ * Where a queued card is DRAWN: under the top-most drawn ancestor of its
+ * chain, or nowhere in particular (undefined) when it has no such ancestor.
+ *
+ * For A←B←C the answer for C is A, not B: the head is the card a person can
+ * actually see, and A's peek list already shows the whole chain in order, so
+ * folding C under B would hide it one level deeper than anything on screen.
+ * The walk climbs the forward edges, remembering the HIGHEST foldable ancestor
+ * it passes, and a `seen` set makes a hand-written cycle finite rather than
+ * fatal.
+ *
+ * An ancestor that is not drawn on a folding surface — composted, tempered, or
+ * simply not in this feed — cannot hold anything: nothing is ever hidden
+ * behind a card that is not there. The walk continues PAST it (a higher
+ * ancestor may still be drawn) but does not fold to it.
+ */
+export function foldHeadId(
+  node: FoldNode,
+  resolve: (id: string) => FoldNode | undefined,
+): string | undefined {
+  const seen = new Set<string>([node.id]);
+  let head: string | undefined;
+  let cur: FoldNode = node;
+  for (;;) {
+    let next: FoldNode | undefined;
+    for (const dep of cur.dependsOn ?? []) {
+      const candidate = resolve(dep);
+      if (candidate && !seen.has(candidate.id)) {
+        next = candidate;
+        break;
+      }
+    }
+    if (!next) return head;
+    seen.add(next.id);
+    if (next.foldable) head = next.id;
+    cur = next;
+  }
 }
 
 /** A node in the dependency graph, as the reverse-edge builder needs it. */
@@ -986,37 +966,19 @@ export function queueDropIndex(from: number, insertAt: number): number {
   return insertAt > from ? insertAt - 1 : insertAt;
 }
 
-/**
- * Is this card's work ACCEPTED — the one state that ends a queue?
- *
- * `tempered: true` is the only verdict that satisfies a dependency, so it is
- * the only state a card cannot be queued behind: the dep would be met the
- * instant it was written and the card would never wait at all. Everything else
- * — open, active, awaiting review, even COMPOSTED — leaves a dependency
- * genuinely unsatisfied, and a stack behind it means exactly what it says.
- *
- * `status: closed` is deliberately NOT the test. It covers awaiting review
- * (live work waiting on a human) and composted alike, and refusing those was
- * over-restriction: it made a draft dragged onto an awaiting-review card fall
- * through to the column and get transitioned instead.
- */
-export function isAccepted(card: Pick<StackCandidate, 'tempered'>): boolean {
-  return card.tempered === true;
-}
-
-/** A queue member that is closed but not accepted: still in the chain, no
- *  longer waiting for its turn. `null` means an ordinary waiting member. */
+/** A queue member that is closed: still in the chain, no longer waiting for
+ *  its turn. `null` means an ordinary waiting member. */
 export type QueueMemberNote = 'awaiting review' | 'composted';
 
 /**
  * How does a queue member sit — waiting its turn, or closed without a verdict?
  *
- * The peek list counts every UNTEMPERED follower, because that is the graph the
- * drop gesture reasons over: a card in awaiting review still occupies its place
- * in the chain, still ends it, and still refuses a second card dropped onto its
- * head. Counting only the live ones made that queue INVISIBLE — an unexplained
- * refusal over a card wearing no chip at all. So the closed members are shown,
- * and shown as what they are rather than as work still waiting.
+ * The peek list counts every follower, because that is the graph the drop
+ * gesture reasons over: a card in awaiting review still occupies its place in
+ * the chain and still ends it. Counting only the live ones made that queue
+ * INVISIBLE — a chain the gesture could plainly see over a card wearing no
+ * chip at all. So the closed members are shown, and shown as what they are
+ * rather than as work still waiting.
  */
 export function queueMemberNote(
   member: Pick<StackCandidate, 'status' | 'tempered'>,
@@ -1029,8 +991,8 @@ export function queueMemberNote(
  * What the "+N queued" chip reads for a queue of this size.
  *
  * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
- * this card in every sense the gesture cares about, and a count that skipped
- * them would disagree with the refusal you get for dropping onto the same card.
+ * this card in every sense the fold cares about, and a count that skipped them
+ * would disagree with the peek list right under it.
  * The chip used to append a second clause counting the settled ones ("· 1 in
  * review"); it made a glance at the desk do arithmetic to answer a question the
  * glance was not asking. How each member sits is a fact about that member, so
@@ -1070,18 +1032,18 @@ export type StackRefusal = 'alreadyQueued';
  * Rule on "put this card behind that one" — the drag of one card onto another.
  *
  * The gesture writes exactly one scalar `depends_on:`, so it declines every
- * case where one edge is not the whole truth:
+ * case where one edge is not the whole truth — and only those. What the cards
+ * have DONE is no longer any of its business: a queue is ordering, so a
+ * tempered or pinned card is a perfectly good thing to file work behind.
  *
  *   • a hand-written LIST on the source — a fan-in someone assembled on
  *     purpose; a drag cannot know which of those edges it was meant to replace.
  *   • a CYCLE fiber on either end — a band of time is not a queue position.
- *   • a closed source — its work is over; queueing it behind something would
- *     be scheduling the past.
  *   • a standing or pinned source — those run on a cron or from the strip, and
- *     a dep would be dead frontmatter the dispatcher does not read (the same
- *     ground as `setSurface`'s standing/pinned guards).
- *   • a LOOP — the target already sits somewhere behind the source. Writing it
- *     would gate both cards forever with no gesture that undoes it.
+ *     folding one away under another card would take the launcher off the
+ *     strip (the same ground as `setSurface`'s standing/pinned guards).
+ *   • a LOOP or a NO-OP — the source already sits behind the target, or the
+ *     edge would close a ring no gesture could undo.
  *
  * On success the attach point is the chain's TAIL, not the card under the
  * cursor: you aimed at a queue, and joining a queue means joining the end.
@@ -1090,7 +1052,6 @@ export function stackDropVerdict(
   source: StackCandidate,
   target: StackCandidate,
   dependents: ReadonlyMap<string, readonly string[]>,
-  lookup?: (id: string) => StackCandidate | undefined,
 ): StackVerdict {
   if (source.id === target.id) return { ok: false, reason: 'a card cannot wait on itself' };
   if (source.isCycle || target.isCycle) {
@@ -1101,11 +1062,10 @@ export function stackDropVerdict(
   }
   // NOTE what is NOT refused here: the source's lifecycle state. Any card may
   // be queued behind another. An awaiting-review or composted source means "if
-  // this reopens, it reopens behind that one". A composted source is inert
-  // until that day (`depGated` exempts a card that already has a verdict); an
-  // awaiting-review one rests immediately, which is the point — the review
-  // waits for the work ahead of it. The one refusal this gesture makes about
-  // lifecycle is about the TAIL, below.
+  // this reopens, it reopens behind that one". Nor is the TARGET's: a queue is
+  // ordering for the eye, so queuing behind finished work says exactly what it
+  // says — "this comes after that" — and a pinned hub is the canonical thing
+  // to file a pile of related work under.
   if (source.shuttleKind === 'standing') {
     return { ok: false, reason: 'a standing role runs on its schedule' };
   }
@@ -1118,16 +1078,6 @@ export function stackDropVerdict(
   // and `S.depends_on = X` closes S←X←S, gating both forever with no gesture
   // that undoes it. Nothing about T said so.
   const tail = chainTail(target.id, dependents);
-  // THE ONE LIFECYCLE REFUSAL, and it is about the TAIL — the card the edge
-  // actually points at, not the one the cursor happened to be over. A tempered
-  // tail would promise nothing: `dependsOnSatisfied` reads true the moment the
-  // edge is written, so the card would never wait. Composted is not refused —
-  // a dep on composted work is still unsatisfied, so the stack means what it
-  // says.
-  const tailCard = tail === target.id ? target : lookup?.(tail);
-  if (tailCard && isAccepted(tailCard)) {
-    return { ok: false, reason: 'that one is already tempered — there is nothing left to wait for' };
-  }
   // ALREADY BEHIND IT — the honest refusal, and the one worth SAYING.
   //
   // Two shapes of the same fact: the source sits somewhere in the chain behind

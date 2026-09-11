@@ -15,7 +15,7 @@ defmodule Shuttle.Poller.StandingRoles do
   struct and return updated state or values, mirroring the signatures they had
   inside `Shuttle.Poller`. Truly shared helpers (`role_kind/1`,
   `host_for_fiber/2`, `host_owned?/2`, `running_key/2`, `iso_to_unix_ms/1`,
-  `fetch_shuttle_block/2`, `dependencies_satisfied?/2`, `list_shuttle_sessions/1`,
+  `fetch_shuttle_block/2`, `list_shuttle_sessions/1`,
   `runtime_key_for_fiber/1`) stay in `Shuttle.Poller` and are called from here.
   """
 
@@ -363,7 +363,6 @@ defmodule Shuttle.Poller.StandingRoles do
 
     with true <- Map.get(fiber, "status", "") == "active",
          true <- is_nil(Map.get(fiber, "tempered")),
-         true <- Poller.dependencies_satisfied?(fiber, state),
          {:ok, role} <- fetch_standing_role(fiber_id, state) do
       now = DateTime.utc_now()
       now_ms = DateTime.to_unix(now, :millisecond)

@@ -1031,9 +1031,6 @@
   text-align: center;
 }
 .kbn-cluster-item-human .kbn-cluster-item-glyph { color: var(--kbn-you); }
-/* Queued behind other work: the glyph itself turns plum — the same pigment as
-   the stack gesture — instead of a text chip that overflowed the row. */
-.kbn-cluster-item-glyph-gated { color: #6B4E71 !important; }
 .kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
 .kbn-cluster-item-title {
   flex: 1;
@@ -1061,11 +1058,6 @@
 /* The row itself carries a hairline left edge in the same slate, so the
    schedule-driven rows are findable in a cluster without reading each chip. */
 .kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 rgba(74, 96, 110, 0.32); }
-/* Gated by sequence — "after <that one>". Muted plum: a third way of being at
-   rest, and the only one that returns on someone else's work rather than on a
-   day, so it must not read as either the ochre snooze or the slate cron. */
-.kbn-cluster-item-gated { color: rgba(107, 78, 113, 0.85); }
-.kbn-cluster-cold .kbn-cluster-item-gated { color: rgba(112, 100, 116, 0.65); }
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the
@@ -1627,19 +1619,9 @@
   border-radius: 2px;
   padding: 1px 5px;
 }
-.kbn-card-blocked {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
-  color: #C49333;
-  background: rgba(196, 147, 51, 0.10);
-  padding: 4px 6px;
-  border-radius: 2px;
-  margin-top: 2px;
-}
 /* A dep id that resolves to nothing. Dashed, because it is a warning ABOUT the
    card's frontmatter rather than a state the card is in — nothing is being
-   enforced (unresolved deps fail open), and the border says "look at this"
-   without the solid fill of .kbn-card-blocked, which reports a real hold. */
+   enforced, and the border says "look at this" quietly. */
 .kbn-card-depwarn {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10.5px * var(--kbn-type-scale, 1));
@@ -1666,6 +1648,39 @@
   flex-shrink: 0;
 }
 .kbn-card-queued:hover { background: rgba(107, 78, 113, 0.18); }
+/* THE SAME CHIP IN A SMALLER ROOM — the pinned strip only. A launcher chip is a
+   single tight row with no line to spare, so the compact chip drops to "+3" and
+   tightens its padding; the word it is short of lives in the tooltip and the
+   aria label, which both spell out the count. A Resting row wraps, so it takes
+   the full chip. */
+.kbn-card-queued--compact {
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  padding: 1px 3px;
+  height: auto;
+  line-height: 1.25;
+  margin-left: 4px;
+}
+/* The pinned strip lays out chips in a row, so the peek list cannot take a line
+   of its own the way it does on a card: it floats under the chip that opened
+   it. The wrapper is the positioning context and the only reason it exists. */
+.kbn-pin-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.kbn-card-queued-list--floating {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 6;
+  min-width: 180px;
+  max-width: 280px;
+  background: var(--kbn-surface, #FBF8F3);
+  border: 1px solid rgba(107, 78, 113, 0.28);
+  border-radius: 2px;
+  padding: 4px 6px;
+  box-shadow: 0 4px 14px rgba(27, 22, 17, 0.16);
+}
 .kbn-card-queued-list {
   /* Full row: the peek drops below the meta line instead of wedging into it.
      `max-width` keeps it inside a narrow host (a Resting cluster item is much
@@ -1946,11 +1961,9 @@
 }
 .kbn-card--stale:active { cursor: default; }
 .kbn-card--stale .kbn-card-name { color: #5A4F3A; }
-/* The waiting badge sits in the same band as kbn-card-blocked /
-   kbn-card-worker — runtime-state info that depends on connection,
-   not on fiber content. Cool grey-blue distinguishes "stale" from
-   the warm gold of "blocked on dep" and the teal of "worker
-   running." */
+/* The waiting badge sits in the same band as kbn-card-worker — runtime-state
+   info that depends on connection, not on fiber content. Cool grey-blue
+   distinguishes "stale" from the teal of "worker running." */
 .kbn-card-waiting {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10.5px * var(--kbn-type-scale, 1));

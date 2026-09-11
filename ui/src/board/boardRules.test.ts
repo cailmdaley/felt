@@ -49,7 +49,7 @@ import {
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
-  unsettledDependents,
+  boardDependents,
 } from './KanbanSurfaces.js'
 import { chromeRestartDirective, chromeRestartNeeded, sessionWindow } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
@@ -518,7 +518,6 @@ describe('Resting clusters split when they overflow', () => {
     originId: 'local',
     status: 'open',
     createdAt: at(),
-    dependsOnSatisfied: true,
     effectiveHorizon: 'stashed',
     drifted: false,
     isCycle: false,
@@ -716,7 +715,13 @@ describe('renderPinnedSection — the launcher band never pages', () => {
       },
     }
 
-    setAttribute(): void {}
+    readonly attrs: Record<string, string> = {}
+    setAttribute(name: string, value: string): void {
+      this.attrs[name] = value
+    }
+    getAttribute(name: string): string | null {
+      return this.attrs[name] ?? null
+    }
     addEventListener(): void {}
     append(...nodes: FakeEl[]): void {
       this.children.push(...nodes)
@@ -743,7 +748,7 @@ describe('renderPinnedSection — the launcher band never pages', () => {
 
   afterEach(() => vi.unstubAllGlobals())
 
-  const renderer = (): KanbanSurfaceRenderer => {
+  const renderer = (lastResponse: KanbanResponse | null = null): KanbanSurfaceRenderer => {
     vi.stubGlobal('document', { createElement: (tag: string) => new FakeEl(tag) })
     // The surfaces ask the viewport two questions while building (mobile.ts:
     // is this a phone-width layout, is the pointer a finger). There is no
@@ -767,7 +772,7 @@ describe('renderPinnedSection — the launcher band never pages', () => {
     return new KanbanSurfaceRenderer({
       getDragSourceId: () => null,
       setDragSourceId: () => {},
-      getLastResponse: () => null,
+      getLastResponse: () => lastResponse,
       stopDragAutoScroll: () => {},
       transition: () => {},
       setSurface: () => {},
@@ -784,7 +789,6 @@ describe('renderPinnedSection — the launcher band never pages', () => {
     originId: 'local',
     status: 'active',
     createdAt: new Date(NOW).toISOString(),
-    dependsOnSatisfied: true,
     effectiveHorizon: 'now',
     drifted: false,
     isCycle: false,
@@ -800,6 +804,37 @@ describe('renderPinnedSection — the launcher band never pages', () => {
     expect(row!.querySelectorAll('.kbn-pin-chip')).toHaveLength(14)
     expect(row!.querySelector('.kbn-pin-more')).toBeNull()
     expect(section.querySelector('.kbn-tl-pager')).toBeNull()
+  })
+
+  it('wears "+N queued" for the work folded under it — the cmbx case', () => {
+    // A pinned hub is the only surface its queue can be seen from, and for as
+    // long as the chip drew no count that pile was invisible from the strip.
+    const hub = pinnedCard('science/cmbx')
+    const queued = {
+      ...pinnedCard('science/mocks'),
+      shuttleKind: 'oneshot' as const,
+      status: 'open',
+      dependsOn: ['science/cmbx'],
+      dependsOnShape: 'scalar' as const,
+      foldedUnder: 'science/cmbx',
+    }
+    const resp = response({ pinned: [hub], folded: [queued] })
+    const section = renderer(resp).renderPinnedSection([hub], {})
+    const chip = section.querySelector('.kbn-card-queued')
+    expect(chip).not.toBeNull()
+    expect(chip!.textContent).toBe('+1')
+    // The words the compact chip has no room for live where a reader can still
+    // get at them: the tooltip and the aria label both name the count.
+    expect(chip!.getAttribute('aria-label')).toContain('1 card queued behind cmbx')
+    expect((chip as unknown as { title: string }).title).toContain('mocks')
+    expect(section.querySelectorAll('.kbn-card-queued-row')).toHaveLength(1)
+  })
+
+  it('leaves an unqueued role as a bare chip', () => {
+    const hub = pinnedCard('science/cmbx')
+    const section = renderer(response({ pinned: [hub] })).renderPinnedSection([hub], {})
+    expect(section.querySelector('.kbn-card-queued')).toBeNull()
+    expect(section.querySelector('.kbn-pin-chip-wrap')).toBeNull()
   })
 })
 
@@ -1452,14 +1487,14 @@ describe('Resting holds standing roles asleep between runs', () => {
   })
 })
 
-// ─── SEQUENCE GATING ──────────────────────────────────────────────────────
+// ─── THE FOLD ─────────────────────────────────────────────────────────────
 //
-// `depends_on:` read as a queue: the head is on the desk, everything behind it
-// rests until the head is tempered. Every rule here is a pure derivation, so
-// each test states a feed and reads a surface — there is no gate to set and
-// none to clear.
+// `depends_on:` read as a queue for the EYE: a card filed behind another is
+// drawn under it — reachable through the head's "+N queued" chip — and nowhere
+// else. Nothing is gated, rested or unlocked by it; every card still classifies
+// by its own status. Each test states a feed and reads a surface.
 
-describe('the sequence gate', () => {
+describe('the fold', () => {
   const seqFeed = (...fibers: Fiber[]): CompositeFeed => ({
     host: 'here',
     entries: fibers.map((fiber) => ({
@@ -1482,166 +1517,124 @@ describe('the sequence gate', () => {
   const board = (...fibers: Fiber[]): KanbanResponse =>
     buildKanbanResponseFromComposite(seqFeed(...fibers), { nowMs: NOW })
 
-  it('rests a card whose dependency is not tempered yet', () => {
+  it('folds a queued open card under its head in Drafts', () => {
     const resp = board(step('a'), step('b', { dependsOn: ['a'] }))
     expect(resp.now.drafts.map((c) => c.id)).toEqual(['a'])
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash[0].depGated).toBe(true)
-    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
-  })
-
-  it('releases the card the moment the dependency tempers — no stored state', () => {
-    const resp = board(
-      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
-      step('b', { dependsOn: ['a'] }),
-    )
-    expect(resp.now.drafts.map((c) => c.id)).toEqual(['b'])
     expect(resp.stash).toHaveLength(0)
-    expect(resp.now.drafts[0].depGated).toBeFalsy()
+    expect(resp.folded.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded[0].foldedUnder).toBe('a')
   })
 
-  it('a COMPOSTED dependency still gates — only tempering is a verdict that unlocks', () => {
+  it('folds under the head wherever the head is drawn — the PINNED strip included', () => {
+    // The cmbx case: a pile of work filed under an umbrella role. The strip is
+    // the only place that role appears, so the queue has to be visible from it.
     const resp = board(
-      step('a', { status: 'closed', tempered: false, closedAt: at0 }),
-      step('b', { dependsOn: ['a'] }),
+      step('hub', { shuttleKind: 'pinned' }),
+      step('b', { dependsOn: ['hub'] }),
     )
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.pinned.map((c) => c.id)).toEqual(['hub'])
+    expect(resp.folded.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded[0].foldedUnder).toBe('hub')
   })
 
-  it('gates an armed oneshot the same way it gates a draft', () => {
+  it('folds under a head in AWAITING REVIEW, and under one at rest', () => {
+    const resp = board(
+      step('a', { status: 'closed', closedAt: at0 }),
+      step('b', { dependsOn: ['a'] }),
+      step('r', { horizon: 'stashed' }),
+      step('s', { dependsOn: ['r'] }),
+    )
+    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['a'])
+    expect(resp.stash.map((c) => c.id)).toEqual(['r'])
+    expect(resp.folded.map((c) => c.id).sort()).toEqual(['b', 's'])
+  })
+
+  it('folds C under A, not under B — the top-most drawn ancestor is the head', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'] }), step('c', { dependsOn: ['b'] }))
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['a'])
+    expect(resp.folded.find((c) => c.id === 'b')?.foldedUnder).toBe('a')
+    expect(resp.folded.find((c) => c.id === 'c')?.foldedUnder).toBe('a')
+  })
+
+  it('stands an ACTIVE card in In flight even when it is queued — work must be seen', () => {
     const resp = board(step('a'), step('b', { status: 'active', dependsOn: ['a'] }))
-    expect(resp.now.inFlight).toHaveLength(0)
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded).toHaveLength(0)
   })
 
-  it('never rests a card with a LIVE WORKER, whatever its deps say', () => {
-    const feed = seqFeed(step('a'), step('b', { status: 'active', dependsOn: ['a'] }))
+  it('stands a card with a LIVE WORKER in its own column', () => {
+    const feed = seqFeed(step('a'), step('b', { dependsOn: ['a'] }))
     feed.entries[1].runtime = { tmuxSession: 'shuttle-b' }
     const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
     expect(resp.now.inFlight.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash).toHaveLength(0)
+    expect(resp.folded).toHaveLength(0)
   })
 
-  it('RESTS an awaiting-review card whose dep has not tempered — the queue hides it from the board', () => {
-    const resp = board(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
-    expect(resp.now.awaitingReview).toHaveLength(0)
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash[0].depGated).toBe(true)
-    expect(resp.stash[0].status).toBe('closed')
-    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
+  it('stands an ORPHANED tail alone — a head the board does not draw hides nothing', () => {
+    const resp = board(step('b', { dependsOn: ['gone/elsewhere'] }))
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded).toHaveLength(0)
+    expect(resp.now.drafts[0].dependsOnUnresolved).toEqual(['gone/elsewhere'])
   })
 
-  it('an awaiting-review card returns to Awaiting review the moment its dep tempers', () => {
+  it('stands a card queued behind FINISHED work alone — the past lane holds no folds', () => {
     const resp = board(
-      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
-      step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
+      step('t', { status: 'closed', tempered: true, closedAt: at0 }),
+      step('c', { status: 'closed', tempered: false, closedAt: at0 }),
+      step('b', { dependsOn: ['t'] }),
+      step('d', { dependsOn: ['c'] }),
     )
-    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash).toHaveLength(0)
-    expect(resp.now.awaitingReview[0].depGated).toBeFalsy()
+    expect(resp.folded).toHaveLength(0)
+    expect(resp.now.drafts.map((c) => c.id).sort()).toEqual(['b', 'd'])
   })
 
-  it('never rests a card that already has a VERDICT — tempered and composted are history', () => {
+  it('still classifies a folded card by its OWN status', () => {
     const resp = board(
       step('a'),
+      step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
       step('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
-      step('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(resp.stash).toHaveLength(0)
-    expect(resp.timeline.past.map((c) => c.id).sort()).toEqual(['c', 't'])
+    expect(resp.now.awaitingReview).toHaveLength(0)
+    expect(resp.timeline.past).toHaveLength(0)
+    expect(resp.folded.map((c) => c.id).sort()).toEqual(['b', 't'])
+    expect(resp.folded.find((c) => c.id === 'b')?.status).toBe('closed')
+    expect(resp.folded.find((c) => c.id === 't')?.tempered).toBe(true)
   })
 
-  it('never rests an awaiting-review card with a LIVE WORKER', () => {
-    const feed = seqFeed(step('a'), step('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }))
-    feed.entries[1].runtime = { tmuxSession: 'shuttle-b' }
-    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
-    expect(resp.stash).toHaveLength(0)
-    expect([...resp.now.inFlight, ...resp.now.awaitingReview].map((c) => c.id)).toContain('b')
+  it('keeps a folded card FINDABLE, so its peek row is not a dead click', () => {
+    const resp = board(step('a'), step('b', { dependsOn: ['a'] }))
+    expect(findCardById(resp, 'b')?.foldedUnder).toBe('a')
   })
 
-  it('FAILS OPEN on a dep id nothing resolves to, and says so on the card', () => {
-    const resp = board(step('b', { dependsOn: ['typo/nope'] }))
-    expect(resp.now.drafts.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash).toHaveLength(0)
-    expect(resp.now.drafts[0].dependsOnUnresolved).toEqual(['typo/nope'])
-    expect(resp.now.drafts[0].dependsOnSatisfied).toBe(true)
-  })
-
-  it('gates on the resolvable dep even when a second one dangles', () => {
+  it('reports a dangling dep id without letting it hide anything', () => {
     const resp = board(step('a'), step('b', { dependsOn: ['a', 'typo/nope'] }))
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash[0].dependsOnBlocking).toEqual(['a'])
-    expect(resp.stash[0].dependsOnUnresolved).toEqual(['typo/nope'])
+    expect(resp.folded.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded[0].dependsOnUnresolved).toEqual(['typo/nope'])
   })
 
-  it('fails open on the LONE-CARD path, where there is no feed to resolve against', () => {
-    // `cardFromCompositeEntry` resolves against an empty map: every dep is
-    // unresolved there, and an unresolved dep must never hide a card.
+  it('says nothing about edges on the LONE-CARD path, where there is no feed', () => {
     const card = cardFromCompositeEntry(
       { origin: 'here', feltStore: '/store', path: '.felt/b.md', fiber: step('b', { dependsOn: ['a'] }) },
       NOW,
     )
-    expect(card.dependsOnSatisfied).toBe(true)
-    expect(card.depGated).toBeFalsy()
+    expect(card.foldedUnder).toBeUndefined()
     expect(card.dependsOnUnresolved).toBeUndefined()
   })
 
-  it('composes with horizon:stashed — a card that is both rests exactly once', () => {
-    const resp = board(step('a'), step('b', { dependsOn: ['a'], horizon: 'stashed' }))
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash[0].effectiveHorizon).toBe('stashed')
-    expect(resp.stash[0].depGated).toBe(true)
-  })
-
-  it('an explicit stash still rests once its dep tempers — the two reasons are independent', () => {
-    const resp = board(
-      step('a', { status: 'closed', tempered: true, closedAt: at0 }),
-      step('b', { dependsOn: ['a'], horizon: 'stashed' }),
-    )
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-    expect(resp.stash[0].depGated).toBeFalsy()
-  })
-
-  it('a due: that has arrived does NOT lift the gate — a date cannot temper work', () => {
-    const resp = board(step('a'), step('b', { dependsOn: ['a'], due: dayFromNow(-1) }))
-    expect(resp.stash.map((c) => c.id)).toEqual(['b'])
-  })
-
-  it('keeps a gated card FINDABLE, so its drag out of Resting is not a no-op', () => {
-    const resp = board(step('a'), step('b', { dependsOn: ['a'] }))
-    expect(findCardById(resp, 'b')?.depGated).toBe(true)
-  })
-
-  it('resolves a dep written as a UID, where the poller and the checker resolve one', () => {
+  it('resolves an edge written as a UID, the way the checker resolves one', () => {
     // The UI used to index by path id alone, so `depends_on: <ulid>` read as
-    // unresolved — fail-open, so the card sat cheerfully on the desk with a
-    // spurious warning while the daemon silently refused to launch it. The two
-    // sides must agree about what a dependency IS before they can agree about
-    // whether it is met.
+    // unresolved and a perfectly good chain drew as a pile of loose cards, each
+    // wearing a spurious warning.
     const uid = '01KTCA2D1FGAJNHX5WKQ34BSZF'
-    const gated = board(step('a', { uid }), step('b', { dependsOn: [uid] }))
-    expect(gated.stash.map((c) => c.id)).toEqual(['b'])
-    expect(gated.stash[0].dependsOnUnresolved).toBeUndefined()
-
-    const released = board(
-      step('a', { uid, status: 'closed', tempered: true, closedAt: at0 }),
-      step('b', { dependsOn: [uid.toLowerCase()] }),
-    )
-    expect(released.now.drafts.map((c) => c.id)).toEqual(['b'])
+    const resp = board(step('a', { uid }), step('b', { dependsOn: [uid.toLowerCase()] }))
+    expect(resp.folded.map((c) => c.id)).toEqual(['b'])
+    expect(resp.folded[0].foldedUnder).toBe('a')
+    expect(resp.folded[0].dependsOnUnresolved).toBeUndefined()
   })
 
-  it('a JUDGED card keeps its unsatisfied dep on the record without being held by it', () => {
-    // A verdict ends the card's claim on attention, so the gate lets go even
-    // though the edge is still unsatisfied — the record of what this work was
-    // waiting on when it finished survives, inert.
-    const resp = board(
-      step('a'),
-      step('b', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
-    )
-    const card = resp.timeline.past.find((c) => c.id === 'b')!
-    expect(card.dependsOnSatisfied).toBe(false)
-    expect(card.depGated).toBeFalsy()
-    expect(resp.stash).toHaveLength(0)
+  it('survives a hand-written CYCLE in the edges rather than hanging', () => {
+    const resp = board(step('a', { dependsOn: ['b'] }), step('b', { dependsOn: ['a'] }))
+    expect(resp.folded.length + resp.now.drafts.length).toBe(2)
   })
 
   it('reads a SCALAR depends_on and remembers the shape the gesture may rewrite', () => {
@@ -1781,11 +1774,9 @@ describe('who may be stacked, and behind what', () => {
     expect(stackDropVerdict(c('d'), awaiting('a'), none)).toEqual({ ok: true, tail: 'a' })
   })
 
-  it('refuses a TEMPERED target — the dep would be satisfied the moment it is written', () => {
-    expect(stackDropVerdict(c('d'), temperedCard('a'), none).ok).toBe(false)
-  })
-
-  it('ALLOWS a composted target — a dep on abandoned work is still unsatisfied', () => {
+  it('does not care what the TARGET lifecycle is either', () => {
+    // "This comes after that" holds whatever verdict that one carries.
+    expect(stackDropVerdict(c('d'), temperedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
     expect(stackDropVerdict(c('d'), compostedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
   })
 
@@ -1801,16 +1792,17 @@ describe('who may be stacked, and behind what', () => {
   it('appends BEHIND an awaiting-review tail rather than skipping it', () => {
     // a ← b, and b is awaiting review. Dropping d onto a must land behind b.
     const chain = edges(['a', []], ['b', ['a']])
-    const lookup = (id: string): StackCandidate | undefined =>
-      id === 'b' ? awaiting('b') : undefined
-    expect(stackDropVerdict(c('d'), c('a'), chain, lookup)).toEqual({ ok: true, tail: 'b' })
+    expect(stackDropVerdict(c('d'), c('a'), chain)).toEqual({ ok: true, tail: 'b' })
   })
 
-  it('refuses a TEMPERED tail reached through the chain', () => {
+  it('ACCEPTS a tempered tail — a queue is ordering, not a promise to wait', () => {
     const chain = edges(['a', []], ['b', ['a']])
-    const lookup = (id: string): StackCandidate | undefined =>
-      id === 'b' ? temperedCard('b') : undefined
-    expect(stackDropVerdict(c('d'), c('a'), chain, lookup).ok).toBe(false)
+    expect(stackDropVerdict(c('d'), temperedCard('a'), chain)).toEqual({ ok: true, tail: 'b' })
+  })
+
+  it('ACCEPTS a pinned card as the TARGET — filing work under a hub is the point', () => {
+    expect(stackDropVerdict(c('d'), { ...c('a'), shuttleKind: 'pinned' }, none))
+      .toEqual({ ok: true, tail: 'a' })
   })
 
   it('still refuses a source already queued behind, through an awaiting-review member', () => {
@@ -1825,18 +1817,17 @@ describe('who may be stacked, and behind what', () => {
     )
     // The live gap this replaced: the chain saw 'b' (so a drop onto 'a'
     // refused) while the chip did not (so 'a' wore nothing). One graph now.
-    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['b'])
-    expect(chainTail('a', unsettledDependents(resp))).toBe('b')
+    expect(queuedBehind('a', boardDependents(resp))).toEqual(['b'])
+    expect(chainTail('a', boardDependents(resp))).toBe('b')
   })
 
-  it('drops a TEMPERED member from the chain graph — an accepted card ends the queue', () => {
+  it('keeps a TEMPERED member in the chain graph — no card leaves for being done', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
-      queueCard('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+      queueCard('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['b'] }),
     )
-    // `b` is gone from the graph; the composted `x` is still a chain member.
-    expect(chainTail('a', unsettledDependents(resp))).toBe('x')
+    expect(chainTail('a', boardDependents(resp))).toBe('x')
   })
 })
 
@@ -1938,13 +1929,12 @@ describe('a card the board could see but never hit', () => {
     expect(resp.staleness['remote-candide'].status).toBe('stale')
   })
 
-  it('is a LEGAL stack target — no gate refuses it', () => {
+  it('is a LEGAL stack target', () => {
     const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
     const target = findCardById(resp, 'smokescreen/replan')!
     const source = findCardById(resp, 'local/draft')!
     expect(
-      stackDropVerdict(source, target, unsettledDependents(resp), (id) =>
-        findCardById(resp, id) ?? undefined),
+      stackDropVerdict(source, target, boardDependents(resp)),
     ).toEqual({ ok: true, tail: 'smokescreen/replan' })
   })
 })
@@ -2020,26 +2010,17 @@ describe('a card claims a drop only when it really is a stack', () => {
   })
 })
 
-describe('the queue counts every follower a dependency still holds', () => {
-  it('drops the TEMPERED follower and keeps the composted one', () => {
+describe('the queue counts every follower filed behind a head', () => {
+  it('counts every follower, whatever verdict it carries', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
       queueCard('c', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
-    )
-    // 'b' is accepted, so nothing waits on it any more; 'c' is composted, and a
-    // dep on composted work is still unsatisfied.
-    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['c'])
-  })
-
-  it('counts the waiting and the awaiting-review followers together', () => {
-    const resp = queueResp(
-      queueCard('a'),
-      queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
       queueCard('d', { dependsOn: ['a'] }),
       queueCard('e', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(queuedBehind('a', unsettledDependents(resp))).toEqual(['d', 'e'])
+    // Each is filed after 'a', and being finished does not unfile it.
+    expect(queuedBehind('a', boardDependents(resp))).toEqual(['b', 'c', 'd', 'e'])
   })
 
   it('names each member by how it sits; the chip only counts', () => {

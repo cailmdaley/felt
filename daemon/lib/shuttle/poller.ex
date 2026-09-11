@@ -2025,13 +2025,16 @@ defmodule Shuttle.Poller do
       # so it sits idle until the human re-attaches, instead of re-dispatching
       # every poll.
 
-      # Standing roles have additional preconditions; oneshots go to dep check.
-      # Support both new-format (kind:) and old-format (mode:) shuttle blocks.
+      # Standing roles have additional preconditions; a oneshot that reaches
+      # here has passed every gate. `depends_on` has no dispatch meaning — it
+      # is a board-only ordering annotation ("filed after that"), read solely
+      # by the UI fold and by `felt check`'s shape validation. Support both
+      # new-format (kind:) and old-format (mode:) shuttle blocks.
       role_kind(shuttle) == "standing" ->
         StandingRoles.standing_role_due?(fiber, state)
 
       true ->
-        dependencies_satisfied?(fiber, state)
+        true
     end
   end
 
@@ -2045,12 +2048,13 @@ defmodule Shuttle.Poller do
   #      exist (we need an agent + project_dir to spawn), the host must
   #      match (we can't conjure a worker on the wrong machine), and the
   #      fiber must not be a human-worker (no machine to spawn). Status,
-  #      enabled, kind, review_state, schedule, validity, and dependencies
-  #      are all overridden. Closed, composted, disabled, not-yet-due, and
-  #      unvalidated fibers all dispatch on force.
+  #      enabled, kind, review_state, schedule, and validity are all
+  #      overridden. Closed, composted, disabled, not-yet-due, and
+  #      unvalidated fibers all dispatch on force. `depends_on` carries no
+  #      dispatch meaning at all, forced or not.
   #
   #   2. Default — full `eligible?` check (status, enabled, schedule,
-  #      review state, deps, validity).
+  #      review state, validity).
   #
   # There is no third `ad_hoc`-without-`force` mode: every caller that sets
   # `ad_hoc` also sets `force` (the controller folds `force: force or ad_hoc`,
@@ -2489,70 +2493,6 @@ defmodule Shuttle.Poller do
       _ -> fallback_host
     end
   end
-
-  # Deps ride the cheap `felt ls` shuttle projection (`depends_on` is in the
-  # --json-field list), so a dependency-free oneshot — the common case —
-  # satisfies here off the candidate row with NO per-tick `felt show`. Only a
-  # fiber that actually declares dependencies shells felt, and then only to read
-  # each dep's `tempered` flag.
-  @doc false
-  def dependencies_satisfied?(fiber, state) when is_map(fiber) do
-    case normalize_deps(Map.get(fiber, "depends_on")) do
-      # Not one of the three shapes the field has (see `normalize_deps`). The
-      # fiber declared a dependency this code cannot read, and reading it as
-      # "no dependencies" would dispatch work the human said comes second.
-      # Unsatisfiable is the safe answer; `felt check` is what says so out loud.
-      :malformed ->
-        false
-
-      [] ->
-        true
-
-      deps ->
-        Enum.all?(deps, fn dep ->
-          case dep_id(dep) do
-            nil ->
-              false
-
-            dep_id ->
-              case fetch_fiber_full(dep_id, state) do
-                {:ok, dep} -> Map.get(dep, "tempered", false) == true
-                {:error, _} -> false
-              end
-          end
-        end)
-    end
-  end
-
-  # THE `depends_on` GRAMMAR, and the only place this side reads it.
-  #
-  # Three shapes, and exactly three — the same three `felt check`
-  # (internal/felt/check.go) and the board's TS parser accept:
-  #
-  #   depends_on: some/fiber          a bare scalar. What the board's
-  #                                   drag-to-stack gesture writes, via
-  #                                   `felt edit --set depends_on=<id>`.
-  #   depends_on: [a, b]              a list of ids.
-  #   depends_on: [{id: a}]           a list of {id: …} maps (felt's own
-  #                                   serialization of a fiber reference).
-  #
-  # `nil` — an explicit `depends_on:` with nothing after it — is ABSENCE, not a
-  # dependency; a blank line is not a claim about ordering.
-  #
-  # This normalization is the CRASH FIX, not a nicety: the poller reached
-  # `Enum.all?/2` with whatever the field held, so the scalar form (which the
-  # board now writes on a drag) raised Protocol.UndefinedError on the live
-  # Poller GenServer every tick, outside the rescue that wraps `poll_reads/1`.
-  # One gesture on the board could take the daemon's clock down.
-  defp normalize_deps(nil), do: []
-  defp normalize_deps(dep) when is_binary(dep), do: [dep]
-  defp normalize_deps(deps) when is_list(deps), do: deps
-  defp normalize_deps(_), do: :malformed
-
-  defp dep_id(dep) when is_binary(dep), do: dep
-  defp dep_id(%{"id" => id}) when is_binary(id), do: id
-  defp dep_id(%{id: id}) when is_binary(id), do: id
-  defp dep_id(_), do: nil
 
   # `created_at` is an INSTANT, and the store legitimately holds mixed offsets —
   # a fiber created in Paris reads `+02:00`, the same second in Berkeley reads

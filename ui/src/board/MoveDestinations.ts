@@ -25,7 +25,7 @@
  */
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
-import { stackDropVerdict, type StackCandidate } from './KanbanRules.js'
+import { stackDropVerdict } from './KanbanRules.js'
 
 /** What a chosen destination asks the board to do. One-to-one with the
  *  gestures the drag already speaks; no new verbs. */
@@ -119,10 +119,8 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   }
 
   // ── Surfaces ───────────────────────────────────────────────────────────
-  // Onto the desk. A dep-gated card asking for Now is asking to LEAVE THE
-  // QUEUE — the horizon write cannot lift a derived gate — so the queue exit
-  // below carries that case and this one stands down.
-  if (!planningIgnored(card) && card.depGated !== true) {
+  // Onto the desk.
+  if (!planningIgnored(card)) {
     const alreadyOnDesk = card.status !== 'closed' && card.effectiveHorizon === 'now'
     if (!alreadyOnDesk) {
       out.push({
@@ -132,9 +130,8 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
       })
     }
   }
-  // Into Resting. A gated CLOSED card is already resting for a reason the
-  // stash cannot improve on, and letting it through would reopen it.
-  if (!planningIgnored(card) && !(card.depGated === true && card.status === 'closed')) {
+  // Into Resting.
+  if (!planningIgnored(card)) {
     if (card.status === 'closed' || !restingNow(card)) {
       out.push({
         id: 'stashed',
@@ -190,7 +187,10 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // A hand-written `depends_on:` LIST is a fan-in someone assembled on
   // purpose; neither the drag nor this menu may collapse it.
   if (card.dependsOnShape !== 'list') {
-    if (card.depGated === true) {
+    // Offered on the EDGE, not on a gate: a card that names a predecessor is in
+    // a queue whether or not the fold happens to be drawing it under one (a
+    // running card stands in its own column and is still queued).
+    if ((card.dependsOn?.length ?? 0) > 0) {
       out.push({
         id: 'unstack',
         label: 'Take it out of the queue',
@@ -204,7 +204,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
       out.push({
         id: 'queue',
         label: 'Queue behind…',
-        hint: 'It rests until that work is tempered',
+        hint: 'It folds under that card until you take it out',
         action: { kind: 'queue' },
       })
     }
@@ -229,11 +229,9 @@ export function queueTargets(
   cards: readonly KanbanCard[],
   dependents: ReadonlyMap<string, readonly string[]>,
 ): QueueTarget[] {
-  const byId = new Map(cards.map((c) => [c.id, c]))
-  const lookup = (id: string): StackCandidate | undefined => byId.get(id)
   const out: QueueTarget[] = []
   for (const target of cards) {
-    const verdict = stackDropVerdict(card, target, dependents, lookup)
+    const verdict = stackDropVerdict(card, target, dependents)
     if (verdict.ok) out.push({ card: target, tail: verdict.tail })
   }
   return out

@@ -1053,6 +1053,11 @@ export function buildRows(
     // calling the one shared function is what keeps this list from drifting
     // out of step with the Desk's own Resting region.
     ...restingCards(response),
+    // FOLDED cards. The Desk draws them under their head rather than in a
+    // column of their own, and that is a Desk reading, not a claim that the
+    // work is gone: a never-run draft filed behind something else still belongs
+    // on the Chronicle at its own day. Omit them and a queued card has no row.
+    ...response.folded,
   ]) {
     include.add(card.id)
   }
@@ -1678,6 +1683,9 @@ class ChronicleView implements TemporalView {
       response.now.awaitingReview,
       response.pinned,
       response.timeline.futureDated,
+      // Folding and unfolding move a card between `folded` and a column, so a
+      // poll whose only change is one of those has to repaint.
+      response.folded,
     ]) {
       parts.push(list.map((c) => c.id).join(','))
     }

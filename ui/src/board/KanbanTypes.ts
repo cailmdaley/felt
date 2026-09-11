@@ -46,29 +46,21 @@ export interface KanbanCard {
   modifiedAt?: string
   tempered?: boolean
   dependsOn?: string[]
-  /**
-   * True when nothing KNOWN blocks this card — every dep resolved and tempered,
-   * or there are no deps. Fail-open: a dep id the feed cannot resolve does not
-   * make this false (see `dependsOnUnresolved`).
-   */
-  dependsOnSatisfied: boolean
   /** How `depends_on:` was written — `scalar` (one bare id) or `list`. The
    *  drag gestures author and clear scalars only. */
   dependsOnShape?: 'scalar' | 'list'
-  /** Resolved deps that are not tempered yet — what the card is actually
-   *  waiting on, and what the "waiting on:" line names. */
-  dependsOnBlocking?: string[]
-  /** Dep ids nothing in the feed answers to. The card is NOT hidden for these
-   *  (fail-open); it wears a warning badge so the dangling reference is
-   *  visible rather than silently load-bearing. */
+  /** Dep ids nothing in the feed answers to. They hold nothing back; the card
+   *  wears a warning badge so a chain that silently is not one is visible. */
   dependsOnUnresolved?: string[]
   /**
-   * True when the dependency gate is what puts this card in Resting — it has
-   * unfinished work ahead of it and no live worker. Derived fresh on every
-   * poll from the feed (`depGated`), never stored: when the dep tempers the
-   * card is simply not gated any more and returns to its own column.
+   * The card this one is FOLDED UNDER — the head of its chain, wherever that
+   * head is drawn (a desk column, the pinned strip, Resting). Set only on the
+   * cards in `KanbanResponse.folded`, which no surface draws directly: they are
+   * reached through the head's "+N queued" chip. Derived fresh on every poll
+   * (`foldHeadId`), never stored — clear the edge and the card is simply drawn
+   * in its own column again.
    */
-  depGated?: boolean
+  foldedUnder?: string
   /** When set, a Shuttle worker is currently running for this fiber. */
   runningWorker?: string
   /**
@@ -273,6 +265,18 @@ export interface KanbanResponse {
    * umbrella roles. Dispatchable on demand; the poller never auto-fires them.
    * A *running* pinned role shows live in `now.inFlight` instead. */
   pinned: KanbanCard[]
+  /**
+   * Cards FOLDED under the head of their chain — queued behind a card that is
+   * drawn somewhere on this board, so they are drawn there and not in a column
+   * of their own. No surface iterates this list; it exists so a folded card is
+   * still RESOLVABLE (`findCardById`, the peek list's rows, every drag that
+   * starts from one) rather than vanishing from the response entirely.
+   *
+   * A card with a live worker or `status: active` is never here — work that is
+   * happening must be seen — and neither is one whose head the board is not
+   * drawing at all.
+   */
+  folded: KanbanCard[]
   /**
    * Cycles — `cycle`-tagged fibers, each a named span of time. Read ONLY by the
    * temporal views, which draw them as bands behind the work; the Desk never

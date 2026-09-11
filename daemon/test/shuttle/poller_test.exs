@@ -3337,33 +3337,6 @@ defmodule Shuttle.PollerTest do
     assert Enum.find(roles, &(&1.fiber_id == "tests/standing-accepted")).state == "scheduled"
   end
 
-  test "poller respects dependency satisfaction" do
-    dep = make_fiber("tests/dep", %{"tempered" => false, "tags" => []})
-    fiber = make_fiber("tests/dependent", %{"depends_on" => ["tests/dep"]})
-
-    MockRunner.set_fiber("tests/dependent", fiber)
-    MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_4,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
-
-    commands = MockRunner.commands()
-
-    refute Enum.any?(commands, fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session" and
-               Enum.member?(args, Dispatcher.session_name("tests/dependent"))
-           end)
-  end
-
   test "poller skips untracked fibers" do
     fiber = make_fiber("tests/untracked", %{"status" => "untracked"})
     MockRunner.set_fiber("tests/untracked", fiber)
@@ -3387,90 +3360,46 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller dispatches when dependencies are tempered" do
-    dep = make_fiber("tests/dep", %{"tempered" => true})
-    fiber = make_fiber("tests/dependent", %{"depends_on" => [%{"id" => "tests/dep"}]})
-
-    MockRunner.set_fiber("tests/dependent", fiber)
-    MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_5,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    send(poller, :run_poll_cycle)
-
-    assert_eventually(fn ->
-      commands = MockRunner.commands()
-
-      assert Enum.any?(commands, fn {cmd, args} ->
-               cmd == "tmux" and hd(args) == "new-session"
-             end)
-    end)
-  end
-
-  # THE SCALAR FORM — `depends_on: tests/dep`, with no list around it. This is
-  # what the board's drag-to-stack gesture writes (`felt edit --set
-  # depends_on=<id>` stores a string), and it used to reach `Enum.all?/2` as a
-  # binary and raise Protocol.UndefinedError on this GenServer every tick, in a
-  # call path outside the rescue that wraps poll_reads/1. So these two tests
-  # assert dispatch behavior AND, by asking the poller for a snapshot
-  # afterwards, that it is still alive to answer.
-  test "poller gates on a SCALAR depends_on without falling over" do
+  # `depends_on` has zero dispatch meaning: it's a board-only ordering
+  # annotation ("filed after that"), never a gate. An active oneshot whose
+  # `depends_on` names a fiber that is neither tempered nor pinned — the
+  # shape that used to block it under the old sequence gate — is eligible
+  # regardless, and this holds for every accepted `depends_on` shape (bare
+  # scalar, list of ids, list of {id: ...} maps).
+  test "poller dispatches a oneshot whose depends_on names an untempered fiber" do
     dep = make_fiber("tests/dep", %{"tempered" => false, "tags" => []})
-    fiber = make_fiber("tests/dependent", %{"depends_on" => "tests/dep"})
 
-    MockRunner.set_fiber("tests/dependent", fiber)
-    MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
+    for {label, deps} <- [
+          {"scalar", "tests/dep"},
+          {"list of ids", ["tests/dep"]},
+          {"list of maps", [%{"id" => "tests/dep"}]}
+        ] do
+      fiber_id = "tests/dependent-#{String.replace(label, " ", "-")}"
+      fiber = make_fiber(fiber_id, %{"depends_on" => deps})
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_scalar_dep,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
+      MockRunner.set_fiber(fiber_id, fiber)
+      MockRunner.set_fiber("tests/dep", dep)
+      MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+      {:ok, poller} =
+        start_poller!(
+          name: :"test_poller_dep_ignored_#{String.replace(label, " ", "_")}",
+          runner: MockRunner,
+          poll_interval_ms: 60_000,
+          felt_stores: [MockRunner.felt_root()]
+        )
 
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end)
+      send(poller, :run_poll_cycle)
 
-    # Still answering: the tick did not take the process down.
-    assert is_map(Poller.snapshot(poller))
-  end
+      assert_eventually(fn ->
+        commands = MockRunner.commands()
 
-  test "poller dispatches on a SCALAR depends_on once it is tempered" do
-    dep = make_fiber("tests/dep", %{"tempered" => true})
-    fiber = make_fiber("tests/dependent", %{"depends_on" => "tests/dep"})
-
-    MockRunner.set_fiber("tests/dependent", fiber)
-    MockRunner.set_fiber("tests/dep", dep)
-    MockRunner.set_shuttle("tests/dependent", oneshot_shuttle())
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_scalar_dep_tempered,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    send(poller, :run_poll_cycle)
-
-    assert_eventually(fn ->
-      assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "tmux" and hd(args) == "new-session"
-             end)
-    end)
+        assert Enum.any?(commands, fn {cmd, args} ->
+                 cmd == "tmux" and hd(args) == "new-session" and
+                   Enum.member?(args, Dispatcher.session_name(fiber_id))
+               end)
+      end)
+    end
   end
 
   test "poller does not double-dispatch" do

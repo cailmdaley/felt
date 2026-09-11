@@ -227,8 +227,9 @@ list the daemon evaluates.
 - **`status: active`** — the sole dispatch gate. `open` marks a draft or a
   pause. `closed` marks awaiting review or a terminus.
 
-Two more conditions live outside the block: the fiber must sit in a felt store
-the daemon polls, and its `depends_on` targets must all be `tempered: true`.
+One more condition lives outside the block: the fiber must sit in a felt store
+the daemon polls. `depends_on` is a board-only ordering annotation — a queued
+card folds under the card it follows — and never gates dispatch.
 
 ## Human in the loop
 

@@ -127,7 +127,9 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 6. The resume-loop circuit breaker is closed.
 7. The boot quarantine is released.
 8. `shuttle.project_dir` exists on this host.
-9. Every `depends_on` target exists and is `tempered: true`.
+
+`depends_on` is not on this list. It is an ordering annotation for the board
+("this is filed after that") and carries no dispatch meaning.
 
 Configured stores come from `FELT_STORES` (comma-separated) or the persisted
 registry at `~/.config/felt/stores.json`. shuttle assumes no default store.

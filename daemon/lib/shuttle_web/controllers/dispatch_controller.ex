@@ -211,7 +211,7 @@ defmodule ShuttleWeb.DispatchController do
   defp ineligible_detail(:not_due_or_blocked),
     do: %{
       detail: "not_due_or_blocked",
-      message: "Not currently dispatchable — not yet due, or blocked by an unmet dependency."
+      message: "Not currently dispatchable — not yet due, or held by another gate."
     }
 
   defp ineligible_detail(other),

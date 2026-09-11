@@ -80,25 +80,23 @@ describe('moveDestinations', () => {
     expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('pin')
   })
 
-  // setSurface: a dep-gated card asking for Now is asking to leave the queue.
-  it('replaces "bring to the desk" with the queue exit for a gated card', () => {
+  // The queue exit is offered on the EDGE: a card that names a predecessor is
+  // in a queue whether or not the fold happens to be drawing it under one.
+  it('offers the queue exit to any card carrying a scalar edge', () => {
     const d = ids(
-      card({ depGated: true, dependsOn: ['work/b'], dependsOnShape: 'scalar', effectiveHorizon: 'stashed' }),
+      card({ dependsOn: ['work/b'], dependsOnShape: 'scalar', foldedUnder: 'work/b' }),
       null,
     )
     expect(d).toContain('unstack')
-    expect(d).not.toContain('now')
   })
 
-  // setSurface: re-resting a gated closed card would reopen it.
-  it('will not re-rest a gated card that is already closed', () => {
-    const d = ids(card({ depGated: true, status: 'closed', tempered: false }), 'composted')
-    expect(d).not.toContain('stashed')
+  it('does not offer the queue exit to a card with no edge', () => {
+    expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('unstack')
   })
 
   // stackDropVerdict: a hand-written list is a fan-in nobody may collapse.
   it('leaves a hand-written depends_on list alone', () => {
-    const d = ids(card({ dependsOnShape: 'list', dependsOn: ['x', 'y'], depGated: true }), null)
+    const d = ids(card({ dependsOnShape: 'list', dependsOn: ['x', 'y'], foldedUnder: 'x' }), null)
     expect(d).not.toContain('queue')
     expect(d).not.toContain('unstack')
   })
@@ -116,19 +114,19 @@ describe('queueTargets', () => {
   const c = card({ id: 'c', name: 'C', status: 'open', dependsOn: ['b'], dependsOnShape: 'scalar' })
   const done = card({ id: 'd', name: 'D', status: 'closed', tempered: true })
   const all = [a, b, c, done]
-  const deps = buildDependents(all.filter((x) => x.tempered !== true))
+  const deps = buildDependents(all)
 
   it('offers every card the drop would accept, and resolves to the chain tail', () => {
     const targets = queueTargets(a, all, deps)
-    expect(targets.map((t) => t.card.id).sort()).toEqual(['b', 'c'])
+    expect(targets.map((t) => t.card.id).sort()).toEqual(['b', 'c', 'd'])
     // Dropping onto B joins the END of B's queue, which is C.
     expect(targets.find((t) => t.card.id === 'b')?.tail).toBe('c')
   })
 
-  it('excludes the card itself and a tempered tail', () => {
+  it('excludes the card itself, and offers finished work — a queue is ordering', () => {
     const targets = queueTargets(a, all, deps).map((t) => t.card.id)
     expect(targets).not.toContain('a')
-    expect(targets).not.toContain('d')
+    expect(targets).toContain('d')
   })
 
   it('excludes a target the card is already queued behind', () => {

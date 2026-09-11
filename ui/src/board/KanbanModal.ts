@@ -47,7 +47,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, unsettledDependents } from './KanbanSurfaces.js'
+import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveDestination, QueueTarget } from './MoveDestinations.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
@@ -895,18 +895,17 @@ export class KanbanModal {
       if (optimistic) this.applyResponse(optimistic)
     }
 
-    // LEAVING RESTING MEANS LEAVING THE QUEUE. A dep-gated card dragged to a
-    // working column is a person saying "not this one — this one now", and the
-    // gate is derived from `depends_on:`, so a lifecycle verb alone cannot lift
-    // it: the card would land in Drafts and be re-rested by the very next poll.
-    // ("It goes there for a second and pops back.") So the gesture carries the
-    // unstack with it, as one more write alongside the transition.
+    // LEAVING THE FOLD MEANS LEAVING THE QUEUE. A folded card dragged to a
+    // working column is a person saying "not that one — this one now", and the
+    // fold is derived from `depends_on:`, so a lifecycle verb alone cannot lift
+    // it: the card would land in Drafts and be folded away again by the very
+    // next poll. ("It goes there for a second and pops back.") So the gesture
+    // carries the unstack with it, as one more write alongside the transition.
     //
-    // Not on a VERDICT (Temper / Compost): a closed card is exempt from the
-    // gate anyway, so nothing would pop back, and erasing the edge would delete
-    // the record of what this work was waiting for at the moment it finished.
+    // Not on a VERDICT (Temper / Compost): erasing the edge would delete the
+    // record of what this work was filed after at the moment it finished.
     const unstacks =
-      card.depGated === true &&
+      card.foldedUnder !== undefined &&
       card.dependsOnShape !== 'list' &&
       target !== 'tempered' &&
       target !== 'composted'
@@ -937,9 +936,9 @@ export class KanbanModal {
     // for. The poll stays out until the refetch below settles it.
     this.gestureDepth += 1
     try {
-      // The unstack rides FIRST, before the lifecycle verb: the gate is what
-      // would pull the card back, so clearing it is what makes the rest of the
-      // gesture stick. See the `unstacks` note in `transition`.
+      // The unstack rides FIRST, before the lifecycle verb: the edge is what
+      // would fold the card away again, so clearing it is what makes the rest
+      // of the gesture stick. See the `unstacks` note in `transition`.
       if (unstacks) {
         await this.postFeltEdit(
           { fiber_id: card.id, origin: card.originId, unset: ['depends_on'] },
@@ -1038,10 +1037,10 @@ export class KanbanModal {
    * "This one goes after that one" — the card-onto-card drop, persisted as a
    * scalar `depends_on:` on the DROPPED card.
    *
-   * One write, one field, and nothing else: the gate is a pure derivation, so
+   * One write, one field, and nothing else: the fold is a pure derivation, so
    * writing the edge is the whole gesture. The board does not move the card
-   * itself — the next render derives Resting from the new frontmatter, which
-   * is the same path a hand-edited `depends_on:` takes. No optimistic
+   * itself — the next render folds it under its head from the new frontmatter,
+   * which is the same path a hand-edited `depends_on:` takes. No optimistic
    * placement for that reason: an optimism that guessed the routing would be
    * re-deriving the read model in the writer.
    *
@@ -1112,7 +1111,7 @@ export class KanbanModal {
   /**
    * Take a fiber out of a queue by dragging its row off the peek list.
    *
-   * The same sentence as dragging a gated card out of Resting, so it gets the
+   * The same sentence as dragging a folded card out of a peek list, so it gets the
    * same answer — the edge that holds it goes — plus the one thing a card drag
    * never has to consider: the row was a POSITION, and somebody may have been
    * standing behind it. `splice` (from `unqueueRowWrites`) hands that successor
@@ -1121,7 +1120,7 @@ export class KanbanModal {
    *
    * The drop's own meaning is then applied on top, through the ordinary paths:
    * a column transitions, `now` surfaces, `stashed` keeps it at rest. The card
-   * handed to those paths is a copy with the gate already cleared, so
+   * handed to those paths is a copy with the edge already cleared, so
    * `transition`'s own unstack does not fire a second, redundant write.
    *
    * THE DESTINATION IS PAINTED FIRST, BEFORE ANY WRITE. This gesture is three
@@ -1130,7 +1129,7 @@ export class KanbanModal {
    * that is true of the store and false of what the human asked for. Left to
    * render, they render: the card reached In flight, popped back to Drafts,
    * and then launched, which is the board narrating its own plumbing. So the
-   * first frame after the drop is the ANSWER (gate cleared, card in the column
+   * first frame after the drop is the ANSWER (edge cleared, card in the column
    * it was dropped on), the writes run underneath it, and `gestureDepth` keeps
    * the poll from painting anything in between. The reconcile at the end still
    * owns the truth: a write that fails snaps the card back with a banner
@@ -1149,10 +1148,10 @@ export class KanbanModal {
     const before = this.lastResponse
     this.gestureDepth += 1
     try {
-      const ungated = clearQueueGate(before, fiberId)
+      const unfolded = clearQueueEdge(before, fiberId)
       const painted = drop.column
-        ? (applyOptimisticTransition(ungated, fiberId, drop.column) ?? ungated)
-        : ungated
+        ? (applyOptimisticTransition(unfolded, fiberId, drop.column) ?? unfolded)
+        : unfolded
       if (painted) this.applyResponse(painted)
 
       try {
@@ -1194,7 +1193,7 @@ export class KanbanModal {
       }
       const released: KanbanCard = {
         ...card,
-        depGated: false,
+        foldedUnder: undefined,
         dependsOn: undefined,
         dependsOnShape: undefined,
       }
@@ -1205,7 +1204,7 @@ export class KanbanModal {
       }
       if (drop.horizon !== undefined) {
         // Dropped on a surface: out of the queue, but still put down. The
-        // horizon write is what keeps it there — without it, an ungated card
+        // horizon write is what keeps it there — without it, an unqueued card
         // would walk straight back onto the desk and the drop would read as
         // ignored. `due` is the day-cell / cycle-chip half of the same
         // sentence: undefined from a plain section drop (leave the date alone),
@@ -1244,10 +1243,10 @@ export class KanbanModal {
   }
 
   /**
-   * The un-stack: drag a dep-gated card out of Resting and onto Now.
+   * The un-stack: drag a folded card out of its head's peek list and onto Now.
    *
-   * Clearing the field IS the gesture — there is no "gate override" to store,
-   * so the only way to take a card out of a queue is to say it is not in one.
+   * Clearing the field IS the gesture — there is nothing else to store, so the
+   * only way to take a card out of a queue is to say it is not in one.
    * When the card was ALSO explicitly stashed, the same write clears that too:
    * the human dragged it to the desk, and leaving half the reasons it was
    * resting in place would bounce it straight back on the next poll.
@@ -1313,24 +1312,14 @@ export class KanbanModal {
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
-    // A dep-gated card dragged up to Now is asking to LEAVE THE QUEUE, not to
-    // have its horizon cleared: the gate is derived from `depends_on:` and no
-    // horizon write can lift it, so the plain surface edit would commit and
-    // the card would sit back down in Resting one poll later — the drag
-    // reading as ignored, which is the dissonance the board must never
-    // produce. `unstack` writes the field that actually holds it.
-    if (horizon === 'now' && card.depGated === true) {
+    // A FOLDED card dragged up to Now is asking to LEAVE THE QUEUE, not to have
+    // its horizon cleared: the fold is derived from `depends_on:` and no horizon
+    // write can lift it, so the plain surface edit would commit and the card
+    // would fold back under its head one poll later — the drag reading as
+    // ignored, which is the dissonance the board must never produce. `unstack`
+    // writes the field that actually holds it.
+    if (horizon === 'now' && card.foldedUnder !== undefined) {
       void this.unstack(card)
-      return
-    }
-    // A gated CLOSED card re-dropped into Resting is already exactly where it
-    // asked to be — the gate put it there, not a stash. Letting it through
-    // would run `commitSurface`'s park-as-draft, REOPENING work that is only
-    // waiting for a verdict: the drop would silently undo the close. Nothing to
-    // do, so say so.
-    if (horizon === 'stashed' && card.depGated === true && card.status === 'closed') {
-      this.showBanner(`“${card.name}” is already resting — it is queued behind other work.`, 'info')
-      this.announce(`${card.name} is already resting, queued behind other work.`)
       return
     }
     // A standing role is placed on the timeline by its schedule
@@ -2396,7 +2385,7 @@ export class KanbanModal {
     return queueTargets(
       this.liveCard(card),
       boardCards(this.lastResponse),
-      unsettledDependents(this.lastResponse),
+      boardDependents(this.lastResponse),
     )
   }
 
@@ -2471,6 +2460,7 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
   pinned: KanbanCard[]
   timeline: KanbanResponse['timeline']
   stash: KanbanCard[]
+  folded: KanbanCard[]
 } {
   let card: KanbanCard | null = null
   const drop = (list: KanbanCard[]): KanbanCard[] => {
@@ -2492,48 +2482,61 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
       futureDated: drop(resp.timeline.futureDated),
     },
     stash: drop(resp.stash),
+    // FOLDED IS A SURFACE for lifting purposes: a card drawn only as a row in
+    // its head's peek list is still a card every gesture can start from, and a
+    // relocator that could not find it would paint nothing at all.
+    folded: drop(resp.folded),
     card,
   }
 }
 
 /**
- * Optimistically release one card from its queue: the gate fields go, on
- * whichever surface holds it. Returns a fresh response (the input is never
+ * Optimistically release one card from its queue: the edge goes, on whichever
+ * surface holds it. Returns a fresh response (the input is never
  * mutated), or null when the card is absent.
  *
  * This is the half of "take it out of the queue" the OTHER optimistic
- * relocators cannot express. They move a card between surfaces; the gate is a
+ * relocators cannot express. They move a card between surfaces; the edge is a
  * property of the card itself, and it is what the head's "+N queued" list is
  * built from — so until it clears, the row the human just dragged is still
- * sitting in the peek list they dragged it out of, and the card is still
- * wearing the plum gated glyph. Clearing it first is what makes the very first
- * frame after the drop agree with the gesture.
+ * sitting in the peek list they dragged it out of. Clearing it first is what
+ * makes the very first frame after the drop agree with the gesture.
  *
  * Deliberately does NOT touch anyone else's `depends_on:`. The successor's
  * repair edge is a real write with a real failure mode, and guessing it here
  * would put a chain shape on screen that no document says yet.
  */
-export function clearQueueGate(
+export function clearQueueEdge(
   resp: KanbanResponse | null,
   cardId: string,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
   const released: KanbanCard = {
     ...card,
-    depGated: false,
+    foldedUnder: undefined,
     dependsOn: undefined,
-    dependsOnBlocking: undefined,
     dependsOnShape: undefined,
   }
   const restore = (list: KanbanCard[], original: KanbanCard[]): KanbanCard[] =>
     list === original ? list : [...list, released]
+  // A card lifted out of FOLDED has no surface to be put back on — it was never
+  // drawn in a column. Unfolding it IS its arrival, so it lands in the column
+  // its own status names, which is where the very next poll will draw it too.
+  const arrives = folded !== resp.folded
+  const arrivesIn = (kind: 'drafts' | 'inFlight' | 'awaitingReview'): boolean =>
+    arrives && unfoldedColumn(released) === kind
+  const place = (
+    list: KanbanCard[],
+    original: KanbanCard[],
+    kind: 'drafts' | 'inFlight' | 'awaitingReview',
+  ): KanbanCard[] => (arrivesIn(kind) ? [released, ...list] : restore(list, original))
   return withSurfaces(resp, {
     now: {
-      drafts: restore(now.drafts, resp.now.drafts),
-      inFlight: restore(now.inFlight, resp.now.inFlight),
-      awaitingReview: restore(now.awaitingReview, resp.now.awaitingReview),
+      drafts: place(now.drafts, resp.now.drafts, 'drafts'),
+      inFlight: place(now.inFlight, resp.now.inFlight, 'inFlight'),
+      awaitingReview: place(now.awaitingReview, resp.now.awaitingReview, 'awaitingReview'),
     },
     pinned: restore(pinned, resp.pinned),
     timeline: {
@@ -2542,7 +2545,17 @@ export function clearQueueGate(
       futureDated: restore(timeline.futureDated, resp.timeline.futureDated),
     },
     stash: restore(stash, resp.stash),
+    folded,
   })
+}
+
+/** The desk column an unfolded card belongs in, from its own status — the
+ *  card-level twin of `classifyFiber`'s open/closed branches, for the one
+ *  frame between a drop and the refetch that reclassifies properly. */
+function unfoldedColumn(card: KanbanCard): 'drafts' | 'inFlight' | 'awaitingReview' {
+  if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview'
+  if (card.runningWorker || card.status === 'active') return 'inFlight'
+  return 'drafts'
 }
 
 /**
@@ -2558,6 +2571,7 @@ function withSurfaces(
     pinned: KanbanCard[]
     timeline: KanbanResponse['timeline']
     stash: KanbanCard[]
+    folded?: KanbanCard[]
   },
 ): KanbanResponse {
   return {
@@ -2566,6 +2580,7 @@ function withSurfaces(
     pinned: s.pinned,
     timeline: s.timeline,
     stash: s.stash,
+    folded: s.folded ?? resp.folded,
     totals: surfaceTotals(s),
   }
 }
@@ -2619,10 +2634,12 @@ function applyOptimisticTransition(
 ): KanbanResponse | null {
   if (!resp) return null
   const nowIso = new Date().toISOString()
-  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
-  const moved: KanbanCard = { ...card }
+  // Unfolding is implicit in every lifecycle drop: the card is being drawn in a
+  // column now, so the fold marker must not survive into the optimistic frame.
+  const moved: KanbanCard = { ...card, foldedUnder: undefined }
   // Any UNTEMPERED non-draft state counts, not just awaiting (status:closed):
   // Temper can land while the run is still status:active (worker alive or just
   // killed, exit writer not yet run) and the daemon resolves it to accept
@@ -2643,7 +2660,7 @@ function applyOptimisticTransition(
     moved.runningWorker = undefined
     moved.runtimePhase = undefined
     if (card.shuttleKind === 'pinned') {
-      return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash })
+      return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash, folded })
     }
     const nowMs = Date.parse(nowIso)
     moved.nextLaunchAt = nextStandingLaunch(
@@ -2655,7 +2672,7 @@ function applyOptimisticTransition(
       nowMs,
     )
     timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, pinned, timeline, stash })
+    return withSurfaces(resp, { now, pinned, timeline, stash, folded })
   }
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
@@ -2696,7 +2713,7 @@ function applyOptimisticTransition(
     now[target] = [...now[target], moved]
   }
 
-  return withSurfaces(resp, { now, pinned, timeline, stash })
+  return withSurfaces(resp, { now, pinned, timeline, stash, folded })
 }
 
 /**
@@ -2748,14 +2765,15 @@ function placeOptimistically(
   patch: (card: KanbanCard) => Partial<KanbanCard>,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, pinned, timeline, stash } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
-  const moved: KanbanCard = { ...card, ...patch(card) }
+  const moved: KanbanCard = { ...card, foldedUnder: undefined, ...patch(card) }
   return withSurfaces(resp, {
     now,
     timeline,
     pinned: surface === 'pinned' ? [moved, ...pinned] : pinned,
     stash: surface === 'stash' ? [moved, ...stash] : stash,
+    folded,
   })
 }
 

@@ -9,11 +9,10 @@ The daemon dispatches a fiber when all of these hold:
 1. The fiber lives in a felt store the daemon polls. Configured stores come from `FELT_STORES` → the persisted registry at `~/.config/felt/stores.json` (no implicit default); a cross-project store (the running example in these docs is `~/loom`; see the felt skill's cross-project reference) also exposes the project substores symlinked under its `.felt/`.
 2. **The fiber carries a `shuttle:` block.** A fiber is shuttle-managed iff it has this block — installed via `felt shuttle install` (oneshot) or `felt shuttle repeat` (standing). The daemon reads the block directly; no tag predicate, no CLI spawn during the poll.
 3. **Felt-native `status:` is `active`** — the sole dispatch gate (`eligible?/2` in `lib/shuttle/poller.ex`). `active` is armed, `open` is a draft, `closed` is a terminus / awaiting review.
-4. Dependencies are satisfied: each `depends_on` target exists and has `tempered: true`.
 
 Agent comes from `shuttle.agent`, resolved against felt's registry — the built-in set embedded into the CLI (`internal/shuttle/agents.builtin.json`) with the operator's `~/.config/felt/agents.json` layered on top; `felt shuttle agents` lists the effective registry, and the daemon consumes the resolved record off `felt show -j`. When a fiber carries no `shuttle.agent`, felt uses the registry default, currently `claude-opus` (see authoring.md, Agent selection).
 
-**Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`, `depends_on`) drive dispatch and view; tags are free-form noticings read by neither the daemon nor the kanban classifier.
+**Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`) drive dispatch and view, and `depends_on` orders the view only (a queued card folds under its head; the daemon never reads it); tags are free-form noticings read by neither the daemon nor the kanban classifier.
 
 ## What the board admits
 

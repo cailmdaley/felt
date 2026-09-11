@@ -87,4 +87,17 @@ describe('a snoozed, workless fiber on Resting', () => {
     const built = rows([dateless, worked], response)
     expect(built.map((r) => r.cardId)).toContain('dateless-resting')
   })
+
+  it('gives a FOLDED card its own row — the Desk hides it, the Chronicle does not', () => {
+    // A never-run draft queued behind a desk head is drawn under that head on
+    // the Desk and in no column of its own. That is a Desk reading; the card is
+    // still work with a day, and it has no other route onto the Chronicle (a
+    // never-run draft cannot win the activity join).
+    const queued = baseCard({ id: 'science/mocks', due: dayAt(4), foldedUnder: 'science/cmbx' })
+    const head = baseCard({ id: 'science/cmbx' })
+    const resp = response({ now: { drafts: [head], inFlight: [], awaitingReview: [] }, folded: [queued] })
+    const built = rows([queued, head], resp)
+    expect(built.map((r) => r.cardId)).toContain('science/mocks')
+    expect(built.find((r) => r.cardId === 'science/mocks')?.dueIdx).toBe(TODAY_IDX + 4)
+  })
 })

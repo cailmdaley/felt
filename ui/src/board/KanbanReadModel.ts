@@ -26,11 +26,12 @@ import {
   classifyFiber,
   cycleMembership,
   cycleSpan,
-  depGated,
   effectiveHorizon,
+  foldHeadId,
   isCycleFiber,
   nextStandingLaunch,
-  resolveDependencies,
+  unresolvedDependencies,
+  type FoldNode,
   type KanbanColumn,
 } from './KanbanRules.js';
 import type {
@@ -85,15 +86,13 @@ export function buildKanbanResponseFromComposite(
   const nowMs = opts.nowMs ?? Date.now();
   const staleness = buildStaleness(feed);
 
-  // Dependency resolution reads across origins, so `byId` spans the WHOLE feed
-  // (a local fiber may depend on a remote-owned one and vice versa), while only
+  // Edge resolution reads across origins, so `byId` spans the WHOLE feed (a
+  // local fiber may depend on a remote-owned one and vice versa), while only
   // the kanban-eligible subset is actually classified onto surfaces.
   // Keyed by BOTH names a dependency can call a fiber by: its path id/slug and
-  // its intrinsic ULID `uid`. The poller and `felt check` both resolve a uid
-  // ref (felt's own object-form `depends_on: [{id: <ulid>}]` writes one), so a
-  // uid-keyed index is the difference between the board agreeing with dispatch
-  // and the board cheerfully showing a card as unblocked — with a spurious
-  // "unresolved dep" warning — while the daemon silently refuses to launch it.
+  // its intrinsic ULID `uid`. felt's own object-form `depends_on: [{id: <ulid>}]`
+  // writes a uid, so without the uid key a perfectly good chain would draw as a
+  // pile of loose cards each wearing a spurious "unresolved dep" warning.
   const byId = new Map<string, Fiber>();
   for (const e of feed.entries) {
     byId.set(e.fiber.id, e.fiber);
@@ -117,6 +116,7 @@ export function buildKanbanResponseFromComposite(
     timeline: surfaces.timeline,
     stash: surfaces.stash,
     pinned: surfaces.pinned,
+    folded: surfaces.folded,
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
     temperedTotal: surfaces.temperedTotal,
@@ -233,9 +233,25 @@ type AssembledSurfaces = {
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
   pinned: KanbanCard[];
+  folded: KanbanCard[];
   cycles: KanbanCard[];
   temperedTotal: number;
 };
+
+/**
+ * The columns whose cards are DRAWN with their queue — the three desk columns
+ * plus the scheduled/Resting and pinned surfaces. A head on one of these can
+ * hold a fold; a head in the past lane (tempered, composted) or a cycle cannot,
+ * so work queued behind finished work stands in its own column rather than
+ * being tucked under something nobody is looking at.
+ */
+const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
+  'drafts',
+  'scheduled',
+  'pinned',
+  'inFlight',
+  'awaitingReview',
+]);
 
 /**
  * The classify-and-route pass: run `classifyFiber` (the SINGLE source of truth)
@@ -261,36 +277,55 @@ function assembleSurfaces(
   const buckets: Record<KanbanColumn, KanbanCard[]> = {
     drafts, scheduled, pinned, inFlight, awaitingReview, tempered, composted, cycles,
   };
-  // Cards the SEQUENCE GATE holds back: they classified onto a working column
-  // but something they depend on has not been tempered, so it is not their
-  // turn. They join the Resting surface below, alongside the deliberately
-  // stashed. Collected as their own list rather than pushed straight at `stash`
-  // so the gate's own ordering and the classifier's buckets stay legible.
-  const depGatedCards: KanbanCard[] = [];
-  for (const entry of entries) {
+  // THE FOLD. A card queued behind another is not a card of its own on this
+  // board: it is drawn under its head, wherever the head is drawn, reachable
+  // through that head's "+N queued" chip. So classification happens first, for
+  // everyone (a card's column is always its own status), and the fold then
+  // decides only which of them are DRAWN in their column.
+  //
+  // Two cards never fold, because both would be the board hiding something it
+  // must show: one with a LIVE WORKER or `status: active` (work is happening
+  // right now), and one whose head this board is not drawing at all — not in
+  // the feed, or settled into the past lane. Nothing is ever hidden behind a
+  // card that is not there.
+  const classified = entries.map((entry) => {
     const card = toCard(entry, byId, nowMs);
-    const column = classifyFiber(entry.fiber, { runningWorker: !!card.runningWorker });
-    // The gate covers every column where the card is still an ATTENTION CLAIM:
-    // the three working columns plus `awaitingReview` — closed but unjudged, and
-    // a review queued behind work that has not landed is precisely what queuing
-    // exists to take off the desk. It returns to Awaiting review by itself when
-    // the dep tempers. `tempered`/`composted` are history (`depGated` refuses a
-    // card that already carries a verdict); `pinned` is a strip, not a queue —
-    // an umbrella role waits for a human to launch it, never for a dep;
-    // `cycles` are calendar bands.
-    if (
-      (column === 'drafts' ||
-        column === 'scheduled' ||
-        column === 'inFlight' ||
-        column === 'awaitingReview') &&
-      depGated(card)
-    ) {
-      depGatedCards.push({ ...card, depGated: true });
+    return {
+      card,
+      column: classifyFiber(entry.fiber, { runningWorker: !!card.runningWorker }),
+    };
+  });
+  // Keyed by BOTH names an edge can call a fiber by — the slug id and the
+  // intrinsic ULID — for the same reason `byId` is: felt's own object form
+  // writes a uid, and a chain the board could not resolve would draw as a pile
+  // of loose cards.
+  const nodes = new Map<string, FoldNode>();
+  for (const { card, column } of classified) {
+    const node: FoldNode = {
+      id: card.id,
+      dependsOn: card.dependsOn,
+      foldable: FOLDABLE_HEAD_COLUMNS.has(column),
+    };
+    nodes.set(card.id, node);
+    if (card.uid) {
+      nodes.set(card.uid, node);
+      nodes.set(card.uid.toLowerCase(), node);
+    }
+  }
+  const folded: KanbanCard[] = [];
+  for (const { card, column } of classified) {
+    const standsAlone = !!card.runningWorker || card.status === 'active';
+    const head = standsAlone
+      ? undefined
+      : foldHeadId(nodes.get(card.id) ?? { id: card.id, dependsOn: card.dependsOn, foldable: false },
+          (id) => nodes.get(id));
+    if (head !== undefined) {
+      folded.push({ ...card, foldedUnder: head });
       continue;
     }
     buckets[column].push(card);
   }
-  depGatedCards.sort(byCreatedAtDesc);
+  folded.sort(byCreatedAtDesc);
 
   scheduled.sort(byCreatedAtDesc);
   // Pinned strip: most-recently-used first. A running role leaves the strip and
@@ -339,14 +374,13 @@ function assembleSurfaces(
   tempered.sort(byClosedAtDesc);
   composted.sort(byClosedAtDesc);
 
-  const stash: KanbanCard[] = [...depGatedCards];
+  const stash: KanbanCard[] = [];
   const futureDated: KanbanCard[] = [...scheduled];
   const nowDrafts: KanbanCard[] = [];
   for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
 
-  // Awaiting-review cards are closed and pending a human verdict — actionable
-  // unless the sequence gate diverted them above, so they stay in the Now
-  // awaitingReview column. They must NOT be
+  // Awaiting-review cards are closed and pending a human verdict — actionable,
+  // so they stay in the Now awaitingReview column. They must NOT be
   // routed through the open-card planning router: a stale `horizon` left over from
   // when the card was an active stashed draft (planning horizon is an open-card
   // concept) would otherwise re-route a just-closed card onto the stash surface,
@@ -371,6 +405,7 @@ function assembleSurfaces(
     timeline: { past, futureDated },
     stash,
     pinned,
+    folded,
     cycles,
     temperedTotal: tempered.length,
   };
@@ -508,27 +543,17 @@ function ghostColumn(card: KanbanCard): LensColumn {
  * The board builds cards in bulk from the whole feed; a fiber reached by
  * [[wikilink]] arrives alone, from the single-fiber feed, and still needs the
  * same card the board would have made — same fields, same shuttle block, so
- * the panel that opens it is the same panel. Dependency satisfaction is the
- * one thing a lone row cannot know (there is no feed to look siblings up in),
- * so it answers the way a card with no dependencies does — UNSATISFIED is a
- * claim, and `blocked on: …` is what the panel prints from it, so ignorance
- * must not be able to make it. `toCard` resolves against an empty map, where
- * every dependency reads as unmet; this restores the "nothing known against
- * it" answer.
+ * the panel that opens it is the same panel. What a lone row cannot know is
+ * how its edges resolve (there is no feed to look siblings up in), so it says
+ * nothing about them rather than reporting every one as dangling.
  */
 export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()): KanbanCard {
-  // Belt and braces: `toCard` against an empty map now fails OPEN on its own
-  // (every dep reads as unresolved, and unresolved never blocks), so this is
-  // already true. It stays written down because the claim matters more than
-  // the mechanism — a lone fetch must never be able to gate or hide a card,
-  // and `dependsOnUnresolved` is dropped for the same reason: a warning that
-  // every single-fiber fetch would raise is noise, not information.
+  // `dependsOnUnresolved` is dropped: a lone row has no feed to resolve its
+  // edges against, so every dep would read as dangling — a warning that every
+  // single-fiber fetch would raise is noise, not information.
   return {
     ...toCard(entry, new Map(), nowMs),
-    dependsOnSatisfied: true,
-    dependsOnBlocking: undefined,
     dependsOnUnresolved: undefined,
-    depGated: false,
   };
 }
 
@@ -538,7 +563,7 @@ export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()
  *   - `runningWorker` is the feed row's owner-served `runtime.tmuxSession` —
  *     uniform for local and remote, ONE observer per fiber. No `resolveRunningWorker`,
  *     no local tmux index, no per-origin branch. This is the bounce-kill.
- * Dependency satisfaction still reads `byId` across the whole feed.
+ * Edge resolution still reads `byId` across the whole feed.
  */
 function toCard(
   entry: CompositeEntry,
@@ -547,12 +572,10 @@ function toCard(
 ): KanbanCard {
   const f = entry.fiber;
   const dependsOn = f.dependsOn ?? [];
-  // FAIL OPEN. An id `byId` cannot answer for is reported, not enforced: it
-  // lands on `dependsOnUnresolved` (a badge on the card) while satisfaction
-  // reads as if it weren't there. The gate hides cards, and a typo must never
-  // be able to hide work — the old all-must-be-tempered test would have rested
-  // a card behind a renamed fiber with nothing on screen to say why.
-  const deps = resolveDependencies(dependsOn, (id) => byId.get(id));
+  // An id `byId` cannot answer for is REPORTED, never enforced: it lands on
+  // `dependsOnUnresolved` (a badge on the card) and holds nothing back. A typo
+  // must never be able to hide work.
+  const unresolved = unresolvedDependencies(dependsOn, (id) => byId.has(id));
   const runningWorker = entry.runtime?.tmuxSession;
   const runtimePhase = entry.runtime?.phase;
   const lastActivityAt = entry.runtime?.lastActivityAt;
@@ -583,9 +606,7 @@ function toCard(
     tempered: f.tempered,
     dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     dependsOnShape: f.dependsOnShape,
-    dependsOnSatisfied: deps.satisfied,
-    dependsOnBlocking: deps.blocking.length > 0 ? deps.blocking : undefined,
-    dependsOnUnresolved: deps.unresolved.length > 0 ? deps.unresolved : undefined,
+    dependsOnUnresolved: unresolved.length > 0 ? unresolved : undefined,
     runningWorker,
     runtimePhase,
     sessionLink: entry.runtime?.sessionLink,

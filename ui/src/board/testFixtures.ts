@@ -24,7 +24,6 @@ export function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): Kanban
     originId: 'local',
     status: 'open',
     createdAt: '2026-01-01T09:00:00Z',
-    dependsOnSatisfied: true,
     effectiveHorizon: 'now',
     drifted: false,
     // Required on KanbanCard since the cycles contract landed; a plain card is
@@ -47,6 +46,7 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
     timeline: { past: [], futureDated: [] },
     stash: [],
     pinned: [],
+    folded: [],
     cycles: [],
     temperedTotal: 0,
     staleness: {},
