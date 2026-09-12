@@ -9,7 +9,7 @@ bin/shuttle release                           # release the boot quarantine (par
 bin/shuttle reset <remote>                    # reset a tripped remote circuit breaker (revive cascade resumes)
 
 # felt shuttle — agent-facing CLI; offline; schema-validating
-felt shuttle status                            # all fibers with shuttle: blocks
+felt shuttle status                            # fibers with shuttle: blocks (closed hidden; --closed)
 felt shuttle status --all                      # local + every configured remote
 felt shuttle status --remote <name>            # single remote
 felt shuttle ps                                # live tmux workers only

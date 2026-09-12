@@ -235,6 +235,7 @@ func formatUnixMS(ms int64) string {
 // grouping is obvious at a glance. Stale rows get a "[stale]" suffix in the STATE
 // column.
 func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
+	rows, hidden := hideClosedRows(rows)
 	if len(rows) == 0 {
 		if only != "" {
 			fmt.Printf("no rows for remote %q (configured: %s)\n",
@@ -242,6 +243,7 @@ func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
 		} else {
 			fmt.Println("no shuttle fibers (local or remote)")
 		}
+		printHiddenClosedTrailer(hidden)
 		return
 	}
 
@@ -261,6 +263,7 @@ func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
 		fmt.Printf("%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
 			shuttleTruncateID(origin, 12), shuttleTruncateID(r.FiberID, 50), kind, state, next, agent)
 	}
+	printHiddenClosedTrailer(hidden)
 }
 
 func joinNames(remotes map[string]*RemoteSnapshot) string {

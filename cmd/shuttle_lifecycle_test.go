@@ -17,6 +17,7 @@ func saveShuttleGlobals() func() {
 	prev := struct {
 		jsonOutput           bool
 		statusIncludeOrphans bool
+		statusClosed         bool
 		pauseNoKill          bool
 		closeTempered        string
 		reopenAsDraft        bool
@@ -39,7 +40,7 @@ func saveShuttleGlobals() func() {
 		pinProjectDir        string
 		pinHost              string
 	}{
-		jsonOutput, statusIncludeOrphans,
+		jsonOutput, statusIncludeOrphans, statusClosed,
 		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
 		reshapeSchedule, reshapeTZ,
 		installModel, installProjectDir, installHost, installDisabled,
@@ -52,6 +53,7 @@ func saveShuttleGlobals() func() {
 	// that omits the flag gets text output.
 	jsonOutput = false
 	statusIncludeOrphans = false
+	statusClosed = false
 	pauseNoKill = false
 	closeTempered = ""
 	reopenAsDraft = false
@@ -82,6 +84,7 @@ func saveShuttleGlobals() func() {
 	return func() {
 		jsonOutput = prev.jsonOutput
 		statusIncludeOrphans = prev.statusIncludeOrphans
+		statusClosed = prev.statusClosed
 		pauseNoKill = prev.pauseNoKill
 		closeTempered = prev.closeTempered
 		reopenAsDraft = prev.reopenAsDraft

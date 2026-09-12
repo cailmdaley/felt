@@ -127,6 +127,42 @@ func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
 	}
 }
 
+// The table hides closed rows by default and says so; --closed restores them;
+// the JSON arm is never filtered.
+func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
+	defer saveShuttleGlobals()()
+	statusIncludeOrphans = false
+	statusClosed = false
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "live", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "done", felt.StatusClosed, oneshot(), nil)
+	withStubbedLiveSessions(t, map[string]bool{})
+
+	out, err := runCommand(t, dir, "shuttle", "status")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "done") || !strings.Contains(out, "(1 closed hidden; --closed to show)") {
+		t.Fatalf("closed row should be hidden and counted:\n%s", out)
+	}
+
+	out, err = runCommand(t, dir, "shuttle", "status", "--closed")
+	if err != nil {
+		t.Fatalf("status --closed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "done") || strings.Contains(out, "closed hidden") {
+		t.Fatalf("--closed should list the closed row without a trailer:\n%s", out)
+	}
+
+	out, err = runCommand(t, dir, "shuttle", "status", "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "\"done\"") {
+		t.Fatalf("json should always carry closed rows:\n%s", out)
+	}
+}
+
 func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 	defer saveShuttleGlobals()()
 	statusIncludeOrphans = false

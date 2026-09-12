@@ -28,6 +28,7 @@ var (
 	statusIncludeOrphans bool
 	statusAll            bool
 	statusRemote         string
+	statusClosed         bool
 )
 
 // FiberStatus is one row of the status output. Origin is reserved for the
@@ -81,6 +82,9 @@ the CLI just renders that response. Rows from a remote carry an "origin" column;
 stale remotes (the registry hasn't heard back recently) are flagged "[stale]".
 
 Other flags:
+  --closed           also list closed fibers. The table hides them by default
+                     (they are the bulk of any store that has been worked for a
+                     while) and says how many it hid; --json always emits them.
   --include-orphans  also list live shuttle tmux sessions that no longer map to a
                      shuttle: facet (rare; useful after manual cleanup).
   --json             emit an array of objects instead.`,
@@ -481,9 +485,36 @@ func printTmuxOriginWarning() {
 	}
 }
 
+// hideClosedRows drops closed rows from a table render unless --closed asked
+// for them, returning the survivors and the count hidden. The JSON arm never
+// calls this: a parsed listing stays complete.
+func hideClosedRows(rows []FiberStatus) ([]FiberStatus, int) {
+	if statusClosed {
+		return rows, 0
+	}
+	kept := rows[:0:0]
+	hidden := 0
+	for _, r := range rows {
+		if r.State == "closed" {
+			hidden++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, hidden
+}
+
+func printHiddenClosedTrailer(hidden int) {
+	if hidden > 0 {
+		fmt.Printf("(%d closed hidden; --closed to show)\n", hidden)
+	}
+}
+
 func printStatusTable(rows []FiberStatus) {
+	rows, hidden := hideClosedRows(rows)
 	if len(rows) == 0 {
 		fmt.Println("no shuttle fibers")
+		printHiddenClosedTrailer(hidden)
 		return
 	}
 	fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
@@ -494,6 +525,7 @@ func printStatusTable(rows []FiberStatus) {
 		fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n",
 			shuttleTruncateID(r.FiberID, 50), r.Kind, r.State, next, agent)
 	}
+	printHiddenClosedTrailer(hidden)
 }
 
 // shuttleTruncateID truncates a fiber id to n runes, keeping the SUFFIX (the leaf
@@ -506,6 +538,8 @@ func shuttleTruncateID(s string, n int) string {
 }
 
 func registerShuttleStatusFlags() {
+	statusCmd.Flags().BoolVar(&statusClosed, "closed", false,
+		"Also list closed fibers (hidden from the table by default; --json always includes them)")
 	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
 		"Also list live shuttle tmux sessions with no matching shuttle: facet")
 	statusCmd.Flags().BoolVar(&statusAll, "all", false,
