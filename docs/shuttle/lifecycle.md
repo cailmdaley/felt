@@ -145,7 +145,10 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 parks every candidate it has never observed running into `pending_launch` and
 dispatches nothing fresh. Work it *did* observe alive under its own uptime —
 adopted at boot, or dispatched since — resumes normally. That counts as
-continuation, not a fresh launch.
+continuation, not a fresh launch. A **due standing role** also passes through:
+its cron occurrence is a fixed-time "go" the human already gave, bounded to one
+run, so a restart that straddles 09:00 does not eat the run. (Under CLI/daemon
+contract skew it holds like everything else.)
 
 The guard exists because a daemon that restarts repeatedly (an overloaded
 machine crash-looping, for example) would otherwise treat every restart as

@@ -788,7 +788,8 @@ writes.
 each dispatchable candidate it has never observed running into `pending_launch`.
 Nothing *fresh* launches until a human runs `bin/shuttle release`. (Work the
 daemon did observe alive — adopted at boot, or dispatched since — keeps
-redispatching, because that counts as continuation. See
+redispatching, because that counts as continuation, and a standing role whose
+cron is due fires on schedule. See
 [Boot quarantine](lifecycle.md#boot-quarantine) for why.) The quarantine guards
 your token budget. It also explains why your first worker never starts while
 nothing appears to be wrong.

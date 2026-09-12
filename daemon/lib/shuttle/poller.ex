@@ -1825,7 +1825,8 @@ defmodule Shuttle.Poller do
 
   # Boot quarantine gate on the autonomous tick (see the State field comment):
   # a just-restarted daemon grants no *fresh* autonomous dispatch, but never
-  # strands in-flight work it observed running. Splits the dispatchable set by
+  # strands in-flight work it observed running, and never holds a due standing
+  # role (cron is the human's pre-given "go"; see the split below). Splits the dispatchable set by
   # `was_running` (runtime keys this daemon saw alive under its own uptime —
   # adopted at boot, or dispatched/claimed since):
   #
@@ -1851,9 +1852,16 @@ defmodule Shuttle.Poller do
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
 
+    # A due standing role also flows through the boot quarantine: its cron
+    # occurrence is a fixed-time authorization the human already gave, and a
+    # restart that happens to straddle 09:00 must not silently eat the run
+    # (the schedule is bounded — one occurrence, never a stale backlog).
+    # Contract skew is the exception: there every shelled write is suspect,
+    # so the role holds like everything else until a restart clears it.
     {resume, fresh} =
       Enum.split_with(dispatchable, fn fiber ->
-        MapSet.member?(state.was_running, runtime_key_for_fiber(fiber))
+        MapSet.member?(state.was_running, runtime_key_for_fiber(fiber)) or
+          (state.contract_check.ok and StandingRoles.standing_role_due?(fiber, state))
       end)
 
     parked =

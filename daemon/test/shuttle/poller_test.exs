@@ -2221,7 +2221,11 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(snap.pending_launch, &(&1.fiber_id == fiber_id))
   end
 
-  test "boot quarantine parks a due standing role (occurrences are fresh launches)" do
+  test "boot quarantine does NOT park a due standing role (cron is the human's pre-given go)" do
+    # Field scenario: a deploy restarted the daemon overnight and nobody ran
+    # `bin/shuttle release`; the 09:00 monthly and weekly roles were parked
+    # and silently missed their runs. A cron occurrence is bounded and
+    # human-authorized at a fixed time, so it flows through the quarantine.
     fiber_id = "tests/quarantine-standing"
 
     MockRunner.set_fiber(
@@ -2258,10 +2262,12 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
-      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
+      assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
     end)
 
-    assert Poller.snapshot(poller).eligible == []
+    snap = Poller.snapshot(poller)
+    assert snap.boot_quarantine == true
+    assert snap.pending_launch == []
   end
 
   test "quarantine parking is rebuilt every cycle even when all slots are full" do

@@ -114,8 +114,9 @@ lives in the docs site (`docs/`, published to
   shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
   felt `status` is `active` AND (2) the boot quarantine is released: every
   daemon (re)start parks EVERY dispatchable candidate — fresh launches and
-  dirty-death resumes alike — in `pending_launch` until `bin/shuttle release`.
-  There is no `enabled` flag; steady-state resume of a worker that dies while
+  dirty-death resumes alike — in `pending_launch` until `bin/shuttle release`;
+  only work the daemon observed running and cron-due standing roles pass
+  through. There is no `enabled` flag; steady-state resume of a worker that dies while
   the daemon is healthy and unquarantined is unaffected, and force-dispatch
   bypasses the quarantine. Tags are free-form qualitative noticings.
 
@@ -166,7 +167,8 @@ git_short_sha and booted_at both move → bin/shuttle release
 
 `bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
 `~/.config/felt/remotes.json`. **Every restart arms the boot quarantine** — no
-autonomous dispatch of any kind proceeds until `bin/shuttle release`. A daemon
+fresh oneshot dispatch proceeds until `bin/shuttle release` (cron-due standing
+roles still fire). A daemon
 route change must ship with the matching UI; `make build` builds both.
 Fetched-release users do not need this checkout deployment helper. Details:
 [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
