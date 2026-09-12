@@ -153,6 +153,22 @@ mkdir -p ~/notes && cd ~/notes && felt init
     installing and every store you name — and warns on stderr about any path
     under one of the three, but it installs anyway, so read what it prints.
 
+!!! warning "macOS: start your tmux server from a terminal, not the daemon"
+    Every worker runs inside tmux, and macOS charges file access to a process
+    tree's *responsible process* — for anything launchd spawns, that's the
+    daemon's own executable, not the worker or its shells. If no tmux server
+    is running when the daemon tries to dispatch, forking one itself would
+    make the daemon the responsible process for every worker underneath it,
+    so every file a worker or its tools touch (`~/Documents`, an app's saved
+    data, anything outside the sandbox) raises a TCC prompt the daemon can
+    never hold the grant to answer. The daemon refuses instead: it asks your
+    running terminal (kitty, remote-controlled) to start the server, and if
+    none is reachable it declines the dispatch and reports why on the board
+    rather than silently rooting a server itself. Keep a tmux server alive
+    from a terminal you started by hand — `felt setup receipt` reports when
+    the current server is daemon-born, which is the one-line sign your
+    terminal's server has gone away and needs restarting.
+
 !!! note "Already using felt on this machine?"
     Then step 3 is the step that decides what the board shows. The daemon polls
     exactly the stores you name and assumes nothing else — so a machine that

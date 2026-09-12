@@ -108,6 +108,57 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   stays alive at the checkpoint instead of handing off (the pinned-role
   contract). This is the contract, not a gap.
 
+## tmux server ownership (macOS)
+
+- **The daemon never roots the tmux server on macOS.** A worker's tmux session
+  (`Dispatcher.spawn_tmux/4`) needs a tmux *server* to attach to, and if none
+  exists, `tmux new-session` forks one as a child of whatever invoked it. Under
+  launchd that invoker is the daemon's own beam executable, and macOS TCC
+  charges every file access in a process tree to the tree's *responsible
+  process* — not the process that actually opened the file, the executable the
+  tree descends from. A daemon-forked server makes beam.smp the responsible
+  process for every worker, every shell the worker opens, and every tool the
+  worker runs, so each one raises its own "wants to access data from other
+  apps" prompt, and the daemon binary has no way to hold the grant those
+  prompts ask for (launchd-run processes don't keep TCC grants across
+  restarts the way a terminal-launched one does). The plist template header
+  documents the same fact for the daemon's own working directory; this is the
+  same rule applied to everything the daemon spawns downstream of it.
+- **The fix is to have the user's own terminal own the fork.** The daemon
+  already remote-controls kitty (`Shuttle.Kitty`, `kitty @ launch`) to open
+  worker windows; a `--type=background` launch runs a command as kitty's
+  child with no window at all. Before a dispatch or capture that finds no
+  tmux server present, the daemon asks kitty to start one this way — an
+  anchor session (`shuttle-anchor`, deliberately not `-shuttle`-suffixed, so
+  nothing that scans session names for workers picks it up) that holds the
+  server alive with nothing running in it. The fork chain is then kitty → tmux,
+  and kitty is what TCC charges — a normal, terminal-launched process that can
+  hold its own grants.
+- **If kitty is unreachable, dispatch is refused, never silently
+  daemon-forked.** No live tmux server and no kitty remote-control socket
+  means the daemon has no way to start one without becoming its ancestor, so
+  it declines with `{:tmux_server_unavailable, message}` instead. The refusal
+  rides the same preflight-cooldown and blocked-row machinery as every other
+  dispatch refusal (`Poller.record_dispatch_failure`, the snapshot's `blocked`
+  list, the 422 shape on `/api/v1/dispatch` and `/api/v1/capture`) — a human
+  sees it on the board rather than a worker quietly inheriting a bad
+  responsible process.
+- **Attribution: how a running server is told apart from a daemon-forked
+  one.** `launchctl procinfo <pid>` reports the responsible pid but requires
+  root, so it isn't usable at runtime. Instead: the daemon stamps a
+  server-scoped tmux environment variable (`SHUTTLE_TMUX_ORIGIN`, via `tmux
+  set-environment -g`) right after it starts a server through kitty; a server
+  a human started by hand carries no such marker. Failing that, the server
+  pid's argv is inspected for the shapes a daemon-driven `new-session` always
+  has (`shuttle-run-…` script paths, `-s <leaf>-<uid>-shuttle` session names)
+  — present without the marker means a server that predates this scheme;
+  absent means a server nothing here can claim credit or blame for. `felt
+  shuttle status` and `felt setup receipt` surface the classification so a
+  daemon-born server reads as a one-line remedy: restart it from kitty.
+- **Non-darwin hosts are unaffected.** Every remote in this fleet is Linux,
+  where TCC doesn't exist and a daemon-forked tmux server was never a problem;
+  the check above is gated on `os_type` and is a no-op everywhere but macOS.
+
 ## Dispatch prompt structure
 
 All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):

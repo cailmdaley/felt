@@ -1209,6 +1209,17 @@ export class KanbanModal {
         // ignored. `due` is the day-cell / cycle-chip half of the same
         // sentence: undefined from a plain section drop (leave the date alone),
         // a date from a day, null from today (onto the desk, now).
+        //
+        // Unless the card is ALREADY there. A folded card keeps its own
+        // horizon while it hides under its head, so a row pulled out of a
+        // queue onto the surface it was resting on all along has nothing left
+        // to write — and `setSurface`'s "already in Resting" banner would
+        // bury the thing that actually happened.
+        if (this.alreadyOnSurface(released, drop.horizon, { due: drop.due })) {
+          this.showBanner(`“${card.name}” is out of the queue.`, 'info')
+          await this.fetchAndRender()
+          return
+        }
         this.setSurface(released, drop.horizon, { due: drop.due })
         return
       }
@@ -1272,6 +1283,40 @@ export class KanbanModal {
       this.announce(`Sequence edit failed: ${msg}`)
     }
     await this.fetchAndRender()
+  }
+
+  /**
+   * `horizon` is a planning field, not the card's current board surface.
+   * An active oneshot can retain `horizon: stashed` while its lifecycle puts
+   * it in In flight (the live-worker override, or simply `status:active`).
+   * Compare against the surface the classifier is actually showing, or a
+   * drag returns "already in Resting" before it can stop and park the worker.
+   */
+  private sameSurface(card: KanbanCard, horizon: HorizonKind, opts: { cold?: boolean }): boolean {
+    const actuallyOnHorizon = horizon === 'stashed'
+      ? !card.runningWorker && card.status === 'open' && card.effectiveHorizon === 'stashed'
+      : card.effectiveHorizon === 'now'
+    return actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
+  }
+
+  /**
+   * `undefined` means "the date is not being touched", so it can never be the
+   * half of a drop that makes it a real change — a preserved due leaves the
+   * verdict entirely to the surface test. Re-dropping an already-resting dated
+   * card into Resting is therefore a true no-op, reported as such; it used to
+   * be a silent deadline deletion.
+   */
+  private sameDueAs(card: KanbanCard, due: string | null | undefined): boolean {
+    return due === undefined || sameCivilDue(card.due, due)
+  }
+
+  /** Would `setSurface` find nothing to write for this open/active card? */
+  private alreadyOnSurface(
+    card: KanbanCard,
+    horizon: HorizonKind,
+    opts: { cold?: boolean; due?: string | null },
+  ): boolean {
+    return card.status !== 'closed' && this.sameSurface(card, horizon, opts) && this.sameDueAs(card, opts.due)
   }
 
   /**
@@ -1371,22 +1416,8 @@ export class KanbanModal {
       horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
     const due = dropsStaleDue ? null : opts.due
 
-    // `horizon` is a planning field, not the card's current board surface.
-    // An active oneshot can retain `horizon: stashed` while its lifecycle puts
-    // it in In flight (the live-worker override, or simply `status:active`).
-    // Compare against the surface the classifier is actually showing, or this
-    // drag returns "already in Resting" before it can stop and park the worker.
-    const actuallyOnHorizon = horizon === 'stashed'
-      ? !card.runningWorker && card.status === 'open' && card.effectiveHorizon === 'stashed'
-      : card.effectiveHorizon === 'now'
-    const sameHorizon =
-      actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
-    // `undefined` means "the date is not being touched", so it can never be the
-    // half of the drop that makes it a real change — a preserved due leaves the
-    // verdict entirely to `sameHorizon`. Re-dropping an already-resting dated
-    // card into Resting is therefore a true no-op now, and the banner below
-    // says so honestly; it used to be a silent deadline deletion.
-    const sameDue = due === undefined || sameCivilDue(card.due, due)
+    const sameHorizon = this.sameSurface(card, horizon, opts)
+    const sameDue = this.sameDueAs(card, due)
     // Any CLOSED card — a tempered/composted past run OR an awaiting-review one
     // (closed, untempered) — classifies by its lifecycle state, not its stored
     // horizon: it sits in Awaiting review / Past regardless of a `horizon:

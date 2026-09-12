@@ -213,6 +213,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_wrapper_missing(enabled),
     do: Agent.update(__MODULE__, &Map.put(&1, :wrapper_missing, enabled))
 
+  # Simulate a host with NO tmux server at all — `tmux ls` answers with tmux's
+  # own absence message, the positive evidence `Shuttle.TmuxServer.presence/1`
+  # requires before it will refuse a dispatch on macOS.
+  def set_tmux_server_missing(enabled),
+    do: Agent.update(__MODULE__, &Map.put(&1, :tmux_server_missing, enabled))
+
   # Simulate a wedged felt on an overloaded node: every `felt ls` variant
   # returns the bounded runner's timeout shape ({message, :timeout}) while
   # `felt show` keeps answering — the exact incident profile the poller's
@@ -458,6 +464,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "tmux" and hd(args) == "ls" and
           Agent.get(__MODULE__, &Map.get(&1, :tmux_ls_timeout, false)) ->
         {"tmux ls timed out after 10000ms", :timeout}
+
+      command == "tmux" and hd(args) == "ls" and
+          Agent.get(__MODULE__, &Map.get(&1, :tmux_server_missing, false)) ->
+        {"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}
 
       command == "tmux" and hd(args) == "ls" ->
         sessions = Agent.get(__MODULE__, & &1.tmux_sessions)

@@ -297,7 +297,8 @@ defmodule Shuttle.Poller.Snapshot do
   # one thing a stranger needs on the board to fix their install. Show the
   # message, not the tuple.
   defp format_block_reason({tag, message})
-       when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(message),
+       when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
+              is_binary(message),
        do: message
 
   defp format_block_reason(reason) when is_atom(reason), do: Atom.to_string(reason)

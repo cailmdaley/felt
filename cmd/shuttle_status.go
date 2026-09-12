@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -159,6 +160,11 @@ Other flags:
 		if jsonOutput {
 			return outputJSON(rows)
 		}
+		// A daemon-forked tmux server poisons every worker on it with macOS
+		// permission prompts charged to the daemon's binary — a state whose only
+		// visible symptom names nothing the human owns, so the overview says it
+		// out loud. Deliberately NOT in `felt shuttle ps`, which is parsed.
+		printTmuxOriginWarning()
 		printStatusTable(rows)
 		return nil
 	},
@@ -460,6 +466,18 @@ func computeState(b *shuttle.Block, status string, running bool) string {
 		return "idle"
 	default:
 		return shuttleNonEmpty(status, "unknown")
+	}
+}
+
+// printTmuxOriginWarning prints the one-line remedy when this host's tmux
+// server was forked by the Shuttle daemon; silence in every other case
+// (including every non-darwin host, where the attribution does not exist).
+func printTmuxOriginWarning() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if report := detectTmuxOrigin(); report.Origin == tmuxOriginDaemonBorn {
+		fmt.Printf("tmux server: daemon-born — %s\n", tmuxOriginRepair)
 	}
 }
 

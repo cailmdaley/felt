@@ -12,6 +12,18 @@ The daemon dispatches a fiber when all of these hold:
 
 Agent comes from `shuttle.agent`, resolved against felt's registry — the built-in set embedded into the CLI (`internal/shuttle/agents.builtin.json`) with the operator's `~/.config/felt/agents.json` layered on top; `felt shuttle agents` lists the effective registry, and the daemon consumes the resolved record off `felt show -j`. When a fiber carries no `shuttle.agent`, felt uses the registry default, currently `claude-opus` (see authoring.md, Agent selection).
 
+**A card can sit `active` and still not dispatch.** Eligibility above is
+necessary, not sufficient — the dispatch action itself can still refuse, and
+a refusal parks the fiber (visible on the board as a blocked row with its
+reason, not a silent no-op) rather than retrying every tick. On macOS, one
+such reason is `tmux_server_unavailable`: no tmux server is running and the
+daemon couldn't reach kitty to start one. This is deliberate, not a bug — the
+daemon starting a tmux server itself would make every worker's file access get
+charged to the daemon's own binary under macOS TCC (see dispatch.md, "tmux
+server ownership"), so it refuses instead of quietly producing workers that
+can't touch their own files. The fix is a human restarting tmux from their
+terminal, not re-dispatching.
+
 **Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`) drive dispatch and view, and `depends_on` orders the view only (a queued card folds under its head; the daemon never reads it); tags are free-form noticings read by neither the daemon nor the kanban classifier.
 
 ## What the board admits

@@ -20,7 +20,12 @@ defmodule Shuttle.DispatcherTest do
       # executable — keyed token → what `type -t` reports, or `:missing` /
       # `:wedged`. Everything not listed resolves as a plain `file` on PATH,
       # which is what the vast majority of tests want.
-      wrapper_kinds: %{}
+      wrapper_kinds: %{},
+      # Whether THIS host has a tmux server, as `tmux ls` would answer:
+      # `:present` (the default — every pre-existing test predates the macOS
+      # tmux-server preflight and must be unaffected), `:absent` (tmux's own
+      # no-server message) or `:timeout`.
+      tmux_server: :present
     }
 
     def start_link(_ \\ []) do
@@ -44,6 +49,24 @@ defmodule Shuttle.DispatcherTest do
 
     def wrapper_kinds do
       Agent.get(__MODULE__, & &1.wrapper_kinds)
+    end
+
+    @doc """
+    Sets what `tmux ls` reports about a tmux SERVER on this host — `:present`,
+    `:absent` or `:timeout`. Distinct from `add_tmux_session/1`, which is about
+    a named session on an existing server.
+    """
+    def set_tmux_server(state) when state in [:present, :absent, :timeout] do
+      Agent.update(__MODULE__, fn s -> %{s | tmux_server: state} end)
+    end
+
+    def tmux_server do
+      Agent.get(__MODULE__, & &1.tmux_server)
+    end
+
+    @doc "Records a non-runner side effect (a kitty launch) in command order."
+    def record(command, args) do
+      Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{command, args}]} end)
     end
 
     def add_tmux_session(session) do
@@ -179,6 +202,19 @@ defmodule Shuttle.DispatcherTest do
             {"can't find session", 1}
           end
 
+        # `Shuttle.TmuxServer.presence/1` — is a tmux SERVER running here?
+        command == "tmux" and hd(args) == "ls" ->
+          case tmux_server() do
+            :present ->
+              {Enum.join(tmux_sessions(), "\n") <> "\n", 0}
+
+            :absent ->
+              {"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}
+
+            :timeout ->
+              {"tmux ls timed out after 60000ms", :timeout}
+          end
+
         command == "tmux" and hd(args) == "new-session" ->
           session = Enum.at(args, 3)
           add_tmux_session(session)
@@ -309,6 +345,43 @@ defmodule Shuttle.DispatcherTest do
     end
   end
 
+  # ── Stub kitty ──
+
+  # The kitty seam `Shuttle.TmuxServer` starts a tmux server through, injected
+  # via `config :shuttle, :kitty_impl`. Records each background launch (in
+  # MockRunner's command order, so "kitty first, then new-session" is
+  # assertable) and, on success, flips the mock host to having a server — which
+  # is exactly what a real `kitty @ launch tmux new-session` does.
+  defmodule StubKitty do
+    use Agent
+
+    def start_link(_ \\ []), do: Agent.start_link(fn -> {:ok, []} end, name: __MODULE__)
+
+    def set_result(result), do: Agent.update(__MODULE__, fn {_r, l} -> {result, l} end)
+
+    def launches, do: Agent.get(__MODULE__, fn {_r, l} -> l end)
+
+    def run_background(argv) do
+      MockRunner.record("kitty", ["@", "launch", "--type=background", "--"] ++ argv)
+
+      Agent.get_and_update(__MODULE__, fn {result, launches} ->
+        {result, {result, launches ++ [argv]}}
+      end)
+      |> case do
+        :ok ->
+          MockRunner.set_tmux_server(:present)
+          :ok
+
+        other ->
+          other
+      end
+    end
+  end
+
+  # The one darwin gate in `Shuttle.TmuxServer`, injectable so both branches run
+  # on either platform.
+  defp set_os_type(os_type), do: Application.put_env(:shuttle, :os_type, os_type)
+
   # ── Setup ──
 
   setup do
@@ -328,10 +401,16 @@ defmodule Shuttle.DispatcherTest do
     prev_stores = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", "/tmp")
 
+    start_supervised!(StubKitty)
+    Application.put_env(:shuttle, :kitty_impl, StubKitty)
+
     on_exit(fn ->
       if prev_stores,
         do: System.put_env("FELT_STORES", prev_stores),
         else: System.delete_env("FELT_STORES")
+
+      Application.delete_env(:shuttle, :kitty_impl)
+      Application.delete_env(:shuttle, :os_type)
     end)
 
     :ok
@@ -1707,6 +1786,127 @@ defmodule Shuttle.DispatcherTest do
              )
 
     assert reason2 =~ "effort bogus not allowed"
+  end
+
+  # ── macOS tmux-server preflight ──
+  #
+  # The daemon must never be the process that forks the tmux server on macOS:
+  # TCC charges every worker's file access to the tree's responsible process,
+  # which for a launchd-spawned daemon is the daemon's own binary ("erlexec").
+  # So on darwin an absent server is started through kitty, or the dispatch is
+  # refused outright.
+
+  describe "tmux server preflight" do
+    test "darwin with no server asks kitty first, then spawns the worker" do
+      set_os_type({:unix, :darwin})
+      MockRunner.set_tmux_server(:absent)
+
+      assert {:ok, session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+      # kitty was asked to fork a server holding the anchor session, and the
+      # anchor deliberately is NOT a `-shuttle` name (nothing must adopt it).
+      assert [argv] = StubKitty.launches()
+
+      assert argv == [
+               "tmux",
+               "new-session",
+               "-d",
+               "-s",
+               "shuttle-anchor",
+               "--",
+               "sh",
+               "-c",
+               "exec sleep 2147483647"
+             ]
+
+      refute Dispatcher.shuttle_session?("shuttle-anchor")
+
+      # …and it happened BEFORE the worker's own `tmux new-session`.
+      commands = MockRunner.commands()
+      kitty_at = Enum.find_index(commands, fn {cmd, _} -> cmd == "kitty" end)
+
+      new_session_at =
+        Enum.find_index(commands, fn
+          {"tmux", ["new-session" | _]} -> true
+          _ -> false
+        end)
+
+      assert is_integer(kitty_at)
+      assert is_integer(new_session_at)
+      assert kitty_at < new_session_at
+
+      # The origin marker is stamped on the server we just had kitty start.
+      assert Enum.any?(commands, fn
+               {"tmux", ["set-environment", "-g", "SHUTTLE_TMUX_ORIGIN", stamp]} ->
+                 String.starts_with?(stamp, "kitty:")
+
+               _ ->
+                 false
+             end)
+
+      assert session =~ "-shuttle"
+    end
+
+    test "darwin with no server and no reachable kitty refuses the dispatch outright" do
+      set_os_type({:unix, :darwin})
+      MockRunner.set_tmux_server(:absent)
+      StubKitty.set_result({:error, "no live kitty remote-control socket"})
+
+      assert {:error, {:tmux_server_unavailable, message}} =
+               Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+      assert message =~ "kitty"
+      assert message =~ "erlexec"
+
+      # Nothing spawned: the refusal is the whole point — a server forked here
+      # would poison every worker on it.
+      refute Enum.any?(MockRunner.commands(), fn
+               {"tmux", ["new-session" | _]} -> true
+               _ -> false
+             end)
+
+      assert MockRunner.tmux_sessions() == MapSet.new()
+    end
+
+    test "darwin with a server already running never touches kitty" do
+      set_os_type({:unix, :darwin})
+      MockRunner.set_tmux_server(:present)
+
+      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+      assert StubKitty.launches() == []
+    end
+
+    test "linux keeps today's behaviour exactly — an absent server is not the daemon's business" do
+      set_os_type({:unix, :linux})
+      MockRunner.set_tmux_server(:absent)
+
+      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+      assert StubKitty.launches() == []
+    end
+
+    test "an unreadable tmux ls is uncertainty, and uncertainty never blocks" do
+      set_os_type({:unix, :darwin})
+      MockRunner.set_tmux_server(:timeout)
+
+      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+      assert StubKitty.launches() == []
+    end
+
+    test "capture refuses identically" do
+      set_os_type({:unix, :darwin})
+      MockRunner.set_tmux_server(:absent)
+      StubKitty.set_result({:error, "no live kitty remote-control socket"})
+
+      assert {:error, {:tmux_server_unavailable, message}} =
+               Dispatcher.capture("an idea",
+                 runner: MockRunner,
+                 work_dir: "/tmp",
+                 felt_store: "/tmp"
+               )
+
+      assert message =~ "kitty"
+      assert MockRunner.tmux_sessions() == MapSet.new()
+    end
   end
 
   # ── Continuation test helpers ──

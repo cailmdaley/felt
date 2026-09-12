@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,6 +41,18 @@ type RuntimeReceipt struct {
 	Hooks      ReceiptComponent         `json:"hooks"`
 	Daemon     ReceiptDaemon            `json:"daemon"`
 	Generation ReceiptGenerationReceipt `json:"generation"`
+	// macOS only: who forked the running tmux server. Absent on every other
+	// platform, where nothing charges a process tree's file access to its root.
+	TmuxServer *ReceiptTmuxServer `json:"tmux_server,omitempty"`
+}
+
+// ReceiptTmuxServer reports the tmux server's attribution — see
+// cmd/shuttle_tmux_origin.go for why a daemon-forked server is a defect.
+type ReceiptTmuxServer struct {
+	Status    receiptStatus `json:"status"`
+	Repair    string        `json:"repair,omitempty"`
+	Origin    string        `json:"origin"`
+	ServerPID string        `json:"server_pid,omitempty"`
 }
 
 type ReceiptComponent struct {
@@ -134,6 +147,9 @@ every component that is enabled on this host to be present and compatible.`,
 			return nil
 		}
 		fmt.Printf("runtime %s\n", receipt.Status)
+		if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
+			fmt.Printf("tmux server: daemon-born — %s\n", receipt.TmuxServer.Repair)
+		}
 		if receipt.Repair != "" {
 			fmt.Printf("repair: %s\n", receipt.Repair)
 		}
@@ -154,11 +170,43 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	r.Hooks = collectHookReceipt(r.Bundles)
 	r.Daemon = collectDaemonReceipt()
 	r.Generation = collectGenerationReceipt(r.Bundles, r.Felt)
-	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Daemon.Status, r.Generation.Status)
+	r.TmuxServer = collectTmuxServerReceipt()
+	extra := []receiptStatus{r.Generation.Status}
+	if r.TmuxServer != nil {
+		extra = append(extra, r.TmuxServer.Status)
+	}
+	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Daemon.Status, extra...)
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
 	}
+	// A daemon-forked tmux server has a remedy nobody would guess from the
+	// generic repair line, so it names itself — but never at the expense of the
+	// generation repair, which is about the install being wrong at all.
+	if r.TmuxServer != nil && r.TmuxServer.Status != receiptHealthy &&
+		r.TmuxServer.Status == r.Status && r.Generation.Status == receiptHealthy {
+		r.Repair = r.TmuxServer.Repair
+	}
 	return r
+}
+
+// collectTmuxServerReceipt attributes the running tmux server on macOS, and
+// reports nothing at all anywhere else: TCC's responsible-process accounting is
+// a darwin behaviour, and every remote in the fleet is Linux.
+//
+// Only `daemon_born` is a mismatch. `kitty_born` is the desired state;
+// `unknown` (a human's own server) and `absent` (no server yet — the daemon will
+// have kitty start one on the next dispatch) are both fine. We never punish a
+// server we cannot attribute.
+func collectTmuxServerReceipt() *ReceiptTmuxServer {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	report := detectTmuxOrigin()
+	rec := &ReceiptTmuxServer{Status: receiptHealthy, Origin: report.Origin, ServerPID: report.ServerPID}
+	if report.Origin == tmuxOriginDaemonBorn {
+		rec.Status, rec.Repair = receiptMismatch, tmuxOriginRepair
+	}
+	return rec
 }
 
 func collectFeltReceipt() ReceiptComponent {

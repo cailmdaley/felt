@@ -12,6 +12,10 @@ describe('dispatchIneligibleReason', () => {
     ).toBe("The fiber's project_dir (/home/me/dev/felt) does not exist on the owning host.")
   })
 
+  it('names kitty as the remedy when no tmux server is reachable', () => {
+    expect(dispatchIneligibleReason({ reason: 'tmux_server_unavailable' })).toContain('kitty')
+  })
+
   it('falls back to per-detail copy when the daemon sends no message', () => {
     expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'project_dir_missing' }))
       .toBe("The fiber's project_dir does not exist on the owning host.")

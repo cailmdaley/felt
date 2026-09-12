@@ -30,6 +30,7 @@ defmodule Shuttle.Dispatcher do
           | {:error, :missing_session_id}
           | {:error, {:wrapper_unresolved, String.t()}}
           | {:error, {:work_dir_missing, String.t()}}
+          | {:error, {:tmux_server_unavailable, String.t()}}
           | {:error, String.t()}
 
   @doc """
@@ -77,7 +78,8 @@ defmodule Shuttle.Dispatcher do
          {:ok, agent} <- resolve_agent(fiber),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <- preflight_wrapper(agent, work_dir, runner) do
+         :ok <- preflight_wrapper(agent, work_dir, runner),
+         :ok <- ensure_tmux_server(runner) do
       resume_intent =
         resolve_resume_intent(prompt_context, fiber,
           force: force,
@@ -602,7 +604,8 @@ defmodule Shuttle.Dispatcher do
     with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <- preflight_wrapper(agent, work_dir, runner) do
+         :ok <- preflight_wrapper(agent, work_dir, runner),
+         :ok <- ensure_tmux_server(runner) do
       session = capture_session_name()
 
       # Only claude can be handed a session id up front; `build_command/3` and
@@ -1133,6 +1136,26 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp check_wrapper_kind(_agent, _word, _kind), do: :ok
+
+  # The last preflight, and the only one that is macOS-only: a tmux server must
+  # already exist, forked by the user's kitty rather than by this daemon. When
+  # the daemon forks it, macOS privacy charges every worker's file access to the
+  # daemon's binary and the whole fleet drowns in "erlexec" prompts the daemon
+  # can never satisfy — see `Shuttle.TmuxServer`. Placed LAST so it only runs
+  # for a dispatch that was otherwise going to happen, and immediately before
+  # `spawn_tmux`, whose `tmux new-session` is the fork in question.
+  #
+  # `spawn_tmux/4` itself is untouched: `tmux new-session`'s exit status stays
+  # the dispatch's ground truth. (Rejected alternative: routing every dispatch
+  # through `kitty @ launch` — kitty's exit code masks tmux's, and it would
+  # refuse dispatch whenever kitty is closed even with a healthy human-born
+  # server.)
+  defp ensure_tmux_server(runner) do
+    case Shuttle.TmuxServer.ensure_available(runner) do
+      :ok -> :ok
+      {:error, {tag, message}} -> dispatch_refused(tag, message)
+    end
+  end
 
   # Every preflight refusal takes this shape: a tagged reason the surfaces can
   # match on, and an operator-facing message they render verbatim (the Poller's

@@ -3035,12 +3035,21 @@ defmodule Shuttle.Poller do
   # the two are one `File.dir?` answer) will not appear between two ticks, and
   # under a macOS file provider each re-stat costs a TCC prompt on someone's
   # screen. One attempt per cooldown, not one per tick.
+  #
+  # `:tmux_server_unavailable` rides it too: no tmux server and no reachable
+  # kitty is a state only a human can leave (open kitty, or start a server by
+  # hand), and each attempt pays a `kitty @ launch` round trip.
 
   @doc false
   def preflight_cooldown_open?(%State{} = state, runtime_key) do
     case Map.get(state.dispatch_failures, runtime_key) do
       %{reason: {tag, _detail}, attempted_at: %DateTime{} = at}
-      when tag in [:wrapper_unresolved, :work_dir_missing, :project_dir_missing] ->
+      when tag in [
+             :wrapper_unresolved,
+             :work_dir_missing,
+             :project_dir_missing,
+             :tmux_server_unavailable
+           ] ->
         DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
 
       _ ->

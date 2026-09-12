@@ -91,3 +91,32 @@ new cycle is scheduled, and any late token from the abandoned read is ignored.
 Repeatedly increasing `stalls` means the daemon is alive but an input remains
 wedged; inspect `~/.config/felt/stores.json` and remote tunnel health rather
 than restarting the daemon to clear the symptom.
+
+## Remedying a daemon-born tmux server (macOS)
+
+`felt setup receipt` (or `felt shuttle status`) prints a one-liner when the
+current tmux server is daemon-born (see dispatch.md, "tmux server ownership")
+— it means the server's fork chain roots at the daemon's beam executable, so
+macOS charges every worker's file access to that binary rather than to a
+process that can hold the TCC grant. The fix is a restart, done from a
+terminal, not from the daemon:
+
+1. **Confirm no worker is live first** — `felt shuttle ps` or `tmux ls`. A
+   session inside the bad server is still a running worker; killing the
+   server under it ends that session mid-thought.
+2. **Kill the server**, not just a session: `tmux kill-server` (with the
+   right `TMUX_TMPDIR`/socket if you run more than one). This drops every
+   session on it, including the daemon's anchor.
+3. **Start a fresh one from kitty**, by hand: `tmux new-session -d -s
+   shuttle-anchor`, or just open a kitty window (kitty's own default session
+   creation forks the server the same way). The point is that kitty — a
+   terminal you launched yourself — is now the responsible process, so it can
+   hold whatever TCC grants its children need.
+4. **Dispatch resumes normally** on the next tick. A worker whose session
+   died in step 2 is not lost: `Shuttle.Continuation` resumes it from its
+   transcript on the next dispatch, the same as any other tmux session that
+   ends between ticks (see dispatch.md, "A finished run is finished").
+
+Doing this while a worker is live is the only way to actually lose work here
+— the daemon itself never restarts a tmux server on its own, so this is
+always a deliberate, by-hand action.

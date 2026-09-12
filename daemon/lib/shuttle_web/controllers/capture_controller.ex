@@ -71,12 +71,14 @@ defmodule ShuttleWeb.CaptureController do
             conn |> put_status(422) |> json(%{spawned: false, reason: msg})
 
           # A dispatch preflight refused before anything spawned — the agent's
-          # wrapper does not resolve in a login bash, or the work directory is
-          # not on this host. Operator config, not a server fault, and the
+          # wrapper does not resolve in a login bash, the work directory is not
+          # on this host, or (macOS) there is no tmux server the daemon is
+          # allowed to fork under. Operator config, not a server fault, and the
           # message is the whole point: render it rather than `inspect`ing the
           # tuple into a 500.
           {:error, {tag, msg}}
-          when tag in [:wrapper_unresolved, :work_dir_missing] and is_binary(msg) ->
+          when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
+               is_binary(msg) ->
             conn
             |> put_status(422)
             |> json(%{spawned: false, reason: to_string(tag), message: msg})

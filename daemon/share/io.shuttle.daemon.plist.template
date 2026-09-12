@@ -30,16 +30,26 @@
   hand-maintained list. `--path` overrides it.
 
   Keep BOTH the shuttle directory and the felt stores outside ~/Documents,
-  ~/Desktop and ~/Downloads. macOS TCC blocks launchd-spawned processes from
-  those folders, and Full Disk Access does NOT inherit across launchd's process
-  tree the way it does under a terminal app — so a daemon rooted in a protected
-  folder crash-loops, and stores in one are silently walked as empty, unless
-  you grant FDA to every binary in the tree (beam.smp, felt, …). Staying
-  outside them sidesteps TCC entirely: zero grants, survives erlang upgrades.
-  install-agent warns about either path. (Earlier this template used `-c` +
-  no-exec + an FDA grant on /bin/bash to keep bash as the responsible process;
-  that umbrella does not actually inherit under launchd — relocating out of the
-  protected folders is the fix.)
+  ~/Desktop and ~/Downloads. macOS TCC charges every file access to a process's
+  *responsible process* — for a launchd-spawned chain, that's the executable
+  launchd itself invoked (beam.smp here), not the process that actually opened
+  the file. A grant made to some other binary in the tree (bash, felt) never
+  covers what beam.smp reads, and beam.smp cannot hold a Full Disk Access grant
+  of its own under launchd (the grant doesn't attach to a process launchd
+  supervises), so a daemon rooted in a protected folder crash-loops and stores
+  in one are silently walked as empty. Staying outside those folders sidesteps
+  TCC entirely: zero grants, survives erlang upgrades. install-agent warns
+  about either path. (Earlier this template used `-c` + no-exec + an FDA grant
+  on /bin/bash to keep bash as the responsible process; responsibility for a
+  launchd-spawned tree is charged to the tree's own executable regardless, not
+  reassignable by the invoking shell — relocating out of the protected folders
+  is the fix.)
+
+  The same responsible-process rule is why the daemon must never be the one to
+  start a tmux server (see docs/dev/dispatch.md, "tmux server ownership"): a
+  tmux server forked from this launchd chain makes beam.smp the responsible
+  process for every worker under it, and every file the worker's shells and
+  tools touch raises a TCC prompt this template's own grant cannot cover.
 -->
 <plist version="1.0">
 <dict>

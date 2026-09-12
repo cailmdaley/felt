@@ -75,6 +75,12 @@ export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
       return 'Draft — set status: active to allow dispatch.'
     case 'closed':
       return 'Fiber is closed — reopen it before dispatching.'
+    // macOS: the daemon refuses to be the process that forks the tmux server,
+    // because macOS would then charge every worker's file access to the
+    // daemon's binary. Fallback copy only — the daemon's own message (which
+    // explains the "erlexec" prompts) wins above.
+    case 'tmux_server_unavailable':
+      return "No tmux server on the daemon's machine — start one from kitty (tmux new-session -d -s shuttle-anchor) and dispatch again."
     case 'not_eligible':
     case undefined:
       return 'Not currently eligible — the fiber may be disabled, not yet due, or already closed.'

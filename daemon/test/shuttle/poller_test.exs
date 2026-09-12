@@ -1991,6 +1991,62 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
   end
 
+  # The kitty seam with nobody home: no live remote-control socket, so on macOS
+  # there is no way to get a tmux server that the daemon is not the root of.
+  defmodule NoKitty do
+    def run_background(_argv), do: {:error, "no live kitty remote-control socket"}
+  end
+
+  test "a refused tmux-server preflight parks the fiber for the cooldown" do
+    # macOS only: a dispatch with no tmux server and no reachable kitty must
+    # refuse rather than fork the server under the daemon (TCC would then charge
+    # every worker's file access to the daemon binary). Like the wrapper
+    # refusal, it never spawns a worker to exit, so the resume-loop breaker
+    # cannot brake it — the preflight cooldown has to.
+    fiber_id = "tests/tmux-server-cooldown"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+
+    Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+    Application.put_env(:shuttle, :kitty_impl, NoKitty)
+
+    on_exit(fn ->
+      Application.delete_env(:shuttle, :os_type)
+      Application.delete_env(:shuttle, :kitty_impl)
+    end)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_tmux_server_cooldown,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    MockRunner.set_tmux_server_missing(true)
+
+    assert {:error, {:tmux_server_unavailable, message}} =
+             Poller.dispatch_fiber(poller, fiber_id, [])
+
+    # The board shows the operator-facing message verbatim — the human's only
+    # other clue is a stream of "erlexec" prompts that names nothing they own.
+    blocked = Enum.find(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
+    assert blocked.reason == message
+    assert blocked.reason =~ "erlexec"
+
+    # Parked: the next autonomous attempt is refused by the cooldown without
+    # spending another `tmux ls` / kitty round trip.
+    probes_before = Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1))
+    assert {:error, _} = Poller.dispatch_fiber(poller, fiber_id, [])
+    assert Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1)) == probes_before
+
+    # Once a server exists, a dispatch succeeds and clears the entry.
+    MockRunner.set_tmux_server_missing(false)
+    assert {:ok, _} = Poller.dispatch_fiber(poller, fiber_id, force: true)
+    refute Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
+  end
+
   test "a healthy worker run resets the resume-loop breaker count" do
     # A long-lived run (≥ the rapid-exit threshold) is the system working: it must
     # zero the consecutive-rapid-exit count so a fiber that occasionally has a fast

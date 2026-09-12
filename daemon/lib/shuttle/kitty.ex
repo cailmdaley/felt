@@ -77,6 +77,50 @@ defmodule Shuttle.Kitty do
 
   def open(_session, _host), do: {:error, "tmux_session is required"}
 
+  @doc """
+  Run `argv` as a child of the user's kitty, with no window
+  (`kitty @ launch --type=background`).
+
+  The point is the PROCESS TREE, not the output: a command launched this way is
+  forked by the kitty app, so macOS privacy (TCC) charges its file access to
+  kitty rather than to whoever asked. `Shuttle.TmuxServer` uses it to have the
+  tmux server forked by kitty instead of by the daemon.
+
+  Unlike `open/2` there is deliberately **no `spawn_window` fallback**: a kitty
+  the daemon itself execs is a child of the daemon, so a server forked under it
+  is daemon-rooted after all — exactly the state this exists to prevent. No live
+  control socket is a clean `{:error, _}`.
+
+  (Follow-up, out of scope here: `open/2`'s `spawn_window/5` fallback has the
+  same defect for worker *terminals* — a tab opened that way roots its shell
+  under the daemon too.)
+  """
+  @spec run_background([String.t()]) :: :ok | {:error, String.t()}
+  def run_background(argv) when is_list(argv) and argv != [] do
+    with {:ok, kitty} <- kitty_bin(),
+         {socket, _kind} when is_binary(socket) <- kitty_socket() || :no_socket do
+      args = ["@"] ++ to_opt(socket) ++ ["launch", "--type=background", "--"] ++ argv
+
+      case run(kitty, args) do
+        {_out, 0} ->
+          :ok
+
+        {out, code} ->
+          {:error,
+           "kitty launch --type=background exited #{code}: " <>
+             (out |> String.trim() |> String.slice(0, 240))}
+      end
+    else
+      :no_socket ->
+        {:error,
+         "no live kitty remote-control socket (needs `allow_remote_control yes` + " <>
+           "`listen_on unix:/tmp/kitty` in kitty.conf, and a kitty window open)"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # ── kitty remote-control plumbing ──────────────────────────────────────────
 
   # Focus an existing tab whose title matches exactly. `:ok` when one was
