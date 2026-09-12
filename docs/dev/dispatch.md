@@ -144,17 +144,31 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   sees it on the board rather than a worker quietly inheriting a bad
   responsible process.
 - **Attribution: how a running server is told apart from a daemon-forked
-  one.** `launchctl procinfo <pid>` reports the responsible pid but requires
-  root, so it isn't usable at runtime. Instead: the daemon stamps a
-  server-scoped tmux environment variable (`SHUTTLE_TMUX_ORIGIN`, via `tmux
-  set-environment -g`) right after it starts a server through kitty; a server
-  a human started by hand carries no such marker. Failing that, the server
-  pid's argv is inspected for the shapes a daemon-driven `new-session` always
-  has (`shuttle-run-…` script paths, `-s <leaf>-<uid>-shuttle` session names)
-  — present without the marker means a server that predates this scheme;
-  absent means a server nothing here can claim credit or blame for. `felt
-  shuttle status` and `felt setup receipt` surface the classification so a
-  daemon-born server reads as a one-line remedy: restart it from kitty.
+  one.** The kernel is asked, rather than the argv guessed at. `launchctl
+  procinfo <pid>` names the responsible process outright but **requires root**
+  (`This subcommand requires root privileges: procinfo`), so it is not usable
+  at runtime; `launchctl print pid/<pid>` needs **no privileges** and prints
+  the process's **resource coalition**, whose `name` is the launchd label or
+  app bundle that rooted the tree — the same attribution TCC charges file
+  access to. So: the server pid comes from `tmux display-message -p
+  '#{pid}'`, and its resource-coalition name decides the origin —
+  `io.shuttle.daemon` (the daemon's own launchd label) is `daemon_born`, any
+  other name is `user_born` and is reported verbatim, an unparsable answer is
+  `unknown`, and no server at all is `absent`. Only `daemon_born` is a defect.
+  The parsing lives in `cmd/shuttle_tmux_origin.go` (the resource coalition is
+  selected by name: `launchctl print` emits a `jetsam coalition` block with
+  the same `name` key, and only the resource one is TCC's). `felt shuttle
+  status` and `felt setup receipt` surface the classification so a daemon-born
+  server reads as a one-line remedy: restart it from a terminal.
+- **A present server is hardened, not just accepted.** tmux's `exit-empty`
+  makes a server exit as soon as it holds no sessions, and the window between
+  `tmux ls` answering "present" and the dispatcher's `new-session` is real: a
+  human closing their last session in that window would leave `new-session` to
+  fork a fresh, daemon-rooted server. So on darwin a present server also gets
+  `tmux set-option -s exit-empty off` — idempotent, and unlike `new-session` it
+  never forks a server of its own (with none running it just fails to connect,
+  verified), though it is only run when a server is present or was just
+  started.
 - **Non-darwin hosts are unaffected.** Every remote in this fleet is Linux,
   where TCC doesn't exist and a daemon-forked tmux server was never a problem;
   the check above is gated on `os_type` and is a no-op everywhere but macOS.

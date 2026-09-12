@@ -166,8 +166,11 @@ mkdir -p ~/notes && cd ~/notes && felt init
     none is reachable it declines the dispatch and reports why on the board
     rather than silently rooting a server itself. Keep a tmux server alive
     from a terminal you started by hand — `felt setup receipt` reports when
-    the current server is daemon-born, which is the one-line sign your
-    terminal's server has gone away and needs restarting.
+    the current server is daemon-born, meaning it was forked by the daemon
+    before this behaviour existed (or by an older daemon). Dispatch still
+    works; every worker on that server is just charged to the daemon binary,
+    so the remedy is to restart the server from a terminal once no workers are
+    live.
 
 !!! note "Already using felt on this machine?"
     Then step 3 is the step that decides what the board shows. The daemon polls

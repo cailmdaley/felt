@@ -3,61 +3,31 @@ defmodule Shuttle.TmuxServerTest do
 
   alias Shuttle.TmuxServer
 
-  # ── classify_origin/2 (pure) ──
-
-  describe "classify_origin/2" do
-    test "any marker means kitty started the server" do
-      assert TmuxServer.classify_origin("SHUTTLE_TMUX_ORIGIN=kitty:2026-09-12T22:15:03Z", nil) ==
-               :kitty_born
-
-      # The marker wins even over daemon-shaped argv: the only way a marker
-      # exists is that we stamped it after a kitty start.
-      assert TmuxServer.classify_origin(
-               "SHUTTLE_TMUX_ORIGIN=kitty:2026-09-12T22:15:03Z",
-               "tmux new-session -d -s x-shuttle"
-             ) == :kitty_born
-    end
-
-    test "a whitespace-only marker is no marker" do
-      assert TmuxServer.classify_origin("  \n", nil) == :absent
-    end
-
-    test "the real daemon-born argv captured from this machine is daemon_born" do
-      argv =
-        "tmux new-session -d -s civbench-01KTHDNZS287ZSSG8X8V59XKWB-shuttle " <>
-          "-c /Users/someone/loom bash -l /var/folders/xx/T/shuttle-run-2115.sh"
-
-      assert TmuxServer.classify_origin(nil, argv) == :daemon_born
-    end
-
-    test "either daemon fingerprint alone is enough" do
-      assert TmuxServer.classify_origin(nil, "bash -l /tmp/shuttle-run-7.sh") == :daemon_born
-      assert TmuxServer.classify_origin(nil, "tmux new-session -d -s leaf-uid-shuttle") ==
-               :daemon_born
-    end
-
-    test "a human's own server is unknown, never daemon_born" do
-      assert TmuxServer.classify_origin(nil, "tmux -CC attach") == :unknown
-      assert TmuxServer.classify_origin(nil, "tmux new-session -d -s shuttle-anchor") == :unknown
-    end
-
-    test "no argv at all means no server" do
-      assert TmuxServer.classify_origin(nil, nil) == :absent
-      assert TmuxServer.classify_origin(nil, "") == :absent
-    end
-  end
-
   # ── presence/1 ──
 
+  # A runner that answers per tmux subcommand and remembers every call, so both
+  # "what did the daemon decide" and "what did the daemon RUN" are assertable.
+  # Anything not in `replies` succeeds silently, which is what a real `tmux
+  # set-option` does.
   defmodule StubRunner do
     @behaviour Shuttle.Runner
 
     use Agent
 
-    def start_link(reply), do: Agent.start_link(fn -> reply end, name: __MODULE__)
+    def start_link(reply) when is_tuple(reply), do: start_link(%{"ls" => reply})
+
+    def start_link(replies) when is_map(replies),
+      do: Agent.start_link(fn -> %{replies: replies, calls: []} end, name: __MODULE__)
 
     @impl true
-    def cmd(_command, _args, _opts), do: Agent.get(__MODULE__, & &1)
+    def cmd(command, args, _opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        {Map.get(state.replies, List.first(args), {"", 0}),
+         %{state | calls: state.calls ++ [{command, args}]}}
+      end)
+    end
+
+    def calls, do: Agent.get(__MODULE__, & &1.calls)
   end
 
   describe "presence/1" do
@@ -67,7 +37,10 @@ defmodule Shuttle.TmuxServerTest do
     end
 
     test "tmux's own absence message is the only evidence of absence" do
-      start_supervised!({StubRunner, {"error connecting to /tmp/tmux-501/default (No such file)", 1}})
+      start_supervised!(
+        {StubRunner, {"error connecting to /tmp/tmux-501/default (No such file)", 1}}
+      )
+
       assert TmuxServer.presence(StubRunner) == :absent
     end
 
@@ -91,6 +64,49 @@ defmodule Shuttle.TmuxServerTest do
     test "no darwin, no opinion — an absent server is fine on Linux" do
       Application.put_env(:shuttle, :os_type, {:unix, :linux})
       start_supervised!({StubRunner, {"no server running on /tmp/tmux-1000/default", 1}})
+
+      assert TmuxServer.ensure_available(StubRunner) == :ok
+
+      # Nothing at all is run on Linux — not even the hardening.
+      assert StubRunner.calls() == []
+    end
+
+    # The race: `tmux ls` says a server is there, the human closes their last
+    # session, the server exits to `exit-empty`, and the dispatcher's
+    # `new-session` forks a fresh one rooted at the daemon. Disarming
+    # `exit-empty` on a server we did not fork closes that window.
+    test "a present server is hardened against exiting when its last session goes" do
+      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      start_supervised!({StubRunner, {"shuttle-anchor\n", 0}})
+
+      assert TmuxServer.ensure_available(StubRunner) == :ok
+
+      assert {"tmux", ["set-option", "-s", "exit-empty", "off"]} in StubRunner.calls()
+    end
+
+    test "an uncertain server is left alone — there may be nothing to harden" do
+      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      start_supervised!({StubRunner, {"tmux ls timed out after 60000ms", :timeout}})
+
+      assert TmuxServer.ensure_available(StubRunner) == :ok
+
+      refute Enum.any?(StubRunner.calls(), fn {_cmd, args} ->
+               List.first(args) == "set-option"
+             end)
+    end
+
+    # A `set-option` that fails changes nothing about the dispatch: losing the
+    # hardening is not a reason to refuse work that would have run.
+    test "a failed hardening never refuses the dispatch" do
+      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+
+      start_supervised!(
+        {StubRunner,
+         %{
+           "ls" => {"shuttle-anchor\n", 0},
+           "set-option" => {"no server running on /tmp/tmux-501/default", 1}
+         }}
+      )
 
       assert TmuxServer.ensure_available(StubRunner) == :ok
     end

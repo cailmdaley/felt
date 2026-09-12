@@ -27,7 +27,7 @@ defmodule Shuttle.TmuxServer do
     * a server is present (or its presence can't be determined) → `:ok`,
       dispatch proceeds untouched
     * no server, kitty reachable → kitty forks an anchor session, we wait for
-      the socket, stamp the origin marker, then `:ok`
+      the socket, disarm `exit-empty`, then `:ok`
     * no server, kitty unreachable → dispatch is **REFUSED** with an
       operator-facing message. The daemon never quietly starts the server
       itself; a silent success here is exactly the state that poisons a whole
@@ -39,44 +39,31 @@ defmodule Shuttle.TmuxServer do
 
   ## Attribution
 
-  `launchctl procinfo <pid>` would name the responsible process directly, but it
-  requires root — verified on macOS 25.5, `rc=1 "This subcommand requires root
-  privileges: procinfo"`. So origin is read two ways instead:
-
-    * the marker `SHUTTLE_TMUX_ORIGIN`, a server-scoped tmux environment
-      variable we set right after starting a server through kitty
-    * failing that, the server's own argv: a daemon-born server was forked by
-      `tmux new-session -d -s <name>-shuttle … bash -l /…/shuttle-run-<n>.sh`,
-      which is self-describing
-
-  A server with neither (a human's own `tmux` from before this machinery) is
-  `:unknown`, never `:daemon_born` — we do not punish a server we cannot
-  attribute.
+  Whether a *running* server is daemon-rooted is answered by the Go CLI, not
+  here, and it asks the kernel rather than guessing: `launchctl print
+  pid/<server pid>` (no privileges needed, unlike `launchctl procinfo`, which
+  requires root) prints the process's resource coalition, whose `name` is the
+  launchd label or app bundle that rooted the tree — exactly the attribution TCC
+  charges file access to. A coalition of `io.shuttle.daemon` is a daemon-born
+  server; anything else is user-born. See `cmd/shuttle_tmux_origin.go`; nothing
+  in this module needs to stamp or read a marker.
   """
 
   require Logger
 
   @type presence :: :present | :absent | :unknown
-  @type origin :: :kitty_born | :daemon_born | :unknown | :absent
 
+  # The session kitty starts to hold a fresh server alive. It deliberately does
+  # NOT end in `-shuttle`, so every "is this a worker?" predicate in the system
+  # (`Shuttle.Dispatcher.shuttle_session?/1`, the poller's
+  # `list_shuttle_sessions/1`, Go's `isShuttleTmuxSessionName`) ignores it.
   @anchor "shuttle-anchor"
-  @marker "SHUTTLE_TMUX_ORIGIN"
 
   # Poll budget for the server appearing after kitty forks it. Generous enough
   # for a cold `kitty @ launch` round trip, short enough that a dispatch tick
   # never stalls on it.
   @await_budget_ms 3_000
   @await_interval_ms 100
-
-  @doc """
-  The session name of the anchor kitty starts to hold the server alive.
-
-  It deliberately does NOT end in `-shuttle`, so every "is this a worker?"
-  predicate in the system (`Shuttle.Dispatcher.shuttle_session?/1`, the poller's
-  `list_shuttle_sessions/1`, Go's `isShuttleTmuxSessionName`) ignores it.
-  """
-  @spec anchor_session() :: String.t()
-  def anchor_session, do: @anchor
 
   @doc """
   Ensures this host has a tmux server the daemon did not fork.
@@ -96,12 +83,15 @@ defmodule Shuttle.TmuxServer do
 
   defp ensure_darwin(runner) do
     case presence(runner) do
+      # A server we did not fork is exactly what we want — and while we have it,
+      # harden it against dying out from under the `new-session` that follows.
+      :present ->
+        disarm_exit_empty(runner)
+
       # Uncertainty never blocks — the same doctrine as `Shuttle.Tmux.present?/2`.
       # A `tmux ls` that fails for an environmental reason must not refuse a
-      # dispatch that would have worked.
-      :present ->
-        :ok
-
+      # dispatch that would have worked. Nothing to harden either: there may be
+      # no server there at all.
       :unknown ->
         :ok
 
@@ -113,7 +103,7 @@ defmodule Shuttle.TmuxServer do
   defp start_server(runner) do
     with :ok <- start_via_kitty(),
          :ok <- await_server(runner, @await_budget_ms) do
-      mark_origin(runner)
+      disarm_exit_empty(runner)
       Logger.info("Started a tmux server via kitty (anchor session #{@anchor})")
       :ok
     else
@@ -186,87 +176,26 @@ defmodule Shuttle.TmuxServer do
   end
 
   @doc """
-  Stamps the kitty-born marker into the server's global tmux environment.
+  Turns `exit-empty` off on this host's tmux server.
 
-  Server-scoped (`set-environment -g`), so it lives exactly as long as the
-  server it describes — no file to go stale, nothing to clean up when the human
-  kills the server by hand.
+  A server with no sessions exits by default, and the window between
+  `presence/1` answering `:present` and the dispatcher's `tmux new-session` is
+  real: a human who detaches and closes their last session in it loses the
+  server, and `new-session` then forks a fresh one — rooted at the daemon,
+  which is the entire state this module exists to prevent. Disarming
+  `exit-empty` makes an anchor-less, human-started server survive that window.
+
+  Server-scoped and idempotent (`set-option -s`), and — unlike `new-session` —
+  it never forks a server of its own: with no server running it just fails
+  ("error connecting to /tmp/tmux-<uid>/default", verified). It is called only
+  with a server present or just started anyway, and a failure is deliberately
+  ignored: losing the hardening must not refuse a dispatch that would have
+  worked.
   """
-  @spec mark_origin(module()) :: :ok
-  def mark_origin(runner) do
-    stamp = "kitty:" <> DateTime.to_iso8601(DateTime.utc_now())
-    runner.cmd("tmux", ["set-environment", "-g", @marker, stamp], stderr_to_stdout: true)
+  @spec disarm_exit_empty(module()) :: :ok
+  def disarm_exit_empty(runner) do
+    runner.cmd("tmux", ["set-option", "-s", "exit-empty", "off"], stderr_to_stdout: true)
     :ok
-  end
-
-  @doc """
-  Attributes the running tmux server: marker, then pid, then argv.
-
-  Returns `%{origin:, server_pid:, argv:}` — the shape `felt setup receipt` and
-  `felt shuttle status` report, so a human sees "restart your tmux server from
-  kitty" as a one-line remedy instead of diagnosing TCC prompts.
-  """
-  @spec origin(module()) :: %{
-          origin: origin(),
-          server_pid: String.t() | nil,
-          argv: String.t() | nil
-        }
-  def origin(runner) do
-    marker =
-      case runner.cmd("tmux", ["show-environment", "-g", @marker], stderr_to_stdout: true) do
-        {output, 0} -> String.trim(output)
-        _ -> nil
-      end
-
-    pid =
-      case runner.cmd("tmux", ["display-message", "-p", "\#{pid}"], stderr_to_stdout: true) do
-        {output, 0} -> output |> String.trim() |> presence_or_nil()
-        _ -> nil
-      end
-
-    argv =
-      case pid do
-        nil ->
-          nil
-
-        pid ->
-          case runner.cmd("ps", ["-o", "args=", "-p", pid], stderr_to_stdout: true) do
-            {output, 0} -> output |> String.trim() |> presence_or_nil()
-            _ -> nil
-          end
-      end
-
-    %{origin: classify_origin(marker, argv), server_pid: pid, argv: argv}
-  end
-
-  defp presence_or_nil(""), do: nil
-  defp presence_or_nil(value), do: value
-
-  # A daemon-forked server's argv is self-describing: the run script it was
-  # handed (`shuttle-run-<n>.sh`) and/or the worker session name it created.
-  @daemon_argv_patterns [
-    ~r/shuttle-run-/,
-    ~r/-s\s+\S+-shuttle\b/
-  ]
-
-  @doc """
-  Classifies a tmux server's origin from its marker and argv. Pure.
-
-    * a marker at all → `:kitty_born` (we only ever stamp one after starting
-      a server through kitty)
-    * no marker, daemon-shaped argv → `:daemon_born`
-    * no marker, some other argv → `:unknown` (a human's own server, or one
-      predating the marker — never punished)
-    * no argv → `:absent`
-  """
-  @spec classify_origin(String.t() | nil, String.t() | nil) :: origin()
-  def classify_origin(marker, argv) do
-    cond do
-      is_binary(marker) and String.trim(marker) != "" -> :kitty_born
-      not is_binary(argv) or String.trim(argv) == "" -> :absent
-      Enum.any?(@daemon_argv_patterns, &Regex.match?(&1, argv)) -> :daemon_born
-      true -> :unknown
-    end
   end
 
   @doc """

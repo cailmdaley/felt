@@ -2036,9 +2036,15 @@ defmodule Shuttle.PollerTest do
     assert blocked.reason =~ "erlexec"
 
     # Parked: the next autonomous attempt is refused by the cooldown without
-    # spending another `tmux ls` / kitty round trip.
+    # spending another `tmux ls` / kitty round trip — and an explicit dispatch
+    # during the cooldown still says WHY. Reporting "not yet due" here (the old
+    # behaviour) pointed the human at the schedule for the whole five minutes,
+    # while the real answer was already recorded.
     probes_before = Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1))
-    assert {:error, _} = Poller.dispatch_fiber(poller, fiber_id, [])
+
+    assert {:error, {:tmux_server_unavailable, ^message}} =
+             Poller.dispatch_fiber(poller, fiber_id, [])
+
     assert Enum.count(MockRunner.commands(), &match?({"tmux", ["ls" | _]}, &1)) == probes_before
 
     # Once a server exists, a dispatch succeeds and clears the entry.

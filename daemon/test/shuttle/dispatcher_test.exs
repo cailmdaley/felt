@@ -1605,7 +1605,9 @@ defmodule Shuttle.DispatcherTest do
 
       assert Dispatcher.effective_resume_intent(intent, claude, previous_session: @prev) == intent
 
-      assert Dispatcher.effective_resume_intent(intent, pi, previous_session: %{uuid: @prev.uuid, harness: nil}) ==
+      assert Dispatcher.effective_resume_intent(intent, pi,
+               previous_session: %{uuid: @prev.uuid, harness: nil}
+             ) ==
                intent
     end
   end
@@ -1835,14 +1837,9 @@ defmodule Shuttle.DispatcherTest do
       assert is_integer(new_session_at)
       assert kitty_at < new_session_at
 
-      # The origin marker is stamped on the server we just had kitty start.
-      assert Enum.any?(commands, fn
-               {"tmux", ["set-environment", "-g", "SHUTTLE_TMUX_ORIGIN", stamp]} ->
-                 String.starts_with?(stamp, "kitty:")
-
-               _ ->
-                 false
-             end)
+      # `exit-empty` is disarmed on the server kitty just forked, so it cannot
+      # die between here and the worker's own `new-session`.
+      assert Enum.any?(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
 
       assert session =~ "-shuttle"
     end
@@ -1868,12 +1865,31 @@ defmodule Shuttle.DispatcherTest do
       assert MockRunner.tmux_sessions() == MapSet.new()
     end
 
-    test "darwin with a server already running never touches kitty" do
+    test "darwin with a server already running never touches kitty, but disarms exit-empty" do
       set_os_type({:unix, :darwin})
       MockRunner.set_tmux_server(:present)
 
       assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
       assert StubKitty.launches() == []
+
+      # The race this closes: a human-started server with no anchor session
+      # exits the moment its last session goes away, which can happen between
+      # `tmux ls` answering `:present` and the worker's `new-session` — and that
+      # `new-session` would then fork a daemon-rooted server, the one outcome
+      # this whole preflight exists to prevent.
+      commands = MockRunner.commands()
+      assert Enum.any?(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
+
+      exit_empty_at =
+        Enum.find_index(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
+
+      new_session_at =
+        Enum.find_index(commands, fn
+          {"tmux", ["new-session" | _]} -> true
+          _ -> false
+        end)
+
+      assert exit_empty_at < new_session_at
     end
 
     test "linux keeps today's behaviour exactly — an absent server is not the daemon's business" do
@@ -1890,6 +1906,12 @@ defmodule Shuttle.DispatcherTest do
 
       assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
       assert StubKitty.launches() == []
+
+      # And uncertainty touches nothing: there may be no server there to harden.
+      refute Enum.any?(MockRunner.commands(), fn
+               {"tmux", ["set-option" | _]} -> true
+               _ -> false
+             end)
     end
 
     test "capture refuses identically" do

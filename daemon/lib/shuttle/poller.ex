@@ -2008,6 +2008,13 @@ defmodule Shuttle.Poller do
   # `:disabled`, `:closed`, `:no_shuttle_block`,
   # `:not_due_or_blocked`) are surfaced to the UI as accurate copy.
   #
+  # A fiber parked by a preflight refusal is the other case worth naming: the
+  # refusal already knows exactly what is wrong and how to fix it, and reporting
+  # "not yet due" instead would send the human to the clock for the length of
+  # the cooldown. `remembered_preflight_refusal/2` hands the recorded refusal
+  # back verbatim, so an explicit dispatch during the cooldown produces the same
+  # 422 (same tag, same message) the autonomous refusal did.
+  #
   # Only called on the ineligible branch, so the eligible (dispatch-now) path is
   # untouched. For a force/ad_hoc dispatch the irreducible gate is `force_*`'s;
   # for a plain dispatch the fuller `eligible?` rules apply, so the reason is
@@ -2016,6 +2023,10 @@ defmodule Shuttle.Poller do
     shuttle = Map.get(fiber, "shuttle")
     status = Map.get(fiber, "status", "")
     forced? = Keyword.get(opts, :force, false)
+
+    # Only for a non-forced dispatch: a force bypasses the cooldown outright
+    # (`force_dispatch_eligible?/2`), so it can never be what blocks one.
+    remembered = if forced?, do: nil, else: remembered_preflight_refusal(state, fiber)
 
     cond do
       not is_map(shuttle) ->
@@ -2036,8 +2047,43 @@ defmodule Shuttle.Poller do
       not forced? and status != "active" ->
         {:not_eligible, :disabled}
 
+      remembered != nil ->
+        remembered
+
       true ->
         {:not_eligible, :not_due_or_blocked}
+    end
+  end
+
+  # The refusal `preflight_cooldown_open?/2` is parking this fiber on, in the
+  # shape its own surface already renders:
+  #
+  #   * the three message-carrying refusals come back as `{tag, message}` —
+  #     exactly what `Dispatcher.dispatch/2` returned when it refused, so the
+  #     dispatch controller's preflight clause renders the 422 with the tag and
+  #     the operator message rather than a flat `not_eligible`
+  #   * `:project_dir_missing` carries a path, not a message, and the controller
+  #     already renders it as an ineligibility detail, so it keeps that shape
+  #
+  # `nil` when no cooldown is open, or when the recorded reason is something
+  # else (a bare atom like `:watcher_start_failed`) — the caller then falls
+  # through to its own reasons.
+  defp remembered_preflight_refusal(%State{} = state, fiber) do
+    runtime_key = runtime_key_for_fiber(fiber)
+
+    if preflight_cooldown_open?(state, runtime_key) do
+      case Map.get(state.dispatch_failures, runtime_key) do
+        %{reason: {tag, message}}
+        when is_binary(message) and
+               tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] ->
+          {tag, message}
+
+        %{reason: {:project_dir_missing, _dir} = reason} ->
+          {:not_eligible, reason}
+
+        _ ->
+          nil
+      end
     end
   end
 

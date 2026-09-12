@@ -53,6 +53,10 @@ type ReceiptTmuxServer struct {
 	Repair    string        `json:"repair,omitempty"`
 	Origin    string        `json:"origin"`
 	ServerPID string        `json:"server_pid,omitempty"`
+	// Coalition is the launchd label macOS charges the server's file access to
+	// — reported even when healthy, so a `user_born` server says which app the
+	// human will see named in any TCC prompt.
+	Coalition string `json:"coalition,omitempty"`
 }
 
 type ReceiptComponent struct {
@@ -179,30 +183,54 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
 	}
-	// A daemon-forked tmux server has a remedy nobody would guess from the
-	// generic repair line, so it names itself — but never at the expense of the
-	// generation repair, which is about the install being wrong at all.
-	if r.TmuxServer != nil && r.TmuxServer.Status != receiptHealthy &&
-		r.TmuxServer.Status == r.Status && r.Generation.Status == receiptHealthy {
-		r.Repair = r.TmuxServer.Repair
-	}
+	applyTmuxServerRepair(&r)
 	return r
+}
+
+// applyTmuxServerRepair folds the tmux-server remedy into the receipt's
+// top-level repair line. A daemon-forked tmux server has a remedy nobody would
+// guess from the generic repair line, so it names itself — but it must never
+// DISPLACE another component's repair: a missing felt and a mis-rooted tmux
+// server are independent problems and the human needs both strings. The
+// generation repair is the one exception that wins outright; a wrong install is
+// more fundamental than a wrongly-rooted server.
+func applyTmuxServerRepair(r *RuntimeReceipt) {
+	if r.TmuxServer == nil || r.TmuxServer.Status == receiptHealthy ||
+		r.TmuxServer.Status != r.Status || r.TmuxServer.Repair == "" {
+		return
+	}
+	switch {
+	case r.Generation.Status != receiptHealthy:
+		// The install being wrong at all outranks everything here.
+	case r.Repair == "" || r.Repair == receiptRepair(r.Status):
+		// Nothing, or `combineReceiptStatus`'s generic catch-all line — the
+		// specific remedy is strictly better than either.
+		r.Repair = r.TmuxServer.Repair
+	case strings.Contains(r.Repair, r.TmuxServer.Repair):
+	default:
+		r.Repair = r.Repair + "; also: " + r.TmuxServer.Repair
+	}
 }
 
 // collectTmuxServerReceipt attributes the running tmux server on macOS, and
 // reports nothing at all anywhere else: TCC's responsible-process accounting is
 // a darwin behaviour, and every remote in the fleet is Linux.
 //
-// Only `daemon_born` is a mismatch. `kitty_born` is the desired state;
-// `unknown` (a human's own server) and `absent` (no server yet — the daemon will
-// have kitty start one on the next dispatch) are both fine. We never punish a
-// server we cannot attribute.
+// Only `daemon_born` is a mismatch. `user_born` is the desired state;
+// `unknown` (launchctl told us nothing parsable) and `absent` (no server yet —
+// the daemon will have kitty start one on the next dispatch) are both fine. We
+// never punish a server we cannot attribute.
 func collectTmuxServerReceipt() *ReceiptTmuxServer {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
 	report := detectTmuxOrigin()
-	rec := &ReceiptTmuxServer{Status: receiptHealthy, Origin: report.Origin, ServerPID: report.ServerPID}
+	rec := &ReceiptTmuxServer{
+		Status:    receiptHealthy,
+		Origin:    report.Origin,
+		ServerPID: report.ServerPID,
+		Coalition: report.Coalition,
+	}
 	if report.Origin == tmuxOriginDaemonBorn {
 		rec.Status, rec.Repair = receiptMismatch, tmuxOriginRepair
 	}

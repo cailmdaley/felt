@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os/exec"
-	"regexp"
 	"strings"
 )
 
@@ -20,81 +19,104 @@ import (
 // server (Shuttle.TmuxServer), but a server forked before that change — or by
 // an older daemon — keeps poisoning workers until a human restarts it.
 //
-// So the receipt has to be able to SAY so. `launchctl procinfo <pid>` would
-// name the responsible process outright, but it needs root (verified: rc=1,
-// "This subcommand requires root privileges: procinfo"), so attribution is read
-// from a marker the daemon stamps plus the server's own argv.
-
+// So the receipt has to be able to SAY so, and it asks the kernel rather than
+// guessing. `launchctl procinfo <pid>` names the responsible process outright
+// but needs root (verified: rc=1, "This subcommand requires root privileges:
+// procinfo"). `launchctl print pid/<pid>` needs no privileges and prints the
+// process's resource coalition, whose `name` is the launchd label (or app
+// bundle id) of the job that rooted the tree — which is exactly the attribution
+// TCC uses. Verified on this host: the daemon-born server → `io.shuttle.daemon`;
+// a server forked by `kitty @ launch --type=background` →
+// `com.koekeishiya.skhd`, the app that launched kitty.
 const (
-	tmuxOriginMarkerVar = "SHUTTLE_TMUX_ORIGIN"
-
-	tmuxOriginKittyBorn  = "kitty_born"
 	tmuxOriginDaemonBorn = "daemon_born"
+	tmuxOriginUserBorn   = "user_born"
 	tmuxOriginUnknown    = "unknown"
 	tmuxOriginAbsent     = "absent"
 )
 
+// daemonLaunchdLabel is the launchd label the daemon's own agent is installed
+// under (`daemon/share/io.shuttle.daemon.plist.template`, and `install-agent
+// --label`'s default). Built from the one reverse-DNS prefix the tunnel labels
+// also derive from, so the label this compares against and the label the daemon
+// is installed under cannot drift apart.
+const daemonLaunchdLabel = defaultLaunchdLabelPrefix + ".daemon"
+
 // tmuxOriginReport is what the receipt and `felt shuttle status` report about
-// the running tmux server.
+// the running tmux server. Coalition is the raw launchd label the kernel
+// attributes the server to — reported verbatim so a `user_born` server still
+// says WHICH app owns it (the one the human will see in TCC prompts).
 type tmuxOriginReport struct {
 	Origin    string
 	ServerPID string
-	Argv      string
+	Coalition string
 }
 
-// A daemon-forked server's argv is self-describing: the run script the
-// dispatcher handed it (shuttle-run-<n>.sh) and/or the `-shuttle` worker
-// session it was told to create.
-var tmuxDaemonArgvPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`shuttle-run-`),
-	regexp.MustCompile(`-s\s+\S+-shuttle\b`),
-}
-
-// classifyTmuxOrigin mirrors Shuttle.TmuxServer.classify_origin/2 exactly — the
-// two must agree, or the receipt contradicts the daemon.
+// parseResourceCoalitionName pulls the `name` out of `launchctl print
+// pid/<pid>`'s **resource** coalition block. Pure, so the parser is tested
+// against captured real output.
 //
-// A marker means the daemon started the server through kitty (the only time it
-// stamps one). No marker plus daemon-shaped argv is daemon-born. No marker and
-// some other argv is unknown — a human's own server, or one predating the
-// marker; never punished, because a server we cannot attribute might be fine.
-func classifyTmuxOrigin(marker, argv string) string {
-	switch {
-	case strings.TrimSpace(marker) != "":
-		return tmuxOriginKittyBorn
-	case strings.TrimSpace(argv) == "":
-		return tmuxOriginAbsent
-	}
-	for _, re := range tmuxDaemonArgvPatterns {
-		if re.MatchString(argv) {
-			return tmuxOriginDaemonBorn
+// The output carries two coalition blocks — `resource` and `jetsam` — and only
+// the resource coalition is the file-access attribution TCC follows, so the
+// block is selected by name rather than by taking the first `name =` line.
+// Returns "" for output with no parsable resource-coalition name (a launchctl
+// whose format moved, or a pid that vanished mid-call): the caller reports that
+// as `unknown` rather than blaming anyone.
+func parseResourceCoalitionName(out string) string {
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "resource coalition") || !strings.Contains(trimmed, "{") {
+			continue
 		}
+		depth := 1
+		for _, inner := range lines[i+1:] {
+			t := strings.TrimSpace(inner)
+			if depth == 1 && strings.HasPrefix(t, "name = ") {
+				return strings.TrimSpace(strings.TrimPrefix(t, "name = "))
+			}
+			depth += strings.Count(t, "{") - strings.Count(t, "}")
+			if depth <= 0 {
+				break
+			}
+		}
+		return ""
 	}
-	return tmuxOriginUnknown
+	return ""
 }
 
-// detectTmuxOrigin reads the live server: marker, then pid, then argv. A func
-// var so tests stub tmux and ps.
-var detectTmuxOrigin = func() tmuxOriginReport {
-	marker := ""
-	if out, err := exec.Command("tmux", "show-environment", "-g", tmuxOriginMarkerVar).Output(); err == nil {
-		marker = strings.TrimSpace(string(out))
+// classifyCoalition maps a resource-coalition name to an origin. Pure.
+func classifyCoalition(name string) string {
+	switch name {
+	case "":
+		return tmuxOriginUnknown
+	case daemonLaunchdLabel:
+		return tmuxOriginDaemonBorn
+	default:
+		return tmuxOriginUserBorn
 	}
+}
 
+// detectTmuxOrigin reads the live server: its pid from tmux, then the launchd
+// coalition the kernel charges it to. A func var so tests stub it out.
+var detectTmuxOrigin = func() tmuxOriginReport {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{pid}").Output()
 	pid := ""
-	if out, err := exec.Command("tmux", "display-message", "-p", "#{pid}").Output(); err == nil {
+	if err == nil {
 		pid = strings.TrimSpace(string(out))
 	}
-
-	argv := ""
-	if pid != "" {
-		if out, err := exec.Command("ps", "-o", "args=", "-p", pid).Output(); err == nil {
-			argv = strings.TrimSpace(string(out))
-		}
+	if pid == "" {
+		return tmuxOriginReport{Origin: tmuxOriginAbsent}
 	}
 
-	return tmuxOriginReport{Origin: classifyTmuxOrigin(marker, argv), ServerPID: pid, Argv: argv}
+	// CombinedOutput, not Output: a launchctl that exits non-zero may still have
+	// printed the block, and one that printed nothing parses to "" → unknown.
+	printed, _ := exec.Command("launchctl", "print", "pid/"+pid).CombinedOutput()
+	name := parseResourceCoalitionName(string(printed))
+
+	return tmuxOriginReport{Origin: classifyCoalition(name), ServerPID: pid, Coalition: name}
 }
 
 // tmuxOriginRepair is the one-line remedy a human acts on. Deliberately spells
 // out the ordering constraint: killing the server kills every worker on it.
-const tmuxOriginRepair = "tmux server was started by the Shuttle daemon — macOS charges every worker's file access to the daemon binary; restart your tmux server from kitty (kill it once no workers are live, then tmux new-session -d -s shuttle-anchor from a kitty window)"
+const tmuxOriginRepair = "tmux server is charged to the Shuttle daemon (launchd coalition " + daemonLaunchdLabel + ") — macOS charges every worker's file access to the daemon binary; restart your tmux server from a terminal (kill it once no workers are live, then tmux new-session -d -s shuttle-anchor from a kitty window)"
