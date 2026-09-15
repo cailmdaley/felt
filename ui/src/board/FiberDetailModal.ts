@@ -15,6 +15,7 @@ import {
   fileKind,
   fileTapAction,
   formatBytes,
+  pdfThumbWorthRendering,
   previewText,
   type Attachment,
 } from './attachments.js'
@@ -44,7 +45,6 @@ import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
-import type { MoveBroker } from './MoveDestinations.js'
 import {
   disambiguateBasenames,
   normalizeSentFiles,
@@ -309,6 +309,61 @@ function whenVisible(el: Element, fn: () => void): void {
   }, { rootMargin: '200px' })
   io.observe(el)
 }
+/**
+ * pdf.js, loaded once and only when a PDF card first comes into view.
+ *
+ * The library is a megabyte of parser that most fibers never need, so it lives
+ * behind a dynamic import and its own chunk. The worker comes in beside it as
+ * a URL (Vite emits it as an asset and hands back the hashed path) — the same
+ * pairing the Lightcone PaperModal uses, so the two importers can't end up on
+ * different builds of the same library.
+ */
+let pdfJsPromise: Promise<typeof import('pdfjs-dist')> | null = null
+
+function loadPdfJs(): Promise<typeof import('pdfjs-dist')> {
+  if (!pdfJsPromise) {
+    pdfJsPromise = Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+    ]).then(([pdfjsLib, worker]) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = worker.default
+      return pdfjsLib
+    })
+  }
+  return pdfJsPromise
+}
+
+/**
+ * Draw page 1 of `src` into a canvas sized for `face`, and hand it back.
+ *
+ * The page is scaled to the face's WIDTH and cropped by the face's overflow,
+ * which is what you want from a thumbnail of a document: the top of the first
+ * page — title, authors, the opening of the abstract — is the part that tells
+ * you which paper this is. The backing store is multiplied by the device pixel
+ * ratio so the text survives a retina screen rather than smearing.
+ */
+async function renderPdfFirstPage(src: string, face: HTMLElement): Promise<HTMLCanvasElement> {
+  const pdfjsLib = await loadPdfJs()
+  const task = pdfjsLib.getDocument(src)
+  try {
+    const doc = await task.promise
+    const page = await doc.getPage(1)
+    const width = face.clientWidth || 128
+    const unit = page.getViewport({ scale: 1 })
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const viewport = page.getViewport({ scale: (width / unit.width) * dpr })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(viewport.width))
+    canvas.height = Math.max(1, Math.round(viewport.height))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('no 2d context')
+    await page.render({ canvasContext: ctx, viewport }).promise
+    return canvas
+  } finally {
+    void task.destroy?.()
+  }
+}
+
 const PERSIST_PREFIX = 'shuttle:detail:'
 
 function loadPersist(uid: string): DetailPersist {
@@ -394,23 +449,6 @@ interface AgentRecord {
  * Lifecycle: `open(card)` mounts the panel; `close()` tears it down
  * (including the React root inside the page pane).
  */
-/**
- * Put the desktop move popover next to its button — below by preference,
- * flipped above when the viewport's lower edge would clip it, and slid back
- * inside the right margin either way. `position: fixed`, because the panel is
- * a size container and would clip a descendant popover.
- */
-function placeMoveMenu(menu: HTMLElement, anchor: HTMLElement): void {
-  const a = anchor.getBoundingClientRect()
-  const m = menu.getBoundingClientRect()
-  const gap = 6
-  const below = a.bottom + gap
-  const top = below + m.height > window.innerHeight - 8 ? Math.max(8, a.top - gap - m.height) : below
-  const left = Math.max(8, Math.min(a.left, window.innerWidth - m.width - 8))
-  menu.style.top = `${top}px`
-  menu.style.left = `${left}px`
-}
-
 export class FiberDetailModal {
   private overlay: HTMLElement | null = null
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null
@@ -540,20 +578,6 @@ export class FiberDetailModal {
    * as another tab in the same panel rather than starting a second one.
    */
   private linkPanel: LinkedFiberPanel | null = null
-  /**
-   * The board's move seam. Present when a board is behind the panel; absent in
-   * the offline harness fixture and in the wire tests, where "Move ▾" simply
-   * never appears rather than appearing and doing nothing.
-   */
-  private readonly moves: MoveBroker | null
-  /** Teardown for the open move menu (a document.body child — the panel is a
-   *  size container and clips its own fixed descendants). Non-null iff a menu
-   *  is open. */
-  private closeMoveMenu: (() => void) | null = null
-  /** The head row's Move control, kept so a live tick can hide it when the
-   *  board stops offering this card anywhere to go (and show it again when it
-   *  does). Null when there is no board or no control. */
-  private moveBtn: HTMLButtonElement | null = null
   /** Unsubscribe from the mobile-threshold watch, live while the panel is open.
    *  Crossing 700px re-frames the panel between window and sheet in place. */
   private mobileWatch: (() => void) | null = null
@@ -567,7 +591,6 @@ export class FiberDetailModal {
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
-      moves?: MoveBroker
     },
   ) {
     this.shuttleBase = shuttleBase
@@ -577,7 +600,6 @@ export class FiberDetailModal {
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
-    this.moves = opts?.moves ?? null
   }
 
   /**
@@ -808,9 +830,6 @@ export class FiberDetailModal {
     if (!this.host) {
       this.escapeHandler = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return
-        // The move menu unwinds first — the nearest thing you are inside is
-        // the thing Escape acts on, the same rule the wikilink panel follows.
-        if (this.closeMoveMenu) return
         if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
@@ -898,8 +917,6 @@ export class FiberDetailModal {
   close(): void {
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
-    this.dismissMoveMenu()
-    this.moveBtn = null
     if (this.mobileWatch) {
       this.mobileWatch()
       this.mobileWatch = null
@@ -1262,6 +1279,30 @@ export class FiberDetailModal {
       return face
     }
 
+    if (kind === 'pdf') {
+      whenVisible(face, () => {
+        // Ask the daemon how big it is first: past the cap the glyph is the
+        // face, and we never spend the download. A daemon without the route
+        // simply answers nothing and we try anyway.
+        void this.attachmentSize(abs, card)
+          .then((size) => {
+            if (!pdfThumbWorthRendering(size) || !face.isConnected) return null
+            return renderPdfFirstPage(src, face)
+          })
+          .then((canvas) => {
+            if (!canvas || !face.isConnected) return
+            canvas.className = 'kbn-detail-attach-thumb kbn-detail-attach-page'
+            canvas.setAttribute('aria-hidden', 'true')
+            glyph.remove()
+            face.append(canvas)
+          })
+          .catch(() => {
+            /* best-effort — an unparseable or absent PDF keeps its glyph */
+          })
+      })
+      return face
+    }
+
     if (kind === 'markdown' || kind === 'text') {
       whenVisible(face, () => {
         // The daemon's file route ignores `Range` (it answers 200 with the
@@ -1288,6 +1329,34 @@ export class FiberDetailModal {
     return face
   }
 
+  /** What the daemon's `/file-info` says about one path, or `null` when it
+   *  can't say — an older daemon without the route, or a failed request. Two
+   *  callers want this: the card's size line, and the PDF face's size cap. */
+  private async attachmentInfo(
+    fullPath: string,
+    card: KanbanCard,
+  ): Promise<{ exists: boolean; size: number | undefined } | null> {
+    try {
+      const res = await fetch(fileInfoUrl(this.shuttleBase, fullPath, card.originId ?? ''), {
+        cache: 'no-store',
+      })
+      if (!res.ok) return null
+      const data = (await res.json()) as { exists?: unknown; size?: unknown }
+      return {
+        exists: data.exists === true,
+        size: typeof data.size === 'number' ? data.size : undefined,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /** Just the byte count, for the PDF face's cap. An unknown size is
+   *  `undefined`, which the cap reads as "small enough, try it". */
+  private async attachmentSize(fullPath: string, card: KanbanCard): Promise<number | undefined> {
+    return (await this.attachmentInfo(fullPath, card))?.size
+  }
+
   /** Fill a card's size from `/file-info`. Best-effort and silent: a daemon
    *  without the route, or a file that isn't there, simply leaves it blank. */
   private async fillAttachmentSize(
@@ -1295,21 +1364,9 @@ export class FiberDetailModal {
     card: KanbanCard,
     slot: HTMLElement,
   ): Promise<void> {
-    try {
-      const res = await fetch(fileInfoUrl(this.shuttleBase, fullPath, card.originId ?? ''), {
-        cache: 'no-store',
-      })
-      if (!res.ok) return
-      const data = (await res.json()) as { exists?: unknown; size?: unknown }
-      if (!slot.isConnected) return
-      if (data.exists !== true) {
-        slot.textContent = 'missing'
-        return
-      }
-      slot.textContent = formatBytes(typeof data.size === 'number' ? data.size : undefined)
-    } catch {
-      /* best-effort — a card with no size is still a card */
-    }
+    const info = await this.attachmentInfo(fullPath, card)
+    if (!info || !slot.isConnected) return
+    slot.textContent = info.exists ? formatBytes(info.size) : 'missing'
   }
 
   /**
@@ -1403,12 +1460,6 @@ export class FiberDetailModal {
 
       await this.refreshArtifacts(card)
       if (this.overlay !== overlay) return
-      // The board moved underneath this sheet while it sat open — a worker
-      // finished, someone tempered the card from another host. The Move control
-      // is the one piece of chrome whose very PRESENCE is a claim about board
-      // state, so it is re-asked here rather than left saying what was true
-      // when the panel opened.
-      this.syncMoveButton()
     } catch {
       // A live tick is best-effort. Keep the readable page and let the next
       // tick or the explicit button try again rather than replacing it with an
@@ -1715,7 +1766,7 @@ export class FiberDetailModal {
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { host, panel, onCloseRequest: requestClose, moves: this.moves ?? undefined },
+      { host, panel, onCloseRequest: requestClose },
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
@@ -2087,19 +2138,9 @@ export class FiberDetailModal {
 
     toggle.append(chevron, toggleLabel, summary)
 
-    // ── Move ▾ ────────────────────────────────────────────────────────────
-    // Lives in the HEAD row, beside the Actions toggle, rather than down
-    // inside the expanded cluster. Two reasons, and the second is the whole
-    // point of the control: on a phone the head row is the sheet's bottom bar,
-    // so Move is one thumb-reach away with nothing expanded; and on any
-    // viewport moving a card is a placement, not a dispatch — it does not
-    // belong in the row where you type a directive.
     const head = document.createElement('div')
     head.className = 'kbn-detail-controls-head'
     head.append(toggle)
-    const moveBtn = this.buildMoveButton(card)
-    this.moveBtn = moveBtn
-    if (moveBtn) head.append(moveBtn)
 
     const body = document.createElement('div')
     body.className = 'kbn-detail-controls-body'
@@ -3340,231 +3381,6 @@ export class FiberDetailModal {
    * match the kanban grid's `kbn-action-*` palette (gold for primary
    * requeue/resume, teal for tempered, muted gray for composted).
    */
-  // ── Move ▾: the drag, said in words ──────────────────────────────────────
-  //
-  // Why this menu exists at all is written once, in `MoveDestinations.ts`.
-  // Here it is only rendered: the legality comes from there, and each chosen
-  // item goes back to the board's own wire calls through the `MoveBroker`.
-
-  /** The head-row Move control, or null when there is no board behind the
-   *  panel (the harness fixture) or nothing this card can legally do. */
-  private buildMoveButton(card: KanbanCard): HTMLButtonElement | null {
-    const broker = this.moves
-    if (!broker) return null
-    const btn = document.createElement('button')
-    // Built even when the list is empty, and hidden instead. The board can
-    // change under an open sheet in either direction, and a control that was
-    // never created cannot come back when the card becomes movable again.
-    btn.hidden = broker.destinations(card).length === 0
-    btn.type = 'button'
-    btn.className = 'kbn-detail-move-btn'
-    btn.textContent = 'Move ▾'
-    btn.setAttribute('aria-haspopup', 'menu')
-    btn.setAttribute('aria-expanded', 'false')
-    btn.title = 'Move this card — the destinations a drag would accept'
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      if (this.closeMoveMenu) {
-        this.dismissMoveMenu()
-        return
-      }
-      this.openMoveMenu(card, btn, broker)
-    })
-    return btn
-  }
-
-  /** The first pane: destinations. Choosing "Queue behind…" swaps the pane
-   *  rather than opening a second menu — one surface, two depths. */
-  private openMoveMenu(card: KanbanCard, anchor: HTMLElement, broker: MoveBroker): void {
-    this.dismissMoveMenu()
-    const sheet = isMobileViewport()
-
-    const scrim = document.createElement('div')
-    scrim.className = 'kbn-move-scrim'
-    const menu = document.createElement('div')
-    menu.className = sheet ? 'kbn-move-menu kbn-move-sheet' : 'kbn-move-menu'
-    menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', `Move ${card.name}`)
-
-    const dismiss = (): void => this.dismissMoveMenu()
-
-    const renderRoot = (): void => {
-      menu.replaceChildren()
-      menu.append(this.buildMoveHeading(card.name, null))
-      const list = document.createElement('div')
-      list.className = 'kbn-move-list'
-      for (const dest of broker.destinations(card)) {
-        list.append(this.buildMoveItem(dest.label, dest.hint, () => {
-          if (dest.action.kind === 'queue') {
-            renderQueue()
-            return
-          }
-          dismiss()
-          broker.perform(card, dest.action)
-        }))
-      }
-      menu.append(list)
-      // Focus the first item for the keyboard, but NOT on a touch sheet: the
-      // focus ring there reads as a pre-selected choice sitting under the
-      // thumb, which is the last impression a destructive-adjacent menu should
-      // give when nobody has chosen anything yet.
-      if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-item')?.focus()
-    }
-
-    const renderQueue = (): void => {
-      const targets = broker.queueTargets(card)
-      menu.replaceChildren()
-      menu.append(this.buildMoveHeading('Queue behind', renderRoot))
-      if (targets.length === 0) {
-        const empty = document.createElement('p')
-        empty.className = 'kbn-move-empty'
-        // An empty list is a fact about the board, not a failure — say which.
-        empty.textContent = 'Nothing on the board can take this one behind it.'
-        menu.append(empty)
-        return
-      }
-      // A search box only once the list is long enough that scanning it costs
-      // more than typing. Below that it is chrome standing between the reader
-      // and four names.
-      const list = document.createElement('div')
-      list.className = 'kbn-move-list'
-      const draw = (filter: string): void => {
-        const q = filter.trim().toLowerCase()
-        list.replaceChildren()
-        const shown = q
-          ? targets.filter((t) => t.card.name.toLowerCase().includes(q) || t.card.id.toLowerCase().includes(q))
-          : targets
-        for (const t of shown) {
-          // The hint names the TAIL when it differs from the card you picked:
-          // joining a queue means joining its end, and the menu should not let
-          // that happen behind your back.
-          const hint = t.tail === t.card.id ? undefined : `joins the end of its queue`
-          list.append(this.buildMoveItem(t.card.name, hint, () => {
-            dismiss()
-            broker.queueBehind(card, t.tail)
-          }))
-        }
-        if (shown.length === 0) {
-          const none = document.createElement('p')
-          none.className = 'kbn-move-empty'
-          none.textContent = 'No match.'
-          list.append(none)
-        }
-      }
-      if (targets.length > 7) {
-        const search = document.createElement('input')
-        search.type = 'search'
-        search.className = 'kbn-move-search'
-        search.placeholder = 'Find a card…'
-        search.setAttribute('aria-label', 'Filter queue targets')
-        search.addEventListener('input', () => draw(search.value))
-        menu.append(search)
-      }
-      draw('')
-      menu.append(list)
-      if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-search, .kbn-move-item')?.focus()
-    }
-
-    document.body.append(scrim, menu)
-    anchor.setAttribute('aria-expanded', 'true')
-    renderRoot()
-    if (!sheet) placeMoveMenu(menu, anchor)
-
-    scrim.addEventListener('pointerdown', (e) => {
-      e.stopPropagation()
-      dismiss()
-    })
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      dismiss()
-    }
-    document.addEventListener('keydown', onKey, true)
-
-    // A MENU IS TRANSIENT, so any reflow under it takes it down rather than
-    // being chased. The desktop popover is placed once against the button's
-    // rectangle, and a resize moves that rectangle out from under it; crossing
-    // 700px is worse still, since the menu would have to change shape as well
-    // as place. Re-placing on every frame would be work spent on a surface the
-    // reader is about to dismiss anyway — one tap re-opens it, correct.
-    const onReflow = (): void => dismiss()
-    window.addEventListener('resize', onReflow)
-    const stopMobileWatch = onMobileChange(onReflow)
-
-    this.closeMoveMenu = () => {
-      document.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('resize', onReflow)
-      stopMobileWatch()
-      anchor.setAttribute('aria-expanded', 'false')
-      scrim.remove()
-      menu.remove()
-    }
-  }
-
-  private buildMoveHeading(text: string, onBack: (() => void) | null): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'kbn-move-heading'
-    if (onBack) {
-      const back = document.createElement('button')
-      back.type = 'button'
-      back.className = 'kbn-move-back'
-      back.setAttribute('aria-label', 'Back to destinations')
-      back.textContent = '‹'
-      back.addEventListener('click', (e) => {
-        e.stopPropagation()
-        onBack()
-      })
-      row.append(back)
-    }
-    const label = document.createElement('span')
-    label.className = 'kbn-move-heading-text'
-    label.textContent = text
-    row.append(label)
-    return row
-  }
-
-  private buildMoveItem(label: string, hint: string | undefined, onPick: () => void): HTMLElement {
-    const item = document.createElement('button')
-    item.type = 'button'
-    item.className = 'kbn-move-item'
-    item.setAttribute('role', 'menuitem')
-    const main = document.createElement('span')
-    main.className = 'kbn-move-item-label'
-    main.textContent = label
-    item.append(main)
-    if (hint) {
-      const sub = document.createElement('span')
-      sub.className = 'kbn-move-item-hint'
-      sub.textContent = hint
-      item.append(sub)
-    }
-    item.addEventListener('click', (e) => {
-      e.stopPropagation()
-      onPick()
-    })
-    return item
-  }
-
-  /** Show or hide the Move control to match what the live board now offers.
-   *  The destinations themselves are always computed at click time, so this is
-   *  only about the control's presence. */
-  private syncMoveButton(): void {
-    const btn = this.moveBtn
-    const card = this.card
-    if (!btn || !card || !this.moves) return
-    const none = this.moves.destinations(card).length === 0
-    if (btn.hidden === none) return
-    btn.hidden = none
-    // An open menu over a card with nothing left to offer is a menu about to
-    // lie; take it down with the button.
-    if (none) this.dismissMoveMenu()
-  }
-
-  private dismissMoveMenu(): void {
-    this.closeMoveMenu?.()
-    this.closeMoveMenu = null
-  }
-
   private buildActionBtn(
     label: string,
     variant: 'primary' | 'tempered' | 'composted',

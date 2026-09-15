@@ -166,3 +166,23 @@ export function previewText(raw: string, maxLines = 6, maxCols = 90): string {
     .join('\n')
     .trimEnd()
 }
+
+/**
+ * The byte ceiling above which a PDF card keeps its glyph instead of rendering
+ * a first-page thumbnail.
+ *
+ * pdf.js parses the file structure before it can draw page 1, and a very large
+ * PDF (a scanned book, a figure-heavy proceedings) costs a multi-megabyte
+ * download and a visible stall to produce a 128px picture. The strip is a
+ * glance, not a viewer — past this size the glyph is the honest face, and the
+ * Reader is one tap away.
+ */
+export const PDF_THUMB_MAX_BYTES = 50 * 1024 * 1024
+
+/** Whether a PDF of this size is worth thumbnailing. An unknown size (the
+ *  daemon has no `/file-info`, or didn't answer) is treated as small enough:
+ *  the feature degrades to "try it", not to "never". */
+export function pdfThumbWorthRendering(size: number | undefined): boolean {
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return true
+  return size <= PDF_THUMB_MAX_BYTES
+}

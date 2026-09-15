@@ -1365,6 +1365,20 @@
   transform: translateY(-1px);
 }
 .kbn-card:active { cursor: grabbing; }
+/* The long press, while it is being held: the card settles a little, the way a
+   physical thing does under a thumb. It is the only feedback touch gets that
+   the gesture has been noticed at all — the menu is still 450ms away. iOS also
+   wants telling twice that a held finger is not a text selection: `user-select`
+   above stops the selection, `-webkit-touch-callout` stops the callout bubble
+   that would otherwise rise over the menu. */
+.kbn-card {
+  -webkit-touch-callout: none;
+}
+.kbn-card.kbn-longpress-held {
+  transform: scale(0.985);
+  background: #F6EFDD;
+  border-color: rgba(154, 123, 53, 0.42);
+}
 .kbn-card-dragging {
   opacity: 0.45;
   transform: scale(0.98);

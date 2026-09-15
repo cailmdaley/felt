@@ -1366,11 +1366,9 @@
   color: #8a7a4a;
 }
 
-/* ── The head row: Actions toggle · Move ▾ ────────────────────────────────
-   The toggle keeps its own full-width tap area; Move sits beside it as a
-   small hard-edged plate. On a phone this row IS the sheet's bottom bar
-   (see the sheet block below), which is why Move lives here rather than
-   inside the cluster the toggle opens. */
+/* ── The head row: the Actions toggle ─────────────────────────────────────
+   One full-width tap area. (Moving a card lives on the card itself now — a
+   long press on the board raises the move menu; see `MoveMenu.ts`.) */
 .kbn-detail-controls-head {
   display: flex;
   align-items: center;
@@ -1381,41 +1379,11 @@
   flex: 1;
   min-width: 0;
 }
-.kbn-detail-move-btn {
-  flex: 0 0 auto;
-  border: 1px solid rgba(27, 22, 17, 0.20);
-  border-radius: 1px;
-  background: rgba(255, 251, 237, 0.72);
-  padding: 3px 10px 2px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #4A443C;
-  cursor: pointer;
-}
-/* The UA's `[hidden]` rule loses to any author `display`, and this file's own
-   history says so — see the note beside `.kbn-detail-controls-body[hidden]`,
-   which is what made the dropdown ship stuck open. Kept adjacent to the rules
-   that could grow one. */
-.kbn-detail-move-btn[hidden] {
-  display: none;
-}
-.kbn-detail-move-btn:hover {
-  border-color: rgba(154, 123, 53, 0.5);
-  color: #1B1611;
-  background: rgba(255, 251, 237, 0.98);
-}
-.kbn-detail-move-btn:focus-visible {
-  outline: 2px solid rgba(154, 123, 53, 0.6);
-  outline-offset: 1px;
-}
-
 /* ── The move menu ────────────────────────────────────────────────────────
    A document.body child, not a panel descendant: the panel is a size
    container, which clips even fixed-position children. Desktop is a
-   popover placed beside its button; on a phone the same list rises from
-   the bottom edge, where the thumb is. */
+   popover placed beside the card it was raised from; on a phone the same
+   list rises from the bottom edge, where the thumb is. */
 .kbn-move-scrim {
   position: fixed;
   inset: 0;
@@ -1665,14 +1633,6 @@
     padding: 4px 12px 4px 16px;
     font-size: calc(11px * var(--kbn-type-scale, 1));
   }
-  .kbn-detail-sheet .kbn-detail-move-btn {
-    min-height: 40px;
-    padding: 0 14px;
-    font-size: calc(11.5px * var(--kbn-type-scale, 1));
-    border-color: rgba(154, 123, 53, 0.5);
-    color: #6B5526;
-    background: rgba(196, 147, 51, 0.12);
-  }
   /* Expanded, the cluster takes the room it needs and scrolls; the cap is
      dvh (not vh) so the browser chrome collapsing does not strand it. */
   .kbn-detail-sheet .kbn-detail-controls-body {
@@ -1871,4 +1831,15 @@ a.kbn-detail-aloft { text-decoration: none; }
     min-height: 36px;
   }
   .kbn-reader-zoom-btn { min-width: 32px; min-height: 32px; }
+}
+/* A PDF's first page, rendered by pdf.js into a canvas at the face's width.
+   Anchored to the TOP rather than cover-cropped to the middle: the title and
+   authors are the part that says which document this is. */
+.kbn-detail-attach-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: auto;
+  object-fit: unset;
+  background: #FFFDF6;
 }

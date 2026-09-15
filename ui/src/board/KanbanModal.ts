@@ -49,7 +49,8 @@ import type {
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
-import type { MoveAction, MoveDestination, QueueTarget } from './MoveDestinations.js'
+import type { MoveAction, MoveBroker, MoveDestination, QueueTarget } from './MoveDestinations.js'
+import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
@@ -280,16 +281,6 @@ export class KanbanModal {
       (card, target) => this.transition(card, target),
       // Status-pill double-click → focus the running worker's kitty tab.
       this.openWorkerAfterGesture,
-      // The move seam: the panel's "Move ▾" performs the board's own gestures
-      // rather than a second implementation of them.
-      {
-        moves: {
-          destinations: (card) => this.moveDestinationsFor(card),
-          queueTargets: (card) => this.moveQueueTargetsFor(card),
-          perform: (card, action) => this.performMove(card, action),
-          queueBehind: (card, tailId) => this.moveQueueBehind(card, tailId),
-        },
-      },
     )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -303,6 +294,7 @@ export class KanbanModal {
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, splice, drop) => this.unqueueRow(fiberId, splice, drop),
       openDetail: (card) => this.detailModal.open(card),
+      onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       // A peek row's drag never touches `dragSourceId`, so this is how the
@@ -2373,6 +2365,38 @@ export class KanbanModal {
     const maxScrollLeft = this.body.scrollWidth - this.body.clientWidth
     this.body.classList.toggle('kbn-can-scroll-left', this.body.scrollLeft > 1)
     this.body.classList.toggle('kbn-can-scroll-right', this.body.scrollLeft < maxScrollLeft - 1)
+  }
+
+  /**
+   * The move seam handed to the menu: four calls, each landing in the same
+   * private gesture method the equivalent drop lands in.
+   */
+  private readonly moveBroker: MoveBroker = {
+    destinations: (card) => this.moveDestinationsFor(card),
+    queueTargets: (card) => this.moveQueueTargetsFor(card),
+    perform: (card, action) => this.performMove(card, action),
+    queueBehind: (card, tailId) => this.moveQueueBehind(card, tailId),
+  }
+
+  /** Teardown for the open move menu. Non-null iff one is up — a second long
+   *  press replaces the first rather than stacking a second menu on it. */
+  private closeMoveMenu: (() => void) | null = null
+
+  /**
+   * A card held still under the thumb offers what a drag would offer.
+   *
+   * Touch has no drag backend, so this is the ONLY way to move a card on a
+   * phone; on desktop it is a harmless extra beside the drag. Nothing to offer
+   * means nothing appears — a menu with no items is worse than no menu, and the
+   * card is not broken, it is simply somewhere terminal.
+   */
+  private openMoveMenuFor(card: KanbanCard, anchor: HTMLElement): void {
+    this.closeMoveMenu?.()
+    this.closeMoveMenu = null
+    if (this.moveDestinationsFor(card).length === 0) return
+    this.closeMoveMenu = openMoveMenu(card, anchor, this.moveBroker, () => {
+      this.closeMoveMenu = null
+    })
   }
 
   // ── The Move menu's seam (MoveBroker) ──────────────────────────────────

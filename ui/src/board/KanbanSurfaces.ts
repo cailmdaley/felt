@@ -43,6 +43,7 @@ import type {
 } from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
+import { attachLongPress } from './longPress.js'
 import {
   activeFolioIndex,
   folioScrollTarget,
@@ -212,6 +213,10 @@ interface KanbanSurfaceRendererOptions {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
+  /** A card held still under the thumb — the touch reading of the drag. The
+   *  renderer only reports the gesture and the element to hang a menu off; what
+   *  it raises is the board's business. Omit to leave cards press-inert. */
+  onCardLongPress?: (card: KanbanCard, anchor: HTMLElement) => void
   openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
    *  `▶ release` click. Release is global per daemon (one restart parks the
@@ -676,6 +681,8 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', `${card.name}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
 
     if (!isStale) this.installDraggable(el, card, true)
+    // Held still, a chip offers the same menu a desk card does.
+    this.installLongPressMove(el, card)
     // The strip takes stack drops like any other surface that draws a head.
     this.installStackTarget(el, card)
 
@@ -1505,8 +1512,8 @@ export class KanbanSurfaceRenderer {
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
     el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
     // Touch has no drag-and-drop backend, and a draggable card fights the
-    // finger that is trying to scroll past it. The overlays lane's Move menu
-    // is the touch path to the same transitions.
+    // finger that is trying to scroll past it. Holding the card still is the
+    // touch path to the same transitions (`onCardLongPress`).
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
     // A fiber in a git-synced store is served by every daemon holding it. The
@@ -1517,6 +1524,12 @@ export class KanbanSurfaceRenderer {
     }
 
     if (!isStale) this.installDraggable(el, card, true)
+    // THE TOUCH READING OF THE DRAG. A card held still under the thumb offers
+    // the places a drag would accept — the only way to move a card on a phone,
+    // and a harmless extra beside the drag everywhere else. What the press
+    // raises is the board's business (`onCardLongPress`); the renderer only
+    // reports that it happened, and on which element to hang the menu.
+    this.installLongPressMove(el, card)
     // A card is also a DROP TARGET: dropping another card on it stacks that
     // one behind this one. Installed even on a stale card — the sequence write
     // is against the DROPPED card's owner, not this one's. ONCE: a second call
@@ -2236,6 +2249,15 @@ export class KanbanSurfaceRenderer {
       if (!source || !verdict?.ok) return
       void this.o.stack?.(source, verdict.tail)
     })
+  }
+
+  /** Wire the long press, when the board offered somewhere for it to go.
+   *  Installed on STALE cards too: what a stale card may do is the move menu's
+   *  own verdict to give, not a gesture's to silently withhold. */
+  private installLongPressMove(el: HTMLElement, card: KanbanCard): void {
+    const longPress = this.o.onCardLongPress
+    if (!longPress) return
+    attachLongPress(el, { onFire: () => longPress(card, el) })
   }
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {
