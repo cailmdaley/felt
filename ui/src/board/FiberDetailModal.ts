@@ -3157,7 +3157,6 @@ export class FiberDetailModal {
             }
           }
         : undefined,
-      { fiberId: card.id },
       scrollable
         ? (pane) => {
             // The text pane's twin of the iframe restore above: no document,

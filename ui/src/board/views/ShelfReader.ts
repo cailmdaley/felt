@@ -541,7 +541,6 @@ export class ShelfReader {
             }
           }
         : undefined,
-      { fiberId: entry.file.uid },
     )
     entry.cell.append(viewer)
     setZoomTarget(entry, viewer, entry.file.fullPath)

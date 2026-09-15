@@ -21,7 +21,6 @@
  */
 
 import './FileViewerPanel.css'
-import { installGestureLayer } from './gestures/GestureLayer.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
@@ -69,7 +68,6 @@ export function buildFileViewer(
   fullPath: string,
   originId: string,
   onFrameLoad?: (iframe: HTMLIFrameElement) => void,
-  gesture?: { fiberId?: string },
   onTextPane?: (scroller: HTMLElement) => void,
 ): HTMLElement {
   const ext = fileExt(fullPath)
@@ -124,17 +122,7 @@ export function buildFileViewer(
   iframe.className = 'kbn-fileview-frame'
   iframe.src = src
   iframe.title = basename(fullPath)
-  // Mount before installing: GestureLayer puts its frame chrome beside the
-  // iframe, so it needs the frame's parent to exist at construction time.
   wrap.append(iframe, veil)
-  // The reader owns the frame's fiber context (a sent-file record carries its
-  // intrinsic uid); the gesture layer owns only the ephemeral interaction.
-  installGestureLayer(iframe, {
-    shuttleBase,
-    fiberId: gesture?.fiberId,
-    filePath: fullPath,
-    sourceUrl: src,
-  })
 
   /** Show the failure, whether or not `load` already lifted the veil. */
   const failed = (detail: string): void => {

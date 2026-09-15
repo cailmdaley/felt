@@ -12,11 +12,21 @@
   display: flex;
   min-height: 0;
   min-width: 0;
+  /* WebKit shrink-wraps an iframe to its content's intrinsic width rather
+     than honoring `width: 100%` on the frame, so a report wider than the
+     viewport (common in an HTML deliverable) widens the frame past the
+     screen and the reader pans sideways into blank space. Clipping here
+     is the other half of the `width: 1px; min-width: 100%` fix below. */
+  overflow: hidden;
 }
 
 .kbn-fileview-frame {
   flex: 1 1 auto;
-  width: 100%;
+  /* See `.kbn-fileview-frame-wrap` above: `width: 1px` defeats WebKit's
+     shrink-to-content sizing, and `min-width: 100%` then stretches the
+     frame to fill its flex container as `width: 100%` was meant to. */
+  width: 1px;
+  min-width: 100%;
   height: 100%;
   border: none;
   background: var(--porch-rag, #FFFDF6);
