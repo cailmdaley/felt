@@ -82,13 +82,25 @@ covered in full under [Keep-alive](#keep-alive).
 What you downloaded is a Mix release: the daemon's compiled modules, the
 bundled Erlang runtime and native components, and the board bundle, in one
 directory tree. It reads nothing from the host's toolchain, which is why this
-path asks for no Elixir and no Node. The bundled runtime and native components
-make each tarball platform-specific: the target needs a matching OS and CPU
-architecture plus compatible system libraries such as libc, but it does not
-need an installed OTP because the release carries its own runtime. CI builds
-each tarball on a native runner instead of cross-compiling one, and boot-tests
-it there before attaching it. The matrix covers four:
-`shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+path asks for no Elixir and no Node. The bundled runtime makes each tarball
+platform-specific — matching OS and CPU architecture — and the matrix covers
+four: `shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+
+On Linux the one thing the host must supply is a C library at least as new as
+the one the release was built against. The Linux tarballs declare a floor of
+**glibc 2.28** (RHEL/Rocky/Alma 8, the `manylinux_2_28` baseline): they are
+built inside an EL8 container, and CI reads the required `GLIBC_`/`GLIBCXX_`/
+`GCC_` symbol versions back out of every binary and refuses to publish an
+artifact above that floor. So a release that boots on an EL8 login node boots
+on every newer distribution too; `ldd --version` tells you where a host stands.
+The felt CLI has no such requirement — it is a static binary.
+
+The installer checks this for you: before it replaces anything it starts the
+bundled runtime (`bin/shuttled eval …`) and reads the version from inside the
+VM. A tree whose runtime cannot start on the host is reported, with the
+loader's error, and left uninstalled. Do the same yourself if you copy a
+tarball around by hand — the launcher's `version` verb is a shell readout that
+succeeds on a runtime that cannot run.
 
 Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The

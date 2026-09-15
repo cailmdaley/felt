@@ -93,11 +93,30 @@ requires the two plugin manifests to agree, and on a real tag refuses a
 manifest version that does not match it. Local snapshots skip only the tag
 comparison, which keeps development packaging usable while retaining the
 agreement check. GoReleaser creates a draft release and defers the Homebrew
-tap update; the daemon matrix
-boot-tests every native artifact, attaches all four daemon tarballs, and the
-final job verifies the complete eight-archive set before making the release
-public. GoReleaser's formula is preserved as an Actions artifact alongside
-those exact archives; for a final release, that job pushes the preserved file
+tap update; the daemon matrix builds, gates and boot-tests every native
+artifact, attaches all four daemon tarballs, and the final job verifies the
+complete eight-archive set before making the release public.
+
+The Linux daemon legs run inside an `almalinux:8` container, not on the bare
+Ubuntu runner: a Mix release bundles the native ERTS that built it, and that
+ERTS inherits the glibc/libstdc++ symbol floor of the build host. Built on
+`ubuntu-latest` it needs `GLIBC_2.38`, which no HPC login node has (the fleet
+floor is 2.28 — RHEL/Rocky/Alma 8). EL8 is the `manylinux_2_28` baseline, so an
+artifact built there runs everywhere newer. There is no prebuilt OTP for EL8,
+so the leg builds OTP from source into a cached `/opt/otp`, keyed on the exact
+patch pinned in the workflow's `EL8_OTP_VERSION` (same major as `ci.yml`).
+
+The invariant is *declared and gated*, not assumed: `scripts/check-glibc-floor.sh`
+runs `objdump -T` over every ELF file in the assembled release and fails the
+job if any binary needs more than `GLIBC_2.28` / `GLIBCXX_3.4.25` / `GCC_7.0.0`.
+The boot test cannot catch this class of regression — it runs on the host that
+produced the binaries, where the symbols are present by construction — which
+is why a base-image bump or a leg quietly losing its `container:` fails at the
+gate instead of on someone's cluster. Run the script locally against an
+untarred release to audit a published artifact (macOS: `brew install binutils`).
+
+GoReleaser's formula is preserved as an Actions artifact alongside those exact
+archives; for a final release, that job pushes the preserved file
 to the tap through the GitHub Contents API only after publication. A failed
 native platform therefore leaves a
 draft for repair instead of exposing a stable CLI release that cannot satisfy
@@ -121,12 +140,14 @@ HOME="$PROBE_ROOT/felt-home" PATH=/usr/bin:/bin \
   FELT_VERSION=1.1.0-rc.3 SHUTTLE=1 \
   SHUTTLE_HOME="$PROBE_ROOT/shuttle" sh ./install.sh
 "$PROBE_ROOT/felt-bin/felt" --version
-"$PROBE_ROOT/shuttle/bin/shuttled" version
+"$PROBE_ROOT/shuttle/bin/shuttled" eval 'Application.load(:shuttle); IO.puts(Application.spec(:shuttle, :vsn))'
 ```
 
 The installer verifies those version identities before replacing an existing
-binary or daemon tree. The native release matrix boots each assembled daemon
-artifact before upload, while the Linux container acceptance harness builds
+binary or daemon tree. The daemon line goes through `eval` rather than the
+launcher's `version` verb because only `eval` starts the bundled BEAM, so it
+fails loudly on a host whose glibc is older than the build machine's. The
+native release matrix boots each assembled daemon artifact before upload, while the Linux container acceptance harness builds
 from a clean image and polls `/api/v1/version` until its contract is healthy.
 
 Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`

@@ -145,3 +145,70 @@ jobs:
       # build (tsc + vite) succeeds on a stranger's clone, CI included.
       - name: Build board bundle
         run: npm run build
+
+  # Warm the EL8 OTP cache that release.yml's daemon legs restore from.
+  #
+  # This job exists purely because of how actions/cache is scoped. A cache entry
+  # is visible to the ref that saved it and to the repository's DEFAULT BRANCH,
+  # nothing else. release.yml runs on tag pushes, so an entry it saves under
+  # refs/tags/v1.1.1 is invisible to the next tag — every release would pay the
+  # 10-20 minute OTP source build on every leg, forever. Saving the same key
+  # here, on pushes to main, puts it somewhere a tag build can actually read.
+  #
+  # The key, the container and the build script are shared with release.yml
+  # (see .github/el8-toolchain.env); if they drift, the cache silently stops
+  # hitting and releases just get slower, which is why release.yml asserts the
+  # image matches its pin.
+  el8-otp-cache:
+    name: Warm the EL8 OTP cache (${{ matrix.label }})
+    # Only main can host a cache a tag build will read; on a PR this job would
+    # build OTP and save an entry nothing can ever restore.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: x86_64
+          - os: ubuntu-24.04-arm
+            label: arm64
+    runs-on: ${{ matrix.os }}
+    container:
+      image: almalinux:8
+    steps:
+      # See release.yml: the image has no git, and checkout degrades without it.
+      - name: Bootstrap git for checkout
+        run: |
+          set -eux
+          dnf -y install git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v4
+
+      - name: Load the pinned EL8 toolchain versions
+        run: grep -E '^[A-Z0-9_]+=' .github/el8-toolchain.env >>"$GITHUB_ENV"
+
+      # lookup-only: probe for the key without downloading ~200 MB we would only
+      # throw away. On a hit the job is a no-op and finishes in seconds.
+      - name: Is the cache already warm?
+        id: probe
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/otp
+          key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}
+          lookup-only: true
+
+      - name: Install the EL8 build toolchain
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: bash scripts/el8-toolchain.sh
+
+      - name: Build OTP from source
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: bash scripts/build-otp-el8.sh /opt/otp
+
+      - name: Save the OTP build for release.yml
+        if: steps.probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/otp
+          key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}

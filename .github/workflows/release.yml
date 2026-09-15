@@ -46,29 +46,150 @@ jobs:
   # NATIVE runners (a release bundles whichever OTP built it, and BEAM bytecode
   # + ERTS must match the platform they run on), each boot-tested on the
   # platform it targets, then attached to the release goreleaser just created.
+  #
+  # The Linux legs build inside an `almalinux:8` container, NOT on the bare
+  # ubuntu runner. A Mix release ships prebuilt native binaries — beam.smp,
+  # erl_child_setup, the crypto NIFs — and those inherit the symbol-version
+  # floor of whatever host compiled them. Built on ubuntu-latest they demand
+  # GLIBC_2.38 / GLIBCXX_3.4.30 / GCC_12.0.0, and every HPC cluster we run on
+  # (RHEL/Rocky/Alma 8, glibc 2.28, plus Alma 9) refuses to load them. EL8 is
+  # the `manylinux_2_28` baseline: glibc 2.28 and the gcc-8 toolchain, so an
+  # artifact built there runs on EL8 and on everything newer.
+  #
+  # The cost of that floor is OTP from source: erlef/setup-beam has no EL8
+  # prebuilt, so the Linux legs run scripts/build-otp-el8.sh into /opt/otp and
+  # cache it. A tag build can only read caches saved on the default branch, so
+  # ci.yml warms that same key on pushes to main and this job normally restores
+  # rather than builds. Pins live in .github/el8-toolchain.env, read by both.
+  # macOS legs are untouched and still use setup-beam.
+  #
+  # scripts/check-glibc-floor.sh guards the invariant, and it is not redundant
+  # with the boot test below. The boot test runs ON THE BUILD HOST, where the
+  # symbols the artifact needs are present by construction — it cannot fail the
+  # way a cluster does. The gate reads the requirement out of the ELF itself, so
+  # it catches a regression (a base-image bump, a leg silently losing its
+  # container) at build time rather than on someone's login node.
+  #
+  # The Go CLI legs are unaffected: goreleaser builds them CGO_ENABLED=0, so
+  # they have no libc dependency at all.
   daemon:
     needs: goreleaser
     strategy:
       fail-fast: false
       matrix:
         include:
+          # almalinux:8 is multi-arch, so the same reference gives x86_64 on
+          # ubuntu-latest and aarch64 on the arm runner. The macOS entries use
+          # an EMPTY image, which runs the job directly on the runner. That
+          # empty value must reach the job through the `container.image`
+          # expression below — a literal `container: ""` is rejected by
+          # workflow schema validation ("Unexpected value ''").
           - os: ubuntu-latest
+            container: "almalinux:8"
             artifact: shuttle_Linux_x86_64.tar.gz
           - os: ubuntu-24.04-arm
+            container: "almalinux:8"
             artifact: shuttle_Linux_arm64.tar.gz
           # Intel macOS is macos-15-intel now. macos-13 was retired: a job
           # targeting it does not fail, it queues forever against a label with
           # no runners (observed on v1.1.0-rc.1 — 50 minutes, no runner, while
           # every other platform finished in about a minute).
           - os: macos-15-intel
+            container: ""
             artifact: shuttle_Darwin_x86_64.tar.gz
           - os: macos-14
+            container: ""
             artifact: shuttle_Darwin_arm64.tar.gz
     runs-on: ${{ matrix.os }}
+    container:
+      image: ${{ matrix.container || '' }}
     steps:
+      # BEFORE checkout, deliberately: the almalinux:8 image has no git, and
+      # actions/checkout silently degrades to a REST tarball download without
+      # it. Only git here — the rest of the toolchain lives in a repo script
+      # that does not exist until checkout has run.
+      - name: Bootstrap git for checkout
+        if: matrix.container != ''
+        run: |
+          set -eux
+          dnf -y install git
+          # The checkout lands owned by a different uid than the container root
+          # that reads it; without this every later `git` call aborts on
+          # "dubious ownership".
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - uses: actions/checkout@v4
 
-      - name: Set up Elixir
+      # Both workflows read the same file, so the cache key they compute and the
+      # OTP they build are the same by construction.
+      - name: Load the pinned EL8 toolchain versions
+        if: matrix.container != ''
+        run: grep -E '^[A-Z0-9_]+=' .github/el8-toolchain.env >>"$GITHUB_ENV"
+
+      - name: The container image must match the pinned one
+        if: matrix.container != ''
+        run: |
+          set -eu
+          if [ "${{ matrix.container }}" != "$EL8_IMAGE" ]; then
+            echo "matrix container '${{ matrix.container }}' != EL8_IMAGE '$EL8_IMAGE'" >&2
+            echo "the cache key says one image and the job runs another; fix .github/el8-toolchain.env" >&2
+            exit 1
+          fi
+
+      - name: Install the EL8 build toolchain
+        if: matrix.container != ''
+        run: bash scripts/el8-toolchain.sh
+
+      # /opt/otp is the slow part of this job (a 10-20 min source build), so it
+      # is cached. actions/cache is scoped per ref and falls back only to the
+      # DEFAULT BRANCH — and this workflow runs on tag pushes, so an entry saved
+      # under refs/tags/v1.1.1 is invisible to v1.1.2. ci.yml warms this exact
+      # key on pushes to main, which is the only ref a tag build can read from.
+      # Key, script and pins are shared with ci.yml; keep them in lockstep.
+      - name: Restore the source-built OTP
+        if: matrix.container != ''
+        id: otp-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/otp
+          key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}
+
+      - name: Build OTP from source (cache miss)
+        if: matrix.container != '' && steps.otp-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-otp-el8.sh /opt/otp
+
+      - name: Install Elixir and put the EL8 toolchain on PATH
+        if: matrix.container != ''
+        run: |
+          set -eux
+          curl -fsSL -o /tmp/elixir.zip \
+            "https://github.com/elixir-lang/elixir/releases/download/v${EL8_ELIXIR_VERSION}/elixir-otp-28.zip"
+          mkdir -p /opt/elixir
+          unzip -q /tmp/elixir.zip -d /opt/elixir
+          echo "/opt/otp/bin" >>"$GITHUB_PATH"
+          echo "/opt/elixir/bin" >>"$GITHUB_PATH"
+          export PATH="/opt/otp/bin:/opt/elixir/bin:$PATH"
+          elixir --version
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Install the gh CLI (EL8)
+        if: matrix.container != ''
+        run: |
+          set -eux
+          case "$(uname -m)" in
+            x86_64)  gh_arch=amd64 ;;
+            aarch64) gh_arch=arm64 ;;
+            *) echo "unsupported arch for the gh tarball: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/gh.tar.gz \
+            "https://github.com/cli/cli/releases/download/v${EL8_GH_VERSION}/gh_${EL8_GH_VERSION}_linux_${gh_arch}.tar.gz"
+          tar -C /tmp -xzf /tmp/gh.tar.gz
+          install -m 0755 "/tmp/gh_${EL8_GH_VERSION}_linux_${gh_arch}/bin/gh" /usr/local/bin/gh
+          gh --version
+
+      - name: Set up Elixir (macOS)
+        if: matrix.container == ''
         uses: erlef/setup-beam@v1
         with:
           # Keep in lockstep with ci.yml: the release ships this OTP.
@@ -117,6 +238,13 @@ jobs:
           MIX_ENV=prod mix compile
           MIX_ENV=prod mix compile.app --force
           MIX_ENV=prod mix release shuttled --path ../out/shuttle
+
+      # Linux only: macOS has no glibc and nothing to check. This must run
+      # before the boot test, because the boot test cannot fail the way a
+      # cluster does — it runs on the host that produced the binaries.
+      - name: Check the artifact's glibc floor
+        if: matrix.container != ''
+        run: bash scripts/check-glibc-floor.sh out/shuttle
 
       - name: Boot-test the artifact
         run: |

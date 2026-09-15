@@ -87,11 +87,31 @@ verify_cli() {
   fi
 }
 
+# The daemon is an ERTS-bundled Mix release, so "is this the right version"
+# and "can this machine run it at all" are one question — and the launcher's
+# `version` verb answers only the first. That verb is a pure shell readout of
+# releases/start_erl.data: it prints a version and exits 0 on a tree whose
+# bundled beam.smp cannot start, which is exactly the state a release built
+# against a newer glibc lands in on an older cluster. Ask the VM instead.
+# `eval` boots the bare BEAM (no application start, no FELT_STORES needed) and
+# the version it prints is the loaded application's own, so one invocation
+# proves the runtime works and establishes identity.
 verify_shuttle() {
   _binary="$1"
   _expected="${TAG#v}"
-  _line="$("$_binary" version 2>/dev/null | head -1 || true)"
-  _actual="$(printf '%s\n' "$_line" | awk '{print $2}')"
+  _err="$TMPDIR/shuttle-verify.err"
+  if ! _line="$("$_binary" eval 'Application.load(:shuttle); IO.puts(Application.spec(:shuttle, :vsn))' 2>"$_err")"; then
+    echo "The downloaded shuttle daemon's bundled Erlang runtime failed to start on this machine." >&2
+    echo "Refusing to replace ${SHUTTLE_HOME}." >&2
+    if [ -s "$_err" ]; then
+      echo "Error from ${_binary}:" >&2
+      sed 's/^/  /' "$_err" >&2
+    fi
+    echo "A \`GLIBC_... not found\` error means this host's C library is older than the" >&2
+    echo "one the release was built against; the felt CLI above is unaffected." >&2
+    exit 1
+  fi
+  _actual="$(printf '%s\n' "$_line" | tail -1 | tr -d '[:space:]')"
   if [ "$_actual" != "$_expected" ]; then
     echo "Downloaded shuttle reports version '${_actual:-unknown}', expected ${_expected}." >&2
     echo "Refusing to replace ${SHUTTLE_HOME}." >&2
