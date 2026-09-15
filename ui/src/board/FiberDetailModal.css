@@ -1040,78 +1040,129 @@
   margin: 0.4em 0;
 }
 
-/* `:::{embed} <path>` rendered through the `/file` route: images and audio as
-   a captioned figure, everything else (PDF, HTML, text) in a fixed-height
-   scrolling iframe. An unresolvable path degrades to `.kbn-detail-embed-missing`
-   — the labelled placeholder, so report.html-style fibers still read cleanly. */
-.kbn-detail-embed-figure {
-  margin: 1.2em 0;
+/* ── Attachments strip ────────────────────────────────────────────────────
+   A fiber body's `:::{embed}` files, one card each, in a row above the prose.
+   They no longer render inline: a scrolling document inside the scrolling
+   constitution reads badly on a desktop and is unusable on a phone. The cards
+   wear the sent-file chip's warm ochre so the two groups read as one family,
+   with more weight here because an attachment is central and evergreen where a
+   sent file is one delivery on a trail. */
+.kbn-detail-attach {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 22px 4px;
 }
-.kbn-detail-embed-img {
-  display: block;
-  max-width: 100%;
-  height: auto;
+.kbn-detail-attach-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #9A7B35;
+}
+.kbn-detail-attach-heading::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(154, 123, 53, 0.28), transparent 70%);
+}
+/* One strip, scrolling in ITSELF — the page never scrolls sideways. */
+.kbn-detail-attach-strip {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.3) transparent;
+}
+.kbn-detail-attach-card {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 148px;
+  min-height: 44px;
+  padding: 8px 10px 9px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(154, 123, 53, 0.34);
   border-radius: 5px;
-  border: 1px solid rgba(27, 22, 17, 0.12);
+  background:
+    linear-gradient(rgba(255, 251, 237, 0.75), rgba(255, 251, 237, 0.25)),
+    rgba(196, 147, 51, 0.1);
+  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.08);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
 }
-.kbn-detail-embed-audio { display: block; width: 100%; }
-.kbn-detail-embed-figure figcaption {
-  margin-top: 0.45em;
-  font-size: 0.82em;
-  font-style: italic;
-  color: #9A8F80;
+.kbn-detail-attach-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(154, 123, 53, 0.6);
+  box-shadow: 0 3px 7px rgba(27, 22, 17, 0.13);
 }
-.kbn-detail-embed-frame {
-  margin: 1.2em 0;
-  border: 1px solid rgba(27, 22, 17, 0.16);
-  border-radius: 6px;
+.kbn-detail-attach-card:active { transform: translateY(0); }
+.kbn-detail-attach-card:focus-visible {
+  outline: 2px solid rgba(154, 123, 53, 0.65);
+  outline-offset: 2px;
+}
+.kbn-detail-attach-card[disabled] {
+  cursor: default;
+  opacity: 0.55;
+  box-shadow: none;
+}
+/* The face: a real thumbnail where the browser can make one for free from the
+   bytes the daemon already serves, otherwise the suffix as a glyph — the same
+   resting face a Shelf card wears. */
+.kbn-detail-attach-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 54px;
   overflow: hidden;
-  background: var(--porch-rag, #FBF6E9);
+  border-radius: 3px;
+  background: rgba(27, 22, 17, 0.045);
 }
-.kbn-detail-embed-frame iframe {
-  display: block;
+.kbn-detail-attach-thumb {
   width: 100%;
   height: 100%;
-  border: 0;
+  object-fit: cover;
+  display: block;
 }
-
-/* A full-length HTML embed (report.html with no pinned `:height:`): the frame
-   carries no fixed height — autosizeEmbeds (FiberDetailModal.ts) measures the
-   same-origin doc on load and sets an explicit px height so it reads as part of
-   the page with no nested scrollbar. `min-height` is the pre-load / cross-origin
-   fallback; `overflow: visible` keeps the grown iframe from being clipped. */
-.kbn-detail-embed-autosize {
-  overflow: visible;
-  min-height: 240px;
+.kbn-detail-attach-ext {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8A6E2E;
 }
-.kbn-detail-embed-autosize iframe {
-  height: auto;
-  min-height: 240px;
+.kbn-detail-attach-name {
+  width: 100%;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  color: #3A2F22;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-/* Placeholder for an embed whose path couldn't be resolved (relative path on a
-   fiber whose dir didn't reach the client, or a bad path). */
-.kbn-detail-embed {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.55em;
-  margin: 1.1em 0;
-  padding: 0.8em 1em;
-  background: rgba(46, 42, 38, 0.04);
-  border: 1px dashed rgba(27, 22, 17, 0.22);
-  border-radius: 6px;
+.kbn-detail-attach-title {
+  width: 100%;
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  color: #6B5526;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.kbn-detail-embed-glyph { color: var(--porch-verdigris, #2f7d6f); font-size: 1.05em; }
-.kbn-detail-embed code {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 0.86em;
-  color: #2E2A26;
-}
-.kbn-detail-embed-note {
-  font-size: 0.8em;
-  font-style: italic;
-  color: #9A8F80;
+.kbn-detail-attach-meta {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  color: rgba(58, 47, 34, 0.6);
 }
 
 /* ── Sent files strip ─────────────────────────────────────────────────── */
@@ -1470,6 +1521,25 @@
      page from the edge it is anchored to. */
   .kbn-detail-sheet .kbn-detail-header { order: 0; }
   .kbn-detail-sheet .kbn-detail-sent { order: 1; }
+
+  /* Thumb-sized cards, and a strip that can be swiped with the finger that is
+     already on the page. The strip scrolls; the page still does not. */
+  .kbn-detail-attach {
+    padding: 10px 16px 4px;
+  }
+  .kbn-detail-attach-strip {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+  }
+  .kbn-detail-attach-card {
+    width: 156px;
+    min-height: 88px;
+    padding: 10px 12px 11px;
+  }
+  .kbn-detail-attach-face { height: 62px; }
+  .kbn-detail-attach-name { font-size: calc(13px * var(--kbn-type-scale, 1)); }
+  .kbn-detail-attach-title { font-size: calc(11.5px * var(--kbn-type-scale, 1)); }
   .kbn-detail-sheet .kbn-detail-page { order: 2; }
   .kbn-detail-sheet .kbn-detail-controls {
     order: 3;

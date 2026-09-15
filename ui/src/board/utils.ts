@@ -320,7 +320,7 @@ export function prepareIframeExternalLinks(iframe: HTMLIFrameElement): void {
  * routes require. Absolute (`/…`) passes through; relative needs `opts.basePath`
  * (the fiber's dir); otherwise `null`.
  */
-function resolveAbs(rawPath: string, opts?: RenderMarkdownOptions): string | null {
+export function resolveAbs(rawPath: string, opts?: RenderMarkdownOptions): string | null {
   if (rawPath.startsWith('/')) return rawPath
   if (opts?.basePath) return `${opts.basePath}/${rawPath}`
   return null
@@ -388,107 +388,12 @@ export function paperUrl(astraPath: string, opts?: RenderMarkdownOptions): strin
   return withOrigin(`paper.html?path=${encodePathParam(dir)}`, opts?.originId)
 }
 
-/** The by-extension image/audio vocabulary, shared by the two dispatches that
- *  key off it: `embedHtml` here (MyST `:::{embed}` blocks) and
- *  `buildFileViewer` in FileViewerPanel (sent deliverables). One vocabulary so
- *  the two can never drift. Read-only — never mutate these. */
+/** The by-extension image/audio vocabulary. `buildFileViewer` in
+ *  FileViewerPanel (the Reader) is its one consumer now that `:::{embed}`
+ *  bodies no longer render inline — an attachment opens through that same
+ *  viewer, so there is still exactly one dispatch. Read-only. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
-const EMBED_DEFAULT_IFRAME_HEIGHT = 600
-// An ASTRA paper render is the full lightcone chrome (masthead + scope rail) —
-// it earns more vertical room than a generic file preview; it scrolls inside.
-const EMBED_ASTRA_IFRAME_HEIGHT = 820
-
-/**
- * Replace MyST `:::{embed} <path>` blocks with real artifact embeds resolved
- * through the `/file` route, by extension — images → `<img>`, audio →
- * `<audio>`, everything else (PDF, HTML, text) → a fixed-height scrolling
- * `<iframe>`, mirroring the sent-file viewer's dispatch. The `:height:` (px or
- * a unit-carrying length) and `:title:` options are honored. A relative path
- * needs the fiber's dir (`opts.basePath`) to resolve; without it — or for an
- * unresolvable path — the block degrades to a labelled placeholder, so a
- * report.html-style fiber on a host that can't resolve the dir still reads
- * cleanly. Runs BEFORE `marked`, injecting block-level HTML the renderer passes
- * through untouched.
- */
-export function renderEmbeds(md: string, opts?: RenderMarkdownOptions): string {
-  // `:::{embed} <path>` then optional `:key: val` option lines, closed by `:::`.
-  const EMBED_RE =
-    /^:::\{embed\}[ \t]+(\S+)[^\n]*\n((?:[ \t]*:[a-zA-Z-]+:[^\n]*\n)*)[ \t]*:::[ \t]*$/gim
-  return md.replace(EMBED_RE, (_match, path: string, optionBlock: string) => {
-    return '\n\n' + embedHtml(path, parseEmbedOptions(optionBlock), opts) + '\n\n'
-  })
-}
-
-function parseEmbedOptions(block: string): { height?: string; title?: string } {
-  const out: { height?: string; title?: string } = {}
-  for (const line of block.split('\n')) {
-    const m = line.match(/^[ \t]*:([a-zA-Z-]+):[ \t]*(.*)$/)
-    if (!m) continue
-    const key = m[1].toLowerCase()
-    const val = m[2].trim()
-    if (key === 'height') out.height = val
-    else if (key === 'title') out.title = val
-  }
-  return out
-}
-
-function embedPlaceholderHtml(path: string, title?: string): string {
-  const label = title ? escapeHtml(title) : 'embedded artifact'
-  return `<div class="kbn-detail-embed kbn-detail-embed-missing"><span class="kbn-detail-embed-glyph">⧉</span><code>${escapeHtml(path)}</code><span class="kbn-detail-embed-note">${label} · couldn’t resolve a path to render</span></div>`
-}
-
-function embedHtml(
-  path: string,
-  embedOpts: { height?: string; title?: string },
-  opts?: RenderMarkdownOptions,
-): string {
-  const src = fileUrl(path, opts)
-  if (!src) return embedPlaceholderHtml(path, embedOpts.title)
-
-  const ext = fileExt(path)
-  const safeSrc = escapeAttr(src)
-  const safeTitle = escapeAttr(embedOpts.title ?? basename(path))
-  const caption = embedOpts.title ? `<figcaption>${escapeHtml(embedOpts.title)}</figcaption>` : ''
-  const heightCss = cssLength(embedOpts.height)
-
-  // An embedded `astra.yaml` opens the full Lightcone paper render in the paper
-  // entry (isolated React + Tailwind), not the generic /file iframe. The paper
-  // entry bakes the project dir and renders via @lightcone/renderer.
-  if (isAstraYaml(path)) {
-    const purl = paperUrl(path, opts)
-    if (!purl) return embedPlaceholderHtml(path, embedOpts.title)
-    const height = heightCss ?? `${EMBED_ASTRA_IFRAME_HEIGHT}px`
-    return `<div class="kbn-detail-embed-frame kbn-detail-embed-astra" style="height:${height}"><iframe src="${escapeAttr(purl)}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
-  }
-
-  if (IMAGE_EXTS.has(ext)) {
-    const style = heightCss ? ` style="height:${heightCss}"` : ''
-    return `<figure class="kbn-detail-embed-figure"><img class="kbn-detail-embed-img" src="${safeSrc}" alt="${safeTitle}" loading="lazy"${style} />${caption}</figure>`
-  }
-
-  if (AUDIO_EXTS.has(ext)) {
-    return `<figure class="kbn-detail-embed-figure"><audio class="kbn-detail-embed-audio" controls src="${safeSrc}"></audio>${caption}</figure>`
-  }
-
-  // An embedded HTML artifact (report.html and friends) reads as part of the
-  // page, not a porthole into another doc — so unless the author pins a
-  // `:height:`, render it FULL-LENGTH: the iframe grows to its own content
-  // height (measured post-load by FiberDetailModal.autosizeEmbeds — same-origin
-  // through /file) and the panel page scrolls as one column, no nested
-  // scrollbar. An explicit `:height:` opts back into the fixed, internally
-  // scrolling frame.
-  if (ext === 'html' || ext === 'htm') {
-    if (heightCss) {
-      return `<div class="kbn-detail-embed-frame" style="height:${heightCss}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
-    }
-    return `<div class="kbn-detail-embed-frame kbn-detail-embed-autosize"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-autosize="1" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
-  }
-
-  const height = heightCss ?? `${EMBED_DEFAULT_IFRAME_HEIGHT}px`
-  return `<div class="kbn-detail-embed-frame" style="height:${height}"><iframe src="${safeSrc}" title="${safeTitle}" loading="lazy" data-gesture-path="${escapeAttr(path)}"></iframe></div>`
-}
-
 export function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
 }
@@ -512,19 +417,6 @@ export function fileExt(path: string): string {
   const base = basename(path)
   const dot = base.lastIndexOf('.')
   return dot > 0 ? base.slice(dot + 1).split(/[?#]/)[0].toLowerCase() : ''
-}
-
-/**
- * Normalize a `:height:` option for an inline `style`. A bare number → `px`; a
- * value already carrying a CSS unit passes through; anything else → undefined.
- * The whitelist guards against style-attribute injection from the option text.
- */
-function cssLength(value?: string): string | undefined {
-  if (!value) return undefined
-  const v = value.trim()
-  if (/^\d+(\.\d+)?$/.test(v)) return `${v}px`
-  if (/^\d+(\.\d+)?(px|em|rem|vh|vw|%)$/.test(v)) return v
-  return undefined
 }
 
 /**

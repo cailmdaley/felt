@@ -3,12 +3,20 @@ import {
   cacheBustUrl,
   fileBytesUrl,
   fileInfoUrl,
+  fileExt,
   humanizeIdleAge,
-  prepareIframeExternalLinks,
-  renderEmbeds,
+  IMAGE_EXTS,
   renderMarkdown,
+  resolveAbs,
   showToast,
 } from './utils.js'
+import {
+  attachmentGlyph,
+  extractEmbeds,
+  fileTapAction,
+  formatBytes,
+  type Attachment,
+} from './attachments.js'
 import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
@@ -33,7 +41,6 @@ import {
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
-import { installGestureLayer, type GestureLayer } from './gestures/GestureLayer.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import type { MoveBroker } from './MoveDestinations.js'
@@ -376,13 +383,9 @@ export class FiberDetailModal {
   private outsideHandler: ((e: PointerEvent) => void) | null = null
   private resizeHandler: (() => void) | null = null
   private searchDebounce: number | null = null
-  /** ResizeObservers watching full-length HTML embeds so they re-fit their
-   *  height when the panel reflows their content (see autosizeEmbeds).
-   *  Disconnected on close so a re-opened panel never leaks observers. */
-  private embedObservers: ResizeObserver[] = []
-  /** Gesture controllers belong to the current body DOM and are replaced when
-   * the fiber body is rerendered. Their own file reloads keep their batches. */
-  private gestureLayers: GestureLayer[] = []
+  /** The attachment strip above the prose. Held so re-reading the body
+   *  replaces the strip rather than stacking a second one under it. */
+  private attachRow: HTMLElement | null = null
   /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
    *  dispatch (carrying user_message + resume_mode inline), lifecycle,
    *  felt-nest — owner-routed by the card's `originId` carried as
@@ -888,8 +891,7 @@ export class FiberDetailModal {
       this.writePersist()
     }
     this.fiberIndex = null
-    this.disconnectEmbedObservers()
-    this.disconnectGestureLayers()
+    this.attachRow = null
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.closeViewerWindow()
@@ -910,6 +912,7 @@ export class FiberDetailModal {
     this.tabStrip = null
     this.bodyPage = null
     this.proseEl = null
+    this.attachRow = null
     this.sentWrap = null
     this.sentList = null
     this.bodyRevision = undefined
@@ -1005,8 +1008,6 @@ export class FiberDetailModal {
       ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
       : ''
 
-    this.disconnectEmbedObservers()
-    this.disconnectGestureLayers()
     prose.classList.remove('kbn-detail-prose-empty')
     if (body) {
       // Resolve a relative `:::{embed}` / image against the fiber's own dir
@@ -1021,9 +1022,13 @@ export class FiberDetailModal {
         // it is the one surface that may render them as links.
         wikilinks: true,
       }
-      prose.innerHTML = lede + renderMarkdown(renderEmbeds(body, bodyOpts), bodyOpts)
-      this.autosizeEmbeds(prose)
-      this.installGestureFrames(prose, card)
+      // The body's `:::{embed}` directives are DECLARATIONS, not placements:
+      // each names a file the fiber keeps current, they leave the prose
+      // entirely, and every one of them is drawn as a card in the strip above
+      // (renderAttachments). See attachments.ts for why inline rendering went.
+      const { body: prose_md, attachments } = extractEmbeds(body)
+      prose.innerHTML = lede + renderMarkdown(prose_md, bodyOpts)
+      this.renderAttachments(attachments, card, prose)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
       this.restoreBodyScroll(pageScroll, overlay)
@@ -1055,6 +1060,156 @@ export class FiberDetailModal {
     this.restoreBodyScroll(pageScroll, overlay)
   }
 
+  // ── Attachments: the strip above the prose ──────────────────────────────
+
+  /**
+   * Draw one card per `:::{embed}` in the body, in body order, as a strip
+   * ABOVE the prose.
+   *
+   * These used to render inline, which put a scrolling document inside the
+   * scrolling constitution: tolerable on a desktop, and on a phone an
+   * embedded PDF whose page 2 was simply unreachable. A card is the honest
+   * shape — it says what is attached and hands the file to the surface that
+   * can actually read it.
+   *
+   * The strip is NOT the sent-files trail and never merges with it. An
+   * attachment is evergreen and central to the fiber; a sent file is a one-off
+   * delivery. They wear the same card idiom so they read as one family, and
+   * they stay two groups because they are two things.
+   */
+  private renderAttachments(
+    attachments: readonly Attachment[],
+    card: KanbanCard,
+    prose: HTMLElement,
+  ): void {
+    this.attachRow?.remove()
+    this.attachRow = null
+    if (attachments.length === 0) return
+
+    const wrap = document.createElement('section')
+    wrap.className = 'kbn-detail-attach'
+
+    const heading = document.createElement('div')
+    heading.className = 'kbn-detail-attach-heading'
+    heading.textContent = attachments.length === 1 ? 'Attachment' : 'Attachments'
+
+    const strip = document.createElement('div')
+    strip.className = 'kbn-detail-attach-strip'
+    strip.setAttribute('role', 'list')
+    for (const att of attachments) strip.append(this.buildAttachmentCard(att, card))
+
+    wrap.append(heading, strip)
+    prose.parentElement?.insertBefore(wrap, prose)
+    this.attachRow = wrap
+  }
+
+  /** One attachment card: a face (image thumbnail, else the extension glyph),
+   *  the filename, the author's `:title:` when given, and the size once the
+   *  daemon's `/file-info` answers. A path that can't be resolved to an
+   *  absolute file (no fiber dir) still draws — inert, saying so. */
+  private buildAttachmentCard(att: Attachment, card: KanbanCard): HTMLElement {
+    const opts = { basePath: card.fiberDir, originId: card.originId }
+    const abs = resolveAbs(att.path, opts)
+    const name = basename(att.path)
+
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'kbn-detail-attach-card'
+    el.setAttribute('role', 'listitem')
+    el.title = att.title ? `${att.title}\n${abs ?? att.path}` : (abs ?? att.path)
+
+    const face = document.createElement('span')
+    face.className = 'kbn-detail-attach-face'
+    // A thumbnail only where the browser can make one for free from bytes the
+    // daemon already serves. Nothing is rendered daemon-side for this strip.
+    if (abs && IMAGE_EXTS.has(fileExt(att.path))) {
+      const img = document.createElement('img')
+      img.className = 'kbn-detail-attach-thumb'
+      img.src = fileBytesUrl(this.shuttleBase, abs, card.originId ?? '')
+      img.alt = ''
+      img.loading = 'lazy'
+      face.append(img)
+    } else {
+      const glyph = document.createElement('span')
+      glyph.className = 'kbn-detail-attach-ext'
+      glyph.textContent = attachmentGlyph(att.path)
+      face.append(glyph)
+    }
+
+    const nameEl = document.createElement('span')
+    nameEl.className = 'kbn-detail-attach-name'
+    nameEl.textContent = name
+
+    const meta = document.createElement('span')
+    meta.className = 'kbn-detail-attach-meta'
+    meta.textContent = abs ? '' : 'path unresolved'
+
+    el.append(face, nameEl)
+    if (att.title) {
+      const titleEl = document.createElement('span')
+      titleEl.className = 'kbn-detail-attach-title'
+      titleEl.textContent = att.title
+      el.append(titleEl)
+    }
+    el.append(meta)
+
+    if (!abs) {
+      el.disabled = true
+      return el
+    }
+    void this.fillAttachmentSize(abs, card, meta)
+    el.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.openArtifact(abs, card)
+    })
+    return el
+  }
+
+  /** Fill a card's size from `/file-info`. Best-effort and silent: a daemon
+   *  without the route, or a file that isn't there, simply leaves it blank. */
+  private async fillAttachmentSize(
+    fullPath: string,
+    card: KanbanCard,
+    slot: HTMLElement,
+  ): Promise<void> {
+    try {
+      const res = await fetch(fileInfoUrl(this.shuttleBase, fullPath, card.originId ?? ''), {
+        cache: 'no-store',
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as { exists?: unknown; size?: unknown }
+      if (!slot.isConnected) return
+      if (data.exists !== true) {
+        slot.textContent = 'missing'
+        return
+      }
+      slot.textContent = formatBytes(typeof data.size === 'number' ? data.size : undefined)
+    } catch {
+      /* best-effort — a card with no size is still a card */
+    }
+  }
+
+  /**
+   * Open one file path, by pointer.
+   *
+   * Under a MOUSE it goes to the Reader, where the tab strip, the zoom and the
+   * ⤓ live. Under a FINGER it downloads straight away, because that is what
+   * the ⤓ did and on iOS the download is what hands the file to the native
+   * viewer — the one surface that can page a PDF properly. Reaching it used to
+   * cost two taps (open the Reader, then find ⤓); this is that gesture with
+   * the detour removed.
+   */
+  private openArtifact(fullPath: string, card: KanbanCard): void {
+    if (fileTapAction(coarsePointer()) === 'download') {
+      void this.downloadFile(fullPath, card.originId ?? '')
+      return
+    }
+    this.activateFile(
+      { fullPath, basename: basename(fullPath), timestamp: Date.now() },
+      card,
+    )
+  }
+
   private restoreBodyScroll(scrollTop: number, overlay: HTMLElement): void {
     const page = this.bodyPage
     if (!page) return
@@ -1062,29 +1217,6 @@ export class FiberDetailModal {
     window.requestAnimationFrame(() => {
       if (this.overlay === overlay) page.scrollTop = scrollTop
     })
-  }
-
-  private disconnectEmbedObservers(): void {
-    for (const ro of this.embedObservers) ro.disconnect()
-    this.embedObservers = []
-  }
-
-  private disconnectGestureLayers(): void {
-    for (const layer of this.gestureLayers) layer.destroy()
-    this.gestureLayers = []
-  }
-
-  private installGestureFrames(prose: HTMLElement, card: KanbanCard): void {
-    const fiberId = card.id
-    for (const frame of prose.querySelectorAll<HTMLIFrameElement>('iframe[data-gesture-path]')) {
-      const src = frame.getAttribute('src') ?? frame.src
-      this.gestureLayers.push(installGestureLayer(frame, {
-        shuttleBase: this.shuttleBase,
-        fiberId,
-        filePath: frame.dataset.gesturePath,
-        sourceUrl: src,
-      }))
-    }
   }
 
   private startLiveRefresh(): void {
@@ -1500,86 +1632,6 @@ export class FiberDetailModal {
     link.title = `Open ${basename(altPath)} in the viewer`
   }
 
-  /**
-   * Size full-length HTML embeds (`iframe[data-autosize]`, emitted by
-   * utils.embedHtml for an HTML `:::{embed}` with no pinned `:height:`) so they
-   * read as part of the page — one scroll column, no nested scrollbar. The
-   * iframe is same-origin (the daemon's `/file` route), so its document is
-   * readable. Two regimes:
-   *
-   *   - **reveal.js deck** (a `slides.html` from the slides skill) — a deck has
-   *     fixed NATIVE slide dimensions and scales to fill whatever box it's given,
-   *     so content-height measurement collapses it to a stub. Instead size by the
-   *     deck's own aspect ratio (`Reveal.getConfig()` width/height): height =
-   *     container-width × (slideH / slideW). The deck then shows at native
-   *     proportions and grows taller as the panel widens.
-   *   - **ordinary HTML** (report.html and friends) — grow to the content's
-   *     scrollHeight so the whole document reads inline.
-   *
-   * A ResizeObserver on both the container (width-driven, for the deck) and the
-   * body (content-driven, for ordinary HTML) re-fits on any panel resize. A
-   * cross-origin or unreadable doc silently keeps the CSS min-height.
-   */
-  private autosizeEmbeds(prose: HTMLElement): void {
-    const frames = prose.querySelectorAll<HTMLIFrameElement>('iframe[data-autosize]')
-    frames.forEach((iframe) => {
-      // reveal.js deck → size by native slide aspect ratio. Returns false when
-      // the frame isn't a (ready) reveal deck, so `fit` falls back to content
-      // height. `getConfig` may not exist until the deck's async init runs —
-      // hence the retries scheduled on load.
-      const fitReveal = (): boolean => {
-        const win = iframe.contentWindow as unknown as {
-          Reveal?: { getConfig?: () => { width?: number; height?: number } }
-        } | null
-        const cfg = win?.Reveal?.getConfig?.()
-        const sw = Number(cfg?.width)
-        const sh = Number(cfg?.height)
-        if (!(sw > 0) || !(sh > 0)) return false
-        const w = (iframe.parentElement ?? iframe).clientWidth
-        if (!(w > 0)) return false
-        iframe.style.height = `${Math.round((w * sh) / sw)}px`
-        return true
-      }
-      const fitContent = () => {
-        const doc = iframe.contentDocument
-        if (!doc) return
-        const h = Math.max(doc.documentElement?.scrollHeight ?? 0, doc.body?.scrollHeight ?? 0)
-        if (h > 0) iframe.style.height = `${h}px`
-      }
-      const fit = () => {
-        try {
-          prepareIframeExternalLinks(iframe)
-          if (!fitReveal()) fitContent()
-        } catch {
-          /* cross-origin / unreadable — leave the CSS min-height in place */
-        }
-      }
-      iframe.addEventListener('load', () => {
-        fit()
-        // Late reveal init: getConfig can lag the load event; re-fit a few times.
-        ;[120, 400, 1200].forEach((ms) => window.setTimeout(fit, ms))
-        try {
-          if (typeof ResizeObserver !== 'undefined') {
-            const ro = new ResizeObserver(() => fit())
-            // Container width drives the deck; body size drives ordinary HTML.
-            if (iframe.parentElement) ro.observe(iframe.parentElement)
-            const body = iframe.contentDocument?.body
-            if (body) ro.observe(body)
-            this.embedObservers.push(ro)
-          }
-        } catch {
-          /* ignore — observation is best-effort */
-        }
-      })
-      // A cached doc may have finished loading before the listener attached.
-      try {
-        if (iframe.contentDocument?.readyState === 'complete') fit()
-      } catch {
-        /* ignore */
-      }
-    })
-  }
-
   // ── Panel geometry: default + remembered, drag, resize ────────────────────
 
   /** Default size: a reading column at nearly full viewport height — the
@@ -1809,9 +1861,14 @@ export class FiberDetailModal {
   private async downloadActiveFile(): Promise<void> {
     const entry = this.openFiles.find((e) => e.file.fullPath === this.activePath)
     if (!entry || !this.card) return
-    const fullPath = entry.file.fullPath
+    await this.downloadFile(entry.file.fullPath, this.card.originId)
+  }
+
+  /** Download one path. The ⤓ button and a tap on a card both land here, so
+   *  the finger gets exactly the gesture the button always performed. */
+  private async downloadFile(fullPath: string, originId: string): Promise<void> {
     const filename = basename(fullPath)
-    const url = fileBytesUrl(this.shuttleBase, fullPath, this.card.originId)
+    const url = fileBytesUrl(this.shuttleBase, fullPath, originId)
     try {
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -2808,6 +2865,12 @@ export class FiberDetailModal {
       row.append(name, when)
       row.addEventListener('click', (e) => {
         e.stopPropagation()
+        // Same pointer rule as an attachment card: a finger gets the file
+        // itself, a mouse gets the Reader.
+        if (fileTapAction(coarsePointer()) === 'download') {
+          void this.downloadFile(file.fullPath, card.originId ?? '')
+          return
+        }
         this.activateFile(file, card)
       })
       list.append(row)
