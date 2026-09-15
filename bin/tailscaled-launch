@@ -8,31 +8,60 @@
 # ~/.local/bin/tailscaled-launch alongside shuttle-launch itself.
 #
 # Modes:
-#   tailscaled-launch          (re)create tmux session "tailscaled" running
-#                              `tailscaled-launch --loop`
-#   tailscaled-launch --loop   the respawn loop itself (runs in the foreground)
+#   tailscaled-launch            (re)create tmux session "tailscaled" running
+#                                `tailscaled-launch --loop`, but ONLY if no
+#                                such session already exists — see "Restart
+#                                is opt-in" below.
+#   tailscaled-launch --restart  same, but tears down and replaces a live
+#                                session first.
+#   tailscaled-launch --loop     the respawn loop itself (runs in the
+#                                foreground; unchanged by --restart, which
+#                                only governs how the outer invocation treats
+#                                an existing session).
 #
 # State lives in $HOME/.local/state/tailscale (socket, statedir, log),
 # created if missing; override with $TAILSCALED_STATE.
 #
-# tailscaled is a well-behaved long-running daemon, not a crash-prone login
-# node process — unlike shuttle-launch's backoff, a fixed 5s retry is enough
-# here and keeps this script small.
+# Restart is opt-in, unlike shuttle-launch.
+#
+# shuttle-launch kills and recreates its tmux session unconditionally, and
+# that is fine there: the shuttle daemon is cheap to restart (workers survive
+# in their own tmux sessions; only the dispatcher bounces) and re-running
+# shuttle-launch by hand is the documented way to pick up a new build. This
+# script's tmux session IS the operator's tailnet connectivity — killing it
+# tears down every live connection over that instance, potentially including
+# the very SSH-over-Tailscale session used to run this command. Re-running
+# tailscaled-launch to check on things, or because a bootstrap script called
+# it again, must not have that side effect. So the bare invocation is
+# idempotent: if session "tailscaled" already exists, it is left alone and we
+# exit 0 having done nothing. --restart is the explicit, deliberate force
+# path for when you actually want to bounce the daemon (new tailscaled
+# binary, wedged state, etc).
 #
 # --outbound-http-proxy-listen and --socks5-server are what make this
 # tailscaled useful as a *hub*: a host whose own tailnet route is
 # userspace-networking has no other way out to a remote's ts.net address, so
 # the daemon feeds that proxy to :httpc via remotes.json's
-# `defaults.https_proxy` (see docs/shuttle/installation.md).
+# `defaults.https_proxy` (see docs/shuttle/installation.md). The port each
+# flag binds is overridable — $TAILSCALED_HTTP_PROXY_PORT (default 1055) and
+# $TAILSCALED_SOCKS_PORT (default 1056) — because 1055 is just a convention,
+# not a Tailscale requirement, and a shared login node can already have
+# another user's tailscaled sitting on it. If you override
+# TAILSCALED_HTTP_PROXY_PORT here, update `defaults.https_proxy` in
+# ~/.config/felt/remotes.json to match on any hub that routes through this
+# instance — the two values are independent settings in independent files
+# and nothing checks that they agree.
 
 set -u
 
 ST="${TAILSCALED_STATE:-$HOME/.local/state/tailscale}"
 SESSION=tailscaled
+HTTP_PROXY_PORT="${TAILSCALED_HTTP_PROXY_PORT:-1055}"
+SOCKS_PORT="${TAILSCALED_SOCKS_PORT:-1056}"
 
 # The binary itself: whatever is on PATH, else the canonical unprivileged drop
 # point. Resolved once, here, so the loop below fails loudly at start rather
-# than respawning a not-found every 5s.
+# than respawning a not-found on every backoff.
 TAILSCALED=$(command -v tailscaled 2>/dev/null || printf '%s' "$HOME/.local/bin/tailscaled")
 [ -x "$TAILSCALED" ] || {
   echo "tailscaled-launch: no tailscaled on PATH or at $HOME/.local/bin/tailscaled" >&2
@@ -41,17 +70,48 @@ TAILSCALED=$(command -v tailscaled 2>/dev/null || printf '%s' "$HOME/.local/bin/
 
 if [ "${1:-}" = "--loop" ]; then
   mkdir -p "$ST" || exit 1
+  LOG="$ST/tailscaled.log"
+  # Size-rotate at 16MB keeping one previous generation, the same mechanism
+  # shuttle-launch uses (mv the current file aside between respawns) but a
+  # smaller cap: this is one quiet, well-behaved daemon logging to a single
+  # stream, not a dispatch history worth 64MB of retention, and a login node's
+  # home quota is usually tighter than its /var.
+  backoff=2
   while :; do
+    if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 16777216 ]; then
+      mv -f "$LOG" "$LOG.1" 2>/dev/null || true
+    fi
+    started=$(date +%s)
+    echo "=== tailscaled start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
     "$TAILSCALED" \
       --tun=userspace-networking \
       --socket="$ST/tailscaled.sock" \
       --statedir="$ST" \
       --port=0 \
-      --outbound-http-proxy-listen=localhost:1055 \
-      --socks5-server=localhost:1056 \
-      >> "$ST/tailscaled.log" 2>&1
-    sleep 5
+      --outbound-http-proxy-listen="localhost:$HTTP_PROXY_PORT" \
+      --socks5-server="localhost:$SOCKS_PORT" \
+      >> "$LOG" 2>&1
+    status=$?
+    lived=$(( $(date +%s) - started ))
+    # Exponential backoff, the same idiom as shuttle-launch's loop: a daemon
+    # that dies fast (crash-looping, port taken, bad state dir) doubles the
+    # sleep up to a cap rather than hot-looping and burying the real error
+    # under thousands of respawn attempts; one that ran a healthy while
+    # resets to the fast retry, since a long-lived process dying once is
+    # more likely a transient blip than a persistent fault.
+    [ "$lived" -ge 60 ] && backoff=2
+    echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') tailscaled exited (status=$status, lived=${lived}s); restarting in ${backoff}s" | tee -a "$LOG" >&2
+    sleep "$backoff"
+    if [ "$lived" -lt 60 ]; then
+      backoff=$(( backoff * 2 ))
+      [ "$backoff" -gt 300 ] && backoff=300
+    fi
   done
+fi
+
+RESTART=0
+if [ "${1:-}" = "--restart" ]; then
+  RESTART=1
 fi
 
 mkdir -p "$ST" || exit 1
@@ -67,7 +127,14 @@ case "$SELF" in
     ;;
 esac
 
-tmux kill-session -t "$SESSION" 2>/dev/null
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  if [ "$RESTART" = 0 ]; then
+    echo "tailscaled-launch: tmux session '$SESSION' already running; leaving it alone (pass --restart to force)."
+    exit 0
+  fi
+  tmux kill-session -t "$SESSION" 2>/dev/null
+fi
+
 tmux new-session -d -s "$SESSION" "'$SELF' --loop" \
   || { echo "tailscaled-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }
 echo "tailscaled-launch: respawn loop running in tmux session '$SESSION'"

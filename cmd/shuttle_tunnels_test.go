@@ -691,8 +691,112 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 	if _, err := os.Stat(orphan); err != nil {
 		t.Errorf("--dry-run must not remove the orphan: %v", err)
 	}
-	if got := calls(); strings.Contains(got, "stop shuttle-tunnel-gamma") || strings.Contains(got, "disable shuttle-tunnel-gamma") {
-		t.Errorf("--dry-run must not touch the supervisor for the orphan, got:\n%s", got)
+	// Not just "did not prune": --dry-run is a preview of the whole command, so
+	// the install half must not have run either. It used to write every job and
+	// bootstrap every supervisor before ever reaching the prune it claimed to be
+	// previewing — and a failing Activate returned first, so the orphan listing
+	// people run this for was often never printed at all.
+	if _, err := os.Stat(filepath.Join(unitDir, "shuttle-tunnel-alpha.service")); !os.IsNotExist(err) {
+		t.Errorf("--dry-run must not write alpha's unit, stat err = %v", err)
+	}
+	if got := calls(); got != "" {
+		t.Errorf("--dry-run must shell no supervisor at all, got:\n%s", got)
+	}
+}
+
+// TestInstallTunnels_DryRunCreatesNoDirectories — the preview is side-effect
+// free all the way down, including the directories install would have made. A
+// host that has never installed a tunnel must look untouched afterwards.
+func TestInstallTunnels_DryRunCreatesNoDirectories(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	useHostGOOS(t, "darwin")
+	calls := stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	tunnelsDryRun = true
+	t.Cleanup(func() { tunnelsDryRun = false })
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install --dry-run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "Library")); !os.IsNotExist(err) {
+		t.Errorf("--dry-run must not create the job dir, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "logs")); !os.IsNotExist(err) {
+		t.Errorf("--dry-run must not create the log dir, stat err = %v", err)
+	}
+	if got := calls(); got != "" {
+		t.Errorf("--dry-run must shell no supervisor, got:\n%s", got)
+	}
+}
+
+// TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing — --dry-run does not
+// widen what install targets. Naming a remote prunes nothing, previewed or not.
+func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	useHostGOOS(t, "linux")
+	stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	tunnelsDryRun = true
+	t.Cleanup(func() { tunnelsDryRun = false })
+
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(unitDir, "shuttle-tunnel-gamma.service")
+	if err := os.WriteFile(orphan, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels([]string{"alpha"}); err != nil {
+		t.Fatalf("install alpha --dry-run: %v", err)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Errorf("a named-remote dry run must leave gamma alone: %v", err)
+	}
+}
+
+// TestInstallTunnels_PruneCatchesAnOldLabelPrefix — the haunting prune exists to
+// end. A plist installed under one reverse-DNS prefix, and a fleet file since
+// changed to another, matches neither the kept set nor a prefix-pinned pattern,
+// so the old autossh loop used to run forever with nothing left that knew its
+// name. The generated `.shuttle-tunnel-` infix is what makes it ours, not the
+// prefix, so prune recognizes it whatever prefix it was born under.
+func TestInstallTunnels_PruneCatchesAnOldLabelPrefix(t *testing.T) {
+	writeRemotes(t, `{"version":1,"launchd_label_prefix":"com.example","remotes":[
+	  {"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]}`)
+	useHostGOOS(t, "darwin")
+	calls := stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	agentDir := filepath.Join(home, "Library", "LaunchAgents")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Installed back when the fleet file said `io.shuttle`.
+	stale := filepath.Join(agentDir, "io.shuttle.shuttle-tunnel-gamma.plist")
+	if err := os.WriteFile(stale, []byte("<plist/>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A hand-written agent with no `.shuttle-tunnel-` infix stays untouchable.
+	handWritten := filepath.Join(agentDir, "com.example.my-own-thing.plist")
+	if err := os.WriteFile(handWritten, []byte("<plist/>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a job under the old prefix should have been pruned, stat err = %v", err)
+	}
+	if _, err := os.Stat(handWritten); err != nil {
+		t.Errorf("a hand-written agent must be left alone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentDir, "com.example.shuttle-tunnel-alpha.plist")); err != nil {
+		t.Errorf("alpha's plist should exist under the current prefix: %v", err)
+	}
+	if got := calls(); !strings.Contains(got, "bootout gui/") {
+		t.Errorf("the pruned job should have been booted out, got calls:\n%s", got)
 	}
 }
 

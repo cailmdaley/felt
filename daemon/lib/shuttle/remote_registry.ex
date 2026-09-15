@@ -481,7 +481,7 @@ defmodule Shuttle.RemoteRegistry do
       # backoff and buries the real reason in ssh errors.
       step when step in [:ssh_check, :restart_remote] and no_ssh_path ->
         with_recovery(
-          entry,
+          failure_entry(entry, :no_ssh_path, now),
           enter_unreachable(
             recovery,
             "no ssh path to this remote; reporting stale",
@@ -498,7 +498,7 @@ defmodule Shuttle.RemoteRegistry do
       # honestly — until the far side comes back on its own.
       :bounce_tunnel when remote.tunnel.manager == :none and no_ssh_path ->
         with_recovery(
-          entry,
+          failure_entry(entry, :no_recovery_path, now),
           enter_unreachable(
             recovery,
             "no tunnel to bounce and no ssh path; reporting stale",
@@ -986,8 +986,17 @@ defmodule Shuttle.RemoteRegistry do
     daemon = ~s("$HOME/.local/bin/shuttle-launch")
 
     if remote_addressed?(remote) do
+      # The gate is the far side's own state file, not the script being
+      # present: `scripts/bootstrap.sh` installs the keep-alive on every host
+      # it touches, and a host that never joined a tailnet has no business
+      # acquiring a running VPN agent because a hub's recovery cascade decided
+      # it might help. The state file is written when a human runs
+      # `tailscale up` and approves the device — which is exactly the opt-in,
+      # and on a facility whose policy forbids this, exactly the act nobody
+      # performed.
       transport =
-        ~s(if [ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
+        ~s(if [ -s "$HOME/.local/state/tailscale/tailscaled.state" ] && ) <>
+          ~s([ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
           ~s(! tmux has-session -t tailscaled 2>/dev/null; then ) <>
           ~s("$HOME/.local/bin/tailscaled-launch"; fi)
 
@@ -1141,22 +1150,34 @@ end
 
 defmodule Shuttle.RemoteRegistry.Client.Default do
   @moduledoc """
-  The real transport: `:httpc` on a dedicated profile.
+  The real transport: `:httpc` on profiles of our own.
 
-  Two things are worth knowing before touching this module.
+  Three things are worth knowing before touching this module.
 
-  **The profile is dedicated on purpose.** `:httpc`'s proxy setting is per
+  **The profiles are ours on purpose.** `:httpc`'s proxy setting is per
   profile, not per request, so configuring it on `:default` would impose this
-  hub's fleet proxy on every other `:httpc` user in the VM. `:shuttle_fleet`
-  keeps it ours. It also gives us the only way back to "no proxy": `:httpc`
-  rejects `undefined` as an option value, so clearing means restarting the
-  profile — cheap, because the fleet file changes about once a year.
+  hub's fleet proxy on every other `:httpc` user in the VM.
+
+  **There are two of them, and neither is ever stopped.** `:shuttle_fleet`
+  carries the proxy; `:shuttle_fleet_direct` never has one applied, and a
+  request picks its profile from what the fleet file currently says. The
+  alternative — one profile, reconfigured — cannot express "no proxy" at all:
+  `:httpc` rejects `undefined` as an option value, so clearing would mean
+  stopping the profile, and stopping a profile kills every request in flight on
+  it with an **exit**, not an exception. That exit escapes the `rescue` clauses
+  below and takes down `Shuttle.RemoteRegistry`, which polls inline in its own
+  GenServer, losing the whole recovery state. Two never-stopped profiles make
+  the failure impossible rather than rare.
 
   **The proxy is re-read, not read once at boot.** `Shuttle.Remotes` is live —
-  `felt shuttle remotes add` takes effect without a daemon bounce — so every
-  request cheaply compares the configured proxy against the applied one and
-  re-applies on change. See `Shuttle.Remotes.https_proxy/0` for why a hub needs
-  one.
+  `felt shuttle remotes add` takes effect without a daemon bounce — so a
+  request re-reads it whenever the fleet file's `{mtime, size}` token has
+  moved, and otherwise pays one stat. See `Shuttle.Remotes.https_proxy/0` for
+  why a hub needs one at all.
+
+  Every callback catches exits as well as errors. `:httpc` is a gen_server
+  behind a facade, and a caller must not inherit its death: a transport fault
+  belongs in the remote's `last_error`, not in the caller's mailbox.
 
   TLS for `https://` remotes is verified explicitly against the OS CA store.
   Fleet URLs on a mesh VPN carry publicly-trusted certificates; there is no
@@ -1165,12 +1186,20 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   """
   @behaviour Shuttle.RemoteRegistry.Client
 
-  # Our own httpc profile — see the moduledoc.
-  @profile :shuttle_fleet
+  # The two profiles — see the moduledoc. Both are started on first use and
+  # never stopped.
+  @proxied_profile :shuttle_fleet
+  @direct_profile :shuttle_fleet_direct
 
-  # The proxy currently applied to @profile, so the common case (unchanged) is
-  # a persistent_term read rather than a file stat plus an httpc call.
-  @proxy_key {__MODULE__, :applied_https_proxy}
+  # What we last read out of the fleet file, and the file token we read it at.
+  # The token is a stat; re-reading the document only happens when it moves,
+  # which is what keeps a 5s poll across three registries from parsing JSON
+  # several times a second for an answer that changes once a year.
+  @proxy_key {__MODULE__, :https_proxy}
+
+  # What is actually applied to `@proxied_profile` right now, so a request only
+  # calls into httpc when the value has genuinely changed.
+  @applied_key {__MODULE__, :applied_https_proxy}
 
   # Loopback never goes through the proxy: ssh-tunnelled remotes are
   # `http://127.0.0.1:<port>` and the daemon's own endpoints are local. httpc
@@ -1181,7 +1210,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @impl true
   def get(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
-    prepare()
+    profile = prepare()
 
     request = {String.to_charlist(url), []}
     http_opts = http_opts(url, timeout_ms)
@@ -1191,7 +1220,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
     # every multibyte char (— × é …). ASCII survives (< 128), so the corruption
     # hides until a special character appears. Keep this binary-safe like get_file/2.
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], @profile) do
+    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
       {:ok, {{_, 200, _}, _headers, body}} ->
         {:ok, body}
 
@@ -1203,6 +1232,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
+    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
+    # uncaught exit here would take the registry — and its whole recovery
+    # state — down with the request.
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
@@ -1211,7 +1246,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   @impl true
   def get(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    prepare()
+    profile = prepare()
 
     headers =
       Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
@@ -1219,7 +1254,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     request = {String.to_charlist(url), headers}
     http_opts = http_opts(url, timeout_ms)
 
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], @profile) do
+    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
       {:ok, {{_, status, _}, resp_headers, body}} ->
         {:ok, status, normalize_headers(resp_headers), body}
 
@@ -1228,6 +1263,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
+    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
+    # uncaught exit here would take the registry — and its whole recovery
+    # state — down with the request.
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # httpc returns header keys/values as charlists; normalize to lowercased-key
@@ -1240,14 +1281,14 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def post(url, body, content_type, timeout_ms)
       when is_binary(url) and is_binary(body) and is_binary(content_type) and
              is_integer(timeout_ms) do
-    prepare()
+    profile = prepare()
 
     request =
       {String.to_charlist(url), [], String.to_charlist(content_type), body}
 
     http_opts = http_opts(url, timeout_ms)
 
-    case :httpc.request(:post, request, http_opts, [body_format: :binary], @profile) do
+    case :httpc.request(:post, request, http_opts, [body_format: :binary], profile) do
       {:ok, {{_, status, _}, _headers, resp_body}} ->
         {:ok, status, resp_body}
 
@@ -1256,6 +1297,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
+    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
+    # uncaught exit here would take the registry — and its whole recovery
+    # state — down with the request.
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # Binary-safe file fetch used by `OriginRouter.forward_get/4`: `body_format:
@@ -1265,12 +1312,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # the kanban shows the remote's own "file not found", not a tunnel error.
   @impl true
   def get_file(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
-    prepare()
+    profile = prepare()
 
     request = {String.to_charlist(url), []}
     http_opts = http_opts(url, timeout_ms)
 
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], @profile) do
+    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
       {:ok, {{_, status, _}, headers, body}} ->
         {:ok, status, content_type_header(headers), body}
 
@@ -1279,22 +1326,39 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
+    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
+    # uncaught exit here would take the registry — and its whole recovery
+    # state — down with the request.
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # ── Transport setup ──
 
-  # Everything every request needs before it goes out: the apps started, our
-  # profile up, and the proxy in sync with the fleet file.
+  # Everything a request needs before it goes out: the apps started, the
+  # profile it will use alive, and that profile carrying the fleet file's
+  # current proxy. Returns the profile to use.
   defp prepare do
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
-    ensure_profile()
-    sync_proxy()
-    :ok
+
+    case current_proxy() do
+      nil ->
+        ensure_profile(@direct_profile)
+        @direct_profile
+
+      {host, port} = proxy ->
+        ensure_profile(@proxied_profile)
+        apply_proxy(proxy, host, port)
+        @proxied_profile
+    end
   end
 
-  defp ensure_profile do
-    case :inets.start(:httpc, profile: @profile) do
+  # Idempotent, and never paired with a stop: a profile this process starts is
+  # one another process may already be mid-request on.
+  defp ensure_profile(profile) do
+    case :inets.start(:httpc, profile: profile) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
       # An httpc that will not start a profile is not something a poll tick can
@@ -1303,27 +1367,47 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
-  defp sync_proxy do
-    desired = Shuttle.Remotes.https_proxy()
+  # The configured proxy, re-derived only when one of its inputs has moved.
+  # Three registries polling several remotes every 5s would otherwise parse the
+  # same JSON a few times a second to learn the same answer; this makes the
+  # steady state a stat plus an ETS read.
+  #
+  # The cache key is the WHOLE input — the fleet file's `{mtime, size}` token
+  # and the application-config override that outranks it — so a test that
+  # `put_env`s a proxy is not served a value cached from the file, and
+  # `Shuttle.Remotes.https_proxy/0` stays the single place the precedence
+  # between them is decided.
+  defp current_proxy do
+    key = {Shuttle.Remotes.config_token(), Application.get_env(:shuttle, :https_proxy)}
 
     case :persistent_term.get(@proxy_key, :unset) do
-      ^desired -> :ok
-      _ -> apply_proxy(desired)
+      {^key, proxy} ->
+        proxy
+
+      _ ->
+        proxy = Shuttle.Remotes.https_proxy()
+        :persistent_term.put(@proxy_key, {key, proxy})
+        proxy
     end
   end
 
-  # Clearing a proxy means a fresh profile: `:httpc.set_options/2` rejects
-  # `undefined`, and a stale CONNECT for every https request is worse than one
-  # profile restart on a config change nobody makes twice a year.
-  defp apply_proxy(nil) do
-    :inets.stop(:httpc, @profile)
-    ensure_profile()
-    :persistent_term.put(@proxy_key, nil)
-  end
+  # `set_options/2` reconfigures a live profile in place — no restart, so
+  # nothing in flight is disturbed. It is idempotent, and concurrent callers
+  # agreeing on the value make it a no-op, so there is nothing here to
+  # serialize.
+  defp apply_proxy(proxy, host, port) do
+    case :persistent_term.get(@applied_key, :unset) do
+      ^proxy ->
+        :ok
 
-  defp apply_proxy({host, port} = proxy) when is_binary(host) and is_integer(port) do
-    :httpc.set_options([{:https_proxy, {{String.to_charlist(host), port}, @no_proxy}}], @profile)
-    :persistent_term.put(@proxy_key, proxy)
+      _ ->
+        :httpc.set_options(
+          [{:https_proxy, {{String.to_charlist(host), port}, @no_proxy}}],
+          @proxied_profile
+        )
+
+        :persistent_term.put(@applied_key, proxy)
+    end
   end
 
   # Timeouts always; explicit TLS verification for https. httpc fills in SNI and

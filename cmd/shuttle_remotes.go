@@ -3,7 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,9 +52,11 @@ const (
 // remoteTunnel is the per-remote tunnel policy.
 type remoteTunnel struct {
 	// Manager: "launchd" or "systemd" (this host supervises the tunnel) or
-	// "none" (the remote is reachable without a locally-managed tunnel).
-	// Defaults to the hub's own supervisor — launchd on darwin, systemd on
-	// linux — and to none anywhere else. The two managed values are
+	// "none" (the remote is reachable without a locally-managed tunnel). For an
+	// entry with a `port` it defaults to the hub's own supervisor — launchd on
+	// darwin, systemd on linux — and to none anywhere else; for an entry with no
+	// port there is no forward to supervise, so it defaults to none everywhere
+	// and naming a supervisor is refused outright. The two managed values are
 	// interchangeable to `felt shuttle tunnels install`: which supervisor
 	// renders is the HUB's business, so a fleet file written on a Mac installs
 	// unchanged on a Linux hub.
@@ -87,25 +89,110 @@ type remoteDefaults struct {
 	HTTPSProxy string `json:"https_proxy,omitempty"`
 }
 
-// normalizedHTTPSProxy renders defaults.https_proxy as bare host:port (no IPv6
-// brackets — that is the form the daemon hands its HTTP client), or "" when
-// absent or unusable. The port must be written out: a scheme's default port is
-// a guess about a local proxy nobody runs on 80. Shuttle.Remotes.https_proxy/0
-// parses the same strings the same way — daemon/test/fixtures/remotes/expected.json
-// asserts it in both languages.
-func (d remoteDefaults) normalizedHTTPSProxy() string {
-	raw := strings.TrimSpace(d.HTTPSProxy)
-	if raw == "" {
+// proxyEndpoint is defaults.https_proxy after parsing: a host with no IPv6
+// brackets (that is the form the daemon hands its HTTP client) and a port as an
+// integer. The zero value means "no proxy configured", which is a perfectly
+// ordinary fleet — only a hub whose mesh VPN runs in userspace needs one.
+//
+// Host and port are kept apart rather than re-joined into one string because
+// the string form is where the two readers used to drift: "localhost:1055" and
+// "localhost:01055" are the same endpoint but different strings, and an
+// expectation written as a string cannot say which one it means. The parity
+// fixture asserts the pair, so there is nothing left to render ambiguously.
+type proxyEndpoint struct {
+	Host string
+	Port int
+}
+
+// configured reports whether a proxy was given at all. A half-parsed endpoint
+// never escapes parseProxyEndpoint — it returns an error instead — so host and
+// port are either both set or both zero.
+func (p proxyEndpoint) configured() bool { return p.Host != "" && p.Port != 0 }
+
+// String is the human form `remotes list` prints and nothing parses back. It
+// goes through net.JoinHostPort so an IPv6 proxy comes out bracketed
+// ("[::1]:1055") and therefore re-parseable if an operator copies the line
+// straight back into the fleet file.
+func (p proxyEndpoint) String() string {
+	if !p.configured() {
 		return ""
 	}
-	if !strings.Contains(raw, "://") {
-		raw = "http://" + raw
+	return net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
+}
+
+// normalizedHTTPSProxy parses defaults.https_proxy. An absent value yields the
+// zero endpoint and no error; anything present but unusable is an error, because
+// `remotes list` is the fleet's validator and a proxy the daemon silently
+// ignores is exactly how every https:// remote goes stale with no explanation.
+func (d remoteDefaults) normalizedHTTPSProxy() (proxyEndpoint, error) {
+	return parseProxyEndpoint(d.HTTPSProxy)
+}
+
+// parseProxyEndpoint is the shared proxy grammar, in Go.
+// Shuttle.Remotes.parse_proxy/1 implements the same rules on the Elixir side and
+// daemon/test/fixtures/remotes/expected.json asserts the result in both
+// languages, with a mirrored unit table in each suite — a rule that changes in
+// one language has to change in the other or a suite goes red.
+//
+// The grammar is deliberately narrower than a URL: `[scheme://][userinfo@]host:port`.
+//
+//   - The scheme, when present, must be http or https (case-insensitive). This
+//     is an HTTP CONNECT proxy; reading socks5:// as one would produce a client
+//     that quietly talks the wrong protocol, which fails the same silent way a
+//     dropped proxy does.
+//   - Userinfo is accepted and dropped. The daemon's client does not do proxy
+//     auth, and a credential in this file would be a surprise either way.
+//   - A path, query, or fragment is REJECTED rather than ignored. A proxy
+//     address has none, so their presence means the operator pasted something
+//     that is not a proxy address, and ignoring the tail would accept a string
+//     whose meaning we are guessing at.
+//   - The port must be written out and must land in 1..65535. A scheme's default
+//     port is a guess about a local proxy nobody runs on 80, so "https://h" is an
+//     error, not port 443. Leading zeros parse as the integer they denote
+//     ("01055" is 1055), which is precisely why the parsed port, not the source
+//     text, is what both readers compare.
+//   - An IPv6 literal keeps its brackets only in the source text: "[::1]:1055"
+//     yields host "::1".
+func parseProxyEndpoint(raw string) (proxyEndpoint, error) {
+	rest := strings.TrimSpace(raw)
+	if rest == "" {
+		return proxyEndpoint{}, nil
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || u.Port() == "" {
-		return ""
+
+	if i := strings.Index(rest, "://"); i >= 0 {
+		scheme := strings.ToLower(rest[:i])
+		if scheme != "http" && scheme != "https" {
+			return proxyEndpoint{}, fmt.Errorf("scheme %q is not http or https", rest[:i])
+		}
+		rest = rest[i+len("://"):]
 	}
-	return u.Hostname() + ":" + u.Port()
+
+	// Checked before userinfo is stripped: a "/" or "?" ahead of the "@" is not
+	// a userinfo character either, so there is no input where rejecting early
+	// loses a valid parse.
+	if strings.ContainsAny(rest, "/?#") {
+		return proxyEndpoint{}, fmt.Errorf("a proxy address has no path, query, or fragment")
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+
+	host, portText, err := net.SplitHostPort(rest)
+	if err != nil {
+		return proxyEndpoint{}, fmt.Errorf("want host:port with the port written out")
+	}
+	if host == "" {
+		return proxyEndpoint{}, fmt.Errorf("no host")
+	}
+	// strconv.Atoi alone would accept "+1055" and "-0"; a port is digits.
+	if portText == "" || strings.TrimLeft(portText, "0123456789") != "" {
+		return proxyEndpoint{}, fmt.Errorf("port %q is not a number", portText)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return proxyEndpoint{}, fmt.Errorf("port %q out of range 1-65535", portText)
+	}
+	return proxyEndpoint{Host: host, Port: port}, nil
 }
 
 // remoteSpec is one entry in the fleet.
@@ -271,8 +358,8 @@ func normalizeRemotes(doc *remotesFile) error {
 	defaults := remoteDefaults{}
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
-		if raw := strings.TrimSpace(defaults.HTTPSProxy); raw != "" && defaults.normalizedHTTPSProxy() == "" {
-			return fmt.Errorf("defaults.https_proxy %q: want host:port or http://host:port", raw)
+		if _, err := defaults.normalizedHTTPSProxy(); err != nil {
+			return fmt.Errorf("defaults.https_proxy %q: %w", strings.TrimSpace(defaults.HTTPSProxy), err)
 		}
 	}
 
@@ -330,9 +417,31 @@ func normalizeRemotes(doc *remotesFile) error {
 		// validating a shallow copy of a sparse document it intends to SAVE
 		// (see `remotes add`), and filling the default in place would write the
 		// default into the file.
+		//
+		// The default manager follows the entry's TRANSPORT, not just the host.
+		// A tunnel is a local forwarded port; an entry with no `port` has no
+		// forward for this host to supervise, so there is no job to write and
+		// its manager is `none` however good a supervisor this hub has. Letting
+		// defaultTunnelManager() answer for a portless entry is what produced a
+		// unit with `-L 0:localhost:4000` and no ssh destination — a job that
+		// can never come up, and which the convergent prune then protects
+		// because the fleet file still asks for it.
+		//
+		// An entry that names a supervisor explicitly while having no port is
+		// that same contradiction stated by hand, so it is refused here rather
+		// than installed: `remotes list` is the fleet's validator, and the
+		// operator who wrote it meant one of two things we must not guess
+		// between (give the entry a port, or say `manager: none`).
 		opts := r.tunnelOpts()
-		if opts.Manager == "" {
+		switch {
+		case opts.Manager == "" && r.Port != 0:
 			opts.Manager = defaultTunnelManager()
+		case opts.Manager == "":
+			opts.Manager = "none"
+		case r.Port == 0 && managedTunnel(opts.Manager):
+			return fmt.Errorf(
+				"remote %q: tunnel.manager %q needs a local port to forward; give it a `port`, or set tunnel.manager to \"none\" if it is reached directly",
+				r.Name, opts.Manager)
 		}
 		r.Tunnel = &opts
 
@@ -473,7 +582,10 @@ var remotesListCmd = &cobra.Command{
 			return nil
 		}
 		if doc.Defaults != nil {
-			if proxy := doc.Defaults.normalizedHTTPSProxy(); proxy != "" {
+			// loadRemotesFile has already refused a proxy that does not parse,
+			// so reaching here means the error is nil; the human line is the
+			// only thing left to do with it.
+			if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
 				fmt.Printf("https:// remotes via proxy %s\n\n", proxy)
 			}
 		}
@@ -525,15 +637,14 @@ var remotesAddCmd = &cobra.Command{
 			URL:        remotesAddURL,
 			Checkout:   remotesAddCheckout,
 		}
-		// --url without --tunnel-manager means a remote reached directly, with
-		// no tunnel for this host to supervise: write that, rather than leaving
-		// the hub's own supervisor as a manager for a job that will never exist.
-		tunnelManager := remotesAddTunnel
-		if tunnelManager == "" && remotesAddURL != "" && remotesAddPort == 0 {
-			tunnelManager = "none"
-		}
-		if remotesAddMultiplex || tunnelManager != "" {
-			entry.Tunnel = &remoteTunnel{Multiplex: remotesAddMultiplex, Manager: tunnelManager}
+		// No manager is written unless the operator asked for one: an entry with
+		// no port already reads as `none` and a port entry already reads as this
+		// host's supervisor (see normalizeRemotes), and materializing either
+		// into the file would pin a decision the reader should keep making —
+		// which matters because the same file is carried between a Mac hub and a
+		// Linux one.
+		if remotesAddMultiplex || remotesAddTunnel != "" {
+			entry.Tunnel = &remoteTunnel{Multiplex: remotesAddMultiplex, Manager: remotesAddTunnel}
 		}
 		replaced := false
 		for i := range doc.Remotes {
@@ -624,7 +735,7 @@ func init() {
 	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required)")
 	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
 	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
-	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor, or none with --url)")
+	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor for a --port entry, none without one)")
 	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")
 	remotesAddCmd.Flags().BoolVar(&remotesAddMultiplex, "multiplex", false, "Ride an existing ControlMaster socket (2FA hosts)")
 	remotesCmd.AddCommand(remotesListCmd, remotesAddCmd, remotesRmCmd, remotesPathCmd)

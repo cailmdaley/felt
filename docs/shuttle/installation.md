@@ -745,6 +745,16 @@ on a login node where you cannot install a kernel module or a system service:
    already-authenticated device or browser. `serve --bg` is what actually
    exposes the daemon — see the policy caveat before you run it.
 
+   `tailscale up` is not optional. A `tailscaled` running under
+   `tailscaled-launch` with `up` never approved looks, from the hub's side,
+   identical to a healthy node: the process is alive, the socket answers, and
+   the daemon's recovery cascade still considers this host joined. But it has
+   no tailnet identity and no address, so the hub sees only a remote that
+   never comes back — a stale card, not an error. Check with
+   `TS_SOCKET=$HOME/.local/state/tailscale/tailscaled.sock tailscale status`
+   after joining: it lists this node and its peers when `up` succeeded, and
+   refuses or reports "Logged out" when it has not.
+
 ### The remotes.json entry
 
 A Tailscale-fronted remote skips SSH entirely — no `--ssh`, no port, no
@@ -756,6 +766,15 @@ A Tailscale-fronted remote skips SSH entirely — no `--ssh`, no port, no
 
 `tunnel: {"manager": "none"}` is what tells the daemon there is no local
 tunnel process to manage or revive for this remote; it dials `url` directly.
+
+The general rule, not specific to Tailscale: a remote with no `port` has no
+tunnel for the hub to supervise, full stop. `manager: none` is the default for
+such an entry — you may omit it, as the entries above do implicitly, and
+`felt shuttle remotes add --url` writes it for you. What is an error is naming
+an actual supervisor (`launchd`, `systemd`, `autossh`) on a portless entry:
+there is no local port for that supervisor to forward to, so `felt shuttle
+tunnels install` rejects it rather than writing a job that starts and
+immediately has nothing to do.
 
 ### `defaults.https_proxy`
 

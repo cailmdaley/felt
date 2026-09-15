@@ -50,8 +50,8 @@ defmodule Shuttle.RemotesTest do
 
         proxy =
           case Remotes.https_proxy() do
-            {host, port} -> "#{host}:#{port}"
-            nil -> ""
+            {host, port} -> %{"host" => host, "port" => port}
+            nil -> %{"host" => "", "port" => 0}
           end
 
         assert proxy == @want["https_proxy"]
@@ -79,15 +79,47 @@ defmodule Shuttle.RemotesTest do
   end
 
   describe "https_proxy" do
-    test "accepts a scheme'd url, a bare host:port, and nothing else" do
-      for {written, want} <- [
-            {~s("http://localhost:1055"), {"localhost", 1055}},
-            {~s("localhost:1055"), {"localhost", 1055}},
-            {~s("  http://10.0.0.5:3128  "), {"10.0.0.5", 3128}},
-            {~s("localhost"), nil},
-            {~s(""), nil},
-            {"1055", nil}
-          ] do
+    # The mirror of `TestParseProxyEndpoint` in cmd/shuttle_remotes_test.go.
+    # Every row here appears there with the same verdict; a grammar rule that
+    # changes in one language fails in both.
+    @proxy_grammar [
+      # accepted
+      {~s("http://localhost:1055"), {"localhost", 1055}},
+      {~s("https://localhost:1055"), {"localhost", 1055}},
+      {~s("localhost:1055"), {"localhost", 1055}},
+      {~s("  http://10.0.0.5:3128  "), {"10.0.0.5", 3128}},
+      {~s("HTTP://h:1"), {"h", 1}},
+      {~s("http://user:pass@h:3128"), {"h", 3128}},
+      {~s("[::1]:1055"), {"::1", 1055}},
+      {~s("https://h:443"), {"h", 443}},
+      # a zero-padded port normalizes rather than diverging between readers
+      {~s("http://h:01055"), {"h", 1055}},
+      # rejected: no port written out
+      {~s("localhost"), nil},
+      {~s("https://h"), nil},
+      {~s("h:"), nil},
+      {~s(""), nil},
+      # rejected: no host
+      {~s("http://:1055"), nil},
+      # rejected: a proxy address has no path, query, or fragment
+      {~s("http://h:1/x"), nil},
+      {~s("http://h:1/x/y"), nil},
+      {~s("http://h:1?a=b"), nil},
+      {~s("http://h:1#f"), nil},
+      # rejected: not an HTTP CONNECT proxy
+      {~s("socks5://h:1080"), nil},
+      # rejected: port out of range, or not a bare decimal
+      {~s("http://h:0"), nil},
+      {~s("http://h:99999"), nil},
+      {~s("http://h:+1055"), nil},
+      # rejected: a bare IPv6 address is ambiguous without brackets
+      {~s("::1:1055"), nil},
+      # rejected: not a string at all
+      {"1055", nil}
+    ]
+
+    test "reads exactly the grammar the Go reader reads" do
+      for {written, want} <- @proxy_grammar do
         path = write_remotes(~s({"defaults": {"https_proxy": #{written}}, "remotes": []}))
         System.put_env("FELT_REMOTES_FILE", path)
 

@@ -12,8 +12,8 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
 
   alias Shuttle.RemoteRegistry.Client.Default
 
-  defp applied_https_proxy do
-    case :httpc.get_options([:https_proxy], :shuttle_fleet) do
+  defp applied_https_proxy(profile) do
+    case :httpc.get_options([:https_proxy], profile) do
       {:ok, [https_proxy: proxy]} -> proxy
       _ -> :no_profile
     end
@@ -71,24 +71,38 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       :ok
     end
 
-    test "is applied to our own httpc profile, and cleared again", %{url: url} do
-      # The proxy is per-profile, not per-request, so the point of the dedicated
-      # `:shuttle_fleet` profile is that this setting never lands on `:default`
-      # and never leaks onto another httpc user in the VM.
+    test "lands on our proxied profile and nowhere else", %{url: url} do
+      # httpc's proxy is per profile, not per request, so the point of owning
+      # the profile is that this setting never reaches `:default` and never
+      # leaks onto another httpc user in the VM.
       Application.put_env(:shuttle, :https_proxy, "127.0.0.1:1055")
       assert {:ok, _} = Default.get(url, 2_000)
 
       assert {{~c"127.0.0.1", 1055}, [~c"localhost", ~c"127.0.0.1", ~c"::1"]} =
-               applied_https_proxy()
+               applied_https_proxy(:shuttle_fleet)
 
       assert {:ok, [https_proxy: {:undefined, []}]} = :httpc.get_options([:https_proxy], :default),
              "the default profile must stay untouched"
+    end
 
-      # Clearing needs a fresh profile — httpc rejects `undefined` as a value —
-      # and a plain http:// request must keep working across that restart.
-      Application.put_env(:shuttle, :https_proxy, false)
+    test "clearing it switches profiles instead of stopping one", %{url: url} do
+      # The direct profile never carries a proxy, so "no proxy" is a profile
+      # CHOICE rather than a reconfiguration. That matters because the only way
+      # to unset httpc's proxy is to stop the profile, and stopping one kills
+      # every request in flight on it with an exit — which would take down the
+      # registry that polls inline in its own GenServer.
+      Application.put_env(:shuttle, :https_proxy, "127.0.0.1:1055")
       assert {:ok, _} = Default.get(url, 2_000)
-      assert {:undefined, []} = applied_https_proxy()
+
+      Application.put_env(:shuttle, :https_proxy, false)
+      assert {:ok, body} = Default.get(url, 2_000)
+      assert body == @utf8_body
+
+      assert {:undefined, []} = applied_https_proxy(:shuttle_fleet_direct)
+
+      # And the proxied profile is still alive, still configured, and still
+      # usable the moment the fleet file names a proxy again.
+      assert {{~c"127.0.0.1", 1055}, _} = applied_https_proxy(:shuttle_fleet)
     end
 
     test "an http:// remote is never sent through it", %{url: url} do

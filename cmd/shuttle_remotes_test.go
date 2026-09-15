@@ -23,9 +23,19 @@ type remoteFixture struct {
 	Label            string `json:"label"`
 }
 
+// proxyFixture is expected.json's `https_proxy`: the parsed pair, not a
+// rendered string. The string form was where the two readers could disagree
+// without the fixture noticing — "localhost:1055" and "localhost:01055" denote
+// one endpoint — so the expectation names host and port separately and
+// {"", 0} means no proxy at all.
+type proxyFixture struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
 type remoteFixtureDoc struct {
 	LaunchdLabelPrefix string          `json:"launchd_label_prefix"`
-	HTTPSProxy         string          `json:"https_proxy"`
+	HTTPSProxy         proxyFixture    `json:"https_proxy"`
 	Remotes            []remoteFixture `json:"remotes"`
 }
 
@@ -66,12 +76,14 @@ func TestRemotesFixtureParity(t *testing.T) {
 			if doc.LaunchdLabelPrefix != want.LaunchdLabelPrefix {
 				t.Errorf("launchd_label_prefix = %q, want %q", doc.LaunchdLabelPrefix, want.LaunchdLabelPrefix)
 			}
-			gotProxy := ""
+			var gotProxy proxyEndpoint
 			if doc.Defaults != nil {
-				gotProxy = doc.Defaults.normalizedHTTPSProxy()
+				// loadRemotesFile already refused an unparseable proxy, so an
+				// error here cannot happen; the fixture asserts the value.
+				gotProxy, _ = doc.Defaults.normalizedHTTPSProxy()
 			}
-			if gotProxy != want.HTTPSProxy {
-				t.Errorf("defaults.https_proxy = %q, want %q", gotProxy, want.HTTPSProxy)
+			if (proxyFixture{Host: gotProxy.Host, Port: gotProxy.Port}) != want.HTTPSProxy {
+				t.Errorf("defaults.https_proxy = %+v, want %+v", gotProxy, want.HTTPSProxy)
 			}
 			if len(doc.Remotes) != len(want.Remotes) {
 				t.Fatalf("got %d remotes, want %d", len(doc.Remotes), len(want.Remotes))
@@ -178,6 +190,11 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 		{"request timeout negative", `[{"name":"a","port":4001,"request_timeout_ms":-1}]`, "request_timeout_ms"},
 		{"stale multiplier negative", `[{"name":"a","port":4001,"stale_multiplier":-1}]`, "stale_multiplier"},
 		{"no port, no url", `[{"name":"a"}]`, "needs a port or an explicit url"},
+		// A portless entry has no forward for this host to supervise, so naming
+		// a supervisor for it is a contradiction, not a default to fill in.
+		{"managed tunnel without a port", `[{"name":"a","url":"https://a.example.ts.net","tunnel":{"manager":"systemd"}}]`, "needs a local port to forward"},
+		{"launchd tunnel without a port", `[{"name":"a","url":"https://a.example.ts.net","tunnel":{"manager":"launchd"}}]`, "needs a local port to forward"},
+		{"proxy with a path", `{"defaults":{"https_proxy":"http://h:1/x"},"remotes":[{"name":"a","port":4001}]}`, "https_proxy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,4 +248,120 @@ func writeRemotes(t *testing.T, body string) string {
 	}
 	t.Setenv("FELT_REMOTES_FILE", path)
 	return path
+}
+
+// TestParseProxyEndpoint is the proxy grammar's full table, and it is mirrored
+// line for line by the Elixir suite's table over Shuttle.Remotes.parse_proxy/1.
+// The two readers share the fixture files for everything a fleet file can
+// legally say, but a fixture can only hold readings that SUCCEED — the rejected
+// inputs are the half where the readers actually drifted (Go used to accept a
+// path, a query, a fragment, a leading-zero port and a socks5:// scheme that
+// Elixir read as no proxy at all, so `remotes list` validated a file clean while
+// the daemon silently connected direct and every ts.net remote went stale). So
+// the table lives in both suites instead: change a rule in one language and the
+// other language's table is what fails.
+func TestParseProxyEndpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want proxyEndpoint // zero value with wantErr means "rejected"
+		// wantErr: the string is present but not a usable proxy address. Note
+		// that the empty input is NOT an error — an absent proxy is an ordinary
+		// fleet, and only a present-but-broken one is worth refusing.
+		wantErr bool
+	}{
+		{"absent", "", proxyEndpoint{}, false},
+		{"bare host:port", "h:1", proxyEndpoint{Host: "h", Port: 1}, false},
+		{"surrounding whitespace", "  h:1  ", proxyEndpoint{Host: "h", Port: 1}, false},
+		{"http scheme", "http://localhost:1055", proxyEndpoint{Host: "localhost", Port: 1055}, false},
+		{"https scheme", "https://h:443", proxyEndpoint{Host: "h", Port: 443}, false},
+		{"scheme is case-insensitive", "HTTP://h:1", proxyEndpoint{Host: "h", Port: 1}, false},
+		{"userinfo is dropped", "http://user:pass@h:3128", proxyEndpoint{Host: "h", Port: 3128}, false},
+		{"ipv6 loses its brackets", "[::1]:1055", proxyEndpoint{Host: "::1", Port: 1055}, false},
+
+		// A path, query, or fragment means the operator pasted something that is
+		// not a proxy address. Ignoring the tail accepts a string whose meaning
+		// we would be guessing at, and the guess is invisible once it is wrong.
+		{"path", "http://h:1/x", proxyEndpoint{}, true},
+		{"deeper path", "http://h:1/x/y", proxyEndpoint{}, true},
+		{"query", "http://h:1?a=b", proxyEndpoint{}, true},
+		{"fragment", "http://h:1#f", proxyEndpoint{}, true},
+
+		// The port is parsed as a number and bounded. A leading-zero port is not
+		// a different endpoint, which is exactly why the expectation is the
+		// integer and not the source text.
+		{"leading zeros normalize", "http://h:01055", proxyEndpoint{Host: "h", Port: 1055}, false},
+		{"port zero", "http://h:0", proxyEndpoint{}, true},
+		{"port above the range", "http://h:99999", proxyEndpoint{}, true},
+		{"empty port", "h:", proxyEndpoint{}, true},
+		{"no port at all", "https://h", proxyEndpoint{}, true},
+
+		{"no host", "http://:1055", proxyEndpoint{}, true},
+		// An HTTP CONNECT proxy is the only kind the daemon's client speaks;
+		// reading a SOCKS URL as one fails the same silent way a dropped proxy
+		// does, so it is refused rather than coerced.
+		{"socks is not an http proxy", "socks5://h:1080", proxyEndpoint{}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProxyEndpoint(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseProxyEndpoint(%q) = %+v, want an error", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseProxyEndpoint(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseProxyEndpoint(%q) = %+v, want %+v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProxyEndpoint_String — the human line `remotes list` prints. An IPv6
+// proxy comes back bracketed so an operator can paste the line straight back
+// into the fleet file and have it parse.
+func TestProxyEndpoint_String(t *testing.T) {
+	if got := (proxyEndpoint{Host: "localhost", Port: 1055}).String(); got != "localhost:1055" {
+		t.Errorf("String() = %q", got)
+	}
+	if got := (proxyEndpoint{Host: "::1", Port: 1055}).String(); got != "[::1]:1055" {
+		t.Errorf("String() = %q, want the brackets back", got)
+	}
+	if got := (proxyEndpoint{}).String(); got != "" {
+		t.Errorf("an absent proxy should render empty, got %q", got)
+	}
+}
+
+// TestNormalizeRemotes_TunnelManagerDefaultFollowsTheTransport — the default
+// manager is a question about the ENTRY, not only about the host. A port entry
+// gets the hub's supervisor; a portless one has no forward to supervise, so it
+// is `none` even on a hub that has launchd or systemd right there. Getting this
+// wrong wrote a unit with `-L 0:localhost:4000` and no ssh destination, which
+// the convergent prune then protected because the fleet file still named it.
+func TestNormalizeRemotes_TunnelManagerDefaultFollowsTheTransport(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			useHostGOOS(t, goos)
+			writeRemotes(t, `[{"name":"meshnode","url":"https://meshnode.example.ts.net"},
+			  {"name":"hub-a","port":4001}]`)
+			doc, err := loadRemotesFile()
+			if err != nil {
+				t.Fatalf("loadRemotesFile: %v", err)
+			}
+			if got := doc.Remotes[0].tunnelOpts().Manager; got != "none" {
+				t.Errorf("portless remote manager = %q, want none", got)
+			}
+			if got := doc.Remotes[1].tunnelOpts().Manager; got != defaultTunnelManager() {
+				t.Errorf("port remote manager = %q, want %q", got, defaultTunnelManager())
+			}
+			// And nothing portless ever reaches the installer.
+			if specs := resolveManagedTunnelSpecs(doc); len(specs) != 1 || specs[0].Name != "hub-a" {
+				t.Errorf("managed specs = %+v, want only hub-a", specs)
+			}
+		})
+	}
 }

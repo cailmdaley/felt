@@ -202,34 +202,90 @@ defmodule Shuttle.Remotes do
   defp defaults_block(%{"defaults" => %{} = defaults}), do: defaults
   defp defaults_block(_), do: %{}
 
-  # `"http://host:port"`, a bare `"host:port"`, or `{host, port}` already
-  # parsed. Anything else is nil: an unusable proxy string must not become a
-  # silent direct connection to a host the hub cannot route to, but it must not
-  # stop the daemon booting either — `remotes list` is the validator.
+  # The proxy grammar, shared with the Go reader (`parseProxyEndpoint` in
+  # `cmd/shuttle_remotes.go`): `[scheme://][userinfo@]host:port`.
   #
-  # The port must be written out. A scheme's default port is a guess about a
-  # local proxy nobody runs on 80, and guessing here diverges from the Go
-  # reader, which has no default to fall back on.
+  #   * scheme, when present, must be http or https. `socks5://` is rejected
+  #     rather than quietly treated as an HTTP CONNECT proxy — silently making
+  #     the wrong kind of connection is the same failure as making none.
+  #   * a path, query, or fragment is rejected. A proxy address has none, and
+  #     ignoring the tail would mean the CLI validates a string the daemon
+  #     reads differently.
+  #   * userinfo is accepted and dropped (`:httpc` takes credentials
+  #     separately, if ever).
+  #   * the port must be written out, all digits, and in 1..65535. A scheme's
+  #     default port is a guess about a local proxy nobody runs on 80.
+  #     `01055` normalizes to 1055, so the two readers cannot disagree about a
+  #     zero-padded port either.
+  #   * an IPv6 host keeps no brackets: that is what `:httpc` wants.
+  #
+  # Anything unusable is nil rather than a raise: a daemon that refuses to boot
+  # over a typo in an operator file is worse than one that serves its own
+  # board, and `felt shuttle remotes list` is the validator that fails loud
+  # with the reason.
+  #
+  # `daemon/test/shuttle/remotes_test.exs` and `cmd/shuttle_remotes_test.go`
+  # carry mirrored tables of every accepted and rejected form, so a rule that
+  # changes in one language fails in both.
   defp parse_proxy(nil), do: nil
   defp parse_proxy({host, port}) when is_binary(host) and is_integer(port), do: {host, port}
 
   defp parse_proxy(value) when is_binary(value) do
-    value = String.trim(value)
-    authority = value |> String.split("://") |> List.last() |> String.trim_trailing("/")
-
-    case URI.parse(if(String.contains?(value, "://"), do: value, else: "http://" <> value)) do
-      %URI{host: host, port: port}
-      when is_binary(host) and host != "" and is_integer(port) ->
-        # Brackets stay off the host: that is what `:httpc` wants for an IPv6
-        # proxy, and what the Go reader's normalized form renders.
-        if String.ends_with?(authority, ":#{port}"), do: {host, port}, else: nil
-
-      _ ->
-        nil
+    with trimmed when trimmed != "" <- String.trim(value),
+         {:ok, rest} <- strip_scheme(trimmed),
+         false <- String.contains?(rest, ["/", "?", "#"]),
+         {:ok, host, port_text} <- split_host_port(strip_userinfo(rest)),
+         {:ok, port} <- parse_port(port_text) do
+      {host, port}
+    else
+      _ -> nil
     end
   end
 
   defp parse_proxy(_), do: nil
+
+  defp strip_scheme(value) do
+    case String.split(value, "://", parts: 2) do
+      [rest] ->
+        {:ok, rest}
+
+      [scheme, rest] ->
+        if String.downcase(scheme) in ["http", "https"], do: {:ok, rest}, else: :error
+    end
+  end
+
+  # Everything up to and including the LAST `@`, so a password containing `@`
+  # does not shift the host.
+  defp strip_userinfo(value) do
+    value |> String.split("@") |> List.last()
+  end
+
+  # Bracketed IPv6 first; otherwise exactly one colon, which is what rejects a
+  # bare `::1:1055` the same way Go's `net.SplitHostPort` does.
+  defp split_host_port("[" <> rest) do
+    case String.split(rest, "]:", parts: 2) do
+      [host, port] when host != "" -> {:ok, host, port}
+      _ -> :error
+    end
+  end
+
+  defp split_host_port(authority) do
+    case String.split(authority, ":") do
+      [host, port] when host != "" -> {:ok, host, port}
+      _ -> :error
+    end
+  end
+
+  defp parse_port(text) do
+    if Regex.match?(~r/\A[0-9]+\z/, text) do
+      case String.to_integer(text) do
+        port when port in 1..65_535 -> {:ok, port}
+        _ -> :error
+      end
+    else
+      :error
+    end
+  end
 
   # Both shapes the Go reader accepts: the wrapped document and a bare array.
   # Fleet-level `defaults` are folded into each entry here so the per-entry

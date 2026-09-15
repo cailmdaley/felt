@@ -6,26 +6,53 @@ defmodule Shuttle.KittyTest do
   describe "attach_command/2" do
     test "a local worker (no host) attaches with an exact tmux target" do
       assert Kitty.attach_command("shuttle-foo-bar", nil) ==
-               ["tmux", "attach", "-t", "=shuttle-foo-bar"]
+               {:ok, ["tmux", "attach", "-t", "=shuttle-foo-bar"]}
     end
 
     test "an empty host is treated as local" do
       assert Kitty.attach_command("shuttle-foo-bar", "") ==
-               ["tmux", "attach", "-t", "=shuttle-foo-bar"]
+               {:ok, ["tmux", "attach", "-t", "=shuttle-foo-bar"]}
     end
 
     test "this daemon's own host id attaches locally, not over ssh" do
       own = Shuttle.Poller.own_host_id()
+
       assert Kitty.attach_command("shuttle-foo-bar", own) ==
-               ["tmux", "attach", "-t", "=shuttle-foo-bar"]
+               {:ok, ["tmux", "attach", "-t", "=shuttle-foo-bar"]}
     end
 
-    test "a remote host wraps the attach in ssh -tt, preserving the exact target" do
-      # A host id that is not this daemon's own id is remote.
-      remote = Shuttle.Poller.own_host_id() <> "-elsewhere"
+    test "a tunnelled remote wraps the attach in ssh -tt at the fleet's destination" do
+      # The destination comes from the fleet file, not from the host id: here
+      # they differ, which is the case that catches a reader who assumed the
+      # routing name doubles as an ssh host.
+      Application.put_env(:shuttle, :remotes, [
+        %{name: "hub-a", port: 4001, ssh: "hub-a-login"}
+      ])
 
-      assert Kitty.attach_command("shuttle-foo-bar", remote) ==
-               ["ssh", "-tt", remote, "tmux", "attach", "-t", "=shuttle-foo-bar"]
+      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
+
+      assert Kitty.attach_command("shuttle-foo-bar", "hub-a") ==
+               {:ok, ["ssh", "-tt", "hub-a-login", "tmux", "attach", "-t", "=shuttle-foo-bar"]}
+    end
+
+    test "a remote the fleet reaches only by url has no ssh path, and says so" do
+      # The mesh-VPN shape. `ssh hub-a` would be a guess at a destination the
+      # operator deliberately did not give, so attach refuses and names the
+      # reason rather than failing slowly inside ssh.
+      Application.put_env(:shuttle, :remotes, [
+        %{name: "hub-a", url: "https://hub-a.example.ts.net", tunnel: %{manager: "none"}}
+      ])
+
+      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
+
+      assert {:error, reason} = Kitty.attach_command("shuttle-foo-bar", "hub-a")
+      assert reason =~ "no ssh path to hub-a"
+      assert reason =~ "https://hub-a.example.ts.net"
+    end
+
+    test "a host that is not in the fleet at all is refused, not guessed at" do
+      assert {:error, reason} = Kitty.attach_command("shuttle-foo-bar", "nowhere")
+      assert reason =~ "not in this host's fleet file"
     end
   end
 

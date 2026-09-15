@@ -35,16 +35,25 @@ defmodule Shuttle.Kitty do
   @doc """
   Open (or focus) `session` in a kitty tab. `host` is the fiber's
   `shuttle.host`: nil / "" / this daemon's own host id → a local
-  `tmux attach`; any other value → a local tab that `ssh -tt`es to `host`.
+  `tmux attach`; any other value → a local tab that `ssh -tt`es to that
+  remote's **ssh destination**, resolved through the fleet file.
   Returns `:ok` or `{:error, reason}`.
+
+  The fleet is consulted rather than the host id used directly because a
+  routing name is not a promise that ssh resolves it — a remote reached over a
+  mesh VPN has an `url` and no ssh path at all, and `ssh <name>` at it is a
+  guess that fails slowly and blames the wrong thing. The recovery cascade
+  stopped making that guess; this is the same rule on the human's path.
   """
   @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t()}
   def open(session, host \\ nil)
 
   def open(session, host) when is_binary(session) and session != "" do
-    with {:ok, kitty} <- kitty_bin() do
-      remote? = remote_host?(host)
+    with {:ok, kitty} <- kitty_bin(),
+         {:ok, destination} <- ssh_destination(host) do
+      remote? = destination != nil
       title = if remote?, do: "#{session}@#{host}", else: session
+      host = destination
 
       result =
         case kitty_socket() do
@@ -187,11 +196,20 @@ defmodule Shuttle.Kitty do
   @doc """
   The inner attach command kitty runs in the new tab. Local → `tmux attach -t
   =<session>` (the leading `=` forces an exact session match); remote → the same
-  wrapped in `ssh -tt <host>`. Pure, so the local/remote shape is unit-testable
-  without spawning kitty.
+  wrapped in `ssh -tt <destination>`, where the destination comes from the
+  fleet file, not from the host id. `{:error, reason}` when the fleet gives
+  this host no ssh path to that daemon.
+
+  Pure enough to unit-test the local/remote shape without spawning kitty; the
+  fleet lookup is a file read, which is what `ssh_destination/1` isolates.
   """
-  @spec attach_command(String.t(), String.t() | nil) :: [String.t()]
-  def attach_command(session, host), do: attach_command(session, host, remote_host?(host))
+  @spec attach_command(String.t(), String.t() | nil) ::
+          {:ok, [String.t()]} | {:error, String.t()}
+  def attach_command(session, host) do
+    with {:ok, destination} <- ssh_destination(host) do
+      {:ok, attach_command(session, destination, destination != nil)}
+    end
+  end
 
   defp attach_command(session, host, remote?) do
     target = "=" <> session
@@ -368,11 +386,46 @@ defmodule Shuttle.Kitty do
     end
   end
 
-  # `shuttle.host` is local iff absent/empty or equal to this daemon's own id.
-  defp remote_host?(host) do
-    case host do
-      h when is_binary(h) and h != "" -> h != Shuttle.Poller.own_host_id()
-      _ -> false
+  @doc """
+  How to reach `host` over ssh: `{:ok, nil}` when it is this daemon's own (so
+  the attach is a plain local `tmux attach`), `{:ok, destination}` when the
+  fleet names one, and `{:error, reason}` when it does not.
+
+  `shuttle.host` is local iff absent/empty or equal to this daemon's own id.
+  Otherwise the host id is a ROUTING key — the name the composite board stamps
+  origins with — and the fleet file is the only thing that knows whether it is
+  also an ssh destination. A remote with a `port` is reached through a tunnel
+  this host supervises, so its name is its destination; a remote reached at its
+  own `url` has one only if the operator wrote an `ssh`.
+  """
+  @spec ssh_destination(String.t() | nil) :: {:ok, String.t() | nil} | {:error, String.t()}
+  def ssh_destination(host) do
+    cond do
+      not (is_binary(host) and host != "") ->
+        {:ok, nil}
+
+      host == Shuttle.Poller.own_host_id() ->
+        {:ok, nil}
+
+      true ->
+        case Enum.find(Shuttle.Remotes.configured(), &(&1.name == host)) do
+          nil ->
+            {:error,
+             "#{host} is not in this host's fleet file, so there is no way to reach it " <>
+               "(felt shuttle remotes add #{host} ...)"}
+
+          remote ->
+            case Shuttle.Remote.ssh_host(remote) do
+              nil ->
+                {:error,
+                 "no ssh path to #{host}: the fleet reaches it at #{remote.url} and names no " <>
+                   "ssh destination, so attach cannot open a terminal there " <>
+                   "(add \"ssh\" to its entry to enable it)"}
+
+              destination ->
+                {:ok, destination}
+            end
+        end
     end
   end
 
