@@ -965,11 +965,43 @@ defmodule Shuttle.RemoteRegistry do
   # compose: the loop absorbs fast local crashes, the breaker caps how many
   # cascades an unreachable remote gets before we stop hammering it.
   defp restart_remote(%Remote{} = remote, runner) do
-    script = ~s("$HOME/.local/bin/shuttle-launch")
-
-    case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
+    case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), restart_script(remote)),
+           stderr_to_stdout: true
+         ) do
       {_out, 0} -> :ok
       {out, code} -> {:error, {:ssh_restart_failed, code, trim_output(out)}}
+    end
+  end
+
+  # For a remote reached over a tunnel, reviving the daemon is the whole job:
+  # the transport is this host's tunnel, and this host already bounced it.
+  #
+  # For a remote reached at its own address, the transport lives on the FAR
+  # side — a mesh-VPN agent there is what makes the address resolve — and a
+  # healthy daemon behind a dead agent is exactly as unreachable as a dead one.
+  # So revive that too, when the host has the tracked keep-alive installed.
+  # Guarded on a non-loopback URL: a tunnelled remote must not have a VPN agent
+  # started on it as a side effect of a daemon restart.
+  defp restart_script(%Remote{} = remote) do
+    daemon = ~s("$HOME/.local/bin/shuttle-launch")
+
+    if remote_addressed?(remote) do
+      transport =
+        ~s(if [ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
+          ~s(! tmux has-session -t tailscaled 2>/dev/null; then ) <>
+          ~s("$HOME/.local/bin/tailscaled-launch"; fi)
+
+      "#{transport}; #{daemon}"
+    else
+      daemon
+    end
+  end
+
+  # True when the URL names the remote itself rather than a local tunnel mouth.
+  defp remote_addressed?(%Remote{url: url}) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) -> host not in ["127.0.0.1", "localhost", "::1"]
+      _ -> false
     end
   end
 

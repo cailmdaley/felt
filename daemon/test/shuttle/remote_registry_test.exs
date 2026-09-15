@@ -780,6 +780,83 @@ defmodule Shuttle.RemoteRegistryTest do
       assert Enum.any?(calls, fn {cmd, _} -> cmd == "ssh" end)
     end
 
+    test "restarting a remote at its own address revives the far-side transport too" do
+      # A daemon that is alive behind a dead mesh-VPN agent is exactly as
+      # unreachable as a dead one, and the agent lives on the far side where no
+      # tunnel bounce can touch it. A tunnelled remote must NOT get one started
+      # as a side effect — see the sibling assertion below.
+      MockClient.set("https://hub-a.example.ts.net/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("ssh", [{"session=absent\n", 0}])
+
+      remote = %Remote{
+        name: "hub-a",
+        url: "https://hub-a.example.ts.net",
+        ssh: "hub-a-login",
+        poll_interval_ms: 1,
+        request_timeout_ms: 100,
+        stale_multiplier: 2,
+        tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_revive_transport,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          restart_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      Enum.each(1..4, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_revive_transport)
+        Process.sleep(2)
+      end)
+
+      scripts = for {"ssh", args} <- MockRunner.calls(), do: List.last(args)
+
+      assert Enum.any?(scripts, &String.contains?(&1, "tailscaled-launch")),
+             "the restart must revive the far-side transport, got #{inspect(scripts)}"
+
+      assert Enum.any?(scripts, &String.contains?(&1, "shuttle-launch")),
+             "and still revive the daemon, got #{inspect(scripts)}"
+    end
+
+    test "restarting a tunnelled remote touches only the daemon" do
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("launchctl", [{"", 0}])
+      MockRunner.set("ssh", [{"session=absent\n", 0}])
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_revive_tunnelled,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          restart_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      Enum.each(1..5, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_revive_tunnelled)
+        Process.sleep(2)
+      end)
+
+      scripts = for {"ssh", args} <- MockRunner.calls(), do: List.last(args)
+      assert scripts != [], "the cascade should have reached the ssh steps"
+
+      refute Enum.any?(scripts, &String.contains?(&1, "tailscaled-launch")),
+             "a tunnelled remote's transport is this host's tunnel, not a far-side agent"
+    end
+
     test "a url remote with no tunnel and no ssh just reports stale" do
       # The mesh-VPN shape: reached over https, no local tunnel to bounce, and
       # the fleet named no ssh destination. Every step of the cascade is a shell
