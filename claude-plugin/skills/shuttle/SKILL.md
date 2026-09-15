@@ -145,9 +145,11 @@ Three cases, asked in order:
 
 ### Delivering artifacts
 
-Use `felt shuttle send-file /absolute/path/report.html` from either Claude or
-Codex to put finished artifacts on the Shuttle Board and sent-files trail.
-Pass multiple paths in one call. The command checks every file before recording
+If your harness has a native user-file tool (Claude Code's `SendUserFile`),
+use it — it is the one that also surfaces in claude.ai chats. Otherwise (Codex,
+Pi, a bare shell) use `felt shuttle send-file /absolute/path/report.html` to
+put finished artifacts on the Shuttle Board and sent-files trail. Pass multiple
+paths in one call. The command checks every file before recording
 and reports failures; keep the files on their owning host for later viewing.
 Session identity is detected from the harness environment or tmux ledger; if
 unavailable, supply `--session <actual-native-session-id>`; never invent an ID. Success confirms recording,
