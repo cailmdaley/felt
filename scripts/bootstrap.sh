@@ -270,10 +270,13 @@ else
   # script itself only starts a tmux respawn loop for a tailscaled binary,
   # and does nothing unless someone runs it or the daemon's recovery cascade
   # does. That cascade only ever revives an instance on a host that already
-  # has tailscaled state on disk ($HOME/.local/state/tailscale/tailscaled.state,
-  # which `tailscale up` creates) — a host that has never joined a tailnet has
-  # no such file, so the daemon never invokes this script there, regardless of
-  # whether it happens to be installed.
+  # has tailscaled state on disk ($HOME/.local/state/tailscale/tailscaled.state).
+  # That file proves tailscaled has RUN here at least once — it is written on
+  # first start, before and independent of `tailscale up` — so the gate is
+  # "somebody deliberately started this", not "somebody approved this device".
+  # Either way a host that never touched Tailscale has no such file, so the
+  # daemon never invokes this script there, regardless of whether it happens
+  # to be installed.
   cp "$REPO/bin/tailscaled-launch" "$HOME/.local/bin/tailscaled-launch" \
     && chmod +x "$HOME/.local/bin/tailscaled-launch" \
     || die "failed to install tailscaled-launch to ~/.local/bin."

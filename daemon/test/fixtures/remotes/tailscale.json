@@ -2,7 +2,7 @@
   "version": 1,
   "defaults": {"https_proxy": "http://localhost:1055"},
   "remotes": [
-    {"name": "hub-a", "url": "https://hub-a.example.ts.net", "tunnel": {"manager": "none"}},
-    {"name": "hub-b", "url": "https://hub-b.example.ts.net", "ssh": "hub-b-login", "tunnel": {"manager": "none"}}
+    {"name": "hub-a", "url": "https://hub-a.example.ts.net"},
+    {"name": "hub-b", "url": "https://hub-b.example.ts.net", "ssh": "hub-b-login"}
   ]
 }

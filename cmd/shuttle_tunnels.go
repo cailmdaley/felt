@@ -501,10 +501,14 @@ func resolveManagedTunnelSpecs(doc remotesFile) []tunnelSpec {
 		if !r.enabledOr() || !managedTunnel(r.tunnelOpts().Manager) {
 			continue
 		}
-		// The convergent arm skips rather than errors, for the same reason it
-		// never errors at all: it is the arm that runs on every install, and one
-		// malformed entry must not stop the rest of the fleet from converging.
-		// See resolveTunnelSpecs for what a port-0 job would actually be.
+		// Unreachable through the fleet file: normalizeRemotes already refuses
+		// a managed manager on a portless entry, and defaults a portless entry
+		// to none, so nothing that gets here can be both managed and port-0.
+		// It stays because this function takes a remotesFile, and the day
+		// something builds one in memory rather than reading it, a port-0
+		// tunnel spec would render `-L 0:localhost:4000` — a job that installs
+		// cleanly and forwards nothing. See resolveTunnelSpecs, which refuses
+		// the same shape loudly because the named arm is allowed to.
 		if r.Port == 0 {
 			continue
 		}

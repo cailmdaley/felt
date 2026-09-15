@@ -22,6 +22,13 @@
 # State lives in $HOME/.local/state/tailscale (socket, statedir, log),
 # created if missing; override with $TAILSCALED_STATE.
 #
+# Leave that override alone on any host a hub may revive over ssh. The shuttle
+# daemon's recovery cascade decides whether this host ever joined a tailnet by
+# testing for a non-empty tailscaled.state at the DEFAULT path, so a moved
+# statedir makes that gate permanently false and the revive step quietly never
+# fires — the remote just reports stale. Like the proxy port below, these are
+# independent settings in independent files and nothing checks they agree.
+#
 # Restart is opt-in, unlike shuttle-launch.
 #
 # shuttle-launch kills and recreates its tmux session unconditionally, and

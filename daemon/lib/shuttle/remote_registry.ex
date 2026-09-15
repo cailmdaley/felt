@@ -990,10 +990,20 @@ defmodule Shuttle.RemoteRegistry do
       # present: `scripts/bootstrap.sh` installs the keep-alive on every host
       # it touches, and a host that never joined a tailnet has no business
       # acquiring a running VPN agent because a hub's recovery cascade decided
-      # it might help. The state file is written when a human runs
-      # `tailscale up` and approves the device — which is exactly the opt-in,
-      # and on a facility whose policy forbids this, exactly the act nobody
-      # performed.
+      # it might help.
+      #
+      # Precisely, the file proves that `tailscaled` has RUN here at least
+      # once — it is written on first start, before and independent of
+      # `tailscale up`. That is weaker than "a human approved this device", and
+      # the difference is a host where someone ran the launcher by hand and
+      # never joined; it is still the difference between "somebody deliberately
+      # started this" and "bootstrap copied a file in".
+      #
+      # It also assumes the default statedir. An operator who sets
+      # `$TAILSCALED_STATE` on the far side (the launcher documents the
+      # override) leaves this gate permanently false, and the transport-revive
+      # step quietly never fires — the remote just reports stale, which is the
+      # safe direction but not an obvious one.
       transport =
         ~s(if [ -s "$HOME/.local/state/tailscale/tailscaled.state" ] && ) <>
           ~s([ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
@@ -1349,21 +1359,22 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
         @direct_profile
 
       {host, port} = proxy ->
-        ensure_profile(@proxied_profile)
-        apply_proxy(proxy, host, port)
+        pid = ensure_profile(@proxied_profile)
+        apply_proxy(pid, proxy, host, port)
         @proxied_profile
     end
   end
 
   # Idempotent, and never paired with a stop: a profile this process starts is
-  # one another process may already be mid-request on.
+  # one another process may already be mid-request on. Returns the profile's
+  # pid, which is what `apply_proxy/3` pins its memo to.
   defp ensure_profile(profile) do
     case :inets.start(:httpc, profile: profile) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
+      {:ok, pid} -> pid
+      {:error, {:already_started, pid}} -> pid
       # An httpc that will not start a profile is not something a poll tick can
       # fix; the request that follows fails and reports itself.
-      _ -> :ok
+      _ -> nil
     end
   end
 
@@ -1393,11 +1404,26 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   # `set_options/2` reconfigures a live profile in place — no restart, so
   # nothing in flight is disturbed. It is idempotent, and concurrent callers
-  # agreeing on the value make it a no-op, so there is nothing here to
-  # serialize.
-  defp apply_proxy(proxy, host, port) do
+  # agreeing on the value make it a no-op.
+  #
+  # The memo is keyed on the profile's PID, not on the proxy alone: a memo that
+  # outlived its profile would claim a proxy is applied to a process that was
+  # restarted without one, and every https request would go direct, silently
+  # and forever — the exact failure this whole path exists to prevent. Nothing
+  # in `daemon/lib` stops `:inets` today, so this is insurance, and it costs a
+  # tuple.
+  #
+  # One race survives and is acceptable: between a caller reading the memo and
+  # issuing its request, another caller may swap one proxy ADDRESS for a
+  # different one, and the first request goes out through the new one. It opens
+  # only on an operator editing one address into another (the transitions to
+  # and from "no proxy" switch profiles instead of reconfiguring), and both
+  # addresses are ones that operator chose.
+  defp apply_proxy(pid, proxy, host, port) do
+    applied = {pid, proxy}
+
     case :persistent_term.get(@applied_key, :unset) do
-      ^proxy ->
+      ^applied ->
         :ok
 
       _ ->
@@ -1406,7 +1432,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           @proxied_profile
         )
 
-        :persistent_term.put(@applied_key, proxy)
+        :persistent_term.put(@applied_key, applied)
     end
   end
 

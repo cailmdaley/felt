@@ -1,5 +1,5 @@
 {
-  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil). `ssh: \"\"` means the entry has NO ssh path at all — ssh defaults to the name only for port-forwarded entries, so a bare `url` remote the operator gave no `ssh` is one the recovery cascade must not try to revive over ssh. `https_proxy` is the document-level `defaults.https_proxy` after parsing, as a {host, port} pair rather than a rendered string: \"localhost:1055\" and \"localhost:01055\" are the same endpoint but different strings, so a string expectation could not say which normalization it meant. {\"host\": \"\", \"port\": 0} means no proxy configured. Host carries no IPv6 brackets. The rejected-input table lives in each suite as a unit test, mirrored line for line, since a fixture file can only hold readings that succeed.",
+  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil). `ssh: \"\"` means the entry has NO ssh path at all \u2014 ssh defaults to the name only for port-forwarded entries, so a bare `url` remote the operator gave no `ssh` is one the recovery cascade must not try to revive over ssh. `https_proxy` is the document-level `defaults.https_proxy` after parsing, as a {host, port} pair rather than a rendered string: \"localhost:1055\" and \"localhost:01055\" are the same endpoint but different strings, so a string expectation could not say which normalization it meant. {\"host\": \"\", \"port\": 0} means no proxy configured. Host carries no IPv6 brackets. The rejected-input table lives in each suite as a unit test, mirrored line for line, since a fixture file can only hold readings that succeed. `manager` appears only on PORTLESS entries, and only there because it is only there that the two readers must agree: a portless remote has no tunnel to supervise, so both say \"none\" on every platform. For a port entry the two deliberately answer different questions \u2014 Go says which supervisor a hub would INSTALL with, the daemon says what its recovery cascade can BOUNCE \u2014 so asserting one value would be asserting a bug.",
   "canonical.json": {
     "launchd_label_prefix": "com.example",
     "remotes": [
@@ -112,7 +112,8 @@
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
-        "label": "io.shuttle.shuttle-tunnel-hub-a"
+        "label": "io.shuttle.shuttle-tunnel-hub-a",
+        "manager": "none"
       }
     ],
     "https_proxy": {
@@ -133,7 +134,8 @@
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
-        "label": "io.shuttle.shuttle-tunnel-hub-a"
+        "label": "io.shuttle.shuttle-tunnel-hub-a",
+        "manager": "none"
       },
       {
         "name": "hub-b",
@@ -145,7 +147,8 @@
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
-        "label": "io.shuttle.shuttle-tunnel-hub-b"
+        "label": "io.shuttle.shuttle-tunnel-hub-b",
+        "manager": "none"
       }
     ],
     "https_proxy": {

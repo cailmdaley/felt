@@ -21,6 +21,14 @@ type remoteFixture struct {
 	RequestTimeoutMS int    `json:"request_timeout_ms"`
 	StaleMultiplier  int    `json:"stale_multiplier"`
 	Label            string `json:"label"`
+
+	// Manager is asserted only where expected.json carries it — on portless
+	// entries, the one place the two readers must agree that a remote has no
+	// tunnel to supervise. Pointer-typed so "absent" and "none" stay distinct:
+	// for a PORT entry the two readers answer different questions on purpose
+	// (which supervisor to install with vs. what the cascade can bounce), so
+	// asserting a shared value there would be asserting a bug.
+	Manager *string `json:"manager"`
 }
 
 // proxyFixture is expected.json's `https_proxy`: the parsed pair, not a
@@ -102,7 +110,11 @@ func TestRemotesFixtureParity(t *testing.T) {
 					StaleMultiplier:  got.StaleMultiplier,
 					Label:            got.label(doc.LaunchdLabelPrefix),
 				}
-				if g != w {
+				if w.Manager != nil {
+					manager := got.tunnelOpts().Manager
+					g.Manager = &manager
+				}
+				if !sameRemoteFixture(g, w) {
 					t.Errorf("remote #%d:\n got  %+v\n want %+v", i, g, w)
 				}
 			}
@@ -110,6 +122,24 @@ func TestRemotesFixtureParity(t *testing.T) {
 	}
 	if cases == 0 {
 		t.Fatal("expected.json listed no fixtures")
+	}
+}
+
+// sameRemoteFixture compares two readings field by field, dereferencing the
+// optional Manager: the struct holds a pointer, so == would compare addresses.
+func sameRemoteFixture(a, b remoteFixture) bool {
+	am, bm := a.Manager, b.Manager
+	a.Manager, b.Manager = nil, nil
+	if a != b {
+		return false
+	}
+	switch {
+	case am == nil && bm == nil:
+		return true
+	case am == nil || bm == nil:
+		return false
+	default:
+		return *am == *bm
 	}
 }
 

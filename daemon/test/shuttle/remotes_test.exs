@@ -71,10 +71,60 @@ defmodule Shuttle.RemotesTest do
               "stale_multiplier" => r.stale_multiplier,
               "label" => Remotes.label_for(r)
             }
+            |> with_manager(r, @want)
           end)
 
         assert got == @want["remotes"]
       end
+    end
+  end
+
+  # `manager` is asserted only where expected.json carries it — on portless
+  # entries, the one place the two readers must agree (see its `_comment`).
+  defp with_manager(got, remote, want) do
+    if Enum.any?(want["remotes"], &Map.has_key?(&1, "manager")) do
+      Map.put(got, "manager", to_string(remote.tunnel.manager))
+    else
+      got
+    end
+  end
+
+  describe "tunnel manager" do
+    # Asserted directly rather than only through the fixtures, because the
+    # fixture assertion is platform-dependent: on Linux `:none` is also the
+    # host default, so a portless entry would read `:none` there even with the
+    # rule removed. This is the case that bites on a Mac hub, where the two
+    # answers differ — and where the drift this test exists to stop actually
+    # hid. The Go mirror is
+    # TestNormalizeRemotes_TunnelManagerDefaultFollowsTheTransport.
+    test "a portless entry has no tunnel to supervise, whatever it claims" do
+      path =
+        write_remotes(~s({"remotes": [
+          {"name": "url-only", "url": "https://hub-a.example.ts.net"},
+          {"name": "claims-launchd", "url": "https://hub-b.example.ts.net",
+           "tunnel": {"manager": "launchd"}},
+          {"name": "claims-systemd", "url": "https://hub-c.example.ts.net",
+           "tunnel": {"manager": "systemd"}}
+        ]}))
+
+      System.put_env("FELT_REMOTES_FILE", path)
+
+      for %Remote{name: name, tunnel: %{manager: manager}} <- Remotes.registered() do
+        assert manager == :none, "#{name} has no port, so it has no tunnel to bounce"
+      end
+    end
+
+    test "a port entry keeps the host rule, and its other tunnel options survive" do
+      path =
+        write_remotes(~s({"remotes": [
+          {"name": "tunnelled", "port": 4001, "tunnel": {"multiplex": true, "label": "custom"}}
+        ]}))
+
+      System.put_env("FELT_REMOTES_FILE", path)
+
+      assert [%Remote{tunnel: tunnel}] = Remotes.registered()
+      assert tunnel.multiplex
+      assert tunnel.label == "custom"
     end
   end
 

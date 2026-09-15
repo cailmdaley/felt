@@ -71,7 +71,9 @@ defmodule Shuttle.Remote do
       one origin is how a mis-stamped origin silently degrades to `:local`.
     * `url` — `http://127.0.0.1:<port>`
     * `remote_port` — 4000 (the daemon port on the far side of the tunnel)
-    * `tunnel.manager` — `:launchd` on darwin, `:none` elsewhere. This answers
+    * `tunnel.manager` — `:none` for any entry with no `port` (nothing to
+      forward means nothing to supervise, on every platform); otherwise
+      `:launchd` on darwin, `:none` elsewhere. This answers
       the daemon's question, which is what the recovery cascade can BOUNCE, and
       the cascade only knows `launchctl kickstart`; `:none` skips the bounce and
       goes straight to the ssh check. The Go installer's `defaultTunnelManager()`
@@ -110,7 +112,7 @@ defmodule Shuttle.Remote do
         display: string_or(fetch(entry, :display), name),
         port: port,
         remote_port: remote_port,
-        tunnel: tunnel_from(fetch(entry, :tunnel)),
+        tunnel: tunnel_from(fetch(entry, :tunnel), port),
         enabled: fetch(entry, :enabled) != false,
         poll_interval_ms: poll_interval_ms,
         request_timeout_ms: request_timeout_ms,
@@ -155,9 +157,24 @@ defmodule Shuttle.Remote do
   defp string_or(value, _fallback) when is_binary(value) and value != "", do: value
   defp string_or(_value, fallback), do: fallback
 
-  defp tunnel_from(tunnel) when is_list(tunnel), do: tunnel_from(Map.new(tunnel))
+  # A remote with no local forwarded port has no tunnel for this host to
+  # supervise — there is nothing to forward — so its manager is `:none`
+  # whatever the entry says, and whatever platform this is. The Go reader
+  # (`normalizeRemotes`) applies the same rule and additionally REFUSES a file
+  # that names an actual supervisor on a portless entry, so the only way such
+  # an entry reaches this parse is a file hand-written around the CLI; reading
+  # it as `:none` is the same answer the CLI would have forced.
+  #
+  # This matters beyond tidiness: `run_recovery_step/3`'s `:no_recovery_path`
+  # clause keys off `manager == :none`, so a portless entry that claimed a
+  # bounceable tunnel would send the cascade to `launchctl kickstart` at a job
+  # that was deliberately never installed.
+  defp tunnel_from(tunnel, nil), do: %{tunnel_shape(tunnel) | manager: :none}
+  defp tunnel_from(tunnel, port) when is_integer(port), do: tunnel_shape(tunnel)
 
-  defp tunnel_from(%{} = tunnel) do
+  defp tunnel_shape(tunnel) when is_list(tunnel), do: tunnel_shape(Map.new(tunnel))
+
+  defp tunnel_shape(%{} = tunnel) do
     %{
       manager: tunnel_manager(fetch(tunnel, :manager)),
       multiplex: fetch(tunnel, :multiplex) == true,
@@ -165,7 +182,7 @@ defmodule Shuttle.Remote do
     }
   end
 
-  defp tunnel_from(_), do: %{manager: default_tunnel_manager(), multiplex: false, label: nil}
+  defp tunnel_shape(_), do: %{manager: default_tunnel_manager(), multiplex: false, label: nil}
 
   defp tunnel_manager("launchd"), do: :launchd
   defp tunnel_manager(:launchd), do: :launchd
