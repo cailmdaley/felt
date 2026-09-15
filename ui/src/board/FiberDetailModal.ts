@@ -271,6 +271,10 @@ interface OpenFileEntry extends ZoomableTab {
  *  304: distinct from `null` (the read FAILED — keep the last known trail) and
  *  from `[]` (the trail is genuinely empty). */
 const SENT_FILES_UNCHANGED = Symbol('sent-files-unchanged')
+/** How many chips a folded (phone) sent-files band shows. The stylesheet's
+ *  `:nth-child(n + 4)` rule is this number + 1; `test/sentFold.test.ts` reads
+ *  the CSS and fails if the two ever drift. */
+export const SENT_FOLD_VISIBLE = 3
 
 type RefreshableArtifact = HTMLImageElement | HTMLIFrameElement | HTMLAudioElement
 
@@ -383,9 +387,10 @@ export class FiberDetailModal {
   private outsideHandler: ((e: PointerEvent) => void) | null = null
   private resizeHandler: (() => void) | null = null
   private searchDebounce: number | null = null
-  /** The attachment strip above the prose. Held so re-reading the body
-   *  replaces the strip rather than stacking a second one under it. */
-  private attachRow: HTMLElement | null = null
+  /** The band the attachment strip mounts into — above the sent-files trail,
+   *  under the head. Held so re-reading the body replaces the strip rather
+   *  than stacking a second one under it. */
+  private attachHost: HTMLElement | null = null
   /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
    *  dispatch (carrying user_message + resume_mode inline), lifecycle,
    *  felt-nest — owner-routed by the card's `originId` carried as
@@ -463,6 +468,8 @@ export class FiberDetailModal {
   private bodyRequestToken = 0
   /** The fiber's last-seen `modified_at`; a change re-renders the body. */
   private bodyRevision: string | undefined
+  private sentCount: HTMLElement | null = null
+  private sentMore: HTMLButtonElement | null = null
   private sentFilesRevision = ''
   private sentFilesEtag: string | null = null
   /** Change baselines for artifact bytes, keyed by BARE absolute path — one
@@ -730,11 +737,20 @@ export class FiberDetailModal {
     // window on first open). Empty trail → the launcher never reveals itself.
     const launcher = this.buildSentFilesLauncher(card)
 
+    // ── Attachments band ─────────────────────────────────────────────────────
+    // Mounted empty and ABOVE the sent-files trail, because an attachment is
+    // what the fiber is about and a sent file is a delivery it made along the
+    // way. The body read fills it (renderFiberBody → renderAttachments); a
+    // fiber with no `:::{embed}` never shows a band at all.
+    const attachHost = document.createElement('div')
+    attachHost.className = 'kbn-detail-attach-host'
+    this.attachHost = attachHost
+
     // ── Assemble: a single reading column ────────────────────────────────────
-    // The card panel is one flex column again — header, controls, launcher,
-    // body. The file viewer is a SEPARATE floating window (openViewerWindow),
-    // so the card keeps its own size and never grows.
-    overlay.append(header, ...(controls ? [controls] : []), launcher, page)
+    // The card panel is one flex column again — header, controls, attachments,
+    // sent files, body. The file viewer is a SEPARATE floating window
+    // (openViewerWindow), so the card keeps its own size and never grows.
+    overlay.append(header, ...(controls ? [controls] : []), attachHost, launcher, page)
     if (this.host) {
       // A tab's card: no frame of its own, no z-order, no registration — it is
       // inside the panel's window, which carries all three for it.
@@ -891,7 +907,7 @@ export class FiberDetailModal {
       this.writePersist()
     }
     this.fiberIndex = null
-    this.attachRow = null
+    this.attachHost = null
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.closeViewerWindow()
@@ -912,9 +928,11 @@ export class FiberDetailModal {
     this.tabStrip = null
     this.bodyPage = null
     this.proseEl = null
-    this.attachRow = null
+    this.attachHost = null
     this.sentWrap = null
     this.sentList = null
+    this.sentCount = null
+    this.sentMore = null
     this.bodyRevision = undefined
     this.sentFilesRevision = ''
     this.sentFilesEtag = null
@@ -1009,6 +1027,7 @@ export class FiberDetailModal {
       : ''
 
     prose.classList.remove('kbn-detail-prose-empty')
+    this.attachHost?.replaceChildren()
     if (body) {
       // Resolve a relative `:::{embed}` / image against the fiber's own dir
       // (carried on the card from the composite feed) and route the bytes
@@ -1028,7 +1047,7 @@ export class FiberDetailModal {
       // (renderAttachments). See attachments.ts for why inline rendering went.
       const { body: prose_md, attachments } = extractEmbeds(body)
       prose.innerHTML = lede + renderMarkdown(prose_md, bodyOpts)
-      this.renderAttachments(attachments, card, prose)
+      this.renderAttachments(attachments, card)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
       this.restoreBodyScroll(pageScroll, overlay)
@@ -1077,13 +1096,10 @@ export class FiberDetailModal {
    * delivery. They wear the same card idiom so they read as one family, and
    * they stay two groups because they are two things.
    */
-  private renderAttachments(
-    attachments: readonly Attachment[],
-    card: KanbanCard,
-    prose: HTMLElement,
-  ): void {
-    this.attachRow?.remove()
-    this.attachRow = null
+  private renderAttachments(attachments: readonly Attachment[], card: KanbanCard): void {
+    const host = this.attachHost
+    if (!host) return
+    host.replaceChildren()
     if (attachments.length === 0) return
 
     const wrap = document.createElement('section')
@@ -1099,8 +1115,7 @@ export class FiberDetailModal {
     for (const att of attachments) strip.append(this.buildAttachmentCard(att, card))
 
     wrap.append(heading, strip)
-    prose.parentElement?.insertBefore(wrap, prose)
-    this.attachRow = wrap
+    host.append(wrap)
   }
 
   /** One attachment card: a face (image thumbnail, else the extension glyph),
@@ -1433,6 +1448,7 @@ export class FiberDetailModal {
     if (this.sentList && this.sentWrap && changed) {
       this.renderLauncher(this.sentList, card)
       this.sentWrap.classList.toggle('kbn-detail-sent-empty', next.length === 0)
+      this.syncSentFold()
     }
     if (!changed) {
       this.syncLauncherActiveState()
@@ -2822,12 +2838,35 @@ export class FiberDetailModal {
 
     const heading = document.createElement('div')
     heading.className = 'kbn-detail-sent-heading'
-    heading.textContent = 'Sent files'
+    const label = document.createElement('span')
+    label.textContent = 'Sent files'
+    // The count earns its place only where the trail is folded — a phone sees
+    // three chips and needs to know three of how many.
+    const count = document.createElement('span')
+    count.className = 'kbn-detail-sent-count'
+    heading.append(label, count)
+    this.sentCount = count
 
     const list = document.createElement('div')
     list.className = 'kbn-detail-sent-list'
     list.setAttribute('role', 'list')
-    wrap.append(heading, list)
+
+    // The fold. A long trail used to fill a phone screen before anything else
+    // on the card came into view; on a phone the list is clipped to its three
+    // most recent chips and this opens the rest. Which chips are hidden is a
+    // CSS rule keyed off the viewport, not a JS branch, so a rotated phone or
+    // a resized window can never leave the button and the list disagreeing.
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'kbn-detail-sent-more'
+    more.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const open = wrap.classList.toggle('kbn-detail-sent-expanded')
+      this.syncSentFold(open)
+    })
+    this.sentMore = more
+
+    wrap.append(heading, list, more)
     this.sentWrap = wrap
     this.sentList = list
 
@@ -2875,6 +2914,19 @@ export class FiberDetailModal {
       })
       list.append(row)
     }
+  }
+
+  /** Label the fold from the trail's own length. Called on every re-render and
+   *  on every toggle, so the button always says what it will actually do. */
+  private syncSentFold(expanded = this.sentWrap?.classList.contains('kbn-detail-sent-expanded') ?? false): void {
+    const total = this.sentFiles.length
+    if (this.sentCount) this.sentCount.textContent = String(total)
+    const more = this.sentMore
+    if (!more) return
+    // Below the fold's own size there is nothing to unfold.
+    more.hidden = total <= SENT_FOLD_VISIBLE
+    more.textContent = expanded ? 'show fewer' : `show all ${total}`
+    more.setAttribute('aria-expanded', String(expanded))
   }
 
   /** Mark launcher entries whose file is currently open in the accordion. */

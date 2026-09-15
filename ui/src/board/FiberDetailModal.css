@@ -1047,11 +1047,21 @@
    wear the sent-file chip's warm ochre so the two groups read as one family,
    with more weight here because an attachment is central and evergreen where a
    sent file is one delivery on a trail. */
+.kbn-detail-attach-host {
+  flex: 0 0 auto;
+}
 .kbn-detail-attach {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  padding: 12px 22px 4px;
+  padding: 11px 16px 12px;
+  border-top: 1px solid rgba(27, 22, 17, 0.08);
+  /* The same warm shelf the sent-files band rests on, a shade stronger: the
+     two are one family, and this one is the fiber's own files. */
+  background:
+    linear-gradient(rgba(255, 251, 237, 0.6), transparent 14px),
+    rgba(154, 123, 53, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 251, 237, 0.6);
 }
 .kbn-detail-attach-heading {
   display: flex;
@@ -1164,6 +1174,12 @@
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
   color: rgba(58, 47, 34, 0.6);
 }
+
+/* The trail's length, and the control that unfolds it. Both belong to the
+   phone: a desktop shows every chip already, so a count and a "show all" would
+   be furniture. They are revealed in the mobile block below. */
+.kbn-detail-sent-count { display: none; }
+.kbn-detail-sent-more { display: none; }
 
 /* ── Sent files strip ─────────────────────────────────────────────────── */
 /* The deliverable trail between the controls cluster and the page pane.
@@ -1519,8 +1535,50 @@
      flex children is the whole mechanism — no second copy of the actions,
      no sticky positioning, and the expanded cluster grows upward over the
      page from the edge it is anchored to. */
+  /* Attachments first: what the fiber IS, before what it has sent. */
   .kbn-detail-sheet .kbn-detail-header { order: 0; }
-  .kbn-detail-sheet .kbn-detail-sent { order: 1; }
+  .kbn-detail-sheet .kbn-detail-attach-host { order: 1; }
+  .kbn-detail-sheet .kbn-detail-sent { order: 2; }
+
+  /* The trail folds to its three most recent chips. The cap-and-scroll the
+     desktop band uses is the wrong instrument on a phone — it puts a second
+     scrolling region in the thumb's path; a fold shows what is recent and
+     asks before showing the rest. `n + 4` is SENT_FOLD_VISIBLE + 1. */
+  .kbn-detail-sent {
+    max-height: none;
+    overflow-y: visible;
+  }
+  .kbn-detail-sent:not(.kbn-detail-sent-expanded) .kbn-detail-sent-list > :nth-child(n + 4) {
+    display: none;
+  }
+  /* Unfolded, it is capped again — an eighty-file trail must not become the
+     whole card — and scrolls inside its own band. */
+  .kbn-detail-sent-expanded {
+    max-height: 45dvh;
+    overflow-y: auto;
+  }
+  .kbn-detail-sent-count {
+    display: inline;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: calc(9.5px * var(--kbn-type-scale, 1));
+    color: rgba(154, 123, 53, 0.85);
+  }
+  .kbn-detail-sent-count::before { content: "("; }
+  .kbn-detail-sent-count::after { content: ")"; }
+  .kbn-detail-sent-more {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px dashed rgba(154, 123, 53, 0.45);
+    border-radius: 4px;
+    background: transparent;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: calc(11px * var(--kbn-type-scale, 1));
+    color: #6B5526;
+  }
+  .kbn-detail-sent-more[hidden] { display: none; }
 
   /* Thumb-sized cards, and a strip that can be swiped with the finger that is
      already on the page. The strip scrolls; the page still does not. */
@@ -1540,9 +1598,9 @@
   .kbn-detail-attach-face { height: 62px; }
   .kbn-detail-attach-name { font-size: calc(13px * var(--kbn-type-scale, 1)); }
   .kbn-detail-attach-title { font-size: calc(11.5px * var(--kbn-type-scale, 1)); }
-  .kbn-detail-sheet .kbn-detail-page { order: 2; }
+  .kbn-detail-sheet .kbn-detail-page { order: 3; }
   .kbn-detail-sheet .kbn-detail-controls {
-    order: 3;
+    order: 4;
     border-bottom: none;
     border-top: 1px solid rgba(27, 22, 17, 0.16);
     background: linear-gradient(transparent, rgba(255, 251, 237, 0.45));
