@@ -45,26 +45,64 @@
 # path for when you actually want to bounce the daemon (new tailscaled
 # binary, wedged state, etc).
 #
-# --outbound-http-proxy-listen and --socks5-server are what make this
-# tailscaled useful as a *hub*: a host whose own tailnet route is
-# userspace-networking has no other way out to a remote's ts.net address, so
-# the daemon feeds that proxy to :httpc via remotes.json's
-# `defaults.https_proxy` (see docs/shuttle/installation.md). The port each
-# flag binds is overridable — $TAILSCALED_HTTP_PROXY_PORT (default 1055) and
-# $TAILSCALED_SOCKS_PORT (default 1056) — because 1055 is just a convention,
-# not a Tailscale requirement, and a shared login node can already have
-# another user's tailscaled sitting on it. If you override
-# TAILSCALED_HTTP_PROXY_PORT here, update `defaults.https_proxy` in
-# ~/.config/felt/remotes.json to match on any hub that routes through this
-# instance — the two values are independent settings in independent files
-# and nothing checks that they agree.
+# The outbound proxy is OFF unless you ask for it, and that default is a
+# security boundary, not a convenience.
+#
+# `--outbound-http-proxy-listen` is what makes this tailscaled useful as a
+# *hub*: a host whose own tailnet route is userspace-networking has no other
+# way out to a remote's ts.net address, so the daemon feeds that proxy to
+# :httpc via remotes.json's `defaults.https_proxy` (see
+# docs/shuttle/installation.md). It is also an UNAUTHENTICATED gateway into
+# the whole tailnet. tailscaled binds it to 127.0.0.1, which is a real
+# boundary on a laptop and none at all on a shared login node: every other
+# user logged into that node shares its loopback, so any of them can
+# `curl -x http://127.0.0.1:<port> https://<any-node>.<tailnet>.ts.net/...`
+# and reach every daemon in the tailnet, `:4000` control API included. An HPC
+# login node routinely has a dozen other people on it.
+#
+# Only a hub needs this. A node that merely runs `tailscale serve` to expose
+# its own daemon needs no outbound proxy at all, so running one there is pure
+# exposure for no function. Hence: set $TAILSCALED_HTTP_PROXY to the listen
+# address (e.g. `localhost:1055`) on the ONE host that composites the fleet,
+# and leave it unset everywhere else. When you do set it, `defaults.https_proxy`
+# in ~/.config/felt/remotes.json must name the same address — two independent
+# settings in independent files, and nothing checks that they agree.
+#
+# $TAILSCALED_SOCKS5 is the same switch for `--socks5-server`, and nothing in
+# felt or shuttle uses it; it exists only because a human occasionally wants a
+# SOCKS route out of a login node. Same exposure, same default: off.
+#
+# Neither flag has an authentication option. On a shared node the residual
+# risk of enabling the proxy is real and unmitigated at this layer — the fix
+# there is authentication on the daemons' own :4000, not a cleverer port.
 
 set -u
 
 ST="${TAILSCALED_STATE:-$HOME/.local/state/tailscale}"
 SESSION=tailscaled
-HTTP_PROXY_PORT="${TAILSCALED_HTTP_PROXY_PORT:-1055}"
-SOCKS_PORT="${TAILSCALED_SOCKS_PORT:-1056}"
+
+# Both listeners are off unless the operator opted in — see the header. The
+# environment wins; a one-line file in the state dir is the durable form.
+listen_setting() {
+  env_value=$1
+  file=$2
+  if [ -n "$env_value" ]; then
+    printf '%s\n' "$env_value"
+  elif [ -r "$ST/$file" ]; then
+    head -n 1 "$ST/$file" | tr -d '[:space:]'
+  fi
+}
+
+HTTP_PROXY_LISTEN=$(listen_setting "${TAILSCALED_HTTP_PROXY:-}" http-proxy-listen)
+SOCKS_LISTEN=$(listen_setting "${TAILSCALED_SOCKS5:-}" socks5-listen)
+
+# Built as argument fragments so an unset setting contributes no flag at all,
+# rather than a flag with an empty value that tailscaled would reject.
+HTTP_PROXY_ARG=""
+[ -n "$HTTP_PROXY_LISTEN" ] && \
+  HTTP_PROXY_ARG="--outbound-http-proxy-listen=$HTTP_PROXY_LISTEN"
+SOCKS_ARG=""
+[ -n "$SOCKS_LISTEN" ] && SOCKS_ARG="--socks5-server=$SOCKS_LISTEN"
 
 # The binary itself: whatever is on PATH, else the canonical unprivileged drop
 # point. Resolved once, here, so the loop below fails loudly at start rather
@@ -90,13 +128,17 @@ if [ "${1:-}" = "--loop" ]; then
     fi
     started=$(date +%s)
     echo "=== tailscaled start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
+    # Unquoted on purpose: an empty variable must vanish from the argument
+    # list, not become an empty argument. Both values are operator-set listen
+    # addresses with no whitespace, so word-splitting them is exactly right.
+    # shellcheck disable=SC2086
     "$TAILSCALED" \
       --tun=userspace-networking \
       --socket="$ST/tailscaled.sock" \
       --statedir="$ST" \
       --port=0 \
-      --outbound-http-proxy-listen="localhost:$HTTP_PROXY_PORT" \
-      --socks5-server="localhost:$SOCKS_PORT" \
+      $HTTP_PROXY_ARG \
+      $SOCKS_ARG \
       >> "$LOG" 2>&1
     status=$?
     lived=$(( $(date +%s) - started ))

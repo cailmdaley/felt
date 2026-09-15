@@ -781,9 +781,16 @@ immediately has nothing to do.
 A hub whose *own* `tailscaled` also runs in userspace-networking mode has no
 kernel route into the tailnet at all — the only way out to another node's
 `ts.net` address is through that `tailscaled`'s local HTTP proxy
-(`--outbound-http-proxy-listen`, which is what `bin/tailscaled-launch` starts
-on `localhost:1055`). Point the fleet file at it with a document-level
-default, which the daemon feeds to `:httpc` for every remote request:
+(`--outbound-http-proxy-listen`). That listener is **off by default** — see
+"The proxy is a gateway" below — so a hub turns it on explicitly:
+
+```bash
+printf 'localhost:1055\n' > ~/.local/state/tailscale/http-proxy-listen
+tailscaled-launch --restart
+```
+
+Then point the fleet file at the same address with a document-level default,
+which the daemon feeds to `:httpc` for every remote request:
 
 ```json
 {
@@ -802,10 +809,46 @@ environment is invisible to the person operating it, and `felt shuttle
 remotes list` validates `remotes.json`, not the daemon's environment, so the
 fleet file has to be the single source of truth.
 
+The two values are independent settings in independent files and nothing
+checks that they agree. A mismatch looks like every remote going stale at once
+with no other symptom, so check both when that happens.
+
 TLS is verified normally, against the system CA store — `ts.net` certificates
 are publicly trusted (Let's Encrypt, via Tailscale's HTTPS certificate
 feature), so there is no `verify_none` or pinned-cert escape hatch anywhere in
 this path.
+
+### The proxy is a gateway
+
+`--outbound-http-proxy-listen` is an **unauthenticated** route into the whole
+tailnet, and `tailscaled` offers no authentication option for it. It binds to
+`127.0.0.1`, which is a real boundary on a laptop and none at all on a shared
+login node: every user logged into that node shares its loopback, so any of
+them can run
+
+```bash
+curl -x http://127.0.0.1:1055 https://<any-node>.<tailnet>.ts.net/api/v1/state
+```
+
+and reach every daemon in your tailnet — including the `:4000` control API that
+launches and kills workers. An HPC login node routinely has a dozen other
+people on it.
+
+Two consequences for how you deploy this.
+
+**Only a hub needs the proxy.** A node that merely runs `tailscale serve` to
+expose its own daemon needs no outbound route at all, so a proxy there is pure
+exposure for no function. This is why `bin/tailscaled-launch` ships with both
+its listeners off: turn the HTTP proxy on for the one host that composites the
+fleet, and nowhere else. (`socks5-listen` is the same switch for
+`--socks5-server`; nothing in felt or shuttle uses it.)
+
+**On the hub itself the risk is real and unmitigated at this layer.** If your
+hub is a shared login node, other users on that node can reach your tailnet for
+as long as the proxy runs. Prefer a hub whose loopback is yours alone — a
+laptop, a workstation, a single-user VM — and if it has a TUN-mode Tailscale
+install it needs no proxy at all. Where that is not possible, the fix is
+authentication on the daemons' own `:4000`, not a less obvious port.
 
 ### Policy caveat
 

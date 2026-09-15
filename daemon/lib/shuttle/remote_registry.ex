@@ -1427,12 +1427,17 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
         :ok
 
       _ ->
-        :httpc.set_options(
-          [{:https_proxy, {{String.to_charlist(host), port}, @no_proxy}}],
-          @proxied_profile
-        )
-
-        :persistent_term.put(@applied_key, applied)
+        # Only record it if httpc took it. A discarded failure here would
+        # memoize a proxy that was never applied, and `sync_proxy/0` would
+        # never try again for the life of the VM — every https remote silently
+        # direct, which is the failure this path exists to prevent.
+        case :httpc.set_options(
+               [{:https_proxy, {{String.to_charlist(host), port}, @no_proxy}}],
+               @proxied_profile
+             ) do
+          :ok -> :persistent_term.put(@applied_key, applied)
+          _ -> :ok
+        end
     end
   end
 
