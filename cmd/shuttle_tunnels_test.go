@@ -518,6 +518,184 @@ func TestRenderTunnelJob_RemotePortReachesForward(t *testing.T) {
 	}
 }
 
+// Convergent install prunes what the fleet file no longer names — the other
+// half of the two-transport world, where a remote can move from a supervised
+// tunnel to a direct `url` (`manager: none`) or drop out of the file
+// altogether, and the old autossh job must not keep running forever against a
+// daemon nothing polls that way anymore.
+
+// TestInstallTunnels_PruneRemovesOrphan — a remote gone from the file entirely
+// leaves behind a job matching our generated naming convention; convergent
+// install (no remote named) boots it out and deletes the file.
+func TestInstallTunnels_PruneRemovesOrphan(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	useHostGOOS(t, "linux")
+	calls := stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+
+	// Seed an orphan: gamma was once installed, but the fleet file above
+	// no longer mentions it at all.
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(unitDir, "shuttle-tunnel-gamma.service")
+	if err := os.WriteFile(orphan, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("orphaned unit should have been removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "shuttle-tunnel-alpha.service")); err != nil {
+		t.Errorf("alpha's unit should still be there: %v", err)
+	}
+	got := calls()
+	for _, want := range []string{
+		"systemctl --user stop shuttle-tunnel-gamma.service",
+		"systemctl --user disable shuttle-tunnel-gamma.service",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q, got calls:\n%s", want, got)
+		}
+	}
+}
+
+// TestInstallTunnels_PruneLeavesStillNamedRemoteAlone — a remote that is still
+// in the fleet file, still managed, is never a prune target, whatever order
+// the directory listing comes back in.
+func TestInstallTunnels_PruneLeavesStillNamedRemoteAlone(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	useHostGOOS(t, "darwin")
+	stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	plist := filepath.Join(home, "Library", "LaunchAgents", "io.shuttle.shuttle-tunnel-alpha.plist")
+	if _, err := os.Stat(plist); err != nil {
+		t.Fatalf("alpha's plist should exist after install: %v", err)
+	}
+}
+
+// TestInstallTunnels_NamedRemoteDoesNotPrune — `install <name>` targets one
+// remote; whatever else sits in the job directory, orphaned or not, is left
+// exactly as it was found.
+func TestInstallTunnels_NamedRemoteDoesNotPrune(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	useHostGOOS(t, "linux")
+	stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(unitDir, "shuttle-tunnel-gamma.service")
+	if err := os.WriteFile(orphan, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels([]string{"alpha"}); err != nil {
+		t.Fatalf("install alpha: %v", err)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Errorf("naming a remote must prune nothing, but gamma's unit is gone: %v", err)
+	}
+}
+
+// TestInstallTunnels_PruneCatchesManagerNone — a remote still in the file, but
+// flipped to `manager: none` (reachable directly now, e.g. over Tailscale), is
+// exactly as much a prune target as one removed outright: this host is no
+// longer asked to supervise a tunnel for it.
+func TestInstallTunnels_PruneCatchesManagerNone(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","url":"https://alpha.example.ts.net","tunnel":{"manager":"none"}}]`)
+	useHostGOOS(t, "linux")
+	stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(unitDir, "shuttle-tunnel-alpha.service")
+	if err := os.WriteFile(stale, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("alpha's old unit should have been pruned once its manager is none, stat err = %v", err)
+	}
+}
+
+// TestInstallTunnels_PruneIgnoresNonMatchingFiles — anything in the job
+// directory that doesn't match our generated naming shape is never a
+// candidate, no matter how stale it looks: a hand-written plist or unit is not
+// ours to remove.
+func TestInstallTunnels_PruneIgnoresNonMatchingFiles(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	useHostGOOS(t, "linux")
+	stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handWritten := filepath.Join(unitDir, "my-own-thing.service")
+	if err := os.WriteFile(handWritten, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	customLabel := filepath.Join(unitDir, "custom-retired.service")
+	if err := os.WriteFile(customLabel, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	for _, path := range []string{handWritten, customLabel} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s must be left untouched: %v", path, err)
+		}
+	}
+}
+
+// TestInstallTunnels_DryRunRemovesNothing — --dry-run reports what prune
+// would do without touching the file or the supervisor.
+func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
+	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	useHostGOOS(t, "linux")
+	calls := stubSupervisorsOnPath(t, 0)
+	home := installIntoTemp(t, "")
+	tunnelsDryRun = true
+	t.Cleanup(func() { tunnelsDryRun = false })
+
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(unitDir, "shuttle-tunnel-gamma.service")
+	if err := os.WriteFile(orphan, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installTunnels(nil); err != nil {
+		t.Fatalf("install --dry-run: %v", err)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Errorf("--dry-run must not remove the orphan: %v", err)
+	}
+	if got := calls(); strings.Contains(got, "stop shuttle-tunnel-gamma") || strings.Contains(got, "disable shuttle-tunnel-gamma") {
+		t.Errorf("--dry-run must not touch the supervisor for the orphan, got:\n%s", got)
+	}
+}
+
 // assertGolden compares against testdata, regenerating with -update.
 func assertGolden(t *testing.T, name, got string) {
 	t.Helper()

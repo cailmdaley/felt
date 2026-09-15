@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"text/template"
@@ -84,6 +85,7 @@ var (
 	tunnelsLogDir    string
 	tunnelsAutoSSH   string
 	tunnelsWriteOnly bool
+	tunnelsDryRun    bool
 )
 
 // tunnelSupervisor is the host's job supervisor. It answers the questions
@@ -102,6 +104,15 @@ type tunnelSupervisor struct {
 	Preflight func() error
 	// Activate loads and (re)starts a written job, printing what it did.
 	Activate func(spec tunnelSpec, path string) error
+	// Deactivate stops and unloads a job by its file name (not full path — the
+	// convergent prune only ever knows a name it read back out of JobDir, not
+	// a tunnelSpec, since the remote it once belonged to may no longer be in
+	// the fleet file at all) and removes the job file. Unloading a job that
+	// isn't currently loaded, or removing a file that is already gone, must
+	// both be treated as success: prune runs unconditionally on every
+	// convergent install, so "there was nothing to clean up" is the common
+	// case, not an error.
+	Deactivate func(jobFile, jobDir string) error
 	// Note is printed once after a successful install; empty prints nothing.
 	Note string
 }
@@ -114,16 +125,25 @@ onto local ports. The generated jobs go to the host's own supervisor: launchd
 LaunchAgents in ~/Library/LaunchAgents on macOS, systemd --user units in
 ~/.config/systemd/user on Linux. Single-host use needs no tunnels at all.
 
+Run with no remote named, install is convergent: it writes and starts a job
+for every remote the fleet file currently names with a managed tunnel, then
+removes any job on this host, installed under our own naming convention, that
+no remote in the file still asks for — a remote dropped from the file
+entirely, or flipped to ` + "`manager: none`" + ` or ` + "`enabled: false`" + `, stops running
+forever once you re-run install. Naming a remote installs (or reinstalls)
+only that one and prunes nothing.
+
 A Linux host with no systemd user session cannot start a unit, so install says
 so and writes nothing; --write-only renders the units for you to supervise
-yourself.
+yourself (and skips pruning too, since both touch the supervisor).
 
 The remotes come from the fleet file (` + "`felt shuttle remotes path`" + `).
 
 Examples:
-  felt shuttle tunnels install              # every configured remote, write + start
-  felt shuttle tunnels install <name>       # only that remote
-  felt shuttle tunnels install --write-only # write job files but don't start them`,
+  felt shuttle tunnels install                 # every configured remote, write + start + prune orphans
+  felt shuttle tunnels install <name>          # only that remote, no pruning
+  felt shuttle tunnels install --dry-run       # show which orphaned jobs would be removed
+  felt shuttle tunnels install --write-only    # write job files but don't start them or prune`,
 }
 
 var tunnelsInstallCmd = &cobra.Command{
@@ -136,9 +156,34 @@ var tunnelsInstallCmd = &cobra.Command{
 }
 
 func installTunnels(requested []string) error {
-	specs, err := resolveTunnelSpecs(requested)
-	if err != nil {
-		return err
+	// The all-remotes form is convergent: it installs every remote the fleet
+	// file currently names with a managed tunnel, AND prunes every job on this
+	// host that our own naming convention recognizes but the file no longer
+	// backs. `install <name>` targets exactly the named remotes and prunes
+	// nothing — a partial, single-remote install has no business deciding
+	// what the rest of the fleet's jobs are for.
+	convergent := len(requested) == 0
+
+	var (
+		specs       []tunnelSpec
+		labelPrefix string
+	)
+	if convergent {
+		doc, err := loadRemotesFile()
+		if err != nil {
+			return err
+		}
+		labelPrefix = doc.LaunchdLabelPrefix
+		specs = resolveManagedTunnelSpecs(doc)
+		if len(specs) == 0 {
+			fmt.Println("no remotes use a supervisor-managed tunnel; checking for orphaned tunnel jobs")
+		}
+	} else {
+		var err error
+		specs, err = resolveTunnelSpecs(requested)
+		if err != nil {
+			return err
+		}
 	}
 
 	home, err := os.UserHomeDir()
@@ -150,87 +195,101 @@ func installTunnels(requested []string) error {
 		return err
 	}
 
-	// Probe before creating anything. A host that cannot start the jobs should
-	// be left with no job directory and no half-installed fleet, and should
-	// hear why. --write-only is an explicit "just render them", so it skips
-	// the probe exactly as it skips the activation the probe guards.
-	if !tunnelsWriteOnly && sup.Preflight != nil {
-		if err := sup.Preflight(); err != nil {
-			return err
-		}
-	}
-
 	jobDir := tunnelsJobDir
 	if jobDir == "" {
 		jobDir = sup.JobDir
 	}
-	logDir := tunnelsLogDir
-	if logDir == "" {
-		logDir = filepath.Join(home, ".local", "state", "shuttle")
-	}
 
-	autosshPath := tunnelsAutoSSH
-	if autosshPath == "" {
-		autosshPath, err = exec.LookPath("autossh")
+	if len(specs) > 0 {
+		// Probe before creating anything. A host that cannot start the jobs
+		// should be left with no job directory and no half-installed fleet,
+		// and should hear why. --write-only is an explicit "just render
+		// them", so it skips the probe exactly as it skips the activation the
+		// probe guards.
+		if !tunnelsWriteOnly && sup.Preflight != nil {
+			if err := sup.Preflight(); err != nil {
+				return err
+			}
+		}
+
+		logDir := tunnelsLogDir
+		if logDir == "" {
+			logDir = filepath.Join(home, ".local", "state", "shuttle")
+		}
+
+		autosshPath := tunnelsAutoSSH
+		if autosshPath == "" {
+			autosshPath, err = exec.LookPath("autossh")
+			if err != nil {
+				return fmt.Errorf("autossh not found on PATH (install with `%s`, or pass --autossh-path)", sup.AutoSSHHint)
+			}
+		}
+
+		if err := os.MkdirAll(jobDir, 0o755); err != nil {
+			return fmt.Errorf("create job dir %s: %w", jobDir, err)
+		}
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			return fmt.Errorf("create log dir %s: %w", logDir, err)
+		}
+
+		tmpl, err := template.New("shuttle-tunnel").Parse(sup.Template)
 		if err != nil {
-			return fmt.Errorf("autossh not found on PATH (install with `%s`, or pass --autossh-path)", sup.AutoSSHHint)
+			return fmt.Errorf("parse embedded %s tunnel template: %w", sup.Name, err)
+		}
+
+		for _, spec := range specs {
+			jobPath := filepath.Join(jobDir, sup.JobFile(spec))
+			logPath := filepath.Join(logDir, fmt.Sprintf("tunnel-%s.log", spec.Name))
+
+			rendered, err := renderTunnelJob(tmpl, tunnelTemplateData{
+				Label:       spec.Label,
+				SSHHost:     spec.SSHHost,
+				LocalPort:   spec.LocalPort,
+				RemotePort:  spec.RemotePort,
+				Multiplex:   spec.Multiplex,
+				AutoSSHPath: autosshPath,
+				SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
+				LogPath:     logPath,
+				Home:        home,
+				// The PATH this command was typed with, which is the user's real
+				// login PATH — the same value `make install-agent` reconstructs
+				// with `bash -lc` because make may be invoked from anywhere. Only
+				// the systemd template reads it (see its header); launchd's own
+				// default PATH already finds ssh.
+				Path: os.Getenv("PATH"),
+			})
+			if err != nil {
+				return fmt.Errorf("render %s: %w", spec.Name, err)
+			}
+			if err := os.WriteFile(jobPath, rendered, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", jobPath, err)
+			}
+
+			fmt.Printf("installed %s -> %s\n", spec.Name, jobPath)
+			fmt.Printf("  log: %s\n", logPath)
+
+			if tunnelsWriteOnly {
+				continue
+			}
+			if err := sup.Activate(spec, jobPath); err != nil {
+				return fmt.Errorf("start %s: %w", spec.Name, err)
+			}
+		}
+
+		if !tunnelsWriteOnly && sup.Note != "" {
+			fmt.Println(sup.Note)
 		}
 	}
 
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		return fmt.Errorf("create job dir %s: %w", jobDir, err)
-	}
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return fmt.Errorf("create log dir %s: %w", logDir, err)
-	}
-
-	tmpl, err := template.New("shuttle-tunnel").Parse(sup.Template)
-	if err != nil {
-		return fmt.Errorf("parse embedded %s tunnel template: %w", sup.Name, err)
-	}
-
-	for _, spec := range specs {
-		jobPath := filepath.Join(jobDir, sup.JobFile(spec))
-		logPath := filepath.Join(logDir, fmt.Sprintf("tunnel-%s.log", spec.Name))
-
-		rendered, err := renderTunnelJob(tmpl, tunnelTemplateData{
-			Label:       spec.Label,
-			SSHHost:     spec.SSHHost,
-			LocalPort:   spec.LocalPort,
-			RemotePort:  spec.RemotePort,
-			Multiplex:   spec.Multiplex,
-			AutoSSHPath: autosshPath,
-			SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
-			LogPath:     logPath,
-			Home:        home,
-			// The PATH this command was typed with, which is the user's real
-			// login PATH — the same value `make install-agent` reconstructs
-			// with `bash -lc` because make may be invoked from anywhere. Only
-			// the systemd template reads it (see its header); launchd's own
-			// default PATH already finds ssh.
-			Path: os.Getenv("PATH"),
-		})
-		if err != nil {
-			return fmt.Errorf("render %s: %w", spec.Name, err)
-		}
-		if err := os.WriteFile(jobPath, rendered, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", jobPath, err)
-		}
-
-		fmt.Printf("installed %s -> %s\n", spec.Name, jobPath)
-		fmt.Printf("  log: %s\n", logPath)
-
-		if tunnelsWriteOnly {
-			continue
-		}
-		if err := sup.Activate(spec, jobPath); err != nil {
-			return fmt.Errorf("start %s: %w", spec.Name, err)
+	// --write-only means "render, don't touch the supervisor" — pruning stops
+	// jobs and deletes files, which is exactly the touching write-only asks us
+	// to skip, so it sits out this pass entirely rather than half-applying.
+	if convergent && !tunnelsWriteOnly {
+		if err := pruneOrphanTunnels(sup, jobDir, specs, labelPrefix, tunnelsDryRun); err != nil {
+			return err
 		}
 	}
 
-	if !tunnelsWriteOnly && sup.Note != "" {
-		fmt.Println(sup.Note)
-	}
 	return nil
 }
 
@@ -273,6 +332,20 @@ func launchdSupervisor(home string) tunnelSupervisor {
 			fmt.Printf("  bootstrapped %s\n", target)
 			return nil
 		},
+		Deactivate: func(jobFile, jobDir string) error {
+			// A plist's file name IS its label plus ".plist" (see JobFile
+			// above) — there is no other record of the label once the remote
+			// it belonged to has left the fleet file, so recovering it from
+			// the name is the only option, and it is exact by construction.
+			label := jobFile[:len(jobFile)-len(".plist")]
+			target := fmt.Sprintf("gui/%d/%s", uid, label)
+			_ = runSupervisor("launchctl", "bootout", target)
+			path := filepath.Join(jobDir, jobFile)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		},
 	}
 }
 
@@ -304,6 +377,21 @@ func systemdSupervisor(home string) tunnelSupervisor {
 				return err
 			}
 			fmt.Printf("  enabled + started %s\n", spec.UnitName)
+			return nil
+		},
+		Deactivate: func(jobFile, jobDir string) error {
+			// Errors from stop/disable are swallowed the same way the
+			// launchd arm swallows bootout: a unit systemd has already
+			// forgotten (never loaded this boot, or already stopped) fails
+			// both calls harmlessly, and that is not a reason to leave its
+			// file behind.
+			_ = runSupervisor("systemctl", "--user", "stop", jobFile)
+			_ = runSupervisor("systemctl", "--user", "disable", jobFile)
+			path := filepath.Join(jobDir, jobFile)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			_ = runSupervisor("systemctl", "--user", "daemon-reload")
 			return nil
 		},
 		Note: "tunnels survive logout and start at boot after:  loginctl enable-linger $(id -un)",
@@ -339,42 +427,23 @@ func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 		return nil, err
 	}
 
-	byName := make(map[string]remoteSpec, len(doc.Remotes))
-	for _, r := range doc.Remotes {
-		byName[r.Name] = r
-	}
-
-	toSpec := func(r remoteSpec) tunnelSpec {
-		return tunnelSpec{
-			Name:       r.Name,
-			SSHHost:    r.SSH,
-			Label:      r.label(doc.LaunchdLabelPrefix),
-			UnitName:   r.unitName(),
-			LocalPort:  r.Port,
-			RemotePort: r.RemotePort,
-			Multiplex:  r.tunnelOpts().Multiplex,
-		}
-	}
-
 	if len(requested) == 0 {
 		if len(doc.Remotes) == 0 {
 			path, _ := feltRemotesPath()
 			return nil, fmt.Errorf(
 				"no remotes configured; run 'felt shuttle remotes add <name> --port <n>' (file: %s)", path)
 		}
-		resolved := make([]tunnelSpec, 0, len(doc.Remotes))
-		for _, r := range doc.Remotes {
-			if !r.enabledOr() || !managedTunnel(r.tunnelOpts().Manager) {
-				continue
-			}
-			resolved = append(resolved, toSpec(r))
-		}
+		resolved := resolveManagedTunnelSpecs(doc)
 		if len(resolved) == 0 {
 			return nil, fmt.Errorf("no remotes use a supervisor-managed tunnel (configured: %s)",
 				remoteNameList(doc.Remotes))
 		}
-		sort.Slice(resolved, func(i, j int) bool { return resolved[i].Name < resolved[j].Name })
 		return resolved, nil
+	}
+
+	byName := make(map[string]remoteSpec, len(doc.Remotes))
+	for _, r := range doc.Remotes {
+		byName[r.Name] = r
 	}
 
 	resolved := make([]tunnelSpec, 0, len(requested))
@@ -388,10 +457,126 @@ func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 			continue
 		}
 		seen[name] = true
-		resolved = append(resolved, toSpec(r))
+		resolved = append(resolved, tunnelSpecFor(r, doc.LaunchdLabelPrefix))
 	}
 	sort.Slice(resolved, func(i, j int) bool { return resolved[i].Name < resolved[j].Name })
 	return resolved, nil
+}
+
+// resolveManagedTunnelSpecs is every remote the fleet file currently asks THIS
+// host to supervise a tunnel for: enabled, and carrying manager launchd or
+// systemd. It never errors — an empty result (no remotes at all, or none of
+// them managed) is a legitimate steady state, not a misconfiguration, and it
+// is exactly the state that leaves the convergent install with nothing to
+// write but everything to prune.
+func resolveManagedTunnelSpecs(doc remotesFile) []tunnelSpec {
+	resolved := make([]tunnelSpec, 0, len(doc.Remotes))
+	for _, r := range doc.Remotes {
+		if !r.enabledOr() || !managedTunnel(r.tunnelOpts().Manager) {
+			continue
+		}
+		resolved = append(resolved, tunnelSpecFor(r, doc.LaunchdLabelPrefix))
+	}
+	sort.Slice(resolved, func(i, j int) bool { return resolved[i].Name < resolved[j].Name })
+	return resolved
+}
+
+func tunnelSpecFor(r remoteSpec, labelPrefix string) tunnelSpec {
+	return tunnelSpec{
+		Name:       r.Name,
+		SSHHost:    r.SSH,
+		Label:      r.label(labelPrefix),
+		UnitName:   r.unitName(),
+		LocalPort:  r.Port,
+		RemotePort: r.RemotePort,
+		Multiplex:  r.tunnelOpts().Multiplex,
+	}
+}
+
+// tunnelJobPattern matches ONLY the filename shape this command itself
+// generates for supervisor sup, given the fleet's current launchd label
+// prefix — never a hand-written plist or unit, and never a remote installed
+// under an explicit tunnel.label (see resolveManagedTunnelSpecs/label/
+// unitName): a custom label is, by the same construction that makes the
+// generated shape recognizable, indistinguishable from something the operator
+// wrote by hand, so prune must not touch it either way. The one capture group
+// is the remote name embedded in the generated shape, used only for the
+// removal message.
+func tunnelJobPattern(sup tunnelSupervisor, labelPrefix string) *regexp.Regexp {
+	switch sup.Name {
+	case "launchd":
+		return regexp.MustCompile(`^` + regexp.QuoteMeta(labelPrefix) + `\.shuttle-tunnel-(.+)\.plist$`)
+	case "systemd":
+		return regexp.MustCompile(`^shuttle-tunnel-(.+)\.service$`)
+	}
+	// A supervisor this function has never been taught is one whose job files
+	// we cannot recognize, and the failure mode of guessing is deleting
+	// someone else's. nil means prune finds nothing, which is the only safe
+	// answer; add the arm here when you add the supervisor.
+	return nil
+}
+
+// pruneOrphanTunnels is the other half of convergent install. Having just
+// written and started a job for every remote the fleet file currently names
+// with a managed tunnel, it walks the same job directory for anything else
+// that carries this command's OWN generated naming convention and boots it
+// out — the file, and whatever the supervisor still remembers about it. This
+// is how a remote dropped from the fleet file entirely, or merely flipped to
+// `manager: none` or `enabled: false`, stops haunting the host as an autossh
+// loop running forever against a daemon nothing polls that way anymore.
+//
+// It is deliberately conservative about what counts as "ours": only a
+// filename matching tunnelJobPattern is a candidate, so a hand-written plist
+// or unit, or one installed under a custom tunnel.label, is never touched —
+// see tunnelJobPattern's own comment for the custom-label case in both
+// directions. Removing a job that was never there, or that the supervisor had
+// already forgotten, is success, not an error: prune runs on every convergent
+// install, so "nothing to clean up" is the ordinary outcome.
+func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, labelPrefix string, dryRun bool) error {
+	entries, err := os.ReadDir(jobDir)
+	if err != nil {
+		// No job directory at all reads the same as an empty one: there is
+		// nothing installed, so there is nothing to prune.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("scan %s for orphaned tunnels: %w", jobDir, err)
+	}
+
+	keptFiles := make(map[string]bool, len(keep))
+	for _, spec := range keep {
+		keptFiles[sup.JobFile(spec)] = true
+	}
+	pattern := tunnelJobPattern(sup, labelPrefix)
+	if pattern == nil || sup.Deactivate == nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if keptFiles[name] {
+			continue
+		}
+		match := pattern.FindStringSubmatch(name)
+		if match == nil {
+			continue
+		}
+		remoteName := match[1]
+		if dryRun {
+			fmt.Printf("would remove %s (no longer in the fleet file)\n", remoteName)
+			continue
+		}
+		if err := sup.Deactivate(name, jobDir); err != nil {
+			return fmt.Errorf("remove orphaned tunnel %s: %w", remoteName, err)
+		}
+		fmt.Printf("removed %s (no longer in the fleet file)\n", remoteName)
+	}
+	return nil
 }
 
 func renderTunnelJob(tmpl *template.Template, data tunnelTemplateData) ([]byte, error) {
@@ -423,6 +608,7 @@ func init() {
 	tunnelsInstallCmd.Flags().StringVar(&tunnelsLogDir, "log-dir", "", "Directory for autossh logs (default: ~/.local/state/shuttle)")
 	tunnelsInstallCmd.Flags().StringVar(&tunnelsAutoSSH, "autossh-path", "", "Path to autossh (default: resolve on PATH)")
 	tunnelsInstallCmd.Flags().BoolVar(&tunnelsWriteOnly, "write-only", false, "Write the job files but do not load or start them")
+	tunnelsInstallCmd.Flags().BoolVar(&tunnelsDryRun, "dry-run", false, "With no remote named, print which orphaned tunnel jobs would be removed without removing them")
 	tunnelsCmd.AddCommand(tunnelsInstallCmd)
 	shuttleCmd.AddCommand(tunnelsCmd)
 }
