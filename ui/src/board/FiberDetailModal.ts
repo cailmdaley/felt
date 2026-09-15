@@ -3,18 +3,19 @@ import {
   cacheBustUrl,
   fileBytesUrl,
   fileInfoUrl,
-  fileExt,
   humanizeIdleAge,
-  IMAGE_EXTS,
   renderMarkdown,
   resolveAbs,
   showToast,
 } from './utils.js'
 import {
+  PREVIEW_BYTES,
   attachmentGlyph,
   extractEmbeds,
+  fileKind,
   fileTapAction,
   formatBytes,
+  previewText,
   type Attachment,
 } from './attachments.js'
 import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
@@ -279,6 +280,35 @@ export const SENT_FOLD_VISIBLE = 3
 type RefreshableArtifact = HTMLImageElement | HTMLIFrameElement | HTMLAudioElement
 
 const LIVE_REFRESH_INTERVAL_MS = 15_000
+/** The CSS width an attachment card's HTML preview iframe is rendered at before
+ *  being scaled into the face. A desktop-ish width so the document lays out
+ *  like itself; the scale factor is measured per card. */
+const ATTACH_FRAME_WIDTH = 800
+
+/**
+ * Run `fn` the first time `el` is scrolled into view, once and never again.
+ *
+ * The attachment strip scrolls sideways and a fiber can carry a dozen files;
+ * fetching every preview on open would spend a dozen requests to draw two
+ * cards. Where IntersectionObserver is missing (jsdom, an old engine) the
+ * honest fallback is to run immediately — the feature degrades to eager, not
+ * to absent.
+ */
+function whenVisible(el: Element, fn: () => void): void {
+  if (typeof IntersectionObserver === 'undefined') {
+    fn()
+    return
+  }
+  const io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      io.disconnect()
+      fn()
+      return
+    }
+  }, { rootMargin: '200px' })
+  io.observe(el)
+}
 const PERSIST_PREFIX = 'shuttle:detail:'
 
 function loadPersist(uid: string): DetailPersist {
@@ -1133,23 +1163,7 @@ export class FiberDetailModal {
     el.setAttribute('role', 'listitem')
     el.title = att.title ? `${att.title}\n${abs ?? att.path}` : (abs ?? att.path)
 
-    const face = document.createElement('span')
-    face.className = 'kbn-detail-attach-face'
-    // A thumbnail only where the browser can make one for free from bytes the
-    // daemon already serves. Nothing is rendered daemon-side for this strip.
-    if (abs && IMAGE_EXTS.has(fileExt(att.path))) {
-      const img = document.createElement('img')
-      img.className = 'kbn-detail-attach-thumb'
-      img.src = fileBytesUrl(this.shuttleBase, abs, card.originId ?? '')
-      img.alt = ''
-      img.loading = 'lazy'
-      face.append(img)
-    } else {
-      const glyph = document.createElement('span')
-      glyph.className = 'kbn-detail-attach-ext'
-      glyph.textContent = attachmentGlyph(att.path)
-      face.append(glyph)
-    }
+    const face = this.buildAttachmentFace(att, abs, card)
 
     const nameEl = document.createElement('span')
     nameEl.className = 'kbn-detail-attach-name'
@@ -1180,6 +1194,100 @@ export class FiberDetailModal {
     return el
   }
 
+  /**
+   * The card's face — a glimpse of the file, not a symbol standing in for it.
+   *
+   * A strip of identical extension glyphs tells you nothing you couldn't read
+   * off the filenames beneath them, and an attachment strip is exactly where
+   * you want to recognize the report you're after at a glance. So each kind
+   * shows whatever the browser can give for free from the bytes the daemon
+   * already serves: an image its thumbnail, an HTML report a scaled-down live
+   * render, a markdown/text file its opening lines. A PDF and anything opaque
+   * keep the glyph — there is nothing cheap to show, and pretending otherwise
+   * would mean rendering daemon-side, which this strip deliberately doesn't.
+   *
+   * Everything beyond the image thumbnail is LAZY and idle: nothing is fetched
+   * until the card is actually scrolled into view, so a fiber with a dozen
+   * attachments costs one request, not a dozen.
+   */
+  private buildAttachmentFace(
+    att: Attachment,
+    abs: string | null,
+    card: KanbanCard,
+  ): HTMLElement {
+    const face = document.createElement('span')
+    face.className = 'kbn-detail-attach-face'
+    const glyph = document.createElement('span')
+    glyph.className = 'kbn-detail-attach-ext'
+    glyph.textContent = attachmentGlyph(att.path)
+    face.append(glyph)
+    if (!abs) return face
+
+    const src = fileBytesUrl(this.shuttleBase, abs, card.originId ?? '')
+    const kind = fileKind(att.path)
+
+    if (kind === 'image') {
+      const img = document.createElement('img')
+      img.className = 'kbn-detail-attach-thumb'
+      img.src = src
+      img.alt = ''
+      img.loading = 'lazy'
+      // The glyph stays as the fallback: a broken or slow image leaves the
+      // suffix showing rather than an empty rectangle.
+      img.addEventListener('load', () => glyph.remove())
+      face.append(img)
+      return face
+    }
+
+    if (kind === 'html') {
+      whenVisible(face, () => {
+        const frame = document.createElement('iframe')
+        frame.className = 'kbn-detail-attach-frame'
+        // Inert on every axis a card face should be inert on: no scripts
+        // (`sandbox=""` is the maximally restrictive value, not the absent
+        // one), no pointer events, out of the tab order. It is a picture of
+        // the document that happens to be made of the document.
+        frame.setAttribute('sandbox', '')
+        frame.setAttribute('tabindex', '-1')
+        frame.setAttribute('aria-hidden', 'true')
+        frame.src = src
+        // Render at a desktop width, then shrink the whole thing into the
+        // face — a report laid out at 148px would reflow into a column of
+        // single words and look nothing like itself.
+        const width = face.clientWidth || 128
+        frame.style.setProperty('--attach-frame-scale', String(width / ATTACH_FRAME_WIDTH))
+        frame.addEventListener('load', () => glyph.remove())
+        face.append(frame)
+      })
+      return face
+    }
+
+    if (kind === 'markdown' || kind === 'text') {
+      whenVisible(face, () => {
+        // The daemon's file route ignores `Range` (it answers 200 with the
+        // whole body), so the slice is ours to make. These files are small —
+        // the cost is the request, not the bytes.
+        void fetch(src)
+          .then((res) => (res.ok ? res.text() : null))
+          .then((text) => {
+            if (text === null || !face.isConnected) return
+            const preview = previewText(text.slice(0, PREVIEW_BYTES))
+            if (!preview) return
+            const pre = document.createElement('span')
+            pre.className = 'kbn-detail-attach-peek'
+            pre.textContent = preview
+            glyph.remove()
+            face.append(pre)
+          })
+          .catch(() => {
+            /* best-effort — the glyph is already there */
+          })
+      })
+    }
+
+    return face
+  }
+
   /** Fill a card's size from `/file-info`. Best-effort and silent: a daemon
    *  without the route, or a file that isn't there, simply leaves it blank. */
   private async fillAttachmentSize(
@@ -1208,14 +1316,14 @@ export class FiberDetailModal {
    * Open one file path, by pointer.
    *
    * Under a MOUSE it goes to the Reader, where the tab strip, the zoom and the
-   * ⤓ live. Under a FINGER it downloads straight away, because that is what
-   * the ⤓ did and on iOS the download is what hands the file to the native
-   * viewer — the one surface that can page a PDF properly. Reaching it used to
-   * cost two taps (open the Reader, then find ⤓); this is that gesture with
-   * the detour removed.
+   * ⤓ live. Under a FINGER it goes to the Reader too, for every kind the
+   * browser can lay out — and downloads straight away for a PDF or an opaque
+   * file, because on iOS the download is what hands those to the native
+   * viewer, the one surface that can page a PDF properly. The rule itself is
+   * `fileTapAction`'s, shared with the sent-files trail.
    */
   private openArtifact(fullPath: string, card: KanbanCard): void {
-    if (fileTapAction(coarsePointer()) === 'download') {
+    if (fileTapAction(coarsePointer(), fullPath) === 'download') {
       void this.downloadFile(fullPath, card.originId ?? '')
       return
     }
@@ -2904,9 +3012,9 @@ export class FiberDetailModal {
       row.append(name, when)
       row.addEventListener('click', (e) => {
         e.stopPropagation()
-        // Same pointer rule as an attachment card: a finger gets the file
-        // itself, a mouse gets the Reader.
-        if (fileTapAction(coarsePointer()) === 'download') {
+        // Same rule as an attachment card, by pointer AND by kind — see
+        // `fileTapAction`.
+        if (fileTapAction(coarsePointer(), file.fullPath) === 'download') {
           void this.downloadFile(file.fullPath, card.originId ?? '')
           return
         }
@@ -3050,6 +3158,17 @@ export class FiberDetailModal {
           }
         : undefined,
       { fiberId: card.id },
+      scrollable
+        ? (pane) => {
+            // The text pane's twin of the iframe restore above: no document,
+            // so the element itself is the scroller.
+            pane.scrollTop = entry.scroll
+            pane.addEventListener('scroll', () => {
+              entry.scroll = pane.scrollTop
+              this.queueScrollWrite()
+            }, { passive: true })
+          }
+        : undefined,
     )
     entry.cell.append(viewer)
     // Zoom target: the <img> for images (sized in px so it magnifies PAST the

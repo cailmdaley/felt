@@ -4,7 +4,14 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { attachmentGlyph, extractEmbeds, fileTapAction, formatBytes } from './attachments.js'
+import {
+  attachmentGlyph,
+  extractEmbeds,
+  fileKind,
+  fileTapAction,
+  formatBytes,
+  previewText,
+} from './attachments.js'
 
 describe('extractEmbeds', () => {
   it('pulls an embed out and leaves the prose clean', () => {
@@ -65,9 +72,58 @@ describe('formatBytes', () => {
   })
 })
 
+describe('fileKind', () => {
+  it('sorts the kinds the browser can show from the ones it cannot', () => {
+    expect(fileKind('plot.PNG')).toBe('image')
+    expect(fileKind('take.m4a')).toBe('audio')
+    expect(fileKind('report.html')).toBe('html')
+    expect(fileKind('notes.md')).toBe('markdown')
+    expect(fileKind('run.log')).toBe('text')
+    expect(fileKind('config.yaml')).toBe('text')
+    expect(fileKind('paper.pdf')).toBe('pdf')
+    expect(fileKind('bundle.zip')).toBe('other')
+    expect(fileKind('Makefile')).toBe('other')
+  })
+
+  it('keeps an astra.yaml on the paper (iframe) path, not the text one', () => {
+    expect(fileKind('analysis/astra.yaml')).toBe('html')
+  })
+})
+
 describe('fileTapAction', () => {
-  it('sends a finger straight to the file and a mouse to the Reader', () => {
-    expect(fileTapAction(true)).toBe('download')
-    expect(fileTapAction(false)).toBe('read')
+  it('sends a mouse to the Reader whatever the kind', () => {
+    for (const p of ['a.pdf', 'a.zip', 'a.md', 'a.png']) {
+      expect(fileTapAction(false, p)).toBe('read')
+    }
+  })
+
+  it('keeps a finger in the Reader for anything the browser can lay out', () => {
+    expect(fileTapAction(true, 'report.html')).toBe('read')
+    expect(fileTapAction(true, 'notes.md')).toBe('read')
+    expect(fileTapAction(true, 'run.log')).toBe('read')
+    expect(fileTapAction(true, 'plot.png')).toBe('read')
+    expect(fileTapAction(true, 'take.m4a')).toBe('read')
+  })
+
+  it('hands a finger the file itself only where the native viewer is better', () => {
+    expect(fileTapAction(true, 'paper.pdf')).toBe('download')
+    expect(fileTapAction(true, 'bundle.zip')).toBe('download')
+    expect(fileTapAction(true, 'Makefile')).toBe('download')
+  })
+})
+
+describe('previewText', () => {
+  it('takes the opening lines and skips the blank ones above them', () => {
+    expect(previewText('\n\none\ntwo\nthree', 2)).toBe('one\ntwo')
+  })
+
+  it('caps a long line so it cannot crowd out the rest', () => {
+    const out = previewText('x'.repeat(200), 6, 20)
+    expect(out).toHaveLength(20)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  it('has nothing to say about an empty slice', () => {
+    expect(previewText('   \n\n  ')).toBe('')
   })
 })

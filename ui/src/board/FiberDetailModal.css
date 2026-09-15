@@ -752,6 +752,9 @@
 /* The viewer fills the cell at zoom 1; `zoom` > 1 grows it and the cell pans.
    `zoom` (not transform) so the scaled box affects layout → real scrollbars. */
 .kbn-detail-view-cell > .kbn-fileview-frame-wrap { width: 100%; height: 100%; }
+/* The self-rendered text pane fills its cell the same way the frame does, and
+   scrolls in itself — which is what lets it keep a reading position. */
+.kbn-detail-view-cell > .kbn-fileview-text-wrap { width: 100%; height: 100%; }
 /* Image fills the cell as a full-view plate on a vellum mat (centered); the
    whole figure is visible at zoom 1, Cmd-scroll magnifies from there. */
 /* Image as a full-width plate, top-aligned (block, not flex-centered): the
@@ -1126,10 +1129,13 @@
   opacity: 0.55;
   box-shadow: none;
 }
-/* The face: a real thumbnail where the browser can make one for free from the
-   bytes the daemon already serves, otherwise the suffix as a glyph — the same
-   resting face a Shelf card wears. */
+/* The face: whatever the browser can show for free from the bytes the daemon
+   already serves — a thumbnail for an image, a scaled-down live render for an
+   HTML report, the opening lines for markdown/text — with the suffix glyph as
+   the resting face beneath it, shown until (and if) the richer face arrives.
+   Nothing here is rendered daemon-side. */
 .kbn-detail-attach-face {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1146,11 +1152,54 @@
   display: block;
 }
 .kbn-detail-attach-ext {
+  /* Centered in its own right rather than by the face's flex alignment: the
+     richer faces are absolutely positioned over it, and a flex item's static
+     position is not something to lean on once its siblings have left flow. */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #8A6E2E;
+}
+/* The HTML preview: the document itself, laid out at a desktop width and
+   shrunk into the face. Inert — sandboxed with no allowances, no pointer
+   events, out of the tab order — so it is a picture that happens to be made of
+   the document. `--attach-frame-scale` is measured per card (face width / the
+   render width) and set in JS. */
+.kbn-detail-attach-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 500px;
+  border: 0;
+  background: #FFFDF6;
+  pointer-events: none;
+  transform: scale(var(--attach-frame-scale, 0.16));
+  transform-origin: top left;
+}
+/* Markdown/text: the opening lines, small and monospaced, clipped by the face.
+   A peek, not a pane — it says which document this is, and the Reader is one
+   tap away for the rest. */
+.kbn-detail-attach-peek {
+  position: absolute;
+  inset: 0;
+  padding: 5px 6px;
+  overflow: hidden;
+  white-space: pre;
+  text-align: left;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(6.5px * var(--kbn-type-scale, 1));
+  line-height: 1.45;
+  color: rgba(58, 47, 34, 0.78);
+  /* The last visible line fades rather than being guillotined mid-stroke. */
+  -webkit-mask-image: linear-gradient(#000 62%, transparent);
+  mask-image: linear-gradient(#000 62%, transparent);
 }
 .kbn-detail-attach-name {
   width: 100%;
@@ -1596,6 +1645,7 @@
     padding: 10px 12px 11px;
   }
   .kbn-detail-attach-face { height: 62px; }
+  .kbn-detail-attach-peek { font-size: calc(7px * var(--kbn-type-scale, 1)); }
   .kbn-detail-attach-name { font-size: calc(13px * var(--kbn-type-scale, 1)); }
   .kbn-detail-attach-title { font-size: calc(11.5px * var(--kbn-type-scale, 1)); }
   .kbn-detail-sheet .kbn-detail-page { order: 3; }

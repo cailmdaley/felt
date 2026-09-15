@@ -25,12 +25,16 @@ import { installGestureLayer } from './gestures/GestureLayer.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
+  MARKDOWN_EXTS,
+  TEXT_EXTS,
   basename,
+  escapeHtml,
   fileBytesUrl,
   fileExt,
   isAstraYaml,
   paperUrl,
   prepareIframeExternalLinks,
+  renderMarkdown,
 } from './utils.js'
 
 /**
@@ -54,8 +58,11 @@ function fileViewerSrc(shuttleBase: string, fullPath: string, originId: string):
  * reads as broken) that lifts on `load` and flips to an error note on `error`.
  *
  * `onFrameLoad` fires once the iframe's document has loaded — the accordion
- * uses it to restore scroll position on a persistence rehydrate. Non-iframe
- * viewers (img/audio) never call it.
+ * uses it to restore scroll position on a persistence rehydrate. `onTextPane`
+ * is its twin for the self-rendered text pane, which has no document and so no
+ * `load`: it fires with the element that scrolls, once the text is in it. A
+ * text deliverable is as scrollable as an HTML one, so it keeps its reading
+ * position the same way. Image and audio viewers call neither.
  */
 export function buildFileViewer(
   shuttleBase: string,
@@ -63,6 +70,7 @@ export function buildFileViewer(
   originId: string,
   onFrameLoad?: (iframe: HTMLIFrameElement) => void,
   gesture?: { fiberId?: string },
+  onTextPane?: (scroller: HTMLElement) => void,
 ): HTMLElement {
   const ext = fileExt(fullPath)
   const src = fileViewerSrc(shuttleBase, fullPath, originId)
@@ -88,6 +96,20 @@ export function buildFileViewer(
     audio.src = src
     wrap.append(audio)
     return wrap
+  }
+
+  // TEXT. An iframe is the wrong instrument here: the daemon serves most text
+  // suffixes as `application/octet-stream`, so the frame either downloads the
+  // file or shows unwrapped monospace source with no reading comfort at all —
+  // and a `.md` deliverable, the most common thing a worker sends, arrived as
+  // raw markdown syntax. Fetching the bytes and rendering them in-page costs
+  // one request and turns both into something readable: markdown through the
+  // same `renderMarkdown` the fiber body uses, wearing the same
+  // `.kbn-detail-prose` skin so a sent report looks like the fiber it came
+  // from; anything else as a code block, reusing the `md-code-block` markup
+  // the markdown renderer already emits for fenced code.
+  if (TEXT_EXTS.has(ext) && !isAstraYaml(fullPath)) {
+    return buildTextViewer(src, fullPath, ext, onTextPane)
   }
 
   // HTML (and any iframe-rendered) deliverable.
@@ -150,8 +172,62 @@ export function buildFileViewer(
   return wrap
 }
 
-/** True when a deliverable scrolls inside an iframe (HTML/PDF/text/paper) and
- *  so can carry a restorable scroll offset. Images and audio cannot. */
+/**
+ * Render a text deliverable into a scrolling pane, with the same loading veil
+ * and error note the iframe path carries — a slow tunnel and a missing file
+ * look identical whichever instrument draws the file, so they read identically
+ * too. The fetch is the only thing that differs: `res.ok` settles here what a
+ * HEAD probe has to settle for an iframe.
+ */
+function buildTextViewer(
+  src: string,
+  fullPath: string,
+  ext: string,
+  onReady?: (scroller: HTMLElement) => void,
+): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'kbn-fileview-text-wrap'
+
+  const veil = document.createElement('div')
+  veil.className = 'kbn-fileview-loading'
+  veil.textContent = `Loading ${basename(fullPath)}…`
+
+  const pane = document.createElement('div')
+  pane.className = 'kbn-fileview-text'
+  wrap.append(pane, veil)
+
+  const failed = (detail: string): void => {
+    veil.classList.add('kbn-fileview-loading-error')
+    veil.textContent = `Couldn't load ${basename(fullPath)} — ${detail}`
+    if (!veil.isConnected) wrap.append(veil)
+  }
+
+  void fetch(src)
+    .then(async (res) => {
+      if (!res.ok) {
+        failed(`${res.status}${res.statusText ? ` ${res.statusText}` : ''}`)
+        return
+      }
+      const text = await res.text()
+      if (MARKDOWN_EXTS.has(ext)) {
+        pane.classList.add('kbn-detail-prose')
+        pane.innerHTML = renderMarkdown(text)
+      } else {
+        pane.innerHTML =
+          `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +
+          `<code class="language-${escapeHtml(ext || 'plaintext')}">${escapeHtml(text)}</code></pre>`
+      }
+      veil.remove()
+      onReady?.(wrap)
+    })
+    .catch(() => failed('the daemon could not be reached'))
+
+  return wrap
+}
+
+/** True when a deliverable scrolls — an iframe (HTML/PDF/paper) or the text
+ *  pane, both of which can carry a restorable scroll offset. Images and audio
+ *  cannot. */
 export function isScrollableFile(path: string): boolean {
   const ext = fileExt(path)
   return !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext)

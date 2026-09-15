@@ -394,6 +394,22 @@ export function paperUrl(astraPath: string, opts?: RenderMarkdownOptions): strin
  *  viewer, so there is still exactly one dispatch. Read-only. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
+/**
+ * Extensions whose bytes are TEXT the browser can lay out itself, given the
+ * chance. The daemon serves most of these as `application/octet-stream`, so an
+ * iframe would download them or show a wall of unwrapped source; fetched and
+ * rendered in-page they are readable — markdown through `renderMarkdown`, the
+ * rest as a code block. That is the whole reason the set exists: it marks the
+ * kinds the Reader renders ITSELF rather than handing to an iframe.
+ */
+export const TEXT_EXTS = new Set([
+  'md', 'markdown', 'txt', 'log', 'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'tsv',
+  'py', 'ts', 'tsx', 'js', 'jsx', 'sh', 'bash', 'zsh', 'rs', 'go', 'c', 'h', 'cpp',
+  'hpp', 'java', 'rb', 'sql', 'css', 'tex', 'bib', 'xml', 'diff', 'patch',
+])
+/** The two extensions that are markdown rather than merely text — they render
+ *  as prose, not as a code block. */
+export const MARKDOWN_EXTS = new Set(['md', 'markdown'])
 export function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
 }

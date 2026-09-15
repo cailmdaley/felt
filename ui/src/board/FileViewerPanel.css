@@ -107,3 +107,37 @@
 @media (prefers-reduced-motion: reduce) {
   .panel-geom-anim { transition: none; }
 }
+
+/* ── Text bodies the Reader renders itself ──────────────────────────────
+   Markdown and source/log/config files don't go through an iframe: the daemon
+   serves most of them as octet-stream, so a frame would download them or show
+   unwrapped source. `buildFileViewer` fetches the bytes and fills this pane
+   instead — markdown also wears `.kbn-detail-prose` (FiberDetailModal.css), so
+   a sent report reads exactly like the fiber body it came from. The WRAP is
+   the scroller, mirroring the frame-wrap cell it replaces. */
+.kbn-fileview-text-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--porch-rag, #FFFDF6);
+}
+
+.kbn-fileview-text {
+  min-height: 100%;
+}
+
+/* Non-markdown text: one code block filling the pane. It reuses the markdown
+   renderer's own `md-code-block` markup, so it inherits that styling; only the
+   layout — fill the pane, wrap long lines rather than scroll sideways inside a
+   pane that already scrolls — belongs here. */
+.kbn-fileview-text > .md-code-block {
+  margin: 0;
+  padding: 1rem 1.1rem 2rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  line-height: 1.55;
+}

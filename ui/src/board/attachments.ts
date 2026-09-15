@@ -9,10 +9,23 @@
  * them as a card in a strip above the prose. Where the directive sat in the
  * body no longer means anything, and nothing of it is left in the text.
  *
+ * It is not quite a leaf any more: it imports the extension VOCABULARY from
+ * utils (the same sets the Reader dispatches on) so that a card face and the
+ * Reader can never disagree about what kind a file is. Still no DOM, no fetch.
+ *
  * Attachments are deliberately not sent files. An attachment is evergreen and
  * central (the report the fiber IS about); a sent file is a one-off delivery
  * on a trail. The panel keeps them as two groups for that reason.
  */
+
+import {
+  AUDIO_EXTS,
+  IMAGE_EXTS,
+  MARKDOWN_EXTS,
+  TEXT_EXTS,
+  fileExt,
+  isAstraYaml,
+} from './utils.js'
 
 /** One `:::{embed}` declaration, in body order. */
 export interface Attachment {
@@ -83,15 +96,73 @@ export function formatBytes(size: number | undefined): string {
 }
 
 /**
+ * What KIND a file is, for the two decisions that turn on it: what a tap does,
+ * and what face its card wears. One classifier so those two can't drift.
+ *
+ * `other` is the honest bucket — a `.docx`, a `.zip`, a suffixless name. The
+ * browser has nothing to show for it, which is precisely why it behaves
+ * differently from the kinds that do.
+ */
+export type FileKind = 'image' | 'audio' | 'html' | 'markdown' | 'text' | 'pdf' | 'other'
+
+export function fileKind(path: string): FileKind {
+  const ext = fileExt(path)
+  if (IMAGE_EXTS.has(ext)) return 'image'
+  if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (ext === 'html' || ext === 'htm') return 'html'
+  if (ext === 'pdf') return 'pdf'
+  // An `astra.yaml` is a paper, not YAML: it renders in an iframe through the
+  // Lightcone entry, so it must not be claimed by the text branch its suffix
+  // would otherwise put it in.
+  if (isAstraYaml(path)) return 'html'
+  if (MARKDOWN_EXTS.has(ext)) return 'markdown'
+  if (TEXT_EXTS.has(ext)) return 'text'
+  return 'other'
+}
+
+/**
  * What a single click/tap on a file card should do.
  *
  * The rule is one line and it belongs in one place, because two surfaces obey
- * it — the attachment strip and the sent-files trail. Under a mouse, `read`:
- * the Reader window has the tabs, the zoom and the ⤓. Under a finger,
- * `download`: on iOS that is what hands the file to the native viewer, the one
- * surface that can page a PDF, and it is exactly what the Reader's ⤓ did at a
- * cost of two taps.
+ * it — the attachment strip and the sent-files trail. Under a mouse, always
+ * `read`: the Reader window has the tabs, the zoom and the ⤓.
+ *
+ * Under a FINGER it used to be `download`, always — because the Reader could
+ * only ever hand a phone an iframe, and an iframed PDF cannot reach page 2.
+ * But that indicted the iframe, not the Reader: an image, an audio file, a
+ * rendered HTML report and now a rendered markdown/text pane all read fine in
+ * the Reader's mobile sheet, and downloading them instead throws away the
+ * tabs and the zoom to no purpose. So the download escape is narrowed to the
+ * kinds that genuinely need the native viewer — a PDF, and anything the
+ * browser can't lay out at all.
  */
-export function fileTapAction(coarse: boolean): 'read' | 'download' {
-  return coarse ? 'download' : 'read'
+export function fileTapAction(coarse: boolean, path: string): 'read' | 'download' {
+  if (!coarse) return 'read'
+  const kind = fileKind(path)
+  return kind === 'pdf' || kind === 'other' ? 'download' : 'read'
+}
+
+/** How many bytes of a text file a card face needs. Generous enough that ~6
+ *  lines survive even a file of long lines, small enough that a strip of them
+ *  costs nothing. The daemon's file route answers a `Range` request with the
+ *  whole body (no `Accept-Ranges`), so the slice happens here, not there. */
+export const PREVIEW_BYTES = 2048
+
+/**
+ * The first few lines of a text file, trimmed for a card face.
+ *
+ * Leading blank lines are dropped (a file that opens with them would otherwise
+ * show an empty face), each line is capped so one very long line can't push
+ * the others out of view, and a truncated line says so with an ellipsis. A
+ * trailing partial line — the near-certain result of slicing at a byte count —
+ * is dropped only when there's enough above it to be worth reading.
+ */
+export function previewText(raw: string, maxLines = 6, maxCols = 90): string {
+  const lines = raw.replace(/\r\n?/g, '\n').split('\n')
+  while (lines.length && lines[0].trim() === '') lines.shift()
+  const kept = lines.slice(0, maxLines)
+  return kept
+    .map((line) => (line.length > maxCols ? `${line.slice(0, maxCols - 1)}…` : line))
+    .join('\n')
+    .trimEnd()
 }
