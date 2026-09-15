@@ -81,6 +81,9 @@ export class LongPressTracker {
       this.pointerId = null
       this.firedPendingClick = true
       this.onPressChange(false)
+      // Any selection iOS started under the held finger goes before the menu
+      // rises, or its Copy/Look Up callout follows the menu up.
+      globalThis.getSelection?.()?.removeAllRanges()
       this.onFire()
     }, this.holdMs)
     this.onPressChange(true)
