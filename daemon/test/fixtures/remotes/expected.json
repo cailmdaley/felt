@@ -1,5 +1,5 @@
 {
-  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil).",
+  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil). `ssh: \"\"` means the entry has NO ssh path at all \u2014 ssh defaults to the name only for port-forwarded entries, so a bare `url` remote the operator gave no `ssh` is one the recovery cascade must not try to revive over ssh. `https_proxy` is the document-level `defaults.https_proxy`, normalized to host:port (\"\" when absent).",
   "canonical.json": {
     "launchd_label_prefix": "com.example",
     "remotes": [
@@ -27,7 +27,8 @@
         "stale_multiplier": 6,
         "label": "com.example.shuttle-tunnel-hub-b"
       }
-    ]
+    ],
+    "https_proxy": ""
   },
   "bare_array.json": {
     "launchd_label_prefix": "io.shuttle",
@@ -56,7 +57,8 @@
         "stale_multiplier": 4,
         "label": "io.shuttle.shuttle-tunnel-hub-b"
       }
-    ]
+    ],
+    "https_proxy": ""
   },
   "defaults.json": {
     "launchd_label_prefix": "io.shuttle",
@@ -85,7 +87,8 @@
         "stale_multiplier": 3,
         "label": "io.shuttle.shuttle-tunnel-hub-b"
       }
-    ]
+    ],
+    "https_proxy": ""
   },
   "url_only.json": {
     "launchd_label_prefix": "io.shuttle",
@@ -93,7 +96,7 @@
       {
         "name": "hub-a",
         "url": "http://10.0.0.5:8080",
-        "ssh": "hub-a",
+        "ssh": "",
         "display": "hub-a",
         "port": 0,
         "remote_port": 4000,
@@ -101,6 +104,37 @@
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
         "label": "io.shuttle.shuttle-tunnel-hub-a"
+      }
+    ],
+    "https_proxy": ""
+  },
+  "tailscale.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "https_proxy": "localhost:1055",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "https://hub-a.example.ts.net",
+        "ssh": "",
+        "display": "hub-a",
+        "port": 0,
+        "remote_port": 4000,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-a"
+      },
+      {
+        "name": "hub-b",
+        "url": "https://hub-b.example.ts.net",
+        "ssh": "hub-b-login",
+        "display": "hub-b",
+        "port": 0,
+        "remote_port": 4000,
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-b"
       }
     ]
   }

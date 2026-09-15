@@ -3,9 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -67,11 +69,43 @@ type remoteTunnel struct {
 	Label string `json:"label,omitempty"`
 }
 
-// remoteDefaults are the file-level fallbacks for the per-remote polling knobs.
+// remoteDefaults are the file-level fallbacks for the per-remote polling knobs,
+// plus the one fleet-wide setting that is not per-remote at all: the hub's
+// outbound HTTP proxy.
 type remoteDefaults struct {
 	PollIntervalMS   int `json:"poll_interval_ms,omitempty"`
 	RequestTimeoutMS int `json:"request_timeout_ms,omitempty"`
 	StaleMultiplier  int `json:"stale_multiplier,omitempty"`
+
+	// HTTPSProxy: "http://localhost:1055", or a bare "localhost:1055". The
+	// daemon feeds it to its HTTP client so a hub whose own mesh-VPN daemon
+	// runs with userspace networking — no kernel route to the mesh, only a
+	// local proxy — can reach its https:// remotes. $HTTPS_PROXY is
+	// deliberately NOT consulted by either reader: a supervised daemon's
+	// environment is invisible to the operator debugging it, and this file is
+	// already the one `remotes list` validates.
+	HTTPSProxy string `json:"https_proxy,omitempty"`
+}
+
+// normalizedHTTPSProxy renders defaults.https_proxy as bare host:port (no IPv6
+// brackets — that is the form the daemon hands its HTTP client), or "" when
+// absent or unusable. The port must be written out: a scheme's default port is
+// a guess about a local proxy nobody runs on 80. Shuttle.Remotes.https_proxy/0
+// parses the same strings the same way — daemon/test/fixtures/remotes/expected.json
+// asserts it in both languages.
+func (d remoteDefaults) normalizedHTTPSProxy() string {
+	raw := strings.TrimSpace(d.HTTPSProxy)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.Port() == "" {
+		return ""
+	}
+	return u.Hostname() + ":" + u.Port()
 }
 
 // remoteSpec is one entry in the fleet.
@@ -237,6 +271,9 @@ func normalizeRemotes(doc *remotesFile) error {
 	defaults := remoteDefaults{}
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
+		if raw := strings.TrimSpace(defaults.HTTPSProxy); raw != "" && defaults.normalizedHTTPSProxy() == "" {
+			return fmt.Errorf("defaults.https_proxy %q: want host:port or http://host:port", raw)
+		}
 	}
 
 	seenNames := map[string]bool{}
@@ -254,7 +291,13 @@ func normalizeRemotes(doc *remotesFile) error {
 		}
 		seenNames[r.Name] = true
 
-		if r.SSH == "" {
+		// ssh defaults to the name ONLY for a port-forwarded entry, where the
+		// ssh destination and the routing name are the same thing by
+		// construction. A bare `url` entry naming no ssh has no ssh path at
+		// all, and the daemon's recovery cascade reads that empty string as
+		// "HTTP is the only way in; report it stale" rather than shelling
+		// `ssh <name>` at a host it was never given credentials to.
+		if r.SSH == "" && r.Port != 0 {
 			r.SSH = r.Name
 		}
 		if r.Display == "" {
@@ -389,6 +432,8 @@ var (
 	remotesAddRemotePort int
 	remotesAddCheckout   string
 	remotesAddMultiplex  bool
+	remotesAddURL        string
+	remotesAddTunnel     string
 )
 
 var remotesCmd = &cobra.Command{
@@ -405,6 +450,7 @@ Examples:
   felt shuttle remotes list
   felt shuttle remotes add hub-a --port 4001
   felt shuttle remotes add hub-b --port 4004 --multiplex
+  felt shuttle remotes add hub-c --url https://hub-c.example.ts.net
   felt shuttle remotes rm hub-a
   felt shuttle remotes path`,
 }
@@ -426,6 +472,11 @@ var remotesListCmd = &cobra.Command{
 			fmt.Printf("no remotes configured (%s)\n", path)
 			return nil
 		}
+		if doc.Defaults != nil {
+			if proxy := doc.Defaults.normalizedHTTPSProxy(); proxy != "" {
+				fmt.Printf("https:// remotes via proxy %s\n\n", proxy)
+			}
+		}
 		fmt.Printf("%-16s %-6s %-18s %-12s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "URL")
 		for _, r := range doc.Remotes {
 			opts := r.tunnelOpts()
@@ -436,7 +487,16 @@ var remotesListCmd = &cobra.Command{
 			if !r.enabledOr() {
 				tunnel = "disabled"
 			}
-			fmt.Printf("%-16s %-6d %-18s %-12s %s\n", r.Name, r.Port, r.SSH, tunnel, r.URL)
+			// A url remote has no local port and no ssh destination; "-" says
+			// that, where 0 and "" read as a value that failed to load.
+			port, ssh := "-", "-"
+			if r.Port != 0 {
+				port = strconv.Itoa(r.Port)
+			}
+			if r.SSH != "" {
+				ssh = r.SSH
+			}
+			fmt.Printf("%-16s %-6s %-18s %-12s %s\n", r.Name, port, ssh, tunnel, r.URL)
 			if r.Port == defaultRemoteDaemonPort {
 				fmt.Fprintf(os.Stderr,
 					"warning: remote %q uses port %d, which the local daemon binds\n",
@@ -462,10 +522,18 @@ var remotesAddCmd = &cobra.Command{
 			Display:    remotesAddDisplay,
 			Port:       remotesAddPort,
 			RemotePort: remotesAddRemotePort,
+			URL:        remotesAddURL,
 			Checkout:   remotesAddCheckout,
 		}
-		if remotesAddMultiplex {
-			entry.Tunnel = &remoteTunnel{Multiplex: true}
+		// --url without --tunnel-manager means a remote reached directly, with
+		// no tunnel for this host to supervise: write that, rather than leaving
+		// the hub's own supervisor as a manager for a job that will never exist.
+		tunnelManager := remotesAddTunnel
+		if tunnelManager == "" && remotesAddURL != "" && remotesAddPort == 0 {
+			tunnelManager = "none"
+		}
+		if remotesAddMultiplex || tunnelManager != "" {
+			entry.Tunnel = &remoteTunnel{Multiplex: remotesAddMultiplex, Manager: tunnelManager}
 		}
 		replaced := false
 		for i := range doc.Remotes {
@@ -555,6 +623,8 @@ func init() {
 	remotesAddCmd.Flags().StringVar(&remotesAddDisplay, "display", "", "Presentation label (default: the remote name)")
 	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required)")
 	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
+	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
+	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor, or none with --url)")
 	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")
 	remotesAddCmd.Flags().BoolVar(&remotesAddMultiplex, "multiplex", false, "Ride an existing ControlMaster socket (2FA hosts)")
 	remotesCmd.AddCommand(remotesListCmd, remotesAddCmd, remotesRmCmd, remotesPathCmd)

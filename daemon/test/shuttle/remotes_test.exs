@@ -11,16 +11,19 @@ defmodule Shuttle.RemotesTest do
     prev_file = System.get_env("FELT_REMOTES_FILE")
     prev_env = Application.get_env(:shuttle, :remotes)
     prev_prefix = Application.get_env(:shuttle, :launchd_label_prefix)
+    prev_proxy = Application.get_env(:shuttle, :https_proxy)
 
     # The whole suite runs with `remotes: []` from config/test.exs — that `[]` is
     # the shield that stops a developer's real fleet file from leaking into the
     # tests. These cases are about the FILE, so they clear it and restore it.
     Application.delete_env(:shuttle, :remotes)
+    Application.delete_env(:shuttle, :https_proxy)
 
     on_exit(fn ->
       restore_env("FELT_REMOTES_FILE", prev_file)
       restore_app_env(:remotes, prev_env)
       restore_app_env(:launchd_label_prefix, prev_prefix)
+      restore_app_env(:https_proxy, prev_proxy)
     end)
 
     :ok
@@ -45,13 +48,21 @@ defmodule Shuttle.RemotesTest do
 
         assert Remotes.launchd_label_prefix() == @want["launchd_label_prefix"]
 
+        proxy =
+          case Remotes.https_proxy() do
+            {host, port} -> "#{host}:#{port}"
+            nil -> ""
+          end
+
+        assert proxy == @want["https_proxy"]
+
         got =
           Remotes.registered()
           |> Enum.map(fn %Remote{} = r ->
             %{
               "name" => r.name,
               "url" => r.url,
-              "ssh" => Remote.ssh_host(r),
+              "ssh" => Remote.ssh_host(r) || "",
               "display" => Remote.display_name(r),
               "port" => r.port || 0,
               "remote_port" => r.remote_port,
@@ -64,6 +75,48 @@ defmodule Shuttle.RemotesTest do
 
         assert got == @want["remotes"]
       end
+    end
+  end
+
+  describe "https_proxy" do
+    test "accepts a scheme'd url, a bare host:port, and nothing else" do
+      for {written, want} <- [
+            {~s("http://localhost:1055"), {"localhost", 1055}},
+            {~s("localhost:1055"), {"localhost", 1055}},
+            {~s("  http://10.0.0.5:3128  "), {"10.0.0.5", 3128}},
+            {~s("localhost"), nil},
+            {~s(""), nil},
+            {"1055", nil}
+          ] do
+        path = write_remotes(~s({"defaults": {"https_proxy": #{written}}, "remotes": []}))
+        System.put_env("FELT_REMOTES_FILE", path)
+
+        assert Remotes.https_proxy() == want,
+               "#{written} should read as #{inspect(want)}"
+      end
+    end
+
+    test "absent defaults, an absent file, and a malformed one all mean no proxy" do
+      path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
+      System.put_env("FELT_REMOTES_FILE", path)
+      assert Remotes.https_proxy() == nil
+
+      System.put_env("FELT_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
+      assert Remotes.https_proxy() == nil
+
+      System.put_env("FELT_REMOTES_FILE", write_remotes("{\"defaults\": {"))
+      assert Remotes.https_proxy() == nil
+    end
+
+    test "application config wins, and false means explicitly none" do
+      path = write_remotes(~s({"defaults": {"https_proxy": "localhost:1055"}, "remotes": []}))
+      System.put_env("FELT_REMOTES_FILE", path)
+
+      Application.put_env(:shuttle, :https_proxy, "proxy.example:8080")
+      assert Remotes.https_proxy() == {"proxy.example", 8080}
+
+      Application.put_env(:shuttle, :https_proxy, false)
+      assert Remotes.https_proxy() == nil
     end
   end
 

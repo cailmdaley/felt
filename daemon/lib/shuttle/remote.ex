@@ -45,7 +45,7 @@ defmodule Shuttle.Remote do
   @type t :: %__MODULE__{
           name: String.t(),
           url: String.t(),
-          ssh: String.t(),
+          ssh: String.t() | nil,
           display: String.t(),
           port: pos_integer() | nil,
           remote_port: pos_integer(),
@@ -63,8 +63,10 @@ defmodule Shuttle.Remote do
   numeric setting is malformed.
 
   Defaults:
-    * `ssh` — `name` (the SSH destination usually IS the routing name; they
-      diverge when ssh-config uses an alias)
+    * `ssh` — nil (not the name). `ssh_host/1` supplies the name as the
+      destination for a `port` entry, where the SSH destination IS the routing
+      name; a bare `url` entry that names no `ssh` has no ssh path at all, and
+      `ssh_host/1` says so with `nil`
     * `display` — `name`. Presentation only, never an address: two ways to name
       one origin is how a mis-stamped origin silently degrades to `:local`.
     * `url` — `http://127.0.0.1:<port>`
@@ -104,7 +106,7 @@ defmodule Shuttle.Remote do
       %__MODULE__{
         name: name,
         url: url,
-        ssh: string_or(fetch(entry, :ssh), name),
+        ssh: string_or(fetch(entry, :ssh), nil),
         display: string_or(fetch(entry, :display), name),
         port: port,
         remote_port: remote_port,
@@ -202,13 +204,25 @@ defmodule Shuttle.Remote do
   end
 
   @doc """
-  The SSH destination for this remote — `ssh` when set, else `name`. Use this
-  rather than `remote.name` for anything that shells `ssh`: a struct built
-  literally (tests, hand-written config) carries no `ssh`, and the name is the
-  right fallback.
+  The SSH destination for this remote, or `nil` when the fleet gives this host
+  no ssh path to that daemon at all.
+
+  `ssh` when the entry names one. Otherwise the name — but only for an entry
+  that declares a `port`, i.e. one reached through a tunnel, where the ssh
+  destination and the routing name are the same thing by construction. A bare
+  `url` entry (a mesh-VPN node, a reverse proxy) is reached over HTTP and
+  nothing else; guessing that its routing name is also a resolvable ssh
+  destination is how the recovery cascade ends up shelling `ssh <name>` every
+  backoff for a host it was never given credentials to.
+
+  `nil` is therefore load-bearing, not a missing default: it is the fleet
+  saying "if HTTP doesn't reach it, report it stale". Anything that shells
+  `ssh` must handle it.
   """
-  @spec ssh_host(t()) :: String.t()
-  def ssh_host(%__MODULE__{ssh: ssh, name: name}), do: string_or(ssh, name)
+  @spec ssh_host(t()) :: String.t() | nil
+  def ssh_host(%__MODULE__{ssh: ssh}) when is_binary(ssh) and ssh != "", do: ssh
+  def ssh_host(%__MODULE__{port: port, name: name}) when is_integer(port), do: name
+  def ssh_host(%__MODULE__{}), do: nil
 
   @doc "The presentation label for this remote — `display` when set, else `name`."
   @spec display_name(t()) :: String.t()

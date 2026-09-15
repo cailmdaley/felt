@@ -12,6 +12,13 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
 
   alias Shuttle.RemoteRegistry.Client.Default
 
+  defp applied_https_proxy do
+    case :httpc.get_options([:https_proxy], :shuttle_fleet) do
+      {:ok, [https_proxy: proxy]} -> proxy
+      _ -> :no_profile
+    end
+  end
+
   # Body with an em-dash (U+2014), multiplication sign (U+00D7), and an accented
   # vowel (U+00E9) — exactly the characters that mojibake'd in the field.
   @utf8_body ~s({"fibers":[{"name":"cmbx — analysis hub","note":"γ×κ Cramér"}]})
@@ -32,16 +39,17 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
   end
 
   setup do
-    port = 4097
-
+    # Port 0 lets the OS pick: a pinned port makes each test wait for the
+    # previous one's listener to be released, and loses the race often enough
+    # to fail on :eaddrinuse.
     {:ok, server} =
       Bandit.start_link(
         plug: {EchoPlug, body: @utf8_body},
-        port: port,
+        port: 0,
         ip: {127, 0, 0, 1}
       )
 
-    Process.sleep(100)
+    {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
     on_exit(fn -> Process.exit(server, :normal) end)
     {:ok, url: "http://127.0.0.1:#{port}/api/v1/fibers"}
   end
@@ -54,5 +62,42 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     assert String.contains?(body, "cmbx — analysis hub")
     refute String.contains?(body, "Ã¢")
     assert {:ok, %{"fibers" => [%{"name" => "cmbx — analysis hub"}]}} = Jason.decode(body)
+  end
+
+  describe "the fleet proxy" do
+    setup do
+      prev = Application.get_env(:shuttle, :https_proxy)
+      on_exit(fn -> Application.put_env(:shuttle, :https_proxy, prev) end)
+      :ok
+    end
+
+    test "is applied to our own httpc profile, and cleared again", %{url: url} do
+      # The proxy is per-profile, not per-request, so the point of the dedicated
+      # `:shuttle_fleet` profile is that this setting never lands on `:default`
+      # and never leaks onto another httpc user in the VM.
+      Application.put_env(:shuttle, :https_proxy, "127.0.0.1:1055")
+      assert {:ok, _} = Default.get(url, 2_000)
+
+      assert {{~c"127.0.0.1", 1055}, [~c"localhost", ~c"127.0.0.1", ~c"::1"]} =
+               applied_https_proxy()
+
+      assert {:ok, [https_proxy: {:undefined, []}]} = :httpc.get_options([:https_proxy], :default),
+             "the default profile must stay untouched"
+
+      # Clearing needs a fresh profile — httpc rejects `undefined` as a value —
+      # and a plain http:// request must keep working across that restart.
+      Application.put_env(:shuttle, :https_proxy, false)
+      assert {:ok, _} = Default.get(url, 2_000)
+      assert {:undefined, []} = applied_https_proxy()
+    end
+
+    test "an http:// remote is never sent through it", %{url: url} do
+      # httpc only consults https_proxy for https URLs, so an ssh-tunnelled
+      # remote at http://127.0.0.1:<port> keeps working even when the proxy
+      # address points at nothing.
+      Application.put_env(:shuttle, :https_proxy, "127.0.0.1:9")
+      assert {:ok, body} = Default.get(url, 2_000)
+      assert body == @utf8_body
+    end
   end
 end

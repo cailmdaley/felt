@@ -264,6 +264,15 @@ else
     || die "failed to install shuttle-launch to ~/.local/bin."
   ok "shuttle-launch installed to ~/.local/bin."
 
+  # tailscaled-launch goes alongside it, for hosts that front their daemon
+  # with an unprivileged (userspace-networking) tailscaled instead of an SSH
+  # tunnel. It is idle until you run it — installing it costs nothing on a
+  # host that never touches Tailscale.
+  cp "$REPO/bin/tailscaled-launch" "$HOME/.local/bin/tailscaled-launch" \
+    && chmod +x "$HOME/.local/bin/tailscaled-launch" \
+    || die "failed to install tailscaled-launch to ~/.local/bin."
+  ok "tailscaled-launch installed to ~/.local/bin."
+
   if have_systemd_user; then
     # Same Makefile target as macOS, systemd arm: it captures the login PATH
     # and renders daemon/share/io.shuttle.daemon.service.template. It needs

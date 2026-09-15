@@ -82,10 +82,15 @@ defmodule Shuttle.RemoteRegistryTest do
     :ok
   end
 
+  # The tunnelled shape: a local forwarded port, so `Remote.ssh_host/1` reads
+  # the routing name as the ssh destination and the recovery cascade has both a
+  # tunnel to bounce and a host to check over ssh. A remote WITHOUT a port is a
+  # different animal — see "a url remote with no tunnel and no ssh".
   defp candide_remote(opts \\ []) do
     %Remote{
       name: "candide",
       url: "http://localhost:4001",
+      port: 4001,
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, 50),
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, 100),
       stale_multiplier: Keyword.get(opts, :stale_multiplier, 2)
@@ -773,6 +778,50 @@ defmodule Shuttle.RemoteRegistryTest do
       calls = MockRunner.calls()
       refute Enum.any?(calls, fn {cmd, _} -> cmd == "launchctl" end)
       assert Enum.any?(calls, fn {cmd, _} -> cmd == "ssh" end)
+    end
+
+    test "a url remote with no tunnel and no ssh just reports stale" do
+      # The mesh-VPN shape: reached over https, no local tunnel to bounce, and
+      # the fleet named no ssh destination. Every step of the cascade is a shell
+      # command this host has no standing to run, so it must run none of them —
+      # guessing that the routing name resolves as an ssh host would fail on
+      # every backoff and bury the real reason under ssh errors.
+      MockClient.set("https://hub-a.example.ts.net/api/v1/state", {:error, :econnrefused})
+
+      remote = %Remote{
+        name: "hub-a",
+        url: "https://hub-a.example.ts.net",
+        poll_interval_ms: 1,
+        request_timeout_ms: 100,
+        stale_multiplier: 2,
+        tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_no_recovery_path,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      Enum.each(1..4, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_no_recovery_path)
+        Process.sleep(2)
+      end)
+
+      assert MockRunner.calls() == [],
+             "nothing to shell for a remote with neither a tunnel nor an ssh path"
+
+      entry = RemoteRegistry.snapshot(:reg_no_recovery_path, "hub-a")
+      assert entry.stale
+      assert entry.recovery.state == :unreachable
+      assert entry.recovery.last_action == "no tunnel to bounce and no ssh path; reporting stale"
     end
   end
 

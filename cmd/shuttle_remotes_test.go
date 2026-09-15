@@ -25,6 +25,7 @@ type remoteFixture struct {
 
 type remoteFixtureDoc struct {
 	LaunchdLabelPrefix string          `json:"launchd_label_prefix"`
+	HTTPSProxy         string          `json:"https_proxy"`
 	Remotes            []remoteFixture `json:"remotes"`
 }
 
@@ -64,6 +65,13 @@ func TestRemotesFixtureParity(t *testing.T) {
 			}
 			if doc.LaunchdLabelPrefix != want.LaunchdLabelPrefix {
 				t.Errorf("launchd_label_prefix = %q, want %q", doc.LaunchdLabelPrefix, want.LaunchdLabelPrefix)
+			}
+			gotProxy := ""
+			if doc.Defaults != nil {
+				gotProxy = doc.Defaults.normalizedHTTPSProxy()
+			}
+			if gotProxy != want.HTTPSProxy {
+				t.Errorf("defaults.https_proxy = %q, want %q", gotProxy, want.HTTPSProxy)
 			}
 			if len(doc.Remotes) != len(want.Remotes) {
 				t.Fatalf("got %d remotes, want %d", len(doc.Remotes), len(want.Remotes))

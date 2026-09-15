@@ -704,6 +704,110 @@ its ssh needs a live human credential — push-2FA or a short-lived certificate 
 and `bin/shuttle-deploy --handshake` will bootstrap a `ControlMaster` for it
 instead of failing.
 
+## Tailscale as fleet transport
+
+`felt shuttle remotes` reaches a remote daemon over an SSH tunnel by default —
+see [Configuring remotes](#configuring-remotes). Tailscale is an alternative
+transport for the same registry: a remote entry names a Tailscale URL instead
+of an SSH port, and the composite board reaches it over the tailnet with no
+tunnel process, no `autossh`, and no SSH key or MFA-cert juggling to keep
+alive. It earns its place on two hosts a tunnel struggles with: a hub behind a
+laptop that closes its lid (a tunnel dies with the SSH session; a tailnet
+membership does not), and a cluster login node behind 2FA whose only
+"always-on" SSH story today is `--multiplex`'s `ControlMaster` babysitting.
+Tailscale replaces that whole apparatus with one join per host.
+
+**Read the policy caveat below before you join a node.**
+
+### The unprivileged recipe
+
+Nothing here needs root or a TUN device — every host in this recipe runs
+`tailscaled` in **userspace-networking** mode, which is what makes it viable
+on a login node where you cannot install a kernel module or a system service:
+
+1. Drop the static `tailscale` and `tailscaled` binaries into `~/.local/bin`
+   (Tailscale ships them as a plain tarball; no package manager or root
+   needed).
+2. Keep `tailscaled` alive under tmux with `bin/tailscaled-launch`
+   (`scripts/bootstrap.sh` installs it to `~/.local/bin` next to
+   `shuttle-launch`, whether or not you use it): it starts `tailscaled
+   --tun=userspace-networking` against a per-host state directory and
+   respawns it if it dies, the same role `shuttle-launch` plays for the
+   daemon.
+3. Export `TS_SOCKET` so the `tailscale` CLI talks to *this* userspace
+   instance rather than a system one:
+   ```bash
+   export TS_SOCKET=$HOME/.local/state/tailscale/tailscaled.sock
+   tailscale up          # one-time device auth
+   tailscale serve --bg 4000    # https://<node>.<tailnet>.ts.net → 127.0.0.1:4000
+   ```
+   `tailscale up` prints a login URL the first time; approve it from any
+   already-authenticated device or browser. `serve --bg` is what actually
+   exposes the daemon — see the policy caveat before you run it.
+
+### The remotes.json entry
+
+A Tailscale-fronted remote skips SSH entirely — no `--ssh`, no port, no
+`ControlMaster`:
+
+```json
+{"name": "hub-a", "url": "https://hub-a.example.ts.net", "tunnel": {"manager": "none"}}
+```
+
+`tunnel: {"manager": "none"}` is what tells the daemon there is no local
+tunnel process to manage or revive for this remote; it dials `url` directly.
+
+### `defaults.https_proxy`
+
+A hub whose *own* `tailscaled` also runs in userspace-networking mode has no
+kernel route into the tailnet at all — the only way out to another node's
+`ts.net` address is through that `tailscaled`'s local HTTP proxy
+(`--outbound-http-proxy-listen`, which is what `bin/tailscaled-launch` starts
+on `localhost:1055`). Point the fleet file at it with a document-level
+default, which the daemon feeds to `:httpc` for every remote request:
+
+```json
+{
+  "defaults": {"https_proxy": "http://localhost:1055"},
+  "remotes": [
+    {"name": "hub-a", "url": "https://hub-a.example.ts.net", "tunnel": {"manager": "none"}}
+  ]
+}
+```
+
+A hub with a real TUN-mode Tailscale install (a desktop or laptop running the
+official app, with a kernel route into the tailnet) needs none of this — drop
+`defaults.https_proxy` and the daemon dials `ts.net` addresses directly.
+`$HTTPS_PROXY` is deliberately **not** read for this: a supervised daemon's
+environment is invisible to the person operating it, and `felt shuttle
+remotes list` validates `remotes.json`, not the daemon's environment, so the
+fleet file has to be the single source of truth.
+
+TLS is verified normally, against the system CA store — `ts.net` certificates
+are publicly trusted (Let's Encrypt, via Tailscale's HTTPS certificate
+feature), so there is no `verify_none` or pinned-cert escape hatch anywhere in
+this path.
+
+### Policy caveat
+
+Joining a tailnet from a shared or institutional host is not a decision to
+make unilaterally. Some facilities' acceptable-use policies explicitly forbid
+"alternative access mechanisms" for compute nodes, and some have named and
+banned structurally similar overlay-networking tools outright. Check the
+facility's AUP before running `tailscale up` on one of its nodes, and — even
+where joining is allowed — never run `tailscale serve` on a node whose policy
+forbids exposing services from it. Joining a tailnet and serving a port from
+it are different acts; a policy can permit one and forbid the other.
+
+None of this is an SSH-login or 2FA bypass. Getting a shell on the node still
+goes through the facility's normal login path, 2FA included — Tailscale plays
+no part in that. What it changes is what happens *after* you're on the node:
+`tailscaled` makes one outbound WireGuard connection to Tailscale's
+coordination service, and `tailscale serve` exposes exactly one port (the
+shuttle daemon's `:4000`) to a tailnet you control, typically a single-user
+one. It does not open an inbound port on the facility's network, and it does
+not touch the login path at all.
+
 ## The event stream and the ledgers
 
 Three append-only JSONL files sit in the daemon's state directory, all resolved

@@ -1,0 +1,73 @@
+#!/bin/sh
+# tailscaled-launch — keep an unprivileged (userspace-networking) tailscaled
+# alive in tmux session "tailscaled", mirroring shuttle-launch's respawn loop.
+#
+# No root, no TUN, no linger on this host: userspace-networking needs no
+# privileged capability to start, so tmux is the supervisor rather than a
+# system service. scripts/bootstrap.sh installs this to
+# ~/.local/bin/tailscaled-launch alongside shuttle-launch itself.
+#
+# Modes:
+#   tailscaled-launch          (re)create tmux session "tailscaled" running
+#                              `tailscaled-launch --loop`
+#   tailscaled-launch --loop   the respawn loop itself (runs in the foreground)
+#
+# State lives in $HOME/.local/state/tailscale (socket, statedir, log),
+# created if missing; override with $TAILSCALED_STATE.
+#
+# tailscaled is a well-behaved long-running daemon, not a crash-prone login
+# node process — unlike shuttle-launch's backoff, a fixed 5s retry is enough
+# here and keeps this script small.
+#
+# --outbound-http-proxy-listen and --socks5-server are what make this
+# tailscaled useful as a *hub*: a host whose own tailnet route is
+# userspace-networking has no other way out to a remote's ts.net address, so
+# the daemon feeds that proxy to :httpc via remotes.json's
+# `defaults.https_proxy` (see docs/shuttle/installation.md).
+
+set -u
+
+ST="${TAILSCALED_STATE:-$HOME/.local/state/tailscale}"
+SESSION=tailscaled
+
+# The binary itself: whatever is on PATH, else the canonical unprivileged drop
+# point. Resolved once, here, so the loop below fails loudly at start rather
+# than respawning a not-found every 5s.
+TAILSCALED=$(command -v tailscaled 2>/dev/null || printf '%s' "$HOME/.local/bin/tailscaled")
+[ -x "$TAILSCALED" ] || {
+  echo "tailscaled-launch: no tailscaled on PATH or at $HOME/.local/bin/tailscaled" >&2
+  exit 1
+}
+
+if [ "${1:-}" = "--loop" ]; then
+  mkdir -p "$ST" || exit 1
+  while :; do
+    "$TAILSCALED" \
+      --tun=userspace-networking \
+      --socket="$ST/tailscaled.sock" \
+      --statedir="$ST" \
+      --port=0 \
+      --outbound-http-proxy-listen=localhost:1055 \
+      --socks5-server=localhost:1056 \
+      >> "$ST/tailscaled.log" 2>&1
+    sleep 5
+  done
+fi
+
+mkdir -p "$ST" || exit 1
+
+# Re-enter THIS copy of the script, the way shuttle-launch does: running it
+# straight out of a checkout must not silently start the installed copy (or
+# nothing at all, before bootstrap has run).
+SELF=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+case "$SELF" in
+  *"'"*)
+    echo "tailscaled-launch: script path contains a single quote ($SELF); refusing to embed it in the tmux command" >&2
+    exit 1
+    ;;
+esac
+
+tmux kill-session -t "$SESSION" 2>/dev/null
+tmux new-session -d -s "$SESSION" "'$SELF' --loop" \
+  || { echo "tailscaled-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }
+echo "tailscaled-launch: respawn loop running in tmux session '$SESSION'"

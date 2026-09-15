@@ -13,7 +13,11 @@ config :shuttle,
   start_remote_registry: false,
   start_remote_fiber_registry: false,
   start_remote_temporal_registry: false,
-  remotes: []
+  remotes: [],
+  # The same shield one level down: `false` means "explicitly no proxy", so no
+  # test can pick up the developer's real fleet proxy and try to CONNECT
+  # through it.
+  https_proxy: false
 
 # Test daemon identity. Resolved at Poller boot by
 # `Shuttle.Poller.resolve_own_host_id/0`, which owns the precedence order. We
