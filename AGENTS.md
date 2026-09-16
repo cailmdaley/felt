@@ -58,7 +58,7 @@ lives in the docs site (`docs/`, published to
 - **Remote content comes from the owning daemon over the tunnel — NEVER from
   git sync.** A fiber is owned by exactly one host; only that host's daemon can
   read its body, files, and assets off its own filesystem. Every cross-host
-  READ (`/api/v1/fibers/:id?body=true`, `/file`, `/astra`) and every cross-host
+  READ (`/api/v1/fibers/:id?body=true`, `/file`) and every cross-host
   WRITE is **owner-routed via `Shuttle.OriginRouter`**: the composite board
   stamps each fiber's `origin`, the client carries it back, and the local daemon
   forwards to the owner's identical endpoint over the SSH LocalForward each

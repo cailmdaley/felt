@@ -24,7 +24,6 @@ import {
   MARKDOWN_EXTS,
   TEXT_EXTS,
   fileExt,
-  isAstraYaml,
 } from './utils.js'
 
 /** One `:::{embed}` declaration, in body order. */
@@ -111,10 +110,6 @@ export function fileKind(path: string): FileKind {
   if (AUDIO_EXTS.has(ext)) return 'audio'
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'pdf') return 'pdf'
-  // An `astra.yaml` is a paper, not YAML: it renders in an iframe through the
-  // Lightcone entry, so it must not be claimed by the text branch its suffix
-  // would otherwise put it in.
-  if (isAstraYaml(path)) return 'html'
   if (MARKDOWN_EXTS.has(ext)) return 'markdown'
   if (TEXT_EXTS.has(ext)) return 'text'
   return 'other'
@@ -165,24 +160,4 @@ export function previewText(raw: string, maxLines = 6, maxCols = 90): string {
     .map((line) => (line.length > maxCols ? `${line.slice(0, maxCols - 1)}…` : line))
     .join('\n')
     .trimEnd()
-}
-
-/**
- * The byte ceiling above which a PDF card keeps its glyph instead of rendering
- * a first-page thumbnail.
- *
- * pdf.js parses the file structure before it can draw page 1, and a very large
- * PDF (a scanned book, a figure-heavy proceedings) costs a multi-megabyte
- * download and a visible stall to produce a 128px picture. The strip is a
- * glance, not a viewer — past this size the glyph is the honest face, and the
- * Reader is one tap away.
- */
-export const PDF_THUMB_MAX_BYTES = 50 * 1024 * 1024
-
-/** Whether a PDF of this size is worth thumbnailing. An unknown size (the
- *  daemon has no `/file-info`, or didn't answer) is treated as small enough:
- *  the feature degrades to "try it", not to "never". */
-export function pdfThumbWorthRendering(size: number | undefined): boolean {
-  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return true
-  return size <= PDF_THUMB_MAX_BYTES
 }

@@ -52,10 +52,6 @@ defmodule ShuttleWeb.Router do
     get("/agents", AgentsController, :show)
     get("/version", VersionController, :show)
     post("/fiber/create", FiberController, :create)
-    # Bake an astra.yaml to MyST mdast (owner-routed): the ASTRA paper render's
-    # backend. Shells out to priv/mystra/bake.mjs on the owning host. JSON-native,
-    # so it lives in the :api pipeline (unlike /file, which serves raw bytes).
-    get("/astra", AstraController, :show)
     # Cheap owner-routed file metadata for the board's live readers. The UI can
     # detect a changed or newly-created embed without downloading the artifact.
     get("/file-info", FileController, :info)

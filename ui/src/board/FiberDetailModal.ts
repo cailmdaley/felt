@@ -15,7 +15,6 @@ import {
   fileKind,
   fileTapAction,
   formatBytes,
-  pdfThumbWorthRendering,
   previewText,
   type Attachment,
 } from './attachments.js'
@@ -309,61 +308,6 @@ function whenVisible(el: Element, fn: () => void): void {
   }, { rootMargin: '200px' })
   io.observe(el)
 }
-/**
- * pdf.js, loaded once and only when a PDF card first comes into view.
- *
- * The library is a megabyte of parser that most fibers never need, so it lives
- * behind a dynamic import and its own chunk. The worker comes in beside it as
- * a URL (Vite emits it as an asset and hands back the hashed path) — the same
- * pairing the Lightcone PaperModal uses, so the two importers can't end up on
- * different builds of the same library.
- */
-let pdfJsPromise: Promise<typeof import('pdfjs-dist')> | null = null
-
-function loadPdfJs(): Promise<typeof import('pdfjs-dist')> {
-  if (!pdfJsPromise) {
-    pdfJsPromise = Promise.all([
-      import('pdfjs-dist'),
-      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-    ]).then(([pdfjsLib, worker]) => {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = worker.default
-      return pdfjsLib
-    })
-  }
-  return pdfJsPromise
-}
-
-/**
- * Draw page 1 of `src` into a canvas sized for `face`, and hand it back.
- *
- * The page is scaled to the face's WIDTH and cropped by the face's overflow,
- * which is what you want from a thumbnail of a document: the top of the first
- * page — title, authors, the opening of the abstract — is the part that tells
- * you which paper this is. The backing store is multiplied by the device pixel
- * ratio so the text survives a retina screen rather than smearing.
- */
-async function renderPdfFirstPage(src: string, face: HTMLElement): Promise<HTMLCanvasElement> {
-  const pdfjsLib = await loadPdfJs()
-  const task = pdfjsLib.getDocument(src)
-  try {
-    const doc = await task.promise
-    const page = await doc.getPage(1)
-    const width = face.clientWidth || 128
-    const unit = page.getViewport({ scale: 1 })
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const viewport = page.getViewport({ scale: (width / unit.width) * dpr })
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(viewport.width))
-    canvas.height = Math.max(1, Math.round(viewport.height))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('no 2d context')
-    await page.render({ canvasContext: ctx, viewport }).promise
-    return canvas
-  } finally {
-    void task.destroy?.()
-  }
-}
-
 const PERSIST_PREFIX = 'shuttle:detail:'
 
 function loadPersist(uid: string): DetailPersist {
@@ -1279,30 +1223,6 @@ export class FiberDetailModal {
       return face
     }
 
-    if (kind === 'pdf') {
-      whenVisible(face, () => {
-        // Ask the daemon how big it is first: past the cap the glyph is the
-        // face, and we never spend the download. A daemon without the route
-        // simply answers nothing and we try anyway.
-        void this.attachmentSize(abs, card)
-          .then((size) => {
-            if (!pdfThumbWorthRendering(size) || !face.isConnected) return null
-            return renderPdfFirstPage(src, face)
-          })
-          .then((canvas) => {
-            if (!canvas || !face.isConnected) return
-            canvas.className = 'kbn-detail-attach-thumb kbn-detail-attach-page'
-            canvas.setAttribute('aria-hidden', 'true')
-            glyph.remove()
-            face.append(canvas)
-          })
-          .catch(() => {
-            /* best-effort — an unparseable or absent PDF keeps its glyph */
-          })
-      })
-      return face
-    }
-
     if (kind === 'markdown' || kind === 'text') {
       whenVisible(face, () => {
         // The daemon's file route ignores `Range` (it answers 200 with the
@@ -1330,8 +1250,8 @@ export class FiberDetailModal {
   }
 
   /** What the daemon's `/file-info` says about one path, or `null` when it
-   *  can't say — an older daemon without the route, or a failed request. Two
-   *  callers want this: the card's size line, and the PDF face's size cap. */
+   *  can't say — an older daemon without the route, or a failed request.
+   *  The card's size line is its caller. */
   private async attachmentInfo(
     fullPath: string,
     card: KanbanCard,
@@ -1349,12 +1269,6 @@ export class FiberDetailModal {
     } catch {
       return null
     }
-  }
-
-  /** Just the byte count, for the PDF face's cap. An unknown size is
-   *  `undefined`, which the cap reads as "small enough, try it". */
-  private async attachmentSize(fullPath: string, card: KanbanCard): Promise<number | undefined> {
-    return (await this.attachmentInfo(fullPath, card))?.size
   }
 
   /** Fill a card's size from `/file-info`. Best-effort and silent: a daemon
@@ -3979,7 +3893,7 @@ async function readFileRevision(
   }
 }
 
-/** Return the artifact path behind one inline `/file` or paper iframe. */
+/** Return the artifact path behind one inline `/file` iframe. */
 function artifactPath(artifact: RefreshableArtifact): string | null {
   const src = artifact.getAttribute('src')
   if (!src) return null
@@ -3988,9 +3902,6 @@ function artifactPath(artifact: RefreshableArtifact): string | null {
     const path = url.searchParams.get('path')
     if (!path) return null
     if (url.pathname.endsWith('/file')) return path
-    if (url.pathname.endsWith('/paper.html')) {
-      return `${path.replace(/\/+$/, '')}/astra.yaml`
-    }
   } catch {
     // An external or malformed source is not ours to refresh.
   }
