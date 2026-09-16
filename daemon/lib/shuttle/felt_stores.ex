@@ -429,4 +429,12 @@ defmodule Shuttle.FeltStores do
   @spec save(host_list()) :: {:ok, host_list()} | {:error, term()}
   def save(hosts) when is_list(hosts), do: PathListConfig.save(@spec_, hosts)
 
+  @doc """
+  Where the registry file resolves: `FELT_STORES_FILE`, else
+  `~/.config/felt/stores.json`. `FELT_STORES` overrides the file's *contents*,
+  not its location, so this path can be live and unread at the same time.
+  """
+  @spec config_path() :: String.t()
+  def config_path, do: PathListConfig.config_path(@spec_)
+
 end

@@ -94,8 +94,16 @@ defmodule Shuttle.PathListConfig do
     end
   end
 
-  # Where the file lives: `<ENV>_FILE` when set, else the default.
-  defp config_path(spec) do
+  @doc """
+  Where the file lives: `<ENV>_FILE` when set, else the default.
+
+  Public because a surface that shows a human this file has to name it. Note
+  what it is NOT: it says nothing about `<ENV>`, whose comma-separated value
+  overrides the file entirely — a host configured that way has a path here that
+  nothing reads, and a caller that displays one must say so.
+  """
+  @spec config_path(spec()) :: String.t()
+  def config_path(spec) do
     case System.get_env(spec.config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(spec.default_path)

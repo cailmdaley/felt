@@ -16,19 +16,26 @@ defmodule ShuttleWeb.FeltStoresController do
   OS folder dialog (`POST /api/v1/choose-folder`), which is how the board
   decides between the native picker and asking for a typed absolute path.
 
-  POST body: %{"felt_stores" => [string]}
+  POST body: %{"felt_stores" => [string], "origin" => string?}
+
+  The POST is **owner-routed via `Shuttle.OriginRouter`**, like `/projects`: a
+  store list describes the daemon that polls it, and the GET above has always
+  served every origin's list, so the write plane has to be able to reach the
+  one the reader is looking at. An absent `origin` still means this host.
 
   Returns:
-    200  %{ok: true, felt_stores: [string], persisted_at: iso8601}
+    200  %{ok: true, host: string, felt_stores: [string], persisted_at: iso8601}
     400  %{error: string}
     500  %{error: string}
+    502  %{error: string}   the forward to the owning daemon failed
   """
 
   use Phoenix.Controller, formats: [:json]
 
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
   import ShuttleWeb.TemporalComposite, only: [render_error: 1]
 
-  alias Shuttle.{FeltStores, FolderPicker, Poller, Projects, RegistryCommon, Remote}
+  alias Shuttle.{FeltStores, FolderPicker, OriginRouter, Poller, Projects, RegistryCommon, Remote}
   alias Shuttle.RemoteFiberRegistry
 
   def show(conn, _params) do
@@ -55,11 +62,31 @@ defmodule ShuttleWeb.FeltStoresController do
     })
   end
 
-  def create(conn, %{"felt_stores" => hosts}) when is_list(hosts) do
+  def create(conn, %{"felt_stores" => hosts} = params) when is_list(hosts) do
+    case OriginRouter.route(Map.get(params, "origin")) do
+      {:remote, remote} ->
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/felt-stores", params), fn name,
+                                                                                        reason ->
+          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
+        end)
+
+      :local ->
+        save_local(conn, hosts)
+    end
+  end
+
+  def create(conn, _params) do
+    conn
+    |> put_status(400)
+    |> json(%{error: "felt_stores must be an array of host paths"})
+  end
+
+  defp save_local(conn, hosts) do
     case FeltStores.save(hosts) do
       {:ok, normalized} ->
         json(conn, %{
           ok: true,
+          host: Poller.own_host_id(),
           felt_stores: normalized,
           persisted_at: DateTime.to_iso8601(DateTime.utc_now())
         })
@@ -69,12 +96,6 @@ defmodule ShuttleWeb.FeltStoresController do
         |> put_status(500)
         |> json(%{error: "failed to persist felt stores: #{format_error(reason)}"})
     end
-  end
-
-  def create(conn, _params) do
-    conn
-    |> put_status(400)
-    |> json(%{error: "felt_stores must be an array of host paths"})
   end
 
   @doc """

@@ -1,12 +1,12 @@
 /**
- * React-island manager for the Stash + Capture forms.
+ * React-island manager for the Stash, Capture and Settings sheets.
  *
- * The kanban board is vanilla TS/DOM; these two forms are the only React in
- * the app. Rather than mount React at boot, we lazily create one root the
- * first time a form opens and render into it on demand — `openStash` /
- * `openCapture` are imperative entry points the board's header buttons call
- * (`onStashClick` / `onNewIdeaClick`). Only one form is open at a time, so a
- * single shared root suffices; closing renders `null`.
+ * The kanban board is vanilla TS/DOM; these sheets are the only React in the
+ * app. Rather than mount React at boot, we lazily create one root the first
+ * time one opens and render into it on demand — `openStash` / `openCapture` /
+ * `openSettings` are imperative entry points the board's chrome calls
+ * (`onStashClick` / `onNewIdeaClick` / `onSettingsClick`). Only one is open at
+ * a time, so a single shared root suffices; closing renders `null`.
  *
  * Both forms need the "project" set — the map-less replacement for Portolan's
  * pinned cities. The authoritative list comes from `/api/v1/felt-stores`; the
@@ -26,6 +26,8 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
 import { CaptureForm, injectCaptureFormStyles, type CaptureProject } from './CaptureForm'
+import { SettingsDialog } from './settings/SettingsDialog'
+import { loadHosts } from './settings/settingsApi'
 
 export interface OpenFormOptions {
   /** Shuttle daemon base — `''` (relative) in the standalone bundle. */
@@ -154,5 +156,27 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
         opts.onResult?.(`Capture session spawned${session ? ` · ${session}` : ''}`, true)
       }}
     />,
+  )
+}
+
+/**
+ * Open the settings sheet.
+ *
+ * It loads the fleet's hosts BEFORE rendering, for the same reason the other
+ * two load the project feed first: a sheet that opens on a spinner and then
+ * decides which machine it is about is a sheet you can start typing into
+ * before it knows where the typing goes. Settings writes configuration to a
+ * host, so it opens already knowing which.
+ */
+export async function openSettings(opts: OpenFormOptions): Promise<void> {
+  let hosts
+  try {
+    hosts = await loadHosts(opts.shuttleBase)
+  } catch (err) {
+    opts.onResult?.((err as Error).message, false)
+    return
+  }
+  ensureRoot().render(
+    <SettingsDialog shuttleBase={opts.shuttleBase} hosts={hosts} onClose={close} />,
   )
 }

@@ -17,13 +17,16 @@ import './ChronicleView.js'
 import './ShelfView.js'
 
 export {
+  blockingDialogOpen,
   collectCards,
   getView,
   keystrokeIsSpokenFor,
+  settingsHotkey,
   listViews,
   normalizeFocusDate,
   viewFallbackKind,
   type BoardViewId,
+  type SettingsHotkey,
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'

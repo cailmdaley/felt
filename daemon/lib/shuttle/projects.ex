@@ -55,4 +55,12 @@ defmodule Shuttle.Projects do
   @spec save(project_list()) :: {:ok, project_list()} | {:error, term()}
   def save(projects) when is_list(projects), do: PathListConfig.save(@spec_, projects)
 
+  @doc """
+  Where the picker list resolves: `FELT_PROJECTS_FILE`, else
+  `~/.config/felt/projects.json`. As with the store registry, `FELT_PROJECTS`
+  overrides the contents rather than the location.
+  """
+  @spec config_path() :: String.t()
+  def config_path, do: PathListConfig.config_path(@spec_)
+
 end

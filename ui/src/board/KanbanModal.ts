@@ -72,6 +72,8 @@ import {
   normalizeFocusDate,
   type BoardViewId,
   type TemporalFetchers,
+  settingsHotkey,
+  blockingDialogOpen,
   type TemporalView,
   type ViewContext,
   viewFallbackKind,
@@ -101,6 +103,14 @@ interface KanbanModalOptions {
    * crystallizes it into a fiber. Omit to hide the button.
    */
   onNewIdeaClick?: () => void
+  /**
+   * Called when the user asks for settings — the ⚙︎ at the right end of the
+   * tab strip, or `⌘,` / `,`. The host opens the settings dialog, which reads
+   * and rewrites the operator files on any host in the fleet. Omit to hide the
+   * button AND disarm both hotkeys: a board with nowhere to send the gesture
+   * should not swallow the keystroke.
+   */
+  onSettingsClick?: () => void
   /** Override the Shuttle daemon base — the kanban's data + write plane. Reads
    *  `GET /api/v1/fibers/composite`; writes POST the daemon transition/felt-edit/
    *  dispatch endpoints (dispatch carries user_message + resume_mode inline),
@@ -131,6 +141,7 @@ export class KanbanModal {
   private readonly openWorkerAfterGesture?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
+  private readonly onSettingsClick?: () => void
   private readonly shuttleBase: string
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
 
@@ -270,6 +281,7 @@ export class KanbanModal {
       : undefined
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
+    this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.detailModal = new FiberDetailModal(
@@ -503,6 +515,26 @@ export class KanbanModal {
     this.lensSlotEl = document.createElement('div')
     this.lensSlotEl.className = 'kbn-viewtabs-lens'
     strip.append(this.lensSlotEl)
+
+    // Settings rides the same row as the pages without being one of them. It
+    // is deliberately NOT a tab: the five tabs are windows onto the work, and
+    // a preferences sheet is not a window onto anything — so it wears a glyph
+    // rather than a name and a keycap, and sits past the lens where the row
+    // has already ended. On a phone the row scrolls; the CSS pins this one
+    // element to the right edge, because a settings button you have to scroll
+    // sideways to find is a settings button nobody finds.
+    if (this.onSettingsClick) {
+      const gear = document.createElement('button')
+      gear.type = 'button'
+      gear.className = 'kbn-viewtabs-settings'
+      // U+2699 + U+FE0E: the text variation selector, as the manicule uses, so
+      // this renders as a serif mark rather than a colour emoji.
+      gear.textContent = '⚙︎'
+      gear.title = 'Settings (⌘, or ,)'
+      gear.setAttribute('aria-label', 'Settings')
+      gear.addEventListener('click', () => this.onSettingsClick?.())
+      strip.append(gear)
+    }
     return strip
   }
 
@@ -723,6 +755,31 @@ export class KanbanModal {
       setFocusDate: (dayISO) => this.setFocusDate(dayISO),
       switchView: (id, opts) => this.switchView(id, opts),
     }
+  }
+
+  /**
+   * `⌘,` and bare `,` open settings — checked BEFORE the view hotkeys, which
+   * is free (`settingsHotkey` only ever answers for `,`) and keeps the reading
+   * order honest: the chord is the broader gesture.
+   *
+   * The two openings are guarded differently, which is the whole reason
+   * `settingsHotkey` reports which one it saw. A chord is inert only under
+   * another dialog, so `⌘,` still works with the caret in a search box. A bare
+   * comma follows the same rule as every other bare key on this board, because
+   * inside a text field it is a comma.
+   *
+   * Both are dead when the host gave no `onSettingsClick`: a board with
+   * nowhere to send the gesture must not eat the keystroke.
+   */
+  private handleSettingsHotkey(e: KeyboardEvent): boolean {
+    if (!this.onSettingsClick) return false
+    const kind = settingsHotkey(e)
+    if (!kind) return false
+    if (kind === 'chord' ? blockingDialogOpen() : keystrokeIsSpokenFor()) return false
+    e.preventDefault()
+    e.stopPropagation()
+    this.onSettingsClick()
+    return true
   }
 
   /**
@@ -2234,6 +2291,7 @@ export class KanbanModal {
       this.setLensCycle(null)
       return
     }
+    if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
     // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
     // order, and the Desk's column heads are display:none behind it anyway.

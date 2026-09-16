@@ -247,6 +247,21 @@ export const BLOCKING_DIALOG_SELECTOR =
   '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], .kbn-detail-overlay'
 
 /**
+ * Is a dialog currently layered over the board?
+ *
+ * The second half of `keystrokeIsSpokenFor` on its own, because a modifier
+ * CHORD wants this half without the first: `⌘,` is not typing, wherever the
+ * caret happens to be, but it must still not stack a second dialog on top of
+ * an open one.
+ */
+export function blockingDialogOpen(): boolean {
+  for (const el of document.querySelectorAll(BLOCKING_DIALOG_SELECTOR)) {
+    if (isBlockingDialog(el)) return true
+  }
+  return false
+}
+
+/**
  * True when a bare keystroke belongs to something other than the board: a text
  * field has focus, or a dialog is layered over it.
  *
@@ -255,10 +270,49 @@ export const BLOCKING_DIALOG_SELECTOR =
  */
 export function keystrokeIsSpokenFor(): boolean {
   if (isTypingTarget(document.activeElement as HTMLElement | null)) return true
-  for (const el of document.querySelectorAll(BLOCKING_DIALOG_SELECTOR)) {
-    if (isBlockingDialog(el)) return true
-  }
-  return false
+  return blockingDialogOpen()
+}
+
+/** What kind of settings keystroke this is, if any. */
+export type SettingsHotkey = 'chord' | 'bare'
+
+/** The shape `settingsHotkey` reads — a `KeyboardEvent`, or a test's stand-in. */
+export interface HotkeyLike {
+  key: string
+  metaKey?: boolean
+  ctrlKey?: boolean
+  altKey?: boolean
+  shiftKey?: boolean
+}
+
+/**
+ * Does this keystroke ask for settings, and in which of the two ways?
+ *
+ * Two openings, because the board is two things at once. On a keyboard it is
+ * an application, and an application's preferences are `⌘,` — the one chord
+ * a Mac user tries without being told. On the board itself every other page is
+ * a BARE key (`1`–`5`, `t`), and a phone's keyboard has no `⌘` at all, so a
+ * bare `,` opens it too. `,` is free: the chassis owns only the digits, and Day
+ * and Week own `t` and the arrows.
+ *
+ * Pure, and it deliberately does NOT consult the DOM — the two kinds are
+ * guarded differently and the caller applies the guard:
+ *
+ *   - `'chord'` is inert only while another dialog is layered over the board
+ *     (`blockingDialogOpen`), not while a field has focus. A modifier chord is
+ *     never typing, and refusing it inside the Chronicle's search box would
+ *     make the one universal shortcut the least reliable one.
+ *   - `'bare'` follows the same rule as every other bare key
+ *     (`keystrokeIsSpokenFor`), because a lone `,` in a text field is a comma.
+ *
+ * `Alt`/`Shift` disqualify both: `⌥,` and `⇧,` are keystrokes someone meant for
+ * something else, and on several layouts `⌥,` is a character.
+ */
+export function settingsHotkey(e: HotkeyLike): SettingsHotkey | null {
+  if (e.key !== ',') return null
+  if (e.altKey || e.shiftKey) return null
+  if (e.metaKey || e.ctrlKey) return 'chord'
+  return 'bare'
 }
 
 const CIVIL_DAY_RE = /^\d{4}-\d{2}-\d{2}$/

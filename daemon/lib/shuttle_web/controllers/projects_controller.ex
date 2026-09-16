@@ -1,7 +1,16 @@
 defmodule ShuttleWeb.ProjectsController do
   @moduledoc """
-  Register a checkout in the curated picker-project list:
-  `POST /api/v1/projects` with `%{"path" => "<absolute path>"}`.
+  Curate the picker-project list: `POST /api/v1/projects`, in two shapes.
+
+      %{"path" => "<absolute path>"}      append one, initializing the store
+      %{"projects" => ["<path>", ...]}    set the whole list
+
+  The first is the "+ Add project…" affordance and is described below. The
+  second is how a project leaves the list, which the append-only form could
+  never express — a settings page that can add a checkout and not remove one is
+  a trap. Setting the list neither initializes nor deletes anything on disk: it
+  rewrites which directories the pickers offer, and a path that drops out keeps
+  its `.felt/` exactly as it was.
 
   The write half of the UI's "+ Add project…" affordance, and the first
   production caller of `Shuttle.Projects.save/1`. Until now the Stash/Capture
@@ -33,7 +42,8 @@ defmodule ShuttleWeb.ProjectsController do
 
   Returns:
     200  %{ok: true, path: string, registered: bool, initialized: bool,
-           host: string, projects: [string]}
+           host: string, projects: [string]}          (the append form)
+    200  %{ok: true, host: string, projects: [string]} (the set form)
     400  %{ok: false, error: string}
     500  %{ok: false, error: string}
   """
@@ -61,8 +71,36 @@ defmodule ShuttleWeb.ProjectsController do
     end
   end
 
+  def create(conn, %{"projects" => projects} = params) when is_list(projects) do
+    case OriginRouter.route(Map.get(params, "origin")) do
+      {:remote, remote} ->
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/projects", params), fn name,
+                                                                                     reason ->
+          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
+        end)
+
+      :local ->
+        set_local(conn, projects)
+    end
+  end
+
   def create(conn, _params) do
-    conn |> put_status(400) |> json(%{ok: false, error: "path is required"})
+    conn
+    |> put_status(400)
+    |> json(%{ok: false, error: ~s(send a "path" to add one project, or a "projects" array to set the list)})
+  end
+
+  defp set_local(conn, projects) do
+    if Enum.all?(projects, &is_binary/1) do
+      case Projects.save(projects) do
+        {:ok, saved} -> json(conn, %{ok: true, host: Poller.own_host_id(), projects: saved})
+        {:error, reason} -> failed(conn, "failed to persist projects: #{inspect(reason)}")
+      end
+    else
+      conn
+      |> put_status(400)
+      |> json(%{ok: false, error: "every entry in projects must be a path string"})
+    end
   end
 
   defp register_local(conn, raw_path) do

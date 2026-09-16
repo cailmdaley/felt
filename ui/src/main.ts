@@ -1,7 +1,7 @@
 import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
-import { openStash, openCapture } from './forms/mountForms.js'
+import { openStash, openCapture, openSettings } from './forms/mountForms.js'
 
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
@@ -29,6 +29,13 @@ const board = new KanbanModal({
   },
   onNewIdeaClick: () => {
     void openCapture({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
+  },
+  // ⚙︎ at the right end of the tab strip, and ⌘, / , — the operator files of
+  // any host in the fleet. Only a failure to even reach the daemon surfaces a
+  // toast; everything else the sheet reports in place, beside the control that
+  // caused it.
+  onSettingsClick: () => {
+    void openSettings({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
   },
   // ▸ aloft / ☞ needs-you-now → open the worker's tmux session in kitty. The
   // web app can't open a terminal itself (Portolan does it natively); the

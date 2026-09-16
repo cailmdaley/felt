@@ -46,6 +46,15 @@ function injectAppDialogStyles(): void {
       border-radius: 4px;
       animation: app-dialog-card-in 160ms ease-out;
     }
+    /* A card carrying its own two-column page rather than one stack of fields
+       — the settings sheet. Wider because a rail plus a pane needs the room,
+       and taller because the thing being edited is a file, not a form: the
+       measure that matters is how much of it you can see at once. */
+    .app-dialog-card-wide {
+      width: min(64rem, 94vw);
+      max-height: 88vh;
+      height: min(44rem, 88vh);
+    }
     @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
       .app-dialog-card {
         top: 0;
@@ -169,6 +178,22 @@ export interface AppDialogProps {
   title: ReactNode
   /** Small mono kicker on the right of the title row (e.g. `shuttle · capture`). */
   eyebrow?: ReactNode
+  /**
+   * Widen and fix the card's height — for a child that is a PAGE (a rail and
+   * a pane) rather than a column of fields. A form should be as tall as its
+   * fields; a page should be as tall as the room allows, so its own scroll
+   * region does not change size as you move between sections.
+   */
+  wide?: boolean
+  /**
+   * Hand the body to the child whole: no padding, no scroll of its own.
+   *
+   * The default body is one padded scroll region, which is right for a form
+   * and wrong for anything with two panes — a single outer scrollbar would
+   * carry the rail off the top of the card as you read down the pane. A flush
+   * child owns its own layout and its own overflow.
+   */
+  flush?: boolean
   children: ReactNode
 }
 
@@ -177,6 +202,8 @@ export function AppDialog({
   onOpenChange,
   title,
   eyebrow,
+  wide,
+  flush,
   children,
 }: AppDialogProps): JSX.Element {
   injectAppDialogStyles()
@@ -185,7 +212,7 @@ export function AppDialog({
       <Dialog.Portal>
         <Dialog.Overlay style={appDialogOverlayStyles} />
         <Dialog.Content
-          className="app-dialog-card"
+          className={wide ? 'app-dialog-card app-dialog-card-wide' : 'app-dialog-card'}
           style={appDialogContentStyles}
           // Radix warns unless a Description is rendered or the attribute is
           // explicitly opted out of. A dialog whose own fields say what it does
@@ -232,7 +259,11 @@ export function AppDialog({
               form's blocks are all direct siblings on one alignment grid. */}
           <div
             className="app-dialog-body"
-            style={{ padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }}
+            style={
+              flush
+                ? { flex: '1 1 auto', minHeight: 0, display: 'flex', overflow: 'hidden' }
+                : { padding: '15px 22px 16px', overflowY: 'auto', flex: '1 1 auto' }
+            }
           >
             {children}
           </div>

@@ -61,6 +61,19 @@ defmodule ShuttleWeb.Router do
     get("/file-info", FileController, :info)
     get("/felt-stores", FeltStoresController, :show)
     post("/felt-stores", FeltStoresController, :create)
+    # The operator files as text, owner-routed: the settings page reads and
+    # rewrites `stores/projects/agents/remotes.json` on whichever host owns
+    # them. Reads are owner-routed too — a config file describes the daemon
+    # that reads it, and only that daemon can see its own `~/.config/felt/`.
+    get("/config", ConfigController, :index)
+    get("/config/:id", ConfigController, :show)
+    post("/config/:id", ConfigController, :create)
+    # The fleet as rows: the normalized file joined to live reachability and
+    # each remote's build. Its two write verbs shell the Go CLI, which stays
+    # the fleet file's only writer.
+    get("/fleet", FleetController, :show)
+    post("/fleet/remotes", FleetController, :upsert)
+    post("/tunnels", FleetController, :tunnels)
     # Register a directory as a picker-project on the host that owns it,
     # initializing its `.felt/` when it isn't a store yet. Owner-routed, since
     # only the owning daemon sees its own filesystem.

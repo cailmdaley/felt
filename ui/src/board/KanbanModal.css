@@ -773,6 +773,44 @@
   min-width: 0;
 }
 .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; }
+
+/* The settings gear closes the strip past the lens. Not a tab, and shaped so:
+   no keycap, no name, a square of chrome rather than a page you can be on. It
+   is iron gall like every other piece of machinery here, and it never takes a
+   pigment — opening a settings sheet is not a claim about the work. */
+.kbn-viewtabs-settings {
+  flex: 0 0 auto;
+  appearance: none;
+  margin: 0 0 0 6px;
+  padding: 0;
+  width: 1.85em;
+  height: 1.85em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(122, 111, 92, 0.28);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  /* Serif + the text variation selector on the glyph itself, so U+2699 renders
+     as a mark on the page instead of a colour emoji — same pairing as the
+     manicule on an attention chip. */
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-variant-emoji: text;
+  font-size: calc(14px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.kbn-viewtabs-settings:hover {
+  color: #7A6F5C;
+  border-color: rgba(122, 111, 92, 0.45);
+  background: rgba(122, 111, 92, 0.06);
+}
+.kbn-viewtabs-settings:focus-visible {
+  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline-offset: 2px;
+}
 .kbn-lens-chip {
   display: flex;
   align-items: baseline;
@@ -2128,6 +2166,24 @@
     margin-left: 4px;
     flex: 0 0 auto;
     overflow: visible;
+  }
+  /* The row scrolls on a phone, and a control that scrolls out of sight is a
+     control that is not there. So the gear is stuck to the right edge and the
+     tabs pass under it: it is the one thing on this strip you reach for
+     without already knowing where the strip has been scrolled to. The paper
+     wash is what keeps a tab from showing through as it slides beneath. */
+  .kbn-viewtabs-settings {
+    position: sticky;
+    right: 0;
+    margin-left: 6px;
+    width: 2.2em;
+    height: 2.2em;
+    font-size: calc(15px * var(--kbn-type-scale, 1));
+    background:
+      linear-gradient(to right, rgba(237, 226, 206, 0) 0%, #EDE2CE 45%, #EDE2CE 100%);
+    border-color: rgba(122, 111, 92, 0.34);
+    padding-left: 6px;
+    background-clip: padding-box;
   }
 
   /* ── The folio strip ───────────────────────────────────────────────────

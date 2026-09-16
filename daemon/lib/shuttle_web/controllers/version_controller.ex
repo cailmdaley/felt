@@ -15,40 +15,8 @@ defmodule ShuttleWeb.VersionController do
   @state_timeout_ms 1_500
 
   def show(conn, _params) do
-    git_sha = build_info(:git_sha)
-
-    json(conn, %{
-      git_sha: git_sha,
-      git_short_sha: short_sha(git_sha),
-      built_at: build_info(:built_at),
-      # Runtime boot stamp (Shuttle.Application.start/2), NOT compile-time: the
-      # release boots :interactive (nothing sets `-mode embedded`), so modules
-      # load lazily from bin/rel/lib/*/ebin — git_sha alone can report a fresh
-      # build out of a stale, long-booted daemon (BuildInfo first referenced
-      # after a rebuild swapped the beams under it). Deploy verifiers must
-      # check both: sha matches AND booted_at postdates the deploy.
-      booted_at: booted_at(),
-      mix_vsn: Shuttle.version(),
-      contract: contract_check()
-    })
+    json(conn, Map.put(Shuttle.BuildStamp.stamp(), :contract, contract_check()))
   end
-
-  defp booted_at do
-    case Application.get_env(:shuttle, :booted_at) do
-      %DateTime{} = dt -> DateTime.to_iso8601(dt)
-      _ -> "unknown"
-    end
-  end
-
-  defp build_info(function) do
-    if Code.ensure_loaded?(Shuttle.BuildInfo) and function_exported?(Shuttle.BuildInfo, function, 0) do
-      apply(Shuttle.BuildInfo, function, [])
-    else
-      "unknown"
-    end
-  end
-
-  defp short_sha(sha) when is_binary(sha), do: String.slice(sha, 0, 7)
 
   # The Poller probes once at boot and caches the result (`contract_check`
   # state) — reading it here is a cheap GenServer call, not a fresh shell-out.

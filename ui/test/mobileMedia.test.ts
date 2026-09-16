@@ -43,20 +43,33 @@ import {
  *  build type-checks this file with the DOM lib and no node types, and a test
  *  that only runs under vitest is not worth a `@types/node` dependency. */
 const SRC = fileURLToPath(new URL('../src/', import.meta.url))
-const ROOTS = ['board', 'board/views', 'forms']
+const ROOTS = ['board', 'forms']
 
+/**
+ * Walks each root RECURSIVELY. It used to name the three directories that
+ * happened to hold stylesheets, which meant the guard silently stopped
+ * covering the codebase the first time a feature landed in a subdirectory of
+ * its own — the one file nobody would think to add here is the one in a
+ * folder that did not exist when this list was written.
+ */
 function sheets(): Array<{ path: string; text: string }> {
   const out: Array<{ path: string; text: string }> = []
-  for (const rel of ROOTS) {
-    for (const name of readdirSync(join(SRC, rel))) {
-      if (!/\.(css|tsx)$/.test(name)) continue
+  const walk = (rel: string): void => {
+    for (const entry of readdirSync(join(SRC, rel), { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`
+      if (entry.isDirectory()) {
+        walk(child)
+        continue
+      }
+      if (!/\.(css|tsx|ts)$/.test(entry.name)) continue
       // Comments are stripped first: the board's CSS explains the threshold at
       // length and says `@media …` while doing it, and a scanner that reads
       // documentation as code finds violations everywhere.
-      const text = readFileSync(join(SRC, rel, name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ')
-      out.push({ path: `${rel}/${name}`, text })
+      const text = readFileSync(join(SRC, child), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ')
+      out.push({ path: child, text })
     }
   }
+  for (const rel of ROOTS) walk(rel)
   return out
 }
 

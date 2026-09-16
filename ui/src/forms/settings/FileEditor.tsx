@@ -1,0 +1,181 @@
+/**
+ * The file a section is a form for, editable as text.
+ *
+ * Every section on this page ends with one of these, folded shut. The
+ * structured controls above it are the ordinary path; this is what makes the
+ * page's claim to hold *all* the configuration true rather than "all the
+ * configuration we built a widget for". Three things it is the only way to do:
+ *
+ *   - reach a key no CLI flag can set (`remotes.json` carries `auth`,
+ *     `ssh_flags`, `tunnel.label` and per-entry timeouts; `felt shuttle remotes
+ *     add` has a flag for none of them),
+ *   - see what is actually on disk, rather than a model's opinion of it,
+ *   - edit a file this page has no form for at all, from a phone.
+ *
+ * It is also the SAFE way to touch `remotes.json`. A structured round trip —
+ * parse, edit the model, re-encode — silently drops every key the model does
+ * not know about; a text edit cannot, because nothing re-encodes anything.
+ *
+ * Saving posts the whole text to `POST /api/v1/config/:id`, which refuses it
+ * unless the tool that really reads that file accepts it first. A refusal
+ * arrives as that tool's own sentence and is shown verbatim: felt says which
+ * remote and which port, and no paraphrase improves on that.
+ */
+
+import { useEffect, useRef, useState } from 'react'
+
+import {
+  CONFIG_FILENAME,
+  loadConfigFile,
+  saveConfigFile,
+  type ConfigId,
+  type SettingsHost,
+} from './settingsApi'
+
+export interface FileEditorProps {
+  shuttleBase: string
+  host: SettingsHost
+  id: ConfigId
+  /** Bumped by the parent when a structured edit rewrote the file underneath. */
+  reloadToken: number
+  /** The structured half should refresh — a save here changed what it reads. */
+  onSaved: () => void
+}
+
+export function FileEditor({
+  shuttleBase,
+  host,
+  id,
+  reloadToken,
+  onSaved,
+}: FileEditorProps): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState<{ text: string; path: string; exists: boolean } | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  // What the caret was doing when the last save landed, so a reload triggered
+  // by our own save does not snatch a half-typed follow-up edit away.
+  const dirty = loaded !== null && draft !== loaded.text
+
+  const load = useRef<() => void>(() => {})
+  load.current = (): void => {
+    setError(null)
+    loadConfigFile(shuttleBase, host, id)
+      .then((file) => {
+        setLoaded({ text: file.text, path: file.path, exists: file.exists })
+        setDraft(file.text)
+      })
+      .catch((err: Error) => setError(err.message))
+  }
+
+  // Fetch only once opened: four sections' files would otherwise be four
+  // requests per host switch for text nobody is looking at.
+  useEffect(() => {
+    if (!open) return
+    load.current()
+  }, [open, host.origin, id, reloadToken])
+
+  // A host switch invalidates everything shown here, including the fold: the
+  // next host's file is a different file, and leaving the previous one's text
+  // on screen under a new host's name is the one mistake this page must not
+  // make.
+  useEffect(() => {
+    setLoaded(null)
+    setDraft('')
+    setError(null)
+    setSaved(false)
+  }, [host.origin, id])
+
+  const save = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    setSaved(false)
+    try {
+      const file = await saveConfigFile(shuttleBase, host, id, draft)
+      setLoaded({ text: file.text, path: file.path, exists: file.exists })
+      setDraft(file.text)
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const filename = CONFIG_FILENAME[id]
+
+  return (
+    <details
+      className="set-file"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        {filename}
+        {dirty && <span style={{ color: '#9A7B35' }}>· unsaved</span>}
+      </summary>
+
+      {open && (
+        <>
+          <div className={`set-file-path${loaded && !loaded.exists ? ' set-file-absent' : ''}`}>
+            {loaded
+              ? loaded.exists
+                ? loaded.path
+                : `${loaded.path} — no such file yet; saving creates it`
+              : 'reading…'}
+          </div>
+
+          <textarea
+            className="set-textarea"
+            rows={16}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            value={draft}
+            disabled={loaded === null}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              setSaved(false)
+            }}
+            aria-label={`${filename} on ${host.label}`}
+          />
+
+          <div className="set-actions">
+            <button
+              type="button"
+              className="set-btn set-btn-primary"
+              disabled={busy || loaded === null || !dirty}
+              onClick={() => void save()}
+            >
+              {busy ? 'Saving…' : draft.trim() === '' ? 'Delete file' : 'Save'}
+            </button>
+            <button
+              type="button"
+              className="set-btn"
+              disabled={busy || loaded === null || !dirty}
+              onClick={() => {
+                setDraft(loaded?.text ?? '')
+                setError(null)
+              }}
+            >
+              Revert
+            </button>
+            <span className="set-actions-spacer" />
+            {saved && !dirty && <span className="set-row-note">saved</span>}
+            {draft.trim() === '' && loaded?.exists && (
+              <span className="set-row-note set-row-note-owed">
+                empty removes the file
+              </span>
+            )}
+          </div>
+
+          {error && <div className="set-error" role="alert">{error}</div>}
+        </>
+      )}
+    </details>
+  )
+}

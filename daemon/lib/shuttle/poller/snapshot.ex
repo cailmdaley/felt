@@ -104,6 +104,11 @@ defmodule Shuttle.Poller.Snapshot do
       # When SHUTTLE_HOST is set this matches the host operators read in logs
       # and use to author `shuttle.host:` pins on fibers.
       host: state.own_host_id,
+      # What this daemon IS, not just what it is doing. It rides the snapshot
+      # so a hub's `/state/composite` answers "which host is on which build"
+      # from the one fetch it already makes — the question every fleet deploy
+      # ends on, previously answerable only by a `/version` round trip per host.
+      build: Shuttle.BuildStamp.stamp(),
       felt_stores: state.felt_stores,
       eligible: eligible,
       blocked: blocked,
