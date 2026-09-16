@@ -1139,6 +1139,21 @@ const settingsFiles: Record<string, Record<string, string>> = {
 const settingsOrigin = (url: string): string =>
   new URL(url, 'http://harness.invalid').searchParams.get('origin') || LOCAL_HOST
 
+/** The two path-list files as a list, the way `ConfigFiles.entries/1` serves
+ *  them — which is where the structured editors get their rows. */
+const settingsEntries = (host: string, id: string): string[] | null => {
+  if (id !== 'stores' && id !== 'projects') return null
+  const text = settingsFiles[host]?.[id] ?? ''
+  if (text === '') return []
+  try {
+    const doc = JSON.parse(text) as Record<string, unknown>
+    const list = Array.isArray(doc) ? doc : doc[id === 'stores' ? 'felt_stores' : 'projects']
+    return Array.isArray(list) ? (list as string[]) : []
+  } catch {
+    return []
+  }
+}
+
 const settingsSummary = (host: string, id: string): Record<string, unknown> => {
   const text = settingsFiles[host]?.[id] ?? ''
   return {
@@ -1147,7 +1162,13 @@ const settingsSummary = (host: string, id: string): Record<string, unknown> => {
     exists: text !== '',
     size: text.length,
     updated_at: Math.floor(now / 1000) - 3600,
-    env_override: host === LOCAL_HOST && id === 'stores' ? { var: 'FELT_STORES', value: '/home/you/loom' } : null,
+    // Only on the local host's stores, so the sheet shows BOTH states at once:
+    // the banner and its frozen controls here, and an ordinary editable list on
+    // Projects and on the other host.
+    env_override:
+      host === LOCAL_HOST && id === 'stores'
+        ? { var: 'FELT_STORES', value: '/home/you/loom' }
+        : null,
     // A stable stand-in: the sheet only ever compares it with itself.
     digest: text === '' ? null : `harness-${host}-${id}-${text.length}`,
   }
@@ -1221,6 +1242,27 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // ── The settings plane ─────────────────────────────────────────────────
   // Before the catch-all below, which would otherwise answer every one of
   // these with `{ok: true}` and leave the sheet rendering an empty page.
+  if (url.includes('/api/v1/felt-stores') && init?.method === 'POST') {
+    const host = bodyOrigin()
+    const list = (body().felt_stores as string[]) ?? []
+    settingsFiles[host] = {
+      ...(settingsFiles[host] ?? {}),
+      stores: JSON.stringify({ version: 1, felt_stores: list }, null, 2) + '\n',
+    }
+    return json({ ok: true, host, felt_stores: list })
+  }
+  if (url.includes('/api/v1/projects')) {
+    const host = bodyOrigin()
+    const current = settingsEntries(host, 'projects') ?? []
+    const next = Array.isArray(body().projects)
+      ? (body().projects as string[])
+      : [...current, String(body().path ?? '')]
+    settingsFiles[host] = {
+      ...(settingsFiles[host] ?? {}),
+      projects: JSON.stringify({ version: 1, projects: next }, null, 2) + '\n',
+    }
+    return json({ ok: true, host, projects: next, registered: true, initialized: false, path: body().path })
+  }
   if (url.includes('/api/v1/felt-stores') && init?.method !== 'POST') {
     return json({
       host: LOCAL_HOST,
@@ -1247,10 +1289,21 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST') {
       const host = bodyOrigin()
       settingsFiles[host] = { ...(settingsFiles[host] ?? {}), [id]: String(body().text ?? '') }
-      return json({ ok: true, host, ...settingsSummary(host, id), text: settingsFiles[host][id] })
+      return json({
+        ok: true,
+        host,
+        ...settingsSummary(host, id),
+        text: settingsFiles[host][id],
+        entries: settingsEntries(host, id),
+      })
     }
     const host = settingsOrigin(url)
-    return json({ host, ...settingsSummary(host, id), text: settingsFiles[host]?.[id] ?? '' })
+    return json({
+      host,
+      ...settingsSummary(host, id),
+      text: settingsFiles[host]?.[id] ?? '',
+      entries: settingsEntries(host, id),
+    })
   }
   if (url.includes('/api/v1/config')) {
     const host = settingsOrigin(url)
