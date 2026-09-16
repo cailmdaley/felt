@@ -96,7 +96,7 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
     const id = window.setInterval(() => {
       // Through a ref, not a dependency: in the deps the timer restarted on
       // every button press, so a run of clicks could hold the refresh off.
-      if (busyRef.current) return
+      if (busyRef.current || document.hidden) return
       loadHostState(shuttleBase, host)
         .then((data) => data && setState(data))
         .catch(() => {})

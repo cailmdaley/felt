@@ -54,6 +54,19 @@ export interface FleetSectionProps {
   onChanged: () => void
 }
 
+/**
+ * How often the open sheet re-reads the fleet.
+ *
+ * Slower than the board's own 15s, deliberately. This read is not free on the
+ * far side: it shells `felt shuttle remotes list` on the host being looked at,
+ * and that host can be a shared cluster login node where the Runner's own
+ * moduledoc records a felt call taking ~11s under IO pressure. Half a minute
+ * is still far inside the window where a staleness clock reads honestly, and
+ * it is a third of the subprocesses. A hidden tab skips the tick entirely — a
+ * sheet left open behind another window should cost the fleet nothing.
+ */
+const FLEET_POLL_MS = 30_000
+
 /** "3m ago" / "2h ago" — a poll's age, which is what staleness is made of. */
 function ago(iso: string | null): string {
   if (!iso) return 'never'
@@ -124,6 +137,7 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
       // the deps restarted this timer on every button press, so a run of
       // clicks could hold the refresh off indefinitely.
       if (busyRef.current) return
+      if (document.hidden) return
       loadFleet(shuttleBase, host)
         .then((data) => {
           setFleet(data)
@@ -136,7 +150,7 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
         // stay (the last good read is still the truest thing we have) and say
         // they have stopped moving.
         .catch(() => setDrifted(true))
-    }, 15_000)
+    }, FLEET_POLL_MS)
     return () => window.clearInterval(id)
   }, [shuttleBase, host.origin])
 
