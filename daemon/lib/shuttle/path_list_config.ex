@@ -84,7 +84,13 @@ defmodule Shuttle.PathListConfig do
 
         _ ->
           File.mkdir_p!(Path.dirname(path))
-          tmp = path <> ".tmp"
+          # Unique per write, not `<path>.tmp`. A fixed staging name is atomic
+          # against a reader and actively unsafe against a second writer: two
+          # concurrent saves share the file, and the first to rename publishes
+          # whichever bytes were staged last. Both of these lists are now
+          # owner-routed, so two hubs really can save the same host's file at
+          # once.
+          tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
           File.write!(tmp, encode(spec, normalized))
           File.rename!(tmp, path)
           {:ok, normalized}

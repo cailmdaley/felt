@@ -145,6 +145,58 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "felt_stores"
   end
 
+  # The GET has always served every origin's list, so the write plane has to be
+  # able to reach the one the reader is looking at: a store list describes the
+  # daemon that polls it, and only that daemon can save it.
+  test "a write for a remote origin forwards to the owning daemon" do
+    path = Path.expand(System.get_env("FELT_STORES_FILE"))
+    saved = Jason.encode!(%{"ok" => true, "host" => "candide", "felt_stores" => ["/remote/loom"]})
+
+    Shuttle.Test.ForwardStub.stub_forward(
+      "candide",
+      "http://candide.example:4000",
+      {:ok, 200, saved},
+      Shuttle.Test.StubPostClient
+    )
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-stores",
+        Jason.encode!(%{"felt_stores" => ["/remote/loom"], "origin" => "candide"})
+      )
+
+    assert conn.status == 200
+    assert conn.resp_body == saved
+
+    last = Shuttle.Test.StubPostClient.last()
+    assert last.url == "http://candide.example:4000/api/v1/felt-stores"
+    # The owner runs it as local — its origin is stripped on the way.
+    assert Jason.decode!(last.body) == %{"felt_stores" => ["/remote/loom"]}
+
+    # And nothing was written on this host.
+    refute File.exists?(path)
+  end
+
+  test "a tunnel failure on a forwarded write is a 502 naming the remote" do
+    Shuttle.Test.ForwardStub.stub_forward(
+      "candide",
+      "http://candide.example:4000",
+      {:error, :econnrefused},
+      Shuttle.Test.StubPostClient
+    )
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-stores",
+        Jason.encode!(%{"felt_stores" => ["/remote/loom"], "origin" => "candide"})
+      )
+
+    assert conn.status == 502
+    assert Jason.decode!(conn.resp_body)["error"] =~ "forward to candide failed"
+  end
+
   # A remote origin is served from `RemoteFiberRegistry`'s cached owner feed —
   # each host carries its own store registry as that feed's `stores` block — so
   # a loaded remote answering slowly can never blink out of the picker. Nothing

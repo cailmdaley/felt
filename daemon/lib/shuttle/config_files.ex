@@ -220,7 +220,9 @@ defmodule Shuttle.ConfigFiles do
   The write itself is tmp + rename inside the file's own directory, so a
   reader polling the path sees either the old bytes or the new ones and never
   a half-written file. Every reader here polls: `Shuttle.RemoteRegistry` stats
-  the fleet file every second.
+  the fleet file every second. The staging name carries a unique suffix, so
+  two writers racing on one file cannot rename each other's bytes into place —
+  see `commit/2`.
   """
   @spec write(id(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def write(id, text, opts \\ []) when is_binary(text) do
@@ -354,9 +356,18 @@ defmodule Shuttle.ConfigFiles do
 
   # ── Writing ──────────────────────────────────────────────────────────────
 
+  # The staging name is unique per write, not `<path>.tmp`.
+  #
+  # A fixed name is only atomic against a reader. Against a second WRITER it is
+  # worse than no staging at all: A stages its bytes, B overwrites the same
+  # staging file, A renames — and B's bytes land under A's write, with both
+  # calls reporting success. `expected_digest` cannot catch it, because at the
+  # moment both writers check, neither has committed and both digests are
+  # legitimately current. That interleaving is exactly the one this surface
+  # invites, since the same file is now reachable from two hubs and a phone.
   defp commit(id, text) do
     path = path(id)
-    tmp = path <> ".tmp"
+    tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
          :ok <- File.write(tmp, text),

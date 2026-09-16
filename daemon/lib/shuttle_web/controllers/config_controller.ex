@@ -82,7 +82,7 @@ defmodule ShuttleWeb.ConfigController do
         end)
 
       :local ->
-        write_local(conn, raw, text, Map.get(params, "expected_digest"))
+        write_local(conn, raw, text, params)
     end
   end
 
@@ -92,13 +92,17 @@ defmodule ShuttleWeb.ConfigController do
 
   # ── Local branches ───────────────────────────────────────────────────────
 
-  defp write_local(conn, raw, text, expected) do
-    # An absent key is `:any` — last-write-wins, which is what a script or an
-    # older client gets. A present one (including an explicit null, meaning "I
-    # read no file") is a caller asking to be stopped if the bytes moved.
-    opts = if is_nil(expected) and not Map.has_key?(conn.params, "expected_digest"),
-      do: [],
-      else: [expected_digest: expected]
+  defp write_local(conn, raw, text, params) do
+    # An ABSENT key is `:any` — last-write-wins, which is what a script or an
+    # older client gets. A PRESENT one, including an explicit null meaning "I
+    # read no file", is a caller asking to be stopped if the bytes moved. The
+    # distinction is read off the params this clause matched, not off
+    # `conn.params`: the same map either way here, but the load-bearing
+    # question deserves to be asked of the value the function was given.
+    opts =
+      if Map.has_key?(params, "expected_digest"),
+        do: [expected_digest: Map.get(params, "expected_digest")],
+        else: []
 
     with {:ok, id} <- parse_id(raw),
          {:ok, file} <- ConfigFiles.write(id, text, opts) do

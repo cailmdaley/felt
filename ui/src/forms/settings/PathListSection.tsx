@@ -70,9 +70,9 @@ const COPY: Record<
     lede: (
       <>
         The checkouts the <strong>Stash and Capture</strong> pickers offer as somewhere for new
-        work to land. Kept separate from the poll list above on purpose: these live in the
-        protected directories polling stays out of. Adding one initializes its{' '}
-        <code>.felt/</code> if it has none.
+        work to land. Kept separate from Stores on purpose: those are where the daemon reads,
+        and these live in the protected directories reading stays out of. Adding one
+        initializes its <code>.felt/</code> if it has none.
       </>
     ),
     addLabel: 'Add a project',

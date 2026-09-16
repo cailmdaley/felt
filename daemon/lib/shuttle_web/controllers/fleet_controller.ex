@@ -30,9 +30,12 @@ defmodule ShuttleWeb.FleetController do
 
   ## Writing
 
-  The fleet file keeps **the Go CLI as its only writer**. `POST /fleet/remotes`
-  shells `felt shuttle remotes add|rm` rather than encoding JSON here, so the
+  **Nothing ever re-encodes the fleet file from a model.** `POST /fleet/remotes`
+  shells `felt shuttle remotes add|rm` rather than composing JSON here, so the
   grammar the two readers have to agree on is never implemented a third time.
+  (The other way the file can change is `POST /api/v1/config/remotes`, which
+  writes the exact bytes a human typed and validates them by running that same
+  CLI against a copy — so it is not a third author of the grammar either.)
   That has a consequence worth stating plainly, because it is the reason the
   settings page also offers the raw file: `remotes add` is **add-or-replace,
   wholesale**, and it has no flag for `enabled`, `auth`, `ssh_flags`,

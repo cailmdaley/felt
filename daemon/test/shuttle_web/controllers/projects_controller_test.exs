@@ -93,10 +93,58 @@ defmodule ShuttleWeb.ProjectsControllerTest do
     assert post_project(file, 400)["error"] =~ "not a directory"
   end
 
-  test "400 when no path is given" do
+  # The endpoint now takes two shapes — `path` appends one, `projects` sets the
+  # whole list — so the refusal has to name both. An append-only form could
+  # never say "drop this one", and a settings page that can add a checkout but
+  # not remove one is a trap.
+  test "400 when neither a path nor a projects list is given" do
     conn = post(api_conn(), "/api/v1/projects", Jason.encode!(%{}))
     assert conn.status == 400
-    assert Jason.decode!(conn.resp_body)["error"] =~ "path is required"
+    error = Jason.decode!(conn.resp_body)["error"]
+    assert error =~ ~s("path")
+    assert error =~ ~s("projects")
+  end
+
+  test "a projects array sets the whole list, normalized", %{root: root} do
+    other = Path.join(root, "sub")
+    File.mkdir_p!(other)
+    post_project(root, 200)
+    post_project(other, 200)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/projects",
+        Jason.encode!(%{"projects" => [other, "~/loom", other, "  "]})
+      )
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert body["ok"] == true
+    assert body["host"] == Shuttle.Poller.own_host_id()
+    assert body["projects"] == [Path.expand(other), Path.expand("~/loom")]
+    assert Shuttle.Projects.configured_projects() == [Path.expand(other), Path.expand("~/loom")]
+
+    # Setting the list neither initializes nor deletes anything on disk: the
+    # path that dropped out keeps its `.felt/` exactly as it was.
+    assert File.dir?(Path.join(root, ".felt"))
+  end
+
+  test "an empty projects array clears the list", %{root: root} do
+    post_project(root, 200)
+
+    conn = post(api_conn(), "/api/v1/projects", Jason.encode!(%{"projects" => []}))
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body)["projects"] == []
+    assert Shuttle.Projects.configured_projects() == []
+  end
+
+  test "400 when an entry in projects is not a path string" do
+    conn = post(api_conn(), "/api/v1/projects", Jason.encode!(%{"projects" => ["/tmp/ok", 42]}))
+
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ "must be a path string"
   end
 
   defp post_project(path, expected_status) do

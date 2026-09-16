@@ -73,6 +73,33 @@ defmodule ShuttleWeb.APIControllerTest do
     assert Jason.decode!(conn.resp_body) == []
   end
 
+  test "GET /api/v1/agents?origin= asks the host that owns the registry" do
+    # The registry is a PER-HOST fact — the built-in layer travels with that
+    # host's felt binary and the user layer is a file in its home — so "which
+    # agents can this host run" can only be answered by that host. A local felt
+    # answering for a remote would be a confident wrong answer, so this leg must
+    # forward; the stub blows up the test if it instead shelled locally.
+    previous_felt_runner = Application.get_env(:shuttle, :felt_runner)
+    Application.put_env(:shuttle, :felt_runner, MockRunner)
+    on_exit(fn -> restore_app_env(:felt_runner, previous_felt_runner) end)
+
+    remote_body = Jason.encode!([%{"id" => "claude-opus"}])
+
+    ForwardStub.stub_forward(
+      "candide",
+      "http://candide.example:4000",
+      {:ok, 200, "application/json", remote_body}
+    )
+
+    conn = get(api_conn(), "/api/v1/agents?origin=candide")
+
+    assert conn.status == 200
+    assert conn.resp_body == remote_body
+    forwarded = Shuttle.Test.StubGetFileClient.last().url
+    assert forwarded =~ "http://candide.example:4000/api/v1/agents"
+    refute forwarded =~ "origin"
+  end
+
   # ── POST /api/v1/dispatch ──
 
   test "dispatches a fiber via API" do
@@ -667,6 +694,12 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["host"] != nil
     assert is_list(body["eligible"])
     assert is_list(body["running_detail"])
+
+    # What this daemon IS, alongside what it is doing. The build stamp rides the
+    # snapshot so a hub's `/state/composite` answers "which host is on which
+    # build" out of the one fetch it already makes, instead of a `/version`
+    # round trip per host — so it is part of this body's shape, not an extra.
+    assert body["build"] == Jason.decode!(Jason.encode!(Shuttle.BuildStamp.stamp()))
 
     # Slice 7: no separate `:runtime` index. Liveness rides the `eligible` rows
     # — each carries the intrinsic uid, the live tmux session, and run state, so

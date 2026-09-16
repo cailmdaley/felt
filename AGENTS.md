@@ -11,7 +11,8 @@ One repo, one checkout, three artifacts:
   `:4000` snapshot/control API and owns a per-worker watcher.
 - **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
   over the felt tree and the fleet's session/commit ledgers (Desk kanban, Day,
-  Week, Chronicle, and the Board canvas of sent work), served by the daemon at
+  Week, Chronicle, and the Board canvas of sent work), plus a settings sheet on
+  `⌘,` over every host's operator files, served by the daemon at
   `http://127.0.0.1:4000/`.
 
 felt owns the data model; shuttle owns the network and the surface. The Elixir
@@ -87,7 +88,10 @@ lives in the docs site (`docs/`, published to
   (`cmd/shuttle_remotes.go`) and the daemon (`daemon/lib/shuttle/remotes.ex`) read the
   same file at runtime, so nothing about your hosts is baked at build time.
   `felt shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
-  validator. `daemon/test/fixtures/remotes/` enforces Go/Elixir parity, and
+  validator — including for the board's settings sheet, which shells that verb
+  rather than encoding the file itself, so the grammar the two readers must
+  agree on is never implemented a third time.
+  `daemon/test/fixtures/remotes/` enforces Go/Elixir parity, and
   `cmd/hygiene_test.go` fails the build on a personal hostname or path anywhere
   in the published surface: `daemon/config/`, `daemon/lib/`, `cmd/`, `daemon/share/`, `ui/`, `bin/`,
   **every `.md` in the repo** (docs and skills ship as content), plus `Makefile`
@@ -132,6 +136,11 @@ make status / make logs    # ps + snapshot / tail the daemon log
 Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing the Go CLI needs `make cli`.
 Editing `ui/` needs `cd ui && npm test`, then `make restart` from the root.
+Changing anything the board draws also wants a look at it: `cd ui && npm run
+harness:board` builds a self-contained bundle with a mocked daemon that opens
+over `file://`, which is the only way to see the board where `:4000` is
+unreachable — and the only way to stage states a live fleet will not hold
+still for.
 Source builds require Go, Elixir/OTP, and Node/npm on each host.
 To cycle a supervised daemon directly, use
 `launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon` or
