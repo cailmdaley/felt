@@ -112,6 +112,7 @@ const local: SettingsHost = {
   feltStores: [],
   projects: [],
   expandedFeltStores: [],
+  hubHost: 'laptop',
 }
 
 /** A remote whose routing key and self-reported id DIFFER, which is the pair
@@ -404,6 +405,31 @@ describe('refusals', () => {
   ])('names the daemon when the fetch itself never lands (%s)', async (_engine, message) => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError(message)))
     expect(await rejection(loadHosts(BASE))).toBe('Couldn’t reach the Shuttle daemon (:4000).')
+  })
+
+  it('refuses an answer the HUB gave to a request addressed to a remote', async () => {
+    // What a degrade-to-local looks like from here: the request named a remote,
+    // and the daemon serving the page answered it about itself. The daemon
+    // refuses that origin now, so this is the second of two guards — and the
+    // one that would still catch an older daemon on the other end of a hub.
+    recorder(() => new Response(JSON.stringify({ host: 'laptop', text: 'mine' }), { status: 200 }))
+    expect(await rejection(loadConfigFile(BASE, remote, 'stores'))).toContain(
+      'came from laptop, the hub',
+    )
+  })
+
+  it('accepts a remote whose own id differs from its fleet name', async () => {
+    // `SettingsHost.host` is the ROUTING key; a remote's `~/.shuttle/host` is
+    // its own name for itself, and the two are allowed to differ. A guard that
+    // demanded they match would refuse working answers on a correct fleet —
+    // which is why the check asks the narrow question instead of the obvious
+    // one. This fixture is exactly that pair.
+    recorder(() =>
+      new Response(JSON.stringify({ host: 'some-other-id', text: 'theirs' }), { status: 200 }),
+    )
+    await expect(loadConfigFile(BASE, remote, 'stores')).resolves.toMatchObject({
+      text: 'theirs',
+    })
   })
 
   it('passes an error that is not a transport failure through untouched', async () => {

@@ -77,6 +77,18 @@ export interface SettingsHost {
   /** How it reads: a remote's `display`, else its host id. */
   label: string
   isLocal: boolean
+  /**
+   * The id of the daemon SERVING this page, on every row.
+   *
+   * It is what the answering-host check compares against. The check is
+   * deliberately narrow: it does not ask "did the right host answer", because a
+   * remote's fleet NAME and its own `~/.shuttle/host` id are allowed to differ
+   * and a general comparison would cry wolf on a legitimate fleet. It asks the
+   * one question with a real failure behind it — "did a request addressed to
+   * another machine come back answered by this one" — which is what a
+   * degrade-to-local looks like from here.
+   */
+  hubHost: string
   /** The hub could not reach it on the last poll. Its settings will still load
    *  if the forward gets through; this is the warning that it may not. */
   stale: boolean
@@ -262,32 +274,44 @@ const reachError = (err: unknown): Error => {
 }
 
 /**
- * Every answer on this plane names the host it came from. Check it.
+ * Did a request addressed to another machine come back answered by this one?
  *
- * The daemon refuses an origin it cannot place, so this should never fire —
- * which is exactly why it is here. Origin is the safety property of the whole
- * page: a page that can write one machine's configuration and show it under
- * another machine's name is a page that eventually does. Two independent
- * guards, one on each side, and the second one costs a comparison.
+ * That is what a degrade-to-local looks like from the client, and it is the
+ * whole failure this guards. The daemon refuses an origin it cannot place, so
+ * this should never fire — which is exactly why it is here: origin is the
+ * safety property of the page, and a guard on each side costs one comparison.
  *
- * `expected` is the host id the sheet believes it is talking to, and `''` for
- * a local call skips the check — a local read cannot be about anyone else.
+ * It deliberately does NOT assert that the right host answered. A remote's
+ * fleet name and its own `~/.shuttle/host` id may legitimately differ, so a
+ * general comparison would refuse working answers on a perfectly good fleet.
+ * The narrow question has no false positive and catches the real bug.
  */
-function assertHost<T extends { host?: string }>(body: T, expected: string, label: string): T {
-  if (expected && body?.host && body.host !== expected) {
+function assertHost<T extends { host?: string }>(
+  body: T,
+  guard: { origin: string; hubHost: string; label: string } | null,
+): T {
+  if (guard && guard.origin && body?.host && body.host === guard.hubHost) {
     throw new Error(
-      `answer came from ${body.host}, not ${label} — refusing it. ` +
+      `that answer came from ${body.host}, the hub — not from ${guard.label}. ` +
+        `Refusing it rather than showing one machine's configuration under another's name. ` +
         `Reopen settings; this hub's idea of the fleet has changed underneath.`,
     )
   }
   return body
 }
 
+/** The narrow guard a per-host call passes to `assertHost`. */
+const hostGuard = (host: SettingsHost): { origin: string; hubHost: string; label: string } => ({
+  origin: host.origin,
+  hubHost: host.hubHost,
+  label: host.label,
+})
+
 async function getJSON<T>(
   base: string,
   path: string,
   host: string,
-  expectHost = '',
+  guard: { origin: string; hubHost: string; label: string } | null = null,
 ): Promise<T> {
   let res: Response
   try {
@@ -296,7 +320,7 @@ async function getJSON<T>(
     throw reachError(err)
   }
   if (!res.ok) throw new DaemonRefusal(await refusal(res, host), res.status)
-  return assertHost((await res.json()) as T & { host?: string }, expectHost, host)
+  return assertHost((await res.json()) as T & { host?: string }, guard)
 }
 
 async function postJSON<T>(
@@ -304,7 +328,7 @@ async function postJSON<T>(
   path: string,
   body: Record<string, unknown>,
   host: string,
-  expectHost = '',
+  guard: { origin: string; hubHost: string; label: string } | null = null,
 ): Promise<T> {
   let res: Response
   try {
@@ -317,7 +341,7 @@ async function postJSON<T>(
     throw reachError(err)
   }
   if (!res.ok) throw new DaemonRefusal(await refusal(res, host), res.status)
-  return assertHost((await res.json()) as T & { host?: string }, expectHost, host)
+  return assertHost((await res.json()) as T & { host?: string }, guard)
 }
 
 // ── Hosts ───────────────────────────────────────────────────────────────────
@@ -361,6 +385,7 @@ export async function loadHosts(base: string): Promise<SettingsHost[]> {
       feltStores: origin.felt_stores ?? [],
       projects: origin.projects ?? [],
       expandedFeltStores: origin.expanded_felt_stores ?? null,
+      hubHost: data.host,
     }
   })
   return rows.sort((a, b) =>
@@ -374,14 +399,14 @@ export const loadConfigIndex = (
   base: string,
   host: SettingsHost,
 ): Promise<{ host: string; files: ConfigFileSummary[] }> =>
-  getJSON(base, `/api/v1/config${originQuery(host.origin)}`, host.label, host.host)
+  getJSON(base, `/api/v1/config${originQuery(host.origin)}`, host.label, hostGuard(host))
 
 export const loadConfigFile = (
   base: string,
   host: SettingsHost,
   id: ConfigId,
 ): Promise<ConfigFile> =>
-  getJSON(base, `/api/v1/config/${id}${originQuery(host.origin)}`, host.label, host.host)
+  getJSON(base, `/api/v1/config/${id}${originQuery(host.origin)}`, host.label, hostGuard(host))
 
 /**
  * Replace a file's text.
@@ -408,7 +433,7 @@ export const saveConfigFile = (
       ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
     },
     host.label,
-    host.host,
+    hostGuard(host),
   )
 
 // ── The two path lists ──────────────────────────────────────────────────────
@@ -435,7 +460,7 @@ export const saveStores = (
       ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
     },
     host.label,
-    host.host,
+    hostGuard(host),
   )
 
 /** Replace a host's whole picker list. See `saveStores` on `expectedDigest`. */
@@ -454,7 +479,7 @@ export const saveProjects = (
       ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
     },
     host.label,
-    host.host,
+    hostGuard(host),
   )
 
 /**
@@ -467,7 +492,7 @@ export const addProject = (
   host: SettingsHost,
   path: string,
 ): Promise<{ path: string; registered: boolean; initialized: boolean; projects: string[] }> =>
-  postJSON(base, '/api/v1/projects', { path, origin: host.origin }, host.label, host.host)
+  postJSON(base, '/api/v1/projects', { path, origin: host.origin }, host.label, hostGuard(host))
 
 /**
  * Raise a host's own folder dialog and answer with the chosen path.
@@ -491,7 +516,7 @@ export const loadAgents = (base: string, host: SettingsHost): Promise<AgentRecor
 // ── Fleet ───────────────────────────────────────────────────────────────────
 
 export const loadFleet = (base: string, host: SettingsHost): Promise<Fleet> =>
-  getJSON(base, `/api/v1/fleet${originQuery(host.origin)}`, host.label, host.host)
+  getJSON(base, `/api/v1/fleet${originQuery(host.origin)}`, host.label, hostGuard(host))
 
 export interface RemoteSpec {
   name: string
@@ -510,7 +535,7 @@ export const saveRemote = (
   host: SettingsHost,
   spec: RemoteSpec,
 ): Promise<{ output: string }> =>
-  postJSON(base, '/api/v1/fleet/remotes', { ...spec, origin: host.origin }, host.label, host.host)
+  postJSON(base, '/api/v1/fleet/remotes', { ...spec, origin: host.origin }, host.label, hostGuard(host))
 
 export const removeRemote = (
   base: string,
@@ -522,7 +547,7 @@ export const removeRemote = (
     '/api/v1/fleet/remotes',
     { name, remove: true, origin: host.origin },
     host.label,
-    host.host,
+    hostGuard(host),
   )
 
 export const runTunnels = (
@@ -536,7 +561,7 @@ export const runTunnels = (
     '/api/v1/tunnels',
     { action, ...(name ? { name } : {}), origin: host.origin },
     host.label,
-    host.host,
+    hostGuard(host),
   )
 
 export const resetRemote = (base: string, name: string): Promise<unknown> =>
