@@ -168,7 +168,7 @@ export function PathListSection({
   const pick = async (): Promise<void> => {
     setError(null)
     try {
-      const result = await chooseFolder(shuttleBase)
+      const result = await chooseFolder(shuttleBase, host)
       if (result.cancelled || !result.path) return
       await add(result.path)
     } catch (err) {
@@ -267,11 +267,16 @@ export function PathListSection({
             >
               Add
             </button>
-            {host.nativeFolderPicker && host.isLocal && (
+            {host.nativeFolderPicker && (
               <button
                 type="button"
                 className="set-btn"
                 disabled={frozen}
+                title={
+                  host.isLocal
+                    ? undefined
+                    : `Opens a folder dialog on ${host.label}, and waits for someone there to answer it`
+                }
                 onClick={() => void pick()}
               >
                 Browse…
@@ -280,8 +285,10 @@ export function PathListSection({
           </div>
           {!host.isLocal && (
             <p className="set-row-note" style={{ marginTop: '6px' }}>
-              Type the path as it exists on {host.label}. There is no folder dialog for a remote
-              — it would open on a desktop nobody is sitting at.
+              Type the path as it exists on {host.label}.
+              {host.nativeFolderPicker
+                ? ' Browse raises a dialog on that machine’s own desktop and waits for someone there to answer it.'
+                : ' That host reports no folder dialog, so there is nothing to browse with.'}
             </p>
           )}
         </>

@@ -652,6 +652,11 @@ The registry file takes this canonical shape. A bare JSON array also works.
 `POST /api/v1/felt-stores` rewrites the file, and the board's store picker uses
 that endpoint. A store path must contain a `.felt/` directory.
 
+Everything in this section and the two below it is also reachable from the
+board's [settings sheet](board.md#settings--the-operator-files-on-any-host)
+(`⌘,`), for any host in the fleet — which is how you configure a machine you
+have no shell on.
+
 ## Configuring agents
 
 `felt shuttle agents` prints the effective registry. It layers your own file

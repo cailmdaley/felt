@@ -18,12 +18,12 @@
  * who this machine is is the worst failure this system has. So it is a fact
  * here, and changing it is a stop-edit-start.
  *
- * ## The quarantine button is local-only
+ * ## Releasing a quarantine from here
  *
- * Releasing the boot quarantine is dispatch authority: it lets a restarted
- * daemon start launching work again. `POST /api/v1/quarantine/release` is
- * deliberately not owner-routed, so the button appears only for the host
- * serving this page; on a remote the section says which command to run there.
+ * `POST /api/v1/quarantine/release` is owner-routed, so a hub can arm a remote
+ * that restarted — which is exactly the case this section is for. It is the
+ * one control on this page that is not about configuration at all: it grants
+ * dispatch authority, and the sentence beside it says so.
  */
 
 import { useEffect, useState } from 'react'
@@ -94,8 +94,9 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
   return (
     <>
       <p className="set-lede">
-        What {host.label} is running and how it is faring. Nothing on this page is editable —
-        the host identity is frozen at boot, and everything else is a reading.
+        What {host.label} is running and how it is faring. None of it is configuration — the
+        host identity is frozen at boot and everything else is a reading. The one action here
+        is releasing a boot quarantine, and it only appears when there is one.
       </p>
 
       {error && <div className="set-error" role="alert">{error}</div>}
@@ -183,31 +184,27 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
                 {(state.pending_launch ?? []).length === 1 ? '' : 'es'} until a human says go —
                 a restart is not dispatch authority. Cron-due standing roles still fire.
               </p>
-              {host.isLocal ? (
-                <div className="set-actions">
-                  <button
-                    type="button"
-                    className="set-btn set-btn-primary"
-                    disabled={busy}
-                    onClick={() => {
-                      setBusy(true)
-                      setError(null)
-                      releaseQuarantine(shuttleBase)
-                        .then(() => setToken((n) => n + 1))
-                        .catch((err: Error) => setError(err.message))
-                        .finally(() => setBusy(false))
-                    }}
-                  >
-                    {busy ? 'Releasing…' : 'Release'}
-                  </button>
-                </div>
-              ) : (
-                <p className="set-row-note">
-                  Releasing is dispatch authority and is not routed across hosts. Run{' '}
-                  <span className="set-mono">bin/shuttle release</span> on {host.label}, or open
-                  its own board.
-                </p>
-              )}
+              <div className="set-actions">
+                <button
+                  type="button"
+                  className="set-btn set-btn-primary"
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true)
+                    setError(null)
+                    releaseQuarantine(shuttleBase, host)
+                      .then(() => setToken((n) => n + 1))
+                      .catch((err: Error) => setError(err.message))
+                      .finally(() => setBusy(false))
+                  }}
+                >
+                  {busy ? 'Releasing…' : `Release ${host.isLocal ? '' : host.label}`.trim()}
+                </button>
+                <span className="set-row-note">
+                  the same grant as <span className="set-mono">bin/shuttle release</span> on that
+                  machine
+                </span>
+              </div>
             </>
           )}
         </>

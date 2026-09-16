@@ -1,9 +1,9 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-five full-page views behind a hotkey row, `1`–`5`. Everything on it is a view
-over fibers the daemon already polls, plus the host-local
-[ledgers](telemetry.md) — the board stores nothing of its own.
+five full-page views behind a hotkey row, `1`–`5`, and a settings sheet on
+`⌘,`. Everything on it is a view over fibers the daemon already polls, plus
+the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
@@ -12,6 +12,7 @@ over fibers the daemon already polls, plus the host-local
 | `3` | **Week** | Which days had work in them |
 | `4` | **Chronicle** | What a stretch of weeks was about |
 | `5` | **Board** | What the work produced |
+| `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
 The first four run from the tightest window outward, so the strip reads as a
 zoom: today, this week, the whole record. The fifth is not a time window at
@@ -220,6 +221,47 @@ disk.
 Without the bundle the root URL 404s with a hint, and the API stays fully
 usable. If you change any `/api/v1/*` route, rebuild the bundle — a stale
 bundle against a changed route table fails silently as a 404.
+
+## Settings — the operator files, on any host
+
+`⌘,` opens the settings sheet, and so does a bare `,`: the board's own idiom
+is bare keys, and a phone has no `⌘`. The ⚙︎ closing the tab strip does the
+same with a pointer, pinned to the right edge on a phone so it never scrolls
+out of reach. `Esc` closes it. It is an overlay rather than a sixth tab — the
+five tabs are windows onto the work, and configuration is not work.
+
+**A host picker is the first control, and everything below it is addressed to
+that host.** The board is reachable from a phone and from a second hub, so the
+machine you are configuring is usually not the one you are sitting at; every
+read and write on the sheet carries the chosen host's origin and is
+owner-routed to the daemon that owns the file. Configuring a remote needs that
+remote's daemon to be recent enough to serve the config routes; an older one
+says so.
+
+| Section | What it holds |
+|---|---|
+| **Stores** | `stores.json` — what this daemon polls, with the symlinked substores it reaches through them |
+| **Projects** | `projects.json` — the checkouts Stash and Capture offer; adding one initializes its `.felt/` |
+| **Agents** | The merged registry, each record marked with the layer it came from, over `agents.json` |
+| **Fleet** | `remotes.json` as rows — how each remote is reached, whether it answered, what build it is running — plus the supervised tunnel jobs derived from it |
+| **Host** | Build, CLI contract, poll health, running workers, and the boot quarantine |
+
+**Every section ends with its own file, editable as text.** That is what makes
+the sheet hold *all* the configuration rather than all of it there is a widget
+for, and it is the only safe way to touch `remotes.json`: a structured round
+trip drops every key the model does not know about, and that file carries
+several (`auth`, `ssh_flags`, `tunnel.label`, per-entry timeouts) that
+`felt shuttle remotes add` has no flag for. A save is refused unless the tool
+that really reads the file accepts it first, and the refusal is that tool's own
+sentence — see [the API reference](../reference/api.md#the-operator-files).
+
+Two things the sheet will not do. It will not edit `~/.shuttle/host`: the
+daemon freezes its host id at boot, so a file rewritten under a live daemon
+would leave the CLI and the dispatcher disagreeing about what this machine is
+called, and that is the worst failure this system has. And when `FELT_STORES`
+or `FELT_PROJECTS` is set in a daemon's environment — which overrides the
+file's contents outright — the section says so and turns editing off, rather
+than letting you carefully fix a setting that has no effect.
 
 A card that never appears at all is usually a dispatch question rather than a
 board question — see [Diagnosing a missing card](lifecycle.md#diagnosing-a-missing-card).

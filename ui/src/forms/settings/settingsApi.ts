@@ -332,17 +332,18 @@ export const addProject = (
   postJSON(base, '/api/v1/projects', { path, origin: host.origin }, host.label)
 
 /**
- * Raise the host's own folder dialog and answer with the chosen path.
+ * Raise a host's own folder dialog and answer with the chosen path.
  *
- * Local hosts only, and it deliberately carries no `origin`: a dialog raised
- * on a remote opens on a desktop nobody is sitting at, and would block this
- * request until someone walked over to that machine. Gate every call on
- * `host.nativeFolderPicker`, which is false for every remote.
+ * Owner-routed like everything else here — only the daemon on a machine can
+ * raise a dialog on it. Gate every call on `host.nativeFolderPicker`, which
+ * that host reports for itself: a headless node says false and the caller asks
+ * for a typed path instead. Blocks for as long as the human takes.
  */
 export const chooseFolder = (
   base: string,
+  host: SettingsHost,
 ): Promise<{ ok: boolean; path?: string; cancelled?: boolean }> =>
-  postJSON(base, '/api/v1/choose-folder', {}, '')
+  postJSON(base, '/api/v1/choose-folder', { origin: host.origin }, host.label)
 
 // ── Agents ──────────────────────────────────────────────────────────────────
 
@@ -424,5 +425,6 @@ export async function loadHostState(base: string, host: SettingsHost): Promise<H
 export const loadVersion = (base: string): Promise<BuildStamp & { contract?: HostState['contract'] }> =>
   getJSON(base, '/api/v1/version', '')
 
-export const releaseQuarantine = (base: string): Promise<unknown> =>
-  postJSON(base, '/api/v1/quarantine/release', {}, '')
+/** Release a host's boot quarantine — owner-routed, so a hub can arm a remote. */
+export const releaseQuarantine = (base: string, host: SettingsHost): Promise<unknown> =>
+  postJSON(base, '/api/v1/quarantine/release', { origin: host.origin }, host.label)

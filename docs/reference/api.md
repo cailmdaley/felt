@@ -41,8 +41,11 @@ is not enough.
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
-| `POST /felt-stores` | local | Persist this daemon's registered felt stores |
-| `POST /projects` | owner-routed | Register a picker project and initialize its `.felt/` when needed |
+| `POST /felt-stores` | owner-routed | Persist a daemon's registered felt stores |
+| `POST /projects` | owner-routed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` |
+| `POST /config/:id` | owner-routed | Replace one operator file's text, validated first by whoever owns its grammar |
+| `POST /fleet/remotes` | owner-routed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
+| `POST /tunnels` | owner-routed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | owner-routed | Open the owning host's native folder picker and return the chosen path |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
 
@@ -54,8 +57,11 @@ is not enough.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
-| `GET /agents` | local | The effective agent registry (shells `felt shuttle agents --json`) |
+| `GET /agents` | owner-routed | The effective agent registry (shells `felt shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's felt binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
+| `GET /config` | owner-routed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
+| `GET /config/:id` | owner-routed | One operator file's text — `stores`, `projects`, `agents` or `remotes` |
+| `GET /fleet` | owner-routed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
@@ -113,11 +119,42 @@ The composite siblings are:
 | `GET /spend/composite` | local transcripts + remote caches | Cross-host token rollups |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
 
+## The operator files
+
+`GET`/`POST /api/v1/config/:id` is a **text** plane over the four JSON files a
+daemon reads from `~/.config/felt/` — `stores`, `projects`, `agents`,
+`remotes`. It deliberately does not parse a file into a structure and
+re-encode it: that round trip drops every key the structure does not know
+about, and `remotes.json` carries several (`auth`, `ssh_flags`,
+`tunnel.label`, per-entry timeouts) that no CLI flag can even express.
+
+A write is refused unless the tool that really reads the file accepts it
+first. The candidate goes to a temporary file, the owning reader is pointed at
+it through its own path-override environment variable, and only a clean exit
+commits:
+
+| File | Validator |
+|---|---|
+| `remotes` | `felt shuttle remotes list --json` under `FELT_REMOTES_FILE` |
+| `agents` | `felt shuttle agents --json` under `FELT_AGENTS_FILE` |
+| `stores`, `projects` | shape-checked in the daemon — no CLI verb reads them |
+
+A refusal is a 400 carrying that tool's own sentence verbatim. Empty text
+removes the file, which is the same vocabulary the structured writers already
+speak (saving an empty list deletes `stores.json`; dropping the last remote
+deletes `remotes.json`).
+
+Reads are owner-routed as well as writes, which is unusual here and is the
+point: a config file describes the daemon that reads it, and only that daemon
+can see its own `~/.config/felt/`. A host whose daemon predates these routes
+answers 404, and the board renders that as "deploy it to configure it from
+here" rather than as a missing file.
+
 ## Operator routes
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon version — the liveness probe |
+| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (owner-routed; `bin/shuttle release`) |
