@@ -72,8 +72,12 @@ export interface SettingsHost {
   /** The hub could not reach it on the last poll. Its settings will still load
    *  if the forward gets through; this is the warning that it may not. */
   stale: boolean
-  /** This host can raise its own OS folder dialog. Only ever true locally —
-   *  a dialog on a remote opens on a desktop nobody is sitting at. */
+  /**
+   * This host reports that it can raise an OS folder dialog of its own. True
+   * for a remote with a desktop, and the call IS owner-routed — but it opens
+   * on that machine's screen and blocks until someone there answers it, so a
+   * caller offering the affordance for a remote should say so.
+   */
   nativeFolderPicker: boolean
   /** Its store registry and picker list, as the origins feed already carries
    *  them, so the two list sections render before their own fetch lands. */
@@ -201,11 +205,21 @@ const refusal = async (res: Response, host: string): Promise<string> => {
   return `the daemon answered ${res.status}`
 }
 
+/**
+ * A thrown `fetch` — the daemon did not answer at all — as a sentence.
+ *
+ * Detected by TYPE, not by reading the message. The fetch spec says a
+ * transport failure rejects with a `TypeError`, and it says nothing at all
+ * about the wording: Chrome writes "Failed to fetch", Firefox "NetworkError
+ * when attempting to fetch resource", and **WebKit writes "Load failed"**. A
+ * substring test for "fetch" therefore worked everywhere except Safari — which
+ * is the phone, which is the entire reason this surface exists. Anything that
+ * is not a TypeError came from our own code and is already a sentence, so it
+ * is passed through.
+ */
 const reachError = (err: unknown): Error => {
-  const message = (err as { message?: string })?.message ?? String(err)
-  return new Error(
-    message.includes('fetch') ? 'Couldn’t reach the Shuttle daemon (:4000).' : message,
-  )
+  if (err instanceof TypeError) return new Error('Couldn’t reach the Shuttle daemon (:4000).')
+  return new Error((err as { message?: string })?.message ?? String(err))
 }
 
 async function getJSON<T>(base: string, path: string, host: string): Promise<T> {

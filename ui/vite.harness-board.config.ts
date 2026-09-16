@@ -38,7 +38,18 @@ function harnessPage(from: string): Plugin {
 
 export default defineConfig({
   base: './',
-  define: { 'import.meta.env.VITE_SHUTTLE_BASE': '""' },
+  define: {
+    'import.meta.env.VITE_SHUTTLE_BASE': '""',
+    // React reads `process.env.NODE_ENV` at module scope and there is no
+    // `process` in a browser. The app build gets this substitution from
+    // @vitejs/plugin-react; this config has no plugins, so it has to say it
+    // itself — and it needs to since the settings sheet brought the first
+    // React island into the board harness. Without it the bundle throws
+    // `ReferenceError: process is not defined` BEFORE the mount's own
+    // try/catch, so the page comes up blank with no error on it, which is the
+    // worst way for this particular artifact to fail.
+    'process.env.NODE_ENV': '"production"',
+  },
   plugins: [harnessPage('harness/index-board.html')],
   build: {
     outDir: OUT_DIR,

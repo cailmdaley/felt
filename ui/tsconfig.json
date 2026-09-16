@@ -28,5 +28,15 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  /* `harness/` is in here, not just `src/`, because it is REAL CODE that only
+     ever runs in a browser opened by hand. `npm run build` bundles it with no
+     type check, so a typo in it — a constant that does not exist, an argument
+     of the wrong shape — built clean and produced a blank page, which is the
+     hardest failure in this repo to read: the harness exists precisely for the
+     cases where you cannot reach a daemon to compare against.
+
+     `test/` stays out. It reads stylesheets with `node:fs`, which would need
+     `@types/node`, and that would put node's globals in front of every browser
+     module in `src/`. */
+  "include": ["src", "harness"]
 }

@@ -104,6 +104,11 @@ describe('the mobile threshold is one contract', () => {
     expect(paths).toContain('board/KanbanModal.css')
     expect(paths).toContain('board/views/DayView.css')
     expect(paths).toContain('forms/StashForm.tsx')
+    // The canary for the RECURSION. `forms/settings/` is the first feature to
+    // land a stylesheet in a directory of its own, and it is exactly the case
+    // the old flat list stopped covering without a word — so a walk that went
+    // back to naming directories has to fail here rather than pass quietly.
+    expect(paths).toContain('forms/settings/settingsStyles.ts')
     expect(sheets().filter((f) => f.text.includes('max-width: 700px')).length).toBeGreaterThan(4)
   })
 

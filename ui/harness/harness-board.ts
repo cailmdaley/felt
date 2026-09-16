@@ -15,6 +15,14 @@
  * `buildKanbanResponseFromComposite`) so what you see is the real DOM/CSS the
  * daemon would serve — only the data is mock.
  *
+ * The SETTINGS sheet is exercised the same way and is the one surface here
+ * that is stateful: the stub keeps an in-memory copy of each host's operator
+ * files, so a save round-trips and the rows above it change. It answers for
+ * two hosts, because a host picker with one entry cannot show the thing it
+ * exists to show. It does NOT validate — the daemon delegates that to the tool
+ * that owns each grammar, and there is no felt here to ask, so a refusal is
+ * the one behaviour this harness cannot stand in for.
+ *
  * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
  * same way: `MOCK_TEMPORAL` below injects a deterministic activity plane and
  * the two ledgers as the `TemporalFetchers` the board would otherwise build
@@ -29,6 +37,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { openSettings } from '../src/forms/mountForms.js'
 import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
@@ -1094,14 +1103,174 @@ function assertUlids(): void {
   if (seen.size !== Object.keys(ULID).length) throw new Error('duplicate mock ULIDs')
 }
 
+// ── Settings: a whole host's configuration, mocked ───────────────────────────
+//
+// The settings sheet reads five routes and writes three, all of them
+// owner-routed by an `origin` query or body key. The mock answers for two
+// hosts so the host picker has something to pick BETWEEN — a picker with one
+// entry cannot show the thing it exists to show — and it keeps a real
+// in-memory copy of each file so a save round-trips and the rows above it
+// change. What it does not do is validate: the daemon delegates that to the
+// tool that owns each grammar, and there is no felt here to ask.
+
+const SETTINGS_HOSTS = [LOCAL_HOST, FOREIGN_HOST]
+
+const settingsFiles: Record<string, Record<string, string>> = {
+  [LOCAL_HOST]: {
+    stores: '{\n  "version": 1,\n  "felt_stores": [\n    "/home/you/loom"\n  ]\n}\n',
+    projects:
+      '{\n  "version": 1,\n  "projects": [\n    "/home/you/loom",\n    "/home/you/dev/felt"\n  ]\n}\n',
+    agents: '',
+    remotes:
+      '{\n  "version": 1,\n  "remotes": [\n    {\n      "name": "' +
+      FOREIGN_HOST +
+      '",\n      "url": "https://' +
+      FOREIGN_HOST +
+      '.example.ts.net",\n      "tunnel": { "manager": "none" }\n    },\n    {\n      "name": "hub-a",\n      "ssh": "hub-a",\n      "port": 4001,\n      "tunnel": { "multiplex": true }\n    }\n  ]\n}\n',
+  },
+  [FOREIGN_HOST]: {
+    stores: '{\n  "version": 1,\n  "felt_stores": [\n    "/scratch/you/loom"\n  ]\n}\n',
+    projects: '{\n  "version": 1,\n  "projects": [\n    "/scratch/you/analysis"\n  ]\n}\n',
+    agents: '',
+    remotes: '',
+  },
+}
+
+const settingsOrigin = (url: string): string =>
+  new URL(url, 'http://harness.invalid').searchParams.get('origin') || LOCAL_HOST
+
+const settingsSummary = (host: string, id: string): Record<string, unknown> => {
+  const text = settingsFiles[host]?.[id] ?? ''
+  return {
+    id,
+    path: `/home/you/.config/felt/${id}.json`,
+    exists: text !== '',
+    size: text.length,
+    updated_at: Math.floor(now / 1000) - 3600,
+    env_override: host === LOCAL_HOST && id === 'stores' ? { var: 'FELT_STORES', value: '/home/you/loom' } : null,
+    // A stable stand-in: the sheet only ever compares it with itself.
+    digest: text === '' ? null : `harness-${host}-${id}-${text.length}`,
+  }
+}
+
+const MOCK_AGENTS = [
+  { id: 'claude-opus', cli: 'claude', model: 'opus', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true, cost_class: 'premium', default: true, source: 'builtin' },
+  { id: 'claude-haiku', cli: 'claude', model: 'haiku', effort_levels: ['low', 'medium', 'high'], default_effort: 'low', chrome_capable: true, cost_class: 'economy', default: false, source: 'builtin' },
+  { id: 'codex-terra', cli: 'codex', model: 'gpt-x-terra', effort_levels: ['low', 'medium', 'high', 'max'], default_effort: 'medium', cost_class: 'standard', default: false, source: 'user' },
+]
+
+const mockBuild = (sha: string, bootedAgoMs: number) => ({
+  git_sha: `${sha}0000000000000000000000000000000000`,
+  git_short_sha: sha,
+  built_at: new Date(now - bootedAgoMs - 600_000).toISOString(),
+  booted_at: new Date(now - bootedAgoMs).toISOString(),
+  mix_vsn: '0.1.0',
+})
+
+const mockHostState = (host: string) => ({
+  host,
+  build: mockBuild(host === LOCAL_HOST ? 'a1b2c3d' : 'f0e9d8c', host === LOCAL_HOST ? 7_200_000 : 86_400_000),
+  felt_stores: host === LOCAL_HOST ? ['/home/you/loom'] : ['/scratch/you/loom'],
+  boot_quarantine: host !== LOCAL_HOST,
+  pending_launch: host === LOCAL_HOST ? [] : [{ fiber_id: 'a/b' }],
+  max_concurrent: 10,
+  claimed_count: host === LOCAL_HOST ? 2 : 0,
+  contract: { ok: true, expected: 2, observed: 2, reason: null },
+  poll_health: { state: 'idle', stalls: 0, stall_timeout_ms: 300_000, last_stalled_at: null },
+  document_cache: { state: 'fresh', entries: 412 },
+  standing_roles: [{}, {}, {}],
+  orphans: [],
+})
+
+const mockFleet = (host: string) => {
+  const remotes =
+    host === LOCAL_HOST
+      ? [
+          { name: FOREIGN_HOST, display: FOREIGN_HOST, url: `https://${FOREIGN_HOST}.example.ts.net`, remote_port: 4000, tunnel: { manager: 'none' }, health: { polled: true, stale: false, last_polled_at: new Date(now - 4_000).toISOString(), last_error: null, recovery: { state: 'healthy', attempt: 0, last_error: null } }, build: mockBuild('f0e9d8c', 86_400_000), tunnel_label: null },
+          { name: 'hub-a', display: 'hub-a', ssh: 'hub-a', port: 4001, remote_port: 4000, url: 'http://127.0.0.1:4001', tunnel: { manager: 'launchd', multiplex: true }, health: { polled: true, stale: true, last_polled_at: new Date(now - 2_700_000).toISOString(), last_error: 'connection refused', recovery: { state: 'reviving', attempt: 2, last_error: 'ssh exited 255' } }, build: null, tunnel_label: 'io.shuttle.shuttle-tunnel-hub-a' },
+        ]
+      : []
+  return {
+    host,
+    supervisor: 'launchd',
+    file: settingsSummary(host, 'remotes'),
+    error: null,
+    launchd_label_prefix: 'io.shuttle',
+    defaults: {},
+    remotes,
+  }
+}
+
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
 const realFetch = window.fetch.bind(window)
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  const body = (): Record<string, unknown> => {
+    try {
+      return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+  const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
   // The board's single read route.
   if (url.includes('/api/v1/fibers/composite')) return json(MOCK_FEED)
+
+  // ── The settings plane ─────────────────────────────────────────────────
+  // Before the catch-all below, which would otherwise answer every one of
+  // these with `{ok: true}` and leave the sheet rendering an empty page.
+  if (url.includes('/api/v1/felt-stores') && init?.method !== 'POST') {
+    return json({
+      host: LOCAL_HOST,
+      origins: Object.fromEntries(
+        SETTINGS_HOSTS.map((h) => [
+          h,
+          {
+            kind: h === LOCAL_HOST ? 'local' : 'remote',
+            host: h,
+            display: h,
+            stale: false,
+            native_folder_picker: h === LOCAL_HOST,
+            felt_stores: h === LOCAL_HOST ? ['/home/you/loom'] : ['/scratch/you/loom'],
+            expanded_felt_stores: h === LOCAL_HOST ? ['/home/you/loom', '/home/you/dev/felt'] : undefined,
+            projects: h === LOCAL_HOST ? ['/home/you/loom', '/home/you/dev/felt'] : ['/scratch/you/analysis'],
+          },
+        ]),
+      ),
+    })
+  }
+  const configFile = /\/api\/v1\/config\/([a-z]+)/.exec(url)
+  if (configFile) {
+    const id = configFile[1]
+    if (init?.method === 'POST') {
+      const host = bodyOrigin()
+      settingsFiles[host] = { ...(settingsFiles[host] ?? {}), [id]: String(body().text ?? '') }
+      return json({ ok: true, host, ...settingsSummary(host, id), text: settingsFiles[host][id] })
+    }
+    const host = settingsOrigin(url)
+    return json({ host, ...settingsSummary(host, id), text: settingsFiles[host]?.[id] ?? '' })
+  }
+  if (url.includes('/api/v1/config')) {
+    const host = settingsOrigin(url)
+    return json({ host, files: ['stores', 'projects', 'agents', 'remotes'].map((id) => settingsSummary(host, id)) })
+  }
+  if (url.includes('/api/v1/fleet')) {
+    if (init?.method === 'POST') return json({ ok: true, host: bodyOrigin(), output: 'saved (harness)' })
+    return json(mockFleet(settingsOrigin(url)))
+  }
+  if (url.includes('/api/v1/tunnels')) {
+    return json({ ok: true, host: bodyOrigin(), output: 'would install hub-a -> ~/Library/LaunchAgents/io.shuttle.shuttle-tunnel-hub-a.plist' })
+  }
+  if (url.includes('/api/v1/agents')) return json(MOCK_AGENTS)
+  if (url.includes('/api/v1/state/composite')) {
+    return json({
+      local: mockHostState(LOCAL_HOST),
+      remotes: { [FOREIGN_HOST]: { snapshot: mockHostState(FOREIGN_HOST), stale: false, last_error: null } },
+    })
+  }
+
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow
   // it with a benign OK so the offline harness doesn't error on a click.
   if (url.includes('/api/v1/')) return json({ ok: true })
@@ -1117,6 +1286,7 @@ try {
   const modal = new KanbanModal({
     onStashClick: () => { window.console.log('stash click') },
     onNewIdeaClick: () => { window.console.log('new-idea click') },
+    onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
     temporalFetchers: MOCK_TEMPORAL,
   })
