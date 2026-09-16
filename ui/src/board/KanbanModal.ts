@@ -62,6 +62,8 @@ import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
+import { showToast } from './utils.js'
+import { waitForNewSessionLink, type NewSessionOpenRequest } from './newSessionWait.js'
 import {
   collectCards,
   createTemporalFetchers,
@@ -281,6 +283,9 @@ export class KanbanModal {
       (card, target) => this.transition(card, target),
       // Status-pill double-click → focus the running worker's kitty tab.
       this.openWorkerAfterGesture,
+      // "New session" → open the session the dispatch STARTED, not the one it
+      // replaced. See `openNewSession`.
+      { onOpenNewSession: (request) => void this.openNewSession(request) },
     )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -1695,6 +1700,63 @@ export class KanbanModal {
     if (!r) return undefined
     const cards = [...r.now.drafts, ...r.now.inFlight, ...r.now.awaitingReview]
     return cards.find((c) => c.runningWorker === tmux)?.sessionLink
+  }
+
+  /** What the last feed said about the session currently on `fiberId`. */
+  private sessionSnapshotFor(fiberId: string):
+    | { sessionUuid?: string; sessionLink?: string }
+    | undefined {
+    const r = this.lastResponse
+    if (!r) return undefined
+    const cards = [...r.now.drafts, ...r.now.inFlight, ...r.now.awaitingReview]
+    const card = cards.find((c) => c.id === fiberId)
+    if (!card) return undefined
+    return { sessionUuid: card.sessionUuid, sessionLink: card.sessionLink }
+  }
+
+  /**
+   * Open the session a fresh dispatch just started.
+   *
+   * Under a finger there is no terminal to raise, so "open the worker" means
+   * navigating to the session's claude.ai bridge URL — and that URL does not
+   * exist yet. The daemon resolves it from the transcript's bridge record,
+   * which the harness writes 20–30s after launch. Worse, the feed row still
+   * describes the session this dispatch replaced, and its tmux session name is
+   * unchanged, so anything that resolves "the link for this fiber" right now
+   * resolves the OLD transcript. That is the bug this method exists for.
+   *
+   * So: refetch the board every few seconds until the row belongs to the new
+   * session (`newSessionLink`), then navigate. The detail sheet is already
+   * closed by this point, so a toast is the only place to say what is going on.
+   * Give up after 90s — the worker is running regardless, and the card's own
+   * link will be right once the feed catches up.
+   *
+   * A fine pointer keeps the old behaviour unchanged: kitty attaches by tmux
+   * session name, which is correct immediately and never stale.
+   */
+  private async openNewSession(request: NewSessionOpenRequest): Promise<void> {
+    if (!coarsePointer()) {
+      const tmux = request.tmuxSession
+      if (tmux) window.setTimeout(() => this.onOpenWorker?.(tmux, request.shuttleHost), 0)
+      return
+    }
+
+    showToast('Starting worker… opening when ready', 'success', 95_000)
+
+    const link = await waitForNewSessionLink({
+      target: request,
+      poll: async () => {
+        await this.fetchAndRender()
+        return this.sessionSnapshotFor(request.fiberId)
+      },
+    })
+
+    if (link) {
+      window.location.assign(link)
+      return
+    }
+
+    showToast('Worker is running — open it from its card once it appears.', 'error')
   }
 
   private applyResponse(data: KanbanResponse): void {

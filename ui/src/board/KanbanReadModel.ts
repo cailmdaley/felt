@@ -610,6 +610,7 @@ function toCard(
     runningWorker,
     runtimePhase,
     sessionLink: entry.runtime?.sessionLink,
+    sessionUuid: f.shuttleSessionUuid,
     lastActivityAt,
     held,
     heldSince,

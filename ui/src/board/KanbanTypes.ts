@@ -130,6 +130,14 @@ export interface KanbanCard {
    */
   sessionLink?: string
   /**
+   * `shuttle.runtime.session_uuid` — the harness session the daemon most
+   * recently launched for this fiber, and the key that says WHICH session
+   * `sessionLink` points at. The tmux session name (`runningWorker`) is keyed
+   * on the fiber's uid and so is byte-for-byte identical across dispatches;
+   * this is not. Absent for a codex/pi worker until the scrape backfills it.
+   */
+  sessionUuid?: string
+  /**
    * `shuttle.agent` — the agent to dispatch with. Present when the fiber
    * has a shuttle block and the block specifies an agent.
    */
