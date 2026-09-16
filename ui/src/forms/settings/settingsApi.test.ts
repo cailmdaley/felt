@@ -367,7 +367,7 @@ describe('refusals', () => {
   })
 
   it('says “this host” when the call names no host', async () => {
-    // `loadHosts` and `loadVersion` are addressed to the daemon serving the
+    // `loadHosts` is addressed to the daemon serving the
     // page and pass no label at all, so the sentence has to read without one
     // rather than open on a blank.
     recorder(() => json({ errors: { detail: 'Not Found' } }, 404))

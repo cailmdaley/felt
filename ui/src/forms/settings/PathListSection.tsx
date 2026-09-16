@@ -229,8 +229,6 @@ export function PathListSection({
   }
 
   const copy = COPY[kind]
-  const expanded = kind === 'stores' ? host.expandedFeltStores : null
-  const extra = expanded ? expanded.filter((p) => !paths.includes(p)) : []
 
   // The compact environment form wins over the file outright, so while it is
   // set the file is read by nobody and editing it would have no effect. The
@@ -243,6 +241,22 @@ export function PathListSection({
   if (summary?.env_override) latched.current = summary.env_override
   const overridden = summary?.env_override ?? latched.current
   const frozen = busy || overridden !== null || loaded === null
+
+  /**
+   * The symlinked substores the daemon reaches through the roots ABOVE.
+   *
+   * Suppressed under an environment override, and that is not fussiness. The
+   * rows are the FILE's list; `expandedFeltStores` is the expansion of what the
+   * daemon actually polls, which under `FELT_STORES` is a different list
+   * entirely. Subtracting one from the other then labels whatever the env
+   * expansion has and the file lacks "a symlinked substore of those roots" —
+   * about roots it is not reached through. Two lists that are not about the
+   * same thing should not be subtracted.
+   */
+  const substores =
+    kind === 'stores' && !overridden && host.expandedFeltStores
+      ? host.expandedFeltStores.filter((p) => !paths.includes(p))
+      : []
 
   return (
     <>
@@ -300,11 +314,11 @@ export function PathListSection({
           </ul>
         ))}
 
-      {extra.length > 0 && (
+      {substores.length > 0 && (
         <p className="set-row-note" style={{ marginTop: '8px' }}>
-          Plus {extra.length} symlinked substore{extra.length === 1 ? '' : 's'} the daemon
-          reaches through {paths.length === 1 ? 'that root' : 'those roots'}:{' '}
-          <span className="set-mono">{extra.join(', ')}</span>
+          Plus {substores.length} symlinked substore{substores.length === 1 ? '' : 's'} the
+          daemon reaches through {paths.length === 1 ? 'that root' : 'those roots'}:{' '}
+          <span className="set-mono">{substores.join(', ')}</span>
         </p>
       )}
 

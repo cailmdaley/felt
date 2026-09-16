@@ -225,18 +225,8 @@ const refusal = async (res: Response, host: string): Promise<string> => {
   return `the daemon answered ${res.status}`
 }
 
-/**
- * A thrown `fetch` — the daemon did not answer at all — as a sentence.
- *
- * Detected by TYPE, not by reading the message. The fetch spec says a
- * transport failure rejects with a `TypeError`, and it says nothing at all
- * about the wording: Chrome writes "Failed to fetch", Firefox "NetworkError
- * when attempting to fetch resource", and **WebKit writes "Load failed"**. A
- * substring test for "fetch" therefore worked everywhere except Safari — which
- * is the phone, which is the entire reason this surface exists. Anything that
- * is not a TypeError came from our own code and is already a sentence, so it
- * is passed through.
- */
+// ── Refusals ────────────────────────────────────────────────────────────
+
 /**
  * A refusal that carries the daemon's status alongside its sentence.
  *
@@ -268,6 +258,18 @@ export const isConflict = (err: unknown): boolean =>
 export const isUnavailable = (err: unknown): boolean =>
   err instanceof DaemonRefusal && err.status === 503
 
+/**
+ * A thrown `fetch` — the daemon did not answer at all — as a sentence.
+ *
+ * Detected by TYPE, not by reading the message. The fetch spec says a
+ * transport failure rejects with a `TypeError`, and it says nothing at all
+ * about the wording: Chrome writes "Failed to fetch", Firefox "NetworkError
+ * when attempting to fetch resource", and **WebKit writes "Load failed"**. A
+ * substring test for "fetch" therefore worked everywhere except Safari — which
+ * is the phone, which is the entire reason this surface exists. Anything that
+ * is not a TypeError came from our own code and is already a sentence, so it
+ * is passed through.
+ */
 const reachError = (err: unknown): Error => {
   if (err instanceof TypeError) return new Error('Couldn’t reach the Shuttle daemon (:4000).')
   return new Error((err as { message?: string })?.message ?? String(err))
@@ -300,7 +302,17 @@ function assertHost<T extends { host?: string }>(
   return body
 }
 
-/** The narrow guard a per-host call passes to `assertHost`. */
+/**
+ * The narrow guard a per-host call passes to `assertHost`.
+ *
+ * It only bites where the answer names a host, which is config, fleet,
+ * felt-stores and projects. `chooseFolder`, `loadAgents` and
+ * `releaseQuarantine` answer shapes that carry no `host` — a path, a bare
+ * array, a boolean — so they are waved through and the daemon's own refusal is
+ * the only guard on them. That is not a hole (the daemon refuses an origin it
+ * cannot place before any of them runs) but it is an asymmetry, and a reader
+ * who assumes the client checks everything would be wrong about three calls.
+ */
 const hostGuard = (host: SettingsHost): { origin: string; hubHost: string; label: string } => ({
   origin: host.origin,
   hubHost: host.hubHost,

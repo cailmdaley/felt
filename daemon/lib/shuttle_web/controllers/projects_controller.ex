@@ -107,22 +107,26 @@ defmodule ShuttleWeb.ProjectsController do
   # else has since changed would drop their rows without either of them seeing
   # it. Absent means last-write-wins.
   defp set_local(conn, projects, expected) do
-    cond do
-      not Enum.all?(projects, &is_binary/1) ->
-        conn
-        |> put_status(400)
-        |> json(%{ok: false, error: "every entry in projects must be a path string"})
-
-      match?({:error, _}, ConfigFiles.check_digest(:projects, expected)) ->
-        {:error, message} = ConfigFiles.check_digest(:projects, expected)
-        conn |> put_status(409) |> json(%{ok: false, error: message})
-
-      true ->
-        case Projects.save(projects) do
-          {:ok, saved} -> json(conn, %{ok: true, host: Poller.own_host_id(), projects: saved})
-          {:error, reason} -> failed(conn, "failed to persist projects: #{inspect(reason)}")
-        end
+    # ONE digest read, in a `with`. The first draft asked `check_digest` in a
+    # `cond` guard and again in its body — two independent reads of the file,
+    # so a change landing between them (exactly the concurrent writer this
+    # precondition exists for) made the second answer `:ok`, the rebind fail,
+    # and the request die with a MatchError where a 409 was owed.
+    with :ok <- all_paths(projects),
+         :ok <- ConfigFiles.check_digest(:projects, expected),
+         {:ok, saved} <- Projects.save(projects) do
+      json(conn, %{ok: true, host: Poller.own_host_id(), projects: saved})
+    else
+      {:bad_request, message} -> conn |> put_status(400) |> json(%{ok: false, error: message})
+      {:conflict, message} -> conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
+      {:error, reason} -> failed(conn, "failed to persist projects: #{inspect(reason)}")
     end
+  end
+
+  defp all_paths(projects) do
+    if Enum.all?(projects, &is_binary/1),
+      do: :ok,
+      else: {:bad_request, "every entry in projects must be a path string"}
   end
 
   defp register_local(conn, raw_path) do

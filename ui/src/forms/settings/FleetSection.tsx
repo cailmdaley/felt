@@ -111,7 +111,13 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
     setSaid(null)
     loadFleet(shuttleBase, host)
       .then((data) => {
-        if (!cancelled) setFleet(data)
+        if (cancelled) return
+        setFleet(data)
+        // Any successful read clears it, not only the timer's. A manual
+        // refresh that worked left the page insisting the ages were frozen
+        // for a further poll interval — which is itself a stale claim about
+        // staleness.
+        setDrifted(false)
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message)
@@ -200,11 +206,11 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
         </div>
       )}
 
-      {drifted && (
+      {drifted && fleet !== null && (
         <div className="set-error" role="status">
-          These rows have stopped refreshing — the last few reads of {host.label} failed. The
-          ages below are frozen at whenever they last worked, so read them as history rather
-          than as now.
+          These rows have stopped refreshing — the last read of {host.label} failed. The ages
+          below are frozen at whenever one last worked, so read them as history rather than as
+          now.
         </div>
       )}
 

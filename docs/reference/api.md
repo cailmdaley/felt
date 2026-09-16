@@ -145,16 +145,21 @@ removes the file, which is the same vocabulary the structured writers already
 speak (saving an empty list deletes `stores.json`; dropping the last remote
 deletes `remotes.json`).
 
-A read serves a `digest` — a hash of the bytes as sent. Send it back as
-`expected_digest` and the write is refused with a **409** if the file has moved
-since, which matters because this board is reachable from two hubs and a phone
-at once and an editor left open while a CLI writes the same file would
+A read serves a `digest` — a hash of the bytes as sent, and of *those* bytes
+rather than of a second read of the file. Send it back as `expected_digest` and
+the write is refused with a **409** carrying `conflict: true` if the file has
+moved since, which matters because this board is reachable from two hubs and a
+phone at once and an editor left open while a CLI writes the same file would
 otherwise save its stale text back over the new one. The two whole-list
-endpoints (`/felt-stores`, `/projects`) take the same key for the same reason.
-Omit it entirely for last-write-wins, which is what a script wants. (A hash
-rather than an mtime: POSIX mtime is second-granular, so a write landing in the
-same second as the read is invisible to it, and that is exactly the
+endpoints (`/felt-stores`, `/projects`) take the same key and answer the same
+409. Omit it entirely for last-write-wins, which is what a script wants. (A
+hash rather than an mtime: POSIX mtime is second-granular, so a write landing
+in the same second as the read is invisible to it, and that is exactly the
 interleaving a fast tool produces.)
+
+409 is its own status because a client branches on it: a conflict is the one
+refusal with a recovery move attached — show me what it says now — and an
+affordance keyed to a status survives a rewording of the sentence.
 
 A **503** is not a refusal of the bytes. It means the host could not RUN the
 check — felt off a supervised daemon's PATH, or wedged past its bound — so

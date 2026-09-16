@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   CONFIG_FILENAME,
   isConflict,
+  isUnavailable,
   loadConfigFile,
   saveConfigFile,
   type ConfigId,
@@ -62,6 +63,8 @@ export function FileEditor({
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [conflict, setConflict] = useState(false)
+  /** The host could not RUN the check. Nothing is known about what was sent. */
+  const [unavailable, setUnavailable] = useState(false)
   /** The draft differs from the bytes on disk as we last saw them. */
   const dirty = loaded !== null && draft !== loaded.text
 
@@ -128,6 +131,7 @@ export function FileEditor({
     try {
       const file = await saveConfigFile(shuttleBase, host, id, draft, loaded?.digest ?? null)
       setConflict(false)
+      setUnavailable(false)
       setLoaded({
         text: file.text,
         path: file.path,
@@ -143,6 +147,7 @@ export function FileEditor({
       // daemon's prose — reword the message and the button would vanish with
       // nothing going red. The API layer reports the kind; this reads the kind.
       setConflict(isConflict(err))
+      setUnavailable(isUnavailable(err))
       setError((err as Error).message)
     } finally {
       setBusy(false)
@@ -217,7 +222,12 @@ export function FileEditor({
           </div>
 
           {error && (
-            <div className="set-error" role="alert">
+            <div className={unavailable ? 'set-said' : 'set-error'} role="alert">
+              {/* A 503 is not a refusal of what you wrote: the host could not
+                  run the check at all, so nothing is known about the bytes and
+                  nothing you retype will help. Putting it in the red box that
+                  means "your JSON is wrong" is the exact conflation the daemon
+                  half of this was built to end. */}
               {error}
               {conflict && (
                 <>

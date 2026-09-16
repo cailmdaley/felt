@@ -306,7 +306,7 @@ defmodule Shuttle.ConfigFilesTest do
     test "a stale digest is refused and writes nothing", %{paths: paths} do
       stale = String.duplicate("0", 64)
 
-      assert {:error, message} = ConfigFiles.write(:stores, "[]", expected_digest: stale)
+      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: stale)
       assert message =~ "changed since you opened it"
       assert File.read!(paths[:stores]) == @stores_doc
     end
@@ -317,7 +317,7 @@ defmodule Shuttle.ConfigFilesTest do
     } do
       File.rm!(paths[:stores])
 
-      assert {:error, message} = ConfigFiles.write(:stores, "[]", expected_digest: digest)
+      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: digest)
       assert message =~ "was deleted since you opened it"
       refute File.exists?(paths[:stores])
     end
@@ -331,7 +331,7 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "nil against a file that DOES exist is a conflict", %{paths: paths} do
-      assert {:error, message} = ConfigFiles.write(:stores, "[]", expected_digest: nil)
+      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: nil)
       assert message =~ "changed since you opened it"
       assert File.read!(paths[:stores]) == @stores_doc
     end
@@ -344,7 +344,7 @@ defmodule Shuttle.ConfigFilesTest do
     test "a stale digest refuses a REMOVAL too", %{paths: paths} do
       stale = String.duplicate("0", 64)
 
-      assert {:error, message} = ConfigFiles.write(:stores, "", expected_digest: stale)
+      assert {:conflict, message} = ConfigFiles.write(:stores, "", expected_digest: stale)
       assert message =~ "changed since you opened it"
       assert File.read!(paths[:stores]) == @stores_doc
     end

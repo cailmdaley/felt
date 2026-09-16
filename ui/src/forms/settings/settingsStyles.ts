@@ -131,13 +131,6 @@ const SHEET = `
   font-weight: 600;
   box-shadow: inset 2px 0 0 #C49333;
 }
-.set-railbtn-count {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10.5px;
-  color: #B5A998;
-  flex: 0 0 auto;
-}
-.set-railbtn-active .set-railbtn-count { color: #9A7B35; }
 
 /* ── The pane ──────────────────────────────────────────────────────────── */
 
@@ -431,6 +424,12 @@ const SHEET = `
      height instead of a smaller size: the thing to save on a phone is vertical
      space, not point size. */
   .set-input, .set-select, .set-textarea { font-size: 16px; }
+  /* And 44px tall, which the font size alone does not give them. The select
+     here is the HOST PICKER — the control that decides which machine
+     everything else on this page writes to — and it was the smallest target on
+     the sheet, at roughly 32px. (No backticks in this file: it is one big
+     template literal, and one would end it.) */
+  .set-input, .set-select { min-height: 44px; padding: 8px 10px; }
   .set-textarea { line-height: 1.35; }
   /* 44px, including — especially — the destructive one. The remove control had
      40 while the safe controls had 44, which is exactly backwards: a miss on

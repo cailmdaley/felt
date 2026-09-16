@@ -240,7 +240,7 @@ says so.
 
 | Section | What it holds |
 |---|---|
-| **Stores** | `stores.json` — what this daemon polls, with the symlinked substores it reaches through them |
+| **Stores** | `stores.json` — the store list this daemon is configured with, and the symlinked substores it reaches through them |
 | **Projects** | `projects.json` — the checkouts Stash and Capture offer; adding one initializes its `.felt/` |
 | **Agents** | The merged registry, each record marked with the layer it came from, over `agents.json` |
 | **Fleet** | `remotes.json` as rows — how each remote is reached, whether it answered, what build it is running — plus the supervised tunnel jobs derived from it |

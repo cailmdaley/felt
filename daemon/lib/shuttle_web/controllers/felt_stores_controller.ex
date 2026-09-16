@@ -101,7 +101,8 @@ defmodule ShuttleWeb.FeltStoresController do
     with :ok <- ConfigFiles.check_digest(:stores, expected) do
       persist_stores(conn, hosts)
     else
-      {:error, message} -> conn |> put_status(409) |> json(%{ok: false, error: message})
+      {:conflict, message} ->
+        conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
     end
   end
 

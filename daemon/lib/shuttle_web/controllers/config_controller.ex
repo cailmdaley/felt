@@ -24,6 +24,10 @@ defmodule ShuttleWeb.ConfigController do
     200  GET  /config/:id  %{host, id, path, exists, size, updated_at, text}
     200  POST /config/:id  %{ok: true, host, id, path, exists, size, updated_at, text}
     400  %{ok: false, error: string}   unknown id or host, missing text, a refused edit
+    409  %{ok: false, error: string, conflict: true}
+                                      the file moved since the caller read it
+                                      (`expected_digest` disagrees) — the one
+                                      refusal with a recovery move attached
     500  %{ok: false, error: string}   the write itself failed
     502  %{ok: false, error: string}   the forward to the owning daemon failed
     503  %{ok: false, error: string, unavailable: true}
@@ -131,10 +135,19 @@ defmodule ShuttleWeb.ConfigController do
         json(conn, Map.merge(file, %{ok: true, host: Poller.own_host_id()}))
 
       # A refusal about the BYTES the caller sent — a parse error, a
-      # validator's complaint, a stale digest. The request is what has to
-      # change, so it is a 400.
+      # validator's complaint. The request is what has to change: 400.
       {:error, message} ->
         bad_request(conn, message)
+
+      # The file moved under the editor. A DIFFERENT kind from the above and it
+      # gets its own status, because the client branches on it: a conflict is
+      # the one refusal with a recovery move attached ("show me what it says
+      # now"), and an affordance that keys off a status survives a rewording of
+      # the sentence, which keying off the prose does not. The two whole-list
+      # endpoints already answered 409; this one answered 400 and the button
+      # that reads it was therefore dead.
+      {:conflict, message} ->
+        conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
 
       # A refusal about this MACHINE — felt missing from the daemon's PATH, a
       # validator that never answered. Nothing the caller sent is wrong and

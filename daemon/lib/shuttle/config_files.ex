@@ -166,7 +166,7 @@ defmodule Shuttle.ConfigFiles do
   the text editor does. Nothing else would explain why one half of a section is
   protected from a concurrent writer and the other half is not.
   """
-  @spec check_digest(id(), String.t() | nil | :any) :: :ok | {:error, String.t()}
+  @spec check_digest(id(), String.t() | nil | :any) :: :ok | {:conflict, String.t()}
   def check_digest(id, expected), do: check_expected(id, expected)
 
   @doc """
@@ -266,7 +266,10 @@ defmodule Shuttle.ConfigFiles do
   see `commit/2`.
   """
   @spec write(id(), String.t(), keyword()) ::
-          {:ok, map()} | {:error, String.t()} | {:unavailable, String.t()}
+          {:ok, map()}
+          | {:error, String.t()}
+          | {:conflict, String.t()}
+          | {:unavailable, String.t()}
   def write(id, text, opts \\ []) when is_binary(text) do
     with :ok <- check_expected(id, Keyword.get(opts, :expected_digest, :any)) do
       if String.trim(text) == "" do
@@ -293,10 +296,11 @@ defmodule Shuttle.ConfigFiles do
         :ok
 
       nil ->
-        {:error, "#{path(id)} was deleted since you opened it. Reload before saving."}
+        {:conflict, "#{path(id)} was deleted since you opened it. Reload before saving."}
 
       _ ->
-        {:error, "#{path(id)} changed since you opened it. Reload to see the new contents — saving now would overwrite them."}
+        {:conflict,
+         "#{path(id)} changed since you opened it. Reload to see the new contents — saving now would overwrite them."}
     end
   end
 
@@ -449,7 +453,17 @@ defmodule Shuttle.ConfigFiles do
          :ok <- File.write(tmp, text),
          :ok <- File.rename(tmp, path) do
       Logger.info("ConfigFiles: wrote #{path} (#{byte_size(text)} bytes)")
-      {:ok, Map.put(summary(id), :text, text)}
+      # The digest is of the bytes just written, NOT of a fresh read — the same
+      # hole `read/1` closes, at the other end. A writer landing between the
+      # rename and a re-read would hand this caller its own text under someone
+      # else's digest, and the caller stores that pair as its new base: the
+      # next save would then pass the precondition and overwrite bytes it never
+      # saw. An editor's guarantee cannot have a gap at the moment it is issued.
+      {:ok,
+       summary(id)
+       |> Map.put(:text, text)
+       |> Map.put(:digest, hash(text))
+       |> Map.put(:entries, entries(id))}
     else
       {:error, reason} ->
         File.rm(tmp)
@@ -463,10 +477,10 @@ defmodule Shuttle.ConfigFiles do
     case File.rm(path) do
       :ok ->
         Logger.info("ConfigFiles: removed #{path}")
-        {:ok, Map.put(summary(id), :text, "")}
+        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:digest, nil) |> Map.put(:entries, entries(id))}
 
       {:error, :enoent} ->
-        {:ok, Map.put(summary(id), :text, "")}
+        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:digest, nil) |> Map.put(:entries, entries(id))}
 
       {:error, reason} ->
         {:error, "#{path}: #{:file.format_error(reason)}"}

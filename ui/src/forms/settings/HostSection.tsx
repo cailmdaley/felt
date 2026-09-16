@@ -61,6 +61,8 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState(0)
+  /** The quiet refetch stopped working; what is drawn is the last good read. */
+  const [drifted, setDrifted] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -69,6 +71,7 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
     loadHostState(shuttleBase, host)
       .then((data) => {
         if (cancelled) return
+        setDrifted(false)
         if (!data) {
           setError(
             `${host.label} has not answered this hub's poll yet, so there is no state to show.`,
@@ -84,11 +87,13 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
     }
   }, [shuttleBase, host.origin, token])
 
-  // Live while open, on the board's cadence — the quarantine can be released
-  // from elsewhere, a worker can finish, and “booted 2m ago” is computed at
-  // render from a fixed stamp. A quiet refetch: failures are dropped rather
-  // than replacing what is on screen with an error the last good read
-  // disproves.
+  // Live while open — the quarantine can be released from elsewhere, a worker
+  // can finish, and every age here is computed at render from a fixed stamp.
+  //
+  // A failed refetch is NOT swallowed, for the same reason as Fleet's: silence
+  // would leave “booted 2m ago” asserting a freshness this page had stopped
+  // knowing about. The last good read stays on screen, because it is still the
+  // truest thing we have, and says it has stopped moving.
   const busyRef = useRef(busy)
   busyRef.current = busy
 
@@ -98,9 +103,13 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
       // every button press, so a run of clicks could hold the refresh off.
       if (busyRef.current || document.hidden) return
       loadHostState(shuttleBase, host)
-        .then((data) => data && setState(data))
-        .catch(() => {})
-    }, 15_000)
+        .then((data) => {
+          if (!data) return
+          setState(data)
+          setDrifted(false)
+        })
+        .catch(() => setDrifted(true))
+    }, 30_000)
     return () => window.clearInterval(id)
   }, [shuttleBase, host.origin])
 
@@ -120,6 +129,13 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
       </p>
 
       {error && <div className="set-error" role="alert">{error}</div>}
+
+      {drifted && state !== null && (
+        <div className="set-error" role="status">
+          This has stopped refreshing — the last read of {host.label} failed. Every age below
+          is frozen at whenever one last worked.
+        </div>
+      )}
 
       {state === null && !error && <div className="set-empty">Reading…</div>}
 

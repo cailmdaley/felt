@@ -205,12 +205,19 @@ defmodule ShuttleWeb.ConfigControllerTest do
       assert File.read!(paths[:stores]) == "[]"
     end
 
-    test "a stale digest is a 400 and leaves the file byte-identical", %{paths: paths} do
+    test "a stale digest is a 409 and leaves the file byte-identical", %{paths: paths} do
+      # 409, not 400, and the distinction is load-bearing rather than
+      # pedantic: the editor's recovery affordance keys off the STATUS, so
+      # that it survives a rewording of the sentence. While this answered 400
+      # the button that offers to re-read the file never rendered at all — and
+      # nothing went red, because the only thing that knew was prose.
       conn =
         post_config("stores", %{"text" => "[]", "expected_digest" => String.duplicate("0", 64)})
 
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "changed since you opened it"
+      assert conn.status == 409
+      body = Jason.decode!(conn.resp_body)
+      assert body["conflict"] == true
+      assert body["error"] =~ "changed since you opened it"
       assert File.read!(paths[:stores]) == @stores_doc
     end
 
@@ -219,7 +226,7 @@ defmodule ShuttleWeb.ConfigControllerTest do
     } do
       conn = post_config("stores", %{"text" => "[]", "expected_digest" => nil})
 
-      assert conn.status == 400
+      assert conn.status == 409
       assert Jason.decode!(conn.resp_body)["error"] =~ "changed since you opened it"
       assert File.read!(paths[:stores]) == @stores_doc
     end
@@ -241,7 +248,7 @@ defmodule ShuttleWeb.ConfigControllerTest do
 
       conn = post_config("stores", %{"text" => "[]", "expected_digest" => digest})
 
-      assert conn.status == 400
+      assert conn.status == 409
       assert Jason.decode!(conn.resp_body)["error"] =~ "was deleted since you opened it"
       refute File.exists?(paths[:stores])
     end
