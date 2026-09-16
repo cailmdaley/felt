@@ -23,6 +23,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import type { MoveBroker } from './MoveDestinations.js'
 import { isMobileViewport, onMobileChange } from './mobile.js'
+import { clearSelection, dismissOnScrim, onPressRelease } from './dismissGesture.js'
 
 /**
  * Put the desktop move popover next to its anchor — below by preference,
@@ -154,13 +155,26 @@ export function openMoveMenu(
 
   document.body.append(scrim, menu)
   anchor.setAttribute('aria-expanded', 'true')
+  // The menu rises under a finger that is STILL DOWN (see `onPressRelease`), so
+  // iPadOS may already have painted a selection where the menu now is. Clear it
+  // here as well as in the tracker: the card's selection was killed before the
+  // menu existed, and the run under the menu is a different one.
+  clearSelection()
   renderRoot()
   if (!sheet) placeMoveMenu(menu, anchor)
 
-  scrim.addEventListener('pointerdown', (e) => {
-    e.stopPropagation()
-    dismiss()
+  // UNTIL THE OPENING PRESS LETS GO, the menu takes no pointer input at all.
+  // The long press fires at 450ms with the finger on the glass; without this,
+  // the pointerup of that very gesture lands on whichever row rose under the
+  // thumb and moves the card somewhere nobody chose. `pointer-events: none`
+  // rather than ignoring pointerup, so the row cannot even light up.
+  menu.style.pointerEvents = 'none'
+  const stopPressWatch = onPressRelease(window, () => {
+    menu.style.removeProperty('pointer-events')
+    clearSelection()
   })
+
+  dismissOnScrim(scrim, dismiss, window)
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return
     e.stopPropagation()
@@ -183,6 +197,7 @@ export function openMoveMenu(
     if (closed) return
     closed = true
     document.removeEventListener('keydown', onKey, true)
+    stopPressWatch()
     window.removeEventListener('resize', onReflow)
     stopMobileWatch()
     anchor.setAttribute('aria-expanded', 'false')

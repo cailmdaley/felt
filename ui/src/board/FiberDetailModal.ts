@@ -41,6 +41,7 @@ import {
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
+import { suppressNextClick } from './dismissGesture.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
 import type { NewSessionOpenRequest } from './newSessionWait.js'
@@ -798,9 +799,12 @@ export class FiberDetailModal {
 
     // Click-away closes the panel. pointerdown (not click) so the gesture
     // that opened the panel — whose pointerdown happened before this
-    // listener existed — can never self-close it. The event is left to
-    // propagate, so the outside click still does its own work (open a
-    // different card, drag on the board, …).
+    // listener existed — can never self-close it. The pointer events are left
+    // to PROPAGATE, because the board under the panel has to keep scrolling
+    // and dragging; what does not propagate is the CLICK at the end of the
+    // gesture. A tap that puts the panel away means "put this away" and
+    // nothing more — it must not also open the card it happened to land on.
+    // The second tap, made once the panel is gone, opens that card normally.
     //
     // A LINKED card has no click-away at all: it was opened by following a
     // reference, and the next thing you click is very often the card you came
@@ -820,7 +824,11 @@ export class FiberDetailModal {
         // and would clip it), so by DOM position it is "outside" the card while
         // being, to the reader, part of it. Clicking it must not close the card
         // out from under the choice being made.
-        if (target instanceof Element && target.closest('.kbn-move-menu')) return
+        // Same for its SCRIM: a tap there is a dismissal of the menu, and one
+        // tap dismisses one thing. Closing the card underneath at the same
+        // time would take away the reading as well as the menu it raised.
+        if (target instanceof Element && target.closest('.kbn-move-menu, .kbn-move-scrim')) return
+        suppressNextClick(window)
         this.close()
       }
       document.addEventListener('pointerdown', this.outsideHandler, true)
