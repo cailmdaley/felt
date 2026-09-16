@@ -1,9 +1,18 @@
 /**
- * The move menu — the drag, said in words.
+ * The move menu — "Move to", then the places.
  *
  * Why this menu exists at all is written once, in `MoveDestinations.ts`. Here
  * it is only rendered: the legality comes from there, and each chosen item goes
  * back to the board's own wire calls through the `MoveBroker`.
+ *
+ * A ROW IS A PLACE NAME AND NOTHING ELSE. The heading says "Move to" and the
+ * items say Drafts, In flight, Awaiting review, Resting, Pinned — the same
+ * words the board prints over those regions, with a rule between the Now
+ * columns and the rest. Prose under a row was there to explain verbs, and the
+ * places need no explaining; which card is being moved is carried by the
+ * sheet's accessible name and the subline under the heading. The one surviving
+ * subline is in the queue pane, where a row is a card name and joining the end
+ * of its chain is not visible from that name.
  *
  * It is raised by a LONG PRESS on the card itself, on the board, rather than by
  * a control inside the open sheet — the gesture sits where the object is, and a
@@ -60,11 +69,19 @@ export function openMoveMenu(
 
   const renderRoot = (): void => {
     menu.replaceChildren()
-    menu.append(buildMoveHeading(card.name, null))
+    menu.append(buildMoveHeading('Move to', null, card.name))
     const list = document.createElement('div')
     list.className = 'kbn-move-list'
+    let lastGroup: string | null = null
     for (const dest of broker.destinations(card)) {
-      list.append(buildMoveItem(dest.label, dest.hint, () => {
+      if (lastGroup !== null && dest.group !== lastGroup) {
+        const rule = document.createElement('div')
+        rule.className = 'kbn-move-rule'
+        rule.setAttribute('role', 'separator')
+        list.append(rule)
+      }
+      lastGroup = dest.group
+      list.append(buildMoveItem(dest.label, undefined, () => {
         if (dest.action.kind === 'queue') {
           renderQueue()
           return
@@ -84,7 +101,7 @@ export function openMoveMenu(
   const renderQueue = (): void => {
     const targets = broker.queueTargets(card)
     menu.replaceChildren()
-    menu.append(buildMoveHeading('Queue behind', renderRoot))
+    menu.append(buildMoveHeading('Queue behind', renderRoot, null))
     if (targets.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'kbn-move-empty'
@@ -177,7 +194,11 @@ export function openMoveMenu(
   return close
 }
 
-function buildMoveHeading(text: string, onBack: (() => void) | null): HTMLElement {
+function buildMoveHeading(
+  text: string,
+  onBack: (() => void) | null,
+  subline: string | null,
+): HTMLElement {
   const row = document.createElement('div')
   row.className = 'kbn-move-heading'
   if (onBack) {
@@ -196,6 +217,12 @@ function buildMoveHeading(text: string, onBack: (() => void) | null): HTMLElemen
   label.className = 'kbn-move-heading-text'
   label.textContent = text
   row.append(label)
+  if (subline) {
+    const sub = document.createElement('span')
+    sub.className = 'kbn-move-heading-sub'
+    sub.textContent = subline
+    row.append(sub)
+  }
   return row
 }
 
