@@ -72,7 +72,16 @@ export function SettingsDialog({
   // visible in the rows above it without a reopen.
   const [revision, setRevision] = useState(0)
   const [liveHosts, setLiveHosts] = useState(hosts)
-  const [index, setIndex] = useState<ConfigFileSummary[] | null>(null)
+  /**
+   * The config index, STAMPED with the host it describes.
+   *
+   * Stamped rather than bare, because clearing it in an effect is one render
+   * too late: the first paint after a host switch still held the previous
+   * host's rows, and a section that latched an environment-override flag out
+   * of that paint carried one machine's warning onto another's page. A stamp
+   * makes the staleness unrepresentable instead of racing to erase it.
+   */
+  const [index, setIndex] = useState<{ origin: string; files: ConfigFileSummary[] } | null>(null)
 
   const host = useMemo(
     () => liveHosts.find((h) => h.origin === originKey) ?? liveHosts[0],
@@ -105,29 +114,28 @@ export function SettingsDialog({
     // index reads as "not overridden" — so clearing it here blinked those
     // controls back on for the length of a round trip, which is the one moment
     // they were guarding against. A host switch does clear it, below.
+    const origin = host.origin
     loadConfigIndex(shuttleBase, host)
       .then((data) => {
-        if (!cancelled) setIndex(data.files ?? [])
+        if (!cancelled) setIndex({ origin, files: data.files ?? [] })
       })
       .catch(() => {
         // A host too old for the settings API, or unreachable. Every section
         // surfaces that failure in its own terms; the index is only an
         // annotation and its absence should not blank the page.
-        if (!cancelled) setIndex([])
+        if (!cancelled) setIndex({ origin, files: [] })
       })
     return () => {
       cancelled = true
     }
   }, [shuttleBase, host?.origin, revision])
 
-  // A host switch, on the other hand, invalidates the index outright: the next
-  // host's files are different files, and its override flags are its own.
-  useEffect(() => {
-    setIndex(null)
-  }, [host?.origin])
-
+  // Undefined for a host the index is not about — including for the render
+  // immediately after a switch, which is the one that used to leak.
   const summaryFor = (id: ConfigFileSummary['id']): ConfigFileSummary | undefined =>
-    index?.find((f) => f.id === id)
+    index && host && index.origin === host.origin
+      ? index.files.find((f) => f.id === id)
+      : undefined
 
   const changed = (): void => setRevision((n) => n + 1)
 
