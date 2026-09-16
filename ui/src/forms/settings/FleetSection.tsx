@@ -106,6 +106,26 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
     }
   }, [shuttleBase, host.origin, token])
 
+  /**
+   * Keep the rows live while the sheet is open, on the board's own cadence.
+   *
+   * Not a nicety. “answering · 4s ago” is computed from a fixed timestamp at
+   * render, so without this the row would still read “4s ago” twenty minutes
+   * after a remote stopped answering — a settings page asserting a freshness
+   * it stopped knowing about. The refetch is quiet: it replaces the rows on
+   * success and leaves a failure, and whatever a button last said, alone,
+   * because a poll landing mid-edit must not blank the page under you.
+   */
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (busy) return
+      loadFleet(shuttleBase, host)
+        .then(setFleet)
+        .catch(() => {})
+    }, 15_000)
+    return () => window.clearInterval(id)
+  }, [shuttleBase, host.origin, busy])
+
   const refresh = (): void => {
     setToken((n) => n + 1)
     onChanged()

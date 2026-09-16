@@ -50,22 +50,41 @@ export function FileEditor({
   onSaved,
 }: FileEditorProps): JSX.Element {
   const [open, setOpen] = useState(false)
-  const [loaded, setLoaded] = useState<{ text: string; path: string; exists: boolean } | null>(null)
+  const [loaded, setLoaded] = useState<{
+    text: string
+    path: string
+    exists: boolean
+    digest: string | null
+  } | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  // What the caret was doing when the last save landed, so a reload triggered
-  // by our own save does not snatch a half-typed follow-up edit away.
+  /** The draft differs from the bytes on disk as we last saw them. */
   const dirty = loaded !== null && draft !== loaded.text
 
-  const load = useRef<() => void>(() => {})
-  load.current = (): void => {
+  /**
+   * Re-read the file.
+   *
+   * `keepDraft` is for the one case where re-reading is a RESPONSE to your own
+   * edit rather than a replacement for it: the save was refused because the
+   * file moved underneath, and throwing away what you typed in order to show
+   * you what it moved to would be the worse of the two losses. The box keeps
+   * your text, `dirty` recomputes against the new base, and saving again now
+   * carries the new digest.
+   */
+  const load = useRef<(keepDraft?: boolean) => void>(() => {})
+  load.current = (keepDraft?: boolean): void => {
     setError(null)
     loadConfigFile(shuttleBase, host, id)
       .then((file) => {
-        setLoaded({ text: file.text, path: file.path, exists: file.exists })
-        setDraft(file.text)
+        setLoaded({
+          text: file.text,
+          path: file.path,
+          exists: file.exists,
+          digest: file.digest ?? null,
+        })
+        if (!keepDraft) setDraft(file.text)
       })
       .catch((err: Error) => setError(err.message))
   }
@@ -94,8 +113,13 @@ export function FileEditor({
     setError(null)
     setSaved(false)
     try {
-      const file = await saveConfigFile(shuttleBase, host, id, draft)
-      setLoaded({ text: file.text, path: file.path, exists: file.exists })
+      const file = await saveConfigFile(shuttleBase, host, id, draft, loaded?.digest ?? null)
+      setLoaded({
+        text: file.text,
+        path: file.path,
+        exists: file.exists,
+        digest: file.digest ?? null,
+      })
       setDraft(file.text)
       setSaved(true)
       onSaved()
@@ -173,7 +197,24 @@ export function FileEditor({
             )}
           </div>
 
-          {error && <div className="set-error" role="alert">{error}</div>}
+          {error && (
+            <div className="set-error" role="alert">
+              {error}
+              {error.includes('since you opened it') && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="set-btn set-btn-drop"
+                    onClick={() => load.current(true)}
+                  >
+                    check what it says now
+                  </button>
+                  {' — your text stays in the box; Revert swaps it for theirs.'}
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
     </details>

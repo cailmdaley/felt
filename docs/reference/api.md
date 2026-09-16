@@ -144,6 +144,15 @@ removes the file, which is the same vocabulary the structured writers already
 speak (saving an empty list deletes `stores.json`; dropping the last remote
 deletes `remotes.json`).
 
+A read serves a `digest` — a hash of the bytes as sent. Send it back as
+`expected_digest` and the write is refused if the file has moved since, which
+matters because this board is reachable from two hubs and a phone at once and
+an editor left open while a CLI writes the same file would otherwise save its
+stale text back over the new one. Omit the key entirely for last-write-wins,
+which is what a script wants. (A hash rather than an mtime: POSIX mtime is
+second-granular, so a write landing in the same second as the read is
+invisible to it, and that is exactly the interleaving a fast tool produces.)
+
 Reads are owner-routed as well as writes, which is unusual here and is the
 point: a config file describes the daemon that reads it, and only that daemon
 can see its own `~/.config/felt/`. A host whose daemon predates these routes

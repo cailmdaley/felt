@@ -119,7 +119,10 @@ defmodule Shuttle.ConfigFiles do
   @spec index() :: [map()]
   def index, do: Enum.map(@ids, &summary/1)
 
-  @doc "One file's `index/0` row."
+  @doc """
+  One file's `index/0` row, including the `digest` a caller sends back to prove
+  it is replacing the bytes it read.
+  """
   @spec summary(id()) :: map()
   def summary(id) do
     path = path(id)
@@ -133,8 +136,34 @@ defmodule Shuttle.ConfigFiles do
           %{id: id, path: path, exists: false, size: 0, updated_at: nil}
       end
 
-    Map.put(base, :env_override, env_override(id))
+    base
+    |> Map.put(:env_override, env_override(id))
+    |> Map.put(:digest, digest(id))
   end
+
+  @doc """
+  A content hash of the file as it is right now, or `nil` when it does not
+  exist.
+
+  The board is reachable from two hubs and a phone at the same time, so "this
+  file has not changed since I read it" is a real question here rather than a
+  theoretical one — an editor left open on a phone while `felt shuttle remotes
+  add` runs on the laptop would otherwise save the old text back over the new
+  entry, silently.
+
+  A hash rather than an mtime: POSIX mtime is second-granular, so a write
+  landing in the same second as the read is invisible to it, and that is
+  precisely the interleaving a fast tool produces.
+  """
+  @spec digest(id()) :: String.t() | nil
+  def digest(id) do
+    case File.read(path(id)) do
+      {:ok, content} -> hash(content)
+      _ -> nil
+    end
+  end
+
+  defp hash(content), do: :crypto.hash(:sha256, content) |> Base.encode16(case: :lower)
 
   # The one way this page could lie. Both path-list files have a compact
   # comma-separated environment form that wins over the file ENTIRELY when it
@@ -193,12 +222,37 @@ defmodule Shuttle.ConfigFiles do
   a half-written file. Every reader here polls: `Shuttle.RemoteRegistry` stats
   the fleet file every second.
   """
-  @spec write(id(), String.t()) :: {:ok, map()} | {:error, String.t()}
-  def write(id, text) when is_binary(text) do
-    if String.trim(text) == "" do
-      remove(id)
-    else
-      with :ok <- validate(id, text), do: commit(id, text)
+  @spec write(id(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def write(id, text, opts \\ []) when is_binary(text) do
+    with :ok <- check_expected(id, Keyword.get(opts, :expected_digest, :any)) do
+      if String.trim(text) == "" do
+        remove(id)
+      else
+        with :ok <- validate(id, text), do: commit(id, text)
+      end
+    end
+  end
+
+  # `:any` is an editor that did not tell us what it read — a script, an older
+  # client — and it keeps the old last-write-wins behaviour rather than being
+  # refused. A caller that DID send a digest is asking to be stopped, and the
+  # refusal names the situation rather than the hashes, which are no use to
+  # anybody reading them.
+  defp check_expected(_id, :any), do: :ok
+
+  defp check_expected(id, expected) do
+    case digest(id) do
+      ^expected ->
+        :ok
+
+      nil when expected in [nil, ""] ->
+        :ok
+
+      nil ->
+        {:error, "#{path(id)} was deleted since you opened it. Reload before saving."}
+
+      _ ->
+        {:error, "#{path(id)} changed since you opened it. Reload to see the new contents — saving now would overwrite them."}
     end
   end
 

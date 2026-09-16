@@ -84,6 +84,21 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
     }
   }, [shuttleBase, host.origin, token])
 
+  // Live while open, on the board's cadence — the quarantine can be released
+  // from elsewhere, a worker can finish, and “booted 2m ago” is computed at
+  // render from a fixed stamp. A quiet refetch: failures are dropped rather
+  // than replacing what is on screen with an error the last good read
+  // disproves.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (busy) return
+      loadHostState(shuttleBase, host)
+        .then((data) => data && setState(data))
+        .catch(() => {})
+    }, 15_000)
+    return () => window.clearInterval(id)
+  }, [shuttleBase, host.origin, busy])
+
   const build = state?.build
   const contract = state?.contract
   const poll = state?.poll_health

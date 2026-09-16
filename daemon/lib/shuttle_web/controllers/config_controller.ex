@@ -27,6 +27,14 @@ defmodule ShuttleWeb.ConfigController do
     500  %{ok: false, error: string}   the write itself failed
     502  %{ok: false, error: string}   the forward to the owning daemon failed
 
+  A write may carry `expected_digest` — the `digest` the caller was served when
+  it read the file, or `null` if there was none. When it is present and the
+  file's current hash disagrees, the write is refused: the board is reachable
+  from two hubs and a phone at once, so an editor left open while a CLI writes
+  the same file would otherwise save its stale text back over the new one.
+  Omitting the key keeps the old last-write-wins behaviour, which is what a
+  script wants.
+
   A refused edit is a 400 carrying felt's own diagnostic verbatim — "remote
   \"hub-a\": port 4001 already used by \"hub-b\"" reaches the human's screen as
   the sentence the CLI would have printed, because no paraphrase of it is more
@@ -74,7 +82,7 @@ defmodule ShuttleWeb.ConfigController do
         end)
 
       :local ->
-        write_local(conn, raw, text)
+        write_local(conn, raw, text, Map.get(params, "expected_digest"))
     end
   end
 
@@ -84,9 +92,16 @@ defmodule ShuttleWeb.ConfigController do
 
   # ── Local branches ───────────────────────────────────────────────────────
 
-  defp write_local(conn, raw, text) do
+  defp write_local(conn, raw, text, expected) do
+    # An absent key is `:any` — last-write-wins, which is what a script or an
+    # older client gets. A present one (including an explicit null, meaning "I
+    # read no file") is a caller asking to be stopped if the bytes moved.
+    opts = if is_nil(expected) and not Map.has_key?(conn.params, "expected_digest"),
+      do: [],
+      else: [expected_digest: expected]
+
     with {:ok, id} <- parse_id(raw),
-         {:ok, file} <- ConfigFiles.write(id, text) do
+         {:ok, file} <- ConfigFiles.write(id, text, opts) do
       json(conn, Map.merge(file, %{ok: true, host: Poller.own_host_id()}))
     else
       {:error, :unknown_id} -> bad_request(conn, unknown_id_message(raw))

@@ -46,6 +46,13 @@ export interface ConfigFileSummary {
    * invites you to fix a setting that has no effect.
    */
   env_override: { var: string; value: string } | null
+  /**
+   * A content hash of the file as served, or null when it does not exist. Send
+   * it back on a write as `expected_digest` and the daemon refuses the save if
+   * the bytes moved underneath — which they can, because this board is
+   * reachable from two hubs and a phone at the same time.
+   */
+  digest: string | null
 }
 
 export interface ConfigFile extends ConfigFileSummary {
@@ -295,13 +302,32 @@ export const loadConfigFile = (
 ): Promise<ConfigFile> =>
   getJSON(base, `/api/v1/config/${id}${originQuery(host.origin)}`, host.label)
 
+/**
+ * Replace a file's text.
+ *
+ * `expectedDigest` is the `digest` the read handed back — pass it always,
+ * including as `null` for a file that did not exist, so the daemon can refuse a
+ * save that would overwrite bytes this editor never saw. Omitting the argument
+ * is last-write-wins, which is right for a script and wrong for a human with
+ * two devices.
+ */
 export const saveConfigFile = (
   base: string,
   host: SettingsHost,
   id: ConfigId,
   text: string,
+  expectedDigest?: string | null,
 ): Promise<ConfigFile> =>
-  postJSON(base, `/api/v1/config/${id}`, { text, origin: host.origin }, host.label)
+  postJSON(
+    base,
+    `/api/v1/config/${id}`,
+    {
+      text,
+      origin: host.origin,
+      ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
+    },
+    host.label,
+  )
 
 // ── The two path lists ──────────────────────────────────────────────────────
 
