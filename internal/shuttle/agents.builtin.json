@@ -137,14 +137,12 @@
     "aliases": ["pi"]
   },
   {
-    "id": "pi-ox-alpha",
+    "id": "pi-union-alpha",
     "cli": "pi",
     "provider": "openrouter",
-    "model": "stealth/ox-alpha",
+    "model": "stealth/union-alpha",
     "requires_model": true,
-    "effort_levels": ["low", "high", "max"],
-    "default_effort": "high",
     "cost_class": "openrouter",
-    "aliases": ["ox-alpha"]
+    "aliases": ["union-alpha"]
   }
 ]

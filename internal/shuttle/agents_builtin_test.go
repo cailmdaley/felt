@@ -17,7 +17,7 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
 		"codex-sol", "codex-terra", "codex-luna",
 		"pi-luna", "pi-openai-luna", "pi-grok", "pi-gemini-flash",
-		"pi-kimi", "pi-deepseek-flash", "pi-glm-flash", "pi-ox-alpha",
+		"pi-kimi", "pi-deepseek-flash", "pi-glm-flash", "pi-union-alpha",
 	}
 	if got := reg.IDs(); !slices.Equal(got, want) {
 		t.Fatalf("built-in ids = %v, want %v", got, want)
@@ -66,7 +66,7 @@ func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
 	want := map[string]struct{ provider, model string }{
 		"pi-luna":        {provider: "github-copilot", model: "gpt-5.6-luna"},
 		"pi-openai-luna": {provider: "openai-codex", model: "gpt-5.6-luna"},
-		"pi-ox-alpha":    {provider: "openrouter", model: "stealth/ox-alpha"},
+		"pi-union-alpha": {provider: "openrouter", model: "stealth/union-alpha"},
 	}
 	for id, expected := range want {
 		got, ok := reg.Find(id)

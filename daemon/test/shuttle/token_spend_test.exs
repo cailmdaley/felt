@@ -233,7 +233,7 @@ defmodule Shuttle.TokenSpendTest do
         "message" => %{
           "role" => "assistant",
           "responseId" => response_id,
-          "model" => "stealth/ox-alpha",
+          "model" => "stealth/union-alpha",
           "usage" => usage
         }
       }
@@ -258,7 +258,7 @@ defmodule Shuttle.TokenSpendTest do
       assert result.messages == 2
 
       assert result.models == %{
-               "stealth/ox-alpha" => %{
+               "stealth/union-alpha" => %{
                  input: 6,
                  output: 100,
                  cache_read: 1_400,
