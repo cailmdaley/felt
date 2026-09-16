@@ -56,7 +56,7 @@ step needs the person.
 | `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. Choose it explicitly when you want that tier; an unnamed fiber uses the registry default, `claude-opus`. |
 | `claude-haiku` | Cheap and fast. Easy, repetitive, or low-stakes tasks. |
 | `codex-sol`, `codex-terra`, `codex-luna` | Hard well-defined implementation — gritty refactors and tight algorithmic problems that suit the Codex CLI's sandboxed, head-down harness. Choose the tier that fits the task. |
-| `pi-luna`, `pi-openai-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash` | Provider-backed pi dispatches. Use `felt shuttle agents` to see which providers are configured on this host. |
+| `pi-luna`, `pi-openai-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash`, `pi-ox-alpha` | Provider-backed pi dispatches. `pi-ox-alpha` is the free OpenRouter Ox Alpha model; use `low`, `high`, or `max` effort. Use `felt shuttle agents` to see which providers are configured on this host. |
 
 `claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
 

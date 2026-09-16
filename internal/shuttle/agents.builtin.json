@@ -135,5 +135,16 @@
     "requires_model": true,
     "cost_class": "openrouter",
     "aliases": ["pi"]
+  },
+  {
+    "id": "pi-ox-alpha",
+    "cli": "pi",
+    "provider": "openrouter",
+    "model": "stealth/ox-alpha",
+    "requires_model": true,
+    "effort_levels": ["low", "high", "max"],
+    "default_effort": "high",
+    "cost_class": "openrouter",
+    "aliases": ["ox-alpha"]
   }
 ]
