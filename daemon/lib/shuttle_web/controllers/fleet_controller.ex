@@ -61,16 +61,25 @@ defmodule ShuttleWeb.FleetController do
 
   @registry_timeout_ms 1_500
   @cli_timeout_ms 60_000
+  # The forward must outlast the work it forwards. `OriginRouter`'s default is
+  # 30s and the CLI on the far side is given 60s, so a tunnel install that took
+  # 40s used to surface here as "forward failed" while the jobs were being
+  # written — a page telling you a write did not land when it did. The margin
+  # covers the far side's own bound plus a slow hop.
+  @forward_timeout_ms 90_000
 
   # ── Read ─────────────────────────────────────────────────────────────────
 
   def show(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/fleet", params))
 
       :local ->
         json(conn, local_fleet())
+
+      {:error, {:unknown_origin, origin}} ->
+        bad_request(conn, OriginRouter.unknown_origin_message(origin))
     end
   end
 
@@ -216,7 +225,7 @@ defmodule ShuttleWeb.FleetController do
   # ── Write: one remote ────────────────────────────────────────────────────
 
   def upsert(conn, %{"name" => name} = params) when is_binary(name) and name != "" do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         forward(conn, remote, "/api/v1/fleet/remotes", params)
 
@@ -226,6 +235,9 @@ defmodule ShuttleWeb.FleetController do
         else
           run_cli(conn, ["shuttle", "remotes", "add", name] ++ add_flags(params))
         end
+
+      {:error, {:unknown_origin, origin}} ->
+        bad_request(conn, OriginRouter.unknown_origin_message(origin))
     end
   end
 
@@ -285,9 +297,12 @@ defmodule ShuttleWeb.FleetController do
   # ── Write: the tunnel jobs ───────────────────────────────────────────────
 
   def tunnels(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         forward(conn, remote, "/api/v1/tunnels", params)
+
+      {:error, {:unknown_origin, origin}} ->
+        bad_request(conn, OriginRouter.unknown_origin_message(origin))
 
       :local ->
         name = Map.get(params, "name")
@@ -316,18 +331,40 @@ defmodule ShuttleWeb.FleetController do
       {:ok, output} ->
         json(conn, %{ok: true, host: Poller.own_host_id(), output: String.trim(output)})
 
+      # Same distinction the config plane makes: felt refusing the request is a
+      # 400, felt not being runnable is a 503. A wedged CLI reported as "your
+      # request was bad" sends someone to fix a correct one; and a timeout is
+      # never evidence of absence — `remotes add` may well have landed.
+      {:command_error, :timeout, _output} ->
+        unavailable(
+          conn,
+          "felt did not answer within #{div(@cli_timeout_ms, 1000)}s on this host. " <>
+            "It may or may not have finished — re-read the fleet before retrying."
+        )
+
+      {:command_error, 127, _output} ->
+        unavailable(conn, "felt is not on this daemon's PATH, so it cannot run that verb.")
+
       {:command_error, _status, output} ->
         bad_request(conn, String.trim(output))
 
       {:error, reason} ->
-        conn |> put_status(502) |> json(%{ok: false, error: "could not run felt: #{reason}"})
+        unavailable(conn, "could not run felt: #{reason}")
     end
   end
 
   defp forward(conn, remote, path, params) do
-    relay_json(conn, OriginRouter.forward(remote, path, params), fn name, reason ->
-      %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-    end)
+    relay_json(
+      conn,
+      OriginRouter.forward(remote, path, params, forward_timeout_ms: @forward_timeout_ms),
+      fn name, reason ->
+        %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
+      end
+    )
+  end
+
+  defp unavailable(conn, message) do
+    conn |> put_status(503) |> json(%{ok: false, error: message, unavailable: true})
   end
 
   defp bad_request(conn, message) do

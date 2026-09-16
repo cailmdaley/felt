@@ -27,12 +27,18 @@ defmodule ShuttleWeb.AgentsController do
   require Logger
 
   def show(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/agents", params))
 
       :local ->
         json(conn, list_agents())
+
+      # A registry is a per-host fact, so an origin this daemon cannot place has
+      # no answer here. Degrading would serve THIS host's agents under another
+      # machine's name, which is worse than an error on a picker.
+      {:error, {:unknown_origin, origin}} ->
+        conn |> put_status(400) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
     end
   end
 

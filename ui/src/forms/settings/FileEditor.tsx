@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   CONFIG_FILENAME,
+  isConflict,
   loadConfigFile,
   saveConfigFile,
   type ConfigId,
@@ -60,6 +61,7 @@ export function FileEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [conflict, setConflict] = useState(false)
   /** The draft differs from the bytes on disk as we last saw them. */
   const dirty = loaded !== null && draft !== loaded.text
 
@@ -73,11 +75,19 @@ export function FileEditor({
    * your text, `dirty` recomputes against the new base, and saving again now
    * carries the new digest.
    */
+  // Every read is stamped, and one whose stamp is no longer current is dropped
+  // on arrival. The parent also remounts this component on a host switch,
+  // which would hide the problem — but "one host's file rendered under another
+  // host's name" is the one unacceptable state on this page, and it should not
+  // rest on a `key` attribute in a different file staying correct.
+  const generation = useRef(0)
   const load = useRef<(keepDraft?: boolean) => void>(() => {})
   load.current = (keepDraft?: boolean): void => {
     setError(null)
+    const mine = ++generation.current
     loadConfigFile(shuttleBase, host, id)
       .then((file) => {
+        if (mine !== generation.current) return
         setLoaded({
           text: file.text,
           path: file.path,
@@ -86,7 +96,9 @@ export function FileEditor({
         })
         if (!keepDraft) setDraft(file.text)
       })
-      .catch((err: Error) => setError(err.message))
+      .catch((err: Error) => {
+        if (mine === generation.current) setError(err.message)
+      })
   }
 
   // Fetch only once opened: four sections' files would otherwise be four
@@ -101,6 +113,7 @@ export function FileEditor({
   // on screen under a new host's name is the one mistake this page must not
   // make.
   useEffect(() => {
+    generation.current += 1
     setLoaded(null)
     setDraft('')
     setError(null)
@@ -114,6 +127,7 @@ export function FileEditor({
     setSaved(false)
     try {
       const file = await saveConfigFile(shuttleBase, host, id, draft, loaded?.digest ?? null)
+      setConflict(false)
       setLoaded({
         text: file.text,
         path: file.path,
@@ -124,6 +138,11 @@ export function FileEditor({
       setSaved(true)
       onSaved()
     } catch (err) {
+      // Whether this refusal was a CONFLICT decides whether the recovery
+      // affordance appears, and that must not be a substring test on the
+      // daemon's prose — reword the message and the button would vanish with
+      // nothing going red. The API layer reports the kind; this reads the kind.
+      setConflict(isConflict(err))
       setError((err as Error).message)
     } finally {
       setBusy(false)
@@ -200,7 +219,7 @@ export function FileEditor({
           {error && (
             <div className="set-error" role="alert">
               {error}
-              {error.includes('since you opened it') && (
+              {conflict && (
                 <>
                   {' '}
                   <button

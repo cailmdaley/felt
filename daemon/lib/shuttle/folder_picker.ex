@@ -18,7 +18,15 @@ defmodule Shuttle.FolderPicker do
     * `:zenity` — Linux/GTK, `--file-selection --directory`.
     * `:kdialog` — Linux/KDE, `--getexistingdirectory`.
 
-  `mechanism/0` answers `nil` when none of them is on PATH (or the platform has
+  On Linux the binary being on PATH is **not** the test, and it used to be. A
+  cluster login node ships `zenity` in its base image and has no display server
+  at all, so `find_executable` said yes and the dialog it promised exited
+  non-zero into a code path that reads a non-zero exit as the human pressing
+  Cancel — the caller waited, and then nothing happened and nothing was said. So
+  a GTK/KDE mechanism additionally requires `$DISPLAY` or `$WAYLAND_DISPLAY`,
+  which is the actual question ("is there a screen to put this on?").
+
+  `mechanism/0` answers `nil` when none of them is usable (or the platform has
   no dialog at all), which is what lets the UI decide between the dialog and the
   path field *before* the human clicks. Force it in tests with
   `config :shuttle, :folder_picker_mechanism, :osascript | :zenity | :kdialog | :none`.
@@ -71,8 +79,21 @@ defmodule Shuttle.FolderPicker do
   defp detect do
     case :os.type() do
       {:unix, :darwin} -> if executable?("osascript"), do: :osascript, else: nil
-      {:unix, _} -> Enum.find([:zenity, :kdialog], &executable?(Atom.to_string(&1)))
+      {:unix, _} -> if display?(), do: linux_mechanism(), else: nil
       _ -> nil
+    end
+  end
+
+  defp linux_mechanism, do: Enum.find([:zenity, :kdialog], &executable?(Atom.to_string(&1)))
+
+  # Is there a screen to put a dialog on? An X11 or Wayland session names
+  # itself in the environment, and a headless host names neither.
+  defp display?, do: env?("DISPLAY") or env?("WAYLAND_DISPLAY")
+
+  defp env?(name) do
+    case System.get_env(name) do
+      value when is_binary(value) and value != "" -> true
+      _ -> false
     end
   end
 

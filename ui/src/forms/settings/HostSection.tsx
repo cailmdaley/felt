@@ -26,7 +26,7 @@
  * dispatch authority, and the sentence beside it says so.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   loadHostState,
@@ -89,15 +89,20 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
   // render from a fixed stamp. A quiet refetch: failures are dropped rather
   // than replacing what is on screen with an error the last good read
   // disproves.
+  const busyRef = useRef(busy)
+  busyRef.current = busy
+
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (busy) return
+      // Through a ref, not a dependency: in the deps the timer restarted on
+      // every button press, so a run of clicks could hold the refresh off.
+      if (busyRef.current) return
       loadHostState(shuttleBase, host)
         .then((data) => data && setState(data))
         .catch(() => {})
     }, 15_000)
     return () => window.clearInterval(id)
-  }, [shuttleBase, host.origin, busy])
+  }, [shuttleBase, host.origin])
 
   const build = state?.build
   const contract = state?.contract

@@ -405,7 +405,6 @@ const SHEET = `
     flex: 0 0 auto;
     box-shadow: none;
     border: 1px solid rgba(46, 42, 38, 0.16);
-    min-height: 40px;
     padding: 6px 12px;
   }
   .set-railbtn-active { box-shadow: none; border-color: #C49333; }
@@ -426,11 +425,19 @@ const SHEET = `
     line-height: 1.35;
   }
   .set-pane { padding: 14px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
-  /* iOS zooms the page for any field under 16px and will not zoom back. */
+  /* iOS zooms the page for any field under 16px and will not zoom back — and
+     that applies to the textarea most of all, which is the main editing
+     surface on the one device this sheet exists for. It gets a tighter line
+     height instead of a smaller size: the thing to save on a phone is vertical
+     space, not point size. */
   .set-input, .set-select, .set-textarea { font-size: 16px; }
-  .set-textarea { font-size: 13px; }
+  .set-textarea { line-height: 1.35; }
+  /* 44px, including — especially — the destructive one. The remove control had
+     40 while the safe controls had 44, which is exactly backwards: a miss on
+     Add costs a keystroke, a miss on ✕ costs a store. */
   .set-btn { min-height: 44px; padding: 8px 14px; }
-  .set-btn-drop { min-height: 40px; }
+  .set-btn-drop { min-height: 44px; min-width: 44px; }
+  .set-railbtn { min-height: 44px; }
   .set-row { padding: 10px 0; }
   .set-facts { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
   .set-facts dt { margin-top: 8px; }

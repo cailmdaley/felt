@@ -650,7 +650,10 @@ The registry file takes this canonical shape. A bare JSON array also works.
 ```
 
 `POST /api/v1/felt-stores` rewrites the file, and the board's store picker uses
-that endpoint. A store path must contain a `.felt/` directory.
+that endpoint. A store is a directory with a `.felt/` inside it; nothing
+validates that when you register one, and nothing needs to — a directory
+without one is a store with no fibers, which the poller reads as empty rather
+than as an error.
 
 Everything in this section and the two below it is also reachable from the
 board's [settings sheet](board.md#settings--the-operator-files-on-any-host)

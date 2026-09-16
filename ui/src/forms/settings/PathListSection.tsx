@@ -22,14 +22,29 @@
  * Adding a **store** only writes the list — a directory with no `.felt/` in it
  * is simply a store with no fibers, which the poller reads as empty rather
  * than as an error.
+ *
+ * ## Where the rows come from, and why not from the feed
+ *
+ * The list is read from the OWNING HOST, through `GET /api/v1/config/:id`, not
+ * from the origins feed the sheet already holds. The feed is a hub's cache,
+ * and for a remote it has not heard from it reports an empty list — which is
+ * indistinguishable, there, from a host that genuinely has none. Every write
+ * here is a whole-list REPLACE, so seeding from that empty list and pressing
+ * Add would have persisted a single row over that host's entire registry. A
+ * live read cannot say "empty" about a host that never answered: it either
+ * works or it fails, and a failure renders as a failure.
+ *
+ * Each save carries the digest that came with the list it is editing, so two
+ * people editing one host's list cannot silently drop each other's rows.
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
 import {
   addProject,
   chooseFolder,
+  loadConfigFile,
   saveProjects,
   saveStores,
   type ConfigFileSummary,
@@ -81,6 +96,12 @@ const COPY: Record<
   },
 }
 
+/** The list as the owning host holds it, with the digest that guards a replace. */
+interface Loaded {
+  paths: string[]
+  digest: string | null
+}
+
 export function PathListSection({
   shuttleBase,
   host,
@@ -88,35 +109,52 @@ export function PathListSection({
   summary,
   onChanged,
 }: PathListSectionProps): JSX.Element {
-  const source = kind === 'stores' ? host.feltStores : host.projects
-  const [paths, setPaths] = useState<string[]>(source)
+  const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [fileToken, setFileToken] = useState(0)
 
-  // The host's own lists ride in on the origins feed, so they are already here
-  // when this mounts — and they are re-read whenever the parent refetches, so
-  // a save made from the file editor below shows up in the rows above it.
-  useEffect(() => {
-    setPaths(source)
-    setError(null)
-    setNote(null)
-  }, [host.origin, kind, source.join('\n')])
+  const read = useCallback(
+    (keepNote = false): Promise<void> => {
+      if (!keepNote) setNote(null)
+      setError(null)
+      return loadConfigFile(shuttleBase, host, kind)
+        .then((file) => {
+          setLoaded({ paths: file.entries ?? [], digest: file.digest ?? null })
+        })
+        .catch((err: Error) => {
+          setLoaded(null)
+          setError(err.message)
+        })
+    },
+    [shuttleBase, host, kind],
+  )
 
-  const persist = async (next: string[], said?: string): Promise<void> => {
-    if (busy) return
+  // Mount, and every host or section switch. The list is dropped to null
+  // BEFORE the new read is issued, so a slow answer can never paint one host's
+  // paths under another host's name — the state this page must never reach.
+  const readRef = useRef(read)
+  readRef.current = read
+  useEffect(() => {
+    setLoaded(null)
+    setTyped('')
+    setNote(null)
+    void readRef.current()
+  }, [shuttleBase, host.origin, kind])
+
+  const paths = loaded?.paths ?? []
+
+  const persist = async (next: string[]): Promise<void> => {
+    if (busy || !loaded) return
     setBusy(true)
     setError(null)
     setNote(null)
     try {
-      const saved =
-        kind === 'stores'
-          ? (await saveStores(shuttleBase, host, next)).felt_stores
-          : (await saveProjects(shuttleBase, host, next)).projects
-      setPaths(saved ?? next)
-      if (said) setNote(said)
+      if (kind === 'stores') await saveStores(shuttleBase, host, next, loaded.digest)
+      else await saveProjects(shuttleBase, host, next, loaded.digest)
+      await read()
       setFileToken((n) => n + 1)
       onChanged()
     } catch (err) {
@@ -128,7 +166,7 @@ export function PathListSection({
 
   const add = async (raw: string): Promise<void> => {
     const path = raw.trim()
-    if (!path) return
+    if (!path || !loaded) return
     if (paths.includes(path)) {
       setError(`${path} is already on the list.`)
       return
@@ -147,15 +185,13 @@ export function PathListSection({
     setNote(null)
     try {
       const result = await addProject(shuttleBase, host, path)
-      setPaths(result.projects ?? [...paths, path])
       setTyped('')
-      setNote(
-        result.initialized
-          ? `Initialized a new felt store at ${result.path}.`
-          : result.registered
-            ? null
-            : `${result.path} was already registered.`,
-      )
+      // The note is set BEFORE the refresh and survives it. It is the
+      // confirmation for the only call here that creates anything on disk, and
+      // a refresh that cleared it made that confirmation flash and vanish.
+      if (result.initialized) setNote(`Initialized a new felt store at ${result.path}.`)
+      else if (!result.registered) setNote(`${result.path} was already registered.`)
+      await read(true)
       setFileToken((n) => n + 1)
       onChanged()
     } catch (err) {
@@ -166,27 +202,47 @@ export function PathListSection({
   }
 
   const pick = async (): Promise<void> => {
+    if (busy) return
     setError(null)
+    setNote(null)
+    setBusy(true)
     try {
       const result = await chooseFolder(shuttleBase, host)
-      if (result.cancelled || !result.path) return
-      await add(result.path)
+      if (result.path) {
+        setBusy(false)
+        await add(result.path)
+        return
+      }
+      // No path, no error. The dialog was dismissed — or it never opened, which
+      // every mechanism reports the same way a dismissal looks. Saying so beats
+      // the silence this used to answer with after a long wait.
+      setNote(
+        host.isLocal
+          ? 'No folder chosen.'
+          : `No folder came back from ${host.label}. Either someone dismissed it there, or that host could not raise a dialog — type the path instead.`,
+      )
     } catch (err) {
       setError((err as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
   const copy = COPY[kind]
   const expanded = kind === 'stores' ? host.expandedFeltStores : null
   const extra = expanded ? expanded.filter((p) => !paths.includes(p)) : []
+
   // The compact environment form wins over the file outright, so while it is
-  // set the rows below are the ENVIRONMENT's list and the file is read by
-  // nobody. Editing the list would write a file with no effect, which is worse
-  // than not offering to: the controls go away and the banner says where the
-  // value is really coming from. The file editor stays — it shows the file's
-  // own contents, honestly labelled as unread.
-  const overridden = summary?.env_override ?? null
-  const frozen = busy || overridden !== null
+  // set the file is read by nobody and editing it would have no effect. The
+  // override arrives on the config index, which the parent refetches after
+  // every save — and during that refetch `summary` is briefly undefined.
+  // `undefined` must not read as "not overridden", or the controls this guard
+  // exists to disable would blink back on mid-round-trip. So an override, once
+  // seen, is latched for the life of this mount.
+  const latched = useRef<ConfigFileSummary['env_override']>(null)
+  if (summary?.env_override) latched.current = summary.env_override
+  const overridden = summary?.env_override ?? latched.current
+  const frozen = busy || overridden !== null || loaded === null
 
   return (
     <>
@@ -195,7 +251,7 @@ export function PathListSection({
       {overridden && (
         <div className="set-error" role="status">
           <span className="set-mono">{overridden.var}</span> is set in this daemon’s
-          environment, so the list below is coming from there and{' '}
+          environment, so it is reading <span className="set-mono">{overridden.value}</span> and{' '}
           <span className="set-mono">{copy.filename}</span> is read by nobody. Editing is off
           for that reason — a change to the file would have no effect until the variable is
           unset and the daemon restarts. The file’s own contents are still at the bottom of
@@ -203,31 +259,46 @@ export function PathListSection({
         </div>
       )}
 
-      {paths.length === 0 ? (
-        <div className="set-empty">{copy.empty}</div>
-      ) : (
-        <ul className="set-list">
-          {paths.map((path) => (
-            <li className="set-row" key={path}>
-              <span className="set-row-main">
-                <span className="set-row-path">{path}</span>
-              </span>
-              {!overridden && (
-                <button
-                  type="button"
-                  className="set-btn set-btn-drop"
-                  disabled={frozen}
-                  title={`Remove ${path} from the list`}
-                  aria-label={`Remove ${path}`}
-                  onClick={() => void persist(paths.filter((p) => p !== path))}
-                >
-                  ✕
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+      {loaded === null && !error && <div className="set-empty">Reading…</div>}
+
+      {loaded !== null && paths.length > 0 && (
+        <div className="set-section-label">
+          {paths.length} {kind === 'stores' ? 'store' : 'project'}
+          {paths.length === 1 ? '' : 's'} in {copy.filename}
+        </div>
       )}
+
+      {loaded !== null &&
+        (paths.length === 0 ? (
+          <div className="set-empty">{copy.empty}</div>
+        ) : (
+          <ul className="set-list">
+            {paths.map((path) => (
+              <li className="set-row" key={path}>
+                <span className="set-row-main">
+                  <span className="set-row-path">{path}</span>
+                  {paths.length === 1 && !overridden && (
+                    <span className="set-row-note set-row-note-owed">
+                      the last one — removing it deletes {copy.filename}
+                    </span>
+                  )}
+                </span>
+                {!overridden && (
+                  <button
+                    type="button"
+                    className="set-btn set-btn-drop"
+                    disabled={frozen}
+                    title={`Remove ${path} from the list`}
+                    aria-label={`Remove ${path}`}
+                    onClick={() => void persist(paths.filter((p) => p !== path))}
+                  >
+                    ✕
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        ))}
 
       {extra.length > 0 && (
         <p className="set-row-note" style={{ marginTop: '8px' }}>
@@ -295,14 +366,21 @@ export function PathListSection({
       )}
 
       {note && <div className="set-said">{note}</div>}
-      {error && <div className="set-error" role="alert">{error}</div>}
+      {error && (
+        <div className="set-error" role="alert">
+          {error}
+        </div>
+      )}
 
       <FileEditor
         shuttleBase={shuttleBase}
         host={host}
         id={kind}
         reloadToken={fileToken}
-        onSaved={onChanged}
+        onSaved={() => {
+          void read()
+          onChanged()
+        }}
       />
     </>
   )

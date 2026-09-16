@@ -35,7 +35,16 @@ defmodule ShuttleWeb.FeltStoresController do
   import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
   import ShuttleWeb.TemporalComposite, only: [render_error: 1]
 
-  alias Shuttle.{FeltStores, FolderPicker, OriginRouter, Poller, Projects, RegistryCommon, Remote}
+  alias Shuttle.{
+    ConfigFiles,
+    FeltStores,
+    FolderPicker,
+    OriginRouter,
+    Poller,
+    Projects,
+    RegistryCommon,
+    Remote
+  }
   alias Shuttle.RemoteFiberRegistry
 
   def show(conn, _params) do
@@ -63,7 +72,7 @@ defmodule ShuttleWeb.FeltStoresController do
   end
 
   def create(conn, %{"felt_stores" => hosts} = params) when is_list(hosts) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         relay_json(conn, OriginRouter.forward(remote, "/api/v1/felt-stores", params), fn name,
                                                                                         reason ->
@@ -71,7 +80,10 @@ defmodule ShuttleWeb.FeltStoresController do
         end)
 
       :local ->
-        save_local(conn, hosts)
+        save_local(conn, hosts, Map.get(params, "expected_digest", :any))
+
+      {:error, {:unknown_origin, origin}} ->
+        conn |> put_status(400) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
     end
   end
 
@@ -81,7 +93,19 @@ defmodule ShuttleWeb.FeltStoresController do
     |> json(%{error: "felt_stores must be an array of host paths"})
   end
 
-  defp save_local(conn, hosts) do
+  # `expected_digest` is the same precondition the text editor carries, and for
+  # the same reason: this is a whole-list REPLACE, so a caller working from a
+  # list someone else has since changed would silently drop their rows. Absent
+  # means last-write-wins, which is every existing caller.
+  defp save_local(conn, hosts, expected) do
+    with :ok <- ConfigFiles.check_digest(:stores, expected) do
+      persist_stores(conn, hosts)
+    else
+      {:error, message} -> conn |> put_status(409) |> json(%{ok: false, error: message})
+    end
+  end
+
+  defp persist_stores(conn, hosts) do
     case FeltStores.save(hosts) do
       {:ok, normalized} ->
         json(conn, %{

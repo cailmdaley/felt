@@ -30,9 +30,20 @@ defmodule ShuttleWeb.QuarantineController do
   def create(conn, params) do
     origin = Map.get(params, "origin")
 
-    case OriginRouter.route(origin) do
-      :local -> release_local(conn)
-      {:remote, %Remote{} = remote} -> forward(conn, remote, origin)
+    case OriginRouter.route_host(origin) do
+      :local ->
+        release_local(conn)
+
+      {:remote, %Remote{} = remote} ->
+        forward(conn, remote, origin)
+
+      # Releasing is dispatch AUTHORITY. An origin this daemon cannot place
+      # must not degrade to "release mine instead" — that is the one degrade
+      # here that starts work running on a machine nobody asked about.
+      {:error, {:unknown_origin, name}} ->
+        conn
+        |> put_status(400)
+        |> json(%{ok: false, error: OriginRouter.unknown_origin_message(name)})
     end
   end
 

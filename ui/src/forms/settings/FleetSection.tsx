@@ -34,7 +34,7 @@
  * `--dry-run` — it reports both halves and touches nothing.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
 import {
@@ -87,6 +87,8 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState(0)
   const [adding, setAdding] = useState(false)
+  /** The quiet refetch stopped working. The rows are still drawn, marked. */
+  const [drifted, setDrifted] = useState(false)
   const [draft, setDraft] = useState({ name: '', url: '', ssh: '', port: '', checkout: '' })
 
   useEffect(() => {
@@ -118,13 +120,28 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
    */
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (busy) return
+      // `busy` is read through a ref rather than a dependency: putting it in
+      // the deps restarted this timer on every button press, so a run of
+      // clicks could hold the refresh off indefinitely.
+      if (busyRef.current) return
       loadFleet(shuttleBase, host)
-        .then(setFleet)
-        .catch(() => {})
+        .then((data) => {
+          setFleet(data)
+          setDrifted(false)
+        })
+        // A failed refetch must NOT be swallowed. Every row's "answering · 4s
+        // ago" is computed at render from a fixed stamp, so silence here is
+        // the page going on asserting a freshness it has stopped knowing
+        // about — verbatim the thing this timer was added to prevent. The rows
+        // stay (the last good read is still the truest thing we have) and say
+        // they have stopped moving.
+        .catch(() => setDrifted(true))
     }, 15_000)
     return () => window.clearInterval(id)
-  }, [shuttleBase, host.origin, busy])
+  }, [shuttleBase, host.origin])
+
+  const busyRef = useRef(busy)
+  busyRef.current = busy
 
   const refresh = (): void => {
     setToken((n) => n + 1)
@@ -166,6 +183,14 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
           The fleet file would not parse, so this host is running with no remotes at all:
           {'\n'}
           {fleet.error}
+        </div>
+      )}
+
+      {drifted && (
+        <div className="set-error" role="status">
+          These rows have stopped refreshing — the last few reads of {host.label} failed. The
+          ages below are frozen at whenever they last worked, so read them as history rather
+          than as now.
         </div>
       )}
 

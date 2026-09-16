@@ -100,7 +100,11 @@ export function SettingsDialog({
   useEffect(() => {
     if (!host) return
     let cancelled = false
-    setIndex(null)
+    // Deliberately NOT cleared first on a revision bump. The index carries the
+    // environment-override flag a section uses to disable editing, and a blank
+    // index reads as "not overridden" — so clearing it here blinked those
+    // controls back on for the length of a round trip, which is the one moment
+    // they were guarding against. A host switch does clear it, below.
     loadConfigIndex(shuttleBase, host)
       .then((data) => {
         if (!cancelled) setIndex(data.files ?? [])
@@ -115,6 +119,12 @@ export function SettingsDialog({
       cancelled = true
     }
   }, [shuttleBase, host?.origin, revision])
+
+  // A host switch, on the other hand, invalidates the index outright: the next
+  // host's files are different files, and its override flags are its own.
+  useEffect(() => {
+    setIndex(null)
+  }, [host?.origin])
 
   const summaryFor = (id: ConfigFileSummary['id']): ConfigFileSummary | undefined =>
     index?.find((f) => f.id === id)
@@ -178,12 +188,6 @@ export function SettingsDialog({
                 onClick={() => setSection(s.id)}
               >
                 {s.label}
-                {s.id === 'stores' && (
-                  <span className="set-railbtn-count">{host.feltStores.length}</span>
-                )}
-                {s.id === 'projects' && (
-                  <span className="set-railbtn-count">{host.projects.length}</span>
-                )}
               </button>
             ))}
           </nav>

@@ -450,7 +450,23 @@ defmodule Shuttle.ConfigFilesTest do
       MockFelt.reply_with(fn call -> {"could not read #{call.tmp} while checking", 1} end)
 
       assert ConfigFiles.validate(:remotes, @remotes_doc) ==
-               {:error, "could not read the candidate while checking"}
+               {:error, "could not read the file while checking"}
+    end
+
+    test "a path MID-SENTENCE is replaced, not excised with the colon after it" do
+      # The two validators put the path in different places, and the scrub used
+      # to strip `"<tmp>: "` wherever it appeared. That is right for the fleet
+      # reader, whose path leads the line, and wrong for the agent one, whose
+      # path sits inside a clause: `parsing <tmp>: unsupported version 99`
+      # became `parsing unsupported version 99`, eating the colon that held the
+      # sentence together — so the one guarantee five docs make about these
+      # refusals ("felt's own sentence, verbatim") was false for that file.
+      MockFelt.reply_with(fn call ->
+        {"loading agent registry: parsing #{call.tmp}: unsupported version 99\n", 1}
+      end)
+
+      assert ConfigFiles.validate(:agents, ~s({"version": 99})) ==
+               {:error, "loading agent registry: parsing the file: unsupported version 99"}
     end
 
     test "cleans up the candidate whether felt accepts or refuses" do

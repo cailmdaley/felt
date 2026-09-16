@@ -437,4 +437,15 @@ defmodule Shuttle.FeltStores do
   @spec config_path() :: String.t()
   def config_path, do: PathListConfig.config_path(@spec_)
 
+  @doc """
+  The list PERSISTED in the file, ignoring `FELT_STORES`.
+
+  Distinct from `configured_base_hosts/0`, which answers "what is this daemon
+  actually polling" — the env form when it is set. An editor of the file wants
+  the file: showing the env list in a control that writes the file would let
+  someone save the override's contents into a file nobody reads.
+  """
+  @spec registered_hosts() :: host_list()
+  def registered_hosts, do: PathListConfig.registered(@spec_)
+
 end

@@ -22,8 +22,6 @@
 /** Which operator file. The wire names are the files' own stems. */
 export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes'
 
-export const CONFIG_IDS: ConfigId[] = ['stores', 'projects', 'agents', 'remotes']
-
 /** What a config file is called on screen, and what it governs. */
 export const CONFIG_FILENAME: Record<ConfigId, string> = {
   stores: 'stores.json',
@@ -57,6 +55,16 @@ export interface ConfigFileSummary {
 
 export interface ConfigFile extends ConfigFileSummary {
   text: string
+  /**
+   * The two path-list files, parsed by the reader that owns them; null for
+   * `agents` and `remotes`.
+   *
+   * This is where a structured list editor gets its rows — NOT the origins
+   * feed, which reports an empty list for a remote the hub has not heard from
+   * yet, and which a whole-list write would then persist over that host's real
+   * registry.
+   */
+  entries: string[] | null
 }
 
 /** One host the settings page can be pointed at. */
@@ -217,20 +225,78 @@ const refusal = async (res: Response, host: string): Promise<string> => {
  * is not a TypeError came from our own code and is already a sentence, so it
  * is passed through.
  */
+/**
+ * A refusal that carries the daemon's status alongside its sentence.
+ *
+ * The status is the machine-readable part and the sentence is the human one,
+ * and a caller that needs to branch — was this a conflict? was the validator
+ * simply not runnable? — must branch on the first. Reading the second is how
+ * a recovery affordance silently disappears the next time someone improves
+ * the wording.
+ */
+export class DaemonRefusal extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'DaemonRefusal'
+    this.status = status
+  }
+}
+
+/** 409 — the file moved since this editor read it. */
+export const isConflict = (err: unknown): boolean =>
+  err instanceof DaemonRefusal && err.status === 409
+
+/**
+ * 503 — the host could not RUN the check, so nothing is known about the bytes
+ * that were sent. Distinct from a refusal on purpose: there is nothing for the
+ * author to fix and retyping will not help.
+ */
+export const isUnavailable = (err: unknown): boolean =>
+  err instanceof DaemonRefusal && err.status === 503
+
 const reachError = (err: unknown): Error => {
   if (err instanceof TypeError) return new Error('Couldn’t reach the Shuttle daemon (:4000).')
   return new Error((err as { message?: string })?.message ?? String(err))
 }
 
-async function getJSON<T>(base: string, path: string, host: string): Promise<T> {
+/**
+ * Every answer on this plane names the host it came from. Check it.
+ *
+ * The daemon refuses an origin it cannot place, so this should never fire —
+ * which is exactly why it is here. Origin is the safety property of the whole
+ * page: a page that can write one machine's configuration and show it under
+ * another machine's name is a page that eventually does. Two independent
+ * guards, one on each side, and the second one costs a comparison.
+ *
+ * `expected` is the host id the sheet believes it is talking to, and `''` for
+ * a local call skips the check — a local read cannot be about anyone else.
+ */
+function assertHost<T extends { host?: string }>(body: T, expected: string, label: string): T {
+  if (expected && body?.host && body.host !== expected) {
+    throw new Error(
+      `answer came from ${body.host}, not ${label} — refusing it. ` +
+        `Reopen settings; this hub's idea of the fleet has changed underneath.`,
+    )
+  }
+  return body
+}
+
+async function getJSON<T>(
+  base: string,
+  path: string,
+  host: string,
+  expectHost = '',
+): Promise<T> {
   let res: Response
   try {
     res = await fetch(`${base}${path}`)
   } catch (err) {
     throw reachError(err)
   }
-  if (!res.ok) throw new Error(await refusal(res, host))
-  return (await res.json()) as T
+  if (!res.ok) throw new DaemonRefusal(await refusal(res, host), res.status)
+  return assertHost((await res.json()) as T & { host?: string }, expectHost, host)
 }
 
 async function postJSON<T>(
@@ -238,6 +304,7 @@ async function postJSON<T>(
   path: string,
   body: Record<string, unknown>,
   host: string,
+  expectHost = '',
 ): Promise<T> {
   let res: Response
   try {
@@ -249,8 +316,8 @@ async function postJSON<T>(
   } catch (err) {
     throw reachError(err)
   }
-  if (!res.ok) throw new Error(await refusal(res, host))
-  return (await res.json()) as T
+  if (!res.ok) throw new DaemonRefusal(await refusal(res, host), res.status)
+  return assertHost((await res.json()) as T & { host?: string }, expectHost, host)
 }
 
 // ── Hosts ───────────────────────────────────────────────────────────────────
@@ -307,14 +374,14 @@ export const loadConfigIndex = (
   base: string,
   host: SettingsHost,
 ): Promise<{ host: string; files: ConfigFileSummary[] }> =>
-  getJSON(base, `/api/v1/config${originQuery(host.origin)}`, host.label)
+  getJSON(base, `/api/v1/config${originQuery(host.origin)}`, host.label, host.host)
 
 export const loadConfigFile = (
   base: string,
   host: SettingsHost,
   id: ConfigId,
 ): Promise<ConfigFile> =>
-  getJSON(base, `/api/v1/config/${id}${originQuery(host.origin)}`, host.label)
+  getJSON(base, `/api/v1/config/${id}${originQuery(host.origin)}`, host.label, host.host)
 
 /**
  * Replace a file's text.
@@ -341,23 +408,54 @@ export const saveConfigFile = (
       ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
     },
     host.label,
+    host.host,
   )
 
 // ── The two path lists ──────────────────────────────────────────────────────
 
+/**
+ * Replace a host's whole store list.
+ *
+ * `expectedDigest` is the digest that came with the list this caller is
+ * editing. It is a whole-list REPLACE, so without it two people editing the
+ * same host drop each other's rows in silence; a mismatch comes back 409.
+ */
 export const saveStores = (
   base: string,
   host: SettingsHost,
   feltStores: string[],
+  expectedDigest?: string | null,
 ): Promise<{ felt_stores: string[] }> =>
-  postJSON(base, '/api/v1/felt-stores', { felt_stores: feltStores, origin: host.origin }, host.label)
+  postJSON(
+    base,
+    '/api/v1/felt-stores',
+    {
+      felt_stores: feltStores,
+      origin: host.origin,
+      ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
+    },
+    host.label,
+    host.host,
+  )
 
+/** Replace a host's whole picker list. See `saveStores` on `expectedDigest`. */
 export const saveProjects = (
   base: string,
   host: SettingsHost,
   projects: string[],
+  expectedDigest?: string | null,
 ): Promise<{ projects: string[] }> =>
-  postJSON(base, '/api/v1/projects', { projects, origin: host.origin }, host.label)
+  postJSON(
+    base,
+    '/api/v1/projects',
+    {
+      projects,
+      origin: host.origin,
+      ...(expectedDigest === undefined ? {} : { expected_digest: expectedDigest }),
+    },
+    host.label,
+    host.host,
+  )
 
 /**
  * Register one checkout: initializes its `.felt/` if it has none, then appends
@@ -369,7 +467,7 @@ export const addProject = (
   host: SettingsHost,
   path: string,
 ): Promise<{ path: string; registered: boolean; initialized: boolean; projects: string[] }> =>
-  postJSON(base, '/api/v1/projects', { path, origin: host.origin }, host.label)
+  postJSON(base, '/api/v1/projects', { path, origin: host.origin }, host.label, host.host)
 
 /**
  * Raise a host's own folder dialog and answer with the chosen path.
@@ -393,7 +491,7 @@ export const loadAgents = (base: string, host: SettingsHost): Promise<AgentRecor
 // ── Fleet ───────────────────────────────────────────────────────────────────
 
 export const loadFleet = (base: string, host: SettingsHost): Promise<Fleet> =>
-  getJSON(base, `/api/v1/fleet${originQuery(host.origin)}`, host.label)
+  getJSON(base, `/api/v1/fleet${originQuery(host.origin)}`, host.label, host.host)
 
 export interface RemoteSpec {
   name: string
@@ -412,14 +510,20 @@ export const saveRemote = (
   host: SettingsHost,
   spec: RemoteSpec,
 ): Promise<{ output: string }> =>
-  postJSON(base, '/api/v1/fleet/remotes', { ...spec, origin: host.origin }, host.label)
+  postJSON(base, '/api/v1/fleet/remotes', { ...spec, origin: host.origin }, host.label, host.host)
 
 export const removeRemote = (
   base: string,
   host: SettingsHost,
   name: string,
 ): Promise<{ output: string }> =>
-  postJSON(base, '/api/v1/fleet/remotes', { name, remove: true, origin: host.origin }, host.label)
+  postJSON(
+    base,
+    '/api/v1/fleet/remotes',
+    { name, remove: true, origin: host.origin },
+    host.label,
+    host.host,
+  )
 
 export const runTunnels = (
   base: string,
@@ -432,6 +536,7 @@ export const runTunnels = (
     '/api/v1/tunnels',
     { action, ...(name ? { name } : {}), origin: host.origin },
     host.label,
+    host.host,
   )
 
 export const resetRemote = (base: string, name: string): Promise<unknown> =>
@@ -460,10 +565,6 @@ export async function loadHostState(base: string, host: SettingsHost): Promise<H
   if (host.isLocal) return data.local ?? null
   return data.remotes?.[host.origin]?.snapshot ?? null
 }
-
-/** The daemon serving this page — its build, and the CLI contract it probed. */
-export const loadVersion = (base: string): Promise<BuildStamp & { contract?: HostState['contract'] }> =>
-  getJSON(base, '/api/v1/version', '')
 
 /** Release a host's boot quarantine — owner-routed, so a hub can arm a remote. */
 export const releaseQuarantine = (base: string, host: SettingsHost): Promise<unknown> =>

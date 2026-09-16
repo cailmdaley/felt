@@ -23,9 +23,14 @@ defmodule ShuttleWeb.ConfigController do
     200  GET  /config      %{host, files: [%{id, path, exists, size, updated_at}]}
     200  GET  /config/:id  %{host, id, path, exists, size, updated_at, text}
     200  POST /config/:id  %{ok: true, host, id, path, exists, size, updated_at, text}
-    400  %{ok: false, error: string}   unknown id, missing text, or a refused edit
+    400  %{ok: false, error: string}   unknown id or host, missing text, a refused edit
     500  %{ok: false, error: string}   the write itself failed
     502  %{ok: false, error: string}   the forward to the owning daemon failed
+    503  %{ok: false, error: string, unavailable: true}
+                                      the validator could not be RUN — felt off
+                                      this daemon's PATH, or wedged past its
+                                      bound. Distinct from 400 on purpose: the
+                                      caller's bytes may be perfectly good.
 
   A write may carry `expected_digest` — the `digest` the caller was served when
   it read the file, or `null` if there was none. When it is present and the
@@ -48,41 +53,58 @@ defmodule ShuttleWeb.ConfigController do
   alias Shuttle.{ConfigFiles, OriginRouter, Poller}
 
   def index(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         relay_get(conn, remote, "/api/v1/config", params)
 
       :local ->
         json(conn, %{host: Poller.own_host_id(), files: ConfigFiles.index()})
+
+      {:error, {:unknown_origin, origin}} ->
+        bad_request(conn, OriginRouter.unknown_origin_message(origin))
     end
   end
 
   def show(conn, %{"id" => raw} = params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
-      {:remote, remote} ->
-        relay_get(conn, remote, "/api/v1/config/#{raw}", params)
+    with {:ok, id} <- parse_id(raw) do
+      case OriginRouter.route_host(Map.get(params, "origin")) do
+        {:remote, remote} ->
+          relay_get(conn, remote, "/api/v1/config/#{id}", params)
 
-      :local ->
-        with {:ok, id} <- parse_id(raw),
-             {:ok, file} <- ConfigFiles.read(id) do
-          json(conn, Map.merge(file, %{host: Poller.own_host_id()}))
-        else
-          {:error, :unknown_id} -> bad_request(conn, unknown_id_message(raw))
-          {:error, message} -> failed(conn, message)
-        end
+        :local ->
+          case ConfigFiles.read(id) do
+            {:ok, file} -> json(conn, Map.merge(file, %{host: Poller.own_host_id()}))
+            {:error, message} -> failed(conn, message)
+          end
+
+        {:error, {:unknown_origin, origin}} ->
+          bad_request(conn, OriginRouter.unknown_origin_message(origin))
+      end
+    else
+      {:error, :unknown_id} -> bad_request(conn, unknown_id_message(raw))
     end
   end
 
   def create(conn, %{"id" => raw, "text" => text} = params) when is_binary(text) do
-    case OriginRouter.route(Map.get(params, "origin")) do
-      {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{raw}", params), fn name,
-                                                                                          reason ->
-          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-        end)
+    # The id is parsed BEFORE the route decision, so an unknown one is refused
+    # here rather than after a round trip to another machine that will refuse
+    # it identically.
+    with {:ok, id} <- parse_id(raw) do
+      case OriginRouter.route_host(Map.get(params, "origin")) do
+        {:remote, remote} ->
+          relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{id}", params), fn name,
+                                                                                           reason ->
+            %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
+          end)
 
-      :local ->
-        write_local(conn, raw, text, params)
+        :local ->
+          write_local(conn, id, text, params)
+
+        {:error, {:unknown_origin, origin}} ->
+          bad_request(conn, OriginRouter.unknown_origin_message(origin))
+      end
+    else
+      {:error, :unknown_id} -> bad_request(conn, unknown_id_message(raw))
     end
   end
 
@@ -92,7 +114,7 @@ defmodule ShuttleWeb.ConfigController do
 
   # ── Local branches ───────────────────────────────────────────────────────
 
-  defp write_local(conn, raw, text, params) do
+  defp write_local(conn, id, text, params) do
     # An ABSENT key is `:any` — last-write-wins, which is what a script or an
     # older client gets. A PRESENT one, including an explicit null meaning "I
     # read no file", is a caller asking to be stopped if the bytes moved. The
@@ -104,16 +126,22 @@ defmodule ShuttleWeb.ConfigController do
         do: [expected_digest: Map.get(params, "expected_digest")],
         else: []
 
-    with {:ok, id} <- parse_id(raw),
-         {:ok, file} <- ConfigFiles.write(id, text, opts) do
-      json(conn, Map.merge(file, %{ok: true, host: Poller.own_host_id()}))
-    else
-      {:error, :unknown_id} -> bad_request(conn, unknown_id_message(raw))
-      # Every ConfigFiles refusal is about the bytes the caller sent — a parse
-      # error, a validator's complaint, an unwritable path. All of those are
-      # the request's problem to fix, so all of them are a 400; there is no
-      # failure mode here where the daemon is at fault and the caller is not.
-      {:error, message} -> bad_request(conn, message)
+    case ConfigFiles.write(id, text, opts) do
+      {:ok, file} ->
+        json(conn, Map.merge(file, %{ok: true, host: Poller.own_host_id()}))
+
+      # A refusal about the BYTES the caller sent — a parse error, a
+      # validator's complaint, a stale digest. The request is what has to
+      # change, so it is a 400.
+      {:error, message} ->
+        bad_request(conn, message)
+
+      # A refusal about this MACHINE — felt missing from the daemon's PATH, a
+      # validator that never answered. Nothing the caller sent is wrong and
+      # nothing they can retype will help, so it must not arrive in the box
+      # that means "your JSON is bad".
+      {:unavailable, message} ->
+        conn |> put_status(503) |> json(%{ok: false, error: message, unavailable: true})
     end
   end
 

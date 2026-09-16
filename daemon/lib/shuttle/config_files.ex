@@ -142,6 +142,34 @@ defmodule Shuttle.ConfigFiles do
   end
 
   @doc """
+  The two path-list files as a LIST, parsed by the reader that owns them.
+
+  `nil` for `:agents` and `:remotes`, whose contents are not a list of paths.
+
+  It exists so a structured editor can read the authoritative current list from
+  the host that owns it, rather than from the hub's cached origins feed. That
+  feed reports an empty list for a remote it has not yet heard from — which a
+  whole-list write would then persist, replacing that host's registry with
+  whatever single row the caller had typed. A list read off the file cannot say
+  "empty" about a host that never answered: the read either works or fails.
+  """
+  @spec entries(id()) :: [String.t()] | nil
+  def entries(:stores), do: FeltStores.registered_hosts()
+  def entries(:projects), do: Projects.registered_projects()
+  def entries(_), do: nil
+
+  @doc """
+  Check a caller's `expected_digest` against the file as it is now, without
+  writing anything.
+
+  Public so the two STRUCTURED list endpoints can take the same precondition
+  the text editor does. Nothing else would explain why one half of a section is
+  protected from a concurrent writer and the other half is not.
+  """
+  @spec check_digest(id(), String.t() | nil | :any) :: :ok | {:error, String.t()}
+  def check_digest(id, expected), do: check_expected(id, expected)
+
+  @doc """
   A content hash of the file as it is right now, or `nil` when it does not
   exist.
 
@@ -198,12 +226,25 @@ defmodule Shuttle.ConfigFiles do
 
     cond do
       not File.exists?(path) ->
-        {:ok, Map.put(summary(id), :text, "")}
+        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:entries, entries(id))}
 
       true ->
         case File.read(path) do
-          {:ok, text} -> {:ok, Map.put(summary(id), :text, text)}
-          {:error, reason} -> {:error, "#{path}: #{:file.format_error(reason)}"}
+          # The digest is of THESE bytes, not of a second read. `summary/1`
+          # would hash the file again, and a write landing between the two
+          # reads would hand the caller old text under the new file's digest —
+          # which its next save would then pass cleanly, overwriting the newer
+          # bytes. That is exactly the outcome the digest exists to prevent, so
+          # the guarantee must not have a hole where it is issued.
+          {:ok, text} ->
+            {:ok,
+             summary(id)
+             |> Map.put(:text, text)
+             |> Map.put(:digest, hash(text))
+             |> Map.put(:entries, entries(id))}
+
+          {:error, reason} ->
+            {:error, "#{path}: #{:file.format_error(reason)}"}
         end
     end
   end
@@ -224,7 +265,8 @@ defmodule Shuttle.ConfigFiles do
   two writers racing on one file cannot rename each other's bytes into place —
   see `commit/2`.
   """
-  @spec write(id(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  @spec write(id(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, String.t()} | {:unavailable, String.t()}
   def write(id, text, opts \\ []) when is_binary(text) do
     with :ok <- check_expected(id, Keyword.get(opts, :expected_digest, :any)) do
       if String.trim(text) == "" do
@@ -265,7 +307,7 @@ defmodule Shuttle.ConfigFiles do
   words. felt names the file and the offending entry; repeating that verbatim
   is more use than any sentence this module could compose about it.
   """
-  @spec validate(id(), String.t()) :: :ok | {:error, String.t()}
+  @spec validate(id(), String.t()) :: :ok | {:error, String.t()} | {:unavailable, String.t()}
   def validate(id, text) when is_binary(text) do
     case Jason.decode(text) do
       {:ok, decoded} -> validate_decoded(id, text, decoded)
@@ -320,11 +362,27 @@ defmodule Shuttle.ConfigFiles do
           {:ok, _output} ->
             :ok
 
+          # THE WORLD DIDN'T ANSWER, which `Shuttle.Runner` warns is never
+          # evidence of absence. A wedged felt on a loaded login node, and a
+          # felt missing from a supervised daemon's PATH (the Runner maps that
+          # to the shell's 127 rather than raising), are both failures of this
+          # machine. Reported as a refusal they would arrive in the box that
+          # means "your JSON is wrong", about bytes that may be perfectly good.
+          {:command_error, :timeout, _output} ->
+            {:unavailable,
+             "the validator did not answer within 15s on this host, so the edit was not saved. " <>
+               "Nothing is wrong with what you wrote; try again."}
+
+          {:command_error, 127, _output} ->
+            {:unavailable,
+             "felt is not on this daemon's PATH, so there is nothing here that can validate " <>
+               "this file. The edit was not saved."}
+
           {:command_error, _status, output} ->
             {:error, output |> scrub_path(tmp) |> String.trim()}
 
           {:error, reason} when is_binary(reason) ->
-            {:error, "could not run felt to validate: #{reason}"}
+            {:unavailable, "could not run felt to validate: #{reason}"}
         end
       after
         File.rm(tmp)
@@ -332,26 +390,44 @@ defmodule Shuttle.ConfigFiles do
     end
   end
 
+  # The candidate is written 0600 into a 0700 directory, because `remotes.json`
+  # can carry an `auth` key and this daemon may be running on a shared login
+  # node where `$TMPDIR` is `/tmp`. A validator's scratch file should not be the
+  # thing that publishes a fleet's credentials to everyone with an account.
   defp write_temp(text) do
     dir = Path.join(System.tmp_dir!(), "shuttle-config-check")
     path = Path.join(dir, "#{System.unique_integer([:positive])}.json")
 
     with :ok <- File.mkdir_p(dir),
-         :ok <- File.write(path, text) do
+         :ok <- File.chmod(dir, 0o700),
+         :ok <- File.write(path, text),
+         :ok <- File.chmod(path, 0o600) do
       {:ok, path}
     else
       {:error, reason} ->
-        {:error, "could not stage the candidate for validation: #{:file.format_error(reason)}"}
+        {:unavailable,
+         "could not stage the candidate for validation: #{:file.format_error(reason)}"}
     end
   end
 
   # felt names the file it was reading, and the file it was reading is our
-  # temporary copy — a path the human has never seen and cannot act on. Strip
-  # it so the message reads as being about their edit, which it is.
+  # temporary copy — a path the human has never seen and cannot act on.
+  #
+  # The replacement is positional, not textual, and that distinction is load
+  # bearing. Stripping `"<tmp>: "` anywhere it appears works for the fleet
+  # validator, whose path leads the line, and MANGLES the agent one, whose
+  # path sits mid-sentence: `parsing <tmp>: unsupported version 99` became
+  # `parsing unsupported version 99`, eating the colon that held the sentence
+  # together. So only a LEADING occurrence is stripped; anywhere else the path
+  # is replaced by a name, leaving the grammar around it intact.
   defp scrub_path(output, tmp) do
     output
-    |> String.replace(tmp <> ": ", "")
-    |> String.replace(tmp, "the candidate")
+    |> String.split("\n")
+    |> Enum.map_join("\n", fn line ->
+      line
+      |> String.replace_prefix(tmp <> ": ", "")
+      |> String.replace(tmp, "the file")
+    end)
   end
 
   # ── Writing ──────────────────────────────────────────────────────────────

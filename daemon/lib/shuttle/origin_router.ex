@@ -24,10 +24,18 @@ defmodule Shuttle.OriginRouter do
   only serves a fiber in its owner feed when it already owns the store, so the
   store is configured by construction by the time the kanban can route to it.
 
-  **Safety:** an `origin` that matches no configured remote falls through to
-  `:local`, where the endpoint's own resolution is the final arbiter — a
-  mis-stamped origin degrades to a clean local "fiber not found" / availability
-  error, never a silent wrong-host write.
+  **Safety, and its limit.** An `origin` that matches no configured remote falls
+  through to `:local`, where the endpoint's own resolution is the final arbiter
+  — a mis-stamped origin degrades to a clean local "fiber not found" /
+  availability error, never a silent wrong-host write.
+
+  That argument holds for a **fiber-addressed** write and only for one. A fiber
+  lives on exactly one host, so a local daemon asked for one it does not own
+  answers "not found" and nothing happens. A **host-addressed** write — a
+  config file, a store list, a tunnel job — has no such arbiter: every host has
+  a `~/.config/felt/stores.json`, so degrading finds a perfectly good local file
+  and writes it, under a UI header naming a different machine. Those endpoints
+  use `route_host/2`, which refuses instead.
   """
 
   alias Shuttle.{Poller, RegistryCommon, Remote}
@@ -41,6 +49,12 @@ defmodule Shuttle.OriginRouter do
   `{:remote, remote}` forwards to the owning daemon.
   """
   @type route_decision :: :local | {:remote, Remote.t()}
+
+  @typedoc """
+  `route_host/2`'s answer: the two above, plus the refusal a host-addressed
+  endpoint needs when the named host is not one this daemon can reach.
+  """
+  @type host_route_decision :: route_decision() | {:error, {:unknown_origin, String.t()}}
 
   @doc """
   Decide whether a write for a fiber stamped with `origin` runs locally or
@@ -92,6 +106,50 @@ defmodule Shuttle.OriginRouter do
             :local
         end
     end
+  end
+
+  @doc """
+  Route a **host-addressed** request, refusing an origin this daemon cannot
+  place instead of degrading to local.
+
+  The difference from `route/2` is one branch and it is the whole point. A
+  fiber-addressed write can degrade safely, because the local daemon will not
+  find a fiber it does not own. A host-addressed write cannot: every host has
+  the files these endpoints touch, so a degraded origin does not fail — it
+  succeeds, on the wrong machine, and answers 200. The realistic way to get
+  there needs no exotic input at all: a settings page open on one host while
+  the fleet file changes underneath, and the next save lands here.
+
+  `{:error, {:unknown_origin, name}}` for a non-empty origin that is neither
+  this daemon nor a configured remote. `nil` / `""` / `"local"` / this host's
+  own id are still `:local` — an unaddressed request means "here", which is
+  every existing caller's meaning.
+  """
+  @spec route_host(String.t() | nil, keyword()) :: host_route_decision()
+  def route_host(origin, opts \\ []) do
+    own = Keyword.get(opts, :own_host_id) || Poller.own_host_id()
+
+    if origin in [nil, "", "local", own] do
+      :local
+    else
+      case Enum.find(RegistryCommon.configured_remotes(opts), &(&1.name == origin)) do
+        %Remote{} = remote -> {:remote, remote}
+        nil -> {:error, {:unknown_origin, origin}}
+      end
+    end
+  end
+
+  @doc """
+  The sentence a refused host origin gets. One phrasing, so every endpoint says
+  the same thing and names what this daemon can actually reach.
+  """
+  @spec unknown_origin_message(String.t(), keyword()) :: String.t()
+  def unknown_origin_message(origin, opts \\ []) do
+    own = Keyword.get(opts, :own_host_id) || Poller.own_host_id()
+    known = [own | Enum.map(RegistryCommon.configured_remotes(opts), & &1.name)]
+
+    "unknown host #{inspect(origin)} — this daemon knows #{Enum.map_join(known, ", ", &inspect/1)}. " <>
+      "Refusing rather than writing this host's own files under that name."
   end
 
   @doc """

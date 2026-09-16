@@ -2176,8 +2176,13 @@
     position: sticky;
     right: 0;
     margin-left: 6px;
-    width: 2.2em;
-    height: 2.2em;
+    /* 44px, in px rather than em: an em box here is a function of the type
+       scale, and at the default 1.18 the entry point to the whole settings
+       sheet came out at 39px — under the threshold, on the device the sheet
+       is for. A touch target is a physical measurement; it does not scale
+       with the typography. */
+    width: 44px;
+    height: 44px;
     font-size: calc(15px * var(--kbn-type-scale, 1));
     background:
       linear-gradient(to right, rgba(237, 226, 206, 0) 0%, #EDE2CE 45%, #EDE2CE 100%);

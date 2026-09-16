@@ -19,7 +19,8 @@ behaviour on a multi-host setup.
 
 | Pattern | Meaning |
 |---|---|
-| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. |
+| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. An origin matching nothing degrades to local, where the fiber lookup is the arbiter. |
+| **host-addressed** | Owner-routed, but an origin this daemon cannot place is **refused** rather than degraded. The subject is a host rather than a fiber — a config file, a store list, a tunnel job, a quarantine — and every host has one, so degrading would not fail: it would succeed on the wrong machine. |
 | **host-scoped** | The route answers for *this* machine only, because what it reads (a transcript, an event stream, a ledger) lives on the machine that wrote it. |
 | **fan-in** | A `/composite` sibling that merges this host's live read with each configured remote's cached read, reporting per-origin freshness. |
 
@@ -41,12 +42,12 @@ is not enough.
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
-| `POST /felt-stores` | owner-routed | Persist a daemon's registered felt stores |
-| `POST /projects` | owner-routed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` |
-| `POST /config/:id` | owner-routed | Replace one operator file's text, validated first by whoever owns its grammar |
-| `POST /fleet/remotes` | owner-routed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
-| `POST /tunnels` | owner-routed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
-| `POST /choose-folder` | owner-routed | Open the owning host's native folder picker and return the chosen path |
+| `POST /felt-stores` | host-addressed | Persist a daemon's registered felt stores (whole list; takes `expected_digest`) |
+| `POST /projects` | host-addressed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` (which takes `expected_digest`) |
+| `POST /config/:id` | host-addressed | Replace one operator file's text, validated first by whoever owns its grammar |
+| `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
+| `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
+| `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
 
 ## Read plane
@@ -57,11 +58,11 @@ is not enough.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
-| `GET /agents` | owner-routed | The effective agent registry (shells `felt shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's felt binary |
+| `GET /agents` | host-addressed | The effective agent registry (shells `felt shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's felt binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
-| `GET /config` | owner-routed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
-| `GET /config/:id` | owner-routed | One operator file's text — `stores`, `projects`, `agents` or `remotes` |
-| `GET /fleet` | owner-routed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
+| `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
+| `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents` or `remotes` — plus `entries` for the two path lists |
+| `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
 | `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
@@ -145,13 +146,20 @@ speak (saving an empty list deletes `stores.json`; dropping the last remote
 deletes `remotes.json`).
 
 A read serves a `digest` — a hash of the bytes as sent. Send it back as
-`expected_digest` and the write is refused if the file has moved since, which
-matters because this board is reachable from two hubs and a phone at once and
-an editor left open while a CLI writes the same file would otherwise save its
-stale text back over the new one. Omit the key entirely for last-write-wins,
-which is what a script wants. (A hash rather than an mtime: POSIX mtime is
-second-granular, so a write landing in the same second as the read is
-invisible to it, and that is exactly the interleaving a fast tool produces.)
+`expected_digest` and the write is refused with a **409** if the file has moved
+since, which matters because this board is reachable from two hubs and a phone
+at once and an editor left open while a CLI writes the same file would
+otherwise save its stale text back over the new one. The two whole-list
+endpoints (`/felt-stores`, `/projects`) take the same key for the same reason.
+Omit it entirely for last-write-wins, which is what a script wants. (A hash
+rather than an mtime: POSIX mtime is second-granular, so a write landing in the
+same second as the read is invisible to it, and that is exactly the
+interleaving a fast tool produces.)
+
+A **503** is not a refusal of the bytes. It means the host could not RUN the
+check — felt off a supervised daemon's PATH, or wedged past its bound — so
+nothing is known about what was sent and nothing the author retypes will help.
+A 400 says "fix this"; a 503 says "ask again".
 
 Reads are owner-routed as well as writes, which is unusual here and is the
 point: a config file describes the daemon that reads it, and only that daemon
@@ -166,7 +174,7 @@ here" rather than as a missing file.
 | `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
-| `POST /quarantine/release` | Release the boot quarantine (owner-routed; `bin/shuttle release`) |
+| `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
 
 ```bash
