@@ -308,7 +308,9 @@ export function PathListSection({
         </p>
       )}
 
-      {!overridden && (
+      {/* Nothing to add to a list that could not be read. A disabled form under
+          "this host has no settings API" is furniture, not an affordance. */}
+      {!overridden && loaded !== null && (
         <>
           <div className="set-section-label">{copy.addLabel}</div>
           <div className="set-actions">
