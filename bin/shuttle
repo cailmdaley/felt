@@ -127,13 +127,33 @@ agent_os_defaults() {
   esac
 }
 
+# Store paths can contain spaces, quotes, backslashes or literal systemd
+# specifiers. Encode the target format before escaping sed's replacement.
+agent_store_escape() {
+  if [ "$AGENT_OS" = Darwin ]; then
+    printf '%s' "$1" | sed -e 's/\&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+  else
+    printf '%s' "$1" | awk '
+      NR > 1 { printf "\\n" }
+      { for (i = 1; i <= length($0); i++) {
+          c = substr($0, i, 1)
+          if (c == "\\") printf "\\\\"
+          else if (c == "\"") printf "\\\""
+          else if (c == "%") printf "%%%%"
+          else if (c == "\t") printf "\\t"
+          else if (c == "\r") printf "\\r"
+          else printf "%s", c
+      } }'
+  fi
+}
+
 render_agent() {
   sed -e "s#__SHUTTLE_DIR__#$(sed_escape "$ROOT")#g" \
       -e "s#__LABEL__#$(sed_escape "$AGENT_LABEL")#g" \
       -e "s#__PORT__#$(sed_escape "$AGENT_PORT_V")#g" \
       -e "s#__LOG__#$(sed_escape "$AGENT_LOG_V")#g" \
-      -e "s#__FELT_STORES__#$(sed_escape "$AGENT_STORES_V")#g" \
-      -e "s#__FELT_STORES_FILE__#$(sed_escape "$AGENT_STORES_FILE_V")#g" \
+      -e "s#__FELT_STORES__#$(sed_escape "$(agent_store_escape "$AGENT_STORES_V")")#g" \
+      -e "s#__FELT_STORES_FILE__#$(sed_escape "$(agent_store_escape "$AGENT_STORES_FILE_V")")#g" \
       -e "s#__PATH__#$(sed_escape "$AGENT_PATH_V")#g" \
       -e "s#__SSH_AUTH_SOCK__#$(sed_escape "$AGENT_SSH_V")#g" \
       "$AGENT_TEMPLATE" \
