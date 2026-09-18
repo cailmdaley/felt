@@ -55,7 +55,7 @@ PIDPATTERN := [b]in/rel/releases/.*/start
 # same supervisor these targets do. Set one here only to override the shim.
 #
 # AGENT_FELT_STORES — comma-separated felt stores the supervised daemon polls.
-#   Required; the shim refuses to install a daemon that polls nothing.
+#   Optional fixed override; normally use the editable stores.json registry.
 #     make install-agent AGENT_FELT_STORES=~/my-store,/some/other
 #   Prefer stores outside ~/Documents / ~/Desktop / ~/Downloads so the agent
 #   touches no TCC-protected path and needs no Full Disk Access.

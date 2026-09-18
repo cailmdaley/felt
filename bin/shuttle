@@ -133,6 +133,7 @@ render_agent() {
       -e "s#__PORT__#$(sed_escape "$AGENT_PORT_V")#g" \
       -e "s#__LOG__#$(sed_escape "$AGENT_LOG_V")#g" \
       -e "s#__FELT_STORES__#$(sed_escape "$AGENT_STORES_V")#g" \
+      -e "s#__FELT_STORES_FILE__#$(sed_escape "$AGENT_STORES_FILE_V")#g" \
       -e "s#__PATH__#$(sed_escape "$AGENT_PATH_V")#g" \
       -e "s#__SSH_AUTH_SOCK__#$(sed_escape "$AGENT_SSH_V")#g" \
       "$AGENT_TEMPLATE" \
@@ -400,6 +401,7 @@ install_agent() {
   AGENT_PRINT=0
   AGENT_PORT_V="${AGENT_PORT-}"
   AGENT_STORES_V="${AGENT_FELT_STORES-}"
+  AGENT_STORES_FILE_V="${FELT_STORES_FILE:-$HOME/.config/felt/stores.json}"
   AGENT_PATH_V="${AGENT_PATH-}"
   AGENT_LOG_V="${AGENT_LOG-}"
   # Set-but-empty is a real answer for the socket (Linux's default), so honour
@@ -449,15 +451,12 @@ install_agent() {
     exit 1
   }
 
-  # No default, deliberately: a daemon with no stores polls nothing, boots
-  # clean, serves an empty board, and dispatches nothing — a failure that
-  # looks like success. Refuse instead.
-  [ -n "$AGENT_STORES_V" ] || {
-    echo "felt stores are required (comma-separated; the daemon polls them):" >&2
-    echo "  shuttle install-agent --felt-stores ~/my-store" >&2
-    echo "  make install-agent AGENT_FELT_STORES=~/my-store    (in a checkout)" >&2
-    exit 1
-  }
+  # Registry-backed by default so Settings can edit the actual polling source.
+  # An explicit --felt-stores remains a fixed environment override. Empty is
+  # intentional: it shadows any stale FELT_STORES in the supervisor manager.
+  if [ -z "$AGENT_STORES_V" ] && [ ! -f "$AGENT_STORES_FILE_V" ]; then
+    echo "No store registry at $AGENT_STORES_FILE_V; add a store in Settings → Stores after startup." >&2
+  fi
 
   [ -n "$AGENT_LOG_V" ] || AGENT_LOG_V="$AGENT_LOG_DEFAULT"
   [ "$AGENT_SSH_SET" = 1 ] || AGENT_SSH_V="$AGENT_SSH_DEFAULT"
@@ -548,7 +547,9 @@ install_agent() {
     mkdir -p "$AGENT_UNIT_DIR"
     render_agent > "$AGENT_UNIT"
     systemctl --user daemon-reload
-    systemctl --user enable --now "$AGENT_UNIT_NAME"
+    systemctl --user enable "$AGENT_UNIT_NAME"
+    # enable --now leaves an already-running service on its old environment.
+    systemctl --user restart "$AGENT_UNIT_NAME"
     echo "enabled $AGENT_UNIT_NAME → daemon restarts on crash + starts at login"
     echo "board → http://127.0.0.1:${AGENT_PORT_V:-4000}/"
     echo "logs → $AGENT_LOG_V   (systemctl --user status $AGENT_UNIT_NAME  to inspect)"
@@ -679,7 +680,7 @@ case "$CMD" in
     echo "  uninstall-agent      Remove it"
     echo ""
     echo "install-agent options:"
-    echo "  --felt-stores <list> Comma-separated felt stores the daemon polls (REQUIRED)"
+    echo "  --felt-stores <list> Fixed store override (default: editable stores.json)"
     echo "  --ssh-auth-sock <p>  ssh-agent socket to bake in (default: ~/.ssh/agent.sock on"
     echo "                       macOS, empty on Linux — empty drops the setting)"
     echo "  --path <PATH>        PATH to bake in (default: captured from a login shell)"

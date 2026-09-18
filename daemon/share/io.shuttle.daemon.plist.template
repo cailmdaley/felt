@@ -78,16 +78,14 @@
         <key>SHUTTLE_PORT</key>
         <string>__PORT__</string>
         <!--
-          FELT_STORES scopes the daemon's felt polling to the stores named at
-          install time (`--felt-stores`). felt re-discovers each project's
-          substores by following the symlinks under a store's .felt/, so a
-          single aggregate store is usually the only entry you need. Keep them
-          outside the TCC-protected folders (see header). (Set in launchd's
-          environment rather than the login profile, since the scoping is ours
-          — a login shell inherits it across the `-l`.)
+          Empty FELT_STORES selects the editable registry and clears any stale
+          override inherited from launchd. --felt-stores explicitly pins the
+          list instead; Settings then reports the override as read-only.
         -->
         <key>FELT_STORES</key>
         <string>__FELT_STORES__</string>
+        <key>FELT_STORES_FILE</key>
+        <string>__FELT_STORES_FILE__</string>
         <!--
           SSH_AUTH_SOCK points at the user's PERSISTENT login ssh-agent (default
           ~/.ssh/agent.sock), NOT launchd's per-session Keychain agent. This is

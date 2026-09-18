@@ -284,16 +284,15 @@ else
 
   if have_systemd_user; then
     # Same Makefile target as macOS, systemd arm: it captures the login PATH
-    # and renders daemon/share/io.shuttle.daemon.service.template. It needs
-    # AGENT_FELT_STORES (make inherits it from this environment) — without one
-    # it refuses, and the respawn loop is still a working keep-alive, so warn
-    # and fall back rather than aborting a bootstrap that got this far.
+    # and renders daemon/share/io.shuttle.daemon.service.template. Stores come
+    # from the editable registry. The respawn loop remains the fallback when
+    # supervisor installation fails.
     if make -C "$REPO" install-agent; then
       ok "systemd user unit enabled (Restart=always + starts at login)."
       note "survive logout and start at boot:  loginctl enable-linger $(id -un)"
     else
       warn "make install-agent failed (see above) — falling back to the tmux respawn loop."
-      note "retry it with a store:  make install-agent AGENT_FELT_STORES=~/my-store"
+      note "retry supervisor installation:  make install-agent"
       start_respawn_loop
     fi
   else

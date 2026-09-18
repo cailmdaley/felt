@@ -192,8 +192,8 @@ mkdir -p ~/notes && cd ~/notes && felt init
     nothing is wrong: you asked for this.
 
     Two ways to bring the existing stores in. Pass them all to
-    `--felt-stores` as one comma-separated list, or — better past the first
-    couple — join them by symlink into a single **cross-project store** and
+    Settings → Stores individually, or — better past the first couple —
+    join them by symlink into a single **cross-project store** and
     name only that. felt re-discovers a store's symlinked substores, so the
     aggregate is the one entry the daemon needs, and adding a project later
     means adding a symlink rather than editing the daemon's configuration.
@@ -209,12 +209,13 @@ mkdir -p ~/notes && cd ~/notes && felt init
 **3. Hand the daemon to launchd.**
 
 ```bash
-~/.local/share/shuttle/bin/shuttle install-agent --felt-stores ~/notes
+~/.local/share/shuttle/bin/shuttle install-agent
 ```
 
 That writes `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it. The
 daemon comes up immediately, comes back at every login, and restarts on crash.
-For several stores, pass one comma-separated list.
+Open the board and add `~/notes` in **Settings → Stores**. Register additional
+stores there too; changes take effect without reinstalling the supervisor.
 
 **4. Check it, and know how to undo it.**
 
@@ -393,10 +394,10 @@ The verb is the same wherever the daemon came from:
 
 ```bash
 # fetched install
-~/.local/share/shuttle/bin/shuttle install-agent --felt-stores ~/notes
+~/.local/share/shuttle/bin/shuttle install-agent
 
 # checkout — builds the release first, then calls the same verb
-make install-agent AGENT_FELT_STORES=~/dev/myproject
+make install-agent
 ```
 
 Neither front door is on your `PATH`; the rest of this section writes `shuttle`
@@ -414,7 +415,8 @@ The install fixes these values into the job:
 
 | Flag | Environment variable | Default |
 | --- | --- | --- |
-| `--felt-stores <list>` | `AGENT_FELT_STORES` | none — **required** |
+| `--felt-stores <list>` | `AGENT_FELT_STORES` | empty — use the editable store registry |
+| — | `FELT_STORES_FILE` | `~/.config/felt/stores.json` |
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
@@ -486,10 +488,13 @@ obvious approach failed:
   profile is not self-sufficient from a bare environment. So the plist freezes
   the real login `PATH`. A `PATH` without `felt` on it gives you a daemon that
   boots, serves the board, and returns 500 on `/api/v1/fibers/composite`.
-- **`FELT_STORES`** — the stores the daemon polls, comma-separated, from
-  `--felt-stores`. felt re-discovers a store's symlinked substores, so one
-  [cross-project store](../concepts/cross-project.md) is usually the only entry
-  you need.
+- **`FELT_STORES`** — empty by default, so the daemon reads the editable
+  `stores.json` registry. Empty also clears any override inherited from the
+  supervisor manager. `--felt-stores` explicitly pins a comma-separated list
+  instead and makes Stores read-only in Settings.
+- **`FELT_STORES_FILE`** — the registry location, captured at install time.
+  felt re-discovers a store's symlinked substores, so one
+  [cross-project store](../concepts/cross-project.md) is usually enough.
 - **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock`, the persistent login agent. launchd
   hands the daemon a bare per-session Keychain agent that holds only the default
   key, which breaks every SSH the daemon makes to a remote host. Point
@@ -511,9 +516,9 @@ see [Sharp edges](#sharp-edges).
 `install-agent` renders `daemon/share/io.shuttle.daemon.service.template`
 (`share/` in a fetched installation) into
 `~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
-enable --now`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
+enable` and `restart`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
 `WantedBy=default.target` starts the daemon at login. It bakes in the same
-`PATH`, `FELT_STORES`, and `SSH_AUTH_SOCK` as the plist, for the same reasons —
+`PATH`, store configuration, and `SSH_AUTH_SOCK` as the plist, for the same reasons —
 a systemd user manager inherits almost nothing either. An empty
 `SSH_AUTH_SOCK` is dropped from the rendered unit rather than baked in as a
 dead path, since Linux has no canonical agent socket.
@@ -636,9 +641,25 @@ The daemon polls felt stores. It resolves them in this order:
 
 **shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. `install-agent` requires
-`--felt-stores` precisely so a supervised daemon never boots into that state by
-accident.
+`:4000`, serves an empty board, and dispatches nothing. `install-agent` uses
+this editable registry by default and reports a missing registry at install
+time; open **Settings → Stores** to register the first store.
+
+### Switching an existing supervisor to the registry
+
+Older installations pinned `FELT_STORES` in the supervisor job. To make Stores
+editable, back up both the job and `stores.json`, then write the daemon's
+**currently effective** store list into the registry. Do not activate a stale
+registry list blindly: it may contain additional stores you did not intend to
+poll. Reinstall with `shuttle install-agent` (or `make install-agent`) without
+`--felt-stores` or `AGENT_FELT_STORES`. Keep any existing PATH, socket, label,
+port, or log overrides when reinstalling. A custom `FELT_STORES_FILE` must be
+present in the installation environment too.
+
+Installation replaces and reloads the supervisor. Check Settings → Stores:
+the source should be the registry, the effective stores should be unchanged,
+and editing should be enabled. Verify the board still contains the expected
+fibers, then release the restart quarantine with `shuttle release`.
 
 The registry file takes this canonical shape. A bare JSON array also works.
 

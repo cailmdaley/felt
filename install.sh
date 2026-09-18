@@ -210,7 +210,7 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   # renders + loads them, so a fetched install can survive a logout without a
   # checkout or a Makefile. Name the command here: it is the only place this
   # installer's user learns the verb exists.
-  echo "  Keep-alive: ${SHUTTLE_HOME}/bin/shuttle install-agent --felt-stores <your-store>"
+  echo "  Keep-alive: ${SHUTTLE_HOME}/bin/shuttle install-agent    # configure stores in Settings"
   echo "              (launchd on macOS, systemd --user on Linux; see"
   echo "               https://cailmdaley.github.io/felt/shuttle/installation/)"
 fi
