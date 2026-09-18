@@ -41,6 +41,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
+import { useSettingsDraft } from './SettingsDraftContext'
 import {
   addProject,
   chooseFolder,
@@ -71,10 +72,8 @@ const COPY: Record<
     filename: 'stores.json',
     lede: (
       <>
-        The felt stores this daemon <strong>polls</strong> — every fiber it can see, dispatch
-        and serve lives under one of these. A store is any directory with a <code>.felt/</code>{' '}
-        inside it. Symlinked substores are followed, so one store root can stand for many
-        projects.
+        Where this daemon reads fibers and finds work to run. Add a directory containing{' '}
+        <code>.felt/</code>; linked projects are included automatically.
       </>
     ),
     addLabel: 'Add a store',
@@ -84,10 +83,8 @@ const COPY: Record<
     filename: 'projects.json',
     lede: (
       <>
-        The checkouts the <strong>Stash and Capture</strong> pickers offer as somewhere for new
-        work to land. Kept separate from Stores on purpose: those are where the daemon reads,
-        and these live in the protected directories reading stays out of. Adding one
-        initializes its <code>.felt/</code> if it has none.
+        Where <strong>Stash and Capture</strong> can create work. Adding a project creates{' '}
+        <code>.felt/</code> if needed. This list is separate from the stores the daemon polls.
       </>
     ),
     addLabel: 'Add a project',
@@ -100,6 +97,7 @@ const COPY: Record<
 interface Loaded {
   paths: string[]
   digest: string | null
+  override: ConfigFileSummary['env_override']
 }
 
 export function PathListSection({
@@ -115,6 +113,7 @@ export function PathListSection({
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [fileToken, setFileToken] = useState(0)
+  useSettingsDraft(`${kind}-form`, typed.trim() !== '', busy)
 
   const read = useCallback(
     (keepNote = false): Promise<void> => {
@@ -122,7 +121,7 @@ export function PathListSection({
       setError(null)
       return loadConfigFile(shuttleBase, host, kind)
         .then((file) => {
-          setLoaded({ paths: file.entries ?? [], digest: file.digest ?? null })
+          setLoaded({ paths: file.entries ?? [], digest: file.digest ?? null, override: file.env_override })
         })
         .catch((err: Error) => {
           setLoaded(null)
@@ -146,8 +145,8 @@ export function PathListSection({
 
   const paths = loaded?.paths ?? []
 
-  const persist = async (next: string[]): Promise<void> => {
-    if (busy || !loaded) return
+  const persist = async (next: string[]): Promise<boolean> => {
+    if (busy || !loaded) return false
     setBusy(true)
     setError(null)
     setNote(null)
@@ -157,8 +156,10 @@ export function PathListSection({
       await read()
       setFileToken((n) => n + 1)
       onChanged()
+      return true
     } catch (err) {
       setError((err as Error).message)
+      return false
     } finally {
       setBusy(false)
     }
@@ -172,8 +173,7 @@ export function PathListSection({
       return
     }
     if (kind === 'stores') {
-      setTyped('')
-      await persist([...paths, path])
+      if (await persist([...paths, path])) setTyped('')
       return
     }
     // Projects go through the endpoint that also creates the store, so the
@@ -230,16 +230,9 @@ export function PathListSection({
 
   const copy = COPY[kind]
 
-  // The compact environment form wins over the file outright, so while it is
-  // set the file is read by nobody and editing it would have no effect. The
-  // override arrives on the config index, which the parent refetches after
-  // every save — and during that refetch `summary` is briefly undefined.
-  // `undefined` must not read as "not overridden", or the controls this guard
-  // exists to disable would blink back on mid-round-trip. So an override, once
-  // seen, is latched for the life of this mount.
-  const latched = useRef<ConfigFileSummary['env_override']>(null)
-  if (summary?.env_override) latched.current = summary.env_override
-  const overridden = summary?.env_override ?? latched.current
+  // Read the override with the list itself, so controls never briefly offer
+  // a write while the separate config index is still loading.
+  const overridden = loaded ? loaded.override : summary?.env_override ?? null
   const frozen = busy || overridden !== null || loaded === null
 
   /**
@@ -263,13 +256,13 @@ export function PathListSection({
       <p className="set-lede">{copy.lede}</p>
 
       {overridden && (
-        <div className="set-error" role="status">
-          <span className="set-mono">{overridden.var}</span> is set in this daemon’s
-          environment, so it is reading <span className="set-mono">{overridden.value}</span> and{' '}
-          <span className="set-mono">{copy.filename}</span> is read by nobody. Editing is off
-          for that reason — a change to the file would have no effect until the variable is
-          unset and the daemon restarts. The file’s own contents are still at the bottom of
-          this page.
+        <div className="set-notice" role="status">
+          <strong>Managed by {overridden.var}</strong>
+          <p>Using <span className="set-mono">{overridden.value}</span>.</p>
+          <p>To edit this list here, remove <span className="set-mono">{overridden.var}</span> from
+            this host’s daemon startup configuration and restart it with the same paths in{' '}
+            <span className="set-mono">{copy.filename}</span>.</p>
+          <p>The saved file below is inactive.</p>
         </div>
       )}
 
@@ -278,13 +271,13 @@ export function PathListSection({
       {loaded !== null && paths.length > 0 && (
         <div className="set-section-label">
           {paths.length} {kind === 'stores' ? 'store' : 'project'}
-          {paths.length === 1 ? '' : 's'} in {copy.filename}
+          {paths.length === 1 ? '' : 's'}{overridden ? ' saved · inactive' : ' configured'}
         </div>
       )}
 
       {loaded !== null &&
         (paths.length === 0 ? (
-          <div className="set-empty">{copy.empty}</div>
+          <div className="set-empty">{overridden ? `No paths saved in ${copy.filename}. The environment setting above is active.` : copy.empty}</div>
         ) : (
           <ul className="set-list">
             {paths.map((path) => (
@@ -292,8 +285,8 @@ export function PathListSection({
                 <span className="set-row-main">
                   <span className="set-row-path">{path}</span>
                   {paths.length === 1 && !overridden && (
-                    <span className="set-row-note set-row-note-owed">
-                      the last one — removing it deletes {copy.filename}
+                    <span className="set-row-note">
+                      {kind === 'stores' ? 'Removing this stops polling these fibers.' : 'Removing this restores the default project choices.'}
                     </span>
                   )}
                 </span>
@@ -393,6 +386,7 @@ export function PathListSection({
         host={host}
         id={kind}
         reloadToken={fileToken}
+        readOnlyReason={overridden ? `${overridden.var} overrides this file. Change the daemon startup configuration to enable editing.` : undefined}
         onSaved={() => {
           void read()
           onChanged()

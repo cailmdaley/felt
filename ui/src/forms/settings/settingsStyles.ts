@@ -89,6 +89,19 @@ const SHEET = `
   min-width: 0;
 }
 
+.set-done { margin-left: auto; }
+.set-discard, .set-notice {
+  padding: 12px 16px;
+  background: rgba(196, 147, 51, 0.09);
+  border-bottom: 1px solid rgba(154, 123, 53, 0.3);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.set-discard { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.set-discard > span { flex: 1 1 16rem; }
+.set-notice { margin-bottom: 16px; border: 1px solid rgba(154, 123, 53, 0.3); border-radius: 3px; }
+.set-notice p { margin: 6px 0 0; overflow-wrap: anywhere; }
+
 /* ── The rail ──────────────────────────────────────────────────────────── */
 
 .set-rail {
@@ -349,6 +362,7 @@ const SHEET = `
   padding-top: 10px;
 }
 .set-file > summary {
+  min-height: 32px;
   cursor: pointer;
   list-style: none;
   display: flex;
@@ -409,7 +423,10 @@ const SHEET = `
     flex-wrap: wrap;
     row-gap: 4px;
   }
-  .set-hostbar .set-select { flex: 1 1 auto; min-width: 0; }
+  .set-hostbar .set-select { flex: 1 1 8rem; min-width: 0; width: 0; }
+  .set-done { order: 0; }
+  .set-hostbar-note { order: 1; }
+  .set-file > summary { min-height: 44px; }
   .set-hostbar-note {
     flex: 1 1 100%;
     white-space: normal;

@@ -37,6 +37,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
+import { useSettingsDraft } from './SettingsDraftContext'
 import {
   loadFleet,
   removeRemote,
@@ -103,6 +104,7 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
   /** The quiet refetch stopped working. The rows are still drawn, marked. */
   const [drifted, setDrifted] = useState(false)
   const [draft, setDraft] = useState({ name: '', url: '', ssh: '', port: '', checkout: '' })
+  useSettingsDraft('remote-form', Object.values(draft).some((value) => value.trim() !== ''), busy)
 
   useEffect(() => {
     let cancelled = false

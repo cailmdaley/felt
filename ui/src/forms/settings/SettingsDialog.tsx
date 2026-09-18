@@ -25,9 +25,10 @@
  * screen — the same reframing the Desk makes at the same threshold.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AppDialog } from '../AppDialog'
+import { SettingsDraftContext } from './SettingsDraftContext'
 import { AgentsSection } from './AgentsSection'
 import { FleetSection } from './FleetSection'
 import { HostSection } from './HostSection'
@@ -67,6 +68,35 @@ export function SettingsDialog({
 
   const [originKey, setOriginKey] = useState(hosts[0]?.origin ?? '')
   const [section, setSection] = useState<SectionId>('stores')
+  const drafts = useRef(new Set<string>())
+  const writes = useRef(new Set<string>())
+  const [waitingForWrite, setWaitingForWrite] = useState(false)
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null)
+  const trackDraft = useCallback((id: string, dirty: boolean, busy: boolean): void => {
+    if (busy) writes.current.add(id)
+    else writes.current.delete(id)
+    if (!writes.current.size) setWaitingForWrite(false)
+    if (dirty) drafts.current.add(id)
+    else drafts.current.delete(id)
+    if (!drafts.current.size) setPendingNavigation(null)
+  }, [])
+  const navigate = (action: () => void): void => {
+    if (writes.current.size) { setWaitingForWrite(true); return }
+    if (drafts.current.size) setPendingNavigation(() => action)
+    else {
+      setPendingNavigation(null)
+      action()
+    }
+  }
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent): void => {
+      if (!drafts.current.size && !writes.current.size) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
   // Bumped whenever something under this host changed on disk. Everything that
   // reads the host's own lists keys off it, so a save in the file editor is
   // visible in the rows above it without a reopen.
@@ -141,7 +171,7 @@ export function SettingsDialog({
 
   if (!host) {
     return (
-      <AppDialog open onOpenChange={(next) => !next && onClose()} title="Settings" eyebrow="shuttle">
+      <AppDialog open onOpenChange={(next) => !next && navigate(onClose)} title="Settings" eyebrow="shuttle">
         <div className="set-empty">
           This daemon reports no hosts at all — not even itself. It is probably not answering;
           check that it is running.
@@ -153,19 +183,23 @@ export function SettingsDialog({
   return (
     <AppDialog
       open
-      onOpenChange={(next) => !next && onClose()}
+      onOpenChange={(next) => !next && navigate(onClose)}
       title="Settings"
       eyebrow={`shuttle · ${host.label}`}
       wide
       flush
     >
+      <SettingsDraftContext.Provider value={trackDraft}>
       <div className="set-page">
         <div className="set-hostbar">
           <span className="set-hostbar-label">Configuring</span>
           <select
             className="set-select"
             value={host.origin}
-            onChange={(e) => setOriginKey(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value
+              navigate(() => setOriginKey(next))
+            }}
             aria-label="Which host to configure"
           >
             {liveHosts.map((h) => (
@@ -183,8 +217,22 @@ export function SettingsDialog({
                 ? 'not answering this hub’s poll — reads and writes may time out'
                 : 'reached through this hub'}
           </span>
+          <button type="button" className="set-btn set-done" onClick={() => navigate(onClose)}>Done</button>
         </div>
 
+        {waitingForWrite && <div className="set-discard" role="status">Saving changes… Wait for this write to finish before leaving.</div>}
+        {pendingNavigation && (
+          <div className="set-discard" role="alert">
+            <span>You have unsaved edits on {host.label}.</span>
+            <button type="button" className="set-btn set-btn-primary" onClick={() => setPendingNavigation(null)}>Keep editing</button>
+            <button type="button" className="set-btn" onClick={() => {
+              if (writes.current.size) { setWaitingForWrite(true); return }
+              drafts.current.clear()
+              setPendingNavigation(null)
+              pendingNavigation()
+            }}>Discard edits</button>
+          </div>
+        )}
         <div className="set-cols">
           <nav className="set-rail" aria-label="Settings sections">
             {SECTIONS.map((s) => (
@@ -193,7 +241,7 @@ export function SettingsDialog({
                 type="button"
                 className={`set-railbtn${s.id === section ? ' set-railbtn-active' : ''}`}
                 aria-current={s.id === section ? 'page' : undefined}
-                onClick={() => setSection(s.id)}
+                onClick={() => { if (s.id !== section) navigate(() => setSection(s.id)) }}
               >
                 {s.label}
               </button>
@@ -238,6 +286,7 @@ export function SettingsDialog({
           </div>
         </div>
       </div>
+      </SettingsDraftContext.Provider>
     </AppDialog>
   )
 }
