@@ -394,7 +394,10 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
             >
               {busy ? 'Adding…' : 'Add'}
             </button>
-            <button type="button" className="set-btn" disabled={busy} onClick={() => setAdding(false)}>
+            <button type="button" className="set-btn" disabled={busy} onClick={() => {
+              setDraft({ name: '', url: '', ssh: '', port: '', checkout: '' })
+              setAdding(false)
+            }}>
               Cancel
             </button>
           </div>
