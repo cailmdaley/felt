@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useSettingsDraft } from './SettingsDraftContext'
 
 import {
   CONFIG_FILENAME,
@@ -42,6 +43,7 @@ export interface FileEditorProps {
   reloadToken: number
   /** The structured half should refresh — a save here changed what it reads. */
   onSaved: () => void
+  readOnlyReason?: string
 }
 
 export function FileEditor({
@@ -50,6 +52,7 @@ export function FileEditor({
   id,
   reloadToken,
   onSaved,
+  readOnlyReason,
 }: FileEditorProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState<{
@@ -68,70 +71,73 @@ export function FileEditor({
   /** The draft differs from the bytes on disk as we last saw them. */
   const dirty = loaded !== null && draft !== loaded.text
 
-  /**
-   * Re-read the file.
-   *
-   * `keepDraft` is for the one case where re-reading is a RESPONSE to your own
-   * edit rather than a replacement for it: the save was refused because the
-   * file moved underneath, and throwing away what you typed in order to show
-   * you what it moved to would be the worse of the two losses. The box keeps
-   * your text, `dirty` recomputes against the new base, and saving again now
-   * carries the new digest.
-   */
-  // Every read is stamped, and one whose stamp is no longer current is dropped
-  // on arrival. The parent also remounts this component on a host switch,
-  // which would hide the problem — but "one host's file rendered under another
-  // host's name" is the one unacceptable state on this page, and it should not
-  // rest on a `key` attribute in a different file staying correct.
+  useSettingsDraft(id, dirty, busy)
+
+  // Reads and writes belong to one file identity. Late responses from a
+  // previous host, or from before a save, cannot replace its successor.
   const generation = useRef(0)
+  const current = useRef({ dirty, busy })
+  current.current = { dirty, busy }
+  const [reading, setReading] = useState(false)
+  const [reviewed, setReviewed] = useState(false)
   const load = useRef<(keepDraft?: boolean) => void>(() => {})
-  load.current = (keepDraft?: boolean): void => {
+  load.current = (keepDraft = false): void => {
+    if (current.current.busy || (!keepDraft && current.current.dirty)) return
     setError(null)
+    setReading(true)
     const mine = ++generation.current
     loadConfigFile(shuttleBase, host, id)
       .then((file) => {
         if (mine !== generation.current) return
-        setLoaded({
-          text: file.text,
-          path: file.path,
-          exists: file.exists,
-          digest: file.digest ?? null,
-        })
+        // Typing may have started while this automatic refresh was in flight.
+        if (!keepDraft && current.current.dirty) return
+        setLoaded(file)
         if (!keepDraft) setDraft(file.text)
+        setConflict(false)
+        setUnavailable(false)
+        setReviewed(keepDraft)
       })
       .catch((err: Error) => {
         if (mine === generation.current) setError(err.message)
       })
+      .finally(() => {
+        if (mine === generation.current) setReading(false)
+      })
   }
 
-  // Fetch only once opened: four sections' files would otherwise be four
-  // requests per host switch for text nobody is looking at.
-  useEffect(() => {
-    if (!open) return
-    load.current()
-  }, [open, host.origin, id, reloadToken])
-
-  // A host switch invalidates everything shown here, including the fold: the
-  // next host's file is a different file, and leaving the previous one's text
-  // on screen under a new host's name is the one mistake this page must not
-  // make.
   useEffect(() => {
     generation.current += 1
+    current.current = { dirty: false, busy: false }
     setLoaded(null)
     setDraft('')
     setError(null)
     setSaved(false)
-  }, [host.origin, id])
+    setConflict(false)
+    setUnavailable(false)
+    setReviewed(false)
+    setBusy(false)
+    setReading(false)
+    return () => { generation.current += 1 }
+  }, [shuttleBase, host.origin, id])
+
+  // Folding and structured edits never replace unsaved text. A later save
+  // still carries its original digest, so a concurrent disk change conflicts.
+  useEffect(() => {
+    if (open) load.current()
+  }, [open, shuttleBase, host.origin, id, reloadToken])
 
   const save = async (): Promise<void> => {
-    if (busy) return
+    if (busy || reading || readOnlyReason || !loaded || !dirty || conflict) return
+    const mine = ++generation.current
     setBusy(true)
     setError(null)
     setSaved(false)
     try {
       const file = await saveConfigFile(shuttleBase, host, id, draft, loaded?.digest ?? null)
+      if (mine !== generation.current) return
       setConflict(false)
       setUnavailable(false)
+      setReviewed(false)
       setLoaded({
         text: file.text,
         path: file.path,
@@ -142,6 +148,7 @@ export function FileEditor({
       setSaved(true)
       onSaved()
     } catch (err) {
+      if (mine !== generation.current) return
       // Whether this refusal was a CONFLICT decides whether the recovery
       // affordance appears, and that must not be a substring test on the
       // daemon's prose — reword the message and the button would vanish with
@@ -150,7 +157,7 @@ export function FileEditor({
       setUnavailable(isUnavailable(err))
       setError((err as Error).message)
     } finally {
-      setBusy(false)
+      if (mine === generation.current) setBusy(false)
     }
   }
 
@@ -173,9 +180,11 @@ export function FileEditor({
             {loaded
               ? loaded.exists
                 ? loaded.path
-                : `${loaded.path} — no such file yet; saving creates it`
+                : `${loaded.path} — ${readOnlyReason ? 'file does not exist' : 'saving creates this file'}`
               : 'reading…'}
           </div>
+
+          {readOnlyReason && <p className="set-said">{readOnlyReason}</p>}
 
           <textarea
             className="set-textarea"
@@ -185,6 +194,8 @@ export function FileEditor({
             autoCorrect="off"
             value={draft}
             disabled={loaded === null}
+            readOnly={busy || !!readOnlyReason}
+            aria-busy={busy || reading}
             onChange={(e) => {
               setDraft(e.target.value)
               setSaved(false)
@@ -196,10 +207,10 @@ export function FileEditor({
             <button
               type="button"
               className="set-btn set-btn-primary"
-              disabled={busy || loaded === null || !dirty}
+              disabled={busy || reading || loaded === null || !dirty || !!readOnlyReason || conflict}
               onClick={() => void save()}
             >
-              {busy ? 'Saving…' : draft.trim() === '' ? 'Delete file' : 'Save'}
+              {busy ? 'Saving…' : draft.trim() === '' ? 'Delete file' : 'Save changes'}
             </button>
             <button
               type="button"
@@ -208,18 +219,35 @@ export function FileEditor({
               onClick={() => {
                 setDraft(loaded?.text ?? '')
                 setError(null)
+                setConflict(false)
+                setUnavailable(false)
+                setReviewed(false)
+                setSaved(false)
+                current.current.dirty = false
+                load.current()
               }}
             >
-              Revert
+              Discard changes
             </button>
             <span className="set-actions-spacer" />
             {saved && !dirty && <span className="set-row-note">saved</span>}
-            {draft.trim() === '' && loaded?.exists && (
+            {!readOnlyReason && draft.trim() === '' && loaded?.exists && (
               <span className="set-row-note set-row-note-owed">
                 empty removes the file
               </span>
             )}
           </div>
+
+          {reviewed && dirty && (
+            <div className="set-said" role="status">
+              Your draft is preserved. Compare it with the current file below before saving;
+              saving replaces that file with your draft.
+              <details>
+                <summary>Current file on disk</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{loaded?.text || '(empty)'}</pre>
+              </details>
+            </div>
+          )}
 
           {error && (
             <div className={unavailable ? 'set-said' : 'set-error'} role="alert">
@@ -229,17 +257,23 @@ export function FileEditor({
                   means "your JSON is wrong" is the exact conflation the daemon
                   half of this was built to end. */}
               {error}
+              {!loaded && (
+                <button type="button" className="set-btn" disabled={reading} onClick={() => load.current()}>
+                  {reading ? 'Reading…' : 'Try again'}
+                </button>
+              )}
               {conflict && (
                 <>
                   {' '}
                   <button
                     type="button"
                     className="set-btn set-btn-drop"
+                    disabled={reading || busy}
                     onClick={() => load.current(true)}
                   >
-                    check what it says now
+                    {reading ? 'Reading…' : 'Review current file'}
                   </button>
-                  {' — your text stays in the box; Revert swaps it for theirs.'}
+                  {' Your draft stays in the editor.'}
                 </>
               )}
             </div>
