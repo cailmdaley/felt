@@ -25,8 +25,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import { FiberDetailModal } from './FiberDetailModal.js'
 import { dueCivilDay, isoDayLocal } from './civilDay.js'
-import type { KanbanCard } from './KanbanTypes.js'
-import { card as baseCard } from './testFixtures.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { card as baseCard, response } from './testFixtures.js'
 
 // ── The harness ──────────────────────────────────────────────────────────────
 
@@ -157,6 +157,9 @@ function makeBoard(): KanbanModal {
 /** Reach a private network half. The gesture composition IS the unit under
  *  test, and it has no public name; nothing is re-implemented here. */
 type Private = {
+  lastResponse: KanbanResponse | null
+  applyResponse: (r: KanbanResponse) => void
+  announce: (message: string) => void
   commitPin: (c: KanbanCard) => Promise<void>
   pinRole: (c: KanbanCard) => void
   setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { cold?: boolean; due?: string | null }) => void
@@ -200,15 +203,15 @@ const asStoredUtc = (day: string): string => `${day}T00:00:00Z`
 /** …and on a machine that was in Paris. Same civil day, different encoding. */
 const asStoredParis = (day: string): string => `${day}T00:00:00+02:00`
 
-// ── Pin: reshape, then pause ─────────────────────────────────────────────────
+// ── Pin: unqueue, reshape, pause, then stop ─────────────────────────────────────────────────
 
-describe('commitPin — the strip drop is two intents, said in two calls', () => {
-  it('posts reshape then pause for a card that already has a shuttle block', async () => {
+describe('commitPin — the strip drop parks the role before stopping its worker', () => {
+  it('posts reshape, pause, then runtime stop for a card with a shuttle block', async () => {
     const c = card({ id: 'pinme', shuttleKind: 'oneshot', shuttleAgent: 'claude' })
     await asPrivate(makeBoard()).commitPin(c)
     await wire.settled()
 
-    // The whole contract: these two bodies, this endpoint, this order.
+    // The whole contract: disarm before the synchronous runtime teardown.
     expect(wire.writes().map((w) => ({ url: w.url, method: w.method, body: w.body }))).toEqual([
       {
         url: `${BASE}/api/v1/lifecycle`,
@@ -218,31 +221,141 @@ describe('commitPin — the strip drop is two intents, said in two calls', () =>
       {
         url: `${BASE}/api/v1/lifecycle`,
         method: 'POST',
-        body: { action: 'pause', fiber: 'pinme', origin: 'local' },
+        body: { action: 'pause', fiber: 'pinme', origin: 'local', no_kill: true },
       },
+      { url: `${BASE}/api/v1/kill`, method: 'POST', body: { fiber_id: 'pinme', origin: 'local' } },
     ])
   })
 
   it('sends the pause even for a CLOSED source — the pause is what parks it', async () => {
     // A once-pinned card left awaiting review is re-rested by this same drag;
-    // `reshape` writes no status, so without the pause it would stay closed.
+    // The shape is already pinned; pause is the only lifecycle write needed.
     const c = card({ id: 'closed-1', status: 'closed', shuttleKind: 'pinned', tempered: undefined })
     await asPrivate(makeBoard()).commitPin(c)
     await wire.settled()
 
-    expect(wire.bodiesTo('/api/v1/lifecycle').map((b) => b.action)).toEqual(['reshape', 'pause'])
+    expect(wire.bodiesTo('/api/v1/lifecycle').map((b) => b.action)).toEqual(['pause'])
   })
 
-  it('kills a live worker BEFORE the reshape', async () => {
+  it('disarms a live worker before stopping it after reshaping', async () => {
     const c = card({ id: 'running-1', shuttleKind: 'oneshot', runningWorker: 'tmux-42' })
     await asPrivate(makeBoard()).commitPin(c)
     await wire.settled()
 
     expect(wire.writes().map((w) => [w.url, w.body])).toEqual([
-      [`${BASE}/api/v1/kill`, { fiber_id: 'running-1', origin: 'local' }],
       [`${BASE}/api/v1/lifecycle`, { action: 'reshape', kind: 'pinned', fiber: 'running-1', origin: 'local' }],
-      [`${BASE}/api/v1/lifecycle`, { action: 'pause', fiber: 'running-1', origin: 'local' }],
+      [`${BASE}/api/v1/lifecycle`, { action: 'pause', fiber: 'running-1', origin: 'local', no_kill: true }],
+      [`${BASE}/api/v1/kill`, { fiber_id: 'running-1', origin: 'local' }],
     ])
+  })
+
+  it('parks an already-pinned live role through pause, not a runtime-only kill', async () => {
+    asPrivate(makeBoard()).pinRole(card({
+      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+    }))
+    await wire.settled()
+    expect(wire.writes().map((w) => [w.url, w.body])).toEqual([
+      [`${BASE}/api/v1/lifecycle`, { action: 'pause', fiber: 'debug', origin: 'local', no_kill: true }],
+      [`${BASE}/api/v1/kill`, { fiber_id: 'debug', origin: 'local' }],
+    ])
+  })
+
+  it('removes a live role’s latent queue before parking it on the strip', async () => {
+    // Live workers stand alone even with depends_on, so foldedUnder is absent.
+    asPrivate(makeBoard()).pinRole(card({
+      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      dependsOn: ['practice'], dependsOnShape: 'scalar', originId: 'remote',
+    }))
+    await wire.settled()
+    expect(wire.writes().map((w) => [w.url, w.body])).toEqual([
+      [`${BASE}/api/v1/felt-edit`, { fiber_id: 'debug', origin: 'remote', unset: ['depends_on'] }],
+      [`${BASE}/api/v1/lifecycle`, { action: 'pause', fiber: 'debug', origin: 'remote', no_kill: true }],
+      [`${BASE}/api/v1/kill`, { fiber_id: 'debug', origin: 'remote' }],
+    ])
+  })
+
+  it('routes the runtime stop to the worker host when it differs from the document origin', async () => {
+    asPrivate(makeBoard()).pinRole(card({
+      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      originId: 'document-owner', shuttleHost: 'worker-host',
+    }))
+    await wire.settled()
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([
+      { action: 'pause', fiber: 'debug', origin: 'document-owner', no_kill: true },
+    ])
+    expect(wire.bodiesTo('/api/v1/kill')).toEqual([
+      { fiber_id: 'debug', origin: 'worker-host' },
+    ])
+  })
+
+  it('brings a folded pinned role back onto the strip rather than claiming it is already there', async () => {
+    asPrivate(makeBoard()).pinRole(card({
+      id: 'debug', status: 'open', shuttleKind: 'pinned',
+      dependsOn: ['practice'], dependsOnShape: 'scalar', foldedUnder: 'practice',
+    }))
+    await wire.settled()
+    expect(wire.writes().map((w) => w.body)).toEqual([
+      { fiber_id: 'debug', origin: 'local', unset: ['depends_on'] },
+      { action: 'pause', fiber: 'debug', origin: 'local', no_kill: true },
+      { fiber_id: 'debug', origin: 'local' },
+    ])
+  })
+
+  it('optimistically shows a parked card without stale worker, verdict, or queue fields', async () => {
+    const c = card({
+      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      runtimePhase: 'working', tempered: false, closedAt: '2026-01-01T00:00:00Z',
+      dependsOn: ['practice'], dependsOnShape: 'scalar', dependsOnUnresolved: ['practice'],
+    })
+    const board = asPrivate(makeBoard())
+    board.lastResponse = response({ now: { drafts: [], inFlight: [c], awaitingReview: [] } })
+    const paint = vi.spyOn(board, 'applyResponse').mockImplementation(() => {})
+    board.pinRole(c)
+    const parked = paint.mock.calls[0][0]
+    expect(parked.now.inFlight).toEqual([])
+    expect(parked.pinned[0]).toMatchObject({ id: 'debug', status: 'open', shuttleKind: 'pinned' })
+    for (const key of ['runningWorker', 'runtimePhase', 'tempered', 'closedAt',
+      'dependsOn', 'dependsOnShape', 'dependsOnUnresolved', 'foldedUnder'] as const) {
+      expect(parked.pinned[0][key]).toBeUndefined()
+    }
+    await wire.settled()
+  })
+
+  it('refuses a handwritten dependency list before stopping the worker', async () => {
+    asPrivate(makeBoard()).pinRole(card({
+      shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      dependsOn: ['a', 'b'], dependsOnShape: 'list',
+    }))
+    expect(wire.calls).toEqual([])
+  })
+
+  it('does not stop the worker if releasing its queue fails', async () => {
+    wire.fail('/api/v1/felt-edit', 500, 'owner unavailable')
+    asPrivate(makeBoard()).pinRole(card({
+      shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      dependsOn: ['practice'], dependsOnShape: 'scalar',
+    }))
+    await wire.settled()
+    expect(wire.writes()).toHaveLength(1)
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([])
+  })
+
+  it('does not kill the worker if pause cannot disarm the role', async () => {
+    wire.fail('/api/v1/lifecycle', 500, 'pause refused')
+    asPrivate(makeBoard()).pinRole(card({ shuttleKind: 'pinned', runningWorker: 'tmux-debug' }))
+    await wire.settled()
+    expect(wire.bodiesTo('/api/v1/kill')).toEqual([])
+  })
+
+  it('reports a failed stop instead of announcing that the role is pinned', async () => {
+    wire.fail('/api/v1/kill', 500, 'tmux refused')
+    const board = asPrivate(makeBoard())
+    const announce = vi.spyOn(board, 'announce')
+    board.pinRole(card({ shuttleKind: 'pinned', runningWorker: 'tmux-debug' }))
+    await wire.settled()
+    expect(announce.mock.calls).toHaveLength(1)
+    expect(announce.mock.calls[0][0]).toContain('Pin failed:')
+    expect(announce.mock.calls[0][0]).toContain('tmux refused')
   })
 
   it('never reaches the wire at all for a block-less card', async () => {

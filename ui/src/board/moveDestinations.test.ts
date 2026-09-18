@@ -80,6 +80,15 @@ describe('moveDestinations', () => {
     expect(d).toContain('unpin')
   })
 
+  it('offers the strip to a queued pinned role, even when the queue is not folded', () => {
+    for (const status of ['open', 'active'] as const) {
+      expect(ids(card({
+        shuttleKind: 'pinned', status,
+        dependsOn: ['work/b'], dependsOnShape: 'scalar',
+      }), null)).toContain('pin')
+    }
+  })
+
   // pinRole: a block-less draft has no host or project_dir to install from.
   it('will not pin a card with no shuttle block', () => {
     expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('pin')

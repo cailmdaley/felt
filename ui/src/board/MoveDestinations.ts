@@ -161,12 +161,11 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
         label: 'Stop it and rest on the strip',
         action: { kind: 'pin' },
       })
-    } else if (card.status === 'closed') {
+    } else if (card.status === 'closed' || (card.dependsOn?.length ?? 0) > 0) {
       // A pinned role whose last run is CLOSED classifies into Awaiting review
       // or Past, not onto the strip — so "already pinned" is not true of it and
       // `pinRole` deliberately lets it through (reopen → reshape → park). This
-      // is the only gesture that brings a once-pinned role back to rest;
-      // withholding it left such a card stranded off the strip forever.
+      // also brings a queued pinned role out from under its predecessor.
       out.push({
         id: 'pin',
         label: 'Rest it back on the strip',

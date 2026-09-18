@@ -1603,108 +1603,60 @@ export class KanbanModal {
     )
   }
 
-  /**
-   * "Onto the Pinned shelf" gesture: reshape an existing shuttle fiber to a
-   * resting `kind:pinned` role. The off-the-shelf twin of dragging a pinned
-   * card onto In-flight (dispatch). Optimistically lands the card on the
-   * pinned surface, then posts the daemon's `reshape pinned` in the background
-   * and reconciles.
-   *
-   * v1 scope (matches the spec): the source must already carry a shuttle block
-   * (a bare human-due draft has no host/project_dir to install from — promote
-   * it first), and must not be closed (the `pin` writer refuses a closed fiber;
-   * reopen-then-pin is a follow-up). Both are surfaced as banners, not silent
-   * no-ops.
-   */
+  /** A strip drop means "be a pinned role, at rest, outside any queue". */
   private pinRole(card: KanbanCard): void {
-    // An already-pinned role that is RESTING (status:active) is already on the
-    // strip — tell the user rather than silently swallowing the drag. But a
-    // pinned role whose last run is awaiting review (status:closed, tempered
-    // undefined) classifies into Awaiting review, NOT onto the strip; dragging
-    // it to the strip means "bring it back to rest," which the closed-card
-    // compose below (reopen → reshape → active) delivers. Returning
-    // unconditionally was the bug: a once-pinned card left closed could never
-    // be re-rested from the board.
-    if (card.shuttleKind === 'pinned' && card.status !== 'closed') {
-      // A *running* pinned role shows in In-flight, not at rest on the strip
-      // (the live-worker override in classifyFiber). Dragging it back to the
-      // strip means "stop it": kill the worker so it comes to rest. No reshape —
-      // it's already pinned, so re-pinning would be a pointless round-trip.
-      if (card.runningWorker) {
-        const optimistic = applyOptimisticPin(this.lastResponse, card.id)
-        if (optimistic) this.applyResponse(optimistic)
-        void this.stopRunningPinnedRole(card)
-        return
-      }
-      this.showBanner(`“${card.name}” is already pinned — it's resting on the strip.`, 'info')
-      this.announce(`${card.name} is already pinned.`)
-      return
-    }
     if (card.shuttleKind === undefined) {
       this.showBanner(`“${card.name}” has no shuttle block — promote it before pinning.`, 'error')
       return
     }
-    // A closed card (awaiting-review or a tempered/composted past run) is no
-    // longer refused: `reshape` writes the shape and nothing else, so commitPin
-    // follows it with a `pause` that parks the card — status:open, tempered and
-    // closed-at cleared. applyOptimisticPin already lands the card at rest
-    // (status:active) on the strip, so the optimistic move holds for a closed
-    // source too.
-    // A running card dragged onto the strip is stopped first (commitPin kills
-    // the worker before the reshape), so it comes to rest on the strip rather
-    // than staying in Now via the live-worker override. The optimistic move to
-    // the strip therefore holds.
+    if (this.refusesHandwrittenList(card)) return
+    if (card.shuttleKind === 'pinned' && card.status !== 'closed' &&
+        !card.runningWorker && !card.dependsOn?.length && !card.foldedUnder) {
+      this.showBanner(`“${card.name}” is already pinned — it's resting on the strip.`, 'info')
+      this.announce(`${card.name} is already pinned.`)
+      return
+    }
     const optimistic = applyOptimisticPin(this.lastResponse, card.id)
     if (optimistic) this.applyResponse(optimistic)
     void this.commitPin(card)
   }
 
   /**
-   * Network half of {@link pinRole}. The gesture means two things — "be a
-   * pinned role" and "come to rest on the strip" — so a card that already
-   * carries a shuttle block says both, in two calls:
-   *
-   *   `reshape pinned` rewrites kind (dropping any schedule) and NOTHING else,
-   *   so model, host and project_dir stay where they are instead of being
-   *   echoed back through a create verb; then `pause` parks it — status:open
-   *   with tempered / closed-at cleared, which IS rest on the strip. The old
-   *   `pin --reshape` delivered the parking by accident, as a side effect of
-   *   rebuilding the whole block; now the intent is stated.
-   *
-   * Non-atomic on purpose. The hazard this codebase learned to fear was
-   * `uninstall` + `pin`, where a failed second write left a fiber with NO block
-   * at all. Here a failed `pause` leaves a correctly pinned role that simply
-   * isn't parked yet — visible, harmless, and re-driveable by the same drag. An
-   * atomic block-rebuild would cost more than it buys.
-   *
-   * There is no create path here. A card with no block has nothing to reshape
-   * and nothing to install from either — no host, no project_dir — so `pinRole`
-   * turns it away with "promote it first" before the network is touched, and
-   * Promote owns the create verbs. A running card is killed first, so by the
-   * time `pause` runs its own kill is a no-op. Reconciles via the trailing
-   * refetch.
+   * Clear the queue before parking: a live card stands outside its queue, but
+   * an open card folds back under its predecessor unless that edge is removed.
+   * Pause disarms dispatch before the runtime kill. The daemon then removes
+   * its worker tracking synchronously, so the reconcile sees a resting card.
+   * Reshape only when needed; propagate either failure rather than announcing
+   * a stop that never happened.
    */
   private async commitPin(card: KanbanCard): Promise<void> {
+    this.gestureDepth += 1
     try {
-      await this.killWorkerIfRunning(card)
-      // Every card reaching here already carries a shuttle block — `pinRole`
-      // turns away a block-less one with "promote it first", because there is
-      // no host or project_dir to install from. So this is the shape edit and
-      // nothing else; the create verbs are Promote's job, not this gesture's.
-      //
-      // The /lifecycle endpoint keys on `fiber` (not `fiber_id`, which
-      // /dispatch and /felt-edit use) — matching FiberDetailModal's reshape.
-      await this.postLifecycle({
-        action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
-      })
-      await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId })
+      if (card.dependsOn?.length || card.foldedUnder) {
+        await this.postFeltEdit({
+          fiber_id: card.id, origin: card.originId, unset: ['depends_on'],
+        }, 'Unstack failed')
+      }
+      if (card.shuttleKind !== 'pinned') {
+        await this.postLifecycle({
+          action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
+        })
+      }
+      await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId, no_kill: true })
+      await this.postJson('/api/v1/kill', {
+        fiber_id: card.id, origin: card.shuttleHost ?? card.originId,
+      }, 'Stop worker failed')
       this.announce(`Pinned “${card.name}”.`)
     } catch (err: unknown) {
       const msg = errText(err)
       this.showBanner(`Couldn't pin “${card.name}”: ${msg}`, 'error')
       this.announce(`Pin failed: ${msg}`)
     }
-    await this.fetchAndRender()
+    try {
+      await this.fetchAndRender()
+    } finally {
+      this.gestureDepth -= 1
+    }
   }
 
   /** POST one lifecycle verb, throwing the daemon's error text on non-2xx.
@@ -2198,19 +2150,6 @@ export class KanbanModal {
       const msg = errText(err)
       this.showBanner(`Couldn't stop the worker for “${card.name}”: ${msg}`, 'error')
     }
-  }
-
-  /**
-   * Drag a *running* pinned role off In-flight onto the strip: stop its worker
-   * and let it come to rest. The board invariant — a worker is alive only while
-   * its card sits in In-flight — applied to the one card kind that lives on the
-   * strip when idle. No reshape (it's already pinned); the kill + refetch is the
-   * whole gesture, and the optimistic pin already landed it on the strip.
-   */
-  private async stopRunningPinnedRole(card: KanbanCard): Promise<void> {
-    await this.killWorkerIfRunning(card)
-    this.announce(`Stopped “${card.name}”; resting on the Pinned strip.`)
-    await this.fetchAndRender()
   }
 
   /** Lightweight auto-poll while mounted. 15s interval. */
@@ -2893,7 +2832,7 @@ function placeOptimistically(
 /**
  * Optimistic relocation of one card onto the Pinned strip — the "onto the
  * shelf" twin of {@link applyOptimisticSurface}. Patches the minimal fields the
- * strip + classifier read: `kind:pinned`, resting `status:active`, and the
+ * strip + classifier read: `kind:pinned`, resting `status:open`, and the
  * schedule cleared (a pinned block has none). Returns null when the card is
  * absent. The trailing refetch reconciles against the daemon's reshape.
  */
@@ -2903,7 +2842,14 @@ function applyOptimisticPin(
 ): KanbanResponse | null {
   return placeOptimistically(resp, cardId, 'pinned', () => ({
     shuttleKind: 'pinned',
-    status: 'active',
+    status: 'open',
+    runningWorker: undefined,
+    runtimePhase: undefined,
+    tempered: undefined,
+    closedAt: undefined,
+    dependsOn: undefined,
+    dependsOnShape: undefined,
+    dependsOnUnresolved: undefined,
     shuttleSchedule: undefined,
     shuttleTz: undefined,
     nextLaunchAt: undefined,
