@@ -327,6 +327,7 @@ export function CaptureForm({
           <label className="capture-field capture-session-field">
             <span className="capture-label">Session</span>
             <select
+              aria-label="Session"
               className="capture-select"
               value={isCodexAgent(agentRec) ? surface : 'cli'}
               disabled={!isCodexAgent(agentRec)}

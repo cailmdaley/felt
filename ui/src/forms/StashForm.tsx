@@ -765,6 +765,7 @@ export function StashForm({
               <label className="stash-field stash-session-field">
                 <span className="stash-label">Session</span>
                 <select className="stash-select"
+                  aria-label="Session"
                   value={isCodexAgent(constraintAgent) ? surface : 'cli'}
                   disabled={!isCodexAgent(constraintAgent)}
                   onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
