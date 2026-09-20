@@ -66,5 +66,35 @@ bundle with `npm run build`.
 
 The real harness smoke is deliberately outside ordinary `mix test`. It uses
 tmux session names like `shuttle-harness-smoke-<harness>-<unique>`, records
-captures under `daemon/_build/test/shuttle_harness_smoke/`, and skips harnesses that
-are not available in `bash -l`.
+captures under `daemon/_build/test/shuttle_harness_smoke/`, and requires the
+harness wrappers to be available in `bash -l`.
+
+### Harness authentication and test isolation
+
+Ordinary tests use fake harness processes, sockets, and transcripts. They must
+not launch an installed harness, run its setup against the operator's home, or
+inherit authentication from the calling session. A temporary working directory
+or `CLAUDE_CONFIG_DIR` alone does not isolate authentication.
+
+Never copy, hardlink, or symlink live OAuth credentials into a test config.
+A separate file still holds the same refresh token: a test process can rotate
+or invalidate authentication used by the operator's sessions. Do not copy
+account configuration, MCP credentials, or credential backups either. Fixtures
+use a fresh home and config with synthetic data and a controlled environment;
+they must not fall back to installed harness executables.
+
+Real harness smoke is an explicit integration operation against the operator's
+runtime. Even starting an idle CLI or running plugin setup can initialize or
+refresh authentication. For authenticated messaging acceptance, use an
+operator-started disposable receiver in its normal authenticated runtime, or
+independently provisioned test authentication. Send through its registered
+endpoint without duplicating its credential store or starting a second writer
+for the same conversation. Do not automate login, logout, token refresh, or
+credential restoration as test recovery.
+
+If authentication fails, stop live probes and preserve evidence. Distinguish
+file metadata and token-presence observations from auth-status output and model
+errors; record observation times without recording secrets. An observation
+after startup does not establish the state before the test. Keep authenticated
+reply and active approval acceptance unverified until those checks actually
+pass; a synthetic API-error response is not model-response evidence.

@@ -13,7 +13,6 @@ import (
 )
 
 var binaryPath string
-var repoRoot string
 
 func TestMain(m *testing.M) {
 	// A test that re-execs THIS binary as a helper child (TestEventHookHelperProcess,
@@ -55,7 +54,6 @@ func TestMain(m *testing.M) {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			buildCmd.Dir = dir
-			repoRoot = dir
 			break
 		}
 		parent := filepath.Dir(dir)
@@ -716,84 +714,13 @@ Needs body.
 		t.Fatalf("rm: fiber should be gone, got: %s", lsOut)
 	}
 
-	// setup claude — registers the marketplace + installs the plugin via the
-	// Claude Code CLI. Skip when `claude` isn't available (e.g., on CI runners
-	// without Claude Code installed).
-	if _, err := exec.LookPath("claude"); err == nil {
-		if _, err := felt(dir, "setup", "claude", "--source", repoRoot); err != nil {
-			t.Fatalf("setup claude: %v", err)
-		}
-	}
-
-	// setup codex — install, idempotent, uninstall. Skipped when the codex
-	// CLI isn't available (e.g. CI runners without Codex installed); the
-	// post-block --help checks still run.
-	if _, err := exec.LookPath("codex"); err != nil {
-		t.Log("codex CLI not on PATH; skipping setup codex portion")
-	} else {
-		codexHome := t.TempDir()
-		codexEnv := append(os.Environ(), "HOME="+codexHome, "SHELL=/bin/zsh")
-
-		cmd := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
-		cmd.Dir = dir
-		cmd.Env = codexEnv
-		cmdOut, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("setup codex install: %v\n%s", err, cmdOut)
-		}
-		if !strings.Contains(string(cmdOut), "## felt") {
-			t.Fatalf("setup codex: expected AGENTS.md snippet, got: %s", cmdOut)
-		}
-
-		// `codex plugin add` materializes the plugin into
-		// ~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/ and enables
-		// it in config.toml. The version directory is named by the plugin
-		// manifest, so glob rather than hardcode it.
-		cacheRoot := filepath.Join(codexHome, ".codex", "plugins", "cache", "cailmdaley-felt", "felt")
-		manifests, err := filepath.Glob(filepath.Join(cacheRoot, "*", ".codex-plugin", "plugin.json"))
-		if err != nil || len(manifests) != 1 {
-			t.Fatalf("setup codex: want exactly one cached plugin manifest under %s, got %v (%v)", cacheRoot, manifests, err)
-		}
-		cacheContent, err := os.ReadFile(manifests[0])
-		if err != nil {
-			t.Fatalf("setup codex: plugin cache manifest unreadable: %v", err)
-		}
-		text := string(cacheContent)
-		if !strings.Contains(text, `"skills"`) || !strings.Contains(text, `"hooks"`) {
-			t.Fatalf("setup codex: cache manifest missing skills/hooks pointers, got: %s", cacheContent)
-		}
-
-		codexConfig := filepath.Join(codexHome, ".codex", "config.toml")
-		configText, err := os.ReadFile(codexConfig)
-		if err != nil {
-			t.Fatalf("setup codex: config.toml unreadable: %v", err)
-		}
-		if !strings.Contains(string(configText), `[plugins."felt@cailmdaley-felt"]`) {
-			t.Fatalf("setup codex: plugin not enabled in config.toml, got: %s", configText)
-		}
-
-		// Re-running repoints the marketplace and reinstalls in place.
-		cmd2 := exec.Command(binaryPath, "setup", "codex", "--source", repoRoot)
-		cmd2.Dir = dir
-		cmd2.Env = codexEnv
-		cmdOut2, err := cmd2.CombinedOutput()
-		if err != nil {
-			t.Fatalf("setup codex rerun: %v\n%s", err, cmdOut2)
-		}
-		if _, err := os.Stat(manifests[0]); err != nil {
-			t.Fatalf("setup codex rerun: plugin cache manifest gone: %v", err)
-		}
-
-		// uninstall
-		cmd3 := exec.Command(binaryPath, "setup", "codex", "--uninstall", "--source", repoRoot)
-		cmd3.Dir = dir
-		cmd3.Env = codexEnv
-		cmd3Out, err := cmd3.CombinedOutput()
-		if err != nil {
-			t.Fatalf("setup codex uninstall: %v\n%s", err, cmd3Out)
-		}
-		if _, err := os.Stat(manifests[0]); !os.IsNotExist(err) {
-			t.Fatalf("setup codex uninstall: plugin cache still present: %v", err)
+	// Native setup behavior is exercised with fake harness binaries and temporary
+	// homes in plugin_remote_setup_test.go. This CLI integration only reads help;
+	// it never installs plugins into a developer's authenticated harness.
+	for _, harness := range []string{"claude", "codex"} {
+		setupHelp := mustFelt(t, dir, "setup", harness, "--help")
+		if !strings.Contains(setupHelp, "--source") {
+			t.Fatalf("setup %s help: missing source option: %s", harness, setupHelp)
 		}
 	}
 

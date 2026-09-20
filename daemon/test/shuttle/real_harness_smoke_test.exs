@@ -19,24 +19,15 @@ defmodule Shuttle.RealHarnessSmokeTest do
     @moduletag skip: "set #{@enable_env}=1 to launch real Claude/Codex/Pi harness smoke tests"
   end
 
-  command_available? = fn wrapper ->
-    case System.cmd("bash", ["-lc", "type -t #{wrapper} >/dev/null"], stderr_to_stdout: true) do
-      {_, 0} -> true
-      _ -> false
-    end
-  end
-
   for {agent_id, wrapper} <- @agent_ids do
-    if command_available?.(wrapper) do
-      @tag agent_id: agent_id
-      test "#{wrapper} opens to an idle tmux surface without a prompt", %{agent_id: agent_id} do
-        agent = agent!(agent_id)
-        run_idle_smoke(agent)
-      end
-    else
-      @tag skip: "#{wrapper} is not available in bash -l"
-      test "#{wrapper} opens to an idle tmux surface without a prompt" do
-        :ok
+    @tag agent_id: agent_id, wrapper: wrapper
+    test "#{wrapper} opens to an idle tmux surface without a prompt", %{
+      agent_id: agent_id,
+      wrapper: wrapper
+    } do
+      case System.cmd("bash", ["-lc", "type -t #{wrapper} >/dev/null"], stderr_to_stdout: true) do
+        {_, 0} -> run_idle_smoke(agent!(agent_id))
+        _ -> flunk("#{wrapper} is not available in bash -l")
       end
     end
   end
@@ -127,6 +118,7 @@ defmodule Shuttle.RealHarnessSmokeTest do
 
     assert "codex-luna" in ids, "the shipped fleet should include configured Codex tiers"
     refute "human" in ids, "human is no longer a registry agent. Got: #{inspect(ids)}"
+
     refute Enum.any?(ids, &String.ends_with?(&1, "-headless")),
            "headless is an internal -p axis, not a shipped agent. Got: #{inspect(ids)}"
   end
