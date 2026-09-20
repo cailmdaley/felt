@@ -637,7 +637,7 @@ export class FiberDetailModal {
       mark.title = `${card.runtimePhase ?? 'Aloft'} — ${appTarget.title}`
       if (mark instanceof HTMLAnchorElement && appTarget.href) {
         mark.href = appTarget.href
-        mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        mark.setAttribute('aria-label', appTarget.ariaLabel)
         mark.addEventListener('click', (e) => e.stopPropagation())
       } else if (mark instanceof HTMLButtonElement) {
         mark.type = 'button'
@@ -726,7 +726,7 @@ export class FiberDetailModal {
     const prose = document.createElement('article')
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
-    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid && !appTarget.href) {
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid && !appTarget.conversationSpecific) {
       const guidance = document.createElement('p')
       guidance.className = 'kbn-detail-app-guide'
       guidance.textContent = appTarget.guidance

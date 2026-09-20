@@ -10,9 +10,11 @@ describe('app conversation opening', () => {
     expect(appConversationTarget(card, true).title).toContain('If it does not select this host')
   })
 
-  it('keeps phones on truthful host/project guidance without inventing a universal link', () => {
+  it('opens the mobile app while retaining host/project guidance', () => {
     const target = appConversationTarget(card, false)
-    expect(target.href).toBeUndefined()
+    expect(target.href).toBe('https://chatgpt.com/open-app')
+    expect(target.conversationSpecific).toBe(false)
+    expect(target.ariaLabel).toBe('Open ChatGPT app')
     expect(target.guidance).toBe('Continue in ChatGPT → Remote → workstation → felt, then choose this conversation.')
     expect(canOpenDesktopApp('Mozilla/5.0 (iPhone) Mobile', false)).toBe(false)
     expect(canOpenDesktopApp('Mozilla/5.0 (Linux; Android 16)', false)).toBe(false)

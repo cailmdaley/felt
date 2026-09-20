@@ -3056,7 +3056,7 @@ class DayViewImpl implements TemporalView {
       mark.title = `${chip.title} — ${target.title}`
       if (mark instanceof HTMLAnchorElement && target.href) {
         mark.href = target.href
-        mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        mark.setAttribute('aria-label', target.ariaLabel)
         mark.addEventListener('click', event => event.stopPropagation())
       } else if (mark instanceof HTMLButtonElement) {
         mark.type = 'button'

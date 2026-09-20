@@ -7,33 +7,28 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH,
 try {
   for (const mobile of [false, true]) {
     const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 }, isMobile: mobile, hasTouch: mobile })
-    await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+    const harness = pathToFileURL(resolve('harness-board-dist/index.html')).href
+    await page.route('https://chatgpt.com/open-app', route => route.fulfill({ contentType: 'text/html', body: '<p>App-opening destination</p>' }))
+    await page.goto(harness)
     const appCard = page.locator('.kbn-card').filter({ has: page.getByText('App conversation continuity', { exact: true }) })
     const appMark = appCard.locator('.kbn-card-worker')
     assert.equal(await appMark.textContent(), 'Aloft')
     assert.ok(await appMark.isVisible())
+    const destination = mobile ? 'https://chatgpt.com/open-app' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
+    assert.equal(await appMark.getAttribute('href'), destination)
     if (mobile) {
       await appMark.click()
-      const guide = page.getByRole('dialog', { name: 'Continue in ChatGPT' })
-      assert.ok(await guide.isVisible())
-      assert.match(await guide.innerText(), /ada-workstation/)
-      assert.match(await guide.innerText(), /01a0be38-6c36-7cd1-aec9-53a680d1f693/)
-      await guide.getByRole('button', { name: 'Copy conversation ID', exact: true }).focus()
-      await page.keyboard.press('Tab')
-      assert.ok(await guide.getByRole('button', { name: 'Close', exact: true }).evaluate(e => e === document.activeElement), 'Tab reaches Close inside the dialog')
-      const box = await guide.boundingBox()
-      assert.ok(box && box.x >= 0 && box.x + box.width <= 390)
-      await guide.getByRole('button', { name: 'Close', exact: true }).click()
+      await page.waitForURL(destination)
+      await page.goto(harness)
     }
     await appCard.locator('.kbn-card-name').click()
     assert.equal(await page.locator('.kbn-detail-aloft').textContent(), 'Aloft')
+    assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('href'), destination)
     if (mobile) {
+      assert.match(await page.locator('.kbn-detail-app-guide').innerText(), /Remote → ada-workstation → loom/)
+      assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('aria-label'), 'Open ChatGPT app')
       await page.locator('.kbn-detail-aloft').click()
-      assert.ok(await page.getByRole('dialog', { name: 'Continue in ChatGPT' }).isVisible())
-      await page.keyboard.press('Escape')
-      assert.equal(await page.getByRole('dialog', { name: 'Continue in ChatGPT' }).count(), 0)
-      assert.ok(await page.locator('.kbn-detail-aloft').isVisible(), 'Escape closes only the guidance')
-      assert.ok(await page.locator('.kbn-detail-aloft').evaluate(e => e === document.activeElement), 'focus returns to Aloft')
+      await page.waitForURL(destination)
     }
     await page.close()
   }

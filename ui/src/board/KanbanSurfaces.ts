@@ -1666,7 +1666,7 @@ export class KanbanSurfaceRenderer {
       phase.title = app ? `${phasePillLabel(phaseName, card.lastActivityAt)} — ${appTarget.title}` : card.launchError ? `${title}\n\n${card.launchError}` : title
       if (phase instanceof HTMLAnchorElement && appTarget.href) {
         phase.href = appTarget.href
-        phase.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        phase.setAttribute('aria-label', appTarget.ariaLabel)
         phase.addEventListener('click', (event) => event.stopPropagation())
       } else if (app && phase instanceof HTMLButtonElement) {
         phase.type = 'button'

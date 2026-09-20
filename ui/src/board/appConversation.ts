@@ -15,15 +15,21 @@ export function canOpenDesktopApp(userAgent: string, coarse: boolean): boolean {
 export function appConversationTarget(
   card: Pick<KanbanCard, 'desktopLink' | 'shuttleHost' | 'shuttleProjectDir' | 'launchError'>,
   desktop: boolean,
-): { href?: string; title: string; guidance: string } {
-  const href = desktop ? validDesktopThreadLink(card.desktopLink) : undefined
+): { href?: string; title: string; guidance: string; conversationSpecific: boolean; ariaLabel: string } {
+  const threadLink = desktop ? validDesktopThreadLink(card.desktopLink) : undefined
+  // ChatGPT registers this universal link to open the mobile app, with an App Store fallback.
+  const href = desktop ? threadLink : 'https://chatgpt.com/open-app'
   const project = card.shuttleProjectDir?.split(/[\\/]/).filter(Boolean).at(-1)
   const location = [card.shuttleHost, project].filter(Boolean).join(' → ')
   const guidance = `Continue in ChatGPT → Remote${location ? ` → ${location}` : ''}, then choose this conversation.`
-  const title = href
+  const title = threadLink
     ? `Open in the ChatGPT desktop app. If it does not select this host, use Remote${location ? ` → ${location}` : ''}.`
-    : guidance
-  return { href, title: card.launchError ? `${title}\n\n${card.launchError}` : title, guidance }
+    : href ? `Open ChatGPT. ${guidance}` : guidance
+  return {
+    href, title: card.launchError ? `${title}\n\n${card.launchError}` : title, guidance,
+    conversationSpecific: Boolean(threadLink),
+    ariaLabel: threadLink ? 'Open conversation in the ChatGPT desktop app' : 'Open ChatGPT app',
+  }
 }
 
 export function workerStatusLabel(phase?: string, launchError?: string): string {
