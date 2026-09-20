@@ -12,6 +12,11 @@ type claudeAdapter struct{}
 
 func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 	hookSessions := MailboxSessions("claude", host)
+	for i := range hookSessions {
+		if claudeNativeAvailable(hookSessions[i].ID, host) {
+			hookSessions[i].Capabilities = append(hookSessions[i].Capabilities, "wake")
+		}
+	}
 	cmd := exec.CommandContext(ctx, "claude", "agents", "--json")
 	var out cappedBuffer
 	cmd.Stdout = &out
@@ -50,6 +55,9 @@ func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, erro
 		if MailboxAvailable("claude", id, host) {
 			capabilities = append(capabilities, "context")
 		}
+		if claudeNativeAvailable(id, host) {
+			capabilities = append(capabilities, "wake")
+		}
 		ss = append(ss, Session{Address: addr, Host: host, Harness: "claude", ID: id, Title: stringField(m, "name"), CWD: stringField(m, "cwd", "workspace"), State: stringField(m, "status"), Capabilities: capabilities})
 	}
 	return mergeNativeAndHookSessions(ss, hookSessions), nil
@@ -71,9 +79,9 @@ func stringField(m map[string]any, keys ...string) string {
 	}
 	return ""
 }
-func (claudeAdapter) send(_ context.Context, a Address, r Request) (Receipt, error) {
+func (claudeAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
 	if r.Wake {
-		return rejected(r, "claude-hook", "Claude hook delivery cannot wake a session"), errCode("wake_required", "Claude hook delivery cannot wake a session")
+		return sendClaudeNative(ctx, a, r)
 	}
 	return QueueMailbox(a, r)
 }

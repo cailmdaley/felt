@@ -83,3 +83,24 @@ func TestEventHookDoesNotClassifyUnknownPayloadAsCodex(t *testing.T) {
 		t.Fatal("unidentified hook registered a Codex mailbox")
 	}
 }
+
+func TestClaudeHookHonorsCustomConfigDirectory(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_EVENTS", "off")
+	t.Setenv("SHUTTLE_HOST", "host")
+	input := eventHookInput{HookEventName: "SessionStart", SessionID: "custom-session", TranscriptPath: filepath.Join(config, "projects", "workspace", "custom-session.jsonl")}
+	b, _ := json.Marshal(input)
+	var out bytes.Buffer
+	if err := runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !messaging.MailboxAvailable("claude", input.SessionID, "host") || messaging.MailboxAvailable("codex", input.SessionID, "host") {
+		t.Fatal("custom Claude config registered the wrong harness")
+	}
+	input.TranscriptPath = filepath.Join(config+"-unrelated", "projects", "workspace", "custom-session.jsonl")
+	if messageHookHarness(input) != "" {
+		t.Fatal("unrelated transcript inherited Claude identity")
+	}
+}

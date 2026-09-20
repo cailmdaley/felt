@@ -144,7 +144,9 @@ The existing `felt hook event` integration registers these receivers;
 Messaging uses the configured fleet transport to reach the owning daemon.
 Each owner discovers its own harnesses; network reachability alone does not
 provide a messaging transport. Codex app-server sessions use the runtime's
-Unix control socket. CLI sessions use supported context hooks. Pi sessions use
+Unix control socket. Claude receiver hooks register its native inbox socket and
+transcript; explicit wake uses that live process, without launching a second
+session. CLI context-only delivery uses supported hooks. Pi sessions use
 Confer's existing Unix RPC socket and require `--wake` because its message
 operation can start a turn. Terminal keystrokes are not a messaging transport.
 
@@ -154,7 +156,8 @@ this calls the owning runtime's turn-start operation. For a running session it
 steers the current turn; it does not schedule an additional turn after completion.
 Codex sessions waiting on approval or user input reject wake until that native
 input is resolved. Pi acknowledges either an active steer or a follow-up prompt.
-The hook mailbox adapters reject wake and remain usable for context-only sends.
+The hook mailbox adapters reject wake when no native wake endpoint is registered
+and remain usable for context-only sends.
 Discovery capabilities describe the available adapter, not every feature a
 harness vendor offers.
 
@@ -163,6 +166,21 @@ receipt. If a peer returns one after dispatch, Shuttle reports an unverified
 outcome and does not retry automatically. A missing acknowledgement after sending
 is `unknown`, even when the underlying worker reports a generic failure. Retrying
 the same message ID retrieves the recorded outcome; it cannot force redelivery.
+
+Claude native wake checks the registered socket and process identity, then waits
+for a real assistant response descended from the exact message in the receiver's
+transcript. A socket write or synthetic API-error response is insufficient.
+Native inbox hold remains `unknown` with an explicit held detail; native refusal
+is `rejected`. Shuttle preserves the receiver's inbound policy and does not use
+its child authentication token. Missing model evidence before the bounded wait
+expires remains `unknown`, even if processing later succeeds. Auth-required
+native endpoints need supported peer authentication before they can be used.
+Claude's native inbound setting governs this wake transport. Context-only sends
+use the separately installed Shuttle mailbox hooks; native inbox refusal does
+not disable that channel. `SHUTTLE_MESSAGES=off` disables hook registration and
+mailbox offers in that receiver.
+Pi wake acceptance requires the worker's correlated native acknowledgement;
+workers without that evidence return `unknown` and need an updated Confer worker.
 
 | Receipt | Evidence |
 |---|---|

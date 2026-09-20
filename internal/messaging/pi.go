@@ -16,8 +16,9 @@ import (
 
 type piAdapter struct{}
 type piReply struct {
-	OK              bool
-	Delivery, Error string
+	OK                               bool
+	Delivery, Error                  string
+	Phase, JobID, RequestID, RPCType string
 }
 
 func decodePiReply(b []byte) (piReply, error) {
@@ -25,9 +26,13 @@ func decodePiReply(b []byte) (piReply, error) {
 		return piReply{}, fmt.Errorf("reply exceeds 65536 bytes")
 	}
 	var wire struct {
-		OK       *bool  `json:"ok"`
-		Delivery string `json:"delivery"`
-		Error    string `json:"error"`
+		OK        *bool  `json:"ok"`
+		Delivery  string `json:"delivery"`
+		Error     string `json:"error"`
+		Phase     string `json:"phase"`
+		JobID     string `json:"jobId"`
+		RequestID string `json:"requestId"`
+		RPCType   string `json:"rpcType"`
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	if err := d.Decode(&wire); err != nil {
@@ -43,7 +48,7 @@ func decodePiReply(b []byte) (piReply, error) {
 	if *wire.OK && wire.Delivery != "steer" && wire.Delivery != "follow_up" {
 		return piReply{}, fmt.Errorf("unsupported delivery acknowledgement")
 	}
-	return piReply{OK: *wire.OK, Delivery: wire.Delivery, Error: wire.Error}, nil
+	return piReply{OK: *wire.OK, Delivery: wire.Delivery, Error: wire.Error, Phase: wire.Phase, JobID: wire.JobID, RequestID: wire.RequestID, RPCType: wire.RPCType}, nil
 }
 
 type piJob struct {
@@ -184,10 +189,25 @@ func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error
 	if decodeErr != nil {
 		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker returned malformed reply"}, errCode("ambiguous_delivery", "Confer returned malformed reply")
 	}
+	if resp.JobID != "" && resp.JobID != j.ID {
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker reply identified a different session"}, errCode("ambiguous_delivery", "Confer reply session identity mismatch")
+	}
 	if !resp.OK {
-		// The worker uses ok=false for both explicit RPC rejection and lost
-		// acknowledgements after writing the prompt. It cannot prove no turn ran.
+		if resp.JobID == j.ID && resp.RequestID != "" && resp.RPCType == "prompt" {
+			if resp.Phase == "preflight" {
+				return rejected(r, "pi-rpc+unix-socket", resp.Error), errCode("preflight_failed", "Confer refused before sending: %s", resp.Error)
+			}
+			if resp.Phase == "rpc_rejected" {
+				return rejected(r, "pi-rpc+unix-socket", resp.Error), errCode("native_rejected", "Pi rejected prompt: %s", resp.Error)
+			}
+		}
+		// Undifferentiated errors and missing receiver evidence cannot prove
+		// that no turn ran, including replies from workers without phase fields.
 		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker did not confirm delivery: " + resp.Error}, errCode("ambiguous_delivery", "Confer delivery outcome unknown: %s", resp.Error)
+	}
+	if resp.Phase != "rpc_acknowledged" || resp.JobID != j.ID || resp.RequestID == "" || resp.RPCType != "prompt" {
+		detail := "worker acknowledgement lacks correlated native evidence; update Confer workers before sending further task handoffs; this message may have run"
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: detail}, errCode("ambiguous_delivery", "%s", detail)
 	}
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusAccepted, Transport: "pi-rpc+unix-socket", Detail: resp.Delivery}, nil
 }

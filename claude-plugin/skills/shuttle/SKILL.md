@@ -70,7 +70,10 @@ it. For a task handoff that should begin without another human prompt, send
 `felt shuttle message <address> "task" --wake`. A queued/context-added receipt
 does not satisfy that request. An accepted wake starts idle work or steers an
 already running turn; it does not promise a separate turn after that turn ends.
-Hook-only sessions reject wake. Pending native approval or user input must be
+Claude hooks register a native inbox when available; wake preserves its inbound
+hold/refuse policy and waits for a correlated real model response. A held message
+or unobserved response is not successful wake. Hook-only sessions reject wake.
+Pending native approval or user input must be
 resolved through that harness's input surface.
 
 For multiline text use `--file <path>` or `-` with stdin. Each send prints a

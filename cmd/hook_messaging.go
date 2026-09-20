@@ -41,6 +41,11 @@ func runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if messaging.RegisterMailbox(harness, input.SessionID, host, input.CWD, input.HookEventName != "SessionEnd") != nil {
 		return nil
 	}
+	if harness == "claude" {
+		_ = messaging.RegisterClaudeNative(input.SessionID, host, input.CWD,
+			os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"), input.TranscriptPath,
+			input.HookEventName != "SessionEnd")
+	}
 	switch input.HookEventName {
 	case "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse":
 		_ = messaging.OfferMailbox(harness, input.SessionID, host, func(requests []messaging.Request) error {

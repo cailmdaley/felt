@@ -121,7 +121,7 @@ func init() {
 
 // harnessFor names the agent harness a hook payload came from, from the one
 // discriminator every harness gives us: Claude Code writes its transcript under
-// ~/.claude/projects/ and pi under ~/.pi/, and nothing else uses either. An
+// its config directory's projects/ and pi under ~/.pi/. An
 // empty transcript_path is neither — Codex sends no such field.
 //
 // Two callers depend on this and must agree: the PreToolUse gate skips the felt
@@ -130,9 +130,13 @@ func init() {
 // `felt hook event` stamps the same verdict as the line's `harness` field.
 func harnessFor(transcriptPath string) string {
 	home, _ := os.UserHomeDir()
+	claudeDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if claudeDir == "" {
+		claudeDir = filepath.Join(home, ".claude")
+	}
 	for prefix, harness := range map[string]string{
-		filepath.Join(home, ".claude", "projects") + string(filepath.Separator): "claude-code",
-		filepath.Join(home, ".pi") + string(filepath.Separator):                 "pi",
+		filepath.Join(claudeDir, "projects") + string(filepath.Separator): "claude-code",
+		filepath.Join(home, ".pi") + string(filepath.Separator):           "pi",
 	} {
 		if transcriptPath != "" && strings.HasPrefix(transcriptPath, prefix) {
 			return harness
