@@ -568,8 +568,9 @@ preserved.`,
 // ---- set-agent -------------------------------------------------------------
 
 var (
-	setAgentEffort string
-	setAgentChrome bool
+	setAgentEffort  string
+	setAgentChrome  bool
+	setAgentSurface string
 )
 
 // setAgentCmd is the axis-aware mutation verb: it composes base agent × effort ×
@@ -608,6 +609,10 @@ back to the harness default.`,
 		if cmd.Flags().Changed("chrome") {
 			chrome = setAgentChrome
 		}
+		surface := block.Surface
+		if cmd.Flags().Changed("surface") {
+			surface = setAgentSurface
+		}
 
 		// Validate the full composition before writing.
 		name := agentID
@@ -616,8 +621,15 @@ back to the harness default.`,
 				name = def.ID
 			}
 		}
-		if _, _, err := reg.Resolve(name, effort, chrome); err != nil {
+		base, _, err := reg.Resolve(name, effort, chrome)
+		if err != nil {
 			return err
+		}
+		if surface != "" && surface != "cli" && surface != "app" {
+			return fmt.Errorf("surface must be cli or app, got %q", surface)
+		}
+		if surface == "app" && base.CLI != "codex" {
+			return fmt.Errorf("surface app is supported only by Codex agents, got %q", base.ID)
 		}
 
 		// Surgical, omitempty-aware writes: a cleared agent/effort drops its key,
@@ -633,6 +645,9 @@ back to the harness default.`,
 				return err
 			}
 		} else if err := f.SetShuttleNodeField("chrome", nil); err != nil {
+			return err
+		}
+		if err := f.SetShuttleNodeField("surface", axisValue(surface)); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {
@@ -865,6 +880,7 @@ func registerShuttleLifecycleFlags() {
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only)")
+	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
 	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "UTC", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
 }

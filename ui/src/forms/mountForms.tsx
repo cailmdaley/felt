@@ -151,9 +151,9 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
       nativeFolderPicker={feed.model.nativeFolderPicker}
       onCancel={close}
-      onSpawned={(session) => {
+      onSpawned={({ tmuxSession: session, surface }) => {
         close()
-        opts.onResult?.(`Capture session spawned${session ? ` · ${session}` : ''}`, true)
+        opts.onResult?.(surface === 'app' ? 'Codex run started in ChatGPT' : `Capture session spawned${session ? ` · ${session}` : ''}`, true)
       }}
     />,
   )

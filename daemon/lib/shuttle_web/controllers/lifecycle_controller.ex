@@ -117,6 +117,7 @@ defmodule ShuttleWeb.LifecycleController do
   defp args_for("install", %{"fiber" => fiber} = params) do
     args = ["install", fiber]
     args = add_string_flag(args, "--model", params["model"])
+    args = add_string_flag(args, "--surface", params["surface"])
     args = add_string_flag(args, "--project-dir", params["project_dir"])
     args = add_bool_flag(args, "--disabled", params["disabled"])
     {:ok, args}
@@ -132,6 +133,7 @@ defmodule ShuttleWeb.LifecycleController do
     {:ok,
      ["pin", fiber]
      |> add_string_flag("--model", params["model"])
+     |> add_string_flag("--surface", params["surface"])
      |> add_string_flag("--project-dir", params["project_dir"])
      |> add_string_flag("--host", params["host"])}
   end
@@ -140,6 +142,7 @@ defmodule ShuttleWeb.LifecycleController do
     {:ok,
      ["repeat", fiber, "--schedule", schedule, "--tz", Map.get(params, "tz", "UTC")]
      |> add_string_flag("--model", params["model"])
+     |> add_string_flag("--surface", params["surface"])
      |> add_string_flag("--project-dir", params["project_dir"])}
   end
 
@@ -179,6 +182,12 @@ defmodule ShuttleWeb.LifecycleController do
     args =
       case params do
         %{"chrome" => chrome} when is_boolean(chrome) -> args ++ ["--chrome=#{chrome}"]
+        _ -> args
+      end
+
+    args =
+      case params do
+        %{"surface" => surface} when is_binary(surface) -> args ++ ["--surface", surface]
         _ -> args
       end
 

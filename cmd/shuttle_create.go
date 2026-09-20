@@ -25,16 +25,19 @@ var (
 	installProjectDir string
 	installHost       string
 	installDisabled   bool
+	installSurface    string
 
 	repeatSchedule   string
 	repeatTZ         string
 	repeatModel      string
 	repeatProjectDir string
 	repeatHost       string
+	repeatSurface    string
 
 	pinModel      string
 	pinProjectDir string
 	pinHost       string
+	pinSurface    string
 )
 
 // refuseExistingBlock is the one policy the three create verbs share: they
@@ -126,6 +129,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 		if installModel != "" {
 			block.Agent = installModel
 		}
+		block.Surface = installSurface
 		// An armed install requires a cwd. A draft does not — but an explicitly
 		// passed one is still honored: the board's Promote button installs
 		// --disabled WITH a project_dir, and nothing later supplies one (resume
@@ -260,6 +264,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 		if repeatModel != "" {
 			block.Agent = repeatModel
 		}
+		block.Surface = repeatSurface
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
@@ -367,6 +372,7 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 		if pinModel != "" {
 			block.Agent = pinModel
 		}
+		block.Surface = pinSurface
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
@@ -413,17 +419,20 @@ func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd on the target host (required unless --disabled)")
 	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
 	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); use 'felt shuttle resume' to arm it")
+	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
 
 	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
 	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name (default: UTC)")
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
 	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 
 	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
 	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
 }
 
 func init() {

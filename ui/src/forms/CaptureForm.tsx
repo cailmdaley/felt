@@ -34,6 +34,7 @@ import { AppDialog } from './AppDialog'
 import type { AgentEntry } from './StashForm'
 import { agentGroups } from './agentGroups'
 import { shuttleOrigin } from './projectModel'
+import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
 import {
   AddProjectPath,
   HostPicker,
@@ -87,8 +88,8 @@ export interface CaptureFormProps {
   /** Unix-ms of most recent activity per project id — recency ranking for the
    *  default selection and picker order. */
   cityActivityById?: Record<string, number>
-  /** Called after a successful spawn with the daemon's tmux session name. */
-  onSpawned: (tmuxSession: string) => void
+  /** Called after a successful launch. App runs deliberately have no tmux name. */
+  onSpawned: (launch: { tmuxSession: string; surface: ExecutionSurface }) => void
   /** Called on cancel / Esc / overlay click. */
   onCancel: () => void
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
@@ -100,6 +101,7 @@ interface CaptureResponse {
   tmux_session?: string
   reason?: string
   error?: string
+  surface?: ExecutionSurface
 }
 
 export function CaptureForm({
@@ -122,6 +124,7 @@ export function CaptureForm({
   // the chosen agent's own default_effort thereafter.
   const [effort, setEffort] = useState<string>(CAPTURE_DEFAULT_EFFORT)
   const [chrome, setChrome] = useState<boolean>(false)
+  const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -175,11 +178,13 @@ export function CaptureForm({
   const chromeCapable = agentRec?.chrome_capable ?? false
 
   const handleAgentChange = (id: string): void => {
+    const wasCodex = isCodexAgent(agents.find((a) => a.id === agent))
     setAgent(id)
     const rec = agents.find((a) => a.id === id)
     const levels = rec?.effort_levels ?? []
     setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
     if (!(rec?.chrome_capable ?? false)) setChrome(false)
+    if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
   const submit = async (): Promise<void> => {
@@ -207,17 +212,20 @@ export function CaptureForm({
           agent,
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
           ...(chrome ? { chrome: true } : {}),
+          ...(isCodexAgent(agentRec) ? { surface } : {}),
         }),
       })
       const data = (await res.json().catch(() => ({}))) as CaptureResponse
       if (!res.ok || !data.spawned) {
         const msg =
-          data.reason === 'project_dir_missing'
+          data.reason === 'app_launch_failed'
+            ? 'ChatGPT could not start this Codex run. Check the app connection and try again.'
+            : data.reason === 'project_dir_missing'
             ? `Project directory not found on the daemon: ${selectedCity.path}`
             : data.reason ?? data.error ?? `Capture failed (${res.status})`
         throw new Error(msg)
       }
-      onSpawned(data.tmux_session ?? '')
+      onSpawned({ tmuxSession: data.tmux_session ?? '', surface: data.surface ?? (isCodexAgent(agentRec) ? surface : 'cli') })
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? String(err)
       setError(msg.includes('fetch') ? 'Couldn’t reach the Shuttle daemon (:4000).' : msg)
@@ -300,6 +308,15 @@ export function CaptureForm({
               ))}
             </select>
           </label>
+          {isCodexAgent(agentRec) && (
+            <label className="capture-field">
+              <span className="capture-label">Execution</span>
+              <select className="capture-select" value={surface} onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
+                <option value="app">ChatGPT app</option>
+                <option value="cli">CLI</option>
+              </select>
+            </label>
+          )}
           <label className="capture-field">
             <span className="capture-label">Effort</span>
             <select

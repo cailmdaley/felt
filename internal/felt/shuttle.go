@@ -212,7 +212,7 @@ func (f *Felt) MigrateRuntimeNesting() ([]string, bool) {
 // Must track shuttle.Block's yaml field set.
 var shuttleConfigKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
-	"effort": true, "chrome": true, "schedule": true,
+	"effort": true, "chrome": true, "surface": true, "schedule": true,
 }
 
 // SetShuttleConfig installs the config block, replacing the typed config keys

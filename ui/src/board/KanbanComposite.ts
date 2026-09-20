@@ -41,8 +41,8 @@
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
 interface CompositeRuntime {
-  /** Owner-served tmux session name for a live worker on this fiber. */
-  tmuxSession: string;
+  /** Owner-served tmux session name for a CLI worker. App workers have none. */
+  tmuxSession?: string;
   /** Owner-served activity category for a tracked LIVE worker — one of:
    *   `"attention"` (last hook event is a Notification — "needs you",
    *     sorts top), `"waiting"` (last event is stop/subagent_stop — the worker
@@ -171,14 +171,19 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
 function parseRuntime(value: unknown): CompositeRuntime | undefined {
   if (!isRecord(value)) return undefined;
   const session = value.tmux_session;
-  if (typeof session !== 'string' || session.length === 0) return undefined;
-  const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
+  const tmuxSession = typeof session === 'string' && session.length > 0 ? session : undefined;
+  // App workers are deliberate non-tmux runtime records. Keep their state so
+  // starting/blocked Codex app launches stay visible on the board.
+  const phase = typeof value.phase === 'string' && value.phase.length > 0
+    ? value.phase
+    : typeof value.state === 'string' && value.state.length > 0 ? value.state : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link
       : undefined;
-  return { tmuxSession: session, phase, lastActivityAt, sessionLink };
+  if (!tmuxSession && !phase) return undefined;
+  return { tmuxSession, phase, lastActivityAt, sessionLink };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

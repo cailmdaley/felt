@@ -20,6 +20,7 @@ import {
 } from './attachments.js'
 import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
+import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
@@ -2268,14 +2269,26 @@ export class FiberDetailModal {
     chromeText.textContent = 'chrome'
     chromeWrap.append(chromeToggle, chromeText)
 
+    const surfaceSelect = document.createElement('select')
+    surfaceSelect.className = 'kbn-detail-select'
+    surfaceSelect.setAttribute('aria-label', 'Execution surface')
+    surfaceSelect.title = 'Codex execution surface'
+    for (const [value, label] of [['app', 'ChatGPT app'], ['cli', 'CLI']] as const) {
+      const opt = document.createElement('option')
+      opt.value = value
+      opt.textContent = label
+      surfaceSelect.append(opt)
+    }
+
     // Effort + chrome compose onto an existing shuttle block via set-agent;
     // a not-yet-promoted human card has no block to mutate, so the axes only
     // appear once the card is shuttle-managed. (Promotion's install path takes
     // base model only; the axes are then editable on the installed block.)
     effortSelect.style.display = shuttleManaged ? '' : 'none'
     chromeWrap.style.display = shuttleManaged ? '' : 'none'
+    surfaceSelect.style.display = 'none'
 
-    agentRow.append(agentLabel, agentSelect, effortSelect, chromeWrap)
+    agentRow.append(agentLabel, agentSelect, effortSelect, chromeWrap, surfaceSelect)
     dispatchSec.append(agentRow)
     // Data-load + listener wiring is deferred until livePatch/statusEl exist
     // (below), since the axis commit posts through them.
@@ -2563,16 +2576,18 @@ export class FiberDetailModal {
         agent: originalAgent,
         effort: card.shuttleEffort ?? '',
         chrome: card.shuttleChrome ?? false,
+        surface: persistedSurface(card.shuttleSurface),
       }
       // For a shuttle-managed card every axis change commits via set-agent;
       // for a human card the picker only populates the base-agent select the
       // promote button reads (no block to mutate yet → no-op commit).
       void this.loadAgentPicker(
-        { agentSelect, effortSelect, chromeToggle },
+        { agentSelect, effortSelect, chromeToggle, surfaceSelect },
         {
           agent: originalAgent,
           effort: card.shuttleEffort ?? '',
           chrome: card.shuttleChrome ?? false,
+          surface: persistedSurface(card.shuttleSurface),
         },
         shuttleManaged
           ? (axes) => {
@@ -3474,11 +3489,12 @@ export class FiberDetailModal {
       agentSelect: HTMLSelectElement
       effortSelect: HTMLSelectElement
       chromeToggle: HTMLInputElement
+      surfaceSelect: HTMLSelectElement
     },
-    current: { agent: string; effort: string; chrome: boolean },
-    onCommit: (axes: { agent: string; effort: string; chrome: boolean }) => boolean | void,
+    current: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
+    onCommit: (axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }) => boolean | void,
   ): Promise<void> {
-    const { agentSelect, effortSelect, chromeToggle } = controls
+    const { agentSelect, effortSelect, chromeToggle, surfaceSelect } = controls
     let records: AgentRecord[]
     try {
       // The daemon's registry is a bare array (`felt shuttle agents --json`,
@@ -3493,6 +3509,7 @@ export class FiberDetailModal {
       effortSelect.innerHTML = ''
       effortSelect.disabled = true
       chromeToggle.disabled = true
+      surfaceSelect.disabled = true
       return
     }
 
@@ -3508,6 +3525,7 @@ export class FiberDetailModal {
       agentSelect.append(opt)
       effortSelect.disabled = true
       chromeToggle.disabled = true
+      surfaceSelect.disabled = true
       return
     }
 
@@ -3563,17 +3581,22 @@ export class FiberDetailModal {
       const chromeOk = rec?.chrome_capable ?? false
       chromeToggle.disabled = !chromeOk
       if (!chromeOk) chromeToggle.checked = false
+      const supportsApp = isCodexAgent(rec)
+      surfaceSelect.style.display = supportsApp ? '' : 'none'
+      surfaceSelect.disabled = !supportsApp
     }
 
     const selectedAgent = (): string => agentSelect.value
     syncDependents(selectedAgent() || current.agent, current.effort)
     chromeToggle.checked = current.chrome && !chromeToggle.disabled
+    surfaceSelect.value = current.surface
 
     const commit = (revertChromeTo?: boolean): void => {
       const accepted = onCommit({
         agent: selectedAgent(),
         effort: effortSelect.value,
         chrome: chromeToggle.checked,
+        surface: surfaceSelect.value as ExecutionSurface,
       })
       if (accepted === false && revertChromeTo !== undefined) {
         chromeToggle.checked = revertChromeTo
@@ -3585,10 +3608,13 @@ export class FiberDetailModal {
       // re-gate chrome and write the fresh composition.
       syncDependents(selectedAgent(), '')
       chromeToggle.checked = chromeToggle.checked && !chromeToggle.disabled
+      if (surfaceSelect.disabled) surfaceSelect.value = 'cli'
+      else if (!isCodexAgent(records.find((a) => a.id === current.agent))) surfaceSelect.value = defaultSurface(records.find((a) => a.id === selectedAgent()))
       commit()
     })
     effortSelect.addEventListener('change', () => commit())
     chromeToggle.addEventListener('change', () => commit(!chromeToggle.checked))
+    surfaceSelect.addEventListener('change', () => commit())
   }
 
   /**
@@ -3600,7 +3626,7 @@ export class FiberDetailModal {
    */
   private async commitAxes(
     card: KanbanCard,
-    axes: { agent: string; effort: string; chrome: boolean },
+    axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
     statusEl: HTMLElement,
     errorEl: HTMLElement,
     onCommitted?: () => void,
@@ -3614,6 +3640,7 @@ export class FiberDetailModal {
         agent: axes.agent,
         effort: axes.effort,
         chrome: axes.chrome,
+        surface: axes.surface,
       }),
     )
     if (ok) onCommitted?.()

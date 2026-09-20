@@ -33,6 +33,9 @@ type Block struct {
 	Host       string `json:"host,omitempty" yaml:"host,omitempty"`
 	ProjectDir string `json:"project_dir,omitempty" yaml:"project_dir,omitempty"`
 	Agent      string `json:"agent,omitempty" yaml:"agent,omitempty"`
+	// Surface selects how Codex executes. Its absence means the durable legacy
+	// behavior (the CLI); app is the ChatGPT-backed App Server transport.
+	Surface string `json:"surface,omitempty" yaml:"surface,omitempty"`
 	// Orthogonal dispatch axes layered on top of Agent (the base id). Effort is
 	// a token validated against the resolved base agent's allowed set; Chrome is
 	// claude-only. Both optional — omitted means the harness/registry default.
@@ -84,6 +87,7 @@ func (b *Block) UnmarshalYAML(value *yaml.Node) error {
 		Host       string    `yaml:"host"`
 		ProjectDir string    `yaml:"project_dir"`
 		Agent      string    `yaml:"agent"`
+		Surface    string    `yaml:"surface"`
 		Effort     string    `yaml:"effort"`
 		Chrome     bool      `yaml:"chrome"`
 		Schedule   *Schedule `yaml:"schedule"`
@@ -98,6 +102,7 @@ func (b *Block) UnmarshalYAML(value *yaml.Node) error {
 	b.Host = aux.Host
 	b.ProjectDir = aux.ProjectDir
 	b.Agent = aux.Agent
+	b.Surface = aux.Surface
 	b.Effort = aux.Effort
 	b.Chrome = aux.Chrome
 	b.Schedule = aux.Schedule
@@ -155,7 +160,11 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		add("kind", fmt.Sprintf("must be one of %v, got %q", ValidKinds, b.Kind))
 	}
 
-	if agents != nil && (b.Agent != "" || b.Effort != "" || b.Chrome) {
+	if b.Surface != "" && b.Surface != "cli" && b.Surface != "app" {
+		add("surface", fmt.Sprintf("must be one of cli or app, got %q", b.Surface))
+	}
+
+	if agents != nil && (b.Agent != "" || b.Effort != "" || b.Chrome || b.Surface != "") {
 		// Resolve the named agent (or registry default when unnamed) together
 		// with the block's axes, surfacing unknown-agent, dangling-alias, and
 		// axis-constraint violations in one shot.
@@ -165,8 +174,11 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 				name = def.ID
 			}
 		}
-		if _, _, err := agents.Resolve(name, b.Effort, b.Chrome); err != nil {
+		base, _, err := agents.Resolve(name, b.Effort, b.Chrome)
+		if err != nil {
 			add("agent", err.Error())
+		} else if b.Surface == "app" && base.CLI != "codex" {
+			add("surface", fmt.Sprintf("app is supported only by Codex agents, got %q", base.ID))
 		}
 	}
 

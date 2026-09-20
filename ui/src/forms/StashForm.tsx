@@ -39,6 +39,7 @@ import {
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
 import { shuttleOrigin } from './projectModel'
+import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,6 +119,7 @@ function buildShuttleBlock(input: {
   tz: string
   projectDir: string
   chrome: boolean
+  surface: ExecutionSurface
 }): Record<string, unknown> {
   const block: Record<string, unknown> = {
     kind: input.kind === 'standing' ? 'standing' : 'oneshot',
@@ -126,6 +128,7 @@ function buildShuttleBlock(input: {
   if (input.agent) block.agent = input.agent
   if (input.effort.trim()) block.effort = input.effort.trim()
   if (input.chrome) block.chrome = true
+  if (input.surface !== 'cli') block.surface = input.surface
   if (block.kind === 'standing') {
     block.schedule = { expr: input.schedule.trim(), tz: input.tz.trim() || 'UTC' }
   }
@@ -330,6 +333,7 @@ export function StashForm({
   const [schedule, setSchedule] = useState<string>('')
   const [scheduleTz, setScheduleTz] = useState<string>('Europe/Paris')
   const [chrome, setChrome] = useState<boolean>(false)
+  const [surface, setSurface] = useState<ExecutionSurface>('cli')
 
   // Form state
   const [submitting, setSubmitting] = useState(false)
@@ -450,6 +454,7 @@ export function StashForm({
         tz: scheduleTz,
         projectDir: selectedCity.path,
         chrome,
+        surface,
       }),
     }
 
@@ -511,10 +516,12 @@ export function StashForm({
   }, [constraintAgent?.id, agents])
 
   const handleAgentChange = (id: string): void => {
+    const wasCodex = isCodexAgent(agents.find((a) => a.id === agentId) ?? defaultAgentEntry)
     setAgentId(id)
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
     const levels = rec?.effort_levels ?? []
     setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
+    if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
   return (
@@ -754,6 +761,20 @@ export function StashForm({
                   ))}
                 </select>
               </div>
+
+              {isCodexAgent(constraintAgent) && (
+                <div className="stash-field">
+                  <span className="stash-label">Execution</span>
+                  <select
+                    className="stash-select"
+                    value={surface}
+                    onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
+                  >
+                    <option value="app">ChatGPT app</option>
+                    <option value="cli">CLI</option>
+                  </select>
+                </div>
+              )}
 
               {/* Kind — segmented control */}
               <div className="stash-field">

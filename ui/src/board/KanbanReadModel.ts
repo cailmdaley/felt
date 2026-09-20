@@ -621,6 +621,7 @@ function toCard(
     shuttleAgent: f.shuttleAgent,
     shuttleEffort: f.shuttleEffort,
     shuttleChrome: f.shuttleChrome,
+    shuttleSurface: f.shuttleSurface,
     shuttleHost: f.shuttleHost,
     shuttleKind: f.shuttleKind,
     shuttleSchedule: f.shuttleSchedule?.expr,

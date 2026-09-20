@@ -154,6 +154,10 @@ export interface KanbanCard {
    * fiber-detail agent picker.
    */
   shuttleChrome?: boolean
+
+  /** `shuttle.surface` — app for a ChatGPT-backed Codex run; absent and cli
+   * both retain the established terminal execution. */
+  shuttleSurface?: 'cli' | 'app'
   /**
    * `shuttle.host` — the daemon that owns this fiber's dispatch (e.g.
    * `cluster-a`, `my-laptop`). Routes a force-dispatch to the owning daemon and

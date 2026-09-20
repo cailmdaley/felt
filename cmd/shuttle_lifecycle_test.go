@@ -25,27 +25,31 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome    bool
 		setAgentEffort       string
 		setAgentChrome       bool
+		setAgentSurface      string
 		reshapeSchedule      string
 		reshapeTZ            string
 		installModel         string
 		installProjectDir    string
 		installHost          string
 		installDisabled      bool
+		installSurface       string
 		repeatSchedule       string
 		repeatTZ             string
 		repeatModel          string
 		repeatProjectDir     string
 		repeatHost           string
+		repeatSurface        string
 		pinModel             string
 		pinProjectDir        string
 		pinHost              string
+		pinSurface           string
 	}{
 		jsonOutput, statusIncludeOrphans, statusClosed,
-		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome,
+		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome, setAgentSurface,
 		reshapeSchedule, reshapeTZ,
-		installModel, installProjectDir, installHost, installDisabled,
-		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost,
-		pinModel, pinProjectDir, pinHost,
+		installModel, installProjectDir, installHost, installDisabled, installSurface,
+		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost, repeatSurface,
+		pinModel, pinProjectDir, pinHost, pinSurface,
 	}
 
 	// --json is a root persistent flag bound to jsonOutput; cobra only sets it on
@@ -61,10 +65,14 @@ func saveShuttleGlobals() func() {
 	acceptKeepOutcome = false
 	setAgentEffort = ""
 	setAgentChrome = false
+	setAgentSurface = ""
 	reshapeSchedule, reshapeTZ = "", ""
 	installModel, installProjectDir, installHost, installDisabled = "", "", "", false
+	installSurface = ""
 	repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = "", "", "", "", ""
+	repeatSurface = ""
 	pinModel, pinProjectDir, pinHost = "", "", ""
+	pinSurface = ""
 
 	pauseCmd.ResetFlags()
 	closeCmd.ResetFlags()
@@ -92,10 +100,14 @@ func saveShuttleGlobals() func() {
 		acceptKeepOutcome = prev.acceptKeepOutcome
 		setAgentEffort = prev.setAgentEffort
 		setAgentChrome = prev.setAgentChrome
+		setAgentSurface = prev.setAgentSurface
 		reshapeSchedule, reshapeTZ = prev.reshapeSchedule, prev.reshapeTZ
 		installModel, installProjectDir, installHost, installDisabled = prev.installModel, prev.installProjectDir, prev.installHost, prev.installDisabled
+		installSurface = prev.installSurface
 		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = prev.repeatSchedule, prev.repeatTZ, prev.repeatModel, prev.repeatProjectDir, prev.repeatHost
+		repeatSurface = prev.repeatSurface
 		pinModel, pinProjectDir, pinHost = prev.pinModel, prev.pinProjectDir, prev.pinHost
+		pinSurface = prev.pinSurface
 	}
 }
 
@@ -565,6 +577,37 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 	raw, _ := os.ReadFile(storage.Path(f.ID))
 	if !strings.Contains(string(raw), "session_uuid: keep-me") {
 		t.Fatalf("runtime key clobbered:\n%s", raw)
+	}
+}
+
+func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "codex-sol", "surface": "cli",
+		"session_uuid": "keep-me",
+	}, nil)
+
+	// An agent switch within Codex leaves an explicit CLI selection intact.
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-terra"); err != nil {
+		t.Fatalf("set-agent preserving surface: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "f")
+	b, _, err := f.ShuttleBlock()
+	if err != nil || b.Surface != "cli" {
+		t.Fatalf("surface after Codex switch = %#v, %v; want cli", b, err)
+	}
+
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-terra", "--surface", "app"); err != nil {
+		t.Fatalf("set-agent app: %v\n%s", err, out)
+	}
+	f = mustRead(t, storage, "f")
+	b, _, err = f.ShuttleBlock()
+	if err != nil || b.Surface != "app" {
+		t.Fatalf("surface after explicit edit = %#v, %v; want app", b, err)
+	}
+	if _, err := runCommand(t, dir, "shuttle", "set-agent", "f", "claude-opus"); err == nil {
+		t.Fatal("switching an app block away from Codex without choosing cli must fail")
 	}
 }
 
