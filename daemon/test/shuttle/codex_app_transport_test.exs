@@ -292,6 +292,35 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  test "close is idempotent when normal concurrent callers race" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+      end)
+
+    {:ok, client} = Transport.start_link(socket_path: path)
+    caller = self()
+
+    tasks =
+      for _ <- 1..8 do
+        Task.async(fn ->
+          send(caller, {:ready, self()})
+          receive do: (:close -> Transport.close(client))
+        end)
+      end
+
+    task_pids =
+      for _ <- tasks do
+        assert_receive {:ready, task_pid}
+        task_pid
+      end
+
+    Enum.each(task_pids, &send(&1, :close))
+    assert Enum.map(tasks, &Task.await(&1, 1_000)) == List.duplicate(:ok, 8)
+    assert :ok = Transport.close(client)
+    await_peer(peer)
+  end
+
   test "adapter reuses a project found on a later page and sends workspace roots" do
     cwd = Path.join(System.tmp_dir!(), "codex-project")
     felt = Path.join(System.tmp_dir!(), "codex-felt")

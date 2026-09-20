@@ -28,7 +28,13 @@ defmodule Shuttle.CodexApp.Transport do
     :exit, _ -> {:error, :disconnected}
   end
 
-  def close(server), do: GenServer.stop(server, :normal)
+  def close(server) do
+    GenServer.stop(server, :normal)
+  catch
+    :exit, {:noproc, _} -> :ok
+    :exit, {:normal, _} -> :ok
+    :exit, {{:normal, _}, {GenServer, :stop, _}} -> :ok
+  end
 
   @impl true
   def init(opts) do
