@@ -111,6 +111,21 @@ defmodule Shuttle.AppWorkers do
     end
   end
 
+  def reserve_resume(id, fiber_id, uid, store) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      with {:ok, record} <- get(id),
+           true <- same_fiber?(record, fiber_id, uid) and record["felt_store"] == store,
+           false <- record["active"] == true,
+           :ok <- put(Map.merge(record, %{"active" => true, "launch_state" => "starting"})) do
+        :ok
+      else
+        true -> {:error, :already_running}
+        false -> {:error, :session_owner_mismatch}
+        error -> error
+      end
+    end)
+  end
+
   def deactivate(id) do
     update(id, %{"active" => false})
   end

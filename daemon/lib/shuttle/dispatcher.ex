@@ -1292,7 +1292,7 @@ defmodule Shuttle.Dispatcher do
     start =
       case intent do
         :fresh -> client.start_thread(app_opts(agent, work_dir, opts))
-        {:previous, id} -> client.resume_thread(id, app_opts(agent, work_dir, opts))
+        {:previous, id} -> resume_app_thread(client, id, fiber_id, agent, work_dir, opts)
       end
 
     with {:ok, %{"id" => id} = thread} <- start,
@@ -1350,6 +1350,36 @@ defmodule Shuttle.Dispatcher do
           })
 
         {:error, {:app_launch_failed, id, {:runtime_marker_failed, marker}}}
+      end
+    end
+  end
+
+  defp resume_app_thread(client, id, fiber_id, agent, work_dir, opts) do
+    with :ok <-
+           Shuttle.AppWorkers.reserve_resume(
+             id,
+             fiber_id,
+             Keyword.get(opts, :uid),
+             Keyword.get(opts, :felt_store)
+           ) do
+      case client.resume_thread(id, app_opts(agent, work_dir, opts)) do
+        {:ok, %{"id" => ^id}} = result ->
+          result
+
+        result ->
+          reason =
+            case result do
+              {:ok, _} -> :resume_identity_mismatch
+              {:error, reason} -> reason
+            end
+
+          :ok =
+            Shuttle.AppWorkers.update(id, %{
+              "launch_state" => "blocked",
+              "last_error" => inspect(reason)
+            })
+
+          {:error, {:app_launch_failed, id, reason}}
       end
     end
   end

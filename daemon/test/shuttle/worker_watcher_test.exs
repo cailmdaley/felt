@@ -144,14 +144,14 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(120)
 
     # Session still alive — no exit message
-    refute_receive {:worker_exited, _, _, _}, 50
+    refute_receive {:worker_exited, _, _, _, _, _}, 50
 
     # Kill the session
     MockRunner.remove_session(session)
     Process.sleep(120)
 
     # Should receive exit notification
-    assert_receive {:worker_exited, "tests/haiku", :normal_exit, false}, 1000
+    assert_receive {:worker_exited, "tests/haiku", _, _, :normal_exit, false}, 1000
 
     # Watcher should have stopped
     assert wait_until(fn -> not Process.alive?(watcher) end)
@@ -167,7 +167,7 @@ defmodule Shuttle.WorkerWatcherTest do
                heartbeat_interval_ms: 50
              )
 
-    assert_receive {:worker_exited, "tests/missing", :session_not_found, _}, 1000
+    assert_receive {:worker_exited, "tests/missing", _, _, :session_not_found, _}, 1000
   end
 
   test "watcher can be stopped gracefully" do
@@ -221,7 +221,7 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(200)
 
     # Watcher should NOT have exited: 2 < max_consecutive_failures.
-    refute_receive {:worker_exited, _, _, _}, 50
+    refute_receive {:worker_exited, _, _, _, _, _}, 50
     assert Process.alive?(watcher)
 
     # Now truly remove the session (sustained failure).
@@ -231,7 +231,7 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(300)
 
     # Now the watcher should declare the worker dead.
-    assert_receive {:worker_exited, "tests/flaky", :normal_exit, false}, 1000
+    assert_receive {:worker_exited, "tests/flaky", _, _, :normal_exit, false}, 1000
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -257,12 +257,12 @@ defmodule Shuttle.WorkerWatcherTest do
     FlakeyRunner.inject_failures(12)
     Process.sleep(400)
 
-    refute_receive {:worker_exited, _, _, _}, 50
+    refute_receive {:worker_exited, _, _, _, _, _}, 50
     assert Process.alive?(watcher)
 
     # A confirmed absence still kills it, proving death detection is intact.
     FlakeyRunner.remove_session(session)
-    assert_receive {:worker_exited, "tests/inconclusive", :normal_exit, false}, 1000
+    assert_receive {:worker_exited, "tests/inconclusive", _, _, :normal_exit, false}, 1000
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -285,7 +285,7 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(250)
 
     # Still alive after 2 failures and recovery.
-    refute_receive {:worker_exited, _, _, _}, 50
+    refute_receive {:worker_exited, _, _, _, _, _}, 50
     assert Process.alive?(watcher)
 
     # Now inject 2 more failures — the counter must have reset to 0 after
@@ -293,14 +293,14 @@ defmodule Shuttle.WorkerWatcherTest do
     FlakeyRunner.inject_failures(2)
     Process.sleep(250)
 
-    refute_receive {:worker_exited, _, _, _}, 50
+    refute_receive {:worker_exited, _, _, _, _, _}, 50
     assert Process.alive?(watcher)
 
     # Sustained failure: remove session so all future checks fail.
     FlakeyRunner.remove_session(session)
     Process.sleep(300)
 
-    assert_receive {:worker_exited, "tests/recover", :normal_exit, false}, 1000
+    assert_receive {:worker_exited, "tests/recover", _, _, :normal_exit, false}, 1000
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -336,7 +336,7 @@ defmodule Shuttle.WorkerWatcherTest do
     MockRunner.remove_session(session)
     Process.sleep(200)
 
-    assert_receive {:worker_exited, "tests/named-poller", :normal_exit, false}, 1000
+    assert_receive {:worker_exited, "tests/named-poller", _, _, :normal_exit, false}, 1000
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 

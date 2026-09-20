@@ -156,7 +156,10 @@ defmodule Shuttle.WorkerWatcher do
     # log so the watcher's exit notification isn't silently dropped.
     # See [[ai-futures/shuttle/finding-ghost-workers-stuck-running]].
     try do
-      send(state.poller, {:worker_exited, state.fiber_id, reason, session_alive?(state)})
+      send(
+        state.poller,
+        {:worker_exited, state.fiber_id, self(), state.session, reason, session_alive?(state)}
+      )
     rescue
       ArgumentError ->
         Logger.error(

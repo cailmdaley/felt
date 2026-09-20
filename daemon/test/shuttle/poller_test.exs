@@ -1735,7 +1735,7 @@ defmodule Shuttle.PollerTest do
 
     # Worker session ends while the document is still active (it did NOT self-close).
     MockRunner.remove_tmux_session(session)
-    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    notify_worker_exit(poller, fiber_id)
     # Flush the GenServer mailbox so the exit write lands before the disk read.
     _ = Poller.snapshot(poller)
 
@@ -1795,7 +1795,7 @@ defmodule Shuttle.PollerTest do
     # then its session ends.
     write_handoff_marker(fiber_id, DateTime.add(DateTime.utc_now(), 60, :second))
     MockRunner.remove_tmux_session(session)
-    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    notify_worker_exit(poller, fiber_id)
     _ = Poller.snapshot(poller)
 
     # The document stays active — NOT parked to open (that's the dirty-exit path).
@@ -1851,7 +1851,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
 
     MockRunner.remove_tmux_session(Dispatcher.session_name(fiber_id))
-    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    notify_worker_exit(poller, fiber_id)
     _ = Poller.snapshot(poller)
 
     doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
@@ -1864,6 +1864,7 @@ defmodule Shuttle.PollerTest do
   # spawn→kill→resume loop nondeterministic under the mock runner.
   defp simulate_exit(poller, fiber_id, lifetime_seconds) do
     started = DateTime.add(DateTime.utc_now(), -lifetime_seconds, :second)
+    watcher = spawn(fn -> :ok end)
 
     :sys.replace_state(poller, fn state ->
       meta = %{
@@ -1872,7 +1873,8 @@ defmodule Shuttle.PollerTest do
         agent_id: "claude-sonnet",
         uid: nil,
         started_at: started,
-        last_activity_at: started
+        last_activity_at: started,
+        pid: watcher
       }
 
       %{
@@ -1881,7 +1883,7 @@ defmodule Shuttle.PollerTest do
       }
     end)
 
-    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    notify_worker_exit(poller, fiber_id)
     # Synchronous call flushes the exit message (mailbox order) before we read.
     _ = Poller.snapshot(poller)
   end
@@ -2907,7 +2909,7 @@ defmodule Shuttle.PollerTest do
     assert String.starts_with?(run_id, "adhoc-")
 
     MockRunner.remove_tmux_session(Dispatcher.session_name(fiber_id))
-    send(poller, {:worker_exited, fiber_id, :normal_exit, false})
+    notify_worker_exit(poller, fiber_id)
     Process.sleep(50)
 
     send(poller, :run_poll_cycle)
@@ -3248,7 +3250,7 @@ defmodule Shuttle.PollerTest do
     )
 
     MockRunner.remove_tmux_session(Dispatcher.session_name("tests/standing-due"))
-    send(poller, {:worker_exited, "tests/standing-due", :normal_exit, false})
+    notify_worker_exit(poller, "tests/standing-due")
     Process.sleep(50)
 
     refute Enum.any?(Poller.snapshot(poller).retrying, &(&1.fiber_id == "tests/standing-due"))
@@ -3524,7 +3526,7 @@ defmodule Shuttle.PollerTest do
     # Simulate worker exit (tmux session dies). The claim is released; the fiber
     # is no longer running and no longer retrying (the retry queue is gone).
     MockRunner.remove_tmux_session(Dispatcher.session_name("tests/haiku-retry"))
-    send(poller, {:worker_exited, "tests/haiku-retry", :normal_exit, false})
+    notify_worker_exit(poller, "tests/haiku-retry")
 
     assert_eventually(fn ->
       snap2 = Poller.snapshot(poller)
@@ -3712,7 +3714,7 @@ defmodule Shuttle.PollerTest do
     # Close the fiber
     MockRunner.set_fiber("tests/haiku-close", %{fiber | "status" => "closed"})
     MockRunner.remove_tmux_session(Dispatcher.session_name("tests/haiku-close"))
-    send(poller, {:worker_exited, "tests/haiku-close", :normal_exit, false})
+    notify_worker_exit(poller, "tests/haiku-close")
 
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
@@ -5408,5 +5410,10 @@ defmodule Shuttle.PollerTest do
 
       assert Poller.sort_candidates([real, junk, missing]) == [junk, missing, real]
     end
+  end
+
+  defp notify_worker_exit(poller, fiber_id) do
+    %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
+    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit, false})
   end
 end

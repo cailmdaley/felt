@@ -44,7 +44,7 @@ defmodule Shuttle.AppWorkersTest do
 
     def resume_thread(id, opts) do
       record({:resume, id, opts})
-      {:ok, %{"id" => id}}
+      {:ok, %{"id" => Agent.get(__MODULE__, &Map.get(&1, :resume_id, id))}}
     end
 
     def start_turn(id, prompt, opts) do
@@ -211,6 +211,104 @@ defmodule Shuttle.AppWorkersTest do
     App.set(:interrupt_result, {:error, :thread_missing})
     assert {"", 0} = WorkerBackend.stop(Runner, session)
     assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
+  end
+
+  test "resume reserves only its original fiber and never overwrites another owner" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+    assert {"", 0} = WorkerBackend.stop(Runner, session)
+
+    assert {:error, :session_owner_mismatch} =
+             AppWorkers.reserve_resume(
+               "app-session-1",
+               "tests/copied",
+               "different-uid",
+               Runner.felt_root()
+             )
+
+    App.set(:resume_id, "unexpected-native-thread")
+
+    assert {:error, {:app_launch_failed, "app-session-1", :resume_identity_mismatch}} =
+             dispatch("tests/app", resume_mode: "previous")
+
+    assert {:error, :not_found} = AppWorkers.get("unexpected-native-thread")
+
+    assert {:ok, %{"fiber_id" => "tests/app", "launch_state" => "blocked"}} =
+             AppWorkers.get("app-session-1")
+  end
+
+  test "dispatch rejects a copied saved marker before native resume side effects" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+    assert {"", 0} = WorkerBackend.stop(Runner, session)
+    fiber("tests/copied")
+
+    copied =
+      Runner.fiber("tests/copied")
+      |> Map.put("uid", "different-owner-uid")
+      |> put_in(["shuttle", "runtime"], %{"session_uuid" => "app-session-1"})
+
+    Runner.set_fiber("tests/copied", copied)
+    before = App.calls()
+    assert {:error, :session_owner_mismatch} = dispatch("tests/copied", resume_mode: "previous")
+    assert App.calls() == before
+
+    assert {:ok, %{"fiber_id" => "tests/app", "active" => false}} =
+             AppWorkers.get("app-session-1")
+  end
+
+  test "concurrent resume reservations have exactly one winner" do
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => "resume-race",
+        "fiber_id" => "tests/app",
+        "uid" => "original-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => false
+      })
+
+    results =
+      1..30
+      |> Task.async_stream(
+        fn _ ->
+          AppWorkers.reserve_resume(
+            "resume-race",
+            "tests/app",
+            "original-uid",
+            Runner.felt_root()
+          )
+        end,
+        max_concurrency: 30
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &(&1 == {:error, :already_running})) == 29
+  end
+
+  test "a delayed watcher exit cannot release a replacement using the same conversation" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    original = Poller.worker_status(poller, "tests/app")
+    assert {:ok, ^session} = Poller.kill_session(poller, "tests/app")
+
+    assert {:ok, ^session} =
+             Poller.dispatch_fiber(poller, "tests/app", force: true, resume_mode: "previous")
+
+    replacement = Poller.worker_status(poller, "tests/app")
+    refute replacement.pid == original.pid
+    send(poller, {:worker_exited, "tests/app", original.pid, session, :normal_exit, false})
+    assert %{pid: watcher, session: ^session} = Poller.worker_status(poller, "tests/app")
+    assert watcher == replacement.pid
   end
 
   test "durable prompts are private before atomic publication" do
