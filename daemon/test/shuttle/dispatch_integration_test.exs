@@ -465,7 +465,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "sleep 2"
     # The resume prompt is present (the script also carries a `|| <fresh>`
     # fallback whose full dispatch prompt is exercised in the deadlock test below).
-    assert script =~ "Shuttle resumed your previous session"
+    assert script =~ "Mode: resume"
     assert script =~ "Fiber: tests/kanban-resume"
 
     # F2: resuming is a dispatch boundary too — a fresh `dispatched_at` must be
@@ -558,7 +558,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     script = read_run_script()
     assert script =~ "codex"
     assert script =~ "resume '40740310-2345-4e33-a1e4-7950db41ce10'"
-    assert script =~ "Shuttle resumed your previous session"
+    assert script =~ "Mode: resume"
   end
 
   # The board Resume button posts user_message with resume_mode=previous.
@@ -599,7 +599,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     [resume_half | _] = String.split(script, " || ", parts: 2)
     assert resume_half =~ "pi"
     assert resume_half =~ "--session 'pi-resume-session-444'"
-    assert resume_half =~ "Shuttle resumed your previous session"
+    assert resume_half =~ "Mode: resume"
     assert resume_half =~ "From User"
     assert resume_half =~ "Fix the resume path so this actually lands."
     refute resume_half =~ "<<<"
@@ -639,18 +639,16 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     assert script =~ "--resume 'history-resume-session-uuid'"
-    assert script =~ "Shuttle resumed your previous session"
+    assert script =~ "Mode: resume"
   end
 
   test "resume previous dispatch reaches each harness-specific resume command", %{host: host} do
     matrix = [
       {"claude-sonnet", "claude-session-111", ["claude", "--resume 'claude-session-111'", "<<<"],
        ["codex resume", "pi "]},
-      {"codex-sol", "codex-session-222",
-       ["codex", "resume 'codex-session-222'", "Shuttle resumed your previous session"],
+      {"codex-sol", "codex-session-222", ["codex", "resume 'codex-session-222'", "Mode: resume"],
        ["--resume", "--session"]},
-      {"pi-kimi", "pi-session-333",
-       ["pi", "--session 'pi-session-333'", "Shuttle resumed your previous session"],
+      {"pi-kimi", "pi-session-333", ["pi", "--session 'pi-session-333'", "Mode: resume"],
        ["--resume", "<<<"]}
     ]
 
@@ -860,7 +858,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # Interactivity is retired as a dispatch mode: the prompt never renders an
   # "Interactive Mode" block, and a legacy `interactive: true` still sitting in a
-  # fiber is inert — the worker reads the always-autonomous exit contract and
+  # fiber is inert — the worker loads the skill-owned exit semantics and
   # honors any "wait for me" intent from the From User directive instead.
   test "dispatch prompt stays autonomous and renders no Interactive Mode block, even with a legacy interactive flag",
        %{host: host} do
@@ -886,8 +884,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     refute script =~ "Interactive Mode"
-    assert script =~ "Exit Contract"
-    assert script =~ "autonomous Shuttle worker"
+    assert script =~ "Activate the felt and shuttle skills"
+    assert script =~ "You are a Shuttle worker"
   end
 
   # A "talk to me first" directive rides the From User block (the channel the
@@ -1627,8 +1625,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     # Standing-role framing.
-    assert script =~ "scheduled run of this standing role"
-    assert script =~ "one due occurrence"
+    assert script =~ "Run mode: scheduled"
+    assert script =~ "references/standing-roles.md"
     assert script =~ "Fiber: tests/standing-dispatch"
     assert script =~ "run-2026-05-07"
     # NOT the fresh-dispatch orientation paragraph.

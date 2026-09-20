@@ -167,6 +167,8 @@ func TestEventMachinePrompt(t *testing.T) {
 		// The dispatcher's other two injected openings — same module as the
 		// dispatch preamble above, same defect if missed.
 		{"resumed worker's wake-up prompt", "Shuttle resumed your previous session on this fiber. Skills and conventions", true},
+		{"compact worker framing", "You are a Shuttle worker. Activate the felt and shuttle skills", true},
+		{"compact capture framing", "You are a Shuttle capture worker. Activate the felt and shuttle skills", true},
 		{"capture session framing", "Shuttle capture session. The user had an idea and spoke it", true},
 		{"a person typing", "hey, can you look at the curve", false},
 		// The reason this is a prefix test and not a search: quoting one of

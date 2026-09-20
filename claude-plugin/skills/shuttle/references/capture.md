@@ -1,0 +1,29 @@
+# Capture
+
+A capture starts from the user's idea rather than an existing constitution. Read
+`From User` as the current request; discuss unresolved scope when needed. The
+launch supplies the owning felt store, project directory, install metadata, and
+an exact claim endpoint and JSON body.
+
+1. **Crystallize.** Search for related fibers, choose the right parent, and file
+   the idea with a lede and Desired State proportionate to what the user has
+   actually asked. Keep its status `open`.
+2. **Install.** Install the shuttle block using every field in `Install` exactly
+   as supplied, including `surface`, host, agent, project directory, and any
+   explicitly requested effort or chrome setting. Keep status `open`.
+3. **Claim.** POST the supplied `Claim` JSON to `Claim endpoint` with
+   `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
+   you created. Encode JSON with a JSON library and pass it as a file or structured
+   request body; do not interpolate user input into shell quoting. Require a
+   successful claim before continuing. A lost response can be retried with the
+   same body; a rejection must not be followed by activation.
+4. **Activate.** Set status `active` only after the successful claim. Activating
+   sooner permits the poller to launch a duplicate worker.
+5. **Realize.** Follow the worker loop and exit semantics in the shuttle skill.
+
+A terminal claim identifies `tmux_session` and, when supplied, the native
+`session_uuid`. Successful claim renames that terminal to the fiber's worker
+name. An app claim identifies `surface: app` and the exact conversation
+`session_uuid`; it does not rename or replace the conversation. Never substitute
+a terminal claim, another conversation ID, or a new app server. App workers end
+their turn after handoff; never kill the shared backend or a parent process.

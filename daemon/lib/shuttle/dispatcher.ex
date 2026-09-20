@@ -240,67 +240,17 @@ defmodule Shuttle.Dispatcher do
     Shuttle.FeltStores.configured_hosts() |> List.first()
   end
 
-  @doc """
-  Renders the universal dispatch prompt for a fiber ID.
-
-  The prompt opens with a single orientation paragraph — what Shuttle is,
-  what the worker is here to do, and how the practice gets loaded — then
-  inlines exactly one context block:
-
-    - **From User** — the user's message for this dispatch, if any.
-      Carried as a transient dispatch parameter (`:user_message`),
-      inlined here and discarded — never persisted.
-
-  We deliberately *don't* inline the fiber's outcome or the last
-  handoff prose. Both are already in scope after the worker calls
-  `felt show <fiber-id>` (which renders outcome and the body, including
-  the `## Status` handoff block the previous session rewrote). The
-  shuttle skill prescribes that read order; duplicating either here just
-  bloats the prompt and risks drift between the inlined snapshot and
-  felt's own view.
-
-  Why keep the From User block inlined? The user's directive arrives
-  *with* the dispatch — it isn't in the constitution the worker reads on
-  arrival, and having it sit at the top of the prompt where causal
-  attention sees it first conditions the worker's reading of everything
-  that follows.
-
-  The exit contract appears directly in the prompt, even though the full
-  practice lives in the `shuttle` skill. Resumed sessions otherwise arrive
-  with a lighter prompt and can mistake Shuttle work for ordinary chat
-  completion; keeping the handoff ritual in the causal foreground preserves
-  the dispatcher contract across fresh and resumed runs.
-
-  ## Options
-
-    * `:felt_store` — directory containing the `.felt/` index to query.
-      Defaults to `default_felt_store/0`. The Poller threads its
-      configured `state.felt_store` here so each shuttle instance reads
-      from the felt store it's responsible for.
-  """
+  @doc "Renders the skill entrypoint and launch-specific data for a worker."
   @spec render_prompt(String.t(), keyword()) :: String.t()
   def render_prompt(fiber_id, opts \\ []) do
-    prompt_fiber_id = Keyword.get(opts, :prompt_fiber_id, fiber_id)
-
-    header = """
-    The orchestration system Shuttle dispatched you on this fiber. The constitution describes what "done" looks like; drive toward it across one or more sessions. The `shuttle` and `felt` skills carry the practice — activate them next.
-
-    Fiber: #{prompt_fiber_id}
-    """
-
-    compose_prompt(header, opts)
+    compose_prompt(
+      "You are a Shuttle worker. Activate the felt and shuttle skills and read the current constitution and Status.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      opts
+    )
   end
 
-  # Renders the lineage line for fresh dispatch prompts: the previous worker's
-  # session UUID (and harness, when the ledger knows it). Returns "" when the
-  # fiber has no prior session on this host.
-  #
-  # Why it's in the prompt at all: the `## Status` handoff is the previous
-  # worker's *summary*; the transcript is the previous worker's *actual last
-  # turns* — searches run, dead ends hit, thinking left mid-flight. The UUID
-  # names that transcript on disk, and the shuttle skill's transcript recipes
-  # turn it into surgical reads. Resume prompts never carry it (a resumed
-  # worker IS the previous session), and a fiber's first dispatch has none.
+  # Optional provenance for fresh workers; current instructions live in the
+  # constitution and this dispatch's user message.
   defp render_previous_session_line(opts) do
     case Keyword.get(opts, :previous_session) do
       %{uuid: uuid} = prev when is_binary(uuid) and uuid != "" ->
@@ -317,30 +267,13 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  @doc """
-  Renders the prompt injected into a *resumed* worker session.
-
-  Mirrors the fresh dispatch prompt's From User block and exit contract so
-  the resumed worker sees the same intent and termination signals at the
-  top of context. The framing paragraph is shorter — skills, conventions,
-  and the constitution are already in the resumed transcript, so repeating
-  them is noise.
-
-  When no `:user_message` is carried on the dispatch, the From User block
-  is suppressed and the worker just gets the framing sentence.
-  """
+  @doc "Renders a resumed worker's skill entrypoint and current launch data."
   @spec render_resume_prompt(String.t(), keyword()) :: String.t()
   def render_resume_prompt(fiber_id, opts \\ []) do
-    prompt_fiber_id = Keyword.get(opts, :prompt_fiber_id, fiber_id)
-
-    header = """
-    Shuttle resumed your previous session on this fiber. Skills and conventions are already loaded in your transcript from the original dispatch; pick up from the last clean checkpoint, or address the message below if one's there.
-
-    Fiber: #{prompt_fiber_id}
-    """
-
-    # A resumed worker IS the previous session — no lineage pointer to itself.
-    compose_prompt(header, Keyword.delete(opts, :previous_session))
+    compose_prompt(
+      "You are a Shuttle worker. Activate the felt and shuttle skills and read the current constitution and Status.\nMode: resume\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      Keyword.delete(opts, :previous_session)
+    )
   end
 
   # Renders the user's dispatch message (the `:user_message` parameter) as a
@@ -356,36 +289,12 @@ defmodule Shuttle.Dispatcher do
       message when is_binary(message) ->
         case String.trim(message) do
           "" -> ""
-          trimmed -> render_block("From User", trimmed)
+          _ -> "From User:\n" <> message
         end
 
       _ ->
         ""
     end
-  end
-
-  # Render a labeled rule-bordered block. Header is "┌─ <label> ─…",
-  # content is indented two spaces, closed with a matching bottom rule.
-  # Total visual width is fixed at @rule_width chars so blocks align in the
-  # terminal even when their headers differ in length.
-  @rule_width 76
-  defp render_block(label, content) do
-    # "┌─ " (3) + label + " " (1) + trailing dashes = @rule_width
-    leading = "┌─ #{label} "
-    trailing = max(@rule_width - String.length(leading), 3)
-    top = leading <> String.duplicate("─", trailing)
-    bottom = "└" <> String.duplicate("─", @rule_width - 1)
-
-    # Inset the content under the box header so multi-line directives stay
-    # visually grouped.
-    body =
-      content
-      |> String.trim()
-      |> String.split("\n")
-      |> Enum.map(&("  " <> &1))
-      |> Enum.join("\n")
-
-    "#{top}\n#{body}\n#{bottom}"
   end
 
   @doc """
@@ -404,23 +313,11 @@ defmodule Shuttle.Dispatcher do
     ad_hoc? = Keyword.get(opts, :ad_hoc, false)
     prompt_fiber_id = Keyword.get(opts, :prompt_fiber_id, fiber_id)
 
-    orientation =
-      if ad_hoc? do
-        "The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role — right-now work that does not consume or advance the scheduled occurrence. Standing roles are recurring responsibilities; write the run's work product into `outcome` and exit per the contract below (the daemon owns the awaiting transition). The `shuttle` and `felt` skills carry the practice — activate them next."
-      else
-        "The orchestration system Shuttle dispatched you for a scheduled run of this standing role. Standing roles are recurring responsibilities — this dispatch is one due occurrence, not a new fiber. Write the run's work product into `outcome` and exit per the contract below. The `shuttle` and `felt` skills carry the practice — activate them next; the skill's standing-roles reference covers the run lifecycle."
-      end
+    mode = if ad_hoc?, do: "ad-hoc", else: "scheduled"
 
-    header = """
-    #{orientation}
-    Fiber: #{prompt_fiber_id}
-    Run:   #{run_id}
-    """
+    header =
+      "You are a Shuttle worker. Activate the felt and shuttle skills, read the current constitution and Status, and references/standing-roles.md.\nFiber: #{prompt_fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
 
-    # A standing run is definitionally standing — declare it here so the exit
-    # contract is right regardless of how the caller threaded opts. The handoff
-    # marker is inert for standing (runs always dispatch fresh); the daemon
-    # owns the awaiting transition on worker exit.
     compose_prompt(header, Keyword.put(opts, :kind, "standing"))
   end
 
@@ -461,125 +358,25 @@ defmodule Shuttle.Dispatcher do
     _ -> :error
   end
 
-  # Shared composition for all top-level prompts: a per-prompt orientation
-  # header, the mandatory exit contract, and optional context blocks. The
-  # shape is documented in AGENTS.md under "Dispatch prompt structure".
-  # Outcome and last-session are deliberately not inlined — the shuttle
-  # skill prescribes that the worker reads them via `felt show` (outcome +
-  # the body's `## Status` block) on arrival, and duplicating either here risks
-  # drift between the prompt's snapshot and felt's view.
+  # Prompts carry identity and invocation data; the skill owns worker behavior.
   defp compose_prompt(header, opts) do
-    felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-
-    # The store line is the worker's absolute anchor. `prompt_fiber_id`
-    # translates the global id to the work_dir-local view when it can, but
-    # its safe-fail hands the worker a *global* id that doesn't resolve from
-    # cwd either — historically the worker then groped for the fiber. With
-    # the store named, the fallback read is mechanical:
-    # `felt -C <felt-store> show <id>`. (When local resolution succeeded,
-    # plain `felt show <id>` from the project dir works and the line is
-    # simply unused.)
-    header =
-      case felt_store do
-        store when is_binary(store) and store != "" ->
-          String.trim(header) <> "\nFelt store: #{store}"
-
-        _ ->
-          String.trim(header)
-      end
-
-    # Lineage sits UNDER the store line: the fiber and the store are what a
-    # worker needs to read its constitution, and the previous session is a
-    # pointer it only follows once oriented.
-    header =
-      case render_previous_session_line(opts) do
-        "" -> header
-        line -> header <> "\n" <> String.trim_trailing(line)
-      end
-
-    # Order: header, exit contract, user message block. The exit contract is
-    # always present; the From User block carries the per-dispatch intent
-    # (including any "talk to me first" signal) and renders only when a
-    # `:user_message` was carried on the dispatch.
     [
       header,
-      exit_contract(opts),
-      render_headless_notice(Keyword.get(opts, :headless, false)),
-      render_user_message_block(opts)
+      "Felt store: #{Keyword.get(opts, :felt_store, default_felt_store())}",
+      "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
+      String.trim_trailing(render_previous_session_line(opts))
     ]
     |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
-    |> String.trim()
+    |> Enum.join("\n")
+    |> append_user_message(opts)
   end
 
-  defp exit_contract(opts) do
-    if Keyword.get(opts, :surface) == "app" do
-      render_block(
-        "App worker contract",
-        "This conversation is available in the ChatGPT app. A final response pauses the conversation for a reply; it does not end your Shuttle ownership. When waiting for human input, simply ask and finish your turn. When an autonomous arc is complete or needs a fresh context, update the fiber outcome and `## Status`, then run `env -u TMUX felt -C #{Keyword.get(opts, :felt_store)} shuttle handoff <fiber-id>` and finish your turn. Close the fiber first when its desired state is achieved. The daemon observes the handoff after your turn ends. Never kill a parent process, tmux server, or app server: it hosts other conversations."
-      )
-    else
-      render_exit_contract(Keyword.get(opts, :kind, "oneshot"))
+  defp append_user_message(header, opts) do
+    case render_user_message_block(opts) do
+      "" -> header
+      message -> header <> "\n\n" <> message
     end
   end
-
-  # Print-mode (`claude -p`) workers run unattended: stdout is not a TTY, no
-  # human can attach, and the exit contract's human-gate exception therefore
-  # cannot apply. Surfacing that in the prompt — right after the exit contract,
-  # where causal attention meets the termination semantics — stops a headless
-  # worker from parking itself at a "wait for the human" checkpoint that will
-  # never be answered.
-  defp render_headless_notice(true) do
-    render_block(
-      "Headless",
-      "Headless print-mode run: no human can attach to this session — work to completion and exit. The human-gate exception never applies here; if you hit something you would normally pause to ask about, record it in the outcome and `## Status`, keep driving to a clean checkpoint, then exit."
-    )
-  end
-
-  defp render_headless_notice(_), do: ""
-
-  # Pinned roles carry a three-case exit contract. A pinned role is a standing
-  # interface a human drives — a status hub, a debug intake, a long-lived
-  # workbench — that rests parked on the strip and is started by hand. Its exit
-  # semantics depend on what the worker is doing:
-  #
-  #  (a) while a human is actively driving, the session IS the interface — run
-  #      out of immediate work and STAY ALIVE at idle, waiting for the next
-  #      message, never `kill $PPID`.
-  #  (b) for a long AUTONOMOUS arc, write `## Status` and run `felt shuttle
-  #      handoff` — the daemon reads the fresh handoff marker and relaunches a
-  #      fresh worker next tick, so the arc continues across clean sessions.
-  #  (c) when the arc is genuinely DONE, set `status: closed` first, then hand
-  #      off — it lands in Awaiting review and returns to the pinned strip when
-  #      the human accepts.
-  #
-  # The load-bearing distinction (b vs. a dirty death): only a clean `felt
-  # shuttle handoff` stamps a fresh marker, and only that relaunches. An idle
-  # exit without handoff, a crash, or a human kill leaves no fresh marker → the
-  # role parks back to the strip and waits for a human Resume. So the default
-  # when there's nothing left to drive and no autonomous arc in flight is (a):
-  # stay alive.
-  defp render_exit_contract("pinned") do
-    render_block(
-      "Exit Contract",
-      "This is a pinned interactive role — a standing interface a human drives, not a one-shot task. (a) While a human is driving and you run out of immediate work, DO NOT exit — stay alive and wait for the next message; the session is the interface. (b) On a long AUTONOMOUS arc, rewrite the constitution's `## Status` then run `felt shuttle handoff <fiber-id>` — only a clean handoff makes the daemon relaunch a fresh worker; an idle exit or crash parks the role back to the strip. (c) When the arc is genuinely done, set `status: closed` FIRST, then hand off — it lands in Awaiting review. Default when idle: (a) stay alive. The shuttle skill's exit semantics carry the rest."
-    )
-  end
-
-  # Oneshots and standing roles share one exit ritual: rewrite `## Status`,
-  # then `felt shuttle handoff` (stamps the clean-exit marker and ends the
-  # session). For standing roles the marker is inert — scheduled runs always
-  # dispatch fresh (decide_continuation is scoped to oneshots) and the daemon
-  # marks the run awaiting on exit — but one uniform contract beats a variant
-  # whose only difference is which kill command ends the session.
-  defp render_exit_contract(_kind) do
-    render_block(
-      "Exit Contract",
-      "This is an autonomous Shuttle worker — a normal chat final response is not a worker exit. At a clean checkpoint, after updating the fiber (outcome, findings, commits), rewrite the constitution's `## Status` in prose — the handoff the next session lands on, rewritten, never a session log — then your FINAL action is `felt shuttle handoff <fiber-id>`: it marks the session complete and closes it. That mark is what tells the daemon you finished at a checkpoint, so the next worker starts fresh from your `## Status` instead of resuming this transcript mid-thought. Exception: if the directive or constitution asks you to wait for a human, or the state of the work makes human input the clear next move (taste calls open, feedback mid-loop), stay alive at that checkpoint instead — do not hand off. The shuttle skill's exit semantics carry the rest."
-    )
-  end
-
-  # ── Capture (spawn-without-constitution) ──
 
   @doc """
   Spawns a tmux agent session from a free-text capture prompt — no
@@ -646,7 +443,8 @@ defmodule Shuttle.Dispatcher do
             project_dir: work_dir,
             host: host,
             effort: effort,
-            chrome: chrome
+            chrome: chrome,
+            headless: agent[:headless] == true
           )
 
         command = Agents.build_command(agent, prompt, session_id: session_uuid)
@@ -708,63 +506,52 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc false
-  # Public for tests. The prompt a capture session wakes to: the yap verbatim,
-  # then the crystallize → install → claim → realize instructions.
   def render_capture_prompt(yap, opts) do
-    session = Keyword.fetch!(opts, :session)
-    felt_store = Keyword.fetch!(opts, :felt_store)
-    port = Keyword.get(opts, :port, 4000)
-    session_uuid = Keyword.get(opts, :session_uuid)
-    agent_id = Keyword.get(opts, :agent_id, "")
-    project_dir = Keyword.get(opts, :project_dir, "")
-    host = Keyword.get(opts, :host)
+    render_capture_entrypoint(yap, Keyword.put(opts, :surface, "cli"))
+  end
 
-    uuid_field =
-      if session_uuid, do: ~s(, "session_uuid": "#{session_uuid}"), else: ""
+  defp render_capture_entrypoint(yap, opts) do
+    surface = Keyword.fetch!(opts, :surface)
+    claim = %{fiber_id: "<fiber id>", agent: Keyword.get(opts, :agent_id, "")}
 
-    host_line =
-      if is_binary(host) and host != "",
-        do: "Set `host: #{host}` in the shuttle block.\n",
-        else: ""
+    claim =
+      if surface == "app",
+        do: Map.put(claim, :surface, "app"),
+        else: Map.put(claim, :tmux_session, Keyword.fetch!(opts, :session))
 
-    # Explicitly-requested axes ride into the crystallized fiber's shuttle
-    # block so redispatches reproduce the launch shape. Defaults stay
-    # implicit — the block records intent, not resolved configuration.
-    effort = Keyword.get(opts, :effort)
+    if surface == "app", do: Keyword.fetch!(opts, :session_uuid)
 
-    axes_yaml =
-      [
-        if(is_binary(effort) and effort != "", do: ", `effort: #{effort}`"),
-        if(Keyword.get(opts, :chrome) == true, do: ", `chrome: true`")
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join()
+    claim =
+      if Keyword.get(opts, :session_uuid),
+        do: Map.put(claim, :session_uuid, opts[:session_uuid]),
+        else: claim
+
+    install = %{
+      kind: "oneshot",
+      surface: surface,
+      agent: Keyword.get(opts, :agent_id, ""),
+      project_dir: Keyword.fetch!(opts, :project_dir)
+    }
+
+    install =
+      Enum.reduce([:host, :effort, :chrome], install, fn key, acc ->
+        case Keyword.get(opts, key) do
+          value when value in [nil, "", false] -> acc
+          value -> Map.put(acc, key, value)
+        end
+      end)
 
     header = """
-    Shuttle capture session. The user had an idea and spoke it into the board's capture box; you are the session it spawned. Your job: crystallize the idea into a fiber, claim this session as its worker, then realize it. The `felt` and `shuttle` skills carry the practice — activate them first.
-
-    Felt store: #{felt_store}
-    Project dir: #{project_dir}
-
-    Steps, in order (the order is load-bearing — claim BEFORE activating, or the poll loop dispatches a duplicate worker in the gap):
-    1. **Crystallize.** Read the idea below and file it as a fiber in the felt store, nested under the right parent (felt-skill judgment — search for kin first). Write the lede and a `## Desired State` the idea has earned; don't over-spec a sketch.
-    2. **Install the shuttle block.** Add to the fiber's frontmatter: `shuttle:` with `kind: oneshot`, `agent: #{agent_id}`#{axes_yaml}, `project_dir: #{project_dir}`. #{host_line}Leave felt `status` as `open` for now.
-    3. **Claim this session** (registers you with the daemon as the fiber's worker — exit handling, liveness, and the kanban all flow from this):
-
-       curl -s -X POST http://localhost:#{port}/api/v1/claim -H 'Content-Type: application/json' -d '{"fiber_id": "<the fiber id you created>", "tmux_session": "#{session}"#{uuid_field}, "agent": "#{agent_id}"}'
-
-       A successful claim renames this tmux session to the fiber's canonical worker name — that is expected. The claim is idempotent: if the response is lost, retry with the same body.
-    4. **Activate.** Now set felt `status: active`. (Doing this before the claim would make the fiber dispatch-eligible while the daemon cannot yet see this session — a duplicate worker would spawn.)
-    5. **Realize.** From here you are an ordinary Shuttle worker on that fiber: drive toward the Desired State, keep the outcome current, and exit per the contract below.
+    You are a Shuttle capture worker. Activate the felt and shuttle skills and read shuttle references/capture.md.
+    Felt store: #{Keyword.fetch!(opts, :felt_store)}
+    Project dir: #{Keyword.fetch!(opts, :project_dir)}
+    Headless: #{Keyword.get(opts, :headless, false)}
+    Install: #{Jason.encode!(install)}
+    Claim endpoint: http://localhost:#{Keyword.get(opts, :port, 4000)}/api/v1/claim
+    Claim: #{Jason.encode!(claim)}
     """
 
-    [
-      String.trim(header),
-      render_exit_contract("oneshot"),
-      render_block("From User", String.trim(yap))
-    ]
-    |> Enum.join("\n\n")
-    |> String.trim()
+    append_user_message(String.trim_trailing(header), user_message: yap)
   end
 
   # `capture-<hex>` — distinguishable, collision-free enough, and crucially
@@ -1450,26 +1237,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   def render_app_capture_prompt(yap, opts) do
-    claim =
-      Jason.encode!(%{
-        fiber_id: "<fiber id>",
-        surface: "app",
-        session_uuid: Keyword.fetch!(opts, :session_uuid),
-        agent: Keyword.fetch!(opts, :agent_id)
-      })
-
-    """
-    Shuttle capture session in the ChatGPT app. Activate the felt and shuttle skills.
-    Felt store: #{Keyword.fetch!(opts, :felt_store)}
-    Project dir: #{Keyword.fetch!(opts, :project_dir)}
-    Read the user's idea and discuss any open design questions with them here. File an appropriately scoped fiber when the idea is ready. Install its shuttle block with kind: oneshot, agent: #{Keyword.fetch!(opts, :agent_id)}, surface: app, project_dir: #{Keyword.fetch!(opts, :project_dir)}, host: #{Keyword.get(opts, :host)}#{if Keyword.get(opts, :effort), do: ", effort: #{Keyword.get(opts, :effort)}", else: ""}.
-    Keep status open until you claim this conversation: POST http://localhost:#{Keyword.get(opts, :port, 4000)}/api/v1/claim with Content-Type application/json and body #{claim}. Replace only the fiber id. Check the response is successful before activating the fiber. The claim is idempotent and never renames the conversation. Then set status active and continue the work.
-
-    #{exit_contract(opts)}
-
-    #{render_block("From User", String.trim(yap))}
-    """
-    |> String.trim()
+    render_capture_entrypoint(yap, Keyword.put(opts, :surface, "app"))
   end
 
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
@@ -2073,16 +1841,12 @@ defmodule Shuttle.Dispatcher do
 
     #{erts_scrub_block()}#{fiber_key_block}#{wait_for_client_block}
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     #{dismiss_block}#{command}
 
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Shuttle worker exited (agent=#{agent_id})"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     """
   end
 

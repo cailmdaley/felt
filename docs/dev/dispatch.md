@@ -175,33 +175,24 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 
 ## Dispatch prompt structure
 
-All prompt variants share this shape (`compose_prompt/3` in dispatcher.ex):
+Prompt rendering lives in `Shuttle.Dispatcher`.
 
-1. **Orientation paragraph** — what shuttle is, what the worker is here to
-   do, how the practice loads. Per-prompt, not boilerplate. Goes first
-   because in causal attention every downstream token sees the prefix.
-2. **`Fiber: <id>`** (and `Run: <run-id>` for standing) — identity lines.
-   Fresh dispatches also carry **`Previous session: <uuid> (<harness>)`**
-   when the fiber has one — the predecessor's transcript pointer, read from
-   the session ledger (`SessionLedger.latest_for_uid/2`, fallback: the
-   runtime marker) *before* this dispatch stamps its own. Resume prompts
-   never carry it (the resumed worker IS the previous session); the shuttle
-   skill's `references/transcripts.md` carries the read recipes.
-3. **`Felt store: <path>`** — the worker's absolute anchor. When
-   `prompt_fiber_id`'s work_dir-local translation safe-fails, the id above
-   is global and doesn't resolve from cwd; the store line makes the
-   fallback mechanical (`felt -C <felt-store> show <id>`).
-4. **`Exit Contract`** block — always present; one uniform contract for
-   oneshot + standing (rewrite `## Status`, then `felt shuttle handoff`),
-   three-case for pinned roles (stay alive while the human drives; handoff
-   relaunches a fresh worker for autonomous arcs; close → awaiting review).
-   A `Headless` block follows for print-mode agents (no human can attach).
-5. **`From User`** — the user's directive, when one rides this dispatch. It
-   is the `user_message` dispatch *parameter* (inlined into the prompt at
-   launch and discarded), not a persisted felt event. The directive arrives
-   *with* the dispatch.
+Launch messages contain a short instruction to activate the felt and shuttle
+skills and read the current constitution and Status, followed by invocation data:
 
-The fiber's outcome and handoff prose are not inlined — they're already in
-scope after `felt show <id>`, which renders the body's `## Status` block (the
-worker's last-writer-wins handoff) along with the rest of the constitution. The
-shuttle skill prescribes the worker reads it on arrival.
+- Fiber and felt store; kind, surface, and headless mode.
+- Standing run ID and scheduled/ad-hoc mode when applicable.
+- Optional previous-session provenance on fresh launches.
+- `From User:` followed by the exact user message, when nonblank.
+
+Capture launches point to the shuttle skill's `references/capture.md` and carry
+JSON install metadata and the exact claim endpoint/body. That reference owns the
+open → install → claim → activate ordering and surface-specific claim behavior.
+Worker loop, headless handling, and handoff instructions live only in the skill.
+No decorative rules, constitution snapshots, or duplicated exit contracts are
+inlined. Previous transcripts support understanding; they do not supply missing
+instructions. Fresh and resumed workers read the current constitution and Status.
+
+Deploy prompt changes together with the corresponding skill generation: the
+worker must be able to load every reference named by its launch message before
+that daemon build starts dispatching.

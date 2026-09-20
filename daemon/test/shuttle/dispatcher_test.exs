@@ -418,35 +418,16 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Tests ──
 
-  test "render_prompt opens with orientation, names the fiber, and carries exit contract" do
-    # No felt index for tests/haiku → all three context blocks render empty;
-    # this test exercises the orientation header.
-    prompt = Dispatcher.render_prompt("tests/haiku")
-
-    # Orientation paragraph: names what Shuttle is, what the worker is for,
-    # how the practice gets loaded.
-    assert prompt =~ "The orchestration system Shuttle dispatched you"
-    assert prompt =~ ~s(constitution describes what "done" looks like)
-    assert prompt =~ "`shuttle` and `felt` skills carry the practice"
-
-    # Fiber identity on its own line for grep-ability.
+  test "worker entrypoint carries invocation data without duplicated workflow" do
+    prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/store")
+    assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
+    assert prompt =~ "read the current constitution and Status"
     assert prompt =~ "Fiber: tests/haiku"
-
-    # The full practice still lives in the shuttle skill, but the exit
-    # contract must be prompt-local so resumed workers do not treat Shuttle
-    # work like ordinary chat completion.
-    assert prompt =~ "Exit Contract"
-    assert prompt =~ "felt shuttle handoff"
-    assert prompt =~ "a normal chat final response is not a worker exit"
-    refute prompt =~ "Exit before context is half-full"
-
-    # A oneshot must be told to write the clean-handoff marker before exit — it's
-    # the signal that distinguishes a clean close (next worker starts fresh) from
-    # a mid-thought death (daemon resumes the transcript) — and to rewrite the
-    # `## Status` handoff prose. The old `felt history append` ritual is gone.
-    assert prompt =~ "felt shuttle handoff"
-    assert prompt =~ "## Status"
-    refute prompt =~ "felt history append"
+    assert prompt =~ "Kind: oneshot; surface: cli; headless: false"
+    assert String.length(prompt) < 350
+    refute prompt =~ "Exit Contract"
+    refute prompt =~ "felt shuttle handoff"
+    refute prompt =~ "──"
   end
 
   test "render_prompt carries the previous-session lineage line only when one exists" do
@@ -468,7 +449,7 @@ defmodule Shuttle.DispatcherTest do
         previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: nil}
       )
 
-    assert unlabeled =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f\n"
+    assert unlabeled =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f"
 
     # First dispatch: no line at all.
     refute Dispatcher.render_prompt("tests/haiku") =~ "Previous session:"
@@ -486,49 +467,15 @@ defmodule Shuttle.DispatcherTest do
     assert standing =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
   end
 
-  test "render_prompt for a pinned role carries the three-case unified-lifecycle contract" do
-    # A pinned role is an interactive interface, but under the unified lifecycle
-    # its exit contract has three cases: (a) while a human drives, stay alive at
-    # idle; (b) for a long autonomous arc, hand off and the daemon relaunches
-    # fresh; (c) when the arc is done, close then hand off (→ Awaiting review →
-    # strip on accept). The default (oneshot) contract is single-case exit, so the
-    # two must not collide.
-    pinned = Dispatcher.render_prompt("tests/haiku", kind: "pinned")
-    assert pinned =~ "Exit Contract"
-    assert pinned =~ "pinned interactive role"
-    # (a) stay alive at idle while a human drives.
-    assert pinned =~ "DO NOT exit"
-    assert pinned =~ "stay alive and wait"
-    # (b) an autonomous arc can hand off for a fresh relaunch.
-    assert pinned =~ "felt shuttle handoff"
-    assert pinned =~ "relaunch a fresh worker"
-    # (c) a finished arc closes to Awaiting review, returning to the strip on accept.
-    assert pinned =~ "status: closed"
-    assert pinned =~ "Awaiting review"
-    # The autonomous kill-on-exit instruction must be absent for pinned.
-    refute pinned =~ "your final action must be `kill $PPID`"
-
-    # Oneshot (the default) keeps the autonomous exit-on-completion contract:
-    # the final action is `felt shuttle handoff`, which writes the marker and ends
-    # the session (it folds in the old `kill $PPID`).
-    oneshot = Dispatcher.render_prompt("tests/haiku")
-    assert oneshot =~ "your FINAL action is `felt shuttle handoff"
-    refute oneshot =~ "stay alive and wait"
-    refute oneshot =~ "pinned interactive role"
+  test "role and surface metadata select the skill's exit semantics" do
+    assert Dispatcher.render_prompt("tests/a", kind: "pinned") =~ "Kind: pinned"
+    assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "surface: app"
+    assert Dispatcher.render_prompt("tests/a") =~ "Kind: oneshot"
   end
 
-  test "render_prompt carries the headless notice only when headless: true" do
-    # Headless (-p) workers run unattended — the prompt must tell them the
-    # human-gate exception can't apply, or they may park at a checkpoint that
-    # never gets answered.
-    headless = Dispatcher.render_prompt("tests/haiku", headless: true)
-    assert headless =~ "Headless"
-    assert headless =~ "no human can attach"
-    assert headless =~ "human-gate exception never applies"
-
-    # Default (interactive) dispatch carries no such notice.
-    interactive = Dispatcher.render_prompt("tests/haiku")
-    refute interactive =~ "no human can attach"
+  test "headless is explicit invocation data" do
+    assert Dispatcher.render_prompt("tests/a", headless: true) =~ "headless: true"
+    assert Dispatcher.render_prompt("tests/a") =~ "headless: false"
   end
 
   test "render_prompt names the felt store so the safe-fail global id stays resolvable" do
@@ -1333,40 +1280,22 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Resume prompt rendering ──
 
-  test "render_standing_run_prompt frames the run as a recurring occurrence" do
+  test "standing launch carries run identity and reference" do
     prompt = Dispatcher.render_standing_run_prompt("tests/haiku", "run-2026-05-06")
-
-    # Standing-role-specific framing
-    assert prompt =~ "scheduled run of this standing role"
-    assert prompt =~ "one due occurrence, not a new fiber"
-    assert prompt =~ "standing-roles reference covers the run lifecycle"
-
-    # Identity lines
+    assert prompt =~ "references/standing-roles.md"
     assert prompt =~ "Fiber: tests/haiku"
-    assert prompt =~ "Run:"
-    assert prompt =~ "run-2026-05-06"
-
-    # The run-specific frontmatter handoff remains in the skill; the generic
-    # autonomous-worker exit contract is prompt-local.
-    assert prompt =~ "Exit Contract"
-    assert prompt =~ "felt shuttle handoff"
-    refute prompt =~ "review.state: awaiting"
-    refute prompt =~ "felt history append"
+    assert prompt =~ "Run: run-2026-05-06"
+    assert prompt =~ "Run mode: scheduled"
+    assert prompt =~ "Kind: standing"
+    refute prompt =~ "felt shuttle handoff"
   end
 
-  test "render_standing_run_prompt distinguishes ad-hoc runs from scheduled occurrences" do
-    prompt =
-      Dispatcher.render_standing_run_prompt("tests/haiku", "adhoc-1770000000000", ad_hoc: true)
-
-    assert prompt =~ "ad-hoc run of this standing role"
-    assert prompt =~ "does not consume or advance the scheduled occurrence"
-    # The slice-5 schema freeze removed review.state and next_due_at; the
-    # prompt must not instruct the worker to write either. The daemon owns
-    # the awaiting transition (standing-roles.md, "Worker exit handoff").
+  test "standing launch distinguishes ad-hoc from scheduled runs" do
+    prompt = Dispatcher.render_standing_run_prompt("tests/haiku", "adhoc-1", ad_hoc: true)
+    assert prompt =~ "Run mode: ad-hoc"
+    assert prompt =~ "Run: adhoc-1"
     refute prompt =~ "review.state"
     refute prompt =~ "next_due_at"
-    assert prompt =~ "daemon owns the awaiting transition"
-    assert prompt =~ "Run:   adhoc-1770000000000"
   end
 
   test "resolve_resume_intent forces :fresh for ad-hoc dispatch even with a resumable session" do
@@ -1483,31 +1412,15 @@ defmodule Shuttle.DispatcherTest do
     end
   end
 
-  test "render_resume_prompt names the fiber and repeats the exit contract" do
-    # No felt history available in test env (no .felt index) — context
-    # blocks suppress to empty; the framing block still renders.
+  test "resume reloads current constitution and skills" do
     prompt = Dispatcher.render_resume_prompt("tests/haiku")
-
-    assert prompt =~ "Shuttle resumed your previous session"
+    assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
+    assert prompt =~ "read the current constitution and Status"
+    assert prompt =~ "Mode: resume"
     assert prompt =~ "Fiber: tests/haiku"
-    assert prompt =~ "already loaded in your transcript"
-    assert prompt =~ "Exit Contract"
-    assert prompt =~ "felt shuttle handoff"
-    assert prompt =~ "a normal chat final response is not a worker exit"
-
-    # Resume prompt deliberately omits the fresh-dispatch orientation —
-    # skills, conventions, and the constitution are already in scope.
-    refute prompt =~ "The orchestration system Shuttle dispatched you"
+    refute prompt =~ "Exit Contract"
   end
 
-  # ── Resume-warning dismiss in run script ──
-
-  # The daemon is a Mix release with a bundled ERTS, and `erl` exports
-  # ROOTDIR/BINDIR/PROGNAME/EMU plus its own erts on PATH into the BEAM's
-  # environment — which every tmux worker inherits. A worker that then runs
-  # mix/elixir/erl dies with "cannot get bootfile .../bin/rel/bin/start.boot".
-  # See finding-release-erts-leaks-into-workers: a worker dispatched onto this
-  # very repo could not build it.
   test "build_run_script scrubs the daemon's own release ERTS from the worker env" do
     script = Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet")
 
@@ -1666,7 +1579,7 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Capture (spawn-without-constitution) ──
 
-  test "render_capture_prompt carries the yap, store, claim call, and contract" do
+  test "render_capture_prompt carries the yap, store, claim data, and skill reference" do
     prompt =
       Dispatcher.render_capture_prompt("make the board sing\nwith two lines",
         session: "capture-ab12cd34",
@@ -1679,20 +1592,105 @@ defmodule Shuttle.DispatcherTest do
       )
 
     # The yap, verbatim, in the From User block.
-    assert prompt =~ "make the board sing\n  with two lines"
+    assert prompt =~ "make the board sing\nwith two lines"
     assert prompt =~ "From User"
-    # Crystallize instructions + anchors.
+    # Launch metadata and anchors.
     assert prompt =~ "Felt store: /Users/x/loom"
     assert prompt =~ "Project dir: /Users/x/projects/portolan"
-    assert prompt =~ "kind: oneshot"
-    assert prompt =~ "agent: claude-opus"
-    assert prompt =~ "host: test-host"
+    assert prompt =~ ~s("kind":"oneshot")
+    assert prompt =~ ~s("agent":"claude-opus")
+    assert prompt =~ ~s("host":"test-host")
     # The claim callback, with this session's identity baked in.
     assert prompt =~ "http://localhost:4123/api/v1/claim"
-    assert prompt =~ ~s("tmux_session": "capture-ab12cd34")
-    assert prompt =~ ~s("session_uuid": "uuid-cap-1")
-    # Worker exit contract present (capture sessions become ordinary workers).
-    assert prompt =~ "felt shuttle handoff"
+    assert prompt =~ ~s("tmux_session":"capture-ab12cd34")
+    assert prompt =~ ~s("session_uuid":"uuid-cap-1")
+    # Capture behavior is defined once in its reference.
+    assert prompt =~ "references/capture.md"
+  end
+
+  test "capture identity and install metadata roundtrip JSON on both surfaces" do
+    message = "  preserve\n\tindent, \"quotes\", $HOME and `code`\n\n"
+
+    opts = [
+      session: "capture-one",
+      session_uuid: "exact-thread",
+      felt_store: "/tmp/store",
+      project_dir: "/tmp/project \"quoted\"",
+      agent_id: "codex-sol",
+      host: "host-a",
+      effort: "high",
+      chrome: true,
+      port: 4567
+    ]
+
+    for surface <- ["cli", "app"] do
+      prompt =
+        if surface == "app",
+          do: Dispatcher.render_app_capture_prompt(message, opts),
+          else: Dispatcher.render_capture_prompt(message, opts)
+
+      assert String.ends_with?(prompt, "From User:\n" <> message)
+      assert prompt =~ "references/capture.md"
+      assert prompt =~ "http://localhost:4567/api/v1/claim"
+      [_, install_json] = Regex.run(~r/^Install: (.+)$/m, prompt)
+      [_, claim_json] = Regex.run(~r/^Claim: (.+)$/m, prompt)
+      install = Jason.decode!(install_json)
+      claim = Jason.decode!(claim_json)
+
+      assert install == %{
+               "kind" => "oneshot",
+               "surface" => surface,
+               "project_dir" => opts[:project_dir],
+               "agent" => "codex-sol",
+               "host" => "host-a",
+               "effort" => "high",
+               "chrome" => true
+             }
+
+      assert claim["session_uuid"] == "exact-thread"
+      assert claim["agent"] == "codex-sol"
+      assert claim["fiber_id"] == "<fiber id>"
+
+      if surface == "app" do
+        assert claim["surface"] == "app"
+        refute Map.has_key?(claim, "tmux_session")
+      else
+        assert claim["tmux_session"] == "capture-one"
+        refute Map.has_key?(claim, "surface")
+      end
+
+      refute prompt =~ "felt shuttle handoff"
+      refute prompt =~ "──"
+    end
+  end
+
+  test "every dispatch preserves nonblank user instructions verbatim" do
+    message = " \n    indented\n\tline with \"quotes\" and 'apostrophes'\n\n"
+    opts = [user_message: message, felt_store: "/tmp/store"]
+
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a", opts),
+          Dispatcher.render_resume_prompt("tests/a", opts),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1", opts)
+        ] do
+      assert String.ends_with?(prompt, "From User:\n" <> message)
+    end
+  end
+
+  test "capture omits unknown identity and unrequested optional axes" do
+    prompt =
+      Dispatcher.render_capture_prompt("idea",
+        session: "capture-one",
+        felt_store: "/tmp/store",
+        project_dir: "/tmp/project"
+      )
+
+    [_, install_json] = Regex.run(~r/^Install: (.+)$/m, prompt)
+    [_, claim_json] = Regex.run(~r/^Claim: (.+)$/m, prompt)
+    install = Jason.decode!(install_json)
+    claim = Jason.decode!(claim_json)
+    for key <- ["host", "chrome", "effort"], do: refute(Map.has_key?(install, key))
+    refute Map.has_key?(claim, "session_uuid")
   end
 
   test "capture spawns a non-shuttle-suffixed session with the prompt in the run script" do
@@ -1720,7 +1718,7 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ uuid
   end
 
-  test "capture renders requested axes into the command and the install-block step" do
+  test "capture renders requested axes into the command and install metadata" do
     {:ok, %{session: _}} =
       Dispatcher.capture("an idea",
         runner: MockRunner,
@@ -1740,9 +1738,9 @@ defmodule Shuttle.DispatcherTest do
     # Axes rendered on the CLI invocation.
     assert script =~ "--effort 'xhigh'"
     assert script =~ "--chrome"
-    # Axes recorded in the crystallize instructions so the fiber reproduces them.
-    assert script =~ "`effort: xhigh`"
-    assert script =~ "`chrome: true`"
+    # Explicit axes survive into the new fiber install metadata.
+    assert script =~ ~s("effort":"xhigh")
+    assert script =~ ~s("chrome":true)
   end
 
   # A wedged felt (runner :timeout) is a server-side failure, never a client

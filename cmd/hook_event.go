@@ -172,12 +172,11 @@ var machinePromptPrefixes = []string{
 	"[Request interrupted",
 	// The /loop skill's injected tick.
 	"# Autonomous loop tick",
-	// The dispatcher's other two injected openings: a resumed session's
-	// wake-up prompt and a capture session's framing (daemon/lib/shuttle/dispatcher.ex
-	// render_resume_prompt/2, render_capture_prompt/2). Same module, same
-	// here-string delivery, same UserPromptSubmit — no human typed either.
+	// Dispatch and capture entrypoints, including prefixes in stored transcripts.
 	"Shuttle resumed your previous session",
 	"Shuttle capture session.",
+	"You are a Shuttle worker.",
+	"You are a Shuttle capture worker.",
 }
 
 // machinePrompt reports whether a prompt was injected rather than typed.

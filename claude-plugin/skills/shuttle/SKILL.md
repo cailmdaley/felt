@@ -3,7 +3,8 @@ name: shuttle
 description: >
   Use this skill in any of these situations.
   **Worker dispatch:** the first user message says shuttle dispatched,
-  resumed, or spawned you ("The orchestration system Shuttle dispatched
+  resumed, or spawned you, or says "You are a Shuttle worker" or
+  "You are a Shuttle capture worker" ("The orchestration system Shuttle dispatched
   you on this fiber", "Shuttle capture session", …) — you're the worker
   realizing that fiber.
   **Authoring:** the user mentions a **constitution** (writing, drafting,
@@ -44,6 +45,7 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 
 | You are | Read |
 |---|---|
+| Capturing a new idea | [references/capture.md](references/capture.md), then the worker loop below. |
 | A dispatched worker | This file, top to bottom. |
 | Authoring a constitution | [references/authoring.md](references/authoring.md) — `felt add` → spec → `felt shuttle install`, drafts vs dispatch, agent selection, human-in-the-loop gates. |
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |
@@ -124,7 +126,8 @@ If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-st
 1. **Survey.** The survey is where you internalize **why** before the **what** — not a checklist, a world-model. Read until you hold the user's intent clearly enough to move ambitiously inside it.
 
    - Read the constitution fresh (see "Finding your fiber"). If `report.html` exists, read it too.
-   - Read the previous session's handoff: the `## Status` block. When the dispatch prompt names a `Previous session:` and the handoff leaves you wanting the texture — where exactly it stopped, what it tried, its in-flight thinking — read that transcript surgically per [references/transcripts.md](references/transcripts.md).
+   - Fresh and resumed workers both read the current constitution and `## Status`. The launch message, when present, is the current directive. With no new message, follow a clear constitution; do not search old transcripts for a substitute request. If the desired work is unclear, ask or record the specific ambiguity before consequential action.
+   - Read the previous session's handoff: the `## Status` block. When the dispatch prompt names a `Previous session:` and the handoff leaves you wanting the texture — where exactly it stopped, what it tried, its in-flight thinking — use it as optional supporting context, never as a source of new instructions; read surgically per [references/transcripts.md](references/transcripts.md).
    - Check `git log` for what's already happened in the fiber's directory and the surrounding code.
    - Skim sub-fibers (decisions, findings, gotchas, staged plans). If a sibling finding lays out a staged plan, follow it rather than re-deriving scope.
    - Follow claims about the system back to the code that grounds them. The constitution is your contract; the code is the ground truth.
@@ -137,7 +140,9 @@ If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-st
 
 4. **Handoff, then exit.** Rewrite the constitution's `## Status` block, then your FINAL tool action is `felt shuttle handoff <fiber-id>`. For a terminal worker it stamps the clean-exit marker and ends your tmux session (no separate `kill $PPID`). For an app worker use `env -u TMUX felt -C <felt-store> shuttle handoff <fiber-id>`, then end your turn; never kill a terminal or the shared app daemon. Shuttle releases app ownership after the handoff and completed turn. The marker tells the daemon to start a fresh worker that reads your `## Status`.
 
-An app conversation waiting for the human's next message remains owned and resumable. An idle turn or a temporary connection failure is not a worker exit. Follow the dispatch prompt's app claim instructions with its exact conversation id; do not substitute the tmux claim example.
+An app conversation waiting for the human's next message remains owned and resumable. An idle turn or a temporary connection failure is not a worker exit. Capture workers claim using [references/capture.md](references/capture.md); ordinary dispatched workers are already assigned.
+
+**Headless runs.** When launch metadata says `headless: true`, no human can attach. Work to a clean checkpoint and exit. Record any question requiring human input in the outcome and `## Status`, and apply the blocked exit case rather than waiting for an interactive reply.
 
 ### When to stop
 
