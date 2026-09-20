@@ -125,7 +125,7 @@ untouched by any of this.
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
 | `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native harness sessions addressable across the fleet (`--host`, `--harness`, `--json`). With a fiber or session, preserve the provenance view: discover the composite session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition through the ledgers; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `felt shuttle message <address> <text\|->` | Send text to the exact canonical session address returned by `sessions` (`--file`, `--wake`, `--from`, `--message-id`, `--json`). `-` and `--file -` preserve multiline stdin. Receipts report only the adapter's actual status (`accepted`, `context_added`, `submitted`, `queued`, `unknown`, or `rejected`) and always carry the message ID needed for a safe explicit retry |
+| `felt shuttle message <address> [text\|-]` | Send text and files to the exact session address returned by `sessions` (`--attach`, `--file`, `--wake`, `--from`, `--message-id`, `--json`). `-` and `--file -` read multiline message text; repeat `--attach <path>` to include binary files. Receipts report the transport result and the message ID needed for a safe explicit retry |
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
@@ -168,6 +168,26 @@ Receipts and queued payloads stay under `$SHUTTLE_DATA_DIR` (default
 `~/.shuttle`), outside the project. Payloads offered by hooks are retained there
 for diagnosis. `SHUTTLE_CODEX_SOCKET` and `SHUTTLE_CONFER_STATE_DIR` override
 native discovery locations when a harness uses a nondefault runtime directory.
+
+Attach up to eight files totaling 20 MiB with the same command:
+
+```sh
+felt shuttle message <address> "Here are the notes and plot" --attach notes.txt --attach plot.png
+felt shuttle message <address> --attach results.pdf
+```
+
+Attachments are stable copies, stored outside the project on the receiving
+host. The receiver verifies each SHA-256 digest before delivering a common
+message containing local paths; each harness receives the same file references.
+The JSON receipt's `files` list gives the copied name, path, digest, and size.
+This confirms stored bytes, not that the recipient opened or understood them.
+An identical retry returns the original receipt; changed bytes under the same
+message ID are refused. An older daemon that cannot receive attachments refuses
+the whole file message instead of dropping its files.
+
+`--file` supplies message text. `--attach` transfers file bytes to another
+session. `felt shuttle send-file` publishes artifacts to the human's IDE using
+the existing owner-served file surface.
 
 ### Fleet / operator plumbing
 

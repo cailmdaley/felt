@@ -175,17 +175,17 @@ func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(c, (64<<10)+1), 4096).ReadBytes('\n')
 	if err != nil {
-		return Receipt{r.MessageID, r.Address, StatusUnknown, "pi-rpc+unix-socket", "worker reply was not received"}, errCode("ambiguous_delivery", "Confer delivery outcome unknown: %v", err)
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker reply was not received"}, errCode("ambiguous_delivery", "Confer delivery outcome unknown: %v", err)
 	}
 	if len(line) > 64<<10 {
-		return Receipt{r.MessageID, r.Address, StatusUnknown, "pi-rpc+unix-socket", "worker reply exceeded limit"}, errCode("ambiguous_delivery", "Confer reply exceeded limit")
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker reply exceeded limit"}, errCode("ambiguous_delivery", "Confer reply exceeded limit")
 	}
 	resp, decodeErr := decodePiReply(line)
 	if decodeErr != nil {
-		return Receipt{r.MessageID, r.Address, StatusUnknown, "pi-rpc+unix-socket", "worker returned malformed reply"}, errCode("ambiguous_delivery", "Confer returned malformed reply")
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker returned malformed reply"}, errCode("ambiguous_delivery", "Confer returned malformed reply")
 	}
 	if !resp.OK {
 		return rejected(r, "pi-rpc+unix-socket", resp.Error), errCode("peer_rejected", "Confer rejected message: %s", resp.Error)
 	}
-	return Receipt{r.MessageID, r.Address, StatusAccepted, "pi-rpc+unix-socket", resp.Delivery}, nil
+	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusAccepted, Transport: "pi-rpc+unix-socket", Detail: resp.Delivery}, nil
 }

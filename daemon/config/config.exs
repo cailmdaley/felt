@@ -1,5 +1,8 @@
 import Config
 
+# Attachment bytes belong in the receiver's file store, never request logs.
+config :phoenix, :filter_parameters, ["password", "attachments"]
+
 # NOTE: `Shuttle.Application.start/2` sets this again at runtime. That was
 # mandatory in the escript era — escript boot loaded no compile-time config, so
 # this line never reached the daemon at all. A release bakes the key into

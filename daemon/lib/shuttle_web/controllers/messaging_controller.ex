@@ -11,7 +11,15 @@ defmodule ShuttleWeb.MessagingController do
   end
 
   def create(conn, params) do
-    case Messaging.send_message(params) do
+    reply(conn, Messaging.send_message(params))
+  end
+
+  def create_files(conn, params) do
+    reply(conn, Messaging.send_message_with_files(params))
+  end
+
+  defp reply(conn, result) do
+    case result do
       {:ok, status, receipt} -> conn |> put_status(status) |> json(receipt)
       {:error, status, error} -> conn |> put_status(status) |> json(%{error: error})
     end

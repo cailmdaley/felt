@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -19,13 +20,13 @@ func TestMailboxQueueOfferAndReplay(t *testing.T) {
 		t.Fatalf("send: %+v %v", r, err)
 	}
 	r2, err := Send(context.Background(), "host", req)
-	if err != nil || r2 != r {
+	if err != nil || !reflect.DeepEqual(r2, r) {
 		t.Fatalf("retry: %+v %v", r2, err)
 	}
 	count := 0
 	if err := OfferMailbox("claude", "session", "host", func(rs []Request) error {
 		count += len(rs)
-		if len(rs) != 1 || rs[0] != req {
+		if len(rs) != 1 || !reflect.DeepEqual(rs[0], req) {
 			t.Errorf("wrong context: %+v", rs)
 		}
 		return nil

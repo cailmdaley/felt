@@ -5,9 +5,14 @@ defmodule Shuttle.Messaging do
 
   @local_message_timeout_ms 20_000
   @remote_message_timeout_ms 25_000
+  @local_files_timeout_ms 60_000
+  @remote_files_timeout_ms 90_000
   @local_discovery_timeout_ms 10_000
   @remote_discovery_timeout_ms 12_000
   @max_text_bytes 65_536
+  @max_attachments 8
+  @max_attachment_bytes 20 * 1024 * 1024
+  @max_frame_bytes 32 * 1024 * 1024
   @receipt_statuses ~w(accepted context_added submitted queued unknown rejected)
   @part_pattern ~r/\A[a-z0-9._-]+\z/
 
@@ -58,16 +63,20 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  def send_message(payload) when is_map(payload) do
-    with {:ok, request} <- validate_message(payload),
+  def send_message(payload) when is_map(payload), do: send_message(payload, :text)
+  def send_message(_), do: {:error, 400, "body must be a JSON object"}
+
+  def send_message_with_files(payload) when is_map(payload), do: send_message(payload, :files)
+  def send_message_with_files(_), do: {:error, 400, "body must be a JSON object"}
+
+  defp send_message(payload, mode) do
+    with {:ok, request} <- validate_message(payload, mode),
          {:ok, address} <- parse_address(request.address),
          decision <- OriginRouter.route_host(address.host),
          result <- deliver(decision, request, address) do
       result
     end
   end
-
-  def send_message(_), do: {:error, 400, "body must be a JSON object"}
 
   defp local_peers do
     host = Poller.own_host_id()
@@ -193,14 +202,16 @@ defmodule Shuttle.Messaging do
 
   defp deliver({:remote, remote}, request, address) do
     forwarded = Map.put(request.raw, "address", build_address("local", address))
+    path = if request.attachments == [], do: "/api/v1/messages", else: "/api/v1/messages/files"
 
-    case OriginRouter.forward(remote, "/api/v1/messages", forwarded,
-           forward_timeout_ms: @remote_message_timeout_ms
-         ) do
+    timeout =
+      if request.attachments == [], do: @remote_message_timeout_ms, else: @remote_files_timeout_ms
+
+    case OriginRouter.forward(remote, path, forwarded, forward_timeout_ms: timeout) do
       {:forwarded, status, body} ->
         case Jason.decode(body) do
           {:ok, receipt} when is_map(receipt) ->
-            case validate_receipt(receipt, request.raw["message_id"], forwarded["address"]) do
+            case validate_receipt(receipt, request, forwarded["address"]) do
               :ok ->
                 {:ok, status, Map.put(receipt, "address", request.address)}
 
@@ -240,14 +251,17 @@ defmodule Shuttle.Messaging do
 
     frame = Jason.encode!(payload) <> "\n"
 
+    timeout =
+      if request.attachments == [], do: @local_message_timeout_ms, else: @local_files_timeout_ms
+
     case Felt.run(["shuttle", "message", "--local", "--json", "--request-json"],
-           timeout_ms: @local_message_timeout_ms,
+           timeout_ms: timeout,
            input: frame
          ) do
       {:ok, output} ->
         case Jason.decode(output) do
           {:ok, receipt} when is_map(receipt) ->
-            if validate_receipt(receipt, request.raw["message_id"], payload["address"]) == :ok,
+            if validate_receipt(receipt, request, payload["address"]) == :ok,
               do: {:ok, 200, receipt},
               else:
                 {:ok, 502,
@@ -271,7 +285,7 @@ defmodule Shuttle.Messaging do
          unknown_receipt(request, "daemon", "local delivery timed out; outcome is unknown")}
 
       {:command_error, _, output} ->
-        case decode_receipt_line(output, request.raw["message_id"], payload["address"]) do
+        case decode_receipt_line(output, request, payload["address"]) do
           {:ok, receipt} ->
             {:ok, 400, receipt}
 
@@ -289,20 +303,29 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  defp validate_message(payload) do
+  defp validate_message(payload, mode) do
     address = Map.get(payload, "address")
-    text = Map.get(payload, "text")
+    text = Map.get(payload, "text", "")
     from = Map.get(payload, "from", "")
     wake = Map.get(payload, "wake", false)
     id = Map.get(payload, "message_id")
 
+    with {:ok, attachments} <- validate_attachments(Map.get(payload, "attachments", []), mode) do
+      validate_message_fields(payload, address, text, from, wake, id, attachments)
+    end
+  end
+
+  defp validate_message_fields(payload, address, text, from, wake, id, attachments) do
     cond do
       not is_binary(address) or byte_size(address) > 8_192 ->
         {:error, 400, "address must be a bounded string"}
 
-      not is_binary(text) or text == "" or byte_size(text) > @max_text_bytes or
+      not is_binary(text) or byte_size(text) > @max_text_bytes or
           String.contains?(text, <<0>>) ->
-        {:error, 400, "text must be a string of 1..#{@max_text_bytes} bytes without NUL"}
+        {:error, 400, "text must be a string of at most #{@max_text_bytes} bytes without NUL"}
+
+      text == "" and attachments == [] ->
+        {:error, 400, "text or attachments must be non-empty"}
 
       not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) ->
         {:error, 400, "from must be a string of at most 1024 bytes without control characters"}
@@ -314,12 +337,79 @@ defmodule Shuttle.Messaging do
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
       true ->
-        {:ok,
-         %{
-           address: address,
-           raw: Map.take(payload, ["address", "text", "from", "wake", "message_id"])
-         }}
+        raw = Map.take(payload, ["address", "text", "from", "wake", "message_id"])
+        raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)
+
+        if raw |> Jason.encode!() |> byte_size() <= @max_frame_bytes do
+          {:ok,
+           %{
+             address: address,
+             attachments: attachments,
+             raw: raw
+           }}
+        else
+          {:error, 400, "message envelope exceeds #{@max_frame_bytes} bytes"}
+        end
     end
+  end
+
+  defp validate_attachments([], :text), do: {:ok, []}
+
+  defp validate_attachments(attachments, :text) when is_list(attachments),
+    do: {:error, 400, "attachments require POST /api/v1/messages/files"}
+
+  defp validate_attachments(attachments, :files)
+       when is_list(attachments) and attachments != [] and length(attachments) <= @max_attachments do
+    attachments
+    |> Enum.reduce_while({:ok, [], 0}, fn attachment, {:ok, valid, total} ->
+      case validate_attachment(attachment) do
+        {:ok, normalized, size} when total + size <= @max_attachment_bytes ->
+          {:cont, {:ok, [normalized | valid], total + size}}
+
+        {:ok, _, _} ->
+          {:halt, {:error, 400, "attachments exceed #{@max_attachment_bytes} decoded bytes"}}
+
+        error ->
+          {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, valid, _total} -> {:ok, Enum.reverse(valid)}
+      error -> error
+    end
+  end
+
+  defp validate_attachments([], :files),
+    do: {:error, 400, "POST /api/v1/messages/files requires attachments"}
+
+  defp validate_attachments(attachments, _mode) when is_list(attachments),
+    do: {:error, 400, "attachments must contain at most #{@max_attachments} files"}
+
+  defp validate_attachments(_, _mode), do: {:error, 400, "attachments must be an array"}
+
+  defp validate_attachment(%{"name" => name, "data" => data, "sha256" => sha256} = attachment)
+       when map_size(attachment) == 3 and is_binary(name) and is_binary(data) and
+              is_binary(sha256) do
+    with :ok <- validate_attachment_name(name),
+         true <- Regex.match?(~r/\A[0-9a-f]{64}\z/, sha256),
+         {:ok, decoded} <- Base.decode64(data) do
+      {:ok, attachment, byte_size(decoded)}
+    else
+      false -> {:error, 400, "attachment sha256 must be 64 lowercase hexadecimal characters"}
+      :error -> {:error, 400, "attachment data must be valid base64"}
+      {:error, _status, _message} = error -> error
+    end
+  end
+
+  defp validate_attachment(_),
+    do: {:error, 400, "each attachment must contain only name, data, and sha256 strings"}
+
+  defp validate_attachment_name(name) do
+    if name != "" and name not in [".", ".."] and String.valid?(name) and
+         byte_size(name) <= 255 and not String.contains?(name, ["/", "\\"]) and
+         not Regex.match?(~r/\p{Cc}/u, name),
+       do: :ok,
+       else: {:error, 400, "attachment name must be a portable basename of at most 255 bytes"}
   end
 
   defp parse_address(value) do
@@ -359,20 +449,54 @@ defmodule Shuttle.Messaging do
     do:
       "shuttle://#{host}/#{address.harness}/#{URI.encode(address.native, &go_path_segment_char?/1)}"
 
-  defp validate_receipt(receipt, expected_id, expected_address) do
-    if Map.get(receipt, "message_id") == expected_id and
+  defp validate_receipt(receipt, request, expected_address) do
+    if Map.get(receipt, "message_id") == request.raw["message_id"] and
          Map.get(receipt, "address") == expected_address and
          Map.get(receipt, "status") in @receipt_statuses and
          is_binary(Map.get(receipt, "transport")) and
-         (is_nil(Map.get(receipt, "detail")) or is_binary(Map.get(receipt, "detail"))),
+         Map.get(receipt, "transport") != "" and
+         (is_nil(Map.get(receipt, "detail")) or is_binary(Map.get(receipt, "detail"))) and
+         valid_receipt_files?(receipt, request),
        do: :ok,
        else: :error
   end
 
-  defp decode_receipt_line(output, expected_id, expected_address) do
+  defp valid_receipt_files?(receipt, %{attachments: []}),
+    do: Map.get(receipt, "files") in [nil, []]
+
+  defp valid_receipt_files?(receipt, request) do
+    if receipt["status"] in ["rejected", "unknown"] do
+      receipt["files"] in [nil, []] or receipt_files_match?(receipt["files"], request.attachments)
+    else
+      receipt_files_match?(receipt["files"], request.attachments)
+    end
+  end
+
+  defp receipt_files_match?(files, attachments) when is_list(files) do
+    length(files) == length(attachments) and
+      Enum.all?(Enum.zip(files, attachments), fn
+        {%{"name" => name, "path" => path, "sha256" => sha256, "size" => size}, attachment}
+        when is_binary(name) and is_binary(path) and path != "" and is_binary(sha256) and
+               is_integer(size) and size >= 0 ->
+          Path.type(path) == :absolute and not has_control?(path) and
+            {name, sha256, size} == file_identity(attachment)
+
+        _ ->
+          false
+      end)
+  end
+
+  defp receipt_files_match?(_, _), do: false
+
+  defp decoded_size(data), do: data |> Base.decode64!() |> byte_size()
+
+  defp file_identity(attachment),
+    do: {attachment["name"], attachment["sha256"], decoded_size(attachment["data"])}
+
+  defp decode_receipt_line(output, request, expected_address) do
     with [line | _] <- String.split(output, "\n", parts: 2),
          {:ok, receipt} when is_map(receipt) <- Jason.decode(line),
-         :ok <- validate_receipt(receipt, expected_id, expected_address) do
+         :ok <- validate_receipt(receipt, request, expected_address) do
       {:ok, receipt}
     else
       _ -> :error

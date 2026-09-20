@@ -42,19 +42,34 @@ type Directory struct {
 }
 
 type Request struct {
-	Address   string `json:"address"`
-	Text      string `json:"text"`
-	From      string `json:"from,omitempty"`
-	Wake      bool   `json:"wake"`
-	MessageID string `json:"message_id"`
+	Address     string       `json:"address"`
+	Text        string       `json:"text"`
+	From        string       `json:"from,omitempty"`
+	Wake        bool         `json:"wake"`
+	MessageID   string       `json:"message_id"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 type Receipt struct {
-	MessageID string `json:"message_id"`
-	Address   string `json:"address"`
-	Status    string `json:"status"`
-	Transport string `json:"transport"`
-	Detail    string `json:"detail,omitempty"`
+	MessageID string         `json:"message_id"`
+	Address   string         `json:"address"`
+	Status    string         `json:"status"`
+	Transport string         `json:"transport"`
+	Detail    string         `json:"detail,omitempty"`
+	Files     []ReceivedFile `json:"files,omitempty"`
+}
+
+type Attachment struct {
+	Name   string `json:"name"`
+	Data   []byte `json:"data"`
+	SHA256 string `json:"sha256"`
+}
+
+type ReceivedFile struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
 }
 
 type Address struct{ Host, Harness, ID string }

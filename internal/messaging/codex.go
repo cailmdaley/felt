@@ -248,7 +248,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 		var result steerResult
 		err = r.call(ctx, "turn/steer", map[string]any{"threadId": a.ID, "expectedTurnId": turns.Data[0].ID, "input": userInput(text), "clientUserMessageId": req.MessageID}, &result)
 		if err == nil && result.TurnID == turns.Data[0].ID {
-			return Receipt{req.MessageID, req.Address, StatusAccepted, "codex-app-server", "steered active turn"}, nil
+			return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "codex-app-server", Detail: "steered active turn"}, nil
 		}
 		if err == nil {
 			err = fmt.Errorf("codex turn/steer returned incomplete or mismatched acknowledgement")
@@ -258,7 +258,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 			var result startResult
 			err = r.call(ctx, "turn/start", map[string]any{"threadId": a.ID, "input": userInput(text), "clientUserMessageId": req.MessageID}, &result)
 			if err == nil && result.Turn.ID != "" && result.Turn.Status != "" {
-				return Receipt{req.MessageID, req.Address, StatusAccepted, "codex-app-server", "started turn"}, nil
+				return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "codex-app-server", Detail: "started turn"}, nil
 			}
 			if err == nil {
 				err = fmt.Errorf("codex turn/start returned incomplete acknowledgement")
@@ -268,7 +268,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 			var result json.RawMessage
 			err = r.call(ctx, "thread/inject_items", map[string]any{"threadId": a.ID, "items": items}, &result)
 			if err == nil && validObjectResult(result) {
-				return Receipt{req.MessageID, req.Address, StatusContextAdded, "codex-app-server", "added persistent context"}, nil
+				return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusContextAdded, Transport: "codex-app-server", Detail: "added persistent context"}, nil
 			}
 			if err == nil {
 				err = fmt.Errorf("codex thread/inject_items returned incomplete acknowledgement")
@@ -289,5 +289,5 @@ func codexMutationFailure(req Request, err error) (Receipt, error) {
 	if _, ok := err.(*rpcPeerError); ok {
 		return rejected(req, "codex-app-server", err.Error()), errCode("peer_rejected", "Codex rejected message: %v", err)
 	}
-	return Receipt{req.MessageID, req.Address, StatusUnknown, "codex-app-server", "Codex delivery outcome is unknown"}, errCode("ambiguous_delivery", "Codex delivery outcome unknown: %v", err)
+	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: "codex-app-server", Detail: "Codex delivery outcome is unknown"}, errCode("ambiguous_delivery", "Codex delivery outcome unknown: %v", err)
 }

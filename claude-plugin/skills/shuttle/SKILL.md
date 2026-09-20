@@ -7,14 +7,16 @@ description: >
   you on this fiber", "Shuttle capture session", …) — you're the worker
   realizing that fiber.
   **Authoring:** the user mentions a **constitution** (writing, drafting,
-  "stash this as a constitution", "shuttle this", "let's shuttle <X>"), or
+  "stash this as a constitution", "shuttle this", "let's shuttle this task"), or
   names a **shuttle agent** by registry id (`claude-opus`, `claude-fable`,
   `codex-terra`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
-  that implies dispatch. The phrase **"shuttle [with] <model-name>"** is
+  that implies dispatch. The phrase **"shuttle [with] model-name"** is
   the canonical author trigger.
   **Operator questions:** the user asks about shuttle itself, the kanban
   board, why a card is or isn't appearing, agent selection, or how to
   prepare work for autonomous follow-through.
+  **Session communication:** discovering conversations or sending messages and
+  files between sessions across machines and harnesses.
 ---
 
 # shuttle
@@ -71,6 +73,13 @@ message ID. If delivery is uncertain, retry the identical request with
 `--message-id <id>`; never invent a new ID just to bypass an unknown result.
 Keep peer context attributed using `--from` when automatic sender detection
 does not identify the conversation.
+
+Attach files with `felt shuttle message <address> "context" --attach <path>`;
+repeat `--attach` for multiple files, or omit the text for a file-only message.
+Shuttle copies and verifies the bytes on the receiving host before offering
+local file paths to the session. The receipt lists those copies; it does not
+prove they were opened. Up to eight files totaling 20 MiB fit in one message.
+Use `felt shuttle send-file` to publish artifacts to the human's IDE.
 
 ## The fiber's surfaces
 

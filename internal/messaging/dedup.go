@@ -22,7 +22,8 @@ func requestHash(r Request) string {
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
 		Wake                bool
-	}{r.Address, r.Text, r.From, r.Wake})
+		Attachments         []Attachment `json:"attachments,omitempty"`
+	}{r.Address, r.Text, r.From, r.Wake, r.Attachments})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }

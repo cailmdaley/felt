@@ -20,13 +20,33 @@ defmodule ShuttleWeb.MessagingControllerTest do
       if request["message_id"] == "malformed-local" do
         {Jason.encode!(%{error: "receipt lost"}), 0}
       else
-        {Jason.encode!(%{
-           message_id: request["message_id"],
-           address: request["address"],
-           status: "accepted",
-           transport: "codex",
-           detail: nil
-         }), 0}
+        receipt = %{
+          message_id: request["message_id"],
+          address: request["address"],
+          status: "accepted",
+          transport: "codex",
+          detail: nil
+        }
+
+        files =
+          Enum.map(request["attachments"] || [], fn attachment ->
+            %{
+              name: attachment["name"],
+              path: "/receiver/#{attachment["name"]}",
+              sha256: attachment["sha256"],
+              size: attachment["data"] |> Base.decode64!() |> byte_size()
+            }
+          end)
+
+        files =
+          if request["message_id"] == "bad-files-receipt" do
+            Enum.map(files, &Map.put(&1, :sha256, String.duplicate("f", 64)))
+          else
+            files
+          end
+
+        receipt = if files == [], do: receipt, else: Map.put(receipt, :files, files)
+        {Jason.encode!(receipt), 0}
       end
     end
   end
@@ -75,6 +95,37 @@ defmodule ShuttleWeb.MessagingControllerTest do
              transport: "pi",
              detail: nil
            })}
+      end
+    end
+
+    def post("http://remote.test/api/v1/messages/files", body, "application/json", timeout) do
+      request = Jason.decode!(body)
+      send(Process.whereis(__MODULE__), {:forwarded_files, request, timeout})
+
+      if request["message_id"] == "old-daemon" do
+        {:ok, 404, Jason.encode!(%{error: "not found"})}
+      else
+        files =
+          request["attachments"]
+          |> Enum.with_index()
+          |> Enum.map(fn {attachment, index} ->
+            %{
+              name: attachment["name"],
+              path: "/remote/#{index}-#{attachment["name"]}",
+              sha256: attachment["sha256"],
+              size: attachment["data"] |> Base.decode64!() |> byte_size()
+            }
+          end)
+
+        {:ok, 200,
+         Jason.encode!(%{
+           message_id: request["message_id"],
+           address: request["address"],
+           status: "accepted",
+           transport: "codex",
+           detail: nil,
+           files: files
+         })}
       end
     end
   end
@@ -136,6 +187,208 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:forwarded, %{"address" => "shuttle://local/pi/p%2F1"}}
     assert receipt["address"] == request["address"]
     assert receipt["status"] == "submitted"
+  end
+
+  test "binary attachments use the files route and retain exact identity" do
+    data = <<0, 1, 2, 255, 128, 64>>
+    sha256 = :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+
+    request = %{
+      "address" => "shuttle://edge/codex/native%2Fid",
+      "text" => "",
+      "from" => "test",
+      "wake" => false,
+      "message_id" => "files-1",
+      "attachments" => [
+        %{"name" => "sample.bin", "data" => Base.encode64(data), "sha256" => sha256}
+      ]
+    }
+
+    receipt =
+      api_conn()
+      |> post("/api/v1/messages/files", Jason.encode!(request))
+      |> json_response(200)
+
+    assert_receive {:forwarded_files,
+                    %{
+                      "address" => "shuttle://local/codex/native%2Fid",
+                      "message_id" => "files-1",
+                      "attachments" => [forwarded]
+                    }, 90_000}
+
+    assert forwarded == hd(request["attachments"])
+    assert receipt["address"] == request["address"]
+    assert [%{"name" => "sample.bin", "sha256" => ^sha256, "size" => 6}] = receipt["files"]
+  end
+
+  test "duplicate basenames remain distinct attachments" do
+    attachments =
+      for data <- ["first", "second"] do
+        %{
+          "name" => "result.dat",
+          "data" => Base.encode64(data),
+          "sha256" => :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+        }
+      end
+
+    request = %{
+      "address" => "shuttle://edge/codex/id",
+      "text" => "two source paths shared this basename",
+      "message_id" => "duplicate-basenames",
+      "attachments" => attachments
+    }
+
+    receipt =
+      api_conn()
+      |> post("/api/v1/messages/files", Jason.encode!(request))
+      |> json_response(200)
+
+    assert_receive {:forwarded_files, %{"attachments" => ^attachments}, 90_000}
+    assert [first, second] = receipt["files"]
+    assert first["name"] == "result.dat"
+    assert second["name"] == "result.dat"
+    assert first["sha256"] != second["sha256"]
+    assert first["path"] != second["path"]
+  end
+
+  test "file envelopes do not copy attachment bytes into request logs", %{host: host} do
+    bytes = "private-attachment-log-marker"
+    encoded = Base.encode64(bytes)
+
+    request = %{
+      "address" => "shuttle://#{host}/codex/id",
+      "message_id" => "filtered-attachment",
+      "attachments" => [
+        %{
+          "name" => "private.bin",
+          "data" => encoded,
+          "sha256" => Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
+        }
+      ]
+    }
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        api_conn() |> post("/api/v1/messages/files", Jason.encode!(request)) |> json_response(200)
+      end)
+
+    assert log =~ "[FILTERED]"
+    refute log =~ encoded
+  end
+
+  test "an old remote files endpoint returns unknown without falling back to messages" do
+    data = "payload"
+    sha256 = :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+
+    request = %{
+      "address" => "shuttle://edge/codex/id",
+      "text" => "see file",
+      "message_id" => "old-daemon",
+      "attachments" => [%{"name" => "x.txt", "data" => Base.encode64(data), "sha256" => sha256}]
+    }
+
+    receipt =
+      api_conn()
+      |> post("/api/v1/messages/files", Jason.encode!(request))
+      |> json_response(502)
+
+    assert_receive {:forwarded_files, %{"message_id" => "old-daemon"}, 90_000}
+    refute_receive {:forwarded, %{"message_id" => "old-daemon"}}
+    assert receipt["status"] == "unknown"
+    assert receipt["address"] == request["address"]
+  end
+
+  test "messages refuses attachments and files requires them" do
+    base = %{
+      "address" => "shuttle://edge/codex/id",
+      "text" => "hello",
+      "message_id" => "route-check"
+    }
+
+    attachment = %{"name" => "x", "data" => "eA==", "sha256" => String.duplicate("0", 64)}
+
+    assert %{"error" => error} =
+             api_conn()
+             |> post(
+               "/api/v1/messages",
+               Jason.encode!(Map.put(base, "attachments", [attachment]))
+             )
+             |> json_response(400)
+
+    assert error =~ "/api/v1/messages/files"
+
+    assert %{"error" => "POST /api/v1/messages/files requires attachments"} =
+             api_conn()
+             |> post("/api/v1/messages/files", Jason.encode!(base))
+             |> json_response(400)
+  end
+
+  test "files validates envelope shape and receipt correlation", %{host: host} do
+    base = %{
+      "address" => "shuttle://#{host}/codex/id",
+      "text" => "",
+      "message_id" => "bad-file"
+    }
+
+    invalid = [
+      [%{"name" => "../x", "data" => "eA==", "sha256" => String.duplicate("0", 64)}],
+      [%{"name" => "x\u0085", "data" => "eA==", "sha256" => String.duplicate("0", 64)}],
+      [%{"name" => "x", "data" => "%%%", "sha256" => String.duplicate("0", 64)}],
+      [%{"name" => "x", "data" => "eA==", "sha256" => String.duplicate("A", 64)}],
+      Enum.map(1..9, &%{"name" => "x#{&1}", "data" => "", "sha256" => String.duplicate("0", 64)})
+    ]
+
+    for attachments <- invalid do
+      assert api_conn()
+             |> post(
+               "/api/v1/messages/files",
+               Jason.encode!(Map.put(base, "attachments", attachments))
+             )
+             |> json_response(400)
+    end
+
+    data = "correlate"
+    sha256 = :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+
+    receipt =
+      api_conn()
+      |> post(
+        "/api/v1/messages/files",
+        Jason.encode!(
+          Map.merge(base, %{
+            "message_id" => "bad-files-receipt",
+            "attachments" => [
+              %{"name" => "x", "data" => Base.encode64(data), "sha256" => sha256}
+            ]
+          })
+        )
+      )
+      |> json_response(502)
+
+    assert receipt["status"] == "unknown"
+    refute Map.has_key?(receipt, "files")
+  end
+
+  test "the larger JSON parser is scoped to the files route" do
+    data = :binary.copy(<<42>>, 7 * 1024 * 1024)
+    sha256 = :crypto.hash(:sha256, data) |> Base.encode16(case: :lower)
+
+    request = %{
+      "address" => "shuttle://edge/codex/id",
+      "text" => "",
+      "message_id" => "large-parser",
+      "attachments" => [
+        %{"name" => "large.bin", "data" => Base.encode64(data), "sha256" => sha256}
+      ]
+    }
+
+    assert api_conn()
+           |> post("/api/v1/messages/files", Jason.encode!(request))
+           |> json_response(200)
+
+    assert_raise Plug.Parsers.RequestTooLargeError, fn ->
+      api_conn() |> post("/api/v1/messages", Jason.encode!(request))
+    end
   end
 
   test "remote failures preserve validated receipts and public addresses" do

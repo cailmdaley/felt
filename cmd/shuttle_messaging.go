@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -31,9 +32,11 @@ var (
 	messageFrom        string
 	messageID          string
 	messageRequestJSON bool
+	messageAttachments []string
 )
 
-const maxMessageRequestFrame = 512 << 10
+const maxMessageRequestFrame = messaging.MaxRequestFrame
+const maxMessageReceiptBytes = 512 << 10
 
 func runShuttleSessionDiscovery(ctx context.Context) error {
 	var (
@@ -120,22 +123,22 @@ func printPeerDirectory(directory messaging.Directory) {
 
 var shuttleMessageCmd = &cobra.Command{
 	Use:   "message <address> [text|-]",
-	Short: "Send a message to a live native harness session",
+	Short: "Send a message and files to an existing session",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if messageRequestJSON {
 			if !messageLocal {
 				return fmt.Errorf("--request-json requires --local")
 			}
-			if len(args) != 0 || messageFile != "" || messageWake || messageFrom != "" || messageID != "" {
-				return fmt.Errorf("--request-json cannot be combined with positional text, --file, --wake, --from, or --message-id")
+			if len(args) != 0 || messageFile != "" || messageWake || messageFrom != "" || messageID != "" || len(messageAttachments) != 0 {
+				return fmt.Errorf("--request-json cannot be combined with positional text, --file, --attach, --wake, --from, or --message-id")
 			}
 			return nil
 		}
 		if len(args) < 1 || len(args) > 2 {
 			return fmt.Errorf("expected an address and text, '-' for stdin, or --file <path>")
 		}
-		if messageFile == "" && len(args) != 2 {
-			return fmt.Errorf("expected text, '-' for stdin, or --file <path>")
+		if messageFile == "" && len(args) != 2 && len(messageAttachments) == 0 {
+			return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
 		}
 		if messageFile != "" && len(args) == 2 {
 			return fmt.Errorf("text and --file are mutually exclusive")
@@ -202,6 +205,10 @@ func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, err
 	if err != nil {
 		return messaging.Request{}, err
 	}
+	attachments, err := messaging.ReadAttachments(messageAttachments)
+	if err != nil {
+		return messaging.Request{}, err
+	}
 	id := strings.TrimSpace(messageID)
 	if id == "" {
 		id, err = newMessageID()
@@ -209,7 +216,7 @@ func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, err
 			return messaging.Request{}, err
 		}
 	}
-	return messaging.Request{Address: args[0], Text: text, From: resolveMessageSender(messageFrom), Wake: messageWake, MessageID: id}, nil
+	return messaging.Request{Address: args[0], Text: text, From: resolveMessageSender(messageFrom), Wake: messageWake, MessageID: id, Attachments: attachments}, nil
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
@@ -251,6 +258,9 @@ func readMessageText(stdin io.Reader, args []string) (string, error) {
 		}
 		defer file.Close()
 		return readMessageInput(file)
+	}
+	if len(args) < 2 {
+		return "", nil
 	}
 	if args[1] == "-" {
 		return readMessageInput(stdin)
@@ -305,18 +315,26 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	if err != nil {
 		return receipt, fmt.Errorf("encoding message: %w", err)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Post(daemonURL()+"/api/v1/messages", "application/json", bytes.NewReader(payload))
+	endpoint := daemonURL() + "/api/v1/messages"
+	timeout := 30 * time.Second
+	if len(request.Attachments) > 0 {
+		// A distinct route makes old daemons refuse the entire send instead of
+		// accepting text while silently discarding unsupported attachments.
+		endpoint += "/files"
+		timeout = 120 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return receipt, fmt.Errorf("reaching daemon at %s: %w", daemonURL(), err)
 	}
 	defer resp.Body.Close()
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMessageRequestFrame+1))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMessageReceiptBytes+1))
 	if readErr != nil {
 		return receipt, fmt.Errorf("reading message receipt: %w", readErr)
 	}
-	if len(body) > maxMessageRequestFrame {
-		return receipt, fmt.Errorf("reading message receipt: body exceeds %d bytes", maxMessageRequestFrame)
+	if len(body) > maxMessageReceiptBytes {
+		return receipt, fmt.Errorf("reading message receipt: body exceeds %d bytes", maxMessageReceiptBytes)
 	}
 	if len(body) != 0 {
 		if decodeErr := json.Unmarshal(body, &receipt); decodeErr != nil {
@@ -324,7 +342,7 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 		}
 	}
 	if receipt.MessageID == "" && resp.StatusCode >= 400 {
-		return messaging.Receipt{}, daemonStatusError{url: daemonURL() + "/api/v1/messages", status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+		return messaging.Receipt{}, daemonStatusError{url: endpoint, status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
 	if receipt.MessageID != request.MessageID || receipt.Address != request.Address || receipt.Transport == "" {
 		return messaging.Receipt{}, fmt.Errorf("daemon returned a mismatched or incomplete message receipt; delivery is unknown")
@@ -334,10 +352,29 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	default:
 		return messaging.Receipt{}, fmt.Errorf("daemon returned an unsupported receipt status %q; delivery is unknown", receipt.Status)
 	}
+	if !validMessageFilesReceipt(request, receipt) {
+		return messaging.Receipt{}, fmt.Errorf("daemon returned mismatched or incomplete file receipts; delivery is unknown")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return receipt, daemonStatusError{url: daemonURL() + "/api/v1/messages", status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+		return receipt, daemonStatusError{url: endpoint, status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
 	return receipt, nil
+}
+
+func validMessageFilesReceipt(request messaging.Request, receipt messaging.Receipt) bool {
+	if len(receipt.Files) == 0 && (receipt.Status == messaging.StatusRejected || receipt.Status == messaging.StatusUnknown) {
+		return true
+	}
+	if len(receipt.Files) != len(request.Attachments) {
+		return false
+	}
+	for i, file := range receipt.Files {
+		want := request.Attachments[i]
+		if file.Name != want.Name || file.SHA256 != want.SHA256 || file.Size != int64(len(want.Data)) || !filepath.IsAbs(file.Path) || strings.ContainsAny(file.Path, "\x00\r\n") {
+			return false
+		}
+	}
+	return true
 }
 
 func init() {
@@ -347,6 +384,7 @@ func init() {
 	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscoveryHarness, "harness", "", "limit live session discovery to one harness")
 
 	shuttleMessageCmd.Flags().StringVar(&messageFile, "file", "", "read message text from a file ('-' for stdin)")
+	shuttleMessageCmd.Flags().StringArrayVar(&messageAttachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
 	shuttleMessageCmd.Flags().BoolVar(&messageWake, "wake", false, "request that the native harness wake the addressed session")
 	shuttleMessageCmd.Flags().StringVar(&messageFrom, "from", "", "label the sender (default: detected harness thread or external)")
 	shuttleMessageCmd.Flags().StringVar(&messageID, "message-id", "", "supply an idempotency key for a safe retry")

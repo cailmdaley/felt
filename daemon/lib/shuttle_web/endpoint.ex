@@ -7,28 +7,35 @@ defmodule ShuttleWeb.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :shuttle
 
-  plug Plug.RequestId
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  plug(Plug.RequestId)
+  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
 
   # Serve the built Shuttle UI bundle so the daemon is one process (API + UI).
   # `only:` restricts to the bundle's first-segment dirs/files, so `/api/*`,
   # `/socket`, and the bare `/` fall through to the router (which serves
   # `index.html` via SpaController). A missing bundle just 404s the asset — the
   # API stays fully usable.
-  plug Plug.Static,
+  plug(Plug.Static,
     at: "/",
     # MFA form: resolved per request, so the bundle location is a RUNTIME
     # decision (env override / release priv / checkout — see ShuttleWeb.Assets)
     # rather than a path baked at compile time on the build machine.
     from: {ShuttleWeb.Assets, :dist, []},
     only: ~w(assets fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest)
+  )
 
-  plug Plug.Parsers,
+  # File-bearing message envelopes get a larger, route-specific JSON ceiling.
+  # Plug.Parsers leaves an already-fetched body alone, so the ordinary parser
+  # below retains its default 8 MB limit for every other endpoint.
+  plug(ShuttleWeb.MessageFilesParser)
+
+  plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
+  )
 
-  plug ShuttleWeb.CORSPlug
-  plug Plug.Head
-  plug ShuttleWeb.Router
+  plug(ShuttleWeb.CORSPlug)
+  plug(Plug.Head)
+  plug(ShuttleWeb.Router)
 end

@@ -60,7 +60,24 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedup(ctx, req, func() (Receipt, error) { return a.send(ctx, addr, req) })
+	return withDedup(ctx, req, func() (Receipt, error) {
+		files, err := materializeAttachments(req.MessageID, req.Attachments)
+		if err != nil {
+			receipt := rejected(req, "attachments", err.Error())
+			return receipt, errCode("preflight_failed", "cannot store attachments: %v", err)
+		}
+		text, err := renderAttachmentText(req.Text, files)
+		if err != nil {
+			receipt := rejected(req, "attachments", err.Error())
+			return receipt, errCode("preflight_failed", "%v", err)
+		}
+		delivery := req
+		delivery.Text = text
+		delivery.Attachments = nil
+		receipt, sendErr := a.send(ctx, addr, delivery)
+		receipt.Files = files
+		return receipt, sendErr
+	})
 }
 
 func validateRequest(host string, r Request) error {
@@ -74,13 +91,13 @@ func validateRequest(host string, r Request) error {
 	if r.MessageID == "" || len(r.MessageID) > 256 || hasControl(r.MessageID) {
 		return errCode("invalid_request", "invalid message_id")
 	}
-	if r.Text == "" || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
-		return errCode("invalid_request", "text must be 1..65536 bytes and contain no NUL")
+	if (r.Text == "" && len(r.Attachments) == 0) || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
+		return errCode("invalid_request", "text must be at most 65536 bytes and may be empty only with attachments")
 	}
 	if len(r.From) > 1024 || hasControl(r.From) {
 		return errCode("invalid_request", "from is too long or contains NUL")
 	}
-	return nil
+	return validateAttachments(r.Attachments)
 }
 
 func hasControl(s string) bool {

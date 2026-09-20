@@ -49,7 +49,8 @@ is not enough.
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
-| `POST /messages` | host-addressed | Deliver a durable, idempotent message request to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
+| `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
+| `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
 ### Codex app conversations
 
@@ -127,6 +128,14 @@ locally. Its receipt reports only submission state (`accepted`,
 it does not claim that the recipient read or acted on the message. Reusing a
 `message_id` with the same request returns the durable receipt, while reusing it
 for changed content is rejected by the local felt adapter.
+
+`POST /messages/files` accepts the same envelope plus one to eight
+`attachments`, each `{name, data, sha256}`. `name` is a portable basename,
+`data` is base64, and `sha256` is lowercase hexadecimal. Decoded attachments
+may total at most 20 MiB. Successful receipts include
+`files: [{name, path, sha256, size}]`, where each path names the receiver-local
+copy. File-bearing envelopes are refused on `/messages`; this dedicated route
+prevents an older daemon from silently dropping fields it does not recognize.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the

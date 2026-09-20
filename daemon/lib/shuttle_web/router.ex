@@ -35,6 +35,7 @@ defmodule ShuttleWeb.Router do
     post("/inject", InjectController, :create)
     get("/peers", MessagingController, :peers)
     post("/messages", MessagingController, :create)
+    post("/messages/files", MessagingController, :create_files)
     get("/state", StateController, :show)
     get("/state/composite", StateController, :composite)
     get("/fibers", FiberDocumentsController, :index)

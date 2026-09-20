@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -49,7 +50,7 @@ func TestDedupReplayAndConflict(t *testing.T) {
 		t.Fatalf("first: %#v %v", a, err)
 	}
 	b, err := withDedup(context.Background(), req, send)
-	if err != nil || b != a || calls.Load() != 1 {
+	if err != nil || !reflect.DeepEqual(b, a) || calls.Load() != 1 {
 		t.Fatalf("replay: %#v %v calls=%d", b, err, calls.Load())
 	}
 	req.Text = "different"
