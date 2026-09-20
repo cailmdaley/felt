@@ -806,6 +806,26 @@ defmodule Shuttle.Poller do
     {:noreply, handle_worker_exit(state, fiber_id)}
   end
 
+  def handle_info({:app_worker_missing, fiber_id, session}, state) do
+    case running_key(state, fiber_id) do
+      nil ->
+        {:noreply, state}
+
+      key ->
+        meta = Map.fetch!(state.running, key)
+
+        if meta.session == session do
+          error =
+            "The app conversation no longer exists. Start a new session or stop this worker."
+
+          meta = Map.merge(meta, %{state: "blocked", launch_error: error})
+          {:noreply, %{state | running: Map.put(state.running, key, meta)}}
+        else
+          {:noreply, state}
+        end
+    end
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")
     {:noreply, state}

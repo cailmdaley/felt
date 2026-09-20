@@ -87,6 +87,8 @@ defmodule Shuttle.WorkerWatcher do
 
   @impl true
   def handle_info(:heartbeat, state) do
+    observe_app(state)
+
     case check_session(state) do
       :alive ->
         ref = Process.send_after(self(), :heartbeat, state.heartbeat_interval_ms)
@@ -129,6 +131,20 @@ defmodule Shuttle.WorkerWatcher do
   end
 
   # ── Internal ──
+
+  defp observe_app(state) do
+    case Shuttle.WorkerBackend.observe(state.session) do
+      :missing ->
+        try do
+          send(state.poller, {:app_worker_missing, state.fiber_id, state.session})
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.session)
 

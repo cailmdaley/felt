@@ -307,6 +307,40 @@ defmodule Shuttle.AppWorkersTest do
     assert App.calls() == []
   end
 
+  test "confirmed missing conversations block automatic duplication but explicit stop releases ownership" do
+    fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    App.set(:state, :missing)
+    App.set(:interrupt_result, {:error, :not_found})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000,
+        heartbeat_interval_ms: 20
+      )
+
+    eventually(fn -> match?(%{state: "blocked"}, Poller.worker_status(poller, "tests/app")) end)
+
+    assert {:ok, %{"active" => true, "remote_state" => "missing"}} =
+             AppWorkers.get("app-session-1")
+
+    assert {:error, :already_running} = dispatch("tests/app")
+    assert {:ok, ^session} = Poller.kill_session(poller, "tests/app")
+    assert WorkerBackend.session_status(Runner, session) == :gone
+    refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+  end
+
+  test "an unavailable app server never releases ownership" do
+    fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    App.set(:state, :unknown)
+    assert WorkerBackend.observe(session) == :unknown
+    assert WorkerBackend.session_status(Runner, session) == :alive
+  end
+
   test "concurrent randomized claims preserve one authoritative owner" do
     :ok =
       AppWorkers.put(%{

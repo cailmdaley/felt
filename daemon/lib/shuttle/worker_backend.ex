@@ -17,6 +17,38 @@ defmodule Shuttle.WorkerBackend do
     end
   end
 
+  @doc "Observe app state without releasing ownership on an idle or uncertain result."
+  def observe(session) do
+    case AppWorkers.id(session) do
+      nil ->
+        :terminal
+
+      id ->
+        remote = AppWorkers.client().state(id)
+
+        case {remote, AppWorkers.get(id)} do
+          {:missing, {:ok, %{"active" => true} = record}} ->
+            if record["remote_state"] != "missing" do
+              AppWorkers.update(id, %{
+                "remote_state" => "missing",
+                "launch_state" => "blocked",
+                "last_error" =>
+                  "The app conversation no longer exists. Start a new session or stop this worker."
+              })
+            end
+
+          {state, {:ok, %{"active" => true} = record}} when state in [:idle, :running] ->
+            if record["remote_state"] != Atom.to_string(state),
+              do: AppWorkers.update(id, %{"remote_state" => Atom.to_string(state)})
+
+          _ ->
+            :ok
+        end
+
+        remote
+    end
+  end
+
   def present?(runner, session), do: session_status(runner, session) != :gone
 
   def stop(runner, session) do
@@ -25,7 +57,12 @@ defmodule Shuttle.WorkerBackend do
         runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
 
       id ->
-        case AppWorkers.client().interrupt(id) do
+        result =
+          if AppWorkers.client().state(id) == :missing,
+            do: :ok,
+            else: AppWorkers.client().interrupt(id)
+
+        case result do
           :ok ->
             case AppWorkers.deactivate(id) do
               :ok -> {"", 0}
