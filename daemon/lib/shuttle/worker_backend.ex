@@ -87,7 +87,14 @@ defmodule Shuttle.WorkerBackend do
             _ -> nil
           end
 
-        %{surface: "app", tmux_session: nil, session_uuid: id, project_id: project_id}
+        %{
+          surface: "app",
+          tmux_session: nil,
+          session_uuid: id,
+          thread_id: id,
+          transcript_session_uuid: AppWorkers.transcript_id(id),
+          project_id: project_id
+        }
     end
   end
 

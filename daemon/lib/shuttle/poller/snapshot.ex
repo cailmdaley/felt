@@ -34,6 +34,11 @@ defmodule Shuttle.Poller.Snapshot do
           tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
           surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
           session_uuid: Shuttle.AppWorkers.id(meta.session),
+          thread_id: Shuttle.AppWorkers.id(meta.session),
+          transcript_session_uuid:
+            if(Shuttle.AppWorkers.app?(meta.session),
+              do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))
+            ),
           agent: meta.agent_id,
           state: Map.get(meta, :state, "running"),
           launch_error: Map.get(meta, :launch_error),
@@ -280,6 +285,11 @@ defmodule Shuttle.Poller.Snapshot do
       tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
       surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
       session_uuid: Shuttle.AppWorkers.id(meta.session),
+      thread_id: Shuttle.AppWorkers.id(meta.session),
+      transcript_session_uuid:
+        if(Shuttle.AppWorkers.app?(meta.session),
+          do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))
+        ),
       agent: Map.get(meta, :agent_id),
       state: Map.get(meta, :state, "running"),
       launch_error: Map.get(meta, :launch_error),
@@ -287,7 +297,11 @@ defmodule Shuttle.Poller.Snapshot do
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
 
-    activity_key = Shuttle.AppWorkers.id(meta.session) || meta.session
+    activity_key =
+      case Shuttle.AppWorkers.id(meta.session) do
+        nil -> meta.session
+        id -> Shuttle.AppWorkers.transcript_id(id)
+      end
 
     case is_binary(activity_key) and Map.get(activity, activity_key) do
       %{last_event_at: at, phase: phase} ->

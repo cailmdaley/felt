@@ -21,7 +21,12 @@ defmodule Shuttle.AppWorkersTest do
 
     def start_thread(opts) do
       record({:start, opts})
-      {:ok, %{"id" => "app-session-1"}}
+
+      {:ok,
+       %{
+         "id" => "app-session-1",
+         "sessionId" => Agent.get(__MODULE__, &Map.get(&1, :transcript_id, "app-session-1"))
+       }}
     end
 
     def resume_thread(id, opts) do
@@ -339,6 +344,29 @@ defmodule Shuttle.AppWorkersTest do
     App.set(:state, :unknown)
     assert WorkerBackend.observe(session) == :unknown
     assert WorkerBackend.session_status(Runner, session) == :alive
+  end
+
+  test "fork route identity stays distinct from its native transcript identity" do
+    fiber("tests/app")
+    App.set(:transcript_id, "native-transcript-id")
+    assert {:ok, session} = dispatch("tests/app")
+    assert {:ok, record} = AppWorkers.get("app-session-1")
+    assert record["thread_id"] == "app-session-1"
+    assert record["transcript_session_uuid"] == "native-transcript-id"
+
+    assert %{
+             thread_id: "app-session-1",
+             session_uuid: "app-session-1",
+             transcript_session_uuid: "native-transcript-id"
+           } = WorkerBackend.wire(session)
+
+    assert get_in(Runner.fiber("tests/app"), ["shuttle", "runtime", "session_uuid"]) ==
+             "app-session-1"
+
+    assert {"", 0} = WorkerBackend.stop(Runner, session)
+    assert {:ok, ^session} = dispatch("tests/app", resume_mode: "previous")
+    assert Enum.any?(App.calls(), &match?({:resume, "app-session-1", _}, &1))
+    refute Enum.any?(App.calls(), &match?({:resume, "native-transcript-id", _}, &1))
   end
 
   test "concurrent randomized claims preserve one authoritative owner" do

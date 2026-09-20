@@ -2,6 +2,11 @@ defmodule Shuttle.AppWorkers do
   @moduledoc """
   Durable ownership of Codex app conversations launched by this daemon.
 
+  `session_uuid` is the continuation identity used by Shuttle, equal to
+  `thread_id` for app workers. `transcript_session_uuid` names the native
+  transcript, which may differ for a fork. Backend operations always address
+  the thread; transcript and activity joins use the native transcript id.
+
   A conversation survives its turns and daemon restarts. Its ownership record
   remains active while it waits for a phone reply; only an explicit stop or
   completed handoff releases it. Captures are recorded before their first turn
@@ -13,6 +18,13 @@ defmodule Shuttle.AppWorkers do
   def id("codex-app:" <> id), do: id
   def id(_), do: nil
   def app?(session), do: is_binary(id(session))
+
+  def transcript_id(thread_id) do
+    case get(thread_id) do
+      {:ok, record} -> record["transcript_session_uuid"] || thread_id
+      _ -> thread_id
+    end
+  end
 
   def root do
     Application.get_env(:shuttle, :app_workers_dir, Path.join(Shuttle.data_dir(), "app-workers"))

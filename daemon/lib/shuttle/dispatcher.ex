@@ -1299,6 +1299,9 @@ defmodule Shuttle.Dispatcher do
          :ok <-
            Shuttle.AppWorkers.put(%{
              "session_uuid" => id,
+             "thread_id" => id,
+             "transcript_session_uuid" =>
+               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
              "project_id" => thread["projectId"],
              "fiber_id" => fiber_id,
              "uid" => Keyword.get(opts, :uid),
@@ -1319,7 +1322,7 @@ defmodule Shuttle.Dispatcher do
       if marker == :ok do
         append_session_ledger(
           fiber_id,
-          id,
+          thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
           Keyword.merge(opts,
             harness: "codex",
             ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume)
@@ -1356,6 +1359,9 @@ defmodule Shuttle.Dispatcher do
          :ok <-
            Shuttle.AppWorkers.put(%{
              "session_uuid" => id,
+             "thread_id" => id,
+             "transcript_session_uuid" =>
+               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
              "project_id" => thread["projectId"],
              "fiber_id" => nil,
              "uid" => nil,

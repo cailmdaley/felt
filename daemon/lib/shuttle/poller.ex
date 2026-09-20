@@ -2735,7 +2735,7 @@ defmodule Shuttle.Poller do
             Shuttle.SessionLedger.record(
               fiber: fiber_id,
               uid: fiber["uid"],
-              session: id,
+              session: Shuttle.AppWorkers.transcript_id(id),
               harness: "codex",
               kind: :claim
             )
