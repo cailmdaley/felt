@@ -130,8 +130,9 @@ defmodule Shuttle.AppWorkersTest do
     assert record["launch_state"] == "running"
     assert record["turn_id"] == "turn-1"
     assert [{:start, _}, {:turn, "app-session-1", prompt, _}] = App.calls()
-    assert prompt =~ "ChatGPT app"
-    assert prompt =~ "env -u TMUX"
+    assert prompt =~ "surface: app"
+    assert prompt =~ "Activate the felt and shuttle skills"
+    refute prompt =~ "env -u TMUX"
 
     refute Enum.any?(Runner.commands(), fn {cmd, args} ->
              cmd == "tmux" and "new-session" in args
