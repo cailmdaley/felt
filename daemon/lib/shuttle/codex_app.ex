@@ -73,7 +73,16 @@ defmodule Shuttle.CodexApp do
         interrupt_thread(id, thread)
 
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
-        with {:ok, thread} <- resume_thread(id), do: interrupt_thread(id, thread)
+        case resume_thread(id) do
+          {:ok, thread} ->
+            interrupt_thread(id, thread)
+
+          {:error, {:peer, error}} = result ->
+            if confirmed_missing?(error, id), do: {:error, :thread_missing}, else: result
+
+          {:error, _} = error ->
+            error
+        end
 
       {:error, _} = error ->
         error
@@ -241,4 +250,15 @@ defmodule Shuttle.CodexApp do
     do: Enum.all?(roots, &match?(%{"path" => path} when is_binary(path), &1))
 
   defp valid_project?(_), do: false
+
+  defp confirmed_missing?(
+         %{
+           "code" => -32_600,
+           "message" => "no rollout found for thread id " <> id
+         },
+         id
+       ),
+       do: true
+
+  defp confirmed_missing?(_error, _id), do: false
 end

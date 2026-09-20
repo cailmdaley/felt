@@ -443,7 +443,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       end)
 
     configure_adapter(path)
-    assert {:error, {:peer, ^missing}} = CodexApp.interrupt(thread_id)
+    assert {:error, :thread_missing} = CodexApp.interrupt(thread_id)
     await_peer(peer)
   end
 
