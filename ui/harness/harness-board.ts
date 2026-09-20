@@ -37,7 +37,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
-import { openSettings } from '../src/forms/mountForms.js'
+import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
@@ -1337,8 +1337,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 try {
   assertUlids()
   const modal = new KanbanModal({
-    onStashClick: () => { window.console.log('stash click') },
-    onNewIdeaClick: () => { window.console.log('new-idea click') },
+    onStashClick: () => { void openStash({ shuttleBase: '' }) },
+    onNewIdeaClick: () => { void openCapture({ shuttleBase: '' }) },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
     temporalFetchers: MOCK_TEMPORAL,

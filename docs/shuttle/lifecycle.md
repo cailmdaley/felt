@@ -5,12 +5,18 @@ accepts the result."
 
 ## The worker loop
 
-The daemon starts one tmux session per eligible fiber, named
+The daemon starts one worker per eligible fiber. A terminal worker is a tmux session named
 `<slug-leaf>-<uid>-shuttle` (legacy `<slug-leaf>-shuttle` for a fiber with no
 ULID), running the agent CLI in `shuttle.project_dir`. `felt shuttle
 session-name <fiber>` prints the canonical name. It composes a deliberately thin
 prompt: the fiber id, the felt store path, an exit contract, and an optional
 per-dispatch "From User" directive.
+
+A Codex app worker (`shuttle.surface: app`) runs in the managed App Server and
+belongs to the project matching `shuttle.project_dir`. Shuttle persists its
+conversation identity before starting a turn. The conversation stays owned
+while idle, survives a Shuttle restart, and can receive replies from another
+app client. Existing blocks without `surface` use the terminal surface.
 
 It does **not** paste the constitution into the prompt. The worker reads the
 fiber fresh from disk, so it picks up an edit you make mid-session instead of
@@ -25,6 +31,13 @@ From there the worker:
 3. **Writes back** — rewrites `outcome:`, rewrites `## Status`, corrects the
    spec if the session sharpened it, files findings as sub-fibers, commits.
 4. **Hands off** — runs `felt shuttle handoff <fiber>` as its final action.
+
+App workers use `env -u TMUX felt -C <felt-store> shuttle handoff <fiber>`, then
+finish the turn. The daemon releases ownership once that turn is idle. A
+normal final reply without a handoff keeps the conversation available for the
+human. Stop interrupts an app turn and releases ownership; Resume uses that
+same conversation, while New session explicitly starts another one. Unknown
+connection state never authorizes a duplicate.
 
 Workers should exit earlier than feels natural. A clean handoff at half a
 context window beats pushing through a compaction. `## Status` plus the

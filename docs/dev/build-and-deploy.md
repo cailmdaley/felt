@@ -31,7 +31,8 @@ Fetched releases include the runtime and UI, so users need none of these build t
 
 The daemon runs compiled modules under `bin/rel`.
 Use `make restart` after source edits to build the UI and release, then restart the daemon.
-Workers live in tmux and continue running through daemon restarts; the new daemon re-adopts them.
+Terminal workers live in tmux and app conversations live in the managed Codex
+App Server. Both survive Shuttle restarts; the daemon re-adopts their ownership.
 
 **A supervisor owns the daemon's restart policy.** After `make install-agent`,
 launchd (`io.shuttle.daemon`) or the systemd user unit starts the daemon with an

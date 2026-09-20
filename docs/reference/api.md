@@ -35,8 +35,8 @@ is not enough.
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
 | `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber |
-| `POST /kill` | owner-routed | Hard-kill a fiber's live worker |
-| `POST /claim` | owner-routed | Register an externally-spawned tmux session as a fiber's worker |
+| `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
+| `POST /claim` | owner-routed | Associate a tmux worker or an app capture conversation with a fiber |
 | `POST /capture` | owner-routed | Launch a session from a free-text prompt; it files the fiber and claims itself |
 | `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
@@ -49,6 +49,41 @@ is not enough.
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
+
+### Codex app conversations
+
+`POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
+terminal execution. Existing-fiber dispatch reads the persisted
+`shuttle.surface`; omission preserves CLI execution. Model and effort remain
+agent-registry choices. App execution requires the owning host's local Codex
+App Server and reports an error if it cannot be reached.
+
+Successful app capture, dispatch, and claim responses carry `surface: "app"`,
+`project_id`, `thread_id`, `session_uuid`, `transcript_session_uuid`, and
+`tmux_session: null`. For app workers, `session_uuid` is the resumable
+conversation identity (the same value as `thread_id`);
+`transcript_session_uuid` is the native transcript identity, which can differ
+for a fork. Session ledgers use the transcript identity. CLI responses carry
+`surface: "cli"` and their real `tmux_session`. An app conversation waiting
+for the next phone reply remains assigned; its idle state does not authorize
+another launch.
+
+A created conversation whose first turn could not be confirmed returns HTTP
+502 with `reason: "app_launch_failed"`, its conversation id, and a recovery
+`message`. Ownership remains reserved; inspect and resume that conversation
+instead of creating a duplicate. Confirmed missing conversations are marked
+blocked and can be explicitly stopped or replaced. A temporary connection
+failure remains unknown.
+
+To claim a capture conversation, post `fiber_id`, `surface: "app"`, and
+`session_uuid` to `/claim`. The session must already have a durable app-worker
+record on this host and must not belong to another fiber. CLI claims use
+`tmux_session`. The app dispatch prompt supplies the claim information and
+the appropriate completion instructions.
+
+`/attach` and `/inject` are terminal operations. An app conversation's UUID
+is not a terminal name or a verified mobile URL. Phone conversation access
+uses the host's Codex project listing until a direct app URL is available.
 
 ## Read plane
 

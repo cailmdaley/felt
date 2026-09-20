@@ -65,6 +65,33 @@ subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it. This
 is the merge end-state — the contract lives in one place (felt) rather than
 being validated on both sides.
 
+## Execution surfaces
+
+The agent registry determines the harness, model, and reasoning effort.
+`shuttle.surface` chooses how a Codex conversation runs: `cli` uses a tmux
+worker; `app` uses the local Codex App Server. An existing block without a
+surface retains CLI execution. New Codex selections in the board default to
+app execution, with CLI available explicitly. Other harnesses use CLI.
+
+The App Server owns the conversation and its turns. Shuttle stores the
+conversation identity and task assignment durably on the owning host. Capture
+creates an unassigned conversation that can claim a fiber; an ordinary
+dispatch assigns the conversation immediately. Both use the same execution
+backend. A completed turn can wait for a reply without releasing its task or
+starting another conversation. An explicit stop or completed handoff releases
+ownership.
+
+App transport errors preserve uncertainty instead of becoming worker-death
+signals. Resume targets the recorded conversation and reports failures;
+creating a fresh conversation is an explicit operation. CLI process liveness
+continues to come from tmux. API responses distinguish these surfaces instead
+of presenting an app conversation as a terminal session.
+
+Phone access uses the host's configured Codex remote access. App Server
+creation and a direct link into the ChatGPT app are separate capabilities:
+session identity does not imply a working phone URL. Shuttle must not invent
+a cloud-task URL for a local conversation.
+
 ## Platform story
 
 **Linux and macOS are both supported for single-host use.** One host runs the

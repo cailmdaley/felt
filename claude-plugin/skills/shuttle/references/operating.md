@@ -62,12 +62,12 @@ Dragging a card reveals the **drag horizon** — a slim row of upcoming days und
 
 ## Kanban columns
 
-Column membership derives from felt `status` + `tempered` + `shuttle.kind` + tmux liveness (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):
+Column membership derives from felt `status` + `tempered` + `shuttle.kind` + worker ownership (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):
 
 - **Drafts**: `status: open` — a stash awaiting refinement, dispatching nothing until launched (`felt shuttle pause` lands a card here). A fiber with no block at all is not a draft; it is not on the board.
 - **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
 - **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces. A human starts it (Resume / strip → In-flight); once running it joins the unified lifecycle: a worker that deliberately hands off is relaunched fresh next tick (a long autonomous arc), a dirty death or idle exit parks it back to the strip, and a close-out lands in Awaiting review.
-- **In flight**: a live tmux worker (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
+- **In flight**: a live terminal worker or owned app conversation (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
 - **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; shuttle ignores it pending human verdict.
 - **Tempered**: `status: closed`, `tempered: true`. Human-accepted (oneshot terminus).
 - **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block is preserved as historical record.
@@ -123,6 +123,18 @@ curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
 ```
 
 ## Claiming a fiber into your session
+
+For a Shuttle-launched **app capture**, use the exact conversation id supplied in its prompt:
+
+```bash
+curl --fail -sS -X POST http://localhost:4000/api/v1/claim \
+  -H 'Content-Type: application/json' \
+  -d '{"fiber_id":"<fiber>","surface":"app","session_uuid":"<conversation id>","agent":"<registry id>"}'
+```
+
+Create the fiber and install its app block as a draft first. Claim it, check success, then set `status: active`. Only a capture recorded by this daemon can claim through this path; an arbitrary chat id is not ownership proof. An app claim does not rename a terminal. App stop interrupts its turn and releases ownership; resume reuses the saved conversation. A connection failure retains ownership and must never cause an automatic replacement conversation.
+
+For a **terminal session**, use the flow below.
 
 An interactive session can become a fiber's worker — first-class, via `POST /api/v1/claim`. The daemon registers the claiming tmux session exactly as if it had dispatched it: liveness watcher, kanban in-flight, and normal exit semantics (`felt shuttle handoff` → clean-exit stamp → fresh dispatch while `active`, or Awaiting review when `closed`). This is how capture sessions adopt the fiber they just authored, and it generalizes to any fiber a human wants to drive from a session shuttle didn't spawn: a draft they want to start on now, an Awaiting-review card being reopened interactively, or a running worker whose cache has gone cold and isn't worth reheating just to continue.
 

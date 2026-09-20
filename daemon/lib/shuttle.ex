@@ -2,7 +2,7 @@ defmodule Shuttle do
   @moduledoc """
   Shuttle — OTP-supervised orchestrator for felt constitution workers.
 
-  The daemon polls the felt tree, dispatches one tmux worker per eligible
+  The daemon polls the felt tree, dispatches one worker per eligible
   fiber, and serves a snapshot surface and agent-API for dashboards and other
   consumers. The supervision tree (`Shuttle.Application`) starts the poller,
   the per-worker watchers, the remote registries, and the HTTP endpoint.

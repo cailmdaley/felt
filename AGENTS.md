@@ -7,7 +7,7 @@ One repo, one checkout, three artifacts:
   subcommands. Built here.
 - **shuttle daemon** (`daemon/`, an Elixir/OTP Mix release) — launched
   through the tracked `bin/shuttle` shim, the **dispatcher**.
-  Polls the felt tree, launches one tmux worker per eligible fiber, exposes a
+  Polls the felt tree, launches one terminal or app worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
 - **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
   over the felt tree and the fleet's session/commit ledgers (Desk kanban, Day,
@@ -51,9 +51,13 @@ lives in the docs site (`docs/`, published to
 
 ## Critical invariants
 
-- **tmux owns the worker process; shuttle owns the watcher.** Workers stay
-  attachable via `felt shuttle attach <fiber>`. Supervise watchers,
-  not workers.
+- **Execution backends own conversations; shuttle owns task assignment and
+  observation.** CLI workers live in tmux and remain attachable via
+  `felt shuttle attach <fiber>`. Codex app conversations live in the local
+  Codex App Server and remain addressable while idle. Neither an idle turn
+  nor an unreachable App Server means a conversation has died. Preserve its
+  identity across daemon restarts; never substitute a CLI launch for an app
+  failure.
 - **felt is the data layer; the daemon shells out to the felt CLI.** Don't
   import felt internals into the daemon.
 - **Remote content comes from the owning daemon over the tunnel — NEVER from
