@@ -44,7 +44,6 @@ import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { suppressNextClick } from './dismissGesture.js'
 import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
-import type { NewSessionOpenRequest } from './newSessionWait.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import {
   disambiguateBasenames,
@@ -423,15 +422,6 @@ export class FiberDetailModal {
    *  kanban's onOpenWorker; drives the status pill's double-click. */
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /**
-   * Open the session a FRESH dispatch just started. Distinct from
-   * `onOpenWorker`, which opens whatever is running now: on a coarse pointer
-   * that resolves through the feed, and immediately after a fresh dispatch the
-   * feed still describes the session that was just replaced. The board's
-   * implementation waits for the feed to carry the new session before it
-   * navigates. Absent in the offline harness fixture.
-   */
-  private readonly onOpenNewSession?: (request: NewSessionOpenRequest) => void
-  /**
    * Terminal-move delegate. Temper / Compost close the panel immediately and
    * hand the move to the parent kanban's optimistic transition path (instant
    * card relocation + background commit + banner on failure). The product
@@ -546,7 +536,6 @@ export class FiberDetailModal {
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
-      onOpenNewSession?: (request: NewSessionOpenRequest) => void
     },
   ) {
     this.shuttleBase = shuttleBase
@@ -556,7 +545,6 @@ export class FiberDetailModal {
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
-    this.onOpenNewSession = opts?.onOpenNewSession
   }
 
   /**
@@ -1700,7 +1688,7 @@ export class FiberDetailModal {
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { host, panel, onCloseRequest: requestClose, onOpenNewSession: this.onOpenNewSession },
+      { host, panel, onCloseRequest: requestClose },
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
@@ -3389,13 +3377,6 @@ export class FiberDetailModal {
     btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
     errorEl.style.display = 'none'
 
-    // What the card says about the session we are about to REPLACE, read before
-    // the dispatch. A fresh dispatch reuses the fiber's tmux session name, so
-    // this is the only thing that tells the old session from the new one when
-    // the daemon cannot name the new one outright.
-    const previousSessionUuid = card.sessionUuid
-    const previousSessionLink = card.sessionLink
-
     // Single force/ad-hoc dispatch carrying the message + resume_mode inline.
     let res: Response
     try {
@@ -3430,9 +3411,7 @@ export class FiberDetailModal {
 
     if (res.status === 409) {
       if (body.tmux_session) {
-        this.close()
-        this.onSaved()
-        this.onOpenWorker?.(body.tmux_session, card.originId)
+        this.finishRequeue(card, body.tmux_session)
         return
       }
 
@@ -3453,28 +3432,19 @@ export class FiberDetailModal {
       return
     }
 
+    this.finishRequeue(card, body.tmux_session)
+  }
+
+  /**
+   * Return to the refreshed board after dispatch. A phone gets the same
+   * session anchor the board renders for any other live worker; opening it
+   * from here would bypass that real anchor tap and race the refresh.
+   */
+  private finishRequeue(card: KanbanCard, tmuxSession?: string): void {
     this.close()
     this.onSaved()
-
-    // Resume opens NOW: it continues the session the card already points at, so
-    // the feed's link is already the right one. A fresh dispatch does not — the
-    // feed still describes the session this one replaced, and the new session's
-    // bridge URL does not exist for another 20–30s. Hand that case to the board,
-    // which waits for the feed to catch up before it navigates.
-    if (mode === 'fresh' && this.onOpenNewSession) {
-      this.onOpenNewSession({
-        fiberId: card.id,
-        tmuxSession: body.tmux_session,
-        shuttleHost: card.originId,
-        expectedSessionUuid: body.session_uuid,
-        previousSessionUuid,
-        previousSessionLink,
-      })
-      return
-    }
-
-    if (body.tmux_session) {
-      this.onOpenWorker?.(body.tmux_session, card.originId)
+    if (tmuxSession && !coarsePointer()) {
+      this.onOpenWorker?.(tmuxSession, card.originId)
     }
   }
 
