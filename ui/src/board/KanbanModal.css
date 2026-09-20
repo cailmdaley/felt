@@ -2567,3 +2567,22 @@
     gap: 4px;
   }
 }
+
+/* A reachable destination when the device has no verified native app route. */
+.kbn-conversation-guidance {
+  box-sizing: border-box;
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid #b7ae9f;
+  border-radius: 4px;
+  color: #3a332a;
+  background: #f5f1e8;
+}
+.kbn-conversation-guidance::backdrop { background: rgba(27, 22, 17, 0.35); }
+.kbn-conversation-guidance h2 { margin-top: 0; }
+.kbn-conversation-guidance dt { font-weight: 600; }
+.kbn-conversation-guidance dd { margin: 0 0 0.75rem; overflow-wrap: anywhere; user-select: text; }
+.kbn-conversation-guidance > div { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.kbn-conversation-guidance button { min-height: 44px; padding: 0.5rem 0.75rem; cursor: pointer; }

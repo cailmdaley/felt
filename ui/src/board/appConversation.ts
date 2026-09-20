@@ -30,3 +30,53 @@ export function workerStatusLabel(phase?: string, launchError?: string): string 
   if (launchError || phase === 'blocked') return '⚠ blocked'
   return 'Aloft'
 }
+
+/** Mobile clients without a verified app route still get a usable destination. */
+export function showAppConversationGuidance(
+  card: Pick<KanbanCard, 'desktopLink' | 'shuttleHost' | 'shuttleProjectDir' | 'launchError' | 'sessionUuid'>,
+): void {
+  const dialog = document.createElement('dialog')
+  dialog.className = 'kbn-conversation-guidance'
+  const heading = document.createElement('h2')
+  heading.textContent = 'Continue in ChatGPT'
+  const instructions = document.createElement('p')
+  instructions.textContent = appConversationTarget(card, false).guidance
+  const destination = document.createElement('dl')
+  for (const [name, value] of [
+    ['Host', card.shuttleHost], ['Project', card.shuttleProjectDir], ['Conversation', card.sessionUuid],
+  ] as const) {
+    if (!value) continue
+    const term = document.createElement('dt')
+    term.textContent = name
+    const detail = document.createElement('dd')
+    detail.textContent = value
+    destination.append(term, detail)
+  }
+  const limitation = document.createElement('p')
+  limitation.textContent = 'A direct app link is not available on this device.'
+  const actions = document.createElement('div')
+  if (card.sessionUuid && navigator.clipboard?.writeText) {
+    const copy = document.createElement('button')
+    copy.type = 'button'
+    copy.textContent = 'Copy conversation ID'
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(card.sessionUuid!)
+        copy.textContent = 'Copied'
+      } catch {
+        copy.textContent = 'Select the conversation ID above to copy'
+      }
+    })
+    actions.append(copy)
+  }
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.textContent = 'Close'
+  close.addEventListener('click', () => dialog.close())
+  actions.append(close)
+  dialog.append(heading, instructions, destination, limitation, actions)
+  dialog.setAttribute('aria-label', 'Continue in ChatGPT')
+  dialog.addEventListener('close', () => dialog.remove(), { once: true })
+  document.body.append(dialog)
+  dialog.showModal()
+}

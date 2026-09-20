@@ -1,4 +1,4 @@
-import { workerStatusLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, showAppConversationGuidance } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1656,9 +1656,9 @@ export class KanbanSurfaceRenderer {
       const title = RUNTIME_PHASE_BADGES[phaseName]?.title ?? 'The app conversation is working.'
       const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
       const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
-      const phase = document.createElement(app && appTarget.href ? 'a' : 'span')
+      const phase = document.createElement(app ? appTarget.href ? 'a' : 'button' : 'span')
       phase.className = app
-        ? `kbn-card-worker${['attention', 'waiting'].includes(phaseName) ? ` kbn-card-worker-${phaseName}` : phaseName === 'blocked' || card.launchError ? ' kbn-card-phase-blocked' : ''}`
+        ? `kbn-card-worker kbn-card-worker-link${['attention', 'waiting'].includes(phaseName) ? ` kbn-card-worker-${phaseName}` : phaseName === 'blocked' || card.launchError ? ' kbn-card-phase-blocked' : ''}`
         : `kbn-card-phase kbn-card-phase-${phaseName}`
       phase.textContent = app
         ? workerStatusLabel(card.runtimePhase, card.launchError)
@@ -1668,6 +1668,13 @@ export class KanbanSurfaceRenderer {
         phase.href = appTarget.href
         phase.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
         phase.addEventListener('click', (event) => event.stopPropagation())
+      } else if (app && phase instanceof HTMLButtonElement) {
+        phase.type = 'button'
+        phase.setAttribute('aria-label', 'Show how to continue this conversation in ChatGPT')
+        phase.addEventListener('click', (event) => {
+          event.stopPropagation()
+          showAppConversationGuidance(card)
+        })
       }
       rightChip = phase
     }

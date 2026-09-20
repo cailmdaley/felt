@@ -1,4 +1,4 @@
-import { workerStatusLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, showAppConversationGuidance } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -631,7 +631,7 @@ export class FiberDetailModal {
     let aloftPill: HTMLElement | null = null
     const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      const mark = document.createElement(appTarget.href ? 'a' : 'span')
+      const mark = document.createElement(appTarget.href ? 'a' : 'button')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
       mark.textContent = workerStatusLabel(card.runtimePhase, card.launchError)
       mark.title = `${card.runtimePhase ?? 'Aloft'} — ${appTarget.title}`
@@ -639,8 +639,13 @@ export class FiberDetailModal {
         mark.href = appTarget.href
         mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
         mark.addEventListener('click', (e) => e.stopPropagation())
-      } else {
-        mark.classList.add('kbn-detail-aloft-static')
+      } else if (mark instanceof HTMLButtonElement) {
+        mark.type = 'button'
+        mark.setAttribute('aria-label', 'Show how to continue this conversation in ChatGPT')
+        mark.addEventListener('click', (event) => {
+          event.stopPropagation()
+          showAppConversationGuidance(card)
+        })
       }
       aloftPill = mark
     } else if (card.runningWorker && coarsePointer()) {
