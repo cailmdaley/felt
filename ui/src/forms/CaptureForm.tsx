@@ -101,6 +101,7 @@ interface CaptureResponse {
   tmux_session?: string
   reason?: string
   error?: string
+  message?: string
   surface?: ExecutionSurface
 }
 
@@ -222,7 +223,7 @@ export function CaptureForm({
             ? 'ChatGPT could not start this Codex run. Check the app connection and try again.'
             : data.reason === 'project_dir_missing'
             ? `Project directory not found on the daemon: ${selectedCity.path}`
-            : data.reason ?? data.error ?? `Capture failed (${res.status})`
+            : data.message ?? data.error ?? data.reason ?? `Capture failed (${res.status})`
         throw new Error(msg)
       }
       onSpawned({ tmuxSession: data.tmux_session ?? '', surface: data.surface ?? (isCodexAgent(agentRec) ? surface : 'cli') })

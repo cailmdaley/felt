@@ -40,6 +40,30 @@ func TestShuttleInstall_Armed(t *testing.T) {
 	}
 }
 
+func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
+	defer saveShuttleGlobals()()
+	dir, storage := newStore(t)
+	pdir := t.TempDir()
+	seedPlainFiber(t, storage, "app", "")
+	seedPlainFiber(t, storage, "cli", "")
+
+	if out, err := runCommand(t, dir, "shuttle", "install", "app", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol"); err != nil {
+		t.Fatalf("Codex install: %v\n%s", err, out)
+	}
+	app, _, _ := mustRead(t, storage, "app").ShuttleBlock()
+	if app.Surface != "app" {
+		t.Fatalf("new Codex surface = %q, want app", app.Surface)
+	}
+
+	if out, err := runCommand(t, dir, "shuttle", "install", "cli", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol", "--surface", "cli"); err != nil {
+		t.Fatalf("explicit CLI install: %v\n%s", err, out)
+	}
+	cli, _, _ := mustRead(t, storage, "cli").ShuttleBlock()
+	if cli.Surface != "cli" {
+		t.Fatalf("explicit surface = %q, want cli", cli.Surface)
+	}
+}
+
 func TestShuttleInstall_Disabled(t *testing.T) {
 	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)

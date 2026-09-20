@@ -82,6 +82,8 @@ export interface KanbanCard {
    * reports no runtime for the fiber.
    */
   runtimePhase?: string
+  /** Durable explanation for a blocked app launch. */
+  launchError?: string
   /**
    * Real ms timestamp of the live worker's most-recent hook event (any type).
    * Present only for a tracked running worker (paired with `runningWorker`);

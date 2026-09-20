@@ -609,6 +609,7 @@ function toCard(
     dependsOnUnresolved: unresolved.length > 0 ? unresolved : undefined,
     runningWorker,
     runtimePhase,
+    launchError: entry.runtime?.launchError,
     sessionLink: entry.runtime?.sessionLink,
     sessionUuid: f.shuttleSessionUuid,
     lastActivityAt,

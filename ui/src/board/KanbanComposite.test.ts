@@ -7,10 +7,10 @@ describe('composite app runtime', () => {
       fibers: [{
         origin: 'local', felt_store: '/felt', path: 'idea.md',
         fiber: { id: 'idea', name: 'Idea', status: 'active', shuttle: { kind: 'oneshot', agent: 'codex-sol', surface: 'app' } },
-        runtime: { state: 'starting' },
+        runtime: { state: 'blocked', launch_error: 'turn/start timed out' },
       }],
     })
-    expect(feed.entries[0].runtime).toMatchObject({ phase: 'starting' })
+    expect(feed.entries[0].runtime).toMatchObject({ phase: 'blocked', launchError: 'turn/start timed out' })
     expect(feed.entries[0].runtime?.tmuxSession).toBeUndefined()
   })
 })

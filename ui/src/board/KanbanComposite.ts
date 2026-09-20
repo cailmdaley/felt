@@ -63,6 +63,8 @@ interface CompositeRuntime {
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
    * the session wrote into its own transcript. Absent when never bridged. */
   sessionLink?: string;
+  /** A durable app-launch failure reported by the owning daemon. */
+  launchError?: string;
 }
 
 export interface CompositeEntry {
@@ -178,12 +180,15 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
     ? value.phase
     : typeof value.state === 'string' && value.state.length > 0 ? value.state : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
+  const launchError = typeof value.launch_error === 'string' && value.launch_error.length > 0
+    ? value.launch_error
+    : undefined;
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link
       : undefined;
   if (!tmuxSession && !phase) return undefined;
-  return { tmuxSession, phase, lastActivityAt, sessionLink };
+  return { tmuxSession, phase, lastActivityAt, sessionLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

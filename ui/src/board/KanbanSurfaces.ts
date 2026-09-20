@@ -109,7 +109,9 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
+  starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
+  blocked: { label: '⚠ blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
 }
 
 /** Below this, an attention chip carries no clock: a worker that just raised
@@ -1653,8 +1655,10 @@ export class KanbanSurfaceRenderer {
       const { title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
       const phase = document.createElement('span')
       phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
-      phase.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
-      phase.title = title
+      phase.textContent = card.shuttleSurface === 'app' && card.sessionUuid
+        ? card.runtimePhase === 'blocked' ? '⚠ ChatGPT blocked' : '◌ ChatGPT'
+        : phasePillLabel(card.runtimePhase, card.lastActivityAt)
+      phase.title = card.launchError ? `${title}\n\n${card.launchError}` : title
       rightChip = phase
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is

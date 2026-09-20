@@ -77,7 +77,8 @@ defmodule ShuttleWeb.CaptureController do
               surface: "app",
               session_uuid: id,
               tmux_session: nil,
-              reason: inspect(reason),
+              reason: "app_launch_failed",
+              error: inspect(reason),
               message:
                 "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
             })

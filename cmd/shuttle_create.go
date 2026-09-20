@@ -129,7 +129,11 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 		if installModel != "" {
 			block.Agent = installModel
 		}
-		block.Surface = installSurface
+		if surface, serr := newBlockSurface(block, installSurface, reg); serr != nil {
+			return serr
+		} else {
+			block.Surface = surface
+		}
 		// An armed install requires a cwd. A draft does not — but an explicitly
 		// passed one is still honored: the board's Promote button installs
 		// --disabled WITH a project_dir, and nothing later supplies one (resume
@@ -264,7 +268,11 @@ set-model / set-agent for the agent, uninstall to start over.`,
 		if repeatModel != "" {
 			block.Agent = repeatModel
 		}
-		block.Surface = repeatSurface
+		if surface, serr := newBlockSurface(block, repeatSurface, reg); serr != nil {
+			return serr
+		} else {
+			block.Surface = surface
+		}
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
@@ -372,7 +380,11 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 		if pinModel != "" {
 			block.Agent = pinModel
 		}
-		block.Surface = pinSurface
+		if surface, serr := newBlockSurface(block, pinSurface, reg); serr != nil {
+			return serr
+		} else {
+			block.Surface = surface
+		}
 
 		if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 			return printShuttleValidationErrors(errs)
@@ -419,20 +431,45 @@ func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd on the target host (required unless --disabled)")
 	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
 	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); use 'felt shuttle resume' to arm it")
-	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
+	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 
 	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
 	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name (default: UTC)")
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
 	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
-	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
+	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 
 	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
 	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
 	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
-	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli (default) or app (Codex only)")
+	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
+}
+
+// newBlockSurface applies the creation-only transport default. Absence remains
+// CLI on a stored block for compatibility, but a newly created Codex role
+// starts in the app unless the caller explicitly asks for CLI.
+func newBlockSurface(block *shuttle.Block, requested string, reg *shuttle.AgentRegistry) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	name := block.Agent
+	if name == "" {
+		def, err := reg.Default()
+		if err != nil {
+			return "", err
+		}
+		name = def.ID
+	}
+	base, _, err := reg.Resolve(name, block.Effort, block.Chrome)
+	if err != nil {
+		return "", err
+	}
+	if base.CLI == "codex" {
+		return "app", nil
+	}
+	return "", nil
 }
 
 func init() {

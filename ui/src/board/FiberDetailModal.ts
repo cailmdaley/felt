@@ -644,7 +644,15 @@ export class FiberDetailModal {
     // that was never bridged keeps the stamp and drops the promise: a plain
     // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
-    if (card.runningWorker && coarsePointer()) {
+    if (card.shuttleSurface === 'app' && card.sessionUuid) {
+      const mark = document.createElement('span')
+      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
+      mark.textContent = '◌ ChatGPT'
+      mark.title = card.launchError
+        ? `ChatGPT conversation blocked\n\n${card.launchError}`
+        : `ChatGPT conversation · ${card.sessionUuid}`
+      aloftPill = mark
+    } else if (card.runningWorker && coarsePointer()) {
       const mark = document.createElement(card.sessionLink ? 'a' : 'span')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
       mark.textContent = '▸ aloft'
