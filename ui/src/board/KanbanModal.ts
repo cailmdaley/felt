@@ -46,6 +46,7 @@ import type {
   KanbanCard,
   KanbanResponse,
 } from './KanbanTypes.js'
+import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
@@ -885,7 +886,7 @@ export class KanbanModal {
     // single click. This is the choke point for every path — the card's inline
     // buttons, the detail panel's terminal moves, and a drag onto the column —
     // so one guard covers all three.
-    if ((target === 'tempered' || target === 'composted') && card.runningWorker) {
+    if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
       const verb = target === 'tempered' ? 'temper' : 'compost'
       const ok = window.confirm(
         `“${card.name}” has a live worker. This stops it — ${verb} anyway?`,
@@ -1343,7 +1344,7 @@ export class KanbanModal {
    */
   private sameSurface(card: KanbanCard, horizon: HorizonKind, opts: { cold?: boolean }): boolean {
     const actuallyOnHorizon = horizon === 'stashed'
-      ? !card.runningWorker && card.status === 'open' && card.effectiveHorizon === 'stashed'
+      ? !hasWorkerToStop(card) && card.status === 'open' && card.effectiveHorizon === 'stashed'
       : card.effectiveHorizon === 'now'
     return actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
   }
@@ -1611,7 +1612,7 @@ export class KanbanModal {
     }
     if (this.refusesHandwrittenList(card)) return
     if (card.shuttleKind === 'pinned' && card.status !== 'closed' &&
-        !card.runningWorker && !card.dependsOn?.length && !card.foldedUnder) {
+        !hasWorkerToStop(card) && !card.dependsOn?.length && !card.foldedUnder) {
       this.showBanner(`“${card.name}” is already pinned — it's resting on the strip.`, 'info')
       this.announce(`${card.name} is already pinned.`)
       return
@@ -2139,7 +2140,7 @@ export class KanbanModal {
    * `tmux kill-session` it, so a mirror-routed kill is a silent no-op.
    */
   private async killWorkerIfRunning(card: KanbanCard): Promise<void> {
-    if (!card.runningWorker) return
+    if (!hasWorkerToStop(card)) return
     try {
       await this.postJson(
         '/api/v1/kill',

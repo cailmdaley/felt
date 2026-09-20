@@ -19,7 +19,7 @@ import {
   previewText,
   type Attachment,
 } from './attachments.js'
-import type { ColumnKind, KanbanCard, ShuttleKind } from './KanbanTypes.js'
+import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
@@ -3398,7 +3398,7 @@ export class FiberDetailModal {
     // discards whatever in-flight context that worker was holding. Confirm
     // before doing that. A dormant card (no live worker) cuts nothing, so it's
     // silent; Resume never cuts, so it never confirms.
-    if (mode === 'fresh' && card.runningWorker && !skipCutConfirmation) {
+    if (mode === 'fresh' && hasWorkerToStop(card) && !skipCutConfirmation) {
       const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
       const ok = window.confirm(
         `A worker is still running for “${card.name}”${working}.\n\n` +

@@ -242,6 +242,22 @@ export interface KanbanCard {
 }
 
 /**
+ * Whether lifecycle mutations must ask the owning daemon to stop a worker.
+ *
+ * A terminal worker has a tmux name; a Codex app worker deliberately does
+ * not.  Its durable thread id still represents owned work, including a turn
+ * whose launch is blocked and needs explicit release before the card moves.
+ * Keep this distinct from `runningWorker`, which is specifically the terminal
+ * opener affordance.
+ */
+export function hasWorkerToStop(
+  card: Pick<KanbanCard, 'runningWorker' | 'shuttleSurface' | 'sessionUuid'>,
+): boolean {
+  return Boolean(card.runningWorker) ||
+    (card.shuttleSurface === 'app' && typeof card.sessionUuid === 'string' && card.sessionUuid.length > 0)
+}
+
+/**
  * Per-origin freshness signal returned in `/kanban` responses. Stage 3b
  * surfaces this on the cards: stale-origin cards show a "waiting on
  * `<hostname>`" badge and refuse drag, since the remote agent or document
