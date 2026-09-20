@@ -138,7 +138,7 @@ defmodule Shuttle.CodexApp do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
-  defp thread_from(%{"thread" => thread}), do: {:ok, thread}
+  defp thread_from(%{"thread" => thread}) when is_map(thread), do: {:ok, thread}
   defp thread_from(_), do: {:error, {:transport, :malformed_response}}
 
   defp interrupt_thread(id, %{"turns" => turns} = thread) when is_list(turns) do
@@ -199,7 +199,7 @@ defmodule Shuttle.CodexApp do
     }
 
     with_rpc("project/create", params, fn
-      %{"project" => %{"id" => id}} -> {:ok, id}
+      %{"project" => %{"id" => id}} when is_binary(id) -> {:ok, id}
       _ -> {:error, {:transport, :malformed_project_response}}
     end)
   end
