@@ -124,12 +124,50 @@ untouched by any of this.
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
-| `felt shuttle sessions <fiber\|session-uuid>` | Discover the fiber's composite Shuttle session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition through the ledgers; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` (`--json` for the structured result) |
+| `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native harness sessions addressable across the fleet (`--host`, `--harness`, `--json`). With a fiber or session, preserve the provenance view: discover the composite session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition through the ledgers; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
+| `felt shuttle message <address> <text\|->` | Send text to the exact canonical session address returned by `sessions` (`--file`, `--wake`, `--from`, `--message-id`, `--json`). `-` and `--file -` preserve multiline stdin. Receipts report only the adapter's actual status (`accepted`, `context_added`, `submitted`, `queued`, `unknown`, or `rejected`) and always carry the message ID needed for a safe explicit retry |
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
 | `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
+
+No-argument `sessions` may report a Claude or Codex receiver with `state: "hook"`. This
+means a supported hook registered the session for queued context; it does not
+claim that a model turn is live. `last_seen` records the latest registration in
+Unix milliseconds. An abnormal exit can leave a registration behind.
+Hook delivery never wakes a session: queued context is offered by the next
+`SessionStart`, `UserPromptSubmit`, `PreToolUse`, or `PostToolUse` hook.
+The existing `felt hook event` integration registers these receivers;
+`SHUTTLE_MESSAGES=off` disables registration and offers for that hook process.
+
+Messaging uses the configured fleet transport to reach the owning daemon.
+Each owner discovers its own harnesses; network reachability alone does not
+provide a messaging transport. Codex app-server sessions use the runtime's
+Unix control socket. CLI sessions use supported context hooks. Pi sessions use
+Confer's existing Unix RPC socket and require `--wake` because its message
+operation can start a turn. Terminal keystrokes are not a messaging transport.
+
+| Receipt | Evidence |
+|---|---|
+| `queued` | Stored in the receiver's host-local hook mailbox; no turn started |
+| `context_added` | Codex acknowledged adding persistent context; no turn started |
+| `accepted` | The native runtime acknowledged a steer, turn start, or Pi message |
+| `unknown` | A delivery attempt may have succeeded; do not resend under a new ID |
+| `rejected` | Validation or the receiving transport refused this request |
+
+No receipt proves that a model read, acted on, or integrated the message.
+Hook offers can repeat if the receiver crashes after writing context but before
+recording the offer; message IDs remain stable. Repeating the identical send
+with the same `--message-id` retrieves its recorded result without redelivery.
+Sender labels are self-reported. Automatic `--from` detection supplies a native
+session address; if the receiver uses another routing alias for that host,
+resolve the reply address through its own `sessions` output.
+
+Receipts and queued payloads stay under `$SHUTTLE_DATA_DIR` (default
+`~/.shuttle`), outside the project. Payloads offered by hooks are retained there
+for diagnosis. `SHUTTLE_CODEX_SOCKET` and `SHUTTLE_CONFER_STATE_DIR` override
+native discovery locations when a harness uses a nondefault runtime directory.
 
 ### Fleet / operator plumbing
 

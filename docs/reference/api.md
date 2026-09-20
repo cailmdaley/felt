@@ -49,6 +49,7 @@ is not enough.
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
+| `POST /messages` | host-addressed | Deliver a durable, idempotent message request to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 
 ## Read plane
 
@@ -67,6 +68,21 @@ is not enough.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
+| `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
+
+`GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
+configured daemon once with `local=true`; an offline, old, timed-out, or
+malformed peer becomes an explicit `{host, error}` gap while successful peers
+remain usable. Returned addresses use the configured routing alias:
+`shuttle://HOST/HARNESS/NATIVE_ID`.
+
+`POST /messages` accepts `{address, text, from, wake, message_id}`. The address
+selects the owner strictly; an unknown host is refused rather than attempted
+locally. Its receipt reports only submission state (`accepted`,
+`context_added`, `submitted`, `queued`, `unknown`, or `rejected`), transport, and detail;
+it does not claim that the recipient read or acted on the message. Reusing a
+`message_id` with the same request returns the durable receipt, while reusing it
+for changed content is rejected by the local felt adapter.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the

@@ -36,6 +36,19 @@ defmodule Shuttle.RunnerTest do
     assert {"hi\n", 0} = Shuttle.Runner.Default.cmd("echo", ["hi"], timeout_ms: 5_000)
   end
 
+  test "input sends one frame without waiting for EOF" do
+    assert {~s({"ok":true}\n), 0} =
+             Shuttle.Runner.Default.cmd(
+               "bash",
+               [
+                 "-c",
+                 "IFS= read -r frame; test \"$frame\" = '{\"text\":\"hello\"}' && printf '{\"ok\":true}\\n'"
+               ],
+               input: ~s({"text":"hello"}\n),
+               timeout_ms: 5_000
+             )
+  end
+
   test "a wedged command times out into {message, :timeout} instead of blocking" do
     started = System.monotonic_time(:millisecond)
     assert {message, :timeout} = Shuttle.Runner.Default.cmd("sleep", ["10"], timeout_ms: 100)

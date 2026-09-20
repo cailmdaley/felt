@@ -1,0 +1,85 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"testing"
+
+	"github.com/cailmdaley/felt/internal/messaging"
+)
+
+func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_HOST", "host")
+	t.Setenv("SHUTTLE_EVENTS", "off")
+	hook := func(name string) string {
+		t.Helper()
+		b, _ := json.Marshal(eventHookInput{HookEventName: name, SessionID: "s", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
+		var out bytes.Buffer
+		if err := runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if out := hook("SessionStart"); out != "" {
+		t.Fatal(out)
+	}
+	if !messaging.MailboxAvailable("claude", "s", "host") {
+		t.Fatal("hook failed to register")
+	}
+	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "peer", MessageID: "m"}
+	if _, err := messaging.Send(context.Background(), "host", r); err != nil {
+		t.Fatal(err)
+	}
+	if out := hook("Stop"); out != "" {
+		t.Fatalf("Stop would wake the model: %s", out)
+	}
+	var got sessionEnvelope
+	if err := json.Unmarshal([]byte(hook("PreToolUse")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.HookSpecificOutput.HookEventName != "PreToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte(r.Text)) {
+		t.Fatalf("bad context: %+v", got)
+	}
+	if out := hook("PostToolUse"); out != "" {
+		t.Fatalf("duplicated message: %s", out)
+	}
+	hook("SessionEnd")
+	if messaging.MailboxAvailable("claude", "s", "host") {
+		t.Fatal("mailbox still available")
+	}
+}
+
+func TestEventHookOffersCodexMailbox(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_EVENTS", "off")
+	t.Setenv("SHUTTLE_HOST", "host")
+	var out bytes.Buffer
+	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"SessionStart","session_id":"s","model":"gpt-6","cwd":"/work"}`), &out)
+	if out.Len() != 0 || !messaging.MailboxAvailable("codex", "s", "host") {
+		t.Fatal("Codex hook failed to register a mailbox")
+	}
+	r := messaging.Request{Address: "shuttle://host/codex/s", Text: "peer context", MessageID: "m"}
+	if receipt, err := messaging.Send(context.Background(), "host", r); err != nil || receipt.Transport != "codex-hook" {
+		t.Fatalf("send: %+v %v", receipt, err)
+	}
+	out.Reset()
+	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"UserPromptSubmit","session_id":"s","model":"gpt-6"}`), &out)
+	if !bytes.Contains(out.Bytes(), []byte("peer context")) {
+		t.Fatalf("Codex context missing: %s", out.String())
+	}
+}
+
+func TestEventHookDoesNotClassifyUnknownPayloadAsCodex(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_EVENTS", "off")
+	var out bytes.Buffer
+	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"PreToolUse","session_id":"s"}`), &out)
+	if out.Len() != 0 || messaging.MailboxAvailable("codex", "s", "") {
+		t.Fatal("unidentified hook registered a Codex mailbox")
+	}
+}

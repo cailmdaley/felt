@@ -33,9 +33,8 @@ import (
 // Everything else on the line (`id`, `harness`, `originName`) is written for
 // operators reading the raw stream and for readers not yet written.
 //
-// The contract with the harness is the same as runPostToolHook's: print
-// nothing, exit 0, always. A tracking hook that can fail a tool call is worse
-// than no tracking hook.
+// Recording is silent and never blocks a tool call. The command also offers
+// queued peer context on supported Claude and Codex hooks through runEventAndMessageHook.
 
 var hookEventCmd = &cobra.Command{
 	Use:   "event",
@@ -49,11 +48,13 @@ Writes only when the stream's parent directory already exists — the daemon's
 state directory is the opt-in. An explicit SHUTTLE_EVENTS_FILE overrides that
 and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 
-Prints nothing and exits 0 on every path, including malformed input.`,
+Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
+offer queued peer messages as additionalContext; Stop never wakes the session.
+SHUTTLE_MESSAGES=off disables mailbox registration and delivery.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runEventHook(os.Stdin)
+		return runEventAndMessageHook(os.Stdin, os.Stdout)
 	},
 }
 
@@ -91,6 +92,7 @@ type eventHookInput struct {
 	TranscriptPath string `json:"transcript_path"`
 	ToolName       string `json:"tool_name"`
 	Prompt         string `json:"prompt"`
+	Model          string `json:"model"`
 	// Notification's own discriminator: `idle_prompt`, `permission_prompt`,
 	// `elicitation_dialog`, … The harness says WHY it is notifying, and only
 	// `idle_prompt` means "nobody has typed in a while" rather than "I am
@@ -148,6 +150,7 @@ type eventLine struct {
 // most; the rest were the four groups added below, and a dispatched worker's
 // opening prompt was the single largest ongoing leak.
 var machinePromptPrefixes = []string{
+	"[Shuttle message ",
 	"<task-notification",
 	"<teammate-message",
 	"Another Claude session sent a message:",
