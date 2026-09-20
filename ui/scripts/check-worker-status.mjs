@@ -18,6 +18,9 @@ try {
       assert.ok(await guide.isVisible())
       assert.match(await guide.innerText(), /ada-workstation/)
       assert.match(await guide.innerText(), /01a0be38-6c36-7cd1-aec9-53a680d1f693/)
+      await guide.getByRole('button', { name: 'Copy conversation ID', exact: true }).focus()
+      await page.keyboard.press('Tab')
+      assert.ok(await guide.getByRole('button', { name: 'Close', exact: true }).evaluate(e => e === document.activeElement), 'Tab reaches Close inside the dialog')
       const box = await guide.boundingBox()
       assert.ok(box && box.x >= 0 && box.x + box.width <= 390)
       await guide.getByRole('button', { name: 'Close', exact: true }).click()
@@ -27,6 +30,10 @@ try {
     if (mobile) {
       await page.locator('.kbn-detail-aloft').click()
       assert.ok(await page.getByRole('dialog', { name: 'Continue in ChatGPT' }).isVisible())
+      await page.keyboard.press('Escape')
+      assert.equal(await page.getByRole('dialog', { name: 'Continue in ChatGPT' }).count(), 0)
+      assert.ok(await page.locator('.kbn-detail-aloft').isVisible(), 'Escape closes only the guidance')
+      assert.ok(await page.locator('.kbn-detail-aloft').evaluate(e => e === document.activeElement), 'focus returns to Aloft')
     }
     await page.close()
   }

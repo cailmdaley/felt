@@ -58,6 +58,7 @@ export function showAppConversationGuidance(
   if (card.sessionUuid && navigator.clipboard?.writeText) {
     const copy = document.createElement('button')
     copy.type = 'button'
+    copy.className = 'kbn-detail-action-btn'
     copy.textContent = 'Copy conversation ID'
     copy.addEventListener('click', async () => {
       try {
@@ -71,12 +72,25 @@ export function showAppConversationGuidance(
   }
   const close = document.createElement('button')
   close.type = 'button'
+  close.className = 'kbn-detail-action-btn'
   close.textContent = 'Close'
   close.addEventListener('click', () => dialog.close())
   actions.append(close)
   dialog.append(heading, instructions, destination, limitation, actions)
   dialog.setAttribute('aria-label', 'Continue in ChatGPT')
-  dialog.addEventListener('close', () => dialog.remove(), { once: true })
+  // Board shortcuts must not consume this modal's navigation or dismissal.
+  const onKeyDown = (event: KeyboardEvent) => {
+    event.stopImmediatePropagation()
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      dialog.close()
+    }
+  }
+  window.addEventListener('keydown', onKeyDown, true)
+  dialog.addEventListener('close', () => {
+    window.removeEventListener('keydown', onKeyDown, true)
+    dialog.remove()
+  }, { once: true })
   document.body.append(dialog)
   dialog.showModal()
 }

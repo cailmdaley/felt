@@ -2570,6 +2570,8 @@
 
 /* A reachable destination when the device has no verified native app route. */
 .kbn-conversation-guidance {
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: calc(15px * var(--kbn-type-scale, 1));
   box-sizing: border-box;
   width: min(32rem, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
