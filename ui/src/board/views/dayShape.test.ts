@@ -1180,14 +1180,14 @@ describe('the live chip', () => {
 
   it('says aloft for a worker mid-tool', () => {
     const chip = laneChip(worker({ runtimePhase: 'working', lastActivityAt: NOW_IN_RAIL - 4_000 }), NOW_IN_RAIL)
-    expect(chip).toMatchObject({ label: '▸ aloft', variant: 'aloft' })
+    expect(chip).toMatchObject({ label: 'Aloft', variant: 'aloft' })
     expect(chip?.tmux).toBe('bmodes-2d-x-shuttle')
   })
 
   it('lets attention take over at once — a raised hand is not a state to age', () => {
     const chip = laneChip(worker({ runtimePhase: 'attention', lastActivityAt: NOW_IN_RAIL - 5_000 }), NOW_IN_RAIL)
     expect(chip?.variant).toBe('attention')
-    expect(chip?.label).toBe('☞︎ needs you')
+    expect(chip?.label).toBe('Aloft')
   })
 
   it('holds `waiting` back for a minute, then shows how long it has stood there', () => {
@@ -1197,7 +1197,16 @@ describe('the live chip', () => {
     expect(fresh?.variant).toBe('aloft')
     const aged = laneChip(worker({ runtimePhase: 'waiting', lastActivityAt: NOW_IN_RAIL - 3 * 3_600_000 }), NOW_IN_RAIL)
     expect(aged?.variant).toBe('waiting')
-    expect(aged?.label).toBe('⏸ waiting · 3h')
+    expect(aged?.label).toBe('Aloft')
+    expect(aged?.title).toContain('3h ago')
+  })
+
+  it('keeps an observed app conversation available after next-session settings change', () => {
+    const app = card({ status: 'active', runningWorker: undefined, workerSurface: 'app', shuttleSurface: 'cli', sessionUuid: 'thread-id', runtimePhase: 'working' })
+    expect(laneChip(app, NOW_IN_RAIL)).toMatchObject({ label: 'Aloft', appCard: app })
+    expect(laneChip(app, NOW_IN_RAIL)?.tmux).toBeUndefined()
+    expect(laneChip({ ...app, launchError: 'failed' }, NOW_IN_RAIL)).toBeUndefined()
+    expect(laneChip({ ...app, status: 'open' }, NOW_IN_RAIL)).toBeUndefined()
   })
 
   it('never appears on a past day — aloft is a fact about now', () => {

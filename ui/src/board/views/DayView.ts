@@ -67,7 +67,7 @@
  */
 
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
-import { phasePillLabel } from '../KanbanSurfaces.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, showAppConversationGuidance } from '../appConversation.js'
 import { fileBytesUrl, humanizeIdleAge, renderMarkdown } from '../utils.js'
 import { normalizeSentFiles, sentFilesInWindow, type SentFile } from '../sentFiles.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -894,8 +894,9 @@ export interface DayChip {
   /** Drives the Desk pill class: `kbn-card-worker-<variant>`. */
   variant: 'aloft' | 'attention' | 'waiting'
   title: string
-  tmux: string
+  tmux?: string
   host?: string
+  appCard?: KanbanCard
 }
 
 /**
@@ -904,29 +905,34 @@ export interface DayChip {
  * Deliberately a re-derivation of KanbanSurfaces' pill logic rather than an
  * import of its DOM builder: the Desk builds a card, we build a ledger row, but
  * the RULE ("attention takes over immediately, waiting only after a minute,
- * otherwise aloft") and the wording both come from there — `phasePillLabel` is
- * imported so the strings can never drift.
+ * otherwise aloft") is shared; the action label comes from `workerStatusLabel`.
  */
 export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip | undefined {
-  if (!card?.runningWorker) return undefined
+  if (!card) return undefined
+  const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid && card.status === 'active'
+  if (!card.runningWorker && !app) return undefined
+  if (card.launchError || card.runtimePhase === 'blocked') return undefined
   const tmux = card.runningWorker
+  const destination = app ? 'conversation' : tmux
+  const appCard = app ? card : undefined
   const phase = card.runtimePhase
   const idleMs = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : Infinity
   const age = card.lastActivityAt !== undefined ? humanizeIdleAge(idleMs) : null
   const takesOver = phase === 'attention' || (phase === 'waiting' && idleMs >= WAITING_GATE_MS)
   if (takesOver && phase) {
     return {
-      label: phasePillLabel(phase, card.lastActivityAt, nowMs),
+      label: workerStatusLabel(),
       variant: phase === 'attention' ? 'attention' : 'waiting',
       title:
         phase === 'attention'
-          ? `Worker raised its hand${age ? ` ${age} ago` : ''} — open ${tmux}`
-          : `Worker paused on input${age ? ` ${age} ago` : ''} — open ${tmux}`,
+          ? `Worker raised its hand${age ? ` ${age} ago` : ''} — open ${destination}`
+          : `Worker paused on input${age ? ` ${age} ago` : ''} — open ${destination}`,
       tmux,
+      appCard,
       host: card.shuttleHost,
     }
   }
-  return { label: '▸ aloft', variant: 'aloft', title: `Worker aloft — open ${tmux}`, tmux, host: card.shuttleHost }
+  return { label: workerStatusLabel(), variant: 'aloft', title: `Worker aloft — open ${destination}`, tmux, appCard, host: card.shuttleHost }
 }
 
 /**
@@ -3040,7 +3046,28 @@ class DayViewImpl implements TemporalView {
    * worker actions already live. Both land somewhere useful — the fallback is
    * one click further from the tmux session.
    */
-  private buildChip(chip: DayChip, cardId: string): HTMLButtonElement {
+  private buildChip(chip: DayChip, cardId: string): HTMLElement {
+    if (chip.appCard) {
+      const card = chip.appCard
+      const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+      const mark = document.createElement(target.href ? 'a' : 'button')
+      mark.className = `kbn-card-worker kbn-card-worker-link kbn-day-chip${chip.variant === 'aloft' ? '' : ` kbn-card-worker-${chip.variant}`}`
+      mark.textContent = chip.label
+      mark.title = `${chip.title} — ${target.title}`
+      if (mark instanceof HTMLAnchorElement && target.href) {
+        mark.href = target.href
+        mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        mark.addEventListener('click', event => event.stopPropagation())
+      } else if (mark instanceof HTMLButtonElement) {
+        mark.type = 'button'
+        mark.setAttribute('aria-label', 'Show how to continue this conversation in ChatGPT')
+        mark.addEventListener('click', event => {
+          event.stopPropagation()
+          showAppConversationGuidance(card)
+        })
+      }
+      return mark
+    }
     const el = document.createElement('button')
     el.type = 'button'
     el.className = `kbn-card-worker kbn-day-chip${
@@ -3056,7 +3083,7 @@ class DayViewImpl implements TemporalView {
       // either way, because it is a STATUS before it is a control, and it
       // opens the fiber instead, where the worker actions live.
       const ctx = this.ctx
-      if (ctx?.openWorker) ctx.openWorker(chip.tmux, chip.host)
+      if (ctx?.openWorker && chip.tmux) ctx.openWorker(chip.tmux, chip.host)
       else ctx?.openCard(cardId)
     })
     return el

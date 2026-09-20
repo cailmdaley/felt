@@ -115,7 +115,7 @@
   transform: rotate(-1.5deg);
   box-shadow: 0 0 0 0.5px rgba(196, 147, 51, 0.18) inset;
 }
-/* The header borrows the grid card's ▸ aloft pill (.kbn-card-worker in
+/* The header borrows the grid card's Aloft pill (.kbn-card-worker in
    KanbanModal.css — teal, pulsing, click → kitty). Locally it joins the
    status stamp's ink-stamp idiom: same size, same slight hand-applied
    rotation, so the two read as a pair of stamps on the page head. */

@@ -37,7 +37,7 @@ const board = new KanbanModal({
   onSettingsClick: () => {
     void openSettings({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
   },
-  // ▸ aloft / ☞ needs-you-now → open the worker's tmux session in kitty. The
+  // Aloft / ☞ needs-you-now → open the worker's tmux session in kitty. The
   // web app can't open a terminal itself (Portolan does it natively); the
   // daemon does, via POST /api/v1/attach (not owner-routed — the tab opens on
   // the host serving this UI, ssh-ing out for a remote worker). Success raises

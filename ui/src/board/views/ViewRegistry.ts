@@ -87,7 +87,7 @@ export interface ViewContext extends TemporalFetchers {
    */
   openCard(cardId: string): void
   /**
-   * Focus a running worker's terminal — the same gesture as the Desk's `▸ aloft`
+   * Focus a running worker's terminal — the same gesture as the Desk's `Aloft`
    * / `☞ needs-you-now` pill, reached from a view.
    *
    * Not a new write plane: it delegates to the host callback the board has

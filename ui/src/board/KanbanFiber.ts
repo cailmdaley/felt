@@ -108,7 +108,7 @@ export interface Fiber {
   remotePath?: string;
   /** Owner-served tmux session name, set when the owning daemon reports a live
    * worker for this fiber (the feed row's `runtime.tmux_session`). This is how
-   * a card resolves `runningWorker` → `▸ aloft` from one reconciled observer. */
+   * a card resolves `runningWorker` → `Aloft` from one reconciled observer. */
   remoteRunningSession?: string;
   isRoot?: boolean;  // entry-point fiber: bare `.felt/<slug>.md`
 }

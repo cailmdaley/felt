@@ -1965,7 +1965,7 @@
   background: rgba(168, 38, 28, 0.18);
   font-weight: 700;
 }
-/* needs-you-now on a live worker takes over the "▸ aloft" pill: the red
+/* needs-you-now on a live worker takes over the "Aloft" pill: the red
    manicule chip IS the clickable button that opens the worker. Inherits
    .kbn-card-worker's pill padding / margin / button-reset / focus; overrides to
    the serif manicule in deep red, normal case (not the mono pill's uppercase).
@@ -1986,7 +1986,7 @@
   background: rgba(168, 38, 28, 0.28);
   border-color: rgba(168, 38, 28, 0.55);
 }
-/* waiting-for-you on a live worker (idle ≥60s) takes over the "▸ aloft" pill,
+/* waiting-for-you on a live worker (idle ≥60s) takes over the "Aloft" pill,
    exactly like attention but in warm amber: the ⏸ chip IS the clickable button
    that opens the worker. Same serif/sizing as the attention takeover; static —
    present, never blinking. */
