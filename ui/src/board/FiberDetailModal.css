@@ -1888,3 +1888,12 @@ a.kbn-detail-aloft { text-decoration: none; }
   object-fit: unset;
   background: #FFFDF6;
 }
+
+/* Phone continuation uses the app's host/project picker. */
+.kbn-detail-app-guide {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
+  border-left: 2px solid var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}

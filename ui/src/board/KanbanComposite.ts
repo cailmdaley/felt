@@ -38,6 +38,7 @@
 //     },
 //   }
 
+import { validDesktopThreadLink } from './appConversation.js';
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
 interface CompositeRuntime {
@@ -63,6 +64,7 @@ interface CompositeRuntime {
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
    * the session wrote into its own transcript. Absent when never bridged. */
   sessionLink?: string;
+  desktopLink?: string;
   /** A durable app-launch failure reported by the owning daemon. */
   launchError?: string;
 }
@@ -187,8 +189,9 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link
       : undefined;
+  const desktopLink = validDesktopThreadLink(value.desktop_link);
   if (!tmuxSession && !phase) return undefined;
-  return { tmuxSession, phase, lastActivityAt, sessionLink, launchError };
+  return { tmuxSession, phase, lastActivityAt, sessionLink, desktopLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

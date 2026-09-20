@@ -1,3 +1,4 @@
+import { appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -644,13 +645,19 @@ export class FiberDetailModal {
     // that was never bridged keeps the stamp and drops the promise: a plain
     // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
+    const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
     if (card.shuttleSurface === 'app' && card.sessionUuid) {
-      const mark = document.createElement('span')
-      mark.className = 'kbn-card-worker kbn-detail-aloft kbn-detail-aloft-static'
-      mark.textContent = '◌ ChatGPT'
-      mark.title = card.launchError
-        ? `ChatGPT conversation blocked\n\n${card.launchError}`
-        : `ChatGPT conversation · ${card.sessionUuid}`
+      const mark = document.createElement(appTarget.href ? 'a' : 'span')
+      mark.className = 'kbn-card-worker kbn-detail-aloft'
+      mark.textContent = card.launchError ? '⚠ ChatGPT' : '◌ ChatGPT'
+      mark.title = appTarget.title
+      if (mark instanceof HTMLAnchorElement && appTarget.href) {
+        mark.href = appTarget.href
+        mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        mark.addEventListener('click', (e) => e.stopPropagation())
+      } else {
+        mark.classList.add('kbn-detail-aloft-static')
+      }
       aloftPill = mark
     } else if (card.runningWorker && coarsePointer()) {
       const mark = document.createElement(card.sessionLink ? 'a' : 'span')
@@ -730,6 +737,12 @@ export class FiberDetailModal {
     const prose = document.createElement('article')
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
+    if (card.shuttleSurface === 'app' && card.sessionUuid && !appTarget.href) {
+      const guidance = document.createElement('p')
+      guidance.className = 'kbn-detail-app-guide'
+      guidance.textContent = appTarget.guidance
+      page.append(guidance)
+    }
     page.append(prose)
     this.bodyPage = page
     this.proseEl = prose

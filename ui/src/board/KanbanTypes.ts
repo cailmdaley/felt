@@ -131,6 +131,8 @@ export interface KanbanCard {
    * `runningWorker`, and only for a session that was bridged.
    */
   sessionLink?: string
+  /** Native desktop app route; never treated as a phone universal link. */
+  desktopLink?: string
   /**
    * `shuttle.runtime.session_uuid` — the harness session the daemon most
    * recently launched for this fiber, and the key that says WHICH session

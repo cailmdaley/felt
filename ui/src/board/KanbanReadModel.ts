@@ -611,6 +611,7 @@ function toCard(
     runtimePhase,
     launchError: entry.runtime?.launchError,
     sessionLink: entry.runtime?.sessionLink,
+    desktopLink: entry.runtime?.desktopLink,
     sessionUuid: f.shuttleSessionUuid,
     lastActivityAt,
     held,

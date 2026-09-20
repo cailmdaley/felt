@@ -1,3 +1,4 @@
+import { appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1653,12 +1654,19 @@ export class KanbanSurfaceRenderer {
     let rightChip: HTMLElement | undefined
     if (showPhase && card.runtimePhase) {
       const { title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
-      const phase = document.createElement('span')
+      const app = card.shuttleSurface === 'app' && !!card.sessionUuid
+      const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+      const phase = document.createElement(app && appTarget.href ? 'a' : 'span')
       phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
-      phase.textContent = card.shuttleSurface === 'app' && card.sessionUuid
+      phase.textContent = app
         ? card.runtimePhase === 'blocked' ? '⚠ ChatGPT blocked' : '◌ ChatGPT'
         : phasePillLabel(card.runtimePhase, card.lastActivityAt)
-      phase.title = card.launchError ? `${title}\n\n${card.launchError}` : title
+      phase.title = app ? appTarget.title : card.launchError ? `${title}\n\n${card.launchError}` : title
+      if (phase instanceof HTMLAnchorElement && appTarget.href) {
+        phase.href = appTarget.href
+        phase.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
+        phase.addEventListener('click', (event) => event.stopPropagation())
+      }
       rightChip = phase
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is

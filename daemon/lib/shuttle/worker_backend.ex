@@ -93,6 +93,7 @@ defmodule Shuttle.WorkerBackend do
           session_uuid: id,
           thread_id: id,
           transcript_session_uuid: AppWorkers.transcript_id(id),
+          desktop_link: Shuttle.SessionLink.desktop_url(id),
           project_id: project_id
         }
     end

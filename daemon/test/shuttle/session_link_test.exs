@@ -13,6 +13,21 @@ defmodule Shuttle.SessionLinkTest do
   @first "https://claude.ai/code/session_01FIRST"
   @last "https://claude.ai/code/session_01LAST"
 
+  test "desktop app routes accept only a bare thread UUID and are separate from mobile links" do
+    assert SessionLink.desktop_url(@session) == "codex://threads/" <> @session
+
+    for invalid <- [
+          nil,
+          "",
+          "not-a-uuid",
+          @session <> "?host=other",
+          @session <> "/../new",
+          @session <> "\n"
+        ] do
+      assert SessionLink.desktop_url(invalid) == nil
+    end
+  end
+
   defp bridge(url),
     do: %{"type" => "user", "attachment" => %{"type" => "remote_session_change", "url" => url}}
 

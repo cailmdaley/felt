@@ -442,11 +442,39 @@ const MIRRORED: MockFiber[] = [
   },
 ]
 
+const APP_THREAD = '01a0be38-6c36-7cd1-aec9-53a680d1f693'
+const APP_CONVERSATION = fiber({
+  id: 'operator/app-conversation',
+  uid: '01KVBR2G7CXDWMG85592QW78ZZ',
+  name: 'App conversation continuity',
+  status: 'active',
+  outcome: 'Continue this conversation from the ChatGPT app on desktop or phone.',
+  shuttle: shuttleBlock(),
+})
+
 const MOCK_FEED = {
   host: 'local',
   generated_at: iso(0),
   fibers: [
     ...DRAFTS.map(fiber),
+    {
+      ...APP_CONVERSATION,
+      origin: 'ada-workstation',
+      fiber: {
+        ...APP_CONVERSATION.fiber,
+        shuttle: {
+          ...shuttleBlock(),
+          agent: 'codex-terra',
+          surface: 'app',
+          runtime: { session_uuid: APP_THREAD },
+        },
+      },
+      runtime: {
+        state: 'running',
+        desktop_link: `codex://threads/${APP_THREAD}`,
+        last_activity_at: now,
+      },
+    },
     ...IN_FLIGHT.map((f, i) => {
       const e = fiber(f)
       // Give the first in-flight card a live worker so the lane shows the

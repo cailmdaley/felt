@@ -35,6 +35,7 @@ defmodule Shuttle.Poller.Snapshot do
           surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
           session_uuid: Shuttle.AppWorkers.id(meta.session),
           thread_id: Shuttle.AppWorkers.id(meta.session),
+          desktop_link: Shuttle.SessionLink.desktop_url(Shuttle.AppWorkers.id(meta.session)),
           transcript_session_uuid:
             if(Shuttle.AppWorkers.app?(meta.session),
               do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))
@@ -286,6 +287,7 @@ defmodule Shuttle.Poller.Snapshot do
       surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
       session_uuid: Shuttle.AppWorkers.id(meta.session),
       thread_id: Shuttle.AppWorkers.id(meta.session),
+      desktop_link: Shuttle.SessionLink.desktop_url(Shuttle.AppWorkers.id(meta.session)),
       transcript_session_uuid:
         if(Shuttle.AppWorkers.app?(meta.session),
           do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))

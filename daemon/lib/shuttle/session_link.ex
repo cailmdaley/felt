@@ -17,6 +17,17 @@ defmodule Shuttle.SessionLink do
 
   alias Shuttle.Moment
 
+  @doc "The installed desktop app's native thread route; not a phone universal link."
+  def desktop_url(thread_id) when is_binary(thread_id) do
+    if Regex.match?(
+         ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i,
+         thread_id
+       ),
+       do: "codex://threads/" <> thread_id
+  end
+
+  def desktop_url(_), do: nil
+
   @marker "remote_session_change"
 
   @doc """
