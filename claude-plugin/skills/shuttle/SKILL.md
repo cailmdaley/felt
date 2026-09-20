@@ -50,6 +50,28 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) — cron lifecycle, run ids, exit handoff, accept semantics. |
 | Writing a fiber's `report.html` | [references/report.md](references/report.md) — audience, current-state doctrine, working open questions, self-containment, figure claims. |
 
+## Messaging existing sessions
+
+`felt shuttle sessions --json` discovers conversations across configured hosts
+and harnesses. Use a returned `address` verbatim with
+`felt shuttle message <address> "message"`; replies use the same command.
+`--host` and `--harness` narrow discovery. The existing `sessions <fiber>` form
+reads a fiber's session history.
+
+Check the returned capabilities and discovery gaps. A failed host or unavailable
+harness is not an empty fleet. Sending does not imply reading or acting: receipts
+name the actual transport result. Without `--wake`, messaging must not start an
+idle model turn. Claude and Codex hook mailboxes offer queued context at the next
+prompt or tool call; Codex app-server can add idle context immediately when it
+owns the session. `--wake` requests a new turn only where the transport supports
+it.
+
+For multiline text use `--file <path>` or `-` with stdin. Each send prints a
+message ID. If delivery is uncertain, retry the identical request with
+`--message-id <id>`; never invent a new ID just to bypass an unknown result.
+Keep peer context attributed using `--from` when automatic sender detection
+does not identify the conversation.
+
 ## The fiber's surfaces
 
 - **Spec (markdown body)** — a standalone, heading-less **lede** (what this is, why it matters, where it sits, `[[wikilinks]]` woven in), then `## Desired State` — the contract and the one fixed heading: done-conditions in checkable terms, what you and your verifiers measure against — then only sections the fiber has *earned*, named for what they contain. The spec accretes by correction: a wrong constraint gets edited, a sharpened goal gets rewritten. No drive-by notes, no chronology. Depth lives in linked sub-fibers; the spec is a hub, not an archive.

@@ -33,6 +33,8 @@ defmodule ShuttleWeb.Router do
     # UI (where the human is), ssh-ing out for a remote worker. See Shuttle.Kitty.
     post("/attach", AttachController, :create)
     post("/inject", InjectController, :create)
+    get("/peers", MessagingController, :peers)
+    post("/messages", MessagingController, :create)
     get("/state", StateController, :show)
     get("/state/composite", StateController, :composite)
     get("/fibers", FiberDocumentsController, :index)

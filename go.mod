@@ -5,6 +5,7 @@ go 1.23.4
 toolchain go1.27.1
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/robfig/cron/v3 v3.0.1

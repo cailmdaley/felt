@@ -52,6 +52,8 @@ defmodule Shuttle.Runner do
     end
 
     defp run_bounded(executable, command, args, opts, timeout_ms) do
+      input = Keyword.get(opts, :input)
+
       port_opts =
         [:binary, :exit_status, :use_stdio, :hide, args: args] ++
           if(Keyword.get(opts, :stderr_to_stdout, false), do: [:stderr_to_stdout], else: []) ++
@@ -68,6 +70,12 @@ defmodule Shuttle.Runner do
       # exactly as bare `System.cmd/3` would — only :enoent and the timeout are
       # softened into the tuple contract.
       port = Port.open({:spawn_executable, executable}, port_opts)
+
+      # Request-style CLI adapters consume one newline-delimited JSON frame and
+      # exit after writing their receipt. Keeping stdin open lets us continue
+      # collecting stdout and the exit status from the same port; no shell,
+      # argv exposure, temporary file, or EOF handshake is involved.
+      if is_binary(input), do: Port.command(port, input)
 
       os_pid =
         case Port.info(port, :os_pid) do

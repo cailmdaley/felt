@@ -497,9 +497,13 @@ var (
 )
 
 var shuttleSessionsCmd = &cobra.Command{
-	Use:   "sessions <fiber|session-uuid>",
-	Short: "Discover Shuttle sessions and transcript availability for a fiber",
-	Long: `Reads Shuttle's composite session ledger and reports the sessions that
+	Use:   "sessions [fiber|session-uuid]",
+	Short: "Discover addressable sessions or inspect a fiber's session history",
+	Long: `With no argument, discovers addressable sessions across Shuttle's configured
+fleet. Use --host or --harness to filter, and pass a returned address to
+'felt shuttle message'. Discovery gaps report unavailable hosts or transports.
+
+With a fiber or session argument, reads Shuttle's composite session ledger and reports the sessions that
 belong to a fiber UID, including historical fiber paths, host, harness, and explicit transcript
 availability. It does not read or search transcript content; use the native
 harness jq/rg recipes on the path returned by 'felt shuttle transcript'.
@@ -515,7 +519,13 @@ and availability.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 && sessionsCommitSHA == "" {
-			return fmt.Errorf("expected a fiber, a session UUID, or --commit <sha>")
+			if sessionsMaterialize || sessionsDir != "" {
+				return fmt.Errorf("--materialize and --dir require a fiber, session UUID, or --commit <sha>")
+			}
+			return runShuttleSessionDiscovery(cmd.Context())
+		}
+		if sessionsDiscoveryLocal || sessionsDiscoveryHost != "" || sessionsDiscoveryHarness != "" {
+			return fmt.Errorf("--local, --host, and --harness apply only to no-argument live session discovery")
 		}
 		ledger, err := fetchSessionLedger()
 		if err != nil {
