@@ -1,4 +1,4 @@
-import { appConversationLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -93,7 +93,7 @@ const QUEUE_ROW_MIME = 'application/x-queue-row'
  * `waiting` (the worker stopped at a prompt) takes over once idle ≥60s — the
  * amber chip (the daemon stamps `waiting` the instant a stop fires, so the
  * takeover is gated downstream in `renderCard`; under 60s the pill stays the
- * plain "▸ aloft"). The third live category, `working` (busy mid-tool), has NO entry here — its
+ * plain "Aloft"). The third live category, `working` (busy mid-tool), has NO entry here — its
  * absence IS the "no chip" behavior. The rest fire *without* a live worker to
  * show: `running` is the rare unmatched case (daemon says running but no session
  * resolved); `retrying`/`due`/`dispatched` are genuinely worker-less. Either way
@@ -1632,7 +1632,7 @@ export class KanbanSurfaceRenderer {
     //   • `waiting` (stopped at a prompt) — the amber chip. Gated to idle ≥60s:
     //     the daemon stamps `waiting` the instant a worker stops, so without
     //     this gate every momentary pause would flip the pill. Under 60s it
-    //     stays the plain "▸ aloft" pill (the sort still floats it up).
+    //     stays the plain "Aloft" pill (the sort still floats it up).
     // A `working` worker has no badge entry, so it never takes over; the
     // worker-less lifecycle phases take the `!runningWorker` branch below,
     // untouched by the idle gate (their `lastActivityAt` is absent → Infinity).
@@ -1644,24 +1644,26 @@ export class KanbanSurfaceRenderer {
         (card.runtimePhase === 'waiting' && idleMs >= 60_000))
     const showPhase =
       kind === 'inFlight' &&
-      card.runtimePhase &&
-      (RUNTIME_PHASE_BADGES[card.runtimePhase] || (card.shuttleSurface === 'app' && card.runtimePhase === 'working')) &&
+      ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || (card.shuttleSurface === 'app' && !!card.sessionUuid)) &&
       !card.runningWorker
     // The RIGHT region: at most one of phase badge / held pill / worker pill
     // is ever live at once (they're mutually exclusive states), collected
     // here rather than appended immediately so the spacer logic at the
     // bottom can place it — same reasoning as `reviewMetaActions` above.
     let rightChip: HTMLElement | undefined
-    if (showPhase && card.runtimePhase) {
-      const title = RUNTIME_PHASE_BADGES[card.runtimePhase]?.title ?? 'The app conversation is working.'
+    if (showPhase) {
+      const phaseName = card.runtimePhase ?? 'working'
+      const title = RUNTIME_PHASE_BADGES[phaseName]?.title ?? 'The app conversation is working.'
       const app = card.shuttleSurface === 'app' && !!card.sessionUuid
       const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
       const phase = document.createElement(app && appTarget.href ? 'a' : 'span')
-      phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
+      phase.className = app
+        ? `kbn-card-worker${['attention', 'waiting'].includes(phaseName) ? ` kbn-card-worker-${phaseName}` : phaseName === 'blocked' || card.launchError ? ' kbn-card-phase-blocked' : ''}`
+        : `kbn-card-phase kbn-card-phase-${phaseName}`
       phase.textContent = app
-        ? appConversationLabel(card.runtimePhase, card.launchError)
-        : phasePillLabel(card.runtimePhase, card.lastActivityAt)
-      phase.title = app ? appTarget.title : card.launchError ? `${title}\n\n${card.launchError}` : title
+        ? workerStatusLabel(card.runtimePhase, card.launchError)
+        : phasePillLabel(phaseName, card.lastActivityAt)
+      phase.title = app ? `${phasePillLabel(phaseName, card.lastActivityAt)} — ${appTarget.title}` : card.launchError ? `${title}\n\n${card.launchError}` : title
       if (phase instanceof HTMLAnchorElement && appTarget.href) {
         phase.href = appTarget.href
         phase.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
@@ -1671,7 +1673,7 @@ export class KanbanSurfaceRenderer {
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct
-    // from the "▸ aloft" running pill and from an idle-active card (mutually
+    // from the "Aloft" running pill and from an idle-active card (mutually
     // exclusive with `runningWorker`: held means parked, not running). The badge
     // IS the release control: hover flips `⏹︎ held` → `▶ release`, click POSTs
     // the release to the card's OWNING host. Release is global per daemon (one
@@ -1714,12 +1716,11 @@ export class KanbanSurfaceRenderer {
       const w = document.createElement('button')
       w.type = 'button'
       if (phaseTakesOverWorker && card.runtimePhase) {
-        // The human-attention phase IS the button — the chip opens the worker,
-        // and (for `waiting`, plus a long-unanswered `attention`) says how long
-        // it has been standing there.
+        // Attention changes the worker color; its title carries the wait age.
+        // The opening action keeps the same Aloft label.
         const age = Number.isFinite(idleMs) ? humanizeIdleAge(idleMs) : null
         w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
-        w.textContent = phasePillLabel(card.runtimePhase, card.lastActivityAt)
+        w.textContent = workerStatusLabel()
         const [aria, verb] = card.runtimePhase === 'attention'
           ? ['Worker needs you', 'Worker raised its hand']
           : ['Worker waiting for you', 'Worker paused on input']
@@ -1730,7 +1731,7 @@ export class KanbanSurfaceRenderer {
         // only job is opening a native terminal has nothing to offer a phone,
         // while the attention/waiting phases stay as visible state.
         w.className = 'kbn-card-worker kbn-card-worker-aloft'
-        w.textContent = '▸ aloft'
+        w.textContent = workerStatusLabel()
         w.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
         w.title = `Worker aloft — click to open ${tmuxName} in kitty`
       }

@@ -2465,11 +2465,9 @@
 /* ── Touch, wherever it happens ────────────────────────────────────────────
    Asked about the input, not the viewport. */
 @media (pointer: coarse) {
-  /* "▸ aloft" opens a terminal emulator on the daemon's host — a gesture with
-     no meaning under a finger. The attention and waiting phases stay: those
-     are STATE ("needs you · 11h"), and the board would be lying by omission
-     without them. They just stop pretending to be buttons. */
-  .kbn-card-worker-aloft:not(.kbn-card-worker-link) { display: none; }
+  /* Unlinked worker marks remain visible on touch screens as status,
+     without offering an unavailable terminal action. */
+  .kbn-card-worker-aloft:not(.kbn-card-worker-link),
   .kbn-card-worker-attention:not(.kbn-card-worker-link),
   .kbn-card-worker-waiting:not(.kbn-card-worker-link) {
     pointer-events: none;

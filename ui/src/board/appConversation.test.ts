@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appConversationLabel, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
 
 const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
 const card = { desktopLink: route, shuttleHost: 'workstation', shuttleProjectDir: '/work/felt' }
@@ -35,14 +35,14 @@ describe('app conversation opening', () => {
   })
 })
 
-describe('native app activity labels', () => {
+describe('shared worker activity labels', () => {
   it.each([
-    ['working', '◌ ChatGPT working'], ['waiting', '⏸ ChatGPT waiting'],
-    ['attention', '☞︎ ChatGPT needs you'], ['blocked', '⚠ ChatGPT blocked'],
-  ])('shows %s in the app marker', (phase, label) => {
-    expect(appConversationLabel(phase)).toBe(label)
+    [undefined, 'Aloft'], ['working', 'Aloft'], ['waiting', 'Aloft'],
+    ['attention', 'Aloft'], ['blocked', '⚠ blocked'],
+  ])('shows %s in the worker marker', (phase, label) => {
+    expect(workerStatusLabel(phase)).toBe(label)
   })
   it('keeps a launch failure ahead of cached native activity', () => {
-    expect(appConversationLabel('waiting', 'failed')).toBe('⚠ ChatGPT blocked')
+    expect(workerStatusLabel('waiting', 'failed')).toBe('⚠ blocked')
   })
 })

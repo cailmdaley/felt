@@ -1,4 +1,4 @@
-import { appConversationLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { workerStatusLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -635,8 +635,8 @@ export class FiberDetailModal {
       void this.forceReload()
     })
 
-    // Worker aloft → the same teal ▸ aloft pill the grid card wears, same
-    // class, same gesture: click opens the worker's tmux session in kitty.
+    // The Aloft control shares its label and worker styling with the grid.
+    // Its destination follows the conversation backend.
     //
     // A TERMINAL IS NOT SOMETHING A PHONE HAS. On a coarse pointer the pill
     // is a LINK instead: the owning daemon stamps each live worker's claude.ai
@@ -649,8 +649,8 @@ export class FiberDetailModal {
     if (card.shuttleSurface === 'app' && card.sessionUuid) {
       const mark = document.createElement(appTarget.href ? 'a' : 'span')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
-      mark.textContent = appConversationLabel(card.runtimePhase, card.launchError)
-      mark.title = appTarget.title
+      mark.textContent = workerStatusLabel(card.runtimePhase, card.launchError)
+      mark.title = `${card.runtimePhase ?? 'Aloft'} — ${appTarget.title}`
       if (mark instanceof HTMLAnchorElement && appTarget.href) {
         mark.href = appTarget.href
         mark.setAttribute('aria-label', 'Open conversation in the ChatGPT desktop app')
@@ -662,7 +662,7 @@ export class FiberDetailModal {
     } else if (card.runningWorker && coarsePointer()) {
       const mark = document.createElement(card.sessionLink ? 'a' : 'span')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
-      mark.textContent = '▸ aloft'
+      mark.textContent = workerStatusLabel()
       if (mark instanceof HTMLAnchorElement && card.sessionLink) {
         mark.href = card.sessionLink
         mark.title = 'Worker aloft — open this session in the Claude app'
@@ -679,7 +679,7 @@ export class FiberDetailModal {
       btn.className = 'kbn-card-worker kbn-detail-aloft'
       btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
       btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      btn.textContent = '▸ aloft'
+      btn.textContent = workerStatusLabel()
       btn.addEventListener('click', (e) => {
         e.stopPropagation()
         this.onOpenWorker?.(tmuxName, card.shuttleHost)
