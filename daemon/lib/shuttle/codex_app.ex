@@ -23,7 +23,7 @@ defmodule Shuttle.CodexApp do
 
   def resume_thread(id, opts \\ []) do
     params = opts |> thread_options() |> Map.put("threadId", id)
-    with_rpc("thread/resume", params, fn result -> thread_from(result) end)
+    with_rpc("thread/resume", params, fn result -> thread_from(result, id) end)
   end
 
   def name_thread(id, name) when is_binary(id) and is_binary(name) do
@@ -42,7 +42,7 @@ defmodule Shuttle.CodexApp do
     with_rpc(
       "thread/read",
       %{"threadId" => id, "includeTurns" => Keyword.get(opts, :include_turns, false)},
-      &thread_from/1
+      &thread_from(&1, id)
     )
   end
 
@@ -143,6 +143,13 @@ defmodule Shuttle.CodexApp do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
   defp thread_from(%{"thread" => thread}) when is_map(thread), do: {:ok, thread}
   defp thread_from(_), do: {:error, {:transport, :malformed_response}}
+
+  defp thread_from(%{"thread" => %{"id" => id} = thread}, id), do: {:ok, thread}
+
+  defp thread_from(%{"thread" => %{"id" => _other}}, _expected_id),
+    do: {:error, {:transport, :thread_identity_mismatch}}
+
+  defp thread_from(_response, _id), do: {:error, {:transport, :malformed_response}}
 
   defp interrupt_thread(id, %{"turns" => turns} = thread) when is_list(turns) do
     case Enum.find(

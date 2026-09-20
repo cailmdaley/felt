@@ -461,6 +461,28 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  test "read and interrupt reject a response for a different thread identity" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+
+        send_result(socket, read_id, %{
+          "thread" => %{
+            "id" => "different-thread",
+            "status" => %{"type" => "active"},
+            "turns" => [%{"id" => "must-not-interrupt", "status" => "inProgress"}]
+          }
+        })
+      end)
+
+    configure_adapter(path)
+
+    assert {:error, {:transport, :thread_identity_mismatch}} =
+             CodexApp.interrupt("requested-thread")
+
+    await_peer(peer)
+  end
+
   test "interrupt surfaces the confirmed missing error after unloaded read and resume" do
     thread_id = "00000000-0000-4000-8000-000000000000"
     missing = %{"code" => -32_600, "message" => "no rollout found for thread id #{thread_id}"}
