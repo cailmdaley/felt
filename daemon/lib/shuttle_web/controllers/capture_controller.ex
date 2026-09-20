@@ -25,6 +25,9 @@ defmodule ShuttleWeb.CaptureController do
 
   alias Shuttle.OriginRouter
 
+  @app_server_unavailable_message "This host has no reachable managed Codex App Server. " <>
+                                    "Select a configured remote host for ChatGPT, or choose CLI."
+
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
@@ -70,18 +73,25 @@ defmodule ShuttleWeb.CaptureController do
             )
 
           {:error, {:app_launch_failed, id, reason}} ->
-            conn
-            |> put_status(502)
-            |> json(%{
-              spawned: false,
-              surface: "app",
-              session_uuid: id,
-              tmux_session: nil,
-              reason: "app_launch_failed",
-              error: inspect(reason),
-              message:
-                "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-            })
+            if reason == :app_server_unavailable do
+              app_server_unavailable(conn, %{session_uuid: id})
+            else
+              conn
+              |> put_status(502)
+              |> json(%{
+                spawned: false,
+                surface: "app",
+                session_uuid: id,
+                tmux_session: nil,
+                reason: "app_launch_failed",
+                error: inspect(reason),
+                message:
+                  "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
+              })
+            end
+
+          {:error, :app_server_unavailable} ->
+            app_server_unavailable(conn)
 
           {:error, {:invalid_axes, msg}} ->
             # Axes-validation failures are client errors (bad effort token,
@@ -111,6 +121,23 @@ defmodule ShuttleWeb.CaptureController do
 
   defp error_code(reason) when is_binary(reason), do: reason
   defp error_code(reason), do: inspect(reason)
+
+  defp app_server_unavailable(conn, extra \\ %{}) do
+    conn
+    |> put_status(503)
+    |> json(
+      Map.merge(
+        %{
+          spawned: false,
+          surface: "app",
+          tmux_session: nil,
+          reason: "app_server_unavailable",
+          message: @app_server_unavailable_message
+        },
+        extra
+      )
+    )
+  end
 
   defp capture_failed(name, reason),
     do: %{spawned: false, reason: "forward_failed", origin: name, error: inspect(reason)}

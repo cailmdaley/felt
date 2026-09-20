@@ -87,6 +87,18 @@ creating a fresh conversation is an explicit operation. CLI process liveness
 continues to come from tmux. API responses distinguish these surfaces instead
 of presenting an app conversation as a terminal session.
 
+The app surface requires the managed App Server's Unix control socket. A
+desktop application's private stdio App Server is a separate runtime: it may
+share persisted rollouts through the same Codex home, but it does not share
+loaded-turn ownership and is not a safe fallback. Shuttle refuses app dispatch
+when the managed socket is absent; choose a host with a reachable managed App
+Server or use the CLI surface. Codex documents the managed daemon lifecycle in
+its [App Server daemon reference](https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md).
+On macOS, desktop attachment to the managed daemon also depends on the desktop
+transport-selection gate; current failures caused by desktop-injected config
+overrides are tracked upstream in
+[openai/codex#41014](https://github.com/openai/codex/issues/41014).
+
 Phone access uses the host's configured Codex remote access. App Server
 creation and a direct link into the ChatGPT app are separate capabilities:
 session identity does not imply a working phone URL. Shuttle must not invent

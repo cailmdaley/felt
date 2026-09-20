@@ -24,6 +24,9 @@ defmodule ShuttleWeb.DispatchController do
 
   alias Shuttle.OriginRouter
 
+  @app_server_unavailable_message "This host has no reachable managed Codex App Server. " <>
+                                    "Select a configured remote host for ChatGPT, or choose CLI."
+
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
@@ -82,18 +85,25 @@ defmodule ShuttleWeb.DispatchController do
           )
 
         {:error, {:app_launch_failed, id, reason}} ->
-          conn
-          |> put_status(502)
-          |> json(%{
-            dispatched: false,
-            surface: "app",
-            session_uuid: id,
-            tmux_session: nil,
-            reason: "app_launch_failed",
-            error: inspect(reason),
-            message:
-              "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-          })
+          if reason == :app_server_unavailable do
+            app_server_unavailable(conn, fiber_id, %{session_uuid: id})
+          else
+            conn
+            |> put_status(502)
+            |> json(%{
+              dispatched: false,
+              surface: "app",
+              session_uuid: id,
+              tmux_session: nil,
+              reason: "app_launch_failed",
+              error: inspect(reason),
+              message:
+                "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
+            })
+          end
+
+        {:error, :app_server_unavailable} ->
+          app_server_unavailable(conn, fiber_id)
 
         {:error, :already_running} ->
           conn
@@ -175,6 +185,24 @@ defmodule ShuttleWeb.DispatchController do
 
   defp maybe_unix_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
   defp maybe_unix_ms(_), do: nil
+
+  defp app_server_unavailable(conn, fiber_id, extra \\ %{}) do
+    conn
+    |> put_status(503)
+    |> json(
+      Map.merge(
+        %{
+          dispatched: false,
+          surface: "app",
+          fiber_id: fiber_id,
+          tmux_session: nil,
+          reason: "app_server_unavailable",
+          message: @app_server_unavailable_message
+        },
+        extra
+      )
+    )
+  end
 
   defp truthy?(value) when value in [true, "true", "1", 1], do: true
   defp truthy?(_), do: false
