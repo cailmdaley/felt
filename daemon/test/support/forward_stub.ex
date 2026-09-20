@@ -4,7 +4,7 @@ defmodule Shuttle.Test.ForwardStub do
 
   Registers a single remote (`name` → `url`) and points `:write_forward_client`
   at a stub client, restoring both in `on_exit`. `client` defaults to the GET
-  stub the body/file/astra reads use; the POST suites pass their own.
+  stub the body/file reads use; the POST suites pass their own.
   """
 
   import ExUnit.Callbacks

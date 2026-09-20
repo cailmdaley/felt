@@ -139,10 +139,6 @@ jobs:
       - name: Run board tests
         run: npm test
 
-      # Ambient declarations in src/paper/lightcone.d.ts satisfy the typecheck
-      # even without the private lightcone-ui checkout, and vite.config's
-      # existsSync guard drops the paper entry when it's absent — so the full
-      # build (tsc + vite) succeeds on a stranger's clone, CI included.
       - name: Build board bundle
         run: npm run build
 

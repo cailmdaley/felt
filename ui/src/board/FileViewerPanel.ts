@@ -7,7 +7,7 @@
  * accordion, so the floating panel is retired. What survives — and is the
  * point of this module — is the by-extension rendering dispatch, factored into
  * the exported `buildFileViewer`: images get an <img>, audio an <audio
- * controls>, everything else (HTML / PDF / text / `astra.yaml`-as-paper) an
+ * controls>, everything else (HTML / PDF / text) an
  * <iframe>. The accordion mounts these directly. The extension VOCABULARY the
  * dispatch keys off lives in utils.js, shared with the `:::{embed}` renderer;
  * what is owned here is the DOM construction for each kind.
@@ -30,25 +30,9 @@ import {
   escapeHtml,
   fileBytesUrl,
   fileExt,
-  isAstraYaml,
-  paperUrl,
   prepareIframeExternalLinks,
   renderMarkdown,
 } from './utils.js'
-
-/**
- * The byte-source URL for a deliverable. An `astra.yaml` renders as the full
- * Lightcone paper (the paper entry bakes the project dir, owner-routed by
- * origin) rather than raw YAML — the same treatment a `:::{embed} astra.yaml`
- * gets in a fiber body; it falls back to the raw bytes if the dir can't
- * resolve. Everything else streams from `/api/v1/file`.
- */
-function fileViewerSrc(shuttleBase: string, fullPath: string, originId: string): string {
-  if (isAstraYaml(fullPath)) {
-    return paperUrl(fullPath, { originId }) ?? fileBytesUrl(shuttleBase, fullPath, originId)
-  }
-  return fileBytesUrl(shuttleBase, fullPath, originId)
-}
 
 /**
  * Render a deliverable into a fresh element by extension — the shared dispatch
@@ -71,7 +55,7 @@ export function buildFileViewer(
   onTextPane?: (scroller: HTMLElement) => void,
 ): HTMLElement {
   const ext = fileExt(fullPath)
-  const src = fileViewerSrc(shuttleBase, fullPath, originId)
+  const src = fileBytesUrl(shuttleBase, fullPath, originId)
 
   if (IMAGE_EXTS.has(ext)) {
     // Mount the plate on a vellum mat so it reads as a mounted figure, centered
@@ -106,7 +90,7 @@ export function buildFileViewer(
   // `.kbn-detail-prose` skin so a sent report looks like the fiber it came
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
-  if (TEXT_EXTS.has(ext) && !isAstraYaml(fullPath)) {
+  if (TEXT_EXTS.has(ext)) {
     return buildTextViewer(src, fullPath, ext, onTextPane)
   }
 
@@ -213,7 +197,7 @@ function buildTextViewer(
   return wrap
 }
 
-/** True when a deliverable scrolls — an iframe (HTML/PDF/paper) or the text
+/** True when a deliverable scrolls — an iframe (HTML/PDF) or the text
  *  pane, both of which can carry a restorable scroll offset. Images and audio
  *  cannot. */
 export function isScrollableFile(path: string): boolean {

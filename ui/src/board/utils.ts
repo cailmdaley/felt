@@ -374,20 +374,6 @@ export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
   return u.origin === CACHE_BUST_BASE ? u.pathname + u.search + u.hash : u.href
 }
 
-/**
- * Build the URL for the ASTRA paper render of an `astra.yaml`. The paper entry
- * (`paper.html`) bakes a project *dir* — the dir holding the astra.yaml — so we
- * resolve the file path, take its dirname, and pass it (owner-routed by origin)
- * to the entry, which fetches `/api/v1/astra` and renders via @lightcone/
- * renderer. Returns `null` when the path can't be resolved to an absolute dir.
- */
-export function paperUrl(astraPath: string, opts?: RenderMarkdownOptions): string | null {
-  const abs = resolveAbs(astraPath, opts)
-  if (abs === null) return null
-  const dir = dirname(abs)
-  return withOrigin(`paper.html?path=${encodePathParam(dir)}`, opts?.originId)
-}
-
 /** The by-extension image/audio vocabulary. `buildFileViewer` in
  *  FileViewerPanel (the Reader) is its one consumer now that `:::{embed}`
  *  bodies no longer render inline — an attachment opens through that same
@@ -412,17 +398,6 @@ export const TEXT_EXTS = new Set([
 export const MARKDOWN_EXTS = new Set(['md', 'markdown'])
 export function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
-}
-
-/** An `astra.yaml` renders as the full Lightcone paper rather than raw YAML,
- *  in a fiber body and in the sent-file viewer alike. */
-export function isAstraYaml(path: string): boolean {
-  return basename(path) === 'astra.yaml'
-}
-
-function dirname(path: string): string {
-  const i = path.replace(/\/+$/, '').lastIndexOf('/')
-  return i <= 0 ? '/' : path.slice(0, i)
 }
 
 export function fileExt(path: string): string {

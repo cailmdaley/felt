@@ -384,6 +384,30 @@ defmodule Shuttle.Poller do
     GenServer.call(server, {:worker_status, fiber_id})
   end
 
+  @doc """
+  The harness session UUID currently stamped on `fiber_id`'s
+  `shuttle.runtime.session_uuid`, read from the document cache, or `nil`.
+
+  What the dispatch endpoint answers with so a client knows WHICH session its
+  dispatch just started — the tmux session name is `<leaf>-<uid>-shuttle` and
+  is the same string before and after a fresh dispatch, so it cannot tell the
+  new session from the one it replaced. Read after `refresh_document/2`, this
+  is the new UUID for a Claude worker (pre-specified at launch) and `nil` for a
+  codex/pi worker, whose UUID is scraped and backfilled seconds later.
+
+  `nil` (not an error) when the Poller is unavailable or the fiber is not in
+  the cache — the caller degrades to comparing against the previous value.
+  """
+  @spec session_uuid(String.t()) :: String.t() | nil
+  def session_uuid(fiber_id), do: session_uuid(__MODULE__, fiber_id)
+
+  @spec session_uuid(GenServer.server(), String.t()) :: String.t() | nil
+  def session_uuid(server, fiber_id) when is_binary(fiber_id) do
+    GenServer.call(server, {:session_uuid, fiber_id})
+  catch
+    :exit, _ -> nil
+  end
+
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []), do: dispatch_fiber(__MODULE__, fiber_id, opts)
 
@@ -846,6 +870,23 @@ defmodule Shuttle.Poller do
     else
       {:reply, :ok, state}
     end
+  end
+
+  def handle_call({:session_uuid, fiber_id}, _from, state) do
+    uuid =
+      Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
+        fiber = Map.get(entry, :fiber, %{})
+
+        with ^fiber_id <- Map.get(fiber, "id"),
+             value when is_binary(value) and value != "" <-
+               get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+          value
+        else
+          _ -> nil
+        end
+      end)
+
+    {:reply, uuid, state}
   end
 
   def handle_call({:worker_status, fiber_id}, _from, state) do

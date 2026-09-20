@@ -1,10 +1,16 @@
 /**
- * "Move ▾" — the list of places a card may go, said in words.
+ * "Move to" — the places a card may go, named as the board names them.
  *
  * Drag-and-drop has always been the board's only way to move a card, and it
- * has no touch backend: on a phone the whole vocabulary of the desk —
- * launch, rest, pin, queue — is simply unreachable. This module is that
- * vocabulary written down, so a menu can offer it.
+ * has no touch backend: on a phone the whole vocabulary of the desk — the
+ * columns, Resting, the Pinned strip, the queue — is simply unreachable. This
+ * module is that vocabulary written down, so a menu can offer it.
+ *
+ * A DESTINATION IS A PLACE, not a verb about one. The label is the column or
+ * surface title the board already prints (`COLUMN_TITLES`, `SURFACE_TITLE`),
+ * so the menu reads as the drag said out loud and needs no gloss under it.
+ * Several legality branches can share one place name — the two ways a pinned
+ * role comes back to rest on the strip are both, to the reader, "Pinned".
  *
  * THE RULE THIS FILE FOLLOWS: it does not decide anything the drag does not
  * already decide. Every entry below mirrors a guard that already lives in
@@ -20,12 +26,13 @@
  *
  * The parity is with the drop's LEGALITY, not with everything a drop can carry.
  * A drag can name a date column or drop a card cold; the menu offers the bare
- * verbs and lets the drop's own defaults apply. Where such a field changes
- * whether a move is a no-op — `cold` is the one — it is read here too.
+ * destinations and lets the drop's own defaults apply. Where such a field
+ * changes whether a move is a no-op — `cold` is the one — it is read here too.
  */
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
 import { stackDropVerdict } from './KanbanRules.js'
+import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'
 
 /** What a chosen destination asks the board to do. One-to-one with the
  *  gestures the drag already speaks; no new verbs. */
@@ -47,10 +54,11 @@ export type MoveAction =
 export interface MoveDestination {
   /** Stable key, for tests and for DOM ids. */
   id: string
-  /** What the human reads. Sentence case, active, names the place. */
+  /** What the human reads: the board's own name for the place. */
   label: string
-  /** One clause of why, when the label alone under-explains. */
-  hint?: string
+  /** Which band of the menu this belongs to. The Now columns come first, a
+   *  rule under them, then the surfaces and the queue. */
+  group: 'column' | 'other'
   action: MoveAction
 }
 
@@ -99,22 +107,20 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // A cycle is a band of time on the calendar, not work. Nothing here applies.
   if (card.isCycle) return out
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────
-  // Launch is unconditional apart from "already there": the drag routes it
-  // through force-dispatch, which bypasses status, schedule and review gates.
-  if (column !== 'inFlight') {
+  // ── The Now columns ────────────────────────────────────────────────────
+  // Offered in the board's own left-to-right order, each omitted only when the
+  // card already sits there — `transition`'s single no-op guard
+  // (`fromKind === target`) and nothing else. In flight is unconditional apart
+  // from that: the drag routes it through force-dispatch, which bypasses
+  // status, schedule and review gates. Awaiting review is likewise a plain
+  // drop — it closes the card with the verdict cleared and stops the worker.
+  for (const target of ['drafts', 'inFlight', 'awaitingReview'] as const) {
+    if (column === target) continue
     out.push({
-      id: 'inFlight',
-      label: 'Run it now',
-      hint: 'Dispatch a worker immediately',
-      action: { kind: 'transition', target: 'inFlight' },
-    })
-  }
-  if (column !== 'drafts') {
-    out.push({
-      id: 'drafts',
-      label: 'Back to Drafts',
-      action: { kind: 'transition', target: 'drafts' },
+      id: target,
+      label: COLUMN_TITLES[target],
+      group: 'column',
+      action: { kind: 'transition', target },
     })
   }
 
@@ -125,7 +131,8 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
     if (!alreadyOnDesk) {
       out.push({
         id: 'now',
-        label: 'Bring to the desk',
+        label: 'The desk',
+        group: 'other',
         action: { kind: 'surface', horizon: 'now' },
       })
     }
@@ -135,8 +142,8 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
     if (card.status === 'closed' || !restingNow(card)) {
       out.push({
         id: 'stashed',
-        label: 'Rest it',
-        hint: 'Off the desk until it is due or you fetch it',
+        label: SURFACE_TITLE.stashed,
+        group: 'other',
         action: { kind: 'surface', horizon: 'stashed' },
       })
     }
@@ -147,38 +154,18 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // bare draft has no host and no project_dir to install from.
   if (card.shuttleKind !== undefined) {
     if (card.shuttleKind !== 'pinned') {
-      out.push({
-        id: 'pin',
-        label: 'Pin to the strip',
-        hint: 'A resting role you launch by hand',
-        action: { kind: 'pin' },
-      })
+      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
     } else if (card.runningWorker) {
       // The drag's own reading of "back to the strip" for a live pinned role:
       // stop it, so it comes to rest.
-      out.push({
-        id: 'pin',
-        label: 'Stop it and rest on the strip',
-        action: { kind: 'pin' },
-      })
+      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
     } else if (card.status === 'closed' || (card.dependsOn?.length ?? 0) > 0) {
-      // A pinned role whose last run is CLOSED classifies into Awaiting review
-      // or Past, not onto the strip — so "already pinned" is not true of it and
-      // `pinRole` deliberately lets it through (reopen → reshape → park). This
-      // also brings a queued pinned role out from under its predecessor.
-      out.push({
-        id: 'pin',
-        label: 'Rest it back on the strip',
-        action: { kind: 'pin' },
-      })
+      // A closed role lives off the strip; a queued role lives beneath its
+      // predecessor. pinRole reopens/reshapes/parks either back onto Pinned.
+      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
     }
     if (card.shuttleKind === 'pinned') {
-      out.push({
-        id: 'unpin',
-        label: 'Unpin it',
-        hint: 'Back to a one-shot you can plan',
-        action: { kind: 'unpin' },
-      })
+      out.push({ id: 'unpin', label: 'Unpin', group: 'other', action: { kind: 'unpin' } })
     }
   }
 
@@ -186,24 +173,23 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // A hand-written `depends_on:` LIST is a fan-in someone assembled on
   // purpose; neither the drag nor this menu may collapse it.
   if (card.dependsOnShape !== 'list') {
+    // Any kind may be queued: the edge is ordering for the eye, so a standing
+    // or pinned role filed after something is exactly that and nothing more.
+    out.push({
+      id: 'queue',
+      label: 'Queue behind…',
+      group: 'other',
+      action: { kind: 'queue' },
+    })
     // Offered on the EDGE, not on a gate: a card that names a predecessor is in
     // a queue whether or not the fold happens to be drawing it under one (a
     // running card stands in its own column and is still queued).
     if ((card.dependsOn?.length ?? 0) > 0) {
       out.push({
         id: 'unstack',
-        label: 'Take it out of the queue',
+        label: 'Out of the queue',
+        group: 'other',
         action: { kind: 'unstack' },
-      })
-    }
-    // Any kind may be queued: the edge is ordering for the eye, so a standing
-    // or pinned role filed after something is exactly that and nothing more.
-    {
-      out.push({
-        id: 'queue',
-        label: 'Queue behind…',
-        hint: 'It folds under that card until you take it out',
-        action: { kind: 'queue' },
       })
     }
   }

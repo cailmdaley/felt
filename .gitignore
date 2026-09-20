@@ -20,7 +20,6 @@ dist/
 
 # Build / cache artifacts
 _build/
-.mystra-cache/
 
 # Generated assets
 nanobanana-output/

@@ -87,22 +87,6 @@ describe('LongPressTracker', () => {
     expect(fired).toBe(0)
   })
 
-  it('swallows exactly one click after firing', () => {
-    const { t, clock } = tracker(() => {})
-    expect(t.consumeClick()).toBe(false)
-    t.down(1, { x: 0, y: 0 })
-    clock.elapse()
-    expect(t.consumeClick()).toBe(true)
-    expect(t.consumeClick()).toBe(false)
-  })
-
-  it('leaves an ordinary tap’s click alone', () => {
-    const { t } = tracker(() => {})
-    t.down(1, { x: 0, y: 0 })
-    t.cancel()
-    expect(t.consumeClick()).toBe(false)
-  })
-
   it('reports press state to the caller', () => {
     const states: boolean[] = []
     const clock = fakeClock()

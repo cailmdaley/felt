@@ -132,16 +132,10 @@ checkout that hasn't built the bundle gets a 404 with the hint
 
 `make ui` installs the UI dependencies and builds `ui/dist` on the current host.
 Both `make build` and `make restart` include this step.
-An optional MyST renderer is compiled into the bundle when its source is available at build time.
 The compiled UI requires no Node runtime to serve.
 
 When changing API routes, update the matching UI and `docs/reference/api.md` in the same change.
 Deploy with `make build` so the daemon and UI come from the same revision.
-
-**`GET /api/v1/astra` is a maintainer-only integration.** It is owner-routed and
-shells out to `daemon/priv/mystra/bake.mjs`, which needs `node` plus a built MySTRA
-checkout beside the repo on the host that owns the astra.yaml. A host without
-them fails `/astra` cleanly; the board and fibers are unaffected.
 
 **The repo builds three things.** The **felt CLI** (Go: `main.go`, `cmd/`,
 `internal/`) — including the `felt shuttle <verb>` subcommands, which ARE Go code

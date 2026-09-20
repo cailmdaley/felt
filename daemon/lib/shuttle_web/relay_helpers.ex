@@ -38,7 +38,7 @@ defmodule ShuttleWeb.RelayHelpers do
   carries its own charset; relaying with a `nil` charset avoids appending a
   SECOND one (`image/png; charset=utf-8; charset=utf-8`), which browsers reject —
   a doubled charset renders a remote-owned image as a broken-image icon. Shared
-  by the owner-routing GET endpoints (`/file`, `/astra`, `/sent-files`,
+  by the owner-routing GET endpoints (`/file`, `/sent-files`,
   `/api/v1/fibers/:id`), whose owning daemon returns raw bytes + a content-type.
   """
   def relay_bytes(conn, {:forwarded, status, content_type, body}) do

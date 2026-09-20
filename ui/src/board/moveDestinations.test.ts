@@ -20,18 +20,51 @@ const ids = (c: KanbanCard, column: Parameters<typeof moveDestinations>[1] = nul
   moveDestinations(c, column).map((d) => d.id)
 
 describe('moveDestinations', () => {
-  it('offers a plain draft the launch, the stash and a queue', () => {
+  it('names the places in board order: the Now columns, then the rest', () => {
     expect(ids(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts')).toEqual([
       'inFlight',
+      'awaitingReview',
       'stashed',
       'pin',
       'queue',
     ])
   })
 
+  it('labels every destination with the board\'s own name for the place', () => {
+    const labels = new Map(
+      moveDestinations(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts').map((d) => [d.id, d.label]),
+    )
+    expect(labels.get('inFlight')).toBe('In flight')
+    expect(labels.get('awaitingReview')).toBe('Awaiting review')
+    expect(labels.get('stashed')).toBe('Resting')
+    expect(labels.get('pin')).toBe('Pinned')
+  })
+
+  it('puts the Now columns in one group and everything else in the other', () => {
+    const d = moveDestinations(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts')
+    expect(d.filter((x) => x.group === 'column').map((x) => x.id)).toEqual(['inFlight', 'awaitingReview'])
+    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'pin', 'queue'])
+  })
+
+  // `transition`'s one no-op guard, `fromKind === target`.
   it('never offers the column the card already sits in', () => {
     expect(ids(card({ shuttleKind: 'oneshot' }), 'inFlight')).not.toContain('inFlight')
     expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('drafts')
+    const closed = card({ status: 'closed' })
+    expect(ids(closed, 'awaitingReview')).not.toContain('awaitingReview')
+    expect(ids(closed, 'awaitingReview')).toContain('drafts')
+  })
+
+  // Awaiting review is a plain lifecycle drop — no gate of its own, so it is
+  // offered from every column but its own, and from the surfaces too.
+  it('offers Awaiting review from anywhere the card is not already in it', () => {
+    expect(ids(card({ shuttleKind: 'oneshot' }), 'inFlight')).toContain('awaitingReview')
+    expect(ids(card({ status: 'open' }), 'drafts')).toContain('awaitingReview')
+    expect(ids(card({ status: 'open', effectiveHorizon: 'stashed' }), null)).toContain('awaitingReview')
+    expect(ids(card({ shuttleKind: 'standing', effectiveHorizon: 'stashed' }), null)).toContain(
+      'awaitingReview',
+    )
+    expect(ids(card({ status: 'closed', tempered: true }), 'tempered')).toContain('awaitingReview')
   })
 
   it('says nothing at all about a cycle — a span of time is not work', () => {

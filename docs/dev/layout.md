@@ -17,7 +17,7 @@ felt/
 │   ├── mix.exs  mix.lock  .formatter.exs
 │   ├── lib/                 dispatcher, poller, and HTTP API
 │   ├── config/              environment configuration
-│   ├── priv/                daemon assets, including mystra/bake.mjs
+│   ├── priv/                daemon assets
 │   ├── rel/                 release environment template
 │   ├── share/               launchd and systemd templates
 │   └── test/                daemon tests and shared parity fixtures

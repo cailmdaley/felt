@@ -1390,6 +1390,24 @@
   z-index: 10500;
   background: transparent;
 }
+/* The menu and its scrim live on `document.body`, OUTSIDE the Desk — so the
+   Desk's coarse-pointer opt-out (KanbanModal.css) does not reach them, and
+   iPadOS happily selects a row's label under the finger that is still holding
+   the press that opened it, callout and all. Unconditional, not behind a
+   media query: there is nothing in a menu of place names worth selecting on
+   any pointer. */
+.kbn-move-scrim,
+.kbn-move-menu,
+.kbn-move-menu * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* …except the one field made for typing into. */
+.kbn-move-menu .kbn-move-search {
+  -webkit-user-select: text;
+  user-select: text;
+}
 .kbn-move-menu {
   position: fixed;
   z-index: 10501;
@@ -1421,11 +1439,31 @@
   text-transform: uppercase;
   color: #9A8F80;
 }
+/* "MOVE TO" never shrinks — it is two words and the title of the menu. Only
+ * the card name beside it gives way. */
 .kbn-move-heading-text {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* The card being moved, riding in the "MOVE TO" heading: the menu's subject,
+ * not its title, so it drops the heading's uppercase mono voice and takes the
+ * ellipsis when a fiber name runs long. */
+.kbn-move-heading-sub {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: #B3A899;
+}
+/* Between the Now columns and everything else. A hairline, because the two
+ * bands are one list read top to bottom, not two menus. */
+.kbn-move-rule {
+  height: 1px;
+  margin: 5px 14px;
+  background: rgba(27, 22, 17, 0.12);
 }
 .kbn-move-back {
   flex: 0 0 auto;
@@ -1718,6 +1756,13 @@
   }
   .kbn-move-sheet .kbn-move-item + .kbn-move-item {
     border-top: 1px solid rgba(27, 22, 17, 0.08);
+  }
+  .kbn-move-sheet .kbn-move-rule {
+    margin: 0;
+    height: 9px;
+    background: rgba(27, 22, 17, 0.05);
+    border-top: 1px solid rgba(27, 22, 17, 0.1);
+    border-bottom: 1px solid rgba(27, 22, 17, 0.1);
   }
   .kbn-move-sheet .kbn-move-back { font-size: 20px; padding: 0 8px; }
   .kbn-move-sheet .kbn-move-search { margin: 0 18px 8px; padding: 10px; }

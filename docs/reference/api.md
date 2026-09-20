@@ -67,7 +67,6 @@ is not enough.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
-| `GET /astra` | owner-routed | Bake an `astra.yaml` to MyST mdast. **Maintainer-only**: needs `node` plus a built MySTRA checkout beside the repo on the owning host |
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the

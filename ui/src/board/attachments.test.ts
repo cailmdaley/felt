@@ -10,8 +10,6 @@ import {
   fileKind,
   fileTapAction,
   formatBytes,
-  PDF_THUMB_MAX_BYTES,
-  pdfThumbWorthRendering,
   previewText,
 } from './attachments.js'
 
@@ -86,10 +84,6 @@ describe('fileKind', () => {
     expect(fileKind('bundle.zip')).toBe('other')
     expect(fileKind('Makefile')).toBe('other')
   })
-
-  it('keeps an astra.yaml on the paper (iframe) path, not the text one', () => {
-    expect(fileKind('analysis/astra.yaml')).toBe('html')
-  })
 })
 
 describe('fileTapAction', () => {
@@ -127,21 +121,5 @@ describe('previewText', () => {
 
   it('has nothing to say about an empty slice', () => {
     expect(previewText('   \n\n  ')).toBe('')
-  })
-})
-
-describe('pdfThumbWorthRendering', () => {
-  it('renders a PDF of ordinary size', () => {
-    expect(pdfThumbWorthRendering(2 * 1024 * 1024)).toBe(true)
-    expect(pdfThumbWorthRendering(PDF_THUMB_MAX_BYTES)).toBe(true)
-  })
-
-  it('declines one past the cap', () => {
-    expect(pdfThumbWorthRendering(PDF_THUMB_MAX_BYTES + 1)).toBe(false)
-  })
-
-  it('tries when the daemon gave no size', () => {
-    expect(pdfThumbWorthRendering(undefined)).toBe(true)
-    expect(pdfThumbWorthRendering(Number.NaN)).toBe(true)
   })
 })

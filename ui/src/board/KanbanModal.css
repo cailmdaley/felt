@@ -1412,6 +1412,18 @@
 .kbn-card {
   -webkit-touch-callout: none;
 }
+/* Under a finger the Desk is a surface of handles, not a page of text: iPadOS
+   in particular answers a held finger by selecting the nearest selectable
+   run — the card refuses, so it takes the column behind it, paints the page
+   blue and raises Copy/Look Up over our menu. Nothing on the Desk is copied by
+   selection on a touchscreen, so the whole view opts out. */
+@media (pointer: coarse) {
+  .kbn-desk, .kbn-desk * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
 .kbn-card.kbn-longpress-held {
   transform: scale(0.985);
   background: #F6EFDD;

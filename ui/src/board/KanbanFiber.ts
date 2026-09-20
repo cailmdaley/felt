@@ -66,6 +66,12 @@ export interface Fiber {
   /** `shuttle.session.id` — the most recently dispatched worker's session UUID
    * when frontmatter still carries one. Display-only hint data. */
   shuttleSessionId?: string;
+  /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
+   * daemon most recently launched for this fiber. Machine-managed, and the ONLY
+   * value on the row that changes when a fresh dispatch replaces one session with
+   * another: the tmux session name is keyed on the fiber's uid and is identical
+   * across dispatches. Absent for a codex/pi worker until the scrape backfills it. */
+  shuttleSessionUuid?: string;
   /** `shuttle.runtime.dispatched_at` — RFC3339 INSTANT the daemon stamped when
    * it launched the most recent worker. Machine-managed; read-only here. */
   shuttleDispatchedAt?: string;
@@ -168,6 +174,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   let shuttleKind: 'oneshot' | 'standing' | 'pinned' | undefined;
   let shuttleSessionId: string | undefined;
+  let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
   let shuttleAgent: string | undefined;
@@ -198,6 +205,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       const r = runtime as Record<string, unknown>;
       shuttleDispatchedAt = pickIsoString(r, 'dispatched_at');
       shuttleHandedOffAt = pickIsoString(r, 'handed_off_at');
+      const uuid = r.session_uuid;
+      if (typeof uuid === 'string' && uuid.trim()) shuttleSessionUuid = uuid.trim();
     }
 
     if (typeof s.agent === 'string' && s.agent) shuttleAgent = s.agent;
@@ -256,6 +265,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
     shuttleSessionId,
+    shuttleSessionUuid,
     shuttleDispatchedAt,
     shuttleHandedOffAt,
     shuttleAgent,

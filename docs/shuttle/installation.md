@@ -1040,11 +1040,8 @@ Go, Elixir/OTP, and Node/npm must be available in the build shell.
 The fleet deploy helper uses each host's login shell to load its toolchain.
 Fetched releases need none of these build tools.
 
-**The UI build needs no private checkout.** `npm run build` runs `tsc --noEmit
-&& vite build`. The `src/paper` entry imports `@lightcone/renderer`, a private
-package — but `ui/src/paper/lightcone.d.ts` ships ambient type declarations
-that satisfy the typecheck without it, and the Vite build drops the paper entry
-when the real package isn't resolvable. A fresh clone builds `ui/dist` fine:
+**The UI build needs nothing beyond the repo.** `npm run build` runs `tsc
+--noEmit && vite build`. A fresh clone builds `ui/dist` fine:
 
 ```bash
 cd ui && npm ci && npm run build

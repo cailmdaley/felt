@@ -14,6 +14,8 @@
  * pointer events into calls on it.
  */
 
+import { suppressNextClick } from './dismissGesture.js'
+
 export const LONG_PRESS_HOLD_MS = 450
 export const LONG_PRESS_SLOP_PX = 8
 
@@ -46,11 +48,6 @@ export class LongPressTracker {
   private timer: number | null = null
   private origin: LongPressPoint | null = null
   private pointerId: number | null = null
-  /** Set when a press fires, cleared by the first `consumeClick` after it. The
-   *  gesture and the click are the SAME pointer sequence, so the browser sends
-   *  a click straight after the menu opens; without this the card would open
-   *  behind its own menu. */
-  private firedPendingClick = false
 
   constructor(opts: LongPressOptions) {
     this.holdMs = opts.holdMs ?? LONG_PRESS_HOLD_MS
@@ -79,8 +76,10 @@ export class LongPressTracker {
       this.timer = null
       this.origin = null
       this.pointerId = null
-      this.firedPendingClick = true
       this.onPressChange(false)
+      // Any selection iOS started under the held finger goes before the menu
+      // rises, or its Copy/Look Up callout follows the menu up.
+      globalThis.getSelection?.()?.removeAllRanges()
       this.onFire()
     }, this.holdMs)
     this.onPressChange(true)
@@ -104,12 +103,6 @@ export class LongPressTracker {
     this.pointerId = null
   }
 
-  /** True exactly once after a fire: "swallow this click". */
-  consumeClick(): boolean {
-    if (!this.firedPendingClick) return false
-    this.firedPendingClick = false
-    return true
-  }
 }
 
 /**
@@ -118,9 +111,17 @@ export class LongPressTracker {
  * `pointerdown` is listened for on the element and the rest on the element too
  * — a pointer capture would fight the native drag, so instead the window's
  * `pointerup`/`pointercancel` close the gesture wherever the finger ends up.
- * `click` is captured (not bubbled) so the suppression lands before the card's
- * own open handler, and `contextmenu` is refused while pressed so iOS does not
- * raise its selection callout over the menu we are about to open.
+ * `contextmenu` is refused while pressed so iOS does not raise its selection
+ * callout over the menu we are about to open.
+ *
+ * THE CLICK THAT FOLLOWS A FIRED PRESS is swallowed AT THE WINDOW, not at the
+ * card. The gesture and the click are one pointer sequence, so the browser
+ * sends a click as soon as the finger lifts — but by then the menu's scrim is
+ * covering the card, and the click's target is the SCRIM. A suppression that
+ * waited on the card would never see that click, would stay armed, and would
+ * eat the reader's next real tap instead (a card that refuses to open once,
+ * for no visible reason). One-shot and self-expiring at the window catches the
+ * click wherever it lands and forgets about it if none comes.
  */
 export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => void {
   const tracker = new LongPressTracker({
@@ -128,6 +129,10 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     onPressChange: (pressing) => {
       el.classList.toggle('kbn-longpress-held', pressing)
       opts.onPressChange?.(pressing)
+    },
+    onFire: () => {
+      suppressNextClick(window)
+      opts.onFire()
     },
   })
 
@@ -139,11 +144,6 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
   }
   const onMove = (e: PointerEvent): void => tracker.move(e.pointerId, { x: e.clientX, y: e.clientY })
   const onEnd = (): void => tracker.cancel()
-  const onClick = (e: MouseEvent): void => {
-    if (!tracker.consumeClick()) return
-    e.preventDefault()
-    e.stopPropagation()
-  }
   const onContextMenu = (e: Event): void => {
     if (tracker.pressing) e.preventDefault()
   }
@@ -151,7 +151,6 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
   el.addEventListener('pointerdown', onDown)
   el.addEventListener('pointermove', onMove)
   el.addEventListener('contextmenu', onContextMenu)
-  el.addEventListener('click', onClick, true)
   // A drag that gets going is the other reading of the same press — desktop
   // keeps its drag, and the timer must not fire mid-flight.
   el.addEventListener('dragstart', onEnd)
@@ -164,7 +163,6 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     el.removeEventListener('pointerdown', onDown)
     el.removeEventListener('pointermove', onMove)
     el.removeEventListener('contextmenu', onContextMenu)
-    el.removeEventListener('click', onClick, true)
     el.removeEventListener('dragstart', onEnd)
     window.removeEventListener('pointerup', onEnd)
     window.removeEventListener('pointercancel', onEnd)

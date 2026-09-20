@@ -85,5 +85,73 @@ defmodule Shuttle.SessionLinkTest do
     assert SessionLink.cached_url(@unbridged, root: root) == nil
     # Within the retry window the miss is served from memory.
     assert :persistent_term.get({SessionLink, @unbridged}) |> elem(0) == nil
+    # A miss records when it FIRST missed, so the young window survives re-checks.
+    assert :persistent_term.get({SessionLink, @unbridged}) |> tuple_size() == 3
+  end
+
+  # ── retry cadence ──────────────────────────────────────────────────────────
+  #
+  # The cadence is wall-clock, so these seed the memo directly with a synthetic
+  # `{nil, checked_at, first_miss_at}` rather than sleeping. The fixture always
+  # HAS a link on disk: whether `cached_url` returns it is exactly the question
+  # of whether the miss was due for a re-check.
+
+  defp bridged_session(root) do
+    session =
+      "1234abcd-0000-4000-8000-" <>
+        String.pad_leading("#{System.unique_integer([:positive])}", 12, "0")
+
+    on_exit(fn -> SessionLink.forget(session) end)
+
+    File.write!(
+      Path.join([root, "-Users-cail-felt", "#{session}.jsonl"]),
+      Jason.encode!(bridge(@last)) <> "\n"
+    )
+
+    session
+  end
+
+  defp seed_miss(session, checked_ago_ms, first_miss_ago_ms) do
+    now = System.monotonic_time(:millisecond)
+
+    :persistent_term.put(
+      {SessionLink, session},
+      {nil, now - checked_ago_ms, now - first_miss_ago_ms}
+    )
+  end
+
+  test "a young session's miss is re-checked within seconds" do
+    root = default_tree()
+    session = bridged_session(root)
+    # First miss 4s ago, last checked 4s ago — past the 3s young retry.
+    seed_miss(session, 4_000, 4_000)
+    assert SessionLink.cached_url(session, root: root) == @last
+  end
+
+  test "a young session's miss inside the young retry is still served from memory" do
+    root = default_tree()
+    session = bridged_session(root)
+    seed_miss(session, 1_000, 1_000)
+    assert SessionLink.cached_url(session, root: root) == nil
+  end
+
+  test "past the young window the miss settles back to the minute retry" do
+    root = default_tree()
+    session = bridged_session(root)
+    # First missed 6 minutes ago (old), last checked 10s ago — under 60s.
+    seed_miss(session, 10_000, 360_000)
+    assert SessionLink.cached_url(session, root: root) == nil
+
+    # ... and is re-read once the minute is up.
+    seed_miss(session, 70_000, 360_000)
+    assert SessionLink.cached_url(session, root: root) == @last
+  end
+
+  test "a found link is never re-read, however young the session" do
+    root = default_tree()
+    session = bridged_session(root)
+    assert SessionLink.cached_url(session, root: root) == @last
+    File.rm!(Path.join([root, "-Users-cail-felt", "#{session}.jsonl"]))
+    assert SessionLink.cached_url(session, root: root) == @last
   end
 end
