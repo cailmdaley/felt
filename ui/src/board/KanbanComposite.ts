@@ -44,6 +44,9 @@ import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 interface CompositeRuntime {
   /** Owner-served tmux session name for a CLI worker. App workers have none. */
   tmuxSession?: string;
+  surface?: 'cli' | 'app';
+  agent?: string;
+  sessionUuid?: string;
   /** Owner-served activity category for a tracked LIVE worker — one of:
    *   `"attention"` (last hook event is a Notification — "needs you",
    *     sorts top), `"waiting"` (last event is stop/subagent_stop — the worker
@@ -190,8 +193,11 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
       ? value.session_link
       : undefined;
   const desktopLink = validDesktopThreadLink(value.desktop_link);
+  const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
+  const agent = typeof value.agent === 'string' ? value.agent : undefined;
+  const sessionUuid = typeof value.session_uuid === 'string' ? value.session_uuid : undefined;
   if (!tmuxSession && !phase) return undefined;
-  return { tmuxSession, phase, lastActivityAt, sessionLink, desktopLink, launchError };
+  return { tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, sessionLink, desktopLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

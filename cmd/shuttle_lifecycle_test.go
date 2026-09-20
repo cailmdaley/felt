@@ -545,6 +545,39 @@ func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
 	}
 }
 
+func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
+	for _, status := range []string{felt.StatusOpen, felt.StatusActive, felt.StatusClosed} {
+		for _, verb := range []string{"set-agent", "set-model"} {
+			t.Run(status+"/"+verb, func(t *testing.T) {
+				defer saveShuttleGlobals()()
+				dir, storage := newStore(t)
+				seedShuttleRole(t, storage, "f", status, map[string]any{
+					"kind": "oneshot", "agent": "claude-opus",
+					"runtime": map[string]any{"session_uuid": "keep-conversation", "dispatched_at": "2026-06-21T00:00:00Z", "handed_off_at": "2026-06-21T01:00:00Z"},
+				}, nil)
+				before := mustRead(t, storage, "f")
+				args := []string{"shuttle", verb, "f", "claude-sonnet"}
+				if verb == "set-agent" {
+					args = append(args, "--effort", "high", "--chrome", "--surface", "cli")
+				}
+				if out, err := runCommand(t, dir, args...); err != nil {
+					t.Fatalf("settings: %v\n%s", err, out)
+				}
+				after := mustRead(t, storage, "f")
+				if after.Status != before.Status || after.Outcome != before.Outcome {
+					t.Fatalf("settings changed lifecycle: before=%+v after=%+v", before, after)
+				}
+				raw, _ := os.ReadFile(storage.Path(after.ID))
+				for _, marker := range []string{"keep-conversation", "2026-06-21T00:00:00Z", "2026-06-21T01:00:00Z"} {
+					if !strings.Contains(string(raw), marker) {
+						t.Fatalf("settings erased runtime marker %s", marker)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
 	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)

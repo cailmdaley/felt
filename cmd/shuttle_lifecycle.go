@@ -532,7 +532,7 @@ var setModelCmd = &cobra.Command{
 	Long: `Updates shuttle.agent to the given agent ID, validated against the agent
 registry (together with the block's existing effort/chrome axes) before writing.
 The single field is set surgically so the daemon-owned runtime keys are
-preserved.`,
+preserved. This saves the next-launch agent without starting or replacing a worker.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -584,7 +584,8 @@ var setAgentCmd = &cobra.Command{
 them to the shuttle: block after validating the combination against the agent
 registry's per-harness constraints. The base agent argument is optional: omit it
 to mutate only the axes of the current agent. Pass --effort "" to clear effort
-back to the harness default.`,
+back to the harness default. Settings apply to the next launch; this command
+does not start, stop, resume, or replace a worker.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()

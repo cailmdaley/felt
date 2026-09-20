@@ -419,6 +419,37 @@ defmodule Shuttle.AppWorkersTest do
     assert WorkerBackend.session_status(Runner, session) == :gone
   end
 
+  test "next-launch configuration does not replace or relabel an owned app conversation" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+    :ok = AppWorkers.update("app-session-1", %{"agent_id" => "codex-original"})
+    calls = App.calls()
+
+    Runner.set_shuttle(
+      "tests/app",
+      "kind: oneshot\nagent: claude-sonnet\nsurface: cli\nproject_dir: /tmp\n",
+      "active"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert %{session: ^session, agent_id: "codex-original"} =
+             Poller.worker_status(poller, "tests/app")
+    assert :ok = Poller.refresh_document(poller, "tests/app")
+    assert %{session: ^session, agent_id: "codex-original"} =
+             Poller.worker_status(poller, "tests/app")
+    assert App.calls() == calls
+    assert WorkerBackend.session_status(Runner, session) == :alive
+    assert {:ok, %{"active" => true, "agent_id" => "codex-original"}} =
+             AppWorkers.get("app-session-1")
+  end
+
   test "stopped app resumes its exact UUID without a CLI fallback" do
     fiber("tests/app")
     assert {:ok, session} = dispatch("tests/app")

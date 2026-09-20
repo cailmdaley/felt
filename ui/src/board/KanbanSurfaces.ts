@@ -1644,7 +1644,7 @@ export class KanbanSurfaceRenderer {
         (card.runtimePhase === 'waiting' && idleMs >= 60_000))
     const showPhase =
       kind === 'inFlight' &&
-      ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || (card.shuttleSurface === 'app' && !!card.sessionUuid)) &&
+      ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || ((card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid)) &&
       !card.runningWorker
     // The RIGHT region: at most one of phase badge / held pill / worker pill
     // is ever live at once (they're mutually exclusive states), collected
@@ -1654,7 +1654,7 @@ export class KanbanSurfaceRenderer {
     if (showPhase) {
       const phaseName = card.runtimePhase ?? 'working'
       const title = RUNTIME_PHASE_BADGES[phaseName]?.title ?? 'The app conversation is working.'
-      const app = card.shuttleSurface === 'app' && !!card.sessionUuid
+      const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
       const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
       const phase = document.createElement(app && appTarget.href ? 'a' : 'span')
       phase.className = app

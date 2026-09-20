@@ -56,6 +56,50 @@ try {
   if (process.env.SCREENSHOT_DIR) {
     await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'detail-phone.png') })
   }
+  // Editing a live worker's settings must never substitute for a launch gesture.
+  await page.evaluate(() => {
+    window.settingWrites = []
+    const originalFetch = window.fetch
+    window.fetch = (input, init) => {
+      if (init?.method === 'POST') window.settingWrites.push({ url: String(input), body: JSON.parse(init.body) })
+      return originalFetch(input, init)
+    }
+  })
+  const dialogs = []
+  page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept() })
+  const detailAgent = page.locator('#kbn-detail-agent')
+  await detailAgent.selectOption('claude-opus')
+  await page.locator('#kbn-detail-chrome').check()
+  await detailAgent.selectOption('codex-terra')
+  await page.locator('#kbn-detail-effort').selectOption('high')
+  await detailSurface.selectOption('cli')
+  await page.waitForTimeout(200)
+  const writes = await page.evaluate(() => window.settingWrites)
+  assert.equal(writes.length, 5)
+  assert.ok(writes.every(write => write.url.endsWith('/api/v1/lifecycle') && write.body.action === 'set-agent'), JSON.stringify(writes))
+  assert.deepEqual(dialogs, [], 'settings do not ask to replace the live session')
+  assert.ok(await page.getByText('Settings are saved for the next launch. The current session keeps running unchanged.').isVisible())
+
+
+  await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
+  await page.locator('.kbn-detail-controls-toggle').click()
+  await page.evaluate(() => {
+    window.settingWrites = []
+    const originalFetch = window.fetch
+    window.fetch = (input, init) => {
+      if (init?.method === 'POST') window.settingWrites.push({ url: String(input), body: JSON.parse(init.body) })
+      return originalFetch(input, init)
+    }
+  })
+  await page.locator('#kbn-detail-agent').selectOption('claude-opus')
+  await page.locator('#kbn-detail-chrome').check()
+  await page.locator('#kbn-detail-agent').selectOption('codex-terra')
+  await page.waitForTimeout(200)
+  const terminalWrites = await page.evaluate(() => window.settingWrites)
+  assert.equal(terminalWrites.length, 3)
+  assert.ok(terminalWrites.every(write => write.url.endsWith('/api/v1/lifecycle') && write.body.action === 'set-agent'), JSON.stringify(terminalWrites))
+  assert.deepEqual(dialogs, [], 'changing terminal model or Chrome must not trigger restart')
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
@@ -69,7 +113,7 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture, Stash and existing-task session choices; desktop/phone geometry passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live app and terminal settings save without dispatch passed')
 } finally {
   await browser.close()
 }

@@ -162,6 +162,9 @@ export interface KanbanCard {
   /** `shuttle.surface` — app for a ChatGPT-backed Codex run; absent and cli
    * both retain the established terminal execution. */
   shuttleSurface?: 'cli' | 'app'
+  /** Observed worker identity, independent of next-launch configuration. */
+  workerSurface?: 'cli' | 'app'
+  workerAgent?: string
   /**
    * `shuttle.host` — the daemon that owns this fiber's dispatch (e.g.
    * `cluster-a`, `my-laptop`). Routes a force-dispatch to the owning daemon and
@@ -251,10 +254,10 @@ export interface KanbanCard {
  * opener affordance.
  */
 export function hasWorkerToStop(
-  card: Pick<KanbanCard, 'runningWorker' | 'shuttleSurface' | 'sessionUuid'>,
+  card: Pick<KanbanCard, 'runningWorker' | 'shuttleSurface' | 'workerSurface' | 'sessionUuid'>,
 ): boolean {
   return Boolean(card.runningWorker) ||
-    (card.shuttleSurface === 'app' && typeof card.sessionUuid === 'string' && card.sessionUuid.length > 0)
+    ((card.workerSurface ?? card.shuttleSurface) === 'app' && typeof card.sessionUuid === 'string' && card.sessionUuid.length > 0)
 }
 
 /**

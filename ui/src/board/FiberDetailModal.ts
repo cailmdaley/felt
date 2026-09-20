@@ -187,22 +187,6 @@ export function sessionWindow(
   }
 }
 
-/** A live worker must be replaced before a changed Chrome axis can take effect. */
-export function chromeRestartNeeded(
-  card: Pick<KanbanCard, 'runningWorker'>,
-  currentChrome: boolean,
-  nextChrome: boolean,
-): boolean {
-  return Boolean(card.runningWorker) && currentChrome !== nextChrome
-}
-
-/** The short directive the replacement worker sees in its opening prompt. */
-export function chromeRestartDirective(chrome: boolean): string {
-  return chrome
-    ? 'This session was resumed to give you Chrome.'
-    : 'This session was restarted with Chrome disabled.'
-}
-
 /** {@link sessionWindow} as the one mono line the detail panel shows. */
 function buildSessionWindow(card: KanbanCard): HTMLElement | null {
   const window_ = sessionWindow(card)
@@ -646,7 +630,7 @@ export class FiberDetailModal {
     // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
     const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
-    if (card.shuttleSurface === 'app' && card.sessionUuid) {
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
       const mark = document.createElement(appTarget.href ? 'a' : 'span')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
       mark.textContent = workerStatusLabel(card.runtimePhase, card.launchError)
@@ -737,7 +721,7 @@ export class FiberDetailModal {
     const prose = document.createElement('article')
     prose.className = 'kbn-detail-prose'
     prose.innerHTML = '<p class="kbn-detail-prose-loading">Loading…</p>'
-    if (card.shuttleSurface === 'app' && card.sessionUuid && !appTarget.href) {
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid && !appTarget.href) {
       const guidance = document.createElement('p')
       guidance.className = 'kbn-detail-app-guide'
       guidance.textContent = appTarget.guidance
@@ -2133,7 +2117,10 @@ export class FiberDetailModal {
 
     const messageTa = document.createElement('textarea')
     messageTa.className = 'kbn-detail-directive'
-    messageTa.placeholder = 'Message for the next worker (optional)…'
+    messageTa.placeholder = 'What should the worker do next?'
+    const messageHelp = document.createElement('div')
+    messageHelp.className = 'kbn-detail-session-help'
+    messageHelp.textContent = 'Add instructions before New session or Resume. Leave blank to follow the constitution and current handoff.'
     messageTa.rows = 3
     messageTa.setAttribute('aria-label', 'Message for next worker')
     swallowDrag(messageTa)
@@ -2154,7 +2141,6 @@ export class FiberDetailModal {
 
     const actionsRow = document.createElement('div')
     actionsRow.className = 'kbn-detail-actions-row'
-    let freshDispatchBtn: HTMLButtonElement | null = null
 
     const temperBtn = this.buildActionBtn('Temper', 'tempered')
     temperBtn.title = 'Close as tempered (human-accepted)'
@@ -2164,12 +2150,11 @@ export class FiberDetailModal {
 
     if (shuttleManaged) {
       const requeueBtn = this.buildActionBtn('New session ▸', 'primary')
-      freshDispatchBtn = requeueBtn
       requeueBtn.title =
-        'Cut any open session and dispatch a fresh worker reading ## Status; outcome preserved'
+        'Start a fresh worker with your instructions, constitution and current handoff; outcome preserved'
 
       const resumeBtn = this.buildActionBtn('Resume ▸', 'primary')
-      resumeBtn.title = 'Resume the previous worker session (claude --resume); outcome preserved'
+      resumeBtn.title = 'Resume the previous conversation with your instructions; outcome preserved'
       // Resume is always offered for a shuttle-managed card — never gated on a
       // card-visible session id. The Claude session id lives in the fiber's
       // `shuttle.session_uuid` frontmatter field, stamped by the daemon at
@@ -2212,7 +2197,7 @@ export class FiberDetailModal {
     // read as distinct clusters without a second row.
     if (shuttleManaged) {
       actionsRow.prepend(waitBtn)
-      actionsSec.append(messageTa, actionsRow, actionsErr)
+      actionsSec.append(messageTa, messageHelp, actionsRow, actionsErr)
     } else {
       actionsSec.append(actionsRow, actionsErr)
     }
@@ -2241,7 +2226,13 @@ export class FiberDetailModal {
     let selectedSchedule = originalSchedule
     let selectedTz = originalTz
 
-    const dispatchSec = this.buildSection(shuttleManaged ? 'Worker' : 'Promote to shuttle')
+    const dispatchSec = this.buildSection(shuttleManaged ? 'Next session settings' : 'Promote to shuttle')
+    if (shuttleManaged) {
+      const settingsHelp = document.createElement('div')
+      settingsHelp.className = 'kbn-detail-session-help'
+      settingsHelp.textContent = 'Settings are saved for the next launch. The current session keeps running unchanged.'
+      dispatchSec.append(settingsHelp)
+    }
     const promoteBtn = shuttleManaged ? null : this.buildActionBtn('Promote to shuttle', 'primary')
     const promoteErr = document.createElement('div')
     promoteErr.className = 'kbn-detail-error'
@@ -2603,12 +2594,6 @@ export class FiberDetailModal {
     // The picker repopulates effort options + chrome availability from the
     // selected agent's registry metadata and commits on any axis change.
     {
-      let committedAxes = {
-        agent: originalAgent,
-        effort: card.shuttleEffort ?? '',
-        chrome: card.shuttleChrome ?? false,
-        surface: persistedSurface(card.shuttleSurface),
-      }
       // For a shuttle-managed card every axis change commits via set-agent;
       // for a human card the picker only populates the base-agent select the
       // promote button reads (no block to mutate yet → no-op commit).
@@ -2622,30 +2607,8 @@ export class FiberDetailModal {
         },
         shuttleManaged
           ? (axes) => {
-              const restartForChrome = chromeRestartNeeded(card, committedAxes.chrome, axes.chrome)
-
-              if (restartForChrome) {
-                const setting = axes.chrome ? 'with Chrome enabled' : 'with Chrome disabled'
-                const ok = window.confirm(
-                  `Would you like to restart “${card.name}” ${setting}?\n\n` +
-                    'The current session will close, and a fresh session will start with this setting.',
-                )
-                if (!ok) return false
-              }
-
               void this.commitAxes(card, axes, statusEl, errorEl, () => {
-                committedAxes = { ...axes }
                 baseline.agent = axes.agent
-                if (restartForChrome && freshDispatchBtn) {
-                  void this.runRequeue(
-                    card,
-                    chromeRestartDirective(axes.chrome),
-                    'fresh',
-                    freshDispatchBtn,
-                    actionsErr,
-                    true,
-                  )
-                }
               })
               return true
             }

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { hasWorkerToStop } from './KanbanTypes.js'
+import { cardFromCompositeEntry } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 
 describe('composite app runtime', () => {
@@ -24,4 +26,26 @@ describe('composite app runtime', () => {
     expect(feed.entries[0].runtime?.sessionLink).toBeUndefined()
   })
 
+})
+
+describe('observed worker identity', () => {
+  it.each(['app', 'cli'] as const)('keeps a live %s worker separate from changed launch settings', (surface) => {
+    const nextSurface = surface === 'app' ? 'cli' : 'app'
+    const feed = parseCompositeFeed({ fibers: [{
+      origin: 'local', felt_store: '/felt', path: 'idea.md',
+      fiber: { id: 'idea', name: 'Idea', status: 'active', shuttle: {
+        kind: 'oneshot', agent: 'next-agent', surface: nextSurface,
+        runtime: { session_uuid: 'saved-id' },
+      } },
+      runtime: { state: 'running', surface, agent: 'actual-agent',
+        session_uuid: 'actual-id', tmux_session: surface === 'cli' ? 'actual-tmux' : null },
+    }] })
+    const card = cardFromCompositeEntry(feed.entries[0])
+    expect(card.shuttleSurface).toBe(nextSurface)
+    expect(card.shuttleAgent).toBe('next-agent')
+    expect(card.workerSurface).toBe(surface)
+    expect(card.workerAgent).toBe('actual-agent')
+    expect(card.sessionUuid).toBe('actual-id')
+    expect(hasWorkerToStop(card)).toBe(true)
+  })
 })
