@@ -453,6 +453,8 @@ defmodule Shuttle.Messaging do
     if Map.get(receipt, "message_id") == request.raw["message_id"] and
          Map.get(receipt, "address") == expected_address and
          Map.get(receipt, "status") in @receipt_statuses and
+         (not Map.get(request.raw, "wake", false) or
+            receipt["status"] in ["accepted", "rejected", "unknown"]) and
          is_binary(Map.get(receipt, "transport")) and
          Map.get(receipt, "transport") != "" and
          (is_nil(Map.get(receipt, "detail")) or is_binary(Map.get(receipt, "detail"))) and

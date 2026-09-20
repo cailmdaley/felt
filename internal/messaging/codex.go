@@ -30,7 +30,8 @@ type codexThread struct {
 	Preview string  `json:"preview"`
 	CWD     string  `json:"cwd"`
 	Status  struct {
-		Type string `json:"type"`
+		Type        string   `json:"type"`
+		ActiveFlags []string `json:"activeFlags"`
 	} `json:"status"`
 	Turns                []struct{ ID, Status string } `json:"turns"`
 	CanAcceptDirectInput *bool                         `json:"canAcceptDirectInput"`
@@ -236,13 +237,20 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 	text := labeled(req)
 	switch t.Status.Type {
 	case "active":
+		if req.Wake {
+			for _, flag := range t.Status.ActiveFlags {
+				if flag == "waitingOnApproval" || flag == "waitingOnUserInput" {
+					return rejected(req, "codex-app-server", "active turn requires approval or user input; answer its pending request before waking"), errCode("pending_input", "active turn requires approval or user input; answer its pending request before waking")
+				}
+			}
+		}
 		var turns struct {
 			Data []struct{ ID, Status string } `json:"data"`
 		}
 		if err = r.call(ctx, "thread/turns/list", map[string]any{"threadId": a.ID, "limit": 1, "sortDirection": "desc"}, &turns); err != nil {
 			return rejected(req, "codex-app-server", "could not inspect active turn"), errCode("preflight_failed", "could not inspect active turn: %v", err)
 		}
-		if len(turns.Data) == 0 || turns.Data[0].Status != "inProgress" {
+		if len(turns.Data) == 0 || turns.Data[0].ID == "" || turns.Data[0].Status != "inProgress" {
 			return rejected(req, "codex-app-server", "active turn unavailable"), errCode("busy_race", "active turn unavailable")
 		}
 		var result steerResult
@@ -257,11 +265,11 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 		if req.Wake {
 			var result startResult
 			err = r.call(ctx, "turn/start", map[string]any{"threadId": a.ID, "input": userInput(text), "clientUserMessageId": req.MessageID}, &result)
-			if err == nil && result.Turn.ID != "" && result.Turn.Status != "" {
+			if err == nil && result.Turn.ID != "" && (result.Turn.Status == "inProgress" || result.Turn.Status == "completed") {
 				return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "codex-app-server", Detail: "started turn"}, nil
 			}
 			if err == nil {
-				err = fmt.Errorf("codex turn/start returned incomplete acknowledgement")
+				err = fmt.Errorf("codex turn/start did not confirm a running or completed turn (status %q)", result.Turn.Status)
 			}
 		} else {
 			items := []map[string]any{{"type": "message", "role": "user", "content": []map[string]any{{"type": "input_text", "text": text}}}}

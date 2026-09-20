@@ -40,8 +40,8 @@ func decodePiReply(b []byte) (piReply, error) {
 	if wire.OK == nil {
 		return piReply{}, fmt.Errorf("missing boolean ok")
 	}
-	if *wire.OK && wire.Delivery == "" {
-		return piReply{}, fmt.Errorf("missing delivery acknowledgement")
+	if *wire.OK && wire.Delivery != "steer" && wire.Delivery != "follow_up" {
+		return piReply{}, fmt.Errorf("unsupported delivery acknowledgement")
 	}
 	return piReply{OK: *wire.OK, Delivery: wire.Delivery, Error: wire.Error}, nil
 }
@@ -162,7 +162,7 @@ func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error
 	d := net.Dialer{Timeout: 2 * time.Second}
 	c, err := d.DialContext(ctx, "unix", j.SocketPath)
 	if err != nil {
-		return Receipt{}, err
+		return rejected(r, "pi-rpc+unix-socket", "worker socket unavailable"), errCode("preflight_failed", "worker socket unavailable: %v", err)
 	}
 	defer c.Close()
 	deadline := time.Now().Add(5 * time.Second)
@@ -185,7 +185,9 @@ func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error
 		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker returned malformed reply"}, errCode("ambiguous_delivery", "Confer returned malformed reply")
 	}
 	if !resp.OK {
-		return rejected(r, "pi-rpc+unix-socket", resp.Error), errCode("peer_rejected", "Confer rejected message: %s", resp.Error)
+		// The worker uses ok=false for both explicit RPC rejection and lost
+		// acknowledgements after writing the prompt. It cannot prove no turn ran.
+		return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusUnknown, Transport: "pi-rpc+unix-socket", Detail: "worker did not confirm delivery: " + resp.Error}, errCode("ambiguous_delivery", "Confer delivery outcome unknown: %s", resp.Error)
 	}
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusAccepted, Transport: "pi-rpc+unix-socket", Detail: resp.Delivery}, nil
 }

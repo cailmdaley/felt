@@ -352,6 +352,9 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	default:
 		return messaging.Receipt{}, fmt.Errorf("daemon returned an unsupported receipt status %q; delivery is unknown", receipt.Status)
 	}
+	if request.Wake && receipt.Status != messaging.StatusAccepted && receipt.Status != messaging.StatusRejected && receipt.Status != messaging.StatusUnknown {
+		return messaging.Receipt{}, fmt.Errorf("daemon did not acknowledge the requested wake (status %q); delivery is unknown", receipt.Status)
+	}
 	if !validMessageFilesReceipt(request, receipt) {
 		return messaging.Receipt{}, fmt.Errorf("daemon returned mismatched or incomplete file receipts; delivery is unknown")
 	}

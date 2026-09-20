@@ -148,6 +148,22 @@ Unix control socket. CLI sessions use supported context hooks. Pi sessions use
 Confer's existing Unix RPC socket and require `--wake` because its message
 operation can start a turn. Terminal keystrokes are not a messaging transport.
 
+Task handoffs that should begin without a human prompt use
+`felt shuttle message <address> "task" --wake`. For an idle managed Codex session,
+this calls the owning runtime's turn-start operation. For a running session it
+steers the current turn; it does not schedule an additional turn after completion.
+Codex sessions waiting on approval or user input reject wake until that native
+input is resolved. Pi acknowledges either an active steer or a follow-up prompt.
+The hook mailbox adapters reject wake and remain usable for context-only sends.
+Discovery capabilities describe the available adapter, not every feature a
+harness vendor offers.
+
+A wake request cannot succeed with a `queued`, `context_added`, or `submitted`
+receipt. If a peer returns one after dispatch, Shuttle reports an unverified
+outcome and does not retry automatically. A missing acknowledgement after sending
+is `unknown`, even when the underlying worker reports a generic failure. Retrying
+the same message ID retrieves the recorded outcome; it cannot force redelivery.
+
 | Receipt | Evidence |
 |---|---|
 | `queued` | Stored in the receiver's host-local hook mailbox; no turn started |

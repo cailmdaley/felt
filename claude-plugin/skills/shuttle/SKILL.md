@@ -66,7 +66,12 @@ name the actual transport result. Without `--wake`, messaging must not start an
 idle model turn. Claude and Codex hook mailboxes offer queued context at the next
 prompt or tool call; Codex app-server can add idle context immediately when it
 owns the session. `--wake` requests a new turn only where the transport supports
-it.
+it. For a task handoff that should begin without another human prompt, send
+`felt shuttle message <address> "task" --wake`. A queued/context-added receipt
+does not satisfy that request. An accepted wake starts idle work or steers an
+already running turn; it does not promise a separate turn after that turn ends.
+Hook-only sessions reject wake. Pending native approval or user input must be
+resolved through that harness's input surface.
 
 For multiline text use `--file <path>` or `-` with stdin. Each send prints a
 message ID. If delivery is uncertain, retry the identical request with

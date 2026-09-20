@@ -23,7 +23,11 @@ defmodule ShuttleWeb.MessagingControllerTest do
         receipt = %{
           message_id: request["message_id"],
           address: request["address"],
-          status: "accepted",
+          status:
+            if(request["message_id"] in ["queued", "context_added", "submitted"],
+              do: request["message_id"],
+              else: "accepted"
+            ),
           transport: "codex",
           detail: nil
         }
@@ -86,12 +90,21 @@ defmodule ShuttleWeb.MessagingControllerTest do
         "malformed" ->
           {:ok, 500, Jason.encode!(%{error: "lost receipt"})}
 
+        status when status in ["queued", "context_added", "submitted"] ->
+          {:ok, 200,
+           Jason.encode!(%{
+             message_id: status,
+             address: request["address"],
+             status: status,
+             transport: "peer"
+           })}
+
         _ ->
           {:ok, 200,
            Jason.encode!(%{
              message_id: request["message_id"],
              address: request["address"],
-             status: "submitted",
+             status: "accepted",
              transport: "pi",
              detail: nil
            })}
@@ -186,7 +199,26 @@ defmodule ShuttleWeb.MessagingControllerTest do
     receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
     assert_receive {:forwarded, %{"address" => "shuttle://local/pi/p%2F1"}}
     assert receipt["address"] == request["address"]
-    assert receipt["status"] == "submitted"
+    assert receipt["status"] == "accepted"
+  end
+
+  test "wake cannot succeed with a context-only acknowledgement from local or remote peers", %{
+    host: host
+  } do
+    for target <- [host, "edge"], status <- ["queued", "context_added", "submitted"] do
+      request = %{
+        address: "shuttle://#{target}/codex/thread",
+        text: "begin work",
+        wake: true,
+        message_id: status
+      }
+
+      receipt =
+        api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
+
+      assert receipt["status"] == "unknown"
+      assert receipt["message_id"] == status
+    end
   end
 
   test "binary attachments use the files route and retain exact identity" do

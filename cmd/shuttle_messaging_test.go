@@ -66,6 +66,32 @@ func TestBuildAttachmentOnlyMessage(t *testing.T) {
 	}
 }
 
+func TestWakeRequiresExecutionAcknowledgement(t *testing.T) {
+	for _, status := range []string{messaging.StatusQueued, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusAccepted} {
+		t.Run(status, func(t *testing.T) {
+			request := messaging.Request{Address: "shuttle://host/codex/thread", MessageID: "wake-check", Wake: true}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: status, Transport: "peer"})
+			}))
+			defer server.Close()
+			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+			receipt, err := postMessage(request)
+			if calls != 1 {
+				t.Fatalf("wake retried automatically: %d", calls)
+			}
+			if status == messaging.StatusAccepted {
+				if err != nil || receipt.Status != status {
+					t.Fatalf("valid wake rejected: %+v %v", receipt, err)
+				}
+			} else if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
+				t.Fatalf("context-only delivery counted as wake: %+v %v", receipt, err)
+			}
+		})
+	}
+}
+
 func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "image.bin")
 	if err := os.WriteFile(path, []byte{0, 255, 13, 10}, 0600); err != nil {
@@ -144,7 +170,7 @@ func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 			t.Errorf("request mismatch:\n got %#v\nwant %#v", got, want)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: got.MessageID, Address: got.Address, Status: messaging.StatusSubmitted, Transport: "codex"})
+		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: got.MessageID, Address: got.Address, Status: messaging.StatusAccepted, Transport: "codex"})
 	}))
 	defer server.Close()
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
@@ -153,7 +179,7 @@ func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MessageID != want.MessageID || got.Status != messaging.StatusSubmitted || got.Address != want.Address {
+	if got.MessageID != want.MessageID || got.Status != messaging.StatusAccepted || got.Address != want.Address {
 		t.Fatalf("receipt mismatch: %#v", got)
 	}
 }

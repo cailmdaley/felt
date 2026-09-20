@@ -20,6 +20,8 @@ type fakeCodex struct {
 	mutationReply     any
 	dropMutationReply bool
 	collideRequest    bool
+	emptyActiveTurnID bool
+	activeFlags       []string
 	mu                sync.Mutex
 	methods           []string
 	mutationParams    map[string]any
@@ -70,9 +72,13 @@ func (f *fakeCodex) serve(w http.ResponseWriter, r *http.Request) {
 		var result any = map[string]any{}
 		switch frame.Method {
 		case "thread/read":
-			result = map[string]any{"thread": map[string]any{"id": "thread-1", "status": map[string]any{"type": f.state}, "canAcceptDirectInput": true}}
+			result = map[string]any{"thread": map[string]any{"id": "thread-1", "status": map[string]any{"type": f.state, "activeFlags": f.activeFlags}, "canAcceptDirectInput": true}}
 		case "thread/turns/list":
-			result = map[string]any{"data": []any{map[string]any{"id": "turn-1", "status": "inProgress"}}}
+			turnID := "turn-1"
+			if f.emptyActiveTurnID {
+				turnID = ""
+			}
+			result = map[string]any{"data": []any{map[string]any{"id": turnID, "status": "inProgress"}}}
 		default:
 			if frame.Method == f.mutation {
 				if f.dropMutationReply {
@@ -120,6 +126,11 @@ func TestCodexMutationReceipts(t *testing.T) {
 		{"malformed error", "idle", "thread/inject_items", false, fakeError{}, false, StatusUnknown},
 		{"idle injects without waking", "idle", "thread/inject_items", false, map[string]any{}, false, StatusContextAdded},
 		{"explicit wake starts", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new-turn", "status": "inProgress"}}, false, StatusAccepted},
+		{"explicit wake completed promptly", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new-turn", "status": "completed"}}, false, StatusAccepted},
+		{"failed start is not successful wake", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new-turn", "status": "failed"}}, false, StatusUnknown},
+		{"interrupted start is not successful wake", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new-turn", "status": "interrupted"}}, false, StatusUnknown},
+		{"unknown start status", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new-turn", "status": "imaginary"}}, false, StatusUnknown},
+		{"missing start id", "idle", "turn/start", true, map[string]any{"turn": map[string]any{"status": "inProgress"}}, false, StatusUnknown},
 		{"active steers despite colliding server request", "active", "turn/steer", false, map[string]any{"turnId": "turn-1"}, true, StatusAccepted},
 	}
 	for _, tc := range tests {
@@ -149,6 +160,59 @@ func TestCodexMutationReceipts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCodexRefusesSteerWithoutActiveTurnID(t *testing.T) {
+	for _, wake := range []bool{false, true} {
+		f := &fakeCodex{t: t, state: "active", emptyActiveTurnID: true, mutation: "turn/steer", mutationReply: map[string]any{}}
+		t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+		t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+		receipt, err := Send(context.Background(), "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "no-turn-id", Wake: wake})
+		if receipt.Status != StatusRejected || ErrorCode(err) != "busy_race" {
+			t.Fatalf("wake=%v: %#v, %v", wake, receipt, err)
+		}
+		if f.methodCount("turn/steer") != 0 || f.methodCount("turn/start") != 0 || f.methodCount("thread/inject_items") != 0 {
+			t.Fatal("mutated a thread without a usable active turn ID")
+		}
+	}
+}
+
+func TestCodexWakeRefusesPendingInputWithoutMutation(t *testing.T) {
+	// These native activeFlags also drive Shuttle.CodexApp thread_status/2.
+	for _, flag := range []string{"waitingOnApproval", "waitingOnUserInput"} {
+		for _, wake := range []bool{false, true} {
+			f := &fakeCodex{t: t, state: "active", activeFlags: []string{flag}, mutation: "turn/steer", mutationReply: map[string]any{"turnId": "turn-1"}}
+			t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+			t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+			receipt, err := Send(context.Background(), "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "pending-input", Wake: wake})
+			if wake {
+				if receipt.Status != StatusRejected || ErrorCode(err) != "pending_input" || f.methodCount("turn/steer") != 0 {
+					t.Fatalf("wake with %s: %#v, %v", flag, receipt, err)
+				}
+			} else if receipt.Status != StatusAccepted || err != nil || f.methodCount("turn/steer") != 1 {
+				t.Fatalf("no-wake with %s: %#v, %v", flag, receipt, err)
+			}
+			if f.methodCount("turn/start") != 0 || f.methodCount("thread/inject_items") != 0 {
+				t.Fatal("started or injected into a turn awaiting input")
+			}
+		}
+	}
+}
+
+func TestCodexLostWakeAcknowledgmentIsNotRetried(t *testing.T) {
+	f := &fakeCodex{t: t, state: "idle", mutation: "turn/start", dropMutationReply: true}
+	t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	req := Request{Address: "shuttle://h/codex/thread-1", Text: "do work", MessageID: "lost-wake", Wake: true}
+	for range 2 {
+		receipt, err := Send(context.Background(), "h", req)
+		if receipt.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
+			t.Fatalf("%#v, %v", receipt, err)
+		}
+	}
+	if f.methodCount("turn/start") != 1 {
+		t.Fatal("retried an ambiguously acknowledged wake")
 	}
 }
 
