@@ -8,7 +8,7 @@ defmodule Shuttle.WorkerWatcher do
   uncertainty never creates a replacement worker.
   """
 
-  # A watcher is bound to one concrete tmux session. Once that session exits,
+  # A watcher is bound to one concrete backend worker. Once that session exits,
   # or the owning poller/test runner is gone, restarting the watcher only
   # replays stale notifications and can crash-loop the app-wide supervisor.
   use GenServer, restart: :temporary
@@ -20,14 +20,14 @@ defmodule Shuttle.WorkerWatcher do
   # ── Client ──
 
   @doc """
-  Starts a watcher for the given fiber and tmux session.
+  Starts a watcher for the given fiber and backend worker.
 
   Options:
     * `:fiber_id` — required. The fiber being watched.
-    * `:session` — required. The tmux session name (e.g. "haiku-shuttle").
+    * `:session` — required. The terminal session name or durable app worker reference.
     * `:poller` — required. The pid of the Poller GenServer to notify on exit.
     * `:runner` — module implementing `Shuttle.Runner` behavior. Defaults to `Shuttle.Runner.Default`.
-    * `:heartbeat_interval_ms` — interval between tmux liveness checks. Default 5_000.
+    * `:heartbeat_interval_ms` — interval between backend liveness checks. Default 5_000.
     * `:max_consecutive_failures` — how many consecutive non-zero exits from
       `tmux has-session` are tolerated before declaring the worker dead. Protects
       against transient tmux hiccups (suspect 4 in ghost-workers bug). Default 3,

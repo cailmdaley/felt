@@ -1312,7 +1312,9 @@ defmodule Shuttle.Dispatcher do
              "launch_state" => "starting",
              "started_at" => DateTime.to_iso8601(DateTime.utc_now())
            }) do
-      # Identity is durable before a worker can claim, hand off, or be adopted.
+      # Identity is durable before naming, turning, or adopting the conversation.
+      if intent == :fresh, do: name_app_thread(client, id, Path.basename(fiber_id))
+
       marker =
         Shuttle.Continuation.write_dispatch(runner, Keyword.get(opts, :felt_store), fiber_id, %{
           session_uuid: id,
@@ -1372,6 +1374,7 @@ defmodule Shuttle.Dispatcher do
              "launch_state" => "starting",
              "started_at" => DateTime.to_iso8601(DateTime.utc_now())
            }),
+         :ok <- name_app_thread(client, id, yap),
          {:ok, _} <-
            Shuttle.AppWorkers.start_turn(
              id,
@@ -1395,6 +1398,25 @@ defmodule Shuttle.Dispatcher do
          surface: "app"
        }}
     end
+  end
+
+  defp name_app_thread(client, id, title) do
+    label =
+      title
+      |> String.split(~r/\R/, trim: true)
+      |> List.first()
+      |> then(&(&1 || "conversation"))
+      |> String.replace(~r/[\x00-\x1f\x7f]/, " ")
+      |> String.trim()
+      |> String.slice(0, 80)
+
+    # Naming is cosmetic; a rejected rename must not block the durable worker.
+    _ = client.name_thread(id, "Shuttle — " <> label)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
   def render_app_capture_prompt(yap, opts) do

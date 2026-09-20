@@ -114,15 +114,21 @@ defmodule Shuttle.Poller.SessionReconciliation do
                 end
             end
 
+          started_at =
+            case DateTime.from_iso8601(app_record["started_at"] || "") do
+              {:ok, timestamp, _} -> timestamp
+              _ -> now
+            end
+
           running_meta = %{
             state: Map.get(app_record, "launch_state", "running"),
             launch_error: app_record["last_error"],
             fiber_id: fiber_id,
             session: session,
-            agent_id: agent_id,
+            agent_id: app_record["agent_id"] || agent_id,
             uid: uid,
-            started_at: now,
-            last_activity_at: now
+            started_at: started_at,
+            last_activity_at: started_at
           }
 
           case Poller.start_watcher(state, fiber_id, running_meta) do

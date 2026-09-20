@@ -29,6 +29,19 @@ defmodule Shuttle.AppWorkersTest do
        }}
     end
 
+    def name_thread(id, name) do
+      {:ok, %{"active" => true}} = AppWorkers.get(id)
+
+      Agent.update(
+        __MODULE__,
+        &Map.update(&1, :names, [{id, name}], fn names -> names ++ [{id, name}] end)
+      )
+
+      {:error, :rename_unavailable}
+    end
+
+    def names, do: Agent.get(__MODULE__, &Map.get(&1, :names, []))
+
     def resume_thread(id, opts) do
       record({:resume, id, opts})
       {:ok, %{"id" => id}}
@@ -176,9 +189,59 @@ defmodule Shuttle.AppWorkersTest do
              )
   end
 
+  test "capture title uses a short sanitized first line even when rename is unavailable" do
+    prompt = "  Phone\tidea\n" <> String.duplicate("context", 50)
+
+    assert {:ok, _} =
+             Dispatcher.capture(prompt,
+               agent: "codex",
+               work_dir: "/tmp",
+               runner: Runner,
+               surface: "app",
+               felt_store: Runner.felt_root()
+             )
+
+    assert App.names() == [{"app-session-1", "Shuttle — Phone idea"}]
+  end
+
+  test "explicit stop releases a thread confirmed missing during native resume" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+    App.set(:state, :unknown)
+    App.set(:interrupt_result, {:error, :thread_missing})
+    assert {"", 0} = WorkerBackend.stop(Runner, session)
+    assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
+  end
+
+  test "durable prompts are private before atomic publication" do
+    record = %{
+      "session_uuid" => "private-thread",
+      "active" => true,
+      "pending_prompt" => "private text"
+    }
+
+    assert :ok = AppWorkers.put(record)
+    assert {:ok, dir_stat} = File.stat(AppWorkers.root())
+    assert Bitwise.band(dir_stat.mode, 0o777) == 0o700
+    assert {:ok, stat} = File.stat(Path.join(AppWorkers.root(), "private-thread.json"))
+    assert Bitwise.band(stat.mode, 0o777) == 0o600
+    assert :ok = AppWorkers.update("private-thread", %{"pending_prompt" => "updated"})
+    assert {:ok, updated} = File.stat(Path.join(AppWorkers.root(), "private-thread.json"))
+    assert Bitwise.band(updated.mode, 0o777) == 0o600
+    assert Path.wildcard(Path.join(AppWorkers.root(), "*.tmp")) == []
+  end
+
   test "idle conversations survive poller restart, adopt once, and resume in place" do
     fiber("tests/app")
     assert {:ok, session} = dispatch("tests/app")
+
+    original_start = ~U[2026-09-19 12:00:00Z]
+
+    :ok =
+      AppWorkers.update("app-session-1", %{
+        "started_at" => DateTime.to_iso8601(original_start),
+        "agent_id" => "codex-original"
+      })
 
     {:ok, poller} =
       start_poller!(
@@ -188,7 +251,12 @@ defmodule Shuttle.AppWorkersTest do
         poll_interval_ms: 60_000
       )
 
-    assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+    assert %{
+             session: ^session,
+             started_at: ^original_start,
+             last_activity_at: ^original_start,
+             agent_id: "codex-original"
+           } = Poller.worker_status(poller, "tests/app")
 
     assert {:ok, ^session} =
              Poller.dispatch_fiber(poller, "tests/app",
@@ -213,6 +281,7 @@ defmodule Shuttle.AppWorkersTest do
     assert {"", 0} = WorkerBackend.stop(Runner, session)
     assert {:ok, ^session} = dispatch("tests/app", resume_mode: "previous")
     assert Enum.any?(App.calls(), &match?({:resume, "app-session-1", _}, &1))
+    assert App.names() == [{"app-session-1", "Shuttle — app"}]
   end
 
   test "marker failure cannot start a turn or mint another conversation" do

@@ -46,9 +46,16 @@ defmodule Shuttle.AppWorkers do
       tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
       with :ok <- File.mkdir_p(root()),
+           :ok <- File.chmod(root(), 0o700),
+           :ok <- File.write(tmp, "", [:exclusive]),
+           :ok <- File.chmod(tmp, 0o600),
            :ok <- File.write(tmp, Jason.encode!(record)),
            :ok <- File.rename(tmp, path) do
         :ok
+      else
+        error ->
+          File.rm(tmp)
+          error
       end
     else
       {:error, :invalid_session_id}

@@ -63,7 +63,7 @@ defmodule Shuttle.WorkerBackend do
             else: AppWorkers.client().interrupt(id)
 
         case result do
-          :ok ->
+          stopped when stopped in [:ok, {:error, :thread_missing}] ->
             case AppWorkers.deactivate(id) do
               :ok -> {"", 0}
               error -> {inspect(error), 1}
