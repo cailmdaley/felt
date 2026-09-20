@@ -1,12 +1,11 @@
 defmodule Shuttle.WorkerWatcher do
   @moduledoc """
-  Per-worker GenServer that tracks tmux session liveness from the outside.
+  Per-worker GenServer that observes a backend's ownership and liveness.
 
-  One watcher per dispatched worker. The watcher periodically checks
-  `tmux has-session` and reports back to the Poller when the session dies.
-
-  The watcher is the supervised unit; tmux owns the actual worker process.
-  See SPEC §9 for the tmux-watcher architecture.
+  Terminal workers use tmux liveness; app conversations use their durable
+  ownership record. An idle app conversation remains owned until a handoff or
+  explicit stop releases it. The watcher reports confirmed absence to Poller;
+  uncertainty never creates a replacement worker.
   """
 
   # A watcher is bound to one concrete tmux session. Once that session exits,
@@ -131,7 +130,7 @@ defmodule Shuttle.WorkerWatcher do
 
   # ── Internal ──
 
-  defp check_session(state), do: Shuttle.Tmux.session_status(state.runner, state.session)
+  defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.session)
 
   defp notify_poller(state, reason) do
     # state.poller is the Poller's registered name (atom) in production —
@@ -156,5 +155,5 @@ defmodule Shuttle.WorkerWatcher do
   # still up (a genuine death vs an in-flight teardown). `:unknown` counts as
   # present here — the same uncertainty-is-presence rule the rest of the system
   # uses, so a flaky check doesn't report a live worker as gone.
-  defp session_alive?(state), do: Shuttle.Tmux.present?(state.runner, state.session)
+  defp session_alive?(state), do: Shuttle.WorkerBackend.present?(state.runner, state.session)
 end

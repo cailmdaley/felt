@@ -31,9 +31,12 @@ defmodule Shuttle.Poller.Snapshot do
           fiber_id: fiber_id,
           uid: Poller.metadata_uid(meta),
           felt_store: Map.get(state.fiber_host_cache, fiber_id),
-          tmux_session: meta.session,
+          tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
+          surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
+          session_uuid: Shuttle.AppWorkers.id(meta.session),
           agent: meta.agent_id,
           state: Map.get(meta, :state, "running"),
+          launch_error: Map.get(meta, :launch_error),
           run_id: Map.get(meta, :run_id),
           started_at: DateTime.to_unix(meta.started_at, :millisecond),
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
@@ -274,14 +277,19 @@ defmodule Shuttle.Poller.Snapshot do
   # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
   defp runtime_payload(meta, activity) do
     base = %{
-      tmux_session: meta.session,
+      tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
+      surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
+      session_uuid: Shuttle.AppWorkers.id(meta.session),
       agent: Map.get(meta, :agent_id),
       state: Map.get(meta, :state, "running"),
+      launch_error: Map.get(meta, :launch_error),
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
 
-    case is_binary(meta.session) and Map.get(activity, meta.session) do
+    activity_key = Shuttle.AppWorkers.id(meta.session) || meta.session
+
+    case is_binary(activity_key) and Map.get(activity, activity_key) do
       %{last_event_at: at, phase: phase} ->
         base |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
 

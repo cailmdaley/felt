@@ -99,6 +99,9 @@ defmodule Shuttle.Poller.StandingRoles do
       Poller.running_key(state, fiber_id) != nil ->
         state
 
+      Shuttle.AppWorkers.for_fiber(fiber_id, Map.get(fiber, "uid")) != nil ->
+        state
+
       # A live tmux session (either name form) means the worker is still up —
       # `reconcile_orphaned_sessions`/`adopt_orphans` will adopt it. Not dead.
       Enum.any?(
@@ -149,7 +152,11 @@ defmodule Shuttle.Poller.StandingRoles do
         # `LifecycleStore.conclude_run` folds into a human accept. Best-effort:
         # a stamp miss just means the next poll self-heals again, still without
         # closing.
-        LifecycleStore.conclude_run(fiber_id, runner: state.runner, felt_stores: state.felt_stores)
+        LifecycleStore.conclude_run(fiber_id,
+          runner: state.runner,
+          felt_stores: state.felt_stores
+        )
+
         state
 
       # A dead ADHOC extra-run must not close the SCHEDULED standing role. An

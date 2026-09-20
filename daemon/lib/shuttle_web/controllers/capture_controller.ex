@@ -60,10 +60,27 @@ defmodule ShuttleWeb.CaptureController do
                work_dir: project_dir,
                agent: Map.get(params, "agent"),
                effort: Map.get(params, "effort"),
-               chrome: Map.get(params, "chrome") == true
+               chrome: Map.get(params, "chrome") == true,
+               surface: Map.get(params, "surface")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
-            json(conn, %{spawned: true, tmux_session: session, agent: agent_id})
+            json(
+              conn,
+              Map.merge(%{spawned: true, agent: agent_id}, Shuttle.WorkerBackend.wire(session))
+            )
+
+          {:error, {:app_launch_failed, id, reason}} ->
+            conn
+            |> put_status(502)
+            |> json(%{
+              spawned: false,
+              surface: "app",
+              session_uuid: id,
+              tmux_session: nil,
+              reason: inspect(reason),
+              message:
+                "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
+            })
 
           {:error, {:invalid_axes, msg}} ->
             # Axes-validation failures are client errors (bad effort token,
@@ -78,7 +95,7 @@ defmodule ShuttleWeb.CaptureController do
           # tuple into a 500.
           {:error, {tag, msg}}
           when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-               is_binary(msg) ->
+                 is_binary(msg) ->
             conn
             |> put_status(422)
             |> json(%{spawned: false, reason: to_string(tag), message: msg})

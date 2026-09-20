@@ -3,9 +3,9 @@ defmodule Shuttle.Dispatcher do
   Dispatches a single worker for a felt constitution fiber:
   - Locates the fiber via felt CLI
   - Checks status (refuses closed)
-  - Checks for existing tmux session
-  - Creates tmux session with dispatch prompt
-  - Invokes the resolved agent wrapper
+  - Checks for an existing worker
+  - Starts the selected terminal or app surface with the dispatch prompt
+  - Records the session identity for continuation
   """
 
   require Logger
@@ -36,7 +36,8 @@ defmodule Shuttle.Dispatcher do
   @doc """
   Dispatches a worker for the given fiber ID.
 
-  Returns `{:ok, tmux_session_name}` on success, or an error tuple.
+  Returns `{:ok, worker_reference}` on success, or an error tuple. Terminal
+  references are tmux names; app references are `codex-app:<session UUID>`.
 
   Options:
     * `:runner` — module implementing `Shuttle.Runner` behavior for test injection.
@@ -74,12 +75,18 @@ defmodule Shuttle.Dispatcher do
          uid = Map.get(fiber, "uid"),
          :ok <- check_not_closed(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
-         :ok <- check_not_running(fiber_id, uid, runner),
+         :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
+         :ok <- check_app_not_running(fiber_id, uid),
          {:ok, agent} <- resolve_agent(fiber),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <- preflight_wrapper(agent, work_dir, runner),
-         :ok <- ensure_tmux_server(runner) do
+         :ok <-
+           preflight_surface(
+             Map.get(fiber["shuttle"] || %{}, "surface", "cli"),
+             agent,
+             work_dir,
+             runner
+           ) do
       resume_intent =
         resolve_resume_intent(prompt_context, fiber,
           force: force,
@@ -91,8 +98,9 @@ defmodule Shuttle.Dispatcher do
           error
 
         resume_intent ->
-          create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
+          create_worker(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
             felt_store: felt_store,
+            surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
             kind: fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
@@ -495,13 +503,24 @@ defmodule Shuttle.Dispatcher do
     # `:user_message` was carried on the dispatch.
     [
       header,
-      render_exit_contract(Keyword.get(opts, :kind, "oneshot")),
+      exit_contract(opts),
       render_headless_notice(Keyword.get(opts, :headless, false)),
       render_user_message_block(opts)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
     |> String.trim()
+  end
+
+  defp exit_contract(opts) do
+    if Keyword.get(opts, :surface) == "app" do
+      render_block(
+        "App worker contract",
+        "This conversation is available in the ChatGPT app. A final response pauses the conversation for a reply; it does not end your Shuttle ownership. When waiting for human input, simply ask and finish your turn. When an autonomous arc is complete or needs a fresh context, update the fiber outcome and `## Status`, then run `env -u TMUX felt -C #{Keyword.get(opts, :felt_store)} shuttle handoff <fiber-id>` and finish your turn. Close the fiber first when its desired state is achieved. The daemon observes the handoff after your turn ends. Never kill a parent process, tmux server, or app server: it hosts other conversations."
+      )
+    else
+      render_exit_contract(Keyword.get(opts, :kind, "oneshot"))
+    end
   end
 
   # Print-mode (`claude -p`) workers run unattended: stdout is not a TTY, no
@@ -601,43 +620,48 @@ defmodule Shuttle.Dispatcher do
     port = Keyword.get(opts, :port, 4000)
     host = Keyword.get(opts, :host)
 
+    surface = Keyword.get(opts, :surface) || "cli"
+
     with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <- preflight_wrapper(agent, work_dir, runner),
-         :ok <- ensure_tmux_server(runner) do
-      session = capture_session_name()
+         :ok <- preflight_surface(surface, agent, work_dir, runner) do
+      if surface == "app" do
+        capture_app(yap, agent, work_dir, felt_store, opts)
+      else
+        session = capture_session_name()
 
-      # Only claude can be handed a session id up front; `build_command/3` and
-      # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
-      # as absent, so the other harnesses need no separate path.
-      session_uuid = if agent.cli == "claude", do: generate_uuid4()
+        # Only claude can be handed a session id up front; `build_command/3` and
+        # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
+        # as absent, so the other harnesses need no separate path.
+        session_uuid = if agent.cli == "claude", do: generate_uuid4()
 
-      prompt =
-        render_capture_prompt(yap,
-          session: session,
-          felt_store: felt_store,
-          port: port,
-          session_uuid: session_uuid,
-          agent_id: agent.id,
-          project_dir: work_dir,
-          host: host,
-          effort: effort,
-          chrome: chrome
-        )
+        prompt =
+          render_capture_prompt(yap,
+            session: session,
+            felt_store: felt_store,
+            port: port,
+            session_uuid: session_uuid,
+            agent_id: agent.id,
+            project_dir: work_dir,
+            host: host,
+            effort: effort,
+            chrome: chrome
+          )
 
-      command = Agents.build_command(agent, prompt, session_id: session_uuid)
+        command = Agents.build_command(agent, prompt, session_id: session_uuid)
 
-      # No `session:` opt: capture sessions are headless by design (the user
-      # stays on the board), so the wait-for-client gate would only delay the
-      # worker by its 10s timeout.
-      run_script = build_run_script(session, command, agent.id, display_fiber_id: "capture")
+        # No `session:` opt: capture sessions are headless by design (the user
+        # stays on the board), so the wait-for-client gate would only delay the
+        # worker by its 10s timeout.
+        run_script = build_run_script(session, command, agent.id, display_fiber_id: "capture")
 
-      Logger.info("Capture session via #{agent.id} → tmux session #{session}")
+        Logger.info("Capture session via #{agent.id} → tmux session #{session}")
 
-      case spawn_tmux(session, work_dir, run_script, runner) do
-        {:ok, _} -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
-        error -> error
+        case spawn_tmux(session, work_dir, run_script, runner) do
+          {:ok, _} -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
+          error -> error
+        end
       end
     end
   end
@@ -974,13 +998,17 @@ defmodule Shuttle.Dispatcher do
   # an inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
-  defp check_not_running(fiber_id, uid, runner) do
-    fiber_id
-    |> session_names(uid)
-    |> Enum.any?(&Shuttle.Tmux.present?(runner, &1))
-    |> case do
-      true -> {:error, :already_running}
-      false -> :ok
+  defp check_not_running(fiber_id, uid, runner, surface) do
+    if surface == "app" and System.find_executable("tmux") == nil do
+      :ok
+    else
+      fiber_id
+      |> session_names(uid)
+      |> Enum.any?(&Shuttle.Tmux.present?(runner, &1))
+      |> case do
+        true -> {:error, :already_running}
+        false -> :ok
+      end
     end
   end
 
@@ -1216,6 +1244,176 @@ defmodule Shuttle.Dispatcher do
 
   # Dispatch: fresh worker (new session) or resume previous.
   # `resume_intent` is `:fresh | {:previous, session_id}` from check_resume_intent/3.
+  defp preflight_surface("cli", agent, work_dir, runner) do
+    with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_tmux_server(runner)
+  end
+
+  defp preflight_surface("app", %{cli: "codex", headless: false}, _work_dir, _runner), do: :ok
+
+  defp preflight_surface(_, _, _, _),
+    do:
+      {:error,
+       {:invalid_axes,
+        "App surface requires an interactive Codex agent; surface must be cli or app."}}
+
+  defp check_app_not_running(fiber_id, uid) do
+    if Shuttle.AppWorkers.for_fiber(fiber_id, uid), do: {:error, :already_running}, else: :ok
+  end
+
+  defp create_worker(fiber_id, agent, work_dir, runner, context, intent, opts) do
+    if Keyword.get(opts, :surface) == "app" do
+      create_app_worker(fiber_id, agent, work_dir, runner, context, intent, opts)
+    else
+      # A saved app conversation is never silently resumed through a terminal.
+      case intent do
+        {:previous, id} ->
+          case Shuttle.AppWorkers.get(id) do
+            {:ok, _} -> {:error, :session_surface_mismatch}
+            _ -> create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
+          end
+
+        _ ->
+          create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
+      end
+    end
+  end
+
+  defp app_opts(agent, work_dir, opts),
+    do: [
+      cwd: work_dir,
+      felt_store: Keyword.get(opts, :felt_store),
+      model: agent.model,
+      effort: agent.effort
+    ]
+
+  defp create_app_worker(fiber_id, agent, work_dir, runner, context, intent, opts) do
+    client = Shuttle.AppWorkers.client()
+
+    start =
+      case intent do
+        :fresh -> client.start_thread(app_opts(agent, work_dir, opts))
+        {:previous, id} -> client.resume_thread(id, app_opts(agent, work_dir, opts))
+      end
+
+    with {:ok, %{"id" => id} = thread} <- start,
+         :ok <-
+           Shuttle.AppWorkers.put(%{
+             "session_uuid" => id,
+             "project_id" => thread["projectId"],
+             "fiber_id" => fiber_id,
+             "uid" => Keyword.get(opts, :uid),
+             "felt_store" => Keyword.get(opts, :felt_store),
+             "cwd" => work_dir,
+             "agent_id" => agent.id,
+             "active" => true,
+             "launch_state" => "starting",
+             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+           }) do
+      # Identity is durable before a worker can claim, hand off, or be adopted.
+      marker =
+        Shuttle.Continuation.write_dispatch(runner, Keyword.get(opts, :felt_store), fiber_id, %{
+          session_uuid: id,
+          run_id: Keyword.get(opts, :run_id)
+        })
+
+      if marker == :ok do
+        append_session_ledger(
+          fiber_id,
+          id,
+          Keyword.merge(opts,
+            harness: "codex",
+            ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume)
+          )
+        )
+
+        prompt =
+          case intent do
+            :fresh -> render_context_prompt(fiber_id, context, opts)
+            _ -> render_resume_prompt(fiber_id, opts)
+          end
+
+        case Shuttle.AppWorkers.start_turn(id, prompt, app_opts(agent, work_dir, opts)) do
+          {:ok, _} -> {:ok, Shuttle.AppWorkers.ref(id)}
+          error -> error
+        end
+      else
+        # Keep the durable record: a retry must recover this exact identity.
+        :ok =
+          Shuttle.AppWorkers.update(id, %{
+            "launch_state" => "blocked",
+            "last_error" => inspect(marker)
+          })
+
+        {:error, {:app_launch_failed, id, {:runtime_marker_failed, marker}}}
+      end
+    end
+  end
+
+  defp capture_app(yap, agent, work_dir, felt_store, opts) do
+    client = Shuttle.AppWorkers.client()
+
+    with {:ok, %{"id" => id} = thread} <- client.start_thread(app_opts(agent, work_dir, opts)),
+         :ok <-
+           Shuttle.AppWorkers.put(%{
+             "session_uuid" => id,
+             "project_id" => thread["projectId"],
+             "fiber_id" => nil,
+             "uid" => nil,
+             "felt_store" => felt_store,
+             "cwd" => work_dir,
+             "agent_id" => agent.id,
+             "active" => true,
+             "launch_state" => "starting",
+             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+           }),
+         {:ok, _} <-
+           Shuttle.AppWorkers.start_turn(
+             id,
+             render_app_capture_prompt(
+               yap,
+               Keyword.merge(opts,
+                 session_uuid: id,
+                 agent_id: agent.id,
+                 project_dir: work_dir,
+                 felt_store: felt_store,
+                 surface: "app"
+               )
+             ),
+             app_opts(agent, work_dir, Keyword.put(opts, :felt_store, felt_store))
+           ) do
+      {:ok,
+       %{
+         session: Shuttle.AppWorkers.ref(id),
+         session_uuid: id,
+         agent_id: agent.id,
+         surface: "app"
+       }}
+    end
+  end
+
+  def render_app_capture_prompt(yap, opts) do
+    claim =
+      Jason.encode!(%{
+        fiber_id: "<fiber id>",
+        surface: "app",
+        session_uuid: Keyword.fetch!(opts, :session_uuid),
+        agent: Keyword.fetch!(opts, :agent_id)
+      })
+
+    """
+    Shuttle capture session in the ChatGPT app. Activate the felt and shuttle skills.
+    Felt store: #{Keyword.fetch!(opts, :felt_store)}
+    Project dir: #{Keyword.fetch!(opts, :project_dir)}
+    Read the user's idea and discuss any open design questions with them here. File an appropriately scoped fiber when the idea is ready. Install its shuttle block with kind: oneshot, agent: #{Keyword.fetch!(opts, :agent_id)}, surface: app, project_dir: #{Keyword.fetch!(opts, :project_dir)}, host: #{Keyword.get(opts, :host)}#{if Keyword.get(opts, :effort), do: ", effort: #{Keyword.get(opts, :effort)}", else: ""}.
+    Keep status open until you claim this conversation: POST http://localhost:#{Keyword.get(opts, :port, 4000)}/api/v1/claim with Content-Type application/json and body #{claim}. Replace only the fiber id. Check the response is successful before activating the fiber. The claim is idempotent and never renames the conversation. Then set status active and continue the work.
+
+    #{exit_contract(opts)}
+
+    #{render_block("From User", String.trim(yap))}
+    """
+    |> String.trim()
+  end
+
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
     resume_intent = effective_resume_intent(resume_intent, agent, opts)
     session = session_name(fiber_id, Keyword.get(opts, :uid))

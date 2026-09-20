@@ -28,7 +28,11 @@ defmodule ShuttleWeb.ClaimController do
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/claim", conn.body_params), &claim_failed/2)
+        relay_json(
+          conn,
+          OriginRouter.forward(remote, "/api/v1/claim", conn.body_params),
+          &claim_failed/2
+        )
 
       :local ->
         create_local(conn, params)
@@ -43,21 +47,28 @@ defmodule ShuttleWeb.ClaimController do
       not present?(fiber_id) ->
         conn |> put_status(400) |> json(%{error: "fiber_id is required"})
 
-      not present?(tmux_session) ->
+      not present?(tmux_session) and
+          not (params["surface"] == "app" and present?(params["session_uuid"])) ->
         conn |> put_status(400) |> json(%{error: "tmux_session is required"})
 
       true ->
         case Shuttle.Poller.claim_session(fiber_id, tmux_session,
                agent: Map.get(params, "agent"),
+               surface: Map.get(params, "surface"),
                session_uuid: Map.get(params, "session_uuid")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
-            json(conn, %{
-              claimed: true,
-              fiber_id: fiber_id,
-              tmux_session: session,
-              agent: agent_id
-            })
+            json(
+              conn,
+              Map.merge(
+                %{
+                  claimed: true,
+                  fiber_id: fiber_id,
+                  agent: agent_id
+                },
+                Shuttle.WorkerBackend.wire(session)
+              )
+            )
 
           {:error, reason} ->
             {status, code} = error_status(reason)

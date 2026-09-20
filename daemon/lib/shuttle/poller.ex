@@ -873,18 +873,21 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:session_uuid, fiber_id}, _from, state) do
-    uuid =
-      Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
-        fiber = Map.get(entry, :fiber, %{})
+    worker = running_worker(state, fiber_id)
 
-        with ^fiber_id <- Map.get(fiber, "id"),
-             value when is_binary(value) and value != "" <-
-               get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
-          value
-        else
-          _ -> nil
-        end
-      end)
+    uuid =
+      (worker && Shuttle.AppWorkers.id(worker.session)) ||
+        Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
+          fiber = Map.get(entry, :fiber, %{})
+
+          with ^fiber_id <- Map.get(fiber, "id"),
+               value when is_binary(value) and value != "" <-
+                 get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+            value
+          else
+            _ -> nil
+          end
+        end)
 
     {:reply, uuid, state}
   end
@@ -898,7 +901,14 @@ defmodule Shuttle.Poller do
   def handle_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
     uid = resolved_uid(state, slug, runtime_key)
-    {state, reply} = do_claim_session(state, slug, uid, tmux_session, opts)
+
+    {state, reply} =
+      if Keyword.get(opts, :surface) == "app" do
+        do_claim_app_session(state, slug, uid, Keyword.get(opts, :session_uuid), opts)
+      else
+        do_claim_session(state, slug, uid, tmux_session, opts)
+      end
+
     {:reply, reply, state}
   end
 
@@ -937,7 +947,7 @@ defmodule Shuttle.Poller do
         # report the exit and double-handle through handle_worker_exit.
         stop_watcher(meta)
 
-        case state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true) do
+        case Shuttle.WorkerBackend.stop(state.runner, session) do
           {_output, 0} ->
             # Pure runtime teardown — drop running entry + claim, no status write.
             state = remove_running(state, runtime_key)
@@ -994,6 +1004,7 @@ defmodule Shuttle.Poller do
             agent: Keyword.get(opts, :agent),
             effort: Keyword.get(opts, :effort),
             chrome: Keyword.get(opts, :chrome) == true,
+            surface: Keyword.get(opts, :surface),
             port: Shuttle.daemon_port(),
             host: state.own_host_id
           )
@@ -1014,7 +1025,32 @@ defmodule Shuttle.Poller do
     # of bouncing off `:already_running`. See cut_open_session_for_fresh/5.
     state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
 
+    current = running_worker(state, fiber_id)
+
     cond do
+      current != nil and Shuttle.AppWorkers.app?(current.session) and
+          Keyword.get(opts, :resume_mode) == "previous" ->
+        with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+             :ok <-
+               ensure_app_claim_marker(
+                 state,
+                 fiber_id,
+                 fiber,
+                 Shuttle.AppWorkers.id(current.session)
+               ),
+             {:ok, _} <-
+               paste_into_session(
+                 state.runner,
+                 current.session,
+                 Keyword.get(opts, :user_message) || "Continue the work on fiber #{fiber_id}."
+               ) do
+          key = running_key(state, fiber_id)
+          meta = Map.merge(current, %{state: "running", launch_error: nil})
+          {:reply, {:ok, current.session}, %{state | running: Map.put(state.running, key, meta)}}
+        else
+          error -> {:reply, error, state}
+        end
+
       running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key) ->
         {:reply, {:error, :already_running}, state}
 
@@ -2646,6 +2682,70 @@ defmodule Shuttle.Poller do
     end
   end
 
+  defp do_claim_app_session(state, fiber_id, uid, id, opts) do
+    session = if is_binary(id), do: Shuttle.AppWorkers.ref(id)
+    running = running_worker(state, fiber_id)
+    other = live_session_for_fiber(state, fiber_id, uid)
+
+    with true <- is_binary(id) and id != "",
+         {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+         true <- Map.get(fiber, "status") != "closed",
+         true <- get_in(fiber, ["shuttle", "surface"]) == "app",
+         true <- get_in(fiber, ["shuttle", "host"]) == state.own_host_id,
+         true <- is_nil(other) or other == session,
+         true <- is_nil(running) or running.session == session,
+         :ok <- Shuttle.AppWorkers.claim(id, fiber, owning_store(fiber_id, state)),
+         :ok <- ensure_app_claim_marker(state, fiber_id, fiber, id) do
+      now = DateTime.utc_now()
+
+      meta = %{
+        fiber_id: fiber_id,
+        uid: fiber["uid"],
+        session: session,
+        agent_id: Keyword.get(opts, :agent) || agent_id_from_fiber(fiber),
+        started_at: now,
+        last_activity_at: now
+      }
+
+      if running do
+        {state, {:ok, %{session: session, agent_id: meta.agent_id}}}
+      else
+        case register_running(state, fiber_id, runtime_key_for_fiber(fiber), meta) do
+          {:ok, state} ->
+            Shuttle.SessionLedger.record(
+              fiber: fiber_id,
+              uid: fiber["uid"],
+              session: id,
+              harness: "codex",
+              kind: :claim
+            )
+
+            {refresh_document_entry(state, fiber_id),
+             {:ok, %{session: session, agent_id: meta.agent_id}}}
+
+          {:error, reason} ->
+            {state, {:error, reason}}
+        end
+      end
+    else
+      false -> {state, {:error, :invalid_app_claim}}
+      {:error, reason} -> {state, {:error, reason}}
+    end
+  end
+
+  defp ensure_app_claim_marker(state, fiber_id, fiber, id) do
+    if Shuttle.Continuation.resumable_session_id(fiber) == id do
+      :ok
+    else
+      Shuttle.Continuation.write_dispatch(
+        state.runner,
+        owning_store(fiber_id, state),
+        fiber_id,
+        %{session_uuid: id}
+      )
+    end
+  end
+
   # The claim verb's local branch: validate fiber + live session, rename the
   # session to the canonical worker name, register it in `running` with a
   # watcher, log the dispatch-shaped history event, and refresh the document
@@ -2852,12 +2952,31 @@ defmodule Shuttle.Poller do
 
       case fetch_fiber_full(fiber_id, state_acc) do
         {:ok, fiber} ->
-          if Map.get(fiber, "status") == "closed" do
-            Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
-            stop_watcher(meta)
-            remove_running(state_acc, runtime_key)
-          else
-            state_acc
+          app? = Shuttle.AppWorkers.app?(meta.session)
+          handed_off? = app? and Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
+
+          idle? =
+            app? and (handed_off? or Map.get(fiber, "status") == "closed") and
+              Shuttle.AppWorkers.client().state(Shuttle.AppWorkers.id(meta.session)) == :idle
+
+          cond do
+            handed_off? and idle? ->
+              :ok = Shuttle.AppWorkers.deactivate(Shuttle.AppWorkers.id(meta.session))
+              stop_watcher(meta)
+              handle_worker_exit(state_acc, fiber_id)
+
+            Map.get(fiber, "status") == "closed" and not app? ->
+              Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
+              stop_watcher(meta)
+              remove_running(state_acc, runtime_key)
+
+            Map.get(fiber, "status") == "closed" and idle? ->
+              :ok = Shuttle.AppWorkers.deactivate(Shuttle.AppWorkers.id(meta.session))
+              stop_watcher(meta)
+              remove_running(state_acc, runtime_key)
+
+            true ->
+              state_acc
           end
 
         {:error, _} ->
@@ -3183,6 +3302,23 @@ defmodule Shuttle.Poller do
       if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
   end
 
+  defp paste_into_session(_runner, "codex-app:" <> id = session, text) do
+    case Shuttle.AppWorkers.client().start_turn(id, text, []) do
+      {:ok, turn} ->
+        :ok =
+          Shuttle.AppWorkers.update(id, %{
+            "launch_state" => "running",
+            "last_error" => nil,
+            "turn_id" => turn["id"]
+          })
+
+        {:ok, %{session: session, bytes: byte_size(text)}}
+
+      error ->
+        error
+    end
+  end
+
   defp paste_into_session(runner, session, text) do
     token = System.unique_integer([:positive])
     path = Path.join(System.tmp_dir!(), "shuttle-inject-#{token}")
@@ -3212,7 +3348,7 @@ defmodule Shuttle.Poller do
   # confirmed `:gone` does. The reconcile/liveness twin of dispatch's
   # check_not_running.
   defp already_running_session?(%State{} = state, session) do
-    Shuttle.Tmux.present?(state.runner, session)
+    Shuttle.WorkerBackend.present?(state.runner, session)
   end
 
   # Dual-recognition liveness: a fiber is running if a live tmux session exists
@@ -3228,9 +3364,26 @@ defmodule Shuttle.Poller do
   # adopt paths); otherwise it's read off a matching running entry.
   @doc false
   def live_session_for_fiber(%State{} = state, fiber_id, uid \\ nil) do
-    fiber_id
-    |> Dispatcher.session_names(uid || metadata_uid(running_worker(state, fiber_id)))
-    |> Enum.find(&already_running_session?(state, &1))
+    case Shuttle.AppWorkers.for_fiber(fiber_id, uid) do
+      %{"session_uuid" => id} ->
+        Shuttle.AppWorkers.ref(id)
+
+      _ ->
+        app_without_tmux? =
+          System.find_executable("tmux") == nil and
+            case fetch_fiber_full(fiber_id, state) do
+              {:ok, fiber} -> get_in(fiber, ["shuttle", "surface"]) == "app"
+              _ -> false
+            end
+
+        if app_without_tmux? do
+          nil
+        else
+          fiber_id
+          |> Dispatcher.session_names(uid || metadata_uid(running_worker(state, fiber_id)))
+          |> Enum.find(&already_running_session?(state, &1))
+        end
+    end
   end
 
   defp available_slots(%State{} = state) do
@@ -3283,44 +3436,43 @@ defmodule Shuttle.Poller do
   end
 
   # The cut itself — the user-gesture twin of `kill_session`, plus the marker.
-  # Stamps the clean-exit marker FIRST so a cut is robust against a failed
-  # re-dispatch: even if the fresh dispatch that follows never spawns, the cut
-  # session reads clean (`handed_off_at >= dispatched_at` → fresh) and the next
-  # poll starts fresh rather than resuming the killed transcript.
+  # Terminal teardown stamps the clean-exit marker before killing the process.
+  # An app stop must first confirm interruption: an uncertain network result
+  # retains ownership and its existing marker so reconciliation cannot release
+  # a conversation that may still be executing.
   defp cut_open_session(%State{} = state, fiber_id, uid) do
-    felt_store = owning_store(fiber_id, state)
+    key = running_key(state, fiber_id)
+    meta = if key, do: Map.get(state.running, key)
+    session = if meta, do: meta.session, else: live_session_for_fiber(state, fiber_id, uid)
+    app? = Shuttle.AppWorkers.app?(session)
 
-    # 1. Clean-exit marker — daemon-side, no worker spawned, no transcript
-    #    reload. Best-effort (logged, never raised) so it can't block the cut.
-    _ = Shuttle.Continuation.mark_handed_off(state.runner, felt_store, fiber_id)
+    if not app?,
+      do:
+        Shuttle.Continuation.mark_handed_off(
+          state.runner,
+          owning_store(fiber_id, state),
+          fiber_id
+        )
 
-    # 2. Drop the runtime footprint + resolve the session to kill. A TRACKED
-    #    worker: stop its watcher BEFORE the kill (so the watcher's has-session
-    #    poll doesn't also report the exit and double-handle through
-    #    handle_worker_exit) and kill exactly the session we're watching — the
-    #    kill_session twin. An ORPHAN (live tmux, no running entry): resolve the
-    #    live name by liveness.
-    {state, session} =
-      case running_key(state, fiber_id) do
-        nil ->
-          {state, live_session_for_fiber(state, fiber_id, uid)}
+    result = if session, do: Shuttle.WorkerBackend.stop(state.runner, session), else: {"", 0}
 
-        key ->
-          meta = Map.get(state.running, key)
-          stop_watcher(meta)
-          {remove_running(state, key), meta.session}
-      end
+    case result do
+      {_, 0} ->
+        if app?,
+          do:
+            Shuttle.Continuation.mark_handed_off(
+              state.runner,
+              owning_store(fiber_id, state),
+              fiber_id
+            )
 
-    # 3. SIGKILL the live tmux session (tracked or orphan). Idempotent — a kill
-    #    on an already-gone session is harmless.
-    if session,
-      do: state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
+        if meta, do: stop_watcher(meta)
+        if key, do: remove_running(state, key), else: state
 
-    Logger.info(
-      "Cut open session for #{fiber_id} (New session): clean-exit marker stamped, tmux #{session || "(none)"} killed"
-    )
-
-    state
+      {output, _} ->
+        Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
+        state
+    end
   end
 
   # The one "a worker just started for this fiber" seam, shared by dispatch and

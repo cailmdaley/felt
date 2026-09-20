@@ -69,11 +69,29 @@ defmodule ShuttleWeb.DispatchController do
           # above just re-read it off disk. `nil` for a codex/pi worker (scraped
           # and backfilled seconds later) — a client then falls back to comparing
           # against the value it saw before dispatching.
-          json(conn, %{
-            dispatched: true,
-            fiber_id: fiber_id,
-            tmux_session: session,
-            session_uuid: Shuttle.Poller.session_uuid(fiber_id)
+          json(
+            conn,
+            Map.merge(
+              %{
+                dispatched: true,
+                fiber_id: fiber_id,
+                session_uuid: Shuttle.Poller.session_uuid(fiber_id)
+              },
+              Shuttle.WorkerBackend.wire(session)
+            )
+          )
+
+        {:error, {:app_launch_failed, id, reason}} ->
+          conn
+          |> put_status(502)
+          |> json(%{
+            dispatched: false,
+            surface: "app",
+            session_uuid: id,
+            tmux_session: nil,
+            reason: inspect(reason),
+            message:
+              "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
           })
 
         {:error, :already_running} ->
@@ -117,7 +135,7 @@ defmodule ShuttleWeb.DispatchController do
         # alternative is the tmux session that dies invisibly.
         {:error, {tag, message}}
         when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-             is_binary(message) ->
+               is_binary(message) ->
           conn
           |> put_status(422)
           |> json(%{
@@ -143,8 +161,7 @@ defmodule ShuttleWeb.DispatchController do
 
     case Shuttle.Poller.worker_status(fiber_id) do
       %{session: session} = worker when is_binary(session) and session != "" ->
-        Map.merge(base, %{
-          tmux_session: session,
+        Map.merge(Map.merge(base, Shuttle.WorkerBackend.wire(session)), %{
           agent: Map.get(worker, :agent_id),
           started_at: maybe_unix_ms(Map.get(worker, :started_at)),
           last_activity_at: maybe_unix_ms(Map.get(worker, :last_activity_at))

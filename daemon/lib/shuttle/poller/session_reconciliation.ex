@@ -30,6 +30,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # restarting; the workers kept running. Each live session is mapped back to its
   # fiber and re-watched (or killed if the fiber has since closed).
   def adopt_orphans(%State{} = state) do
+    state = adopt_app_sessions(state)
     # An {:error, :unknown} scan (wedged tmux, timeout) means the session list
     # is UNCERTAIN, not empty — adopting off an empty read would boot the
     # daemon believing no workers exist. Skip; the per-poll
@@ -51,6 +52,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # Per-poll reconcile: find live tmux sessions that have no watcher and adopt
   # them. Sessions already covered by a running entry are left alone.
   def reconcile_orphaned_sessions(%State{} = state) do
+    state = adopt_app_sessions(state)
     # Find tmux sessions that exist but have no watcher. On an :unknown scan
     # there is nothing safe to reconcile — retry next poll.
     case Poller.list_shuttle_sessions(state) do
@@ -92,7 +94,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
           session || Poller.live_session_for_fiber(state, fiber_id, uid) ||
             Dispatcher.session_name(fiber_id, uid)
 
-        if Map.get(fiber, "status") != "closed" do
+        if Map.get(fiber, "status") != "closed" or Shuttle.AppWorkers.app?(session) do
           # Label only — felt owns resolution; read its resolved id off the
           # already-fetched fiber JSON rather than re-resolving.
           agent_id = Poller.agent_id_from_fiber(fiber)
@@ -100,7 +102,21 @@ defmodule Shuttle.Poller.SessionReconciliation do
           now = DateTime.utc_now()
           runtime_key = Poller.runtime_key_for_fiber(fiber)
 
+          app_record =
+            case Shuttle.AppWorkers.id(session) do
+              nil ->
+                %{}
+
+              id ->
+                case Shuttle.AppWorkers.get(id) do
+                  {:ok, record} -> record
+                  _ -> %{}
+                end
+            end
+
           running_meta = %{
+            state: Map.get(app_record, "launch_state", "running"),
+            launch_error: app_record["last_error"],
             fiber_id: fiber_id,
             session: session,
             agent_id: agent_id,
@@ -136,6 +152,36 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
+  defp adopt_app_sessions(state) do
+    Enum.reduce(Shuttle.AppWorkers.active(), state, fn record, acc ->
+      fiber_id = record["fiber_id"]
+
+      if is_binary(fiber_id) and record["felt_store"] in state.felt_stores and
+           Poller.running_key(acc, fiber_id) == nil do
+        fetched =
+          case Poller.fetch_fiber_full(fiber_id, acc) do
+            {:ok, _} = found -> found
+            _ -> Poller.fetch_fiber_full(record["uid"] || fiber_id, acc)
+          end
+
+        case fetched do
+          {:ok, fiber} ->
+            if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
+                 Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
+              adopt_session(acc, fiber["id"], Shuttle.AppWorkers.ref(record["session_uuid"]))
+            else
+              acc
+            end
+
+          _ ->
+            acc
+        end
+      else
+        acc
+      end
+    end)
+  end
+
   # Maps every live tmux session name a candidate could carry — both the
   # uid-keyed canonical name and the legacy leaf-only name — back to its fiber,
   # so orphan adoption recognizes a worker launched under either scheme. The
@@ -157,7 +203,10 @@ defmodule Shuttle.Poller.SessionReconciliation do
           # a session name seen exactly once (every uid-keyed name is unique to one
           # fiber) keeps empty sets, resolves to nil below, and the live worker is
           # never adopted — the daemon-restart-drops-all-adoptions bug.
-          add_to_bucket = fn grouped -> Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id)) end
+          add_to_bucket = fn grouped ->
+            Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id))
+          end
+
           singleton = add_to_bucket.(%{open: MapSet.new(), closed: MapSet.new()})
 
           fiber_id

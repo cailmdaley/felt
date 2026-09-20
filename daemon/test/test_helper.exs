@@ -19,4 +19,10 @@ System.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-sessions-#{System.system_time(:nanosecond)}.jsonl")
 )
 
+Application.put_env(
+  :shuttle,
+  :app_workers_dir,
+  Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
+)
+
 ExUnit.start(exclude: [:integration])
