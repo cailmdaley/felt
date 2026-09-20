@@ -3488,9 +3488,7 @@ export class FiberDetailModal {
 
     if (res.status === 409) {
       if (body.tmux_session) {
-        this.close()
-        this.onSaved()
-        this.onOpenWorker?.(body.tmux_session, card.originId)
+        this.finishRequeue(card, body.tmux_session)
         return
       }
 
@@ -3511,10 +3509,19 @@ export class FiberDetailModal {
       return
     }
 
+    this.finishRequeue(card, body.tmux_session)
+  }
+
+  /**
+   * Return to the refreshed board after dispatch. A phone gets the same
+   * session anchor the board renders for any other live worker; opening it
+   * from here would bypass that real anchor tap and race the refresh.
+   */
+  private finishRequeue(card: KanbanCard, tmuxSession?: string): void {
     this.close()
     this.onSaved()
-    if (body.tmux_session) {
-      this.onOpenWorker?.(body.tmux_session, card.originId)
+    if (tmuxSession && !coarsePointer()) {
+      this.onOpenWorker?.(tmuxSession, card.originId)
     }
   }
 
