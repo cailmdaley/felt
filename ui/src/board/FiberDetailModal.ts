@@ -2292,6 +2292,7 @@ export class FiberDetailModal {
 
     const surfaceSelect = document.createElement('select')
     surfaceSelect.className = 'kbn-detail-select'
+    surfaceSelect.disabled = true
     surfaceSelect.setAttribute('aria-label', 'Session')
     surfaceSelect.title = 'Session destination'
     for (const [value, label] of [['app', 'ChatGPT app'], ['cli', 'Terminal']] as const) {
@@ -2317,6 +2318,7 @@ export class FiberDetailModal {
     surfaceLabel.textContent = 'Session'
     const surfaceHint = document.createElement('span')
     surfaceHint.className = 'kbn-detail-session-help'
+    surfaceHint.textContent = sessionHelp(undefined, persistedSurface(card.shuttleSurface))
     surfaceRow.append(surfaceLabel, surfaceSelect, surfaceHint)
     dispatchSec.append(agentRow, surfaceRow)
     // Data-load + listener wiring is deferred until livePatch/statusEl exist
