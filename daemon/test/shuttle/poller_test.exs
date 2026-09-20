@@ -3707,14 +3707,21 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    # Dispatch
+    # Wait for dispatch to install the watcher before closing the fixture.
     send(poller, :run_poll_cycle)
-    Process.sleep(100)
+
+    assert_eventually(fn ->
+      assert %{pid: watcher} = Poller.worker_status(poller, "tests/haiku-close")
+      assert is_pid(watcher)
+      assert Poller.snapshot(poller).claimed_count == 1
+    end)
+
+    %{pid: watcher, session: session} = Poller.worker_status(poller, "tests/haiku-close")
 
     # Close the fiber
     MockRunner.set_fiber("tests/haiku-close", %{fiber | "status" => "closed"})
-    MockRunner.remove_tmux_session(Dispatcher.session_name("tests/haiku-close"))
-    notify_worker_exit(poller, "tests/haiku-close")
+    MockRunner.remove_tmux_session(session)
+    send(poller, {:worker_exited, "tests/haiku-close", watcher, session, :normal_exit, false})
 
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
