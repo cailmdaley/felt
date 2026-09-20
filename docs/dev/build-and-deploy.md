@@ -164,3 +164,17 @@ reset, version).
 If `mix release` warns about a stale build shadowing a fresh one, run
 `make clean` first — stray `.beam` files at the project root shadow the real
 ones. They should never be committed.
+
+## Plugin maintenance and authentication
+
+Felt invokes Claude plugin inspection, installation, updates, and rollback in
+command-scoped bare mode (`CLAUDE_CODE_SIMPLE=1`). Claude's
+[bare-mode contract](https://code.claude.com/docs/en/headless#start-faster-with-bare-mode)
+excludes subscription OAuth credentials and the system keychain. Plugin commands
+still manage the native marketplace and cache. Maintenance also disables
+nonessential traffic and auto-updates in that child process. These environment
+settings do not propagate to worker sessions or change the user's configuration.
+
+Deploy skill-owned launch prompts only after the matching plugin generation is
+installed and verified. Never copy live OAuth credentials into a test config or
+modify a harness cache by hand to bypass native plugin installation.

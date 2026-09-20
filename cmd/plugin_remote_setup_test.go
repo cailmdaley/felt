@@ -151,7 +151,14 @@ materialize_cache() {
 }
 `
 
-const claudeSetupFake = nativeFakePrologue + `if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
+const claudeSetupFake = nativeFakePrologue + `for flag in CLAUDE_CODE_SIMPLE CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC DISABLE_AUTOUPDATER; do
+  eval "value=\${$flag:-}"
+  if [ "$value" != 1 ]; then
+    echo "missing plugin maintenance guard: $flag" >&2
+    exit 94
+  fi
+done
+if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
     printf '[{"name":"cailmdaley-felt","source":"directory","path":"%s"}]\n' "$source"

@@ -364,7 +364,7 @@ func codexSource(cfg map[string]interface{}) string {
 
 func collectClaudeBundle() []ReceiptBundle {
 	if _, err := exec.LookPath("claude"); err == nil {
-		out, err := exec.Command("claude", "plugin", "list", "--json").Output()
+		out, err := claudePluginCommand("list", "--json").Output()
 		if err == nil {
 			var plugins []receiptInstalledPlugin
 			if json.Unmarshal(out, &plugins) == nil {

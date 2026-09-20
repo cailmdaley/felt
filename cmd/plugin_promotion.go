@@ -109,7 +109,7 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 	if !state.Configured {
 		// The failed candidate may have installed the plugin before returning an
 		// error. Best effort uninstall is safe for the absent-plugin case.
-		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
 		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing failed marketplace: %w", err)
 		}
@@ -127,7 +127,7 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 			return fmt.Errorf("restoring Claude plugin: %w", err)
 		}
 	} else {
-		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
 	}
 	return nil
 }
@@ -667,7 +667,7 @@ func reconcileClaudeInstallation(intent claudeInstallationState, current string)
 	}
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
-		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
 		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing Claude marketplace: %w", err)
 		}

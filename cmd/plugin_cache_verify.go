@@ -10,7 +10,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -21,7 +20,7 @@ func verifyClaudeLoadedGeneration(current string) error {
 	if err != nil || !present {
 		return err
 	}
-	out, err := exec.Command("claude", "plugin", "list", "--json").Output()
+	out, err := claudePluginCommand("list", "--json").Output()
 	if err != nil {
 		return fmt.Errorf("verifying Claude cache: claude plugin list: %w", err)
 	}

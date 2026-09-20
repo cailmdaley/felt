@@ -424,7 +424,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// promotion is refused. The same retry converges interrupted-promotion
 	// reconciliation, whose reinstall also lands here.
 	if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
-		_, _ = exec.Command("claude", "plugin", "uninstall", pluginRef).Output()
+		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
 		if installErr := runHarnessCLI("claude", "plugin", "install", pluginRef); installErr != nil {
 			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", pluginRef, err, installErr)
 		}
@@ -447,7 +447,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 // fails — install is the safe guess, since installing an installed plugin is
 // a no-op while updating a missing one is an error.
 func isPluginInstalled(ref string) bool {
-	out, err := exec.Command("claude", "plugin", "list", "--json").Output()
+	out, err := claudePluginCommand("list", "--json").Output()
 	if err != nil {
 		return false
 	}
@@ -477,7 +477,7 @@ type claudeMarketplaceEntry struct {
 // marketplaces. Returns the entry and true on success; false if the CLI is
 // missing, the call fails, or the name isn't found.
 func marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
-	out, err := exec.Command("claude", "plugin", "marketplace", "list", "--json").Output()
+	out, err := claudePluginCommand("marketplace", "list", "--json").Output()
 	if err != nil {
 		return claudeMarketplaceEntry{}, false
 	}
@@ -581,6 +581,9 @@ func pruneMarketplaceSkillLinks() []string {
 // caller so the user sees the same status output the harness prints natively.
 func runHarnessCLI(bin string, args ...string) error {
 	cmd := exec.Command(bin, args...)
+	if bin == "claude" && len(args) > 0 && args[0] == "plugin" {
+		cmd = claudePluginCommand(args[1:]...)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
