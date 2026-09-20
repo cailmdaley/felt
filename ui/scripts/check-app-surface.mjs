@@ -43,8 +43,33 @@ try {
   assert.equal(await surface.inputValue(), 'cli', 'Claude visibly uses Terminal')
   assert.equal(await surface.isDisabled(), true, 'Claude cannot select app mode')
   assert.ok(await page.getByText('Terminal session. Choose a Codex agent to use the ChatGPT app.').isVisible())
+
+  await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await page.getByText('App conversation continuity', { exact: true }).click()
+  await page.locator('.kbn-detail-controls-toggle').click()
+  const detailSurface = page.getByRole('combobox', { name: 'Session', exact: true })
+  await detailSurface.scrollIntoViewIfNeeded()
+  assert.equal(await detailSurface.inputValue(), 'app', 'existing app conversation retains its mode')
+  assert.ok(await detailSurface.isVisible(), 'existing task visibly identifies its session type')
+  const detailBox = await detailSurface.boundingBox()
+  assert.ok(detailBox && detailBox.x >= 0 && detailBox.x + detailBox.width <= 390, 'phone: detail session choice fits')
+  if (process.env.SCREENSHOT_DIR) {
+    await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'detail-phone.png') })
+  }
+
+  await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
+  const stashSurface = page.getByRole('combobox', { name: 'Session', exact: true })
+  await stashSurface.scrollIntoViewIfNeeded()
+  assert.equal(await stashSurface.inputValue(), 'cli', 'default stash visibly uses Terminal')
+  assert.equal(await stashSurface.isDisabled(), true)
+  const stashAgent = page.locator('select').filter({ has: page.locator('option[value="codex-terra"]') })
+  await stashAgent.selectOption('codex-terra')
+  assert.equal(await stashSurface.inputValue(), 'app', 'new Codex stash defaults to app')
+  await stashSurface.selectOption('cli')
+  assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture app/CLI selection and desktop/phone geometry passed')
+  console.log('Capture, Stash and existing-task session choices; desktop/phone geometry passed')
 } finally {
   await browser.close()
 }
