@@ -25,3 +25,11 @@ export function appConversationTarget(
     : guidance
   return { href, title: card.launchError ? `${title}\n\n${card.launchError}` : title, guidance }
 }
+
+export function appConversationLabel(phase?: string, launchError?: string): string {
+  if (launchError || phase === 'blocked') return '⚠ ChatGPT blocked'
+  if (phase === 'attention') return '☞︎ ChatGPT needs you'
+  if (phase === 'waiting') return '⏸ ChatGPT waiting'
+  if (phase === 'working') return '◌ ChatGPT working'
+  return '◌ ChatGPT'
+}

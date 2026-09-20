@@ -1,4 +1,4 @@
-import { appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { appConversationLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -649,7 +649,7 @@ export class FiberDetailModal {
     if (card.shuttleSurface === 'app' && card.sessionUuid) {
       const mark = document.createElement(appTarget.href ? 'a' : 'span')
       mark.className = 'kbn-card-worker kbn-detail-aloft'
-      mark.textContent = card.launchError ? '⚠ ChatGPT' : '◌ ChatGPT'
+      mark.textContent = appConversationLabel(card.runtimePhase, card.launchError)
       mark.title = appTarget.title
       if (mark instanceof HTMLAnchorElement && appTarget.href) {
         mark.href = appTarget.href

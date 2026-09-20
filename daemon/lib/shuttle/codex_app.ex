@@ -83,7 +83,9 @@ defmodule Shuttle.CodexApp do
     end
   end
 
-  def state(id) do
+  def state(id), do: status(id).state
+
+  def status(id) do
     result =
       with {:ok, client} <- client(),
            do:
@@ -95,9 +97,9 @@ defmodule Shuttle.CodexApp do
              )
 
     case result do
-      {:ok, %{"thread" => thread}} -> thread_state(thread)
-      {:ok, thread} -> thread_state(thread)
-      {:error, _} -> :unknown
+      {:ok, %{"thread" => thread}} -> thread_status(thread, id)
+      {:ok, thread} -> thread_status(thread, id)
+      {:error, _} -> %{state: :unknown, phase: nil}
     end
   end
 
@@ -115,7 +117,7 @@ defmodule Shuttle.CodexApp do
         case Transport.start_link(Keyword.put(opts, :name, @client)) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, pid}} -> {:ok, pid}
-          {:error, reason} -> {:error, {:transport, reason}}
+          {:error, _reason} -> {:error, :app_server_unavailable}
         end
 
       pid ->
@@ -179,6 +181,36 @@ defmodule Shuttle.CodexApp do
         error
     end
   end
+
+  defp thread_status(%{"id" => other}, expected) when other != expected,
+    do: %{state: :unknown, phase: nil}
+
+  defp thread_status(thread, _id) when is_map(thread) do
+    phase =
+      case thread["status"] do
+        %{"type" => "idle"} ->
+          "waiting"
+
+        %{"type" => "systemError"} ->
+          "attention"
+
+        %{"type" => "active"} = status ->
+          flags = List.wrap(status["activeFlags"])
+
+          cond do
+            "waitingOnApproval" in flags -> "attention"
+            "waitingOnUserInput" in flags -> "waiting"
+            true -> "working"
+          end
+
+        _ ->
+          nil
+      end
+
+    %{state: thread_state(thread), phase: phase}
+  end
+
+  defp thread_status(_, _), do: %{state: :unknown, phase: nil}
 
   defp thread_state(thread) do
     case get_in(thread, ["status", "type"]) do

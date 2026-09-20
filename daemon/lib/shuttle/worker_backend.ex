@@ -24,7 +24,7 @@ defmodule Shuttle.WorkerBackend do
         :terminal
 
       id ->
-        remote = AppWorkers.client().state(id)
+        %{state: remote, phase: phase} = AppWorkers.client().status(id)
 
         case {remote, AppWorkers.get(id)} do
           {:missing, {:ok, %{"active" => true} = record}} ->
@@ -37,9 +37,17 @@ defmodule Shuttle.WorkerBackend do
               })
             end
 
-          {state, {:ok, %{"active" => true} = record}} when state in [:idle, :running] ->
-            if record["remote_state"] != Atom.to_string(state),
-              do: AppWorkers.update(id, %{"remote_state" => Atom.to_string(state)})
+          {state, {:ok, %{"active" => true} = record}} ->
+            if record["remote_state"] != Atom.to_string(state) or record["remote_phase"] != phase do
+              values = %{"remote_state" => Atom.to_string(state), "remote_phase" => phase}
+
+              values =
+                if phase && phase != record["remote_phase"],
+                  do: Map.put(values, "phase_changed_at", System.system_time(:millisecond)),
+                  else: values
+
+              AppWorkers.update(id, values)
+            end
 
           _ ->
             :ok

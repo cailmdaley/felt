@@ -1,4 +1,4 @@
-import { appConversationTarget, canOpenDesktopApp } from './appConversation.js'
+import { appConversationLabel, appConversationTarget, canOpenDesktopApp } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1645,7 +1645,7 @@ export class KanbanSurfaceRenderer {
     const showPhase =
       kind === 'inFlight' &&
       card.runtimePhase &&
-      RUNTIME_PHASE_BADGES[card.runtimePhase] &&
+      (RUNTIME_PHASE_BADGES[card.runtimePhase] || (card.shuttleSurface === 'app' && card.runtimePhase === 'working')) &&
       !card.runningWorker
     // The RIGHT region: at most one of phase badge / held pill / worker pill
     // is ever live at once (they're mutually exclusive states), collected
@@ -1653,13 +1653,13 @@ export class KanbanSurfaceRenderer {
     // bottom can place it — same reasoning as `reviewMetaActions` above.
     let rightChip: HTMLElement | undefined
     if (showPhase && card.runtimePhase) {
-      const { title } = RUNTIME_PHASE_BADGES[card.runtimePhase]
+      const title = RUNTIME_PHASE_BADGES[card.runtimePhase]?.title ?? 'The app conversation is working.'
       const app = card.shuttleSurface === 'app' && !!card.sessionUuid
       const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
       const phase = document.createElement(app && appTarget.href ? 'a' : 'span')
       phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
       phase.textContent = app
-        ? card.runtimePhase === 'blocked' ? '⚠ ChatGPT blocked' : '◌ ChatGPT'
+        ? appConversationLabel(card.runtimePhase, card.launchError)
         : phasePillLabel(card.runtimePhase, card.lastActivityAt)
       phase.title = app ? appTarget.title : card.launchError ? `${title}\n\n${card.launchError}` : title
       if (phase instanceof HTMLAnchorElement && appTarget.href) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
+import { appConversationLabel, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
 
 const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
 const card = { desktopLink: route, shuttleHost: 'workstation', shuttleProjectDir: '/work/felt' }
@@ -32,5 +32,17 @@ describe('app conversation opening', () => {
     const target = appConversationTarget({ ...card, launchError: 'Turn could not be confirmed' }, true)
     expect(target.href).toBe(route)
     expect(target.title).toContain('Turn could not be confirmed')
+  })
+})
+
+describe('native app activity labels', () => {
+  it.each([
+    ['working', '◌ ChatGPT working'], ['waiting', '⏸ ChatGPT waiting'],
+    ['attention', '☞︎ ChatGPT needs you'], ['blocked', '⚠ ChatGPT blocked'],
+  ])('shows %s in the app marker', (phase, label) => {
+    expect(appConversationLabel(phase)).toBe(label)
+  })
+  it('keeps a launch failure ahead of cached native activity', () => {
+    expect(appConversationLabel('waiting', 'failed')).toBe('⚠ ChatGPT blocked')
   })
 })

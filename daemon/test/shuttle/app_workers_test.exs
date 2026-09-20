@@ -13,6 +13,15 @@ defmodule Shuttle.AppWorkersTest do
           name: __MODULE__
         )
 
+    def status(id) do
+      state = state(id)
+
+      phase =
+        Agent.get(__MODULE__, &Map.get(&1, :phase, if(state == :idle, do: "waiting", else: nil)))
+
+      %{state: state, phase: phase}
+    end
+
     def calls, do: Agent.get(__MODULE__, & &1.calls)
     def set(key, value), do: Agent.update(__MODULE__, &Map.put(&1, key, value))
 
@@ -309,6 +318,43 @@ defmodule Shuttle.AppWorkersTest do
     send(poller, {:worker_exited, "tests/app", original.pid, session, :normal_exit, false})
     assert %{pid: watcher, session: ^session} = Poller.worker_status(poller, "tests/app")
     assert watcher == replacement.pid
+  end
+
+  test "native activity phases reach snapshots without changing idle ownership" do
+    fiber("tests/app")
+    assert {:ok, session} = dispatch("tests/app")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    for {state, phase} <- [{:running, "working"}, {:running, "attention"}, {:idle, "waiting"}] do
+      App.set(:state, state)
+      App.set(:phase, phase)
+      assert WorkerBackend.observe(session) == state
+
+      assert [%{phase: ^phase, session_uuid: "app-session-1", state: "running"}] =
+               Poller.snapshot(poller).eligible
+
+      meta = Poller.worker_status(poller, "tests/app")
+      index = Shuttle.Poller.Snapshot.runtime_index(%{"tests/app" => meta}, %{})
+      assert %{phase: ^phase, surface: "app"} = index["tests/app"]
+      assert WorkerBackend.session_status(Runner, session) == :alive
+    end
+
+    [%{last_activity_at: since}] = Poller.snapshot(poller).eligible
+    assert :idle = WorkerBackend.observe(session)
+    assert [%{last_activity_at: ^since}] = Poller.snapshot(poller).eligible
+    App.set(:state, :unknown)
+    App.set(:phase, nil)
+    assert :unknown = WorkerBackend.observe(session)
+    [uncertain] = Poller.snapshot(poller).eligible
+    refute Map.has_key?(uncertain, :phase)
+    assert WorkerBackend.session_status(Runner, session) == :alive
   end
 
   test "durable prompts are private before atomic publication" do

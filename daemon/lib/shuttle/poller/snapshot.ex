@@ -48,6 +48,7 @@ defmodule Shuttle.Poller.Snapshot do
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
         }
+        |> native_activity(meta.session)
       end)
 
     dispatch_blocked =
@@ -305,12 +306,34 @@ defmodule Shuttle.Poller.Snapshot do
         id -> Shuttle.AppWorkers.transcript_id(id)
       end
 
-    case is_binary(activity_key) and Map.get(activity, activity_key) do
-      %{last_event_at: at, phase: phase} ->
-        base |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
+    payload =
+      case is_binary(activity_key) and Map.get(activity, activity_key) do
+        %{last_event_at: at, phase: phase} ->
+          base |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
 
-      _ ->
-        Map.put(base, :last_activity_at, DateTime.to_unix(meta.last_activity_at, :millisecond))
+        _ ->
+          Map.put(base, :last_activity_at, DateTime.to_unix(meta.last_activity_at, :millisecond))
+      end
+
+    native_activity(payload, meta.session)
+  end
+
+  defp native_activity(payload, session) do
+    case Shuttle.AppWorkers.id(session) do
+      nil ->
+        payload
+
+      id ->
+        case Shuttle.AppWorkers.get(id) do
+          {:ok, %{"launch_state" => "running", "remote_phase" => phase} = record}
+          when phase in ["working", "waiting", "attention"] ->
+            payload
+            |> Map.put(:phase, phase)
+            |> Map.put(:last_activity_at, record["phase_changed_at"] || payload.last_activity_at)
+
+          _ ->
+            Map.delete(payload, :phase)
+        end
     end
   end
 

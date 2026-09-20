@@ -528,6 +528,48 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(second_peer)
   end
 
+  test "adapter refuses creation when the managed app server socket is absent" do
+    path = Path.join(System.tmp_dir!(), "absent-codex-#{System.unique_integer([:positive])}.sock")
+    refute File.exists?(path)
+    configure_adapter(path)
+
+    assert {:error, :app_server_unavailable} =
+             CodexApp.start_thread(cwd: System.tmp_dir!())
+
+    refute File.exists?(path)
+    assert Process.whereis(@client) == nil
+  end
+
+  test "native status distinguishes work, user input, approval, errors and idle" do
+    statuses = [
+      {%{"type" => "active", "activeFlags" => []}, :running, "working"},
+      {%{"type" => "active", "activeFlags" => ["waitingOnUserInput"]}, :running, "waiting"},
+      {%{"type" => "active", "activeFlags" => ["waitingOnUserInput", "waitingOnApproval"]},
+       :running, "attention"},
+      {%{"type" => "idle"}, :idle, "waiting"},
+      {%{"type" => "systemError"}, :unknown, "attention"},
+      {%{"type" => "notLoaded"}, :unknown, nil}
+    ]
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        for {status, _, _} <- statuses do
+          %{"id" => request_id, "method" => "thread/read", "params" => %{"includeTurns" => false}} =
+            recv_json(socket)
+
+          send_result(socket, request_id, %{"thread" => %{"id" => "thread-1", "status" => status}})
+        end
+      end)
+
+    configure_adapter(path)
+
+    for {_, state, phase} <- statuses do
+      assert %{state: ^state, phase: ^phase} = CodexApp.status("thread-1")
+    end
+
+    await_peer(peer)
+  end
+
   defp configure_adapter(path) do
     Application.put_env(:shuttle, :codex_app_transport_opts,
       socket_path: path,
@@ -547,6 +589,7 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   defp start_peer(handler) do
     path = Path.join(System.tmp_dir!(), "felt-codex-#{System.unique_integer([:positive])}.sock")
+    File.rm(path)
 
     {:ok, listen} =
       :gen_tcp.listen(0, [:binary, active: false, ifaddr: {:local, String.to_charlist(path)}])
