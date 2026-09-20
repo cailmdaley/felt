@@ -8,9 +8,12 @@ an exact claim endpoint and JSON body.
 1. **Crystallize.** Search for related fibers, choose the right parent, and file
    the idea with a lede and Desired State proportionate to what the user has
    actually asked. Keep its status `open`.
-2. **Install.** Install the shuttle block using every field in `Install` exactly
-   as supplied, including `surface`, host, agent, project directory, and any
-   explicitly requested effort or chrome setting. Keep status `open`.
+2. **Install as a draft.** Use `felt shuttle install <fiber-id> --disabled`
+   with the supplied model, surface, host and project directory; apply any
+   supplied effort or chrome setting with `felt shuttle set-agent`. Preserve
+   every field in `Install` exactly. `--disabled` keeps status `open` throughout
+   installation. Never install armed and reset status afterward: that gap lets
+   the poller launch another worker before you claim this session.
 3. **Claim.** POST the supplied `Claim` JSON to `Claim endpoint` with
    `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
    you created. Encode JSON with a JSON library and pass it as a file or structured
