@@ -69,20 +69,14 @@ defmodule Shuttle.CodexApp do
 
   def interrupt(id) when is_binary(id) do
     case read_thread(id, include_turns: true) do
+      {:ok, %{"status" => %{"type" => "notLoaded"}}} ->
+        resume_for_interrupt(id)
+
       {:ok, thread} ->
         interrupt_thread(id, thread)
 
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
-        case resume_thread(id) do
-          {:ok, thread} ->
-            interrupt_thread(id, thread)
-
-          {:error, {:peer, error}} = result ->
-            if confirmed_missing?(error, id), do: {:error, :thread_missing}, else: result
-
-          {:error, _} = error ->
-            error
-        end
+        resume_for_interrupt(id)
 
       {:error, _} = error ->
         error
@@ -165,6 +159,19 @@ defmodule Shuttle.CodexApp do
   end
 
   defp interrupt_thread(_id, _thread), do: {:error, {:transport, :malformed_thread_response}}
+
+  defp resume_for_interrupt(id) do
+    case resume_thread(id) do
+      {:ok, thread} ->
+        interrupt_thread(id, thread)
+
+      {:error, {:peer, error}} = result ->
+        if confirmed_missing?(error, id), do: {:error, :thread_missing}, else: result
+
+      {:error, _} = error ->
+        error
+    end
+  end
 
   defp thread_state(thread) do
     case get_in(thread, ["status", "type"]) do

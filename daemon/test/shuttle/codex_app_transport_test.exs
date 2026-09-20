@@ -425,6 +425,42 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  test "interrupt resumes a successful notLoaded read before inspecting turns" do
+    thread_id = "00000000-0000-4000-8000-000000000002"
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+
+        send_result(socket, read_id, %{
+          "thread" => %{
+            "id" => thread_id,
+            "status" => %{"type" => "notLoaded"},
+            "turns" => [%{"id" => "old-turn", "status" => "completed"}]
+          }
+        })
+
+        assert %{
+                 "id" => resume_id,
+                 "method" => "thread/resume",
+                 "params" => %{"threadId" => ^thread_id}
+               } =
+                 recv_json(socket)
+
+        send_result(socket, resume_id, %{
+          "thread" => %{
+            "id" => thread_id,
+            "status" => %{"type" => "idle"},
+            "turns" => [%{"id" => "old-turn", "status" => "completed"}]
+          }
+        })
+      end)
+
+    configure_adapter(path)
+    assert :ok = CodexApp.interrupt(thread_id)
+    await_peer(peer)
+  end
+
   test "interrupt surfaces the confirmed missing error after unloaded read and resume" do
     thread_id = "00000000-0000-4000-8000-000000000000"
     missing = %{"code" => -32_600, "message" => "no rollout found for thread id #{thread_id}"}
