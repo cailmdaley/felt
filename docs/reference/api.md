@@ -58,6 +58,10 @@ terminal execution. Existing-fiber dispatch reads the persisted
 `shuttle.surface`; omission preserves CLI execution. Model and effort remain
 agent-registry choices. App execution requires the owning host's local Codex
 App Server and reports an error if it cannot be reached.
+An unavailable managed server returns HTTP 503 with
+`reason: "app_server_unavailable"` and guidance to choose a configured remote
+host or CLI execution. Shuttle does not start an independent app runtime or
+silently change the selected surface.
 
 Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 `project_id`, `thread_id`, `session_uuid`, `transcript_session_uuid`, and
@@ -68,6 +72,11 @@ for a fork. Session ledgers use the transcript identity. CLI responses carry
 `surface: "cli"` and their real `tmux_session`. An app conversation waiting
 for the next phone reply remains assigned; its idle state does not authorize
 another launch.
+
+App responses and runtime rows can also carry `desktop_link`, the validated
+`codex://threads/<thread_id>` desktop route. This is separate from a verified
+phone `session_link`. The board uses native working, waiting, and attention
+states without treating an idle conversation as released ownership.
 
 A created conversation whose first turn could not be confirmed returns HTTP
 502 with `reason: "app_launch_failed"`, its conversation id, and a recovery
