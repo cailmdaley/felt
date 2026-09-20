@@ -34,7 +34,7 @@ import { AppDialog } from './AppDialog'
 import type { AgentEntry } from './StashForm'
 import { agentGroups } from './agentGroups'
 import { shuttleOrigin } from './projectModel'
-import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
+import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 import {
   AddProjectPath,
   HostPicker,
@@ -309,15 +309,6 @@ export function CaptureForm({
               ))}
             </select>
           </label>
-          {isCodexAgent(agentRec) && (
-            <label className="capture-field">
-              <span className="capture-label">Execution</span>
-              <select className="capture-select" value={surface} onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
-                <option value="app">ChatGPT app</option>
-                <option value="cli">CLI</option>
-              </select>
-            </label>
-          )}
           <label className="capture-field">
             <span className="capture-label">Effort</span>
             <select
@@ -332,6 +323,19 @@ export function CaptureForm({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="capture-field capture-session-field">
+            <span className="capture-label">Session</span>
+            <select
+              className="capture-select"
+              value={isCodexAgent(agentRec) ? surface : 'cli'}
+              disabled={!isCodexAgent(agentRec)}
+              onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
+            >
+              <option value="app">ChatGPT app</option>
+              <option value="cli">Terminal</option>
+            </select>
+            <span className="capture-session-help">{sessionHelp(agentRec, surface)}</span>
           </label>
         </div>
         {addProject.pathOpen && onProjectAdded && (
@@ -452,6 +456,8 @@ export function injectCaptureFormStyles(): void {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
+    .capture-session-field { grid-column: 1 / -1; }
+    .capture-session-help { font-size: 12px; line-height: 1.4; color: #756B60; }
     .capture-field {
       display: flex;
       flex-direction: column;

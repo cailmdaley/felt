@@ -1897,3 +1897,17 @@ a.kbn-detail-aloft { text-decoration: none; }
   font-size: 0.85rem;
   line-height: 1.5;
 }
+
+.kbn-detail-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.kbn-detail-session-help {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted, #756B60);
+}

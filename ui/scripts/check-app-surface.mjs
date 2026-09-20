@@ -40,7 +40,9 @@ try {
   await surface.selectOption('cli')
   assert.equal(await surface.inputValue(), 'cli')
   await agent.selectOption('claude-opus')
-  assert.equal(await surface.count(), 0, 'Claude has no Codex app selector')
+  assert.equal(await surface.inputValue(), 'cli', 'Claude visibly uses Terminal')
+  assert.equal(await surface.isDisabled(), true, 'Claude cannot select app mode')
+  assert.ok(await page.getByText('Terminal session. Choose a Codex agent to use the ChatGPT app.').isVisible())
   assert.deepEqual(errors, [])
   console.log('Capture app/CLI selection and desktop/phone geometry passed')
 } finally {

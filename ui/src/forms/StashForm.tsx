@@ -39,7 +39,7 @@ import {
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
 import { shuttleOrigin } from './projectModel'
-import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
+import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -762,19 +762,17 @@ export function StashForm({
                 </select>
               </div>
 
-              {isCodexAgent(constraintAgent) && (
-                <div className="stash-field">
-                  <span className="stash-label">Execution</span>
-                  <select
-                    className="stash-select"
-                    value={surface}
-                    onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
-                  >
-                    <option value="app">ChatGPT app</option>
-                    <option value="cli">CLI</option>
-                  </select>
-                </div>
-              )}
+              <label className="stash-field stash-session-field">
+                <span className="stash-label">Session</span>
+                <select className="stash-select"
+                  value={isCodexAgent(constraintAgent) ? surface : 'cli'}
+                  disabled={!isCodexAgent(constraintAgent)}
+                  onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
+                  <option value="app">ChatGPT app</option>
+                  <option value="cli">Terminal</option>
+                </select>
+                <span className="stash-session-help">{sessionHelp(constraintAgent, surface)}</span>
+              </label>
 
               {/* Kind — segmented control */}
               <div className="stash-field">
@@ -1049,6 +1047,8 @@ export function injectStashFormStyles(): void {
         grid-template-columns: 1fr;
       }
     }
+    .stash-session-field { grid-column: 1 / -1; }
+    .stash-session-help { font-size: 12px; line-height: 1.4; color: #756B60; }
     .stash-field {
       display: flex;
       flex-direction: column;
