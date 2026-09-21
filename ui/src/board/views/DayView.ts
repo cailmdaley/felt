@@ -67,7 +67,7 @@
  */
 
 import { civilDayToLocalDate, dueCivilDay, instantMs, isoDayLocal, railCivilDay } from '../civilDay.js'
-import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, showAppConversationGuidance } from '../appConversation.js'
+import { workerStatusLabel, appWorkerLink, workerVariant } from '../appConversation.js'
 import { fileBytesUrl, humanizeIdleAge, renderMarkdown } from '../utils.js'
 import { normalizeSentFiles, sentFilesInWindow, type SentFile } from '../sentFiles.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -885,10 +885,6 @@ export function buildDayLanes(
 // same gesture — because a live worker must not look like two different things
 // on two pages of one board.
 
-/** Below a minute of idling, a paused worker is just working; the Desk applies
- *  the same gate before letting `waiting` take over its pill. */
-const WAITING_GATE_MS = 60_000
-
 export interface DayChip {
   label: string
   /** Drives the Desk pill class: `kbn-card-worker-<variant>`. */
@@ -902,10 +898,7 @@ export interface DayChip {
 /**
  * The live chip for a fiber with a worker in the air, or nothing.
  *
- * Deliberately a re-derivation of KanbanSurfaces' pill logic rather than an
- * import of its DOM builder: the Desk builds a card, we build a ledger row, but
- * the RULE ("attention takes over immediately, waiting only after a minute,
- * otherwise aloft") is shared; the action label comes from `workerStatusLabel`.
+ * Shares the Desk's attention timing and action label.
  */
 export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip | undefined {
   if (!card) return undefined
@@ -918,7 +911,7 @@ export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip |
   const phase = card.runtimePhase
   const idleMs = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : Infinity
   const age = card.lastActivityAt !== undefined ? humanizeIdleAge(idleMs) : null
-  const takesOver = phase === 'attention' || (phase === 'waiting' && idleMs >= WAITING_GATE_MS)
+  const takesOver = workerVariant(card, nowMs) !== 'aloft'
   if (takesOver && phase) {
     return {
       label: workerStatusLabel(),
@@ -3048,25 +3041,9 @@ class DayViewImpl implements TemporalView {
    */
   private buildChip(chip: DayChip, cardId: string): HTMLElement {
     if (chip.appCard) {
-      const card = chip.appCard
-      const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
-      const mark = document.createElement(target.href ? 'a' : 'button')
-      mark.className = `kbn-card-worker kbn-card-worker-link kbn-day-chip${chip.variant === 'aloft' ? '' : ` kbn-card-worker-${chip.variant}`}`
-      mark.textContent = chip.label
-      mark.title = `${chip.title} — ${target.title}`
-      if (mark instanceof HTMLAnchorElement && target.href) {
-        mark.href = target.href
-        mark.setAttribute('aria-label', target.ariaLabel)
-        mark.addEventListener('click', event => event.stopPropagation())
-      } else if (mark instanceof HTMLButtonElement) {
-        mark.type = 'button'
-        mark.setAttribute('aria-label', 'Show how to continue this conversation in ChatGPT')
-        mark.addEventListener('click', event => {
-          event.stopPropagation()
-          showAppConversationGuidance(card)
-        })
-      }
-      return mark
+      const link = appWorkerLink(chip.appCard, `kbn-day-chip${chip.variant === 'aloft' ? '' : ` kbn-card-worker-${chip.variant}`}`)
+      link.title = `${chip.title} — ${link.title}`
+      return link
     }
     const el = document.createElement('button')
     el.type = 'button'

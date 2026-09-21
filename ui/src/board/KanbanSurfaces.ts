@@ -1,4 +1,4 @@
-import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, showAppConversationGuidance } from './appConversation.js'
+import { workerStatusLabel, appWorkerLink, workerVariant } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1640,8 +1640,7 @@ export class KanbanSurfaceRenderer {
     const phaseTakesOverWorker =
       kind === 'inFlight' &&
       !!card.runningWorker &&
-      (card.runtimePhase === 'attention' ||
-        (card.runtimePhase === 'waiting' && idleMs >= 60_000))
+      workerVariant(card) !== 'aloft'
     const showPhase =
       kind === 'inFlight' &&
       ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || ((card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid)) &&
@@ -1655,28 +1654,20 @@ export class KanbanSurfaceRenderer {
       const phaseName = card.runtimePhase ?? 'working'
       const title = RUNTIME_PHASE_BADGES[phaseName]?.title ?? 'The app conversation is working.'
       const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
-      const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
-      const phase = document.createElement(app ? appTarget.href ? 'a' : 'button' : 'span')
-      phase.className = app
-        ? `kbn-card-worker kbn-card-worker-link${['attention', 'waiting'].includes(phaseName) ? ` kbn-card-worker-${phaseName}` : phaseName === 'blocked' || card.launchError ? ' kbn-card-phase-blocked' : ''}`
-        : `kbn-card-phase kbn-card-phase-${phaseName}`
-      phase.textContent = app
-        ? workerStatusLabel(card.runtimePhase, card.launchError)
-        : phasePillLabel(phaseName, card.lastActivityAt)
-      phase.title = app ? `${phasePillLabel(phaseName, card.lastActivityAt)} — ${appTarget.title}` : card.launchError ? `${title}\n\n${card.launchError}` : title
-      if (phase instanceof HTMLAnchorElement && appTarget.href) {
-        phase.href = appTarget.href
-        phase.setAttribute('aria-label', appTarget.ariaLabel)
-        phase.addEventListener('click', (event) => event.stopPropagation())
-      } else if (app && phase instanceof HTMLButtonElement) {
-        phase.type = 'button'
-        phase.setAttribute('aria-label', 'Show how to continue this conversation in ChatGPT')
-        phase.addEventListener('click', (event) => {
-          event.stopPropagation()
-          showAppConversationGuidance(card)
-        })
+      if (app) {
+        const variant = workerVariant(card)
+        const classes = card.launchError || phaseName === 'blocked'
+          ? 'kbn-card-phase-blocked'
+          : `kbn-card-worker-${variant}`
+        rightChip = appWorkerLink(card, classes)
+        rightChip.title = `${phasePillLabel(phaseName, card.lastActivityAt)} — ${rightChip.title}`
+      } else {
+        const phase = document.createElement('span')
+        phase.className = `kbn-card-phase kbn-card-phase-${phaseName}`
+        phase.textContent = phasePillLabel(phaseName, card.lastActivityAt)
+        phase.title = card.launchError ? `${title}\n\n${card.launchError}` : title
+        rightChip = phase
       }
-      rightChip = phase
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct

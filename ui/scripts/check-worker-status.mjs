@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core'
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true })
 try {
   for (const mobile of [false, true]) {
-    const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 }, isMobile: mobile, hasTouch: mobile })
+    const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 }, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' })
     const harness = pathToFileURL(resolve('harness-board-dist/index.html')).href
     await page.route('https://chatgpt.com/open-app', route => route.fulfill({ contentType: 'text/html', body: '<p>App-opening destination</p>' }))
     await page.goto(harness)
@@ -14,6 +14,24 @@ try {
     const appMark = appCard.locator('.kbn-card-worker')
     assert.equal(await appMark.textContent(), 'Aloft')
     assert.ok(await appMark.isVisible())
+    // Compare the real app anchor against the existing terminal button styles.
+    await appMark.evaluate(anchor => {
+      const button = document.createElement('button')
+      button.textContent = 'Aloft'
+      anchor.after(button)
+      const original = anchor.className
+      const properties = ['color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textDecorationLine', 'borderRadius', 'padding', 'height']
+      for (const variant of ['aloft', 'waiting', 'attention']) {
+        anchor.className = `kbn-card-worker kbn-card-worker-link kbn-card-worker-${variant}`
+        button.className = `kbn-card-worker kbn-card-worker-${variant}`
+        const app = getComputedStyle(anchor), terminal = getComputedStyle(button)
+        for (const property of properties) {
+          if (app[property] !== terminal[property]) throw new Error(`${variant} ${property}: app ${app[property]} vs terminal ${terminal[property]}`)
+        }
+      }
+      anchor.className = original
+      button.remove()
+    })
     const destination = mobile ? 'https://chatgpt.com/open-app' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     assert.equal(await appMark.getAttribute('href'), destination)
     if (mobile) {
