@@ -20,7 +20,7 @@ try {
       button.textContent = 'Aloft'
       anchor.after(button)
       const original = anchor.className
-      const properties = ['color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textDecorationLine', 'borderRadius', 'padding', 'height']
+      const properties = ['color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform', 'textDecorationLine', 'borderRadius', 'padding', 'height']
       for (const variant of ['aloft', 'waiting', 'attention']) {
         anchor.className = `kbn-card-worker kbn-card-worker-link kbn-card-worker-${variant}`
         button.className = `kbn-card-worker kbn-card-worker-${variant}`
@@ -42,6 +42,15 @@ try {
     await appCard.locator('.kbn-card-name').click()
     assert.equal(await page.locator('.kbn-detail-aloft').textContent(), 'Aloft')
     assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('href'), destination)
+    await page.locator('.kbn-detail-aloft').evaluate(detail => {
+      const card = document.querySelector('.kbn-card-worker')
+      if (!card) throw new Error('card worker marker missing')
+      for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']) {
+        if (getComputedStyle(detail)[property] !== getComputedStyle(card)[property]) {
+          throw new Error(`detail ${property} differs from card`)
+        }
+      }
+    })
     if (mobile) {
       assert.match(await page.locator('.kbn-detail-app-guide').innerText(), /Remote → ada-workstation → loom/)
       assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('aria-label'), 'Open ChatGPT app')

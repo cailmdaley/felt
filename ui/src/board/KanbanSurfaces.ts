@@ -1714,11 +1714,10 @@ export class KanbanSurfaceRenderer {
       const w = document.createElement('button')
       w.type = 'button'
       if (phaseTakesOverWorker && card.runtimePhase) {
-        // Attention changes the worker color; its title carries the wait age.
-        // The opening action keeps the same Aloft label.
+        // Attention changes the worker color and label; its title carries the wait age.
         const age = Number.isFinite(idleMs) ? humanizeIdleAge(idleMs) : null
         w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
-        w.textContent = workerStatusLabel()
+        w.textContent = workerStatusLabel(card.runtimePhase)
         const [aria, verb] = card.runtimePhase === 'attention'
           ? ['Worker needs you', 'Worker raised its hand']
           : ['Worker waiting for you', 'Worker paused on input']

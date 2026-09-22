@@ -912,10 +912,11 @@ export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip |
   const idleMs = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : Infinity
   const age = card.lastActivityAt !== undefined ? humanizeIdleAge(idleMs) : null
   const takesOver = workerVariant(card, nowMs) !== 'aloft'
+  const variant = workerVariant(card, nowMs)
   if (takesOver && phase) {
     return {
-      label: workerStatusLabel(),
-      variant: phase === 'attention' ? 'attention' : 'waiting',
+      label: workerStatusLabel(phase),
+      variant,
       title:
         phase === 'attention'
           ? `Worker raised its hand${age ? ` ${age} ago` : ''} — open ${destination}`
@@ -925,7 +926,7 @@ export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip |
       host: card.shuttleHost,
     }
   }
-  return { label: workerStatusLabel(), variant: 'aloft', title: `Worker aloft — open ${destination}`, tmux, appCard, host: card.shuttleHost }
+  return { label: workerStatusLabel(undefined), variant: 'aloft', title: `Worker aloft — open ${destination}`, tmux, appCard, host: card.shuttleHost }
 }
 
 /**

@@ -1,4 +1,4 @@
-import { workerStatusLabel, appConversationTarget, canOpenDesktopApp, appWorkerLink } from './appConversation.js'
+import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -630,12 +630,14 @@ export class FiberDetailModal {
     // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
     const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+    const workerState = workerVariant(card)
+    const workerClasses = `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      aloftPill = appWorkerLink(card, 'kbn-detail-aloft')
+      aloftPill = appWorkerLink(card, workerClasses)
     } else if (card.runningWorker && coarsePointer()) {
       const mark = document.createElement(card.sessionLink ? 'a' : 'span')
-      mark.className = 'kbn-card-worker kbn-detail-aloft'
-      mark.textContent = workerStatusLabel()
+      mark.className = `kbn-card-worker ${workerClasses}`
+      mark.textContent = workerStatusLabel(workerState === 'aloft' ? undefined : card.runtimePhase)
       if (mark instanceof HTMLAnchorElement && card.sessionLink) {
         mark.href = card.sessionLink
         mark.title = 'Worker aloft — open this session in the Claude app'
@@ -649,10 +651,10 @@ export class FiberDetailModal {
       const tmuxName = card.runningWorker
       const btn = document.createElement('button')
       btn.type = 'button'
-      btn.className = 'kbn-card-worker kbn-detail-aloft'
+      btn.className = `kbn-card-worker ${workerClasses}`
       btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
       btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      btn.textContent = workerStatusLabel()
+      btn.textContent = workerStatusLabel(workerState === 'aloft' ? undefined : card.runtimePhase)
       btn.addEventListener('click', (e) => {
         e.stopPropagation()
         this.onOpenWorker?.(tmuxName, card.shuttleHost)

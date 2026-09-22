@@ -35,6 +35,8 @@ export function appConversationTarget(
 
 export function workerStatusLabel(phase?: string, launchError?: string): string {
   if (launchError || phase === 'blocked') return '⚠ blocked'
+  if (phase === 'attention') return 'Needs you'
+  if (phase === 'waiting') return 'Waiting'
   return 'Aloft'
 }
 
@@ -47,9 +49,10 @@ export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActiv
 
 export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement {
   const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+  const variant = workerVariant(card)
   const link = document.createElement('a')
   link.className = `kbn-card-worker kbn-card-worker-link ${classes}`.trim()
-  link.textContent = workerStatusLabel(card.runtimePhase, card.launchError)
+  link.textContent = workerStatusLabel(variant === 'aloft' ? undefined : card.runtimePhase, card.launchError)
   link.href = target.href
   link.title = `${card.runtimePhase ?? 'Aloft'} — ${target.title}`
   link.setAttribute('aria-label', target.ariaLabel)

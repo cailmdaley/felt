@@ -39,8 +39,8 @@ describe('app conversation opening', () => {
 
 describe('shared worker activity labels', () => {
   it.each([
-    [undefined, 'Aloft'], ['working', 'Aloft'], ['waiting', 'Aloft'],
-    ['attention', 'Aloft'], ['blocked', '⚠ blocked'],
+    [undefined, 'Aloft'], ['working', 'Aloft'], ['waiting', 'Waiting'],
+    ['attention', 'Needs you'], ['blocked', '⚠ blocked'],
   ])('shows %s in the worker marker', (phase, label) => {
     expect(workerStatusLabel(phase)).toBe(label)
   })

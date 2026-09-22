@@ -122,8 +122,6 @@
 .kbn-detail-aloft {
   margin-left: 0;
   margin-top: 6px;
-  font-size: calc(9px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.14em;
   padding: 3px 8px 2px;
   border-radius: 1px;
   transform: rotate(-1.5deg);
