@@ -54,6 +54,18 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     path
   end
 
+  defp write_ledger(lines) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle_sent_files_ledger_#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    File.write!(path, Enum.join(lines, "\n") <> "\n")
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
   test "explicit CLI deliveries share the legacy trail without tool or harness spoofing" do
     line =
       Jason.encode!(%{
@@ -80,6 +92,42 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     assert Enum.map(Shuttle.SentFiles.all_since(1500, events_file: path), & &1.uid) == [
              @session_only_uid
            ]
+  end
+
+  test "explicit native session deliveries join the fiber UID through the session ledger" do
+    fiber_uid = "01M2ZVXV9DZ8VJNPGGM83X3KB9"
+    session = "native-session-1"
+
+    events =
+      write_fixture([
+        Jason.encode!(%{
+          "type" => "file_sent",
+          "sessionId" => session,
+          "tmuxSession" => "",
+          "timestamp" => 3000,
+          "files" => ["/tmp/native-report.html"],
+          "cwd" => "/tmp"
+        })
+      ])
+
+    ledger =
+      write_ledger([
+        Jason.encode!(%{
+          "fiber" => "ai-futures/felt/sessions/worker-wake",
+          "uid" => fiber_uid,
+          "session" => session,
+          "kind" => "claim",
+          "at" => 2999
+        })
+      ])
+
+    opts = [events_file: events, session_ledger_file: ledger]
+
+    assert [%{fullPath: "/tmp/native-report.html", sessionId: ^session}] =
+             Shuttle.SentFiles.for_uid(fiber_uid, opts)
+
+    assert [%{uid: ^fiber_uid, sessionId: ^session}] = Shuttle.SentFiles.all_since(0, opts)
+    assert [%{fullPath: "/tmp/native-report.html"}] = Shuttle.SentFiles.for_uid(session, opts)
   end
 
   describe "Shuttle.SentFiles.for_uid/2 (the reader)" do
@@ -286,6 +334,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       conn = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}")
 
       assert conn.status == 200
+
       assert %{"files" => [%{"fullPath" => "/tmp/local.html", "basename" => "local.html"}]} =
                json_response(conn, 200)
     end
@@ -316,6 +365,65 @@ defmodule ShuttleWeb.SentFilesControllerTest do
         |> get("/api/v1/sent-files?uid=#{@other_ulid}")
 
       assert other.status == 200
+    end
+
+    test "invalidates an ETag when the session ledger adds a native claim" do
+      session = "native-session-etag"
+
+      path =
+        write_fixture([
+          Jason.encode!(%{
+            "type" => "file_sent",
+            "sessionId" => session,
+            "tmuxSession" => "",
+            "timestamp" => 100,
+            "files" => ["/tmp/native.html"],
+            "cwd" => "/tmp"
+          })
+        ])
+
+      ledger = write_ledger([])
+      with_events_file(path)
+      with_session_ledger(ledger)
+
+      first = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}")
+      assert first.status == 200
+      assert %{"files" => []} = json_response(first, 200)
+      [etag] = get_resp_header(first, "etag")
+
+      File.write!(
+        ledger,
+        Jason.encode!(%{
+          "fiber" => "test/native-session",
+          "uid" => @match_ulid,
+          "session" => session,
+          "kind" => "claim",
+          "at" => 101
+        }) <> "\n"
+      )
+
+      second =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/v1/sent-files?uid=#{@match_ulid}")
+
+      assert second.status == 200
+      assert %{"files" => [%{"fullPath" => "/tmp/native.html"}]} = json_response(second, 200)
+
+      # The global feed shares the same join and validator source.
+      [global_etag] = get_resp_header(get(api_conn(), "/api/v1/sent-files/all"), "etag")
+
+      File.write!(ledger, "\n", [:append])
+
+      global_second =
+        api_conn()
+        |> put_req_header("if-none-match", global_etag)
+        |> get("/api/v1/sent-files/all")
+
+      assert global_second.status == 200
+
+      assert %{"files" => [%{"uid" => @match_ulid, "fullPath" => "/tmp/native.html"}]} =
+               json_response(global_second, 200)
     end
 
     test "200 with an empty list when the fiber has no sends" do
@@ -349,7 +457,11 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     end
 
     test "relays the remote's status verbatim" do
-      stub_forward("candide", "http://localhost:4001", {:ok, 404, "application/json", ~s({"error":"x"})})
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 404, "application/json", ~s({"error":"x"})}
+      )
 
       conn = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}&origin=candide")
       assert conn.status == 404
@@ -406,7 +518,6 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       assert %{"error" => error} = json_response(conn, 400)
       assert error =~ "ms"
     end
-
   end
 
   describe "global composite" do
@@ -468,5 +579,14 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     end)
   end
 
+  defp with_session_ledger(path) do
+    previous = System.get_env("SHUTTLE_SESSIONS_FILE")
+    System.put_env("SHUTTLE_SESSIONS_FILE", path)
 
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("SHUTTLE_SESSIONS_FILE", previous),
+        else: System.delete_env("SHUTTLE_SESSIONS_FILE")
+    end)
+  end
 end

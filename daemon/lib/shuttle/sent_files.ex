@@ -8,15 +8,17 @@ defmodule Shuttle.SentFiles do
   `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. Legacy
   `SendUserFile` hook events carry paths in `toolInput.files` and remain readable.
   Paths are absolute or resolved against the owning host's recorded `cwd`.
-  A worker's tmux-embedded ULID associates the delivery with its fiber; other
-  sessions are addressed by `sessionId`.
+  A worker's tmux-embedded ULID associates the delivery with its fiber. Native
+  sessions without a tmux name use the session ledger's fiber claim; an
+  unclaimed session remains addressable by its raw `sessionId`.
   A derived, server-owned index would be stale the moment that server stops —
   events.jsonl is ground truth. (See finding 01KVC1N5XMAAMYXDAGR4V6QA9G.)
 
   **The trail for a `uid`** = SendUserFile events whose tmux-embedded ULID — or
-  `sessionId` — matches the requested `uid`, with `toolInput.files` flattened
-  into one entry per path, deduped by `fullPath` keeping the newest send, sorted
-  newest-first, capped at `@cap`.
+  claimed session-ledger UID — matches the requested `uid`, with
+  `toolInput.files` flattened into one entry per path, deduped by `fullPath`
+  keeping the newest send, sorted newest-first, capped at `@cap`. Unclaimed
+  sessions retain the raw `sessionId` fallback for legacy deliveries.
 
   The events file grows to tens of megabytes between rollovers, so it is
   **streamed** line-by-line (never slurped); malformed lines and
@@ -35,17 +37,19 @@ defmodule Shuttle.SentFiles do
   `%{fullPath, basename, timestamp, sessionId}` maps — newest-first, deduped by
   `fullPath`, capped.
 
-  Opts (for tests): `:events_file` (path to the JSONL stream), `:cap`.
+  Opts (for tests): `:events_file` (path to the JSONL stream),
+  `:session_ledger_file` (path to the session ledger), `:cap`.
   """
   @spec for_uid(String.t(), keyword()) :: [map()]
   def for_uid(uid, opts \\ []) when is_binary(uid) do
     path = Keyword.get(opts, :events_file, default_events_file())
     cap = Keyword.get(opts, :cap, @cap)
+    session_uids = session_uids(opts)
 
     if File.regular?(path) do
       path
       |> File.stream!()
-      |> Stream.flat_map(&entries_for_line(&1, uid))
+      |> Stream.flat_map(&entries_for_line(&1, uid, session_uids))
       |> Enum.to_list()
       |> dedupe_newest()
       |> Enum.sort_by(& &1.timestamp, :desc)
@@ -60,8 +64,9 @@ defmodule Shuttle.SentFiles do
   oldest first — the global counterpart to `for_uid/2`.
 
   Each entry additionally carries `uid`, computed the same way `for_uid/2`
-  matches (tmux-embedded ULID falling back to `sessionId`), so a caller with no
-  single fiber in mind can still group by one. Unlike `for_uid/2` this does
+  matches (tmux-embedded ULID, then session-ledger claim, then raw `sessionId`),
+  so a caller with no single fiber in mind can still group by one. Unlike
+  `for_uid/2` this does
   **not** dedupe by `fullPath` or cap the result — raw entries, oldest-first;
   dedup is the client's job (house rule: recorded evidence only, no server-side
   opinion about which send "wins").
@@ -69,16 +74,17 @@ defmodule Shuttle.SentFiles do
   Reads only the live `events.jsonl`, same as `for_uid/2` — no rotated `.1`
   sibling — the source Shuttle.WaitingTracker.default_events_file/0` resolves.
 
-  Opts (for tests): `:events_file`.
+  Opts (for tests): `:events_file`, `:session_ledger_file`.
   """
   @spec all_since(integer(), keyword()) :: [map()]
   def all_since(since_ms, opts \\ []) when is_integer(since_ms) do
     path = Keyword.get(opts, :events_file, default_events_file())
+    session_uids = session_uids(opts)
 
     if File.regular?(path) do
       path
       |> File.stream!()
-      |> Stream.flat_map(&entries_since_line(&1, since_ms))
+      |> Stream.flat_map(&entries_since_line(&1, since_ms, session_uids))
       |> Enum.to_list()
       |> Enum.sort_by(& &1.timestamp)
     else
@@ -89,13 +95,13 @@ defmodule Shuttle.SentFiles do
   # One JSONL line → the (possibly empty) list of entries it contributes,
   # unfiltered by fiber. Malformed JSON, non-SendUserFile events, and events
   # older than `since_ms` all collapse to `[]`.
-  defp entries_since_line(line, since_ms) do
+  defp entries_since_line(line, since_ms, session_uids) do
     with {:ok, event} <- Jason.decode(line),
          files when is_list(files) <- sent_paths(event),
          timestamp when is_integer(timestamp) and timestamp >= since_ms <- event["timestamp"] do
       session_id = event["sessionId"]
       cwd = event["cwd"]
-      uid = event_uid(event)
+      uid = event_uid(event, session_uids)
 
       for full_path <- files, is_binary(full_path) do
         abs = absolutize(full_path, cwd)
@@ -123,10 +129,10 @@ defmodule Shuttle.SentFiles do
   # One JSONL line → the (possibly empty) list of entries it contributes for
   # `uid`. Malformed JSON, non-SendUserFile events, and non-matching fibers all
   # collapse to `[]` so a single bad line never breaks the stream.
-  defp entries_for_line(line, uid) do
+  defp entries_for_line(line, uid, session_uids) do
     with {:ok, event} <- Jason.decode(line),
          files when is_list(files) <- sent_paths(event),
-         true <- event_uid(event) == uid do
+         true <- uid in event_uids(event, session_uids) do
       session_id = event["sessionId"]
       timestamp = event["timestamp"]
       cwd = event["cwd"]
@@ -160,11 +166,39 @@ defmodule Shuttle.SentFiles do
       else: path
   end
 
-  # The fiber id an event belongs to: the ULID embedded in the tmux session
-  # name, falling back to the raw sessionId (capture sessions with no tmux name
-  # claim themselves by sessionId).
-  defp event_uid(event) do
-    Shuttle.ULID.from_tmux(event["tmuxSession"]) || event["sessionId"]
+  # The fiber id an event belongs to: prefer the ULID embedded in the tmux
+  # session name, then the session ledger's claim, then the raw sessionId.
+  defp event_uid(event, session_uids) do
+    case Shuttle.ULID.from_tmux(event["tmuxSession"]) do
+      nil -> Map.get(session_uids, event["sessionId"], event["sessionId"])
+      uid -> uid
+    end
+  end
+
+  defp event_uids(event, session_uids) do
+    [event_uid(event, session_uids), event["sessionId"]]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  end
+
+  defp session_uids(opts) do
+    ledger_opts =
+      case Keyword.get(opts, :session_ledger_file) do
+        path when is_binary(path) -> [path: path]
+        _ -> []
+      end
+
+    Shuttle.SessionLedger.read_since(0, ledger_opts)
+    |> Enum.reduce(%{}, fn record, acc ->
+      case {record["session"], record["uid"]} do
+        {session, uid}
+        when is_binary(session) and session != "" and is_binary(uid) and uid != "" ->
+          Map.put(acc, session, uid)
+
+        _ ->
+          acc
+      end
+    end)
   end
 
   # Keep only the newest send per fullPath. Entries arrive in file order
