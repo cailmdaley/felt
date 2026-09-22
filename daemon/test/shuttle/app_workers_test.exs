@@ -84,6 +84,20 @@ defmodule Shuttle.AppWorkersTest do
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
   end
 
+  defmodule MarkerFailsOnceRunner do
+    use Agent
+
+    def start_link(_), do: Agent.start_link(fn -> true end, name: __MODULE__)
+
+    def cmd("felt", ["shuttle", "mark-runtime" | _] = args, opts) do
+      if Agent.get_and_update(__MODULE__, fn fail? -> {fail?, false} end),
+        do: {"write failed", 1},
+        else: Runner.cmd("felt", args, opts)
+    end
+
+    def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+  end
+
   defmodule MissingTmuxRunner do
     def cmd("tmux", _args, _opts), do: {"tmux unavailable", :timeout}
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
@@ -244,6 +258,56 @@ defmodule Shuttle.AppWorkersTest do
              entry["kind"] == "claim" and entry["fiber"] == id and
                entry["session"] == "native-transcript"
            end)
+  end
+
+  test "claim adopts an idle native conversation" do
+    fiber = %{"id" => "tests/adopt-idle", "uid" => "idle-uid"}
+
+    App.set(:read_result, {:ok, %{"id" => "idle-thread", "status" => %{"type" => "idle"}}})
+
+    assert :ok = AppWorkers.claim_or_adopt("idle-thread", fiber, Runner.felt_root())
+
+    assert {:ok, %{"fiber_id" => "tests/adopt-idle", "active" => true}} =
+             AppWorkers.get("idle-thread")
+
+    assert [{:read, "idle-thread"}] = App.calls()
+  end
+
+  test "marker failure retains an adopted conversation for a same-session claim retry" do
+    id = "tests/adopt-marker-retry"
+    thread = "marker-retry-thread"
+
+    Runner.set_fiber(id, make_fiber(id, %{"uid" => "marker-retry-uid", "status" => "open"}))
+
+    Runner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: codex\nsurface: app\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
+      "open"
+    )
+
+    App.set(:read_result, {:ok, %{"id" => thread, "status" => %{"type" => "active"}}})
+    start_supervised!(MarkerFailsOnceRunner)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MarkerFailsOnceRunner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert {:error, _} =
+             Poller.claim_session(poller, id, nil, surface: "app", session_uuid: thread)
+
+    assert {:ok, %{"active" => true, "fiber_id" => ^id}} = AppWorkers.get(thread)
+    assert [{:read, ^thread}] = App.calls()
+
+    assert {:ok, %{session: "codex-app:" <> ^thread}} =
+             Poller.claim_session(poller, id, nil, surface: "app", session_uuid: thread)
+
+    assert [{:read, ^thread}] = App.calls()
+    assert get_in(Runner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == thread
+    assert %{session: "codex-app:" <> ^thread} = Poller.worker_status(poller, id)
   end
 
   test "claim refuses an unverified native conversation without creating ownership" do
