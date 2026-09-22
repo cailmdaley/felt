@@ -145,7 +145,11 @@ func runCodexDesktopBridge(ctx context.Context, o bridgeOptions) error {
 		close(childDone)
 	}()
 	var endpoint os.FileInfo
+	cleanupEndpoint := false
 	defer func() {
+		if !cleanupEndpoint {
+			return
+		}
 		if endpoint != nil {
 			removeOwnedEndpoint(socket, endpoint)
 		} else {
@@ -155,13 +159,21 @@ func runCodexDesktopBridge(ctx context.Context, o bridgeOptions) error {
 
 	_, err = waitForBridgeEndpoint(ctx, socket, childDone, func() error { return childErr }, o.startup)
 	if err != nil {
-		stopBridgeChild(child, childDone)
+		if stopBridgeChild(child, childDone) {
+			cleanupEndpoint = true
+		} else {
+			return fmt.Errorf("%w; native Codex process could not be reaped; endpoint left in place", err)
+		}
 		return err
 	}
 	endpoint, _ = os.Stat(socket)
 	ws, err := dialBridgeSocket(ctx, socket)
 	if err != nil {
-		stopBridgeChild(child, childDone)
+		if stopBridgeChild(child, childDone) {
+			cleanupEndpoint = true
+		} else {
+			return fmt.Errorf("connecting native Codex websocket: %w; process could not be reaped; endpoint left in place", err)
+		}
 		return fmt.Errorf("connecting native Codex websocket: %w", err)
 	}
 	defer ws.Close()
@@ -175,7 +187,15 @@ func runCodexDesktopBridge(ctx context.Context, o bridgeOptions) error {
 		childFinishedBeforeStop = true
 	default:
 	}
-	stopBridgeChild(child, childDone)
+	childStopped := stopBridgeChild(child, childDone)
+	if childStopped {
+		cleanupEndpoint = true
+	} else {
+		if err == nil {
+			return errors.New("native Codex process could not be reaped; endpoint left in place")
+		}
+		return fmt.Errorf("%w; native Codex process could not be reaped; endpoint left in place", err)
+	}
 	if err == nil && childFinishedBeforeStop && childErr != nil {
 		return fmt.Errorf("native Codex exited: %w", childErr)
 	}
@@ -308,7 +328,7 @@ func acquireBridgeOwner(socket string) (*bridgeOwner, error) {
 		}
 		return nil, fmt.Errorf("acquire bridge owner lock: %w", err)
 	}
-	if err := f.Truncate(0); err == nil {
+	if err = f.Truncate(0); err == nil {
 		_, err = fmt.Fprintf(f, "pid=%d\nsocket=%s\n", os.Getpid(), socket)
 	}
 	if err != nil {
@@ -536,22 +556,24 @@ func sendBridgeMessage(ctx context.Context, out chan<- bridgeMessage, msg bridge
 	}
 }
 
-func stopBridgeChild(child *exec.Cmd, done <-chan struct{}) {
+func stopBridgeChild(child *exec.Cmd, done <-chan struct{}) bool {
 	if child == nil || child.Process == nil {
-		return
+		return true
 	}
 	_ = signalBridgeChild(child, syscall.SIGTERM)
 	timer := time.NewTimer(bridgeStopTimeout)
 	defer timer.Stop()
 	select {
 	case <-done:
-		return
+		return true
 	case <-timer.C:
 	}
 	_ = signalBridgeChild(child, syscall.SIGKILL)
 	select {
 	case <-done:
+		return true
 	case <-time.After(bridgeStopTimeout):
+		return false
 	}
 }
 
