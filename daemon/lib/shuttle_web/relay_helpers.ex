@@ -16,6 +16,12 @@ defmodule ShuttleWeb.RelayHelpers do
 
   alias Shuttle.FeltStores
 
+  @doc "The recovery guidance shown when ChatGPT is unavailable on the selected host."
+  def app_server_unavailable_message do
+    "The ChatGPT connection on this host is unavailable. " <>
+      "Open or reconnect this host in ChatGPT, then try again."
+  end
+
   @doc """
   Relay a JSON-bodied forward verbatim, or render a 502 tunnel failure.
 
