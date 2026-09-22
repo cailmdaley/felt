@@ -19,17 +19,31 @@ try {
       const original = anchor.className
       const typography = ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']
       const baseline = {}
+      const button = document.createElement('button')
+      button.textContent = 'Aloft'
+      anchor.after(button)
       anchor.className = 'kbn-card-worker kbn-card-worker-link kbn-card-worker-aloft'
       for (const property of typography) baseline[property] = getComputedStyle(anchor)[property]
       for (const variant of ['aloft', 'waiting', 'attention', 'blocked']) {
         anchor.className = `kbn-card-worker kbn-card-worker-link kbn-card-worker-${variant}`
+        button.className = `kbn-card-worker kbn-card-worker-${variant}`
         const app = getComputedStyle(anchor)
+        for (const property of typography) {
+          if (getComputedStyle(button)[property] !== app[property]) throw new Error(`${variant}: terminal ${property} differs from app`)
+        }
         for (const property of typography) {
           if (app[property] !== baseline[property]) {
             throw new Error(`${variant} ${property}: expected aloft baseline ${baseline[property]}, app ${app[property]}`)
           }
         }
       }
+      for (const variant of ['waiting', 'attention', 'blocked']) {
+        anchor.className = `kbn-card-phase kbn-card-phase-${variant}`
+        for (const property of typography) {
+          if (getComputedStyle(anchor)[property] !== baseline[property]) throw new Error(`${variant}: fallback ${property} differs from Aloft`)
+        }
+      }
+      button.remove()
       anchor.className = original
     })
     const destination = mobile ? 'https://chatgpt.com/open-app' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'

@@ -1942,29 +1942,14 @@
   0%, 100% { background: rgba(63, 130, 120, 0.10); }
   50% { background: rgba(63, 130, 120, 0.22); }
 }
-/* waiting-for-human is a loud in-flight signal — these cards sort near the
-   top of the column and the chip should pull the eye there. Warm amber, bolder
-   ink; not an error (that's retrying's warmer red). On a live worker (idle ≥60s)
-   this takes over the worker pill itself (.kbn-card-worker-waiting); this span
-   form is the worker-less fallback. Static — the warm wash carries it, no blink. */
+/* Worker-less status badges use the same typography as live worker controls. */
 .kbn-card-phase-waiting {
   color: #8A5A12;
   background: rgba(200, 138, 30, 0.20);
-  font-weight: 600;
 }
-/* attention is the loudest in-flight signal — the worker raised its hand
-   (Notification) and sorts above even `waiting`. Deep red ink + wash + the
-   manicule (☞, U+261E + U+FE0E text VS; serif + font-variant-emoji:text render
-   it as a text mark, not a color emoji). On a live worker this rarely shows as
-   a chip — it takes over the worker pill itself (.kbn-card-worker-attention);
-   this span form is the worker-less fallback. Static — a deep-red call-to-action,
-   never blinking. */
 .kbn-card-phase-attention {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-variant-emoji: text;
   color: #9A2A1E;
   background: rgba(168, 38, 28, 0.18);
-  font-weight: 700;
 }
 /* Needs-you-now on a live worker takes over the worker pill. The state changes
    its pigment and motion only, so every worker state keeps the same uppercase
