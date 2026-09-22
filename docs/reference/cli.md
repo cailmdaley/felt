@@ -157,6 +157,11 @@ endpoint owned by another user, or a directory accessible by other users is
 refused. A stale endpoint should only be removed after its owning process has
 been verified stopped.
 
+See [Desktop installation and rollback](../shuttle/codex-desktop.md) for
+explicit endpoint configuration, durable launch setup, and acceptance checks.
+
+### Session discovery and messaging
+
 No-argument `sessions` may report a Claude or Codex receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in
