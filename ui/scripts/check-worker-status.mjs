@@ -6,9 +6,16 @@ import { chromium } from 'playwright-core'
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true })
 try {
   for (const mobile of [false, true]) {
-    const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 }, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' })
+    const page = await browser.newPage({
+      viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 },
+      isMobile: mobile,
+      hasTouch: mobile,
+      userAgent: mobile
+        ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1'
+        : undefined,
+      reducedMotion: 'reduce',
+    })
     const harness = pathToFileURL(resolve('harness-board-dist/index.html')).href
-    await page.route('https://chatgpt.com/open-app', route => route.fulfill({ contentType: 'text/html', body: '<p>App-opening destination</p>' }))
     await page.goto(harness)
     const appCard = page.locator('.kbn-card').filter({ has: page.getByText('App conversation continuity', { exact: true }) })
     const appMark = appCard.locator('.kbn-card-worker')
@@ -46,13 +53,8 @@ try {
       button.remove()
       anchor.className = original
     })
-    const destination = mobile ? 'https://chatgpt.com/open-app' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
+    const destination = mobile ? 'chatgpt://' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     assert.equal(await appMark.getAttribute('href'), destination)
-    if (mobile) {
-      await appMark.click()
-      await page.waitForURL(destination)
-      await page.goto(harness)
-    }
     await appCard.locator('.kbn-card-name').click()
     assert.equal(await page.locator('.kbn-detail-aloft').textContent(), 'Aloft')
     assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('href'), destination)
@@ -68,8 +70,8 @@ try {
     if (mobile) {
       assert.match(await page.locator('.kbn-detail-app-guide').innerText(), /Remote → ada-workstation → loom/)
       assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('aria-label'), 'Open ChatGPT app')
-      await page.locator('.kbn-detail-aloft').click()
-      await page.waitForURL(destination)
+      // The native chatgpt:// scheme is handed to iOS; the href assertion above
+      // is the browser-safe check for that handoff.
     }
     await page.close()
   }

@@ -23,6 +23,19 @@ describe('app conversation opening', () => {
   })
 
   it.each([
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) Mobile',
+    'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X)',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+  ])('uses the native ChatGPT opener on iOS, including desktop-mode iPad: %s', (userAgent) => {
+    const coarse = /iPad|Macintosh/.test(userAgent)
+    expect(appConversationTarget(card, false, userAgent, coarse).href).toBe('chatgpt://')
+  })
+
+  it('keeps Android on the HTTPS app fallback', () => {
+    expect(appConversationTarget(card, false, 'Mozilla/5.0 (Linux; Android 16)', true).href).toBe('https://chatgpt.com/open-app')
+  })
+
+  it.each([
     'javascript:alert(1)', 'codex://review?anything', `${route}?host=other`,
     `${route}/../new`, 'codex://threads/not-a-uuid', 'https://chatgpt.com/codex/tasks/anything',
     `${route}\n`, null,

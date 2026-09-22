@@ -16,10 +16,13 @@ export function canOpenDesktopApp(userAgent: string, coarse: boolean): boolean {
 export function appConversationTarget(
   card: Pick<KanbanCard, 'desktopLink' | 'shuttleHost' | 'shuttleProjectDir' | 'launchError'>,
   desktop: boolean,
+  userAgent = '',
+  coarse = false,
 ): { href: string; title: string; guidance: string; conversationSpecific: boolean; ariaLabel: string } {
   const threadLink = desktop ? validDesktopThreadLink(card.desktopLink) : undefined
-  // ChatGPT registers this universal link to open the mobile app, with an App Store fallback.
-  const href = threadLink ?? 'https://chatgpt.com/open-app'
+  const appleMobile = /iPhone|iPad|iPod/i.test(userAgent) || (coarse && /Macintosh/i.test(userAgent))
+  // The iOS opener preserves the app's last screen; Safari may ask to open it.
+  const href = threadLink ?? (appleMobile ? 'chatgpt://' : 'https://chatgpt.com/open-app')
   const project = card.shuttleProjectDir?.split(/[\\/]/).filter(Boolean).at(-1)
   const location = [card.shuttleHost, project].filter(Boolean).join(' → ')
   const guidance = `Continue in ChatGPT → Remote${location ? ` → ${location}` : ''}, then choose this conversation.`
@@ -48,7 +51,8 @@ export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActiv
 }
 
 export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement {
-  const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+  const coarse = coarsePointer()
+  const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
   const variant = workerVariant(card)
   const link = document.createElement('a')
   link.className = `kbn-card-worker kbn-card-worker-link ${classes}`.trim()

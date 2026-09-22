@@ -629,7 +629,8 @@ export class FiberDetailModal {
     // that was never bridged keeps the stamp and drops the promise: a plain
     // mark, not a link to nowhere.
     let aloftPill: HTMLElement | null = null
-    const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarsePointer()))
+    const coarse = coarsePointer()
+    const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
     const workerState = workerVariant(card)
     const workerClasses = `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
