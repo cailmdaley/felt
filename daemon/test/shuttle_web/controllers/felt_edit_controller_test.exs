@@ -160,6 +160,101 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     refute File.exists?(args_file)
   end
 
+  test "routes a collaboration replacement through felt shuttle assign without changing status" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-felt-edit-collaboration-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "remote-tags"])
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(
+      Path.join(fiber_dir, "remote-tags.md"),
+      "---\nname: Remote tags\nstatus: active\n---\n\nbody\n"
+    )
+
+    args_file = install_fake_felt!(root)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_loom_homes)
+      File.rm_rf(root)
+    end)
+
+    collaboration = %{
+      "collaborator" => %{
+        "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+        "origin" => "host-a"
+      },
+      "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+    }
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{"fiber_id" => "tests/remote-tags", "collaboration" => collaboration})
+      )
+
+    assert conn.status == 200
+    assert args = File.read!(args_file)
+    assert args =~ "-C\n#{store}\nshuttle\nassign\ntests/remote-tags\n--json-assignment\n"
+    assert args =~ "\"collaborator\""
+    refute args =~ "--status"
+  end
+
+  test "rejects malformed collaboration before it shells felt" do
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{
+          "fiber_id" => "tests/remote-tags",
+          "collaboration" => %{"role" => %{"uid" => "not-a-ulid", "origin" => "host-a"}}
+        })
+      )
+
+    assert conn.status == 400
+    assert conn.resp_body =~ "collaboration.role.uid"
+  end
+
+  test "rejects an explicit null collaboration rather than treating it as an absent edit" do
+    root =
+      System.tmp_dir!()
+      |> Path.join("shuttle-felt-edit-null-collaboration-#{System.unique_integer([:positive])}")
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "remote-tags"])
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(
+      Path.join(fiber_dir, "remote-tags.md"),
+      "---\nname: Remote tags\nstatus: active\ncollaboration:\n  collaborator:\n    uid: 01KTS261GJMMRDRHS2QDMEFV3K\n    origin: host-a\n---\n\nbody\n"
+    )
+
+    args_file = install_fake_felt!(root)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_loom_homes)
+      File.rm_rf(root)
+    end)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{"fiber_id" => "tests/remote-tags", "collaboration" => nil})
+      )
+
+    assert conn.status == 400
+    assert conn.resp_body =~ "collaboration must be an object"
+    refute File.exists?(args_file)
+  end
+
   test "forwards a remote-origin edit to the owning daemon, origin stripped, and refreshes its feed on a 2xx" do
     setup_forward_plane!({:ok, 200, "ok\n"})
 
@@ -189,6 +284,33 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     # A 2xx forward invalidates the owner's feed cache — the fiber registry
     # refetched candide's feed.
     assert FeltEditFeedClient.get_count() == 1
+  end
+
+  test "forwards a remote-origin collaboration replacement to the owner" do
+    setup_forward_plane!({:ok, 200, "ok\n"})
+
+    collaboration = %{
+      "collaborator" => %{
+        "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+        "origin" => "host-a"
+      }
+    }
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{
+          "fiber_id" => "tests/remote-tags",
+          "origin" => "candide",
+          "collaboration" => collaboration
+        })
+      )
+
+    assert conn.status == 200
+    forwarded = FeltEditForwardClient.last().body |> Jason.decode!()
+    refute Map.has_key?(forwarded, "origin")
+    assert forwarded["collaboration"] == collaboration
   end
 
   test "a non-2xx forward is relayed verbatim and does NOT refresh the owner feed" do
@@ -239,7 +361,6 @@ defmodule ShuttleWeb.FeltEditControllerTest do
       restore_app_env(:write_forward_client, previous_client)
     end)
   end
-
 
   defp install_fake_felt!(root) do
     bin_dir = Path.join(root, "bin")

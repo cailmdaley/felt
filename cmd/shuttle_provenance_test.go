@@ -44,8 +44,8 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"records":[
-          {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
-          {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","at":2,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
+          {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","agent":"codex-terra","model":"gpt-6","collaboration":{"collaborator":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","origin":"candide"}},"at":1,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
+          {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","agent":"codex-sol","model":"gpt-6.1","collaboration":{"role":{"uid":"01BX5ZZKBKACTAV9WEVGEMMVRZ","origin":"cineca"}},"at":2,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
           {"fiber":"new/name","uid":"01UID","session":"other","host":"cineca","harness":"claude-code","kind":"dispatch","at":3,"transcript":{"availability":"transcript_missing"}},
           {"fiber":"other","uid":"02UID","session":"ignored","host":"candide","harness":"codex","kind":"dispatch","at":4}
         ]}`))
@@ -67,6 +67,12 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 	}
 	if len(rows[0].Events) != 2 || rows[0].Events[0].Kind != "dispatch" || rows[0].Events[1].Kind != "resume" {
 		t.Fatalf("duplicate ledger rows did not preserve ordered lifecycle events: %#v", rows[0].Events)
+	}
+	if rows[0].Agent != "codex-terra" || rows[0].Model != "gpt-6" || rows[0].Collaboration == nil || rows[0].Collaboration.Collaborator == nil {
+		t.Fatalf("dispatch attribution missing from row: %#v", rows[0])
+	}
+	if rows[0].Events[1].Agent != "codex-sol" || rows[0].Events[1].Model != "gpt-6.1" || rows[0].Events[1].Collaboration == nil || rows[0].Events[1].Collaboration.Role == nil {
+		t.Fatalf("resume attribution missing from event: %#v", rows[0].Events[1])
 	}
 }
 

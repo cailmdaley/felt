@@ -10,7 +10,7 @@ defmodule Shuttle.Dispatcher do
 
   require Logger
 
-  alias Shuttle.Agents
+  alias Shuttle.{Agents, Collaboration}
 
   # Codex and pi mint their own session UUIDs after the process starts. A cold
   # harness can spend tens of seconds loading before it writes the transcript
@@ -106,7 +106,10 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
-            previous_session: previous_session_info(fiber, uid)
+            previous_session: previous_session_info(fiber, uid),
+            collaboration: Collaboration.snapshot(fiber),
+            agent: agent.id,
+            model: agent.model
           )
       end
     end
@@ -364,7 +367,8 @@ defmodule Shuttle.Dispatcher do
       header,
       "Felt store: #{Keyword.get(opts, :felt_store, default_felt_store())}",
       "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
-      String.trim_trailing(render_previous_session_line(opts))
+      String.trim_trailing(render_previous_session_line(opts)),
+      Collaboration.prompt_section(Keyword.get(opts, :collaboration))
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
@@ -1319,13 +1323,18 @@ defmodule Shuttle.Dispatcher do
         # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
         # same as fresh dispatch.
         spawn_and_record(session, work_dir, run_script, runner, fn ->
-          record_dispatch_session(fiber_id, session_id, runner,
-            felt_store: felt_store,
-            run_id: Keyword.get(opts, :run_id),
-            tmux: session,
-            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-            uid: Keyword.get(opts, :uid),
-            ledger_kind: :resume
+          record_dispatch_session(
+            fiber_id,
+            session_id,
+            runner,
+            Keyword.merge(opts,
+              felt_store: felt_store,
+              run_id: Keyword.get(opts, :run_id),
+              tmux: session,
+              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+              uid: Keyword.get(opts, :uid),
+              ledger_kind: :resume
+            )
           )
         end)
 
@@ -1345,13 +1354,18 @@ defmodule Shuttle.Dispatcher do
         # Store the session UUID in the dispatch marker so "Resume previous"
         # and the autonomous continuation heuristic can recover it.
         spawn_and_record(session, work_dir, run_script, runner, fn ->
-          store_session_id(fiber_id, session_uuid, runner,
-            felt_store: felt_store,
-            run_id: Keyword.get(opts, :run_id),
-            tmux: session,
-            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-            uid: Keyword.get(opts, :uid),
-            ledger_kind: :dispatch
+          store_session_id(
+            fiber_id,
+            session_uuid,
+            runner,
+            Keyword.merge(opts,
+              felt_store: felt_store,
+              run_id: Keyword.get(opts, :run_id),
+              tmux: session,
+              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+              uid: Keyword.get(opts, :uid),
+              ledger_kind: :dispatch
+            )
           )
         end)
     end
@@ -1582,7 +1596,10 @@ defmodule Shuttle.Dispatcher do
       session: uuid,
       tmux: Keyword.get(opts, :tmux),
       harness: Keyword.get(opts, :harness),
-      kind: Keyword.get(opts, :ledger_kind, :dispatch)
+      kind: Keyword.get(opts, :ledger_kind, :dispatch),
+      agent: Keyword.get(opts, :agent),
+      model: Keyword.get(opts, :model),
+      collaboration: Keyword.get(opts, :collaboration)
     )
   end
 

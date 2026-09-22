@@ -29,6 +29,48 @@ defmodule Shuttle.SessionLedgerTest do
   defp decoded(path), do: Enum.map(lines(path), &Jason.decode!/1)
 
   describe "record/1" do
+    test "snapshots collaboration and resolved execution recipe on the new row", %{path: path} do
+      collaboration = %{
+        "collaborator" => %{
+          "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+          "origin" => "host-a"
+        },
+        "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+      }
+
+      SessionLedger.record(
+        path: path,
+        fiber: "work/paper/edits",
+        session: "0883ade1-08e0-4457-94c6-7ac12137eb0f",
+        kind: :dispatch,
+        agent: "codex-terra",
+        model: "gpt-5.6-terra",
+        collaboration: collaboration
+      )
+
+      assert [record] = decoded(path)
+      assert record["agent"] == "codex-terra"
+      assert record["model"] == "gpt-5.6-terra"
+      assert record["collaboration"] == collaboration
+    end
+
+    test "keeps legacy rows without collaboration or execution fields readable", %{path: path} do
+      File.write!(
+        path,
+        Jason.encode!(%{
+          "fiber" => "old/fiber",
+          "session" => "old-session",
+          "at" => 100,
+          "kind" => "dispatch"
+        }) <> "\n"
+      )
+
+      assert [%{"fiber" => "old/fiber"} = record] = SessionLedger.read_since(0, path: path)
+      refute Map.has_key?(record, "agent")
+      refute Map.has_key?(record, "model")
+      refute Map.has_key?(record, "collaboration")
+    end
+
     test "writes one line carrying the whole pairing", %{path: path} do
       SessionLedger.record(
         path: path,

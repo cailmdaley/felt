@@ -29,6 +29,7 @@ defmodule Shuttle.Poller do
   require Logger
 
   alias Shuttle.{
+    Collaboration,
     Dispatcher,
     LifecycleStore,
     StandingRole,
@@ -430,7 +431,8 @@ defmodule Shuttle.Poller do
   per-host dispatch marker the dispatcher writes at spawn (when `:session_uuid`
   is provided) so resume works.
 
-  Options: `:agent` (registry name; defaults to the fiber's shuttle.agent),
+  Options: `:agent` (optional execution agent asserted by the claimant; the
+  fiber's shuttle.agent remains the display fallback),
   `:session_uuid` (the harness transcript UUID, for the dispatch marker).
   """
   @spec claim_session(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -2529,6 +2531,37 @@ defmodule Shuttle.Poller do
       get_in(fiber, ["shuttle", "agent"]) || "unknown"
   end
 
+  defp collaboration_snapshot(fiber) do
+    case Collaboration.snapshot(fiber) do
+      {:ok, snapshot} -> snapshot
+      {:error, _} -> nil
+    end
+  end
+
+  # A fiber's configured agent is an execution recipe. It makes a useful
+  # running-card label, but it cannot prove what an external claimant was
+  # actually running. Ledger provenance therefore carries only an explicit
+  # claimant assertion, or an agent id already persisted by AppWorkers.
+  defp explicit_claim_agent(opts) do
+    agent_presence(Keyword.get(opts, :agent))
+  end
+
+  defp app_claim_agent(id, opts) do
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, %{"agent_id" => agent}} ->
+        agent_presence(agent) || explicit_claim_agent(opts)
+
+      _ ->
+        explicit_claim_agent(opts)
+    end
+  end
+
+  defp agent_presence(agent) when is_binary(agent) do
+    if String.trim(agent) == "", do: nil, else: agent
+  end
+
+  defp agent_presence(_), do: nil
+
   # Returns the working directory to use when dispatching this fiber.
   #
   # When the fiber's shuttle block contains a `project_dir` key pointing to an
@@ -2719,7 +2752,7 @@ defmodule Shuttle.Poller do
          true <- is_nil(running) or running.session == session,
          :ok <-
            Shuttle.AppWorkers.claim_or_adopt(id, fiber, owning_store(fiber_id, state),
-             agent_id: Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
+             agent_id: explicit_claim_agent(opts)
            ),
          :ok <- ensure_app_claim_marker(state, fiber_id, fiber, id) do
       now = DateTime.utc_now()
@@ -2743,7 +2776,9 @@ defmodule Shuttle.Poller do
               uid: fiber["uid"],
               session: Shuttle.AppWorkers.transcript_id(id),
               harness: "codex",
-              kind: :claim
+              kind: :claim,
+              agent: app_claim_agent(id, opts),
+              collaboration: collaboration_snapshot(fiber)
             )
 
             {refresh_document_entry(state, fiber_id),
@@ -2899,7 +2934,9 @@ defmodule Shuttle.Poller do
             Shuttle.SessionLedger.harness_for_cli(
               get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
             ),
-          kind: :claim
+          kind: :claim,
+          agent: explicit_claim_agent(opts),
+          collaboration: collaboration_snapshot(fiber)
         )
 
         state = refresh_document_entry(state, fiber_id)

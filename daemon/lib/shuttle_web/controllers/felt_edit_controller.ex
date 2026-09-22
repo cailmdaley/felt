@@ -40,7 +40,7 @@ defmodule ShuttleWeb.FeltEditController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, host_for_fiber: 1]
 
-  alias Shuttle.{Felt, OriginRouter, Poller, RemoteFiberRegistry}
+  alias Shuttle.{Collaboration, Felt, OriginRouter, Poller, RemoteFiberRegistry}
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -71,9 +71,19 @@ defmodule ShuttleWeb.FeltEditController do
     with {:ok, set_pairs} <- set_pairs(params["set"]),
          {:ok, due_args} <- due_args(params),
          {:ok, native_args} <- native_args(params),
+         {:ok, collaboration} <- collaboration(params),
          {:ok, host, address} <- host_for_fiber(fiber_id),
          {:ok, output} <-
-           run(host, address, add, remove, unset, set_pairs, due_args ++ native_args) do
+           run(
+             host,
+             address,
+             add,
+             remove,
+             unset,
+             set_pairs,
+             due_args ++ native_args,
+             collaboration
+           ) do
       # The edit mutated the felt doc (tags / horizon / due); re-read it into the
       # document cache NOW so the kanban's post-edit refetch reflects the change
       # instead of snapping the card back until the next poll.
@@ -88,9 +98,21 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   # An empty diff is a no-op, mirroring Portolan's local felt-edit path.
-  defp run(_host, _fiber_id, [], [], [], [], []), do: {:ok, ""}
+  defp run(_host, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
 
-  defp run(host, fiber_id, add, remove, unset, set_pairs, due_args) do
+  defp run(host, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do
+    Felt.run([
+      "-C",
+      host,
+      "shuttle",
+      "assign",
+      fiber_id,
+      "--json-assignment",
+      Jason.encode!(collaboration)
+    ])
+  end
+
+  defp run(host, fiber_id, add, remove, unset, set_pairs, due_args, nil) do
     args = ["-C", host, "edit", fiber_id]
     args = Enum.reduce(remove, args, fn tag, acc -> acc ++ ["--untag", tag] end)
     args = Enum.reduce(add, args, fn tag, acc -> acc ++ ["--tag", tag] end)
@@ -100,6 +122,12 @@ defmodule ShuttleWeb.FeltEditController do
 
     Felt.run(args)
   end
+
+  # Both commands are individual locked read-modify-write operations. Refusing
+  # a mixed request keeps a collaboration replacement atomic with respect to
+  # ordinary frontmatter/body edits instead of guessing an ordering.
+  defp run(_host, _fiber_id, _add, _remove, _unset, _set_pairs, _due_args, _collaboration),
+    do: {:error, "collaboration must be the only document mutation in a request"}
 
   # `set` is a map of opaque scalar frontmatter. Render each entry as the
   # `key=value` argument `felt edit --set` expects; felt re-parses the value as
@@ -158,6 +186,14 @@ defmodule ShuttleWeb.FeltEditController do
       {:ok, nil} -> {:ok, ["--due", ""]}
       {:ok, value} when is_binary(value) -> {:ok, ["--due", value]}
       {:ok, _} -> {:error, "due must be a string or null"}
+    end
+  end
+
+  defp collaboration(params) do
+    case Map.fetch(params, "collaboration") do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:error, "collaboration must be an object"}
+      {:ok, value} -> Collaboration.parse(value)
     end
   end
 

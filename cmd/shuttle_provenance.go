@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -51,26 +52,35 @@ type TranscriptReceipt struct {
 // predecessor/children fields are optional because old ledger rows predate
 // explicit lineage; absence is not interpreted as proof of no lineage.
 type SessionProvenance struct {
-	Fiber      string            `json:"fiber,omitempty"`
-	FiberID    string            `json:"fiber_id,omitempty"`
-	UID        string            `json:"uid,omitempty"`
-	Session    string            `json:"session"`
-	Harness    string            `json:"harness,omitempty"`
-	Host       string            `json:"host,omitempty"`
-	Tmux       string            `json:"tmux,omitempty"`
-	At         int64             `json:"at,omitempty"`
-	Kind       string            `json:"kind,omitempty"`
-	Origin     string            `json:"origin,omitempty"`
-	Stale      bool              `json:"stale,omitempty"`
-	Events     []SessionEvent    `json:"events,omitempty"`
-	Transcript TranscriptReceipt `json:"transcript,omitempty"`
+	Fiber   string `json:"fiber,omitempty"`
+	FiberID string `json:"fiber_id,omitempty"`
+	UID     string `json:"uid,omitempty"`
+	Session string `json:"session"`
+	Harness string `json:"harness,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Tmux    string `json:"tmux,omitempty"`
+	// Collaboration, Agent, and Model are dispatch-time attribution snapshots.
+	// They are never reconstructed from the fiber's current assignment because a
+	// later reassignment or model change must not rewrite session history.
+	Collaboration *shuttle.Collaboration `json:"collaboration,omitempty"`
+	Agent         string                 `json:"agent,omitempty"`
+	Model         string                 `json:"model,omitempty"`
+	At            int64                  `json:"at,omitempty"`
+	Kind          string                 `json:"kind,omitempty"`
+	Origin        string                 `json:"origin,omitempty"`
+	Stale         bool                   `json:"stale,omitempty"`
+	Events        []SessionEvent         `json:"events,omitempty"`
+	Transcript    TranscriptReceipt      `json:"transcript,omitempty"`
 }
 
 type SessionEvent struct {
-	At    int64  `json:"at,omitempty"`
-	Kind  string `json:"kind,omitempty"`
-	Fiber string `json:"fiber,omitempty"`
-	Tmux  string `json:"tmux,omitempty"`
+	At            int64                  `json:"at,omitempty"`
+	Kind          string                 `json:"kind,omitempty"`
+	Fiber         string                 `json:"fiber,omitempty"`
+	Tmux          string                 `json:"tmux,omitempty"`
+	Collaboration *shuttle.Collaboration `json:"collaboration,omitempty"`
+	Agent         string                 `json:"agent,omitempty"`
+	Model         string                 `json:"model,omitempty"`
 }
 
 func (s SessionProvenance) fiber() string {
@@ -188,20 +198,32 @@ func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProv
 		if seen[key] {
 			for i := range rows {
 				if rows[i].Host+"\x00"+rows[i].Harness+"\x00"+rows[i].Session == key {
-					rows[i].Events = append(rows[i].Events, SessionEvent{At: row.At, Kind: row.Kind, Fiber: row.fiber(), Tmux: row.Tmux})
+					rows[i].Events = append(rows[i].Events, sessionEvent(row))
 					break
 				}
 			}
 			continue
 		}
 		seen[key] = true
-		row.Events = []SessionEvent{{At: row.At, Kind: row.Kind, Fiber: row.fiber(), Tmux: row.Tmux}}
+		row.Events = []SessionEvent{sessionEvent(row)}
 		rows = append(rows, row)
 	}
 	for i := range rows {
 		sort.SliceStable(rows[i].Events, func(a, b int) bool { return rows[i].Events[a].At < rows[i].Events[b].At })
 	}
 	return rows
+}
+
+func sessionEvent(row SessionProvenance) SessionEvent {
+	return SessionEvent{
+		At:            row.At,
+		Kind:          row.Kind,
+		Fiber:         row.fiber(),
+		Tmux:          row.Tmux,
+		Collaboration: row.Collaboration,
+		Agent:         row.Agent,
+		Model:         row.Model,
+	}
 }
 
 // compositeFiberRow is one entry of GET /api/v1/fibers/composite. Transport or

@@ -61,7 +61,7 @@ defmodule Shuttle.SessionLedger do
   @kinds ~w(dispatch claim resume)
 
   @typedoc "One ledger line, as written and as served."
-  @type record :: %{String.t() => String.t() | integer() | nil}
+  @type record :: %{String.t() => String.t() | integer() | map() | nil}
 
   @doc """
   The ledger path, honoring the same env the rest of the daemon's host-local
@@ -79,7 +79,11 @@ defmodule Shuttle.SessionLedger do
 
   Required: `:fiber`, `:session`, `:kind`. Optional: `:tmux`, `:harness`,
   `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
-  own_host_id when omitted), `:at` (now when omitted).
+  own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
+  and `:collaboration` (the exact launch-time pointer snapshot). `:model`
+  records the configured model passed to a launch command, not a claim about a
+  provider's concrete backend checkpoint; callers omit it when no model was
+  selected for that session.
 
   Returns `:ok` always — including when the record is dropped for having no
   session UUID, and when the write itself fails. Callers are on the dispatch
@@ -110,17 +114,22 @@ defmodule Shuttle.SessionLedger do
     if session && fiber && kind do
       tmux = presence(Keyword.get(fields, :tmux))
 
-      {:ok,
-       Jason.encode!(%{
-         "fiber" => fiber,
-         "uid" => presence(Keyword.get(fields, :uid)) || Shuttle.ULID.from_tmux(tmux),
-         "session" => session,
-         "harness" => presence(Keyword.get(fields, :harness)),
-         "host" => presence(Keyword.get(fields, :host)) || own_host(),
-         "tmux" => tmux,
-         "at" => Keyword.get(fields, :at) || System.system_time(:millisecond),
-         "kind" => kind
-       }) <> "\n"}
+      line =
+        %{
+          "fiber" => fiber,
+          "uid" => presence(Keyword.get(fields, :uid)) || Shuttle.ULID.from_tmux(tmux),
+          "session" => session,
+          "harness" => presence(Keyword.get(fields, :harness)),
+          "host" => presence(Keyword.get(fields, :host)) || own_host(),
+          "tmux" => tmux,
+          "at" => Keyword.get(fields, :at) || System.system_time(:millisecond),
+          "kind" => kind
+        }
+        |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
+        |> maybe_put("model", presence(Keyword.get(fields, :model)))
+        |> maybe_put("collaboration", collaboration(Keyword.get(fields, :collaboration)))
+
+      {:ok, Jason.encode!(line) <> "\n"}
     else
       :drop
     end
@@ -286,4 +295,20 @@ defmodule Shuttle.SessionLedger do
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil
+
+  # Dispatcher carries parse results through its prompt options so malformed
+  # stored metadata can be rendered visibly. Accept that validated result here
+  # too; the snapshot is still the value read at launch, never a later re-read.
+  defp collaboration({:ok, snapshot}), do: snapshot
+  defp collaboration({:error, _}), do: nil
+
+  defp collaboration(value) do
+    case Shuttle.Collaboration.parse(value) do
+      {:ok, snapshot} -> snapshot
+      {:error, _} -> nil
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

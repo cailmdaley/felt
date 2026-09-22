@@ -5267,6 +5267,7 @@ defmodule Shuttle.PollerTest do
     assert ledger["session"] == "uuid-claim-1"
     assert ledger["tmux"] == session
     assert ledger["host"] == Shuttle.Poller.own_host_id()
+    refute Map.has_key?(ledger, "agent")
 
     new_sessions_before =
       Enum.count(MockRunner.commands(), fn {cmd, args} ->
@@ -5288,6 +5289,31 @@ defmodule Shuttle.PollerTest do
              end,
              80
            )
+  end
+
+  test "claim ledger records an explicit agent but never infers the fiber recipe" do
+    id = "tests/claim-explicit-agent"
+    MockRunner.set_fiber(id, make_fiber(id, %{"uid" => "01EXPLICITUID"}))
+    MockRunner.set_shuttle(id, oneshot_shuttle())
+    MockRunner.add_tmux_session("capture-explicit-agent")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_claim_explicit_agent,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert {:ok, %{agent_id: "codex-external"}} =
+             Poller.claim_session(poller, id, "capture-explicit-agent",
+               agent: "codex-external",
+               session_uuid: "uuid-claim-explicit-agent"
+             )
+
+    assert [ledger] = Shuttle.SessionLedger.read_since(0)
+    assert ledger["kind"] == "claim"
+    assert ledger["agent"] == "codex-external"
   end
 
   test "claim refuses unknown fibers, dead sessions, and double claims" do

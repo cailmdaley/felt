@@ -141,6 +141,18 @@ defmodule Shuttle.DispatcherTest do
         tags: ["constitution", "pi"],
         shuttle: %{"agent" => "pi-deepseek-flash", "resolved" => %{"agent" => @pi_resolved}}
       },
+      "tests/collaborative" => %{
+        status: "active",
+        tags: ["constitution"],
+        collaboration: %{
+          "collaborator" => %{
+            "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+            "origin" => "host-a"
+          },
+          "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+        },
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/shuttle-agent-block" => %{
         status: "active",
         tags: ["constitution"],
@@ -324,6 +336,7 @@ defmodule Shuttle.DispatcherTest do
               "modified_at" => "2026-04-28T00:00:00Z"
             }
             |> maybe_put("shuttle", fiber.shuttle)
+            |> maybe_put("collaboration", Map.get(fiber, :collaboration))
             |> maybe_put("uid", Map.get(fiber, :uid))
 
           {Jason.encode!(payload), 0}
@@ -401,6 +414,15 @@ defmodule Shuttle.DispatcherTest do
     prev_stores = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", "/tmp")
 
+    sessions_file =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-dispatcher-ledger-#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
+    System.put_env("SHUTTLE_SESSIONS_FILE", sessions_file)
+
     start_supervised!(StubKitty)
     Application.put_env(:shuttle, :kitty_impl, StubKitty)
 
@@ -411,6 +433,13 @@ defmodule Shuttle.DispatcherTest do
 
       Application.delete_env(:shuttle, :kitty_impl)
       Application.delete_env(:shuttle, :os_type)
+
+      if prev_sessions_file,
+        do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file),
+        else: System.delete_env("SHUTTLE_SESSIONS_FILE")
+
+      File.rm(sessions_file)
+      File.rm(sessions_file <> ".1")
     end)
 
     :ok
@@ -488,6 +517,49 @@ defmodule Shuttle.DispatcherTest do
     # Default store renders too — the line is unconditional.
     default_prompt = Dispatcher.render_prompt("tests/haiku")
     assert default_prompt =~ "Felt store: "
+  end
+
+  test "fresh, resumed, and standing prompts point at assigned collaboration without snapshotting it" do
+    collaboration =
+      {:ok,
+       %{
+         "collaborator" => %{
+           "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+           "origin" => "host-a"
+         },
+         "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+       }}
+
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a", collaboration: collaboration),
+          Dispatcher.render_resume_prompt("tests/a", collaboration: collaboration),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: collaboration)
+        ] do
+      assert prompt =~ "Collaboration:"
+      assert prompt =~ "origin=host-a"
+      assert prompt =~ "origin=host-b"
+      assert prompt =~ "fiber.uid and response.host"
+    end
+
+    refute Dispatcher.render_prompt("tests/a") =~ "Collaboration:"
+    refute Dispatcher.render_resume_prompt("tests/a") =~ "Collaboration:"
+    refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
+  end
+
+  test "dispatch snapshots collaboration and selected execution recipe into its ledger row" do
+    assert {:ok, _} = Dispatcher.dispatch("tests/collaborative", runner: MockRunner)
+
+    assert [record] = Shuttle.SessionLedger.read_since(0)
+    assert record["agent"] == "claude-sonnet"
+    assert record["model"] == "sonnet"
+
+    assert record["collaboration"] == %{
+             "collaborator" => %{
+               "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
+               "origin" => "host-a"
+             },
+             "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+           }
   end
 
   test "render_prompt omits the From User block when no user_message is carried" do

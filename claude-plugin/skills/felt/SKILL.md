@@ -99,6 +99,8 @@ Stores and views: a project whose `.felt` symlinks into the loom is a *view* on 
 
 **Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. Edit the body by correction; chronology lives in the git log of the fiber file (fibers are git-synced), not in the prose. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content is sedimenting where a correction belongs. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
 
+**Identity and remit are fibers too.** A constitution may optionally reference a collaborator fiber (durable identity and orientation) and a role fiber (durable remit). Neither is the execution model, and neither is required for ordinary work. Read [collaborators.md](references/collaborators.md) before creating, assigning, or updating either kind.
+
 **Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
 
 **Outcomes teach.** An outcome that says "done" has failed. Put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone: it's what `felt ls` and `-d compact` show.
@@ -158,3 +160,4 @@ Read the reference that matches the situation. Everything above applies always; 
 | Acting on `felt session` Attention or reading across the assemblage for mess — gardening, composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
 | Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |
 | Setting up a cross-project felt store, or linking a per-project store into one | [cross-project.md](references/cross-project.md) |
+| Creating or assigning a durable collaborator identity or role | [collaborators.md](references/collaborators.md) |

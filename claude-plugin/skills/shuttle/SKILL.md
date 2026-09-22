@@ -1,23 +1,12 @@
 ---
 name: shuttle
 description: >
-  Use this skill in any of these situations.
-  **Worker dispatch:** the first user message says shuttle dispatched,
-  resumed, or spawned you, or says "You are a Shuttle worker" or
-  "You are a Shuttle capture worker" ("The orchestration system Shuttle dispatched
-  you on this fiber", "Shuttle capture session", …) — you're the worker
-  realizing that fiber.
-  **Authoring:** the user mentions a **constitution** (writing, drafting,
-  "stash this as a constitution", "shuttle this", "let's shuttle this task"), or
-  names a **shuttle agent** by registry id (`claude-opus`, `claude-fable`,
-  `codex-terra`, `claude-sonnet`, … — `felt shuttle agents` lists them) in a context
-  that implies dispatch. The phrase **"shuttle [with] model-name"** is
-  the canonical author trigger.
-  **Operator questions:** the user asks about shuttle itself, the kanban
-  board, why a card is or isn't appearing, agent selection, or how to
-  prepare work for autonomous follow-through.
-  **Session communication:** discovering conversations or sending messages and
-  files between sessions across machines and harnesses.
+  Use when Shuttle dispatches, resumes, or captures you as a worker; when
+  authoring a constitution or asked to "shuttle" work with a named agent;
+  and for operating Shuttle, its kanban, agent selection, or dispatch.
+  Also covers assigning persistent collaborators and roles, maintaining
+  continuity across sessions, discovering conversations, and sending
+  messages or files between sessions across hosts and harnesses.
 ---
 
 # shuttle
@@ -41,7 +30,7 @@ harness-reported cache before a promotion may commit. Daemon snapshots also carr
 results are rejected, and reconciliation continues. Rising `stalls` identifies
 a degraded input without mistaking the responsive daemon for a healthy read.
 
-## Reading by role
+## Reading by situation
 
 | You are | Read |
 |---|---|
@@ -51,6 +40,7 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |
 | Claiming a fiber into the current interactive session — a draft to start on now, an awaiting-review card, or a running worker gone cold | [references/operating.md](references/operating.md), "Claiming a fiber into your session" — the `/api/v1/claim` flow; from the claim on you are the worker. |
 | Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) — `felt shuttle sessions`/`transcript` (fiber ↔ session ↔ commit lineage, cross-host materialization, honest availability), validated jq recipes for tails, search, thinking (claude-code + codex). |
+| A dispatch carrying a collaborator or role assignment | [references/continuity.md](references/continuity.md) — authoritative owner-routed context, inherited identity, ongoing handoffs, and profile updates. |
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) — cron lifecycle, run ids, exit handoff, accept semantics. |
 | Writing a fiber's `report.html` | [references/report.md](references/report.md) — audience, current-state doctrine, working open questions, self-containment, figure claims. |
 
@@ -106,7 +96,7 @@ Use `felt shuttle send-file` to publish artifacts to the human's IDE.
 
   Paths resolve relative to the fiber directory, or absolute — absolute paths resolve on the fiber's owning host (`shuttle.host`), so a remote paper build renders wherever the fiber is opened. Renderer by extension: PDF, HTML iframe, images, audio. The report.html embed is this same mechanism; a fiber that should open with a PDF just embeds it at the top of the body.
 - **`outcome:`** — the kanban headline. One or two sentences: where the work is, what the reader does next. Rewritten every session, not appended. When blocked, lead with "Blocked: …".
-- **`## Status`** (a section in the constitution body) — the handoff. Rewritten each session, never appended: it holds the *now*, not a session log. The next worker reads it on arrival and lands warm; you write it at exit — what landed, where you got stuck, what to know on arrival. Multi-paragraph prose welcome.
+- **`## Status`** (a section in the constitution body) — the handoff. Rewritten, never appended: it holds the *now*, not a session log. Refresh it after meaningful transitions and before returning a turn when the state changed, so another session can inherit the work without waiting for an exit ritual. At exit, consolidate what landed, where you got stuck, and what to know on arrival. Multi-paragraph prose welcome.
 
 None of these is a status flag; all are always-current. Outcome and `## Status` stay plain text (agents chain sessions on them); the report is where humans read, with full visual freedom.
 
@@ -136,9 +126,9 @@ If `felt show` can't find the fiber, don't grope — go straight to `-C <felt-st
 
    **Give sub-goals their own context.** Subagent and workflow tools are context architecture first, parallelism second: decompose into pieces that each want a clean window — bulk reading, mechanical sweeps, independent verification — while your own context keeps the management view. That separation lets one session carry an arc that used to span dispatches. On long building runs, set a verification cadence: every few substantial changes, a fresh-context subagent checks the work against Desired State — fresh verifiers outperform self-critique. Without subagent tools the same walls exist across dispatches: each redispatch is a fresh window and the daemon holds the loop, so do the arc across sessions rather than hand-rolling tmux loops (`/loop` covers the zero-infra, self-paced case).
 
-3. **Felt.** Before exiting: rewrite `report.html` whole against current understanding — headline state, findings recomposed by meaning with superseded ones cut, open questions you tried to close first (see [references/report.md](references/report.md)); rewrite `outcome:`; correct the spec if the session sharpened it; file crystallizations as sub-fibers (decisions, findings, gotchas — not iteration-numbered debris); commit with clear messages.
+3. **Felt.** Keep `## Status` warm after meaningful transitions and before returning a turn when state changed. Before exiting: consolidate it; rewrite `report.html` whole against current understanding — headline state, findings recomposed by meaning with superseded ones cut, open questions you tried to close first (see [references/report.md](references/report.md)); rewrite `outcome:`; correct the spec if the session sharpened it; file crystallizations as sub-fibers (decisions, findings, gotchas — not iteration-numbered debris); commit with clear messages. When the dispatch carries a collaborator or role assignment, follow [references/continuity.md](references/continuity.md) for the separate profile update.
 
-4. **Handoff, then exit.** Rewrite the constitution's `## Status` block, then your FINAL tool action is `felt shuttle handoff <fiber-id>`. For a terminal worker it stamps the clean-exit marker and ends your tmux session (no separate `kill $PPID`). For an app worker use `env -u TMUX felt -C <felt-store> shuttle handoff <fiber-id>`, then end your turn; never kill a terminal or the shared app daemon. Shuttle releases app ownership after the handoff and completed turn. The marker tells the daemon to start a fresh worker that reads your `## Status`.
+4. **Handoff, then exit.** Consolidate the constitution's current `## Status` block, then your FINAL tool action is `felt shuttle handoff <fiber-id>`. For a terminal worker it stamps the clean-exit marker and ends your tmux session (no separate `kill $PPID`). For an app worker use `env -u TMUX felt -C <felt-store> shuttle handoff <fiber-id>`, then end your turn; never kill a terminal or the shared app daemon. Shuttle releases app ownership after the handoff and completed turn. The marker tells the daemon to start a fresh worker that reads your `## Status`.
 
 An app conversation waiting for the human's next message remains owned and resumable. An idle turn or a temporary connection failure is not a worker exit. Capture workers claim using [references/capture.md](references/capture.md); ordinary dispatched workers are already assigned.
 

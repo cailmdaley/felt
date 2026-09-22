@@ -63,6 +63,7 @@ nav:
       - Fibers: concepts/fibers.md
       - Organizing: concepts/organizing.md
       - Frontmatter: concepts/frontmatter.md
+      - Collaborators and roles: concepts/collaborators.md
       - Companions: concepts/companions.md
       - Cross-Project: concepts/cross-project.md
   - Agents & Plugin: agents.md

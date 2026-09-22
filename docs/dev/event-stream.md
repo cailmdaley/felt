@@ -81,6 +81,15 @@ views as **join rung 0** — the structural pairing that replaces an inference.
 - `~/.shuttle/sessions.jsonl` (`daemon/lib/shuttle/session_ledger.ex`) pairs a fiber
   with the harness session dispatched against it. **The daemon writes it**, at
   dispatch / claim / resume.
+  Rows can also carry the `collaboration` assignment and the selected `agent`
+  and configured `model` at that event. These are historical snapshots: a later
+  reassignment or registry edit must not change them. A configured model can be
+  a provider alias; it does not prove which concrete checkpoint served the
+  request. Records lacking this information remain unattributed on those axes.
+  The session provenance response preserves the snapshots on individual events
+  as well as its current row, so a resumed session's assignment changes remain
+  visible. Collaborator identity is separate from both the work's fiber UID and
+  the execution model.
 - `~/.shuttle/commits.jsonl` (`daemon/lib/shuttle/commit_ledger.ex`) pairs a commit
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces

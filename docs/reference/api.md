@@ -52,6 +52,15 @@ is not enough.
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
+`POST /felt-edit` also accepts a `collaboration` object to replace a fiber's
+optional assignment. Each `collaborator` or `role` reference contains an
+intrinsic fiber `uid` and explicit owning `origin`. Send this separately from
+body, status, or other document edits: the owner runs one locked
+`felt shuttle assign --json-assignment` write. This changes assignment without
+launching a worker or changing the execution agent. The references are pointers,
+not copied profile bodies; read their content through the owning daemon and
+verify the returned host and UID. See [Collaborators](../concepts/collaborators.md).
+
 ### Codex app conversations
 
 `POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
