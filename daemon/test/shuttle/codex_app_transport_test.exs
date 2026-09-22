@@ -572,7 +572,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   test "native status distinguishes work, user input, approval, errors and idle" do
     statuses = [
       {%{"type" => "active", "activeFlags" => []}, :running, "working"},
-      {%{"type" => "active", "activeFlags" => ["waitingOnUserInput"]}, :running, "waiting"},
+      {%{"type" => "active", "activeFlags" => ["waitingOnUserInput"]}, :running, "attention"},
       {%{"type" => "active", "activeFlags" => ["waitingOnUserInput", "waitingOnApproval"]},
        :running, "attention"},
       {%{"type" => "idle"}, :idle, "waiting"},

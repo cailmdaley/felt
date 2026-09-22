@@ -109,14 +109,14 @@ defmodule Shuttle.WaitingTrackerTest do
     assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
   end
 
-  test "natural escalation: stop then notification reads as \"attention\"",
+  test "untyped notification after stop reads as \"attention\"",
        %{events: events} do
     name = start(events)
     append(events, "stop", "foo-01J-shuttle")
     assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
 
-    # CC fires the idle notification AFTER the stop — last-event-wins escalates
-    # to attention with no hand-rolled stickiness.
+    # Untyped notifications retain the attention signal for harnesses that
+    # do not report why they are notifying.
     append(events, "notification", "foo-01J-shuttle")
     assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
   end
@@ -150,6 +150,19 @@ defmodule Shuttle.WaitingTrackerTest do
     append_ev(events, "notification", "foo-01J-shuttle", %{notificationKind: "idle_prompt"})
     Process.sleep(30)
     assert phase(name, "foo-01J-shuttle") == "working"
+  end
+
+  test "an idle reminder remains waiting rather than demanding attention", %{events: events} do
+    name = start(events)
+    append(events, "stop", "foo-01J-shuttle")
+    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+
+    append_ev(events, "notification", "foo-01J-shuttle", %{
+      notificationKind: "idle_prompt",
+      timestamp: @base + 1
+    })
+    assert wait_until(fn -> activity(name, "foo-01J-shuttle")[:last_event_at] == @base + 1 end)
+    assert phase(name, "foo-01J-shuttle") == "waiting"
   end
 
   test "a permission prompt is attention even over running background work",

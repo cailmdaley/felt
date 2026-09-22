@@ -22,9 +22,8 @@ defmodule Shuttle.WaitingTracker do
   Each tracked session holds exactly one record — `%{type: String.t(), at: ms}`
   — the **raw type and real timestamp of its most recent event**. Every event
   unconditionally overwrites it; there is no sticky/kind state machine.
-  Escalation falls out of the natural event order: Claude Code fires the idle
-  `notification` hook *after* the `stop`, so a long-idle worker becomes
-  `attention` on its own.
+  Explicit permission and elicitation notifications signal attention. An idle
+  reminder remains waiting; elapsed idle time alone does not require action.
 
   `at` is the event's **own** `timestamp` (epoch ms carried on every hook line),
   not the poll wall-clock — that's what makes idle-duration ranking real.
@@ -34,8 +33,8 @@ defmodule Shuttle.WaitingTracker do
   `session_activity/1` resolves each stored record to `%{last_event_at, phase}`,
   where `phase` is the category of the last event type:
 
-    * `notification` → `"attention"` (the agent blocked on a human —
-      permission, MCP elicitation), EXCEPT the idle timeout over outstanding
+    * `notification` → `"attention"` for permission, elicitation, and untyped
+      notifications; `idle_prompt` → `"waiting"`, or `"working"` over outstanding
       background work; see "Waiting on itself" below.
     * `stop` / `subagent_stop` → `"waiting"` (a turn or subagent finished;
       the agent is idle, waiting on the next input) — again except over
@@ -238,6 +237,7 @@ defmodule Shuttle.WaitingTracker do
   # way. A permission prompt or an elicitation is the exception that proves it —
   # there the human IS the blocker, running shells or not.
   defp category("notification", "idle_prompt", bg) when bg > 0, do: "working"
+  defp category("notification", "idle_prompt", _bg), do: "waiting"
   defp category("notification", _kind, _bg), do: "attention"
   defp category(type, _kind, bg) when type in ["stop", "subagent_stop"] and bg > 0, do: "working"
   defp category(type, _kind, _bg) when type in ["stop", "subagent_stop"], do: "waiting"

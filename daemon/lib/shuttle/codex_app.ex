@@ -199,7 +199,7 @@ defmodule Shuttle.CodexApp do
 
           cond do
             "waitingOnApproval" in flags -> "attention"
-            "waitingOnUserInput" in flags -> "waiting"
+            "waitingOnUserInput" in flags -> "attention"
             true -> "working"
           end
 
