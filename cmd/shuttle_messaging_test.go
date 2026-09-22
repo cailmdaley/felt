@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,84 @@ func TestBuildAttachmentOnlyMessage(t *testing.T) {
 	}
 	if request.Text != "" || len(request.Attachments) != 1 || !reflect.DeepEqual(request.Attachments[0].Data, want) || request.Attachments[0].Name != "bytes.bin" {
 		t.Fatalf("file-only message lost data: %+v", request)
+	}
+}
+
+func TestBuildMessageRequestContextOnlyOptOut(t *testing.T) {
+	oldWake, oldContextOnly := messageWake, messageContextOnly
+	t.Cleanup(func() { messageWake, messageContextOnly = oldWake, oldContextOnly })
+	messageWake, messageContextOnly = true, true
+
+	request, err := buildMessageRequest(strings.NewReader("please read"), []string{"shuttle://host/codex/id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Wake {
+		t.Fatal("--context-only should disable the active turn")
+	}
+}
+
+func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
+	oldWake, oldContextOnly := messageWake, messageContextOnly
+	t.Cleanup(func() { messageWake, messageContextOnly = oldWake, oldContextOnly })
+	messageWake, messageContextOnly = true, false
+
+	request, err := buildMessageRequest(strings.NewReader("please act"), []string{"shuttle://host/codex/id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !request.Wake {
+		t.Fatal("ordinary messages should request an active turn")
+	}
+}
+
+func TestMessageCobraWakeFlags(t *testing.T) {
+	oldWake, oldContextOnly := messageWake, messageContextOnly
+	wakeFlag := shuttleMessageCmd.Flags().Lookup("wake")
+	contextOnlyFlag := shuttleMessageCmd.Flags().Lookup("context-only")
+	oldWakeChanged, oldContextOnlyChanged := wakeFlag.Changed, contextOnlyFlag.Changed
+	t.Cleanup(func() {
+		messageWake, messageContextOnly = oldWake, oldContextOnly
+		_ = shuttleMessageCmd.Flags().Set("wake", strconv.FormatBool(oldWake))
+		_ = shuttleMessageCmd.Flags().Set("context-only", strconv.FormatBool(oldContextOnly))
+		wakeFlag.Changed, contextOnlyFlag.Changed = oldWakeChanged, oldContextOnlyChanged
+	})
+
+	wake, err := shuttleMessageCmd.Flags().GetBool("wake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextOnly, err := shuttleMessageCmd.Flags().GetBool("context-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wake || contextOnly {
+		t.Fatalf("unexpected message flag defaults: wake=%t context-only=%t", wake, contextOnly)
+	}
+
+	if err := shuttleMessageCmd.Flags().Set("context-only", "true"); err != nil {
+		t.Fatal(err)
+	}
+	request, err := buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Wake {
+		t.Fatal("--context-only should produce a context-only request")
+	}
+
+	if err := shuttleMessageCmd.Flags().Set("context-only", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := shuttleMessageCmd.Flags().Set("wake", "false"); err != nil {
+		t.Fatal(err)
+	}
+	request, err = buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Wake {
+		t.Fatal("--wake=false should produce a context-only request")
 	}
 }
 
@@ -153,6 +232,28 @@ func TestReadMessageRequestFrameRejectsTrailingJSON(t *testing.T) {
 	_, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"hi","message_id":"one"} {"message_id":"two"}` + "\n"))
 	if err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
 		t.Fatalf("expected trailing JSON error, got %v", err)
+	}
+}
+
+func TestReadMessageRequestFrameDefaultsWakeToTrue(t *testing.T) {
+	request, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"work","message_id":"one"}` + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !request.Wake {
+		t.Fatal("omitted wake should request an active turn")
+	}
+
+	request, err = readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"context","wake":false,"message_id":"two"}` + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Wake {
+		t.Fatal("explicit wake=false should preserve context-only delivery")
+	}
+
+	if _, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"invalid","wake":null}` + "\n")); err == nil {
+		t.Fatal("wake=null should be rejected rather than treated as context-only")
 	}
 }
 

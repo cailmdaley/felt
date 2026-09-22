@@ -307,7 +307,10 @@ defmodule Shuttle.Messaging do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
     from = Map.get(payload, "from", "")
-    wake = Map.get(payload, "wake", false)
+    # Ordinary messages are task requests. Context-only delivery is explicit
+    # with `wake: false`; keeping the default here also applies to public JSON
+    # callers that omit the field entirely.
+    wake = Map.get(payload, "wake", true)
     id = Map.get(payload, "message_id")
 
     with {:ok, attachments} <- validate_attachments(Map.get(payload, "attachments", []), mode) do
@@ -337,7 +340,10 @@ defmodule Shuttle.Messaging do
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
       true ->
-        raw = Map.take(payload, ["address", "text", "from", "wake", "message_id"])
+        raw =
+          payload
+          |> Map.take(["address", "text", "from", "wake", "message_id"])
+          |> Map.put("wake", wake)
         raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)
 
         if raw |> Jason.encode!() |> byte_size() <= @max_frame_bytes do

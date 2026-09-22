@@ -202,6 +202,18 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["status"] == "accepted"
   end
 
+  test "omitted wake defaults to an active task request" do
+    request = %{
+      "address" => "shuttle://edge/pi/p%2F1",
+      "text" => "please act",
+      "message_id" => "omitted-wake"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert_receive {:forwarded, %{"address" => "shuttle://local/pi/p%2F1", "wake" => true}}
+    assert receipt["status"] == "accepted"
+  end
+
   test "wake cannot succeed with a context-only acknowledgement from local or remote peers", %{
     host: host
   } do
