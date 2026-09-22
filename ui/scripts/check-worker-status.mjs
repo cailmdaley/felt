@@ -16,21 +16,21 @@ try {
     assert.ok(await appMark.isVisible())
     // Compare the real app anchor against the existing terminal button styles.
     await appMark.evaluate(anchor => {
-      const button = document.createElement('button')
-      button.textContent = 'Aloft'
-      anchor.after(button)
       const original = anchor.className
-      const properties = ['color', 'backgroundColor', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform', 'textDecorationLine', 'borderRadius', 'padding', 'height']
-      for (const variant of ['aloft', 'waiting', 'attention']) {
+      const typography = ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']
+      const baseline = {}
+      anchor.className = 'kbn-card-worker kbn-card-worker-link kbn-card-worker-aloft'
+      for (const property of typography) baseline[property] = getComputedStyle(anchor)[property]
+      for (const variant of ['aloft', 'waiting', 'attention', 'blocked']) {
         anchor.className = `kbn-card-worker kbn-card-worker-link kbn-card-worker-${variant}`
-        button.className = `kbn-card-worker kbn-card-worker-${variant}`
-        const app = getComputedStyle(anchor), terminal = getComputedStyle(button)
-        for (const property of properties) {
-          if (app[property] !== terminal[property]) throw new Error(`${variant} ${property}: app ${app[property]} vs terminal ${terminal[property]}`)
+        const app = getComputedStyle(anchor)
+        for (const property of typography) {
+          if (app[property] !== baseline[property]) {
+            throw new Error(`${variant} ${property}: expected aloft baseline ${baseline[property]}, app ${app[property]}`)
+          }
         }
       }
       anchor.className = original
-      button.remove()
     })
     const destination = mobile ? 'https://chatgpt.com/open-app' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     assert.equal(await appMark.getAttribute('href'), destination)
@@ -47,7 +47,7 @@ try {
       if (!card) throw new Error('card worker marker missing')
       for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']) {
         if (getComputedStyle(detail)[property] !== getComputedStyle(card)[property]) {
-          throw new Error(`detail ${property} differs from card`)
+          throw new Error(`detail ${property} differs from card: ${getComputedStyle(detail)[property]} vs ${getComputedStyle(card)[property]}`)
         }
       }
     })

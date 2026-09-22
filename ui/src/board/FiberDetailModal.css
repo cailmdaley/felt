@@ -122,6 +122,10 @@
 .kbn-detail-aloft {
   margin-left: 0;
   margin-top: 6px;
+  /* The detail panel has a larger reading scale, but its worker control is
+     the same compact status mark as the card and Day surfaces. */
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
   padding: 3px 8px 2px;
   border-radius: 1px;
   transform: rotate(-1.5deg);
