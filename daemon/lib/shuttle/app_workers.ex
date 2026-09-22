@@ -134,10 +134,73 @@ defmodule Shuttle.AppWorkers do
     :global.trans({{__MODULE__, id}, self()}, fn -> do_claim(id, fiber, store) end)
   end
 
+  @doc """
+  Claims an app conversation already known to Shuttle, or adopts a conversation
+  verified by the connected native App Server.
+
+  Adoption reads the exact thread before it writes ownership. It never resumes
+  the thread or starts a turn: a conversation already working keeps its turn.
+  The record creation and any competing claim share the thread lock, so one
+  fiber remains the sole owner.
+  """
+  def claim_or_adopt(id, fiber, store, opts \\ []) do
+    if valid_id?(id) do
+      case claim(id, fiber, store) do
+        {:error, :not_found} -> adopt(id, fiber, store, opts)
+        result -> result
+      end
+    else
+      {:error, :invalid_session_id}
+    end
+  end
+
+  defp adopt(id, fiber, store, opts) do
+    with {:ok, %{"id" => ^id} = thread} <- client().read_thread(id),
+         true <- get_in(thread, ["status", "type"]) in ["active", "idle"] do
+      :global.trans({{__MODULE__, id}, self()}, fn ->
+        case get(id) do
+          {:ok, _record} ->
+            do_claim(id, fiber, store)
+
+          {:error, :not_found} ->
+            # `get/1` deliberately does not disclose a malformed private
+            # record as a different public read result. Adoption needs the
+            # stronger answer: only an absent path may become a new owner.
+            case File.lstat(record_path(id)) do
+              {:error, :enoent} ->
+                put(%{
+                  "session_uuid" => id,
+                  "thread_id" => id,
+                  "transcript_session_uuid" => thread["sessionId"] || id,
+                  "project_id" => thread["projectId"],
+                  "cwd" => thread["cwd"],
+                  "fiber_id" => fiber["id"],
+                  "uid" => fiber["uid"],
+                  "felt_store" => store,
+                  "agent_id" => Keyword.get(opts, :agent_id),
+                  "active" => true,
+                  "launch_state" => "running",
+                  "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+                })
+
+              _ ->
+                {:error, :ownership_record_unreadable}
+            end
+        end
+      end)
+    else
+      false -> {:error, :native_thread_unverified}
+      _ -> {:error, :native_thread_unverified}
+    end
+  end
+
   defp do_claim(id, fiber, store) do
     with {:ok, record} <- get(id),
          true <- record["active"] == true,
-         true <- is_nil(record["fiber_id"]) or same_fiber?(record, fiber["id"], fiber["uid"]),
+         true <-
+           is_nil(record["fiber_id"]) or
+             (same_fiber?(record, fiber["id"], fiber["uid"]) and
+                record["felt_store"] in [nil, store]),
          :ok <-
            put(
              Map.merge(record, %{
@@ -152,6 +215,9 @@ defmodule Shuttle.AppWorkers do
       error -> error
     end
   end
+
+  defp valid_id?(id), do: is_binary(id) and Regex.match?(~r/^[A-Za-z0-9_-]+$/, id)
+  defp record_path(id), do: Path.join(root(), id <> ".json")
 
   def same_fiber?(record, fiber_id, uid) do
     if is_binary(uid) and is_binary(record["uid"]),

@@ -84,6 +84,8 @@ defmodule ShuttleWeb.ClaimController do
   defp error_status(:closed), do: {422, "closed"}
   defp error_status(:already_running), do: {409, "already_running"}
   defp error_status(:session_not_found), do: {422, "session_not_found"}
+  defp error_status(:native_thread_unverified), do: {422, "native_thread_unverified"}
+  defp error_status(:ownership_record_unreadable), do: {409, "ownership_record_unreadable"}
   defp error_status(:rename_failed), do: {500, "rename_failed"}
   defp error_status(other), do: {500, inspect(other)}
 

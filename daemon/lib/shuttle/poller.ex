@@ -2717,7 +2717,10 @@ defmodule Shuttle.Poller do
          true <- get_in(fiber, ["shuttle", "host"]) == state.own_host_id,
          true <- is_nil(other) or other == session,
          true <- is_nil(running) or running.session == session,
-         :ok <- Shuttle.AppWorkers.claim(id, fiber, owning_store(fiber_id, state)),
+         :ok <-
+           Shuttle.AppWorkers.claim_or_adopt(id, fiber, owning_store(fiber_id, state),
+             agent_id: Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
+           ),
          :ok <- ensure_app_claim_marker(state, fiber_id, fiber, id) do
       now = DateTime.utc_now()
 

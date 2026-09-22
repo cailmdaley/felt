@@ -56,6 +56,15 @@ defmodule Shuttle.AppWorkersTest do
       {:ok, %{"id" => Agent.get(__MODULE__, &Map.get(&1, :resume_id, id))}}
     end
 
+    def read_thread(id) do
+      record({:read, id})
+
+      Agent.get(
+        __MODULE__,
+        &Map.get(&1, :read_result, {:ok, %{"id" => id, "status" => %{"type" => "active"}}})
+      )
+    end
+
     def start_turn(id, prompt, opts) do
       {:ok, %{"active" => true}} = AppWorkers.get(id)
       record({:turn, id, prompt, opts})
@@ -180,6 +189,160 @@ defmodule Shuttle.AppWorkersTest do
     assert {:error, :not_found} = AppWorkers.claim("invented", first, Runner.felt_root())
   end
 
+  test "claim adopts a verified native conversation without interrupting its active turn" do
+    id = "tests/adopt-existing"
+
+    Runner.set_fiber(id, make_fiber(id, %{"uid" => "adopt-uid", "status" => "open"}))
+
+    Runner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: codex\nsurface: app\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
+      "open"
+    )
+
+    App.set(
+      :read_result,
+      {:ok,
+       %{
+         "id" => "existing-thread",
+         "sessionId" => "native-transcript",
+         "projectId" => "native-project",
+         "cwd" => "/native/project",
+         "status" => %{"type" => "active"}
+       }}
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert {:ok, %{session: "codex-app:existing-thread", agent_id: "codex"}} =
+             Poller.claim_session(poller, id, nil,
+               surface: "app",
+               session_uuid: "existing-thread"
+             )
+
+    assert {:ok, record} = AppWorkers.get("existing-thread")
+    assert record["fiber_id"] == id
+    assert record["uid"] == "adopt-uid"
+    assert record["transcript_session_uuid"] == "native-transcript"
+    assert record["project_id"] == "native-project"
+    assert record["cwd"] == "/native/project"
+    assert record["active"] == true
+
+    assert [{:read, "existing-thread"}] = App.calls()
+    refute Enum.any?(App.calls(), &match?({tag, _, _} when tag in [:start, :resume, :turn], &1))
+
+    assert get_in(Runner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "existing-thread"
+    assert %{session: "codex-app:existing-thread"} = Poller.worker_status(poller, id)
+
+    assert Enum.any?(Shuttle.SessionLedger.read_since(0), fn entry ->
+             entry["kind"] == "claim" and entry["fiber"] == id and
+               entry["session"] == "native-transcript"
+           end)
+  end
+
+  test "claim refuses an unverified native conversation without creating ownership" do
+    id = "tests/adopt-missing"
+
+    Runner.set_fiber(id, make_fiber(id, %{"uid" => "missing-uid", "status" => "open"}))
+
+    Runner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: codex\nsurface: app\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
+      "open"
+    )
+
+    App.set(:read_result, {:error, :not_found})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert {:error, :native_thread_unverified} =
+             Poller.claim_session(poller, id, nil, surface: "app", session_uuid: "missing-thread")
+
+    assert {:error, :not_found} = AppWorkers.get("missing-thread")
+    assert [{:read, "missing-thread"}] = App.calls()
+    assert get_in(Runner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
+  end
+
+  test "adoption rejects non-live native states without recording ownership" do
+    fiber = %{"id" => "tests/adopt-state", "uid" => "state-uid"}
+
+    for state <- ["missing", "notLoaded", "unknown"] do
+      id = "thread-#{state}"
+      App.set(:calls, [])
+      App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => state}}})
+
+      assert {:error, :native_thread_unverified} =
+               AppWorkers.claim_or_adopt(id, fiber, Runner.felt_root())
+
+      assert {:error, :not_found} = AppWorkers.get(id)
+      assert [{:read, ^id}] = App.calls()
+    end
+  end
+
+  test "adoption rejects a native response for a different thread" do
+    App.set(:read_result, {:ok, %{"id" => "other-thread", "status" => %{"type" => "active"}}})
+
+    assert {:error, :native_thread_unverified} =
+             AppWorkers.claim_or_adopt(
+               "claimed-thread",
+               %{"id" => "tests/adopt-identity", "uid" => "identity-uid"},
+               Runner.felt_root()
+             )
+
+    assert {:error, :not_found} = AppWorkers.get("claimed-thread")
+    assert [{:read, "claimed-thread"}] = App.calls()
+  end
+
+  test "concurrent external claims leave one fiber as a native thread's owner" do
+    App.set(:read_result, {:ok, %{"id" => "adopt-race", "status" => %{"type" => "active"}}})
+
+    fibers = for n <- 1..30, do: %{"id" => "tests/adopt-race-#{n}", "uid" => "uid-#{n}"}
+
+    results =
+      fibers
+      |> Task.async_stream(
+        &AppWorkers.claim_or_adopt("adopt-race", &1, Runner.felt_root()),
+        max_concurrency: 30,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &(&1 == {:error, :already_claimed})) == 29
+    assert {:ok, record} = AppWorkers.get("adopt-race")
+    assert record["fiber_id"] in Enum.map(fibers, & &1["id"])
+    refute Enum.any?(App.calls(), &match?({tag, _, _} when tag in [:start, :resume, :turn], &1))
+  end
+
+  test "adoption never overwrites an unreadable ownership record" do
+    path = Path.join(AppWorkers.root(), "corrupt-thread.json")
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "not json")
+
+    App.set(:read_result, {:ok, %{"id" => "corrupt-thread", "status" => %{"type" => "active"}}})
+
+    assert {:error, :ownership_record_unreadable} =
+             AppWorkers.claim_or_adopt(
+               "corrupt-thread",
+               %{"id" => "tests/adopt-corrupt", "uid" => "corrupt-uid"},
+               Runner.felt_root()
+             )
+
+    assert {:ok, "not json"} = File.read(path)
+  end
+
   test "UID is authoritative when a slug is reused" do
     :ok =
       AppWorkers.put(%{
@@ -196,6 +359,24 @@ defmodule Shuttle.AppWorkersTest do
                "old",
                %{"id" => "tests/same", "uid" => "new-uid"},
                Runner.felt_root()
+             )
+  end
+
+  test "claim never rebinds an owned conversation to another felt store" do
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => "store-bound",
+        "active" => true,
+        "fiber_id" => "tests/store-bound",
+        "uid" => "store-uid",
+        "felt_store" => "/one-store"
+      })
+
+    assert {:error, :already_claimed} =
+             AppWorkers.claim(
+               "store-bound",
+               %{"id" => "tests/store-bound", "uid" => "store-uid"},
+               "/another-store"
              )
   end
 
@@ -442,11 +623,15 @@ defmodule Shuttle.AppWorkersTest do
 
     assert %{session: ^session, agent_id: "codex-original"} =
              Poller.worker_status(poller, "tests/app")
+
     assert :ok = Poller.refresh_document(poller, "tests/app")
+
     assert %{session: ^session, agent_id: "codex-original"} =
              Poller.worker_status(poller, "tests/app")
+
     assert App.calls() == calls
     assert WorkerBackend.session_status(Runner, session) == :alive
+
     assert {:ok, %{"active" => true, "agent_id" => "codex-original"}} =
              AppWorkers.get("app-session-1")
   end

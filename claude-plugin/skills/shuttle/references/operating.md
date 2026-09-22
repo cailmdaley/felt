@@ -132,7 +132,7 @@ curl --fail -sS -X POST http://localhost:4000/api/v1/claim \
   -d '{"fiber_id":"<fiber>","surface":"app","session_uuid":"<conversation id>","agent":"<registry id>"}'
 ```
 
-Create the fiber and install its app block as a draft first. Claim it, check success, then set `status: active`. Only a capture recorded by this daemon can claim through this path; an arbitrary chat id is not ownership proof. An app claim does not rename a terminal. App stop interrupts its turn and releases ownership; resume reuses the saved conversation. A connection failure retains ownership and must never cause an automatic replacement conversation.
+Create the fiber and install its app block as a draft first. Claim it, check success, then set `status: active`. A capture recorded by this daemon claims directly. An existing native Codex conversation may also be adopted when its exact id is readable from this daemon's connected App Server; Shuttle verifies that identity before atomically recording ownership. The claim does not resume the conversation or start a turn, so an active turn continues untouched. An unreadable, missing, or already-owned id is refused. An app claim does not rename a terminal. App stop interrupts its turn and releases ownership; resume reuses the saved conversation. A connection failure retains ownership and must never cause an automatic replacement conversation.
 
 For a **terminal session**, use the flow below.
 

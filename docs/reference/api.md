@@ -36,7 +36,7 @@ is not enough.
 | `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
-| `POST /claim` | owner-routed | Associate a tmux worker or an app capture conversation with a fiber |
+| `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
 | `POST /capture` | owner-routed | Launch a session from a free-text prompt; it files the fiber and claims itself |
 | `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
@@ -70,7 +70,10 @@ Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 conversation identity (the same value as `thread_id`);
 `transcript_session_uuid` is the native transcript identity, which can differ
 for a fork. Session ledgers use the transcript identity. CLI responses carry
-`surface: "cli"` and their real `tmux_session`. An app conversation waiting
+`surface: "cli"` and their real `tmux_session`. A claim can attach an existing
+native Codex conversation only after the connected App Server read-verifies its
+exact id and active or idle state. The claim records ownership without starting,
+resuming, naming, or interrupting a turn. An app conversation waiting
 for the next phone reply remains assigned; its idle state does not authorize
 another launch.
 
@@ -86,11 +89,12 @@ instead of creating a duplicate. Confirmed missing conversations are marked
 blocked and can be explicitly stopped or replaced. A temporary connection
 failure remains unknown.
 
-To claim a capture conversation, post `fiber_id`, `surface: "app"`, and
-`session_uuid` to `/claim`. The session must already have a durable app-worker
-record on this host and must not belong to another fiber. CLI claims use
-`tmux_session`. The app dispatch prompt supplies the claim information and
-the appropriate completion instructions.
+To claim an app conversation, post `fiber_id`, `surface: "app"`, and
+`session_uuid` to `/claim`. A Shuttle-created capture claims its durable record
+directly; an existing native conversation is adopted only after exact
+read-verification by this host's App Server. In either case it must not belong
+to another fiber. CLI claims use `tmux_session`. The app dispatch prompt
+supplies the claim information and the appropriate completion instructions.
 
 `/attach` and `/inject` are terminal operations. An app conversation's UUID
 is not a terminal name or a verified mobile URL. Phone conversation access
