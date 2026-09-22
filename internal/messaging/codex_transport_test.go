@@ -13,6 +13,30 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestCodexSocketSelection(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("SHUTTLE_CODEX_SOCKET", "")
+	want := filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
+	if got := codexSocket(); got != want {
+		t.Fatalf("default socket = %q, want %q", got, want)
+	}
+	custom := filepath.Join(t.TempDir(), "custom-codex")
+	t.Setenv("CODEX_HOME", custom)
+	want = filepath.Join(custom, "app-server-control", "app-server-control.sock")
+	if got := codexSocket(); got != want {
+		t.Fatalf("custom home socket = %q, want %q", got, want)
+	}
+	override := filepath.Join(home, "desktop.sock")
+	t.Setenv("SHUTTLE_CODEX_SOCKET", override)
+	if got := codexSocket(); got != override {
+		t.Fatalf("override socket = %q, want %q", got, override)
+	}
+}
+
 type fakeCodex struct {
 	t                 *testing.T
 	state             string

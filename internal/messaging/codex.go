@@ -41,8 +41,12 @@ func codexSocket() string {
 	if p := os.Getenv("SHUTTLE_CODEX_SOCKET"); p != "" {
 		return p
 	}
-	h, _ := os.UserHomeDir()
-	return filepath.Join(h, ".codex/app-server-control/app-server-control.sock")
+	home := os.Getenv("CODEX_HOME")
+	if home == "" {
+		h, _ := os.UserHomeDir()
+		home = filepath.Join(h, ".codex")
+	}
+	return filepath.Join(home, "app-server-control", "app-server-control.sock")
 }
 
 func dialCodex(ctx context.Context) (*rpcClient, error) {
