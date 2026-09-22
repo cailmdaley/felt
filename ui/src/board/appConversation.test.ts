@@ -57,6 +57,7 @@ describe('shared worker appearance', () => {
     expect(workerVariant(waiting, 61_000)).toBe('waiting')
     expect(workerVariant({ runtimePhase: 'attention' }, 1000)).toBe('attention')
     expect(workerVariant({ runtimePhase: 'blocked' }, 1000)).toBe('attention')
+    expect(workerVariant({ runtimePhase: 'working', launchError: 'failed' }, 1000)).toBe('attention')
     expect(workerVariant({ runtimePhase: 'working' }, 1000)).toBe('aloft')
   })
   it('still opens ChatGPT when no desktop conversation route is available', () => {

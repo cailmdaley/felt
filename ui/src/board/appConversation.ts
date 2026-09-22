@@ -40,9 +40,9 @@ export function workerStatusLabel(phase?: string, launchError?: string): string 
   return 'Aloft'
 }
 
-/** Waiting becomes an attention state only after a full minute, on every backend. */
-export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActivityAt'>, now = Date.now()): 'aloft' | 'waiting' | 'attention' {
-  if (card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return 'attention'
+/** Idle waiting is debounced; explicit attention and failures are immediate. */
+export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActivityAt' | 'launchError'>, now = Date.now()): 'aloft' | 'waiting' | 'attention' {
+  if (card.launchError || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return 'attention'
   if (card.runtimePhase === 'waiting' && now - (card.lastActivityAt ?? -Infinity) >= 60_000) return 'waiting'
   return 'aloft'
 }

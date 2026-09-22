@@ -911,9 +911,8 @@ export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip |
   const phase = card.runtimePhase
   const idleMs = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : Infinity
   const age = card.lastActivityAt !== undefined ? humanizeIdleAge(idleMs) : null
-  const takesOver = workerVariant(card, nowMs) !== 'aloft'
   const variant = workerVariant(card, nowMs)
-  if (takesOver && phase) {
+  if (variant !== 'aloft' && phase) {
     return {
       label: workerStatusLabel(phase),
       variant,

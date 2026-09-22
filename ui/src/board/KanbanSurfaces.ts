@@ -1716,7 +1716,7 @@ export class KanbanSurfaceRenderer {
       if (phaseTakesOverWorker && card.runtimePhase) {
         // Attention changes the worker color and label; its title carries the wait age.
         const age = Number.isFinite(idleMs) ? humanizeIdleAge(idleMs) : null
-        w.className = `kbn-card-worker kbn-card-worker-${card.runtimePhase}`
+        w.className = `kbn-card-worker kbn-card-worker-${workerVariant(card)}`
         w.textContent = workerStatusLabel(card.runtimePhase)
         const [aria, verb] = card.runtimePhase === 'attention'
           ? ['Worker needs you', 'Worker raised its hand']
