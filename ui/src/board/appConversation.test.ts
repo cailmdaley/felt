@@ -40,12 +40,12 @@ describe('app conversation opening', () => {
 describe('shared worker activity labels', () => {
   it.each([
     [undefined, 'Aloft'], ['working', 'Aloft'], ['waiting', 'Waiting'],
-    ['attention', 'Needs you'], ['blocked', '⚠ blocked'],
+    ['attention', 'Needs you'], ['blocked', 'Blocked'],
   ])('shows %s in the worker marker', (phase, label) => {
     expect(workerStatusLabel(phase)).toBe(label)
   })
   it('keeps a launch failure ahead of cached native activity', () => {
-    expect(workerStatusLabel('waiting', 'failed')).toBe('⚠ blocked')
+    expect(workerStatusLabel('waiting', 'failed')).toBe('Blocked')
   })
 })
 
@@ -56,6 +56,7 @@ describe('shared worker appearance', () => {
     expect(workerVariant(waiting, 60_999)).toBe('aloft')
     expect(workerVariant(waiting, 61_000)).toBe('waiting')
     expect(workerVariant({ runtimePhase: 'attention' }, 1000)).toBe('attention')
+    expect(workerVariant({ runtimePhase: 'blocked' }, 1000)).toBe('attention')
     expect(workerVariant({ runtimePhase: 'working' }, 1000)).toBe('aloft')
   })
   it('still opens ChatGPT when no desktop conversation route is available', () => {

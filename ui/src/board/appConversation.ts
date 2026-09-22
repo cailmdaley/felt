@@ -34,7 +34,7 @@ export function appConversationTarget(
 }
 
 export function workerStatusLabel(phase?: string, launchError?: string): string {
-  if (launchError || phase === 'blocked') return '⚠ blocked'
+  if (launchError || phase === 'blocked') return 'Blocked'
   if (phase === 'attention') return 'Needs you'
   if (phase === 'waiting') return 'Waiting'
   return 'Aloft'
@@ -42,7 +42,7 @@ export function workerStatusLabel(phase?: string, launchError?: string): string 
 
 /** Waiting becomes an attention state only after a full minute, on every backend. */
 export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActivityAt'>, now = Date.now()): 'aloft' | 'waiting' | 'attention' {
-  if (card.runtimePhase === 'attention') return 'attention'
+  if (card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return 'attention'
   if (card.runtimePhase === 'waiting' && now - (card.lastActivityAt ?? -Infinity) >= 60_000) return 'waiting'
   return 'aloft'
 }

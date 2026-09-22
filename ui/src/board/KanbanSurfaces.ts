@@ -112,7 +112,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
   starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
-  blocked: { label: '⚠ blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
+  blocked: { label: 'Blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
 }
 
 /** Below this, an attention chip carries no clock: a worker that just raised

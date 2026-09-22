@@ -1974,6 +1974,10 @@
   background: rgba(168, 38, 28, 0.18);
   animation: none; /* override .kbn-card-worker's base kbn-pulse — static, no blink */
 }
+.kbn-card-phase-blocked {
+  color: #9A2A1E;
+  background: rgba(168, 38, 28, 0.18);
+}
 .kbn-card-worker-attention:hover {
   color: #7A1E14;
   background: rgba(168, 38, 28, 0.28);
