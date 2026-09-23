@@ -216,8 +216,8 @@ defmodule Shuttle.Agents do
 
   # A headless `-p` worker runs unattended: no human can approve a tool call, so
   # the interactive `--permission-mode auto` is swapped for `bypassPermissions`
-  # (claude's "never stall" mode, the parallel to codex's
-  # `--dangerously-bypass-approvals-and-sandbox`). Non-headless invocations keep
+  # (claude's "never stall" mode; codex agents never stall either, since
+  # `--approve-for-me` routes approvals to Codex's reviewer). Non-headless invocations keep
   # their declared `extra_flags` verbatim.
   defp headless_extra_flags(%{extra_flags: ef}, true) when is_binary(ef) do
     String.replace(ef, "--permission-mode auto", "--permission-mode bypassPermissions")

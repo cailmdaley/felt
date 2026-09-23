@@ -622,7 +622,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 	}, nil)
 
 	// An agent switch within Codex leaves an explicit CLI selection intact.
-	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-terra"); err != nil {
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-luna"); err != nil {
 		t.Fatalf("set-agent preserving surface: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -631,7 +631,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 		t.Fatalf("surface after Codex switch = %#v, %v; want cli", b, err)
 	}
 
-	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-terra", "--surface", "app"); err != nil {
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "codex-luna", "--surface", "app"); err != nil {
 		t.Fatalf("set-agent app: %v\n%s", err, out)
 	}
 	f = mustRead(t, storage, "f")
