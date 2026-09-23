@@ -154,7 +154,7 @@ func piNativeSessions(host string) []Session {
 			continue
 		}
 		var r piNativeRegistration
-		if json.Unmarshal(b, &r) != nil || r.Host != host || !piNativeAvailable(r.ID, host) {
+		if json.Unmarshal(b, &r) != nil || r.Host != host || !piNativeAvailable(r.ID, host) || !piNativeListening(r.Socket) {
 			continue
 		}
 		address, err := FormatAddress(host, "pi", r.ID)
