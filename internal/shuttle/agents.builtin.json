@@ -62,16 +62,6 @@
     "aliases": ["gpt-6-sol"]
   },
   {
-    "id": "codex-terra",
-    "cli": "codex",
-    "model": "gpt-5.6-terra",
-    "extra_flags": "--approve-for-me",
-    "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
-    "default_effort": "medium",
-    "cost_class": "standard",
-    "aliases": ["gpt-5.6-terra"]
-  },
-  {
     "id": "codex-luna",
     "cli": "codex",
     "model": "gpt-6-luna",
