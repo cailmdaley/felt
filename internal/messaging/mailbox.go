@@ -41,7 +41,7 @@ func mailboxDir(harness, id string) string {
 // RegisterMailbox is called by the receiver's hooks, never by a sender. A
 // SessionEnd withdraws availability without deleting already queued messages.
 func RegisterMailbox(harness, id, host, cwd string, active bool) error {
-	if harness != "claude" && harness != "codex" {
+	if harness != "claude" && harness != "codex" && harness != "pi" {
 		return errCode("invalid_request", "unsupported mailbox harness")
 	}
 	if id == "" || len(id) > 4096 || strings.ContainsAny(id, "\x00\r\n") {
@@ -90,7 +90,7 @@ func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
 
 func QueueMailbox(a Address, r Request) (Receipt, error) {
 	transport := a.Harness + "-hook"
-	if (a.Harness != "claude" && a.Harness != "codex") || !MailboxAvailable(a.Harness, a.ID, a.Host) {
+	if (a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi") || !MailboxAvailable(a.Harness, a.ID, a.Host) {
 		return rejected(r, transport, "session has not registered a Shuttle message hook on this host"), errCode("unavailable", "session has not registered a Shuttle message hook on this host")
 	}
 	if r.Wake {

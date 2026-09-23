@@ -46,40 +46,26 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 
 ## Messaging existing sessions
 
-`felt shuttle sessions --json` discovers conversations across configured hosts
-and harnesses. Use a returned `address` verbatim with
-`felt shuttle message <address> "message"`; replies use the same command.
-`--host` and `--harness` narrow discovery. The existing `sessions <fiber>` form
-reads a fiber's session history.
+`felt shuttle sessions --json` lists conversations across configured hosts and
+harnesses; `--host` and `--harness` narrow the list. Use a returned address:
 
-Check the returned capabilities and discovery gaps. A failed host or unavailable
-harness is not an empty fleet. Sending does not imply reading or acting: receipts
-name the actual transport result. Without `--wake`, messaging must not start an
-idle model turn. Claude and Codex hook mailboxes offer queued context at the next
-prompt or tool call; Codex app-server can add idle context immediately when it
-owns the session. `--wake` requests a new turn only where the transport supports
-it. For a task handoff that should begin without another human prompt, send
-`felt shuttle message <address> "task" --wake`. A queued/context-added receipt
-does not satisfy that request. An accepted wake starts idle work or steers an
-already running turn; it does not promise a separate turn after that turn ends.
-Claude hooks register a native inbox when available; wake preserves its inbound
-hold/refuse policy and waits for a correlated real model response. A held message
-or unobserved response is not successful wake. Hook-only sessions reject wake.
-Pending native approval or user input must be
-resolved through that harness's input surface.
+```bash
+felt shuttle message <address> "Please investigate this"
+felt shuttle message <address> "Background for later" --context-only
+felt shuttle message <address> "Results attached" --attach results.csv
+```
 
-For multiline text use `--file <path>` or `-` with stdin. Each send prints a
-message ID. If delivery is uncertain, retry the identical request with
-`--message-id <id>`; never invent a new ID just to bypass an unknown result.
-Keep peer context attributed using `--from` when automatic sender detection
-does not identify the conversation.
+Ordinary messages start an idle turn or steer ongoing work. `--context-only`
+supplies context at a natural prompt/tool boundary without requesting a turn
+or native steer; idle receivers stay idle. Use it for nonurgent updates and acknowledgments. Replies use the same command. No persistent identity or
+Confer worker is required. The receiver must have a supported live integration;
+unavailable receivers and pending native approvals are not bypassed.
 
-Attach files with `felt shuttle message <address> "context" --attach <path>`;
-repeat `--attach` for multiple files, or omit the text for a file-only message.
-Shuttle copies and verifies the bytes on the receiving host before offering
-local file paths to the session. The receipt lists those copies; it does not
-prove they were opened. Up to eight files totaling 20 MiB fit in one message.
-Use `felt shuttle send-file` to publish artifacts to the human's IDE.
+Use `--file <path>` or `-` for multiline text, and repeat `--attach` for files.
+Sending does not prove reading or task completion. If the result is uncertain,
+retry the identical request with its printed `--message-id`; a new ID could
+repeat the work. `--from` supplies attribution when automatic detection fails.
+Use `felt shuttle send-file <path>` to publish a file to the human's Shuttle UI.
 
 ## The fiber's surfaces
 

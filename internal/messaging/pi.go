@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -55,6 +56,22 @@ type piJob struct {
 	ID, Name, Status, Phase, CWD, SocketPath string
 	WorkerPID                                int    `json:"workerPid"`
 	Host                                     string `json:"host"`
+	SessionID                                string `json:"sessionId"`
+	PiSessionID                              string `json:"piSessionId"`
+}
+
+func mergePiSessions(primary, additions []Session) []Session {
+	seen := make(map[string]bool, len(primary)+len(additions))
+	merged := make([]Session, 0, len(primary)+len(additions))
+	for _, session := range append(primary, additions...) {
+		if seen[session.Address] {
+			continue
+		}
+		seen[session.Address] = true
+		merged = append(merged, session)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Address < merged[j].Address })
+	return merged
 }
 
 func conferStateDir() string {
@@ -69,8 +86,15 @@ func liveSocket(path string) bool {
 	return err == nil && st.Mode()&os.ModeSocket != 0
 }
 func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
+	hookSessions := MailboxSessions("pi", host)
+	nativeSessions := piNativeSessions(host)
+	nativeIDs := make(map[string]bool, len(nativeSessions))
+	for _, session := range nativeSessions {
+		nativeIDs[session.ID] = true
+	}
 	root := conferStateDir()
-	var ss []Session
+	ss := mergeNativeAndHookSessions(nativeSessions, hookSessions)
+	var conferSessions []Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		select {
 		case <-ctx.Done():
@@ -96,18 +120,21 @@ func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 		if json.Unmarshal(b, &j) != nil || j.ID == "" || j.SocketPath == "" || !liveSocket(j.SocketPath) {
 			return nil
 		}
+		if nativeIDs[j.SessionID] || nativeIDs[j.PiSessionID] {
+			return nil
+		}
 		addr, _ := FormatAddress(host, "pi", j.ID)
 		state := j.Phase
 		if state == "" {
 			state = j.Status
 		}
-		ss = append(ss, Session{Address: addr, Host: host, Harness: "pi", ID: j.ID, Title: j.Name, CWD: j.CWD, State: state, Capabilities: []string{"wake"}})
+		conferSessions = append(conferSessions, Session{Address: addr, Host: host, Harness: "pi", ID: j.ID, Title: j.Name, CWD: j.CWD, State: state, Capabilities: []string{"wake"}})
 		return nil
 	})
 	if os.IsNotExist(err) {
-		return []Session{}, nil
+		return ss, nil
 	}
-	return ss, err
+	return mergePiSessions(ss, conferSessions), err
 }
 func findPi(ctx context.Context, id string) (piJob, error) {
 	var matches []piJob
@@ -158,7 +185,13 @@ func readBoundedFile(path string, limit int64) ([]byte, error) {
 }
 func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
 	if !r.Wake {
+		if MailboxAvailable("pi", a.ID, a.Host) {
+			return QueueMailbox(a, r)
+		}
 		return rejected(r, "pi-rpc+unix-socket", "Confer messages can start a turn; wake is required"), errCode("wake_required", "Confer requires wake=true")
+	}
+	if piNativeAvailable(a.ID, a.Host) {
+		return sendPiNative(ctx, a, r)
 	}
 	j, err := findPi(ctx, a.ID)
 	if err != nil {
