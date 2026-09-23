@@ -2,21 +2,21 @@
  * Felt extension for pi — the pi adapter over the same binary hooks the
  * Claude Code/Codex plugin drives (claude-plugin/hooks/).
  *
- * Division of labor mirrors the shell-hook plugin: the `felt` binary owns all
- * logic (`felt hook event|commit|posttool`, `felt session`); this extension is
- * event plumbing plus the one piece that cannot be delegated — the activation
- * gate, because pi activates skills by *reading* SKILL.md rather than calling
- * a Skill tool, so the deny decision belongs where the read is visible.
+ * The `felt` binary owns routing, mailboxes, and records. This extension connects
+ * Pi lifecycle events and native messaging to that shared surface. It also
+ * enforces skill activation where Pi's reads of SKILL.md are visible.
  *
  * Graceful degradation: a missing or old felt binary loses the context
- * injection and the ledger entries, never the session. Every spawned hook is
- * fire-and-forget with errors swallowed — the contract the shell shims keep
- * (print nothing, exit 0) holds here as "never fail a tool call".
+ * injection and the ledger entries, never the session. Activity hooks are
+ * fire-and-forget; context hooks are awaited with a bounded timeout. Native
+ * messaging reports acceptance or refusal without failing the receiving session.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -77,6 +77,28 @@ function runHook(args: string[], payload: unknown): void {
 	}
 }
 
+function runHookOutput(args: string[], payload: unknown): Promise<string> {
+	const bin = resolveFelt();
+	if (!bin) return Promise.resolve("");
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (output: string) => {
+			if (settled) return;
+			settled = true;
+			resolve(output);
+		};
+		try {
+			const child = execFile(bin, ["hook", ...args], { timeout: 30_000, maxBuffer: 1 << 20 }, (err, stdout) => {
+				finish(err ? "" : stdout.toString());
+			});
+			child.stdin?.end(JSON.stringify(payload));
+			child.on("error", () => finish(""));
+		} catch {
+			finish("");
+		}
+	});
+}
+
 /** Awaited variant for the one call whose output we need (`felt session`).
  * The bound must clear a SLOW STORE, not a fast one: session context scans
  * every tracked fiber, and on a Lustre-backed 5k-fiber loom that is seconds
@@ -126,6 +148,16 @@ const denyReason =
 export default function feltExtension(pi: ExtensionAPI) {
 	let injectedSessionId: string | null = null;
 	let warnedBinaryMissing = false;
+	let nativeServer: net.Server | null = null;
+	let nativeSocket: string | null = null;
+	let nativeAccepting = false;
+	let nativeSessionId: string | null = null;
+	let nativeCwd: string | null = null;
+	let nativeTranscript: string | null = null;
+	let streaming = false;
+	const nativeFrameLimit = 512 << 10;
+	const pendingNativeMessages = new Map<string, { sessionId: string; resolve: (confirmed: boolean) => void }>();
+	const nativeMessageAckTimeoutMs = 14_000;
 
 	function isFeltProject(cwd: string): boolean {
 		return fs.existsSync(path.join(cwd, ".felt"));
@@ -142,11 +174,209 @@ export default function feltExtension(pi: ExtensionAPI) {
 	function emit(event: string, extra: Record<string, unknown>, ctx: any): void {
 		runHook(["event"], {
 			hook_event_name: event,
+			harness: "pi",
 			session_id: sessionId(ctx),
 			cwd: ctx.cwd,
 			transcript_path: safeSessionFile(ctx),
+			native_socket: nativeSocket,
+			native_pid: process.pid,
 			...extra,
 		});
+	}
+
+	function nativePath(sid: string): string {
+		const digest = createHash("sha256").update(sid).digest("hex").slice(0, 24);
+		return path.join(os.tmpdir(), `felt-pi-${process.pid}-${digest}`, "worker.sock");
+	}
+
+	function writeNativeReply(socket: net.Socket, reply: Record<string, unknown>): void {
+		try {
+			socket.end(`${JSON.stringify(reply)}\n`);
+		} catch {
+			/* the sender may have gone away */
+		}
+	}
+
+	pi.on("message_start", (event) => {
+		if (event.message.role !== "user") return;
+		const content = event.message.content;
+		const text = typeof content === "string"
+			? content
+			: content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n");
+		const pending = pendingNativeMessages.get(text);
+		if (!pending || pending.sessionId !== nativeSessionId || !nativeAccepting) return;
+		pendingNativeMessages.delete(text);
+		pending.resolve(true);
+	});
+
+	async function startNative(ctx: any): Promise<void> {
+		if (nativeServer) return;
+		const sid = sessionId(ctx);
+		if (sid === "anonymous") return;
+		nativeSocket = nativePath(sid);
+		nativeSessionId = sid;
+		nativeCwd = ctx.cwd;
+		nativeTranscript = safeSessionFile(ctx);
+		try {
+			const parent = path.dirname(nativeSocket);
+			fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+			const parentStat = fs.lstatSync(parent);
+			if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || (typeof process.getuid === "function" && parentStat.uid !== process.getuid()) || (parentStat.mode & 0o77) !== 0) throw new Error("native socket directory is not private");
+			fs.rmSync(nativeSocket, { force: true });
+		} catch {
+			nativeSocket = null;
+			nativeSessionId = null;
+			nativeCwd = null;
+			nativeTranscript = null;
+			return;
+		}
+		const socketPath = nativeSocket;
+		nativeServer = net.createServer((socket) => {
+			let buffer = "";
+			let handled = false;
+			socket.setEncoding("utf8");
+				socket.setTimeout(15_000, () => socket.destroy());
+			socket.on("error", () => {});
+			socket.on("data", async (chunk) => {
+				if (handled) return;
+				buffer += chunk;
+				if (Buffer.byteLength(buffer) > nativeFrameLimit) {
+					socket.destroy();
+					return;
+				}
+				const newline = buffer.indexOf("\n");
+				if (newline < 0) return;
+				handled = true;
+				const line = buffer.slice(0, newline);
+				let request: any;
+				try {
+					request = JSON.parse(line);
+				} catch {
+					writeNativeReply(socket, { ok: false, error: "malformed request" });
+					return;
+				}
+				const requestId = typeof request?.requestId === "string" ? request.requestId : "";
+				const replyBase = { requestId, sessionId: sid };
+				if (!nativeAccepting || nativeSessionId !== sid) {
+					writeNativeReply(socket, { ...replyBase, ok: false, error: "Pi receiver is closing or has switched sessions" });
+					return;
+				}
+				if (request?.type !== "msg" || request.sessionId !== sid || !requestId || typeof request.message !== "string" || !request.message.trim() || request.message.includes("\0") || Buffer.byteLength(request.message) > (128 << 10)) {
+					writeNativeReply(socket, { ...replyBase, ok: false, error: "invalid Pi message request" });
+					return;
+				}
+				const delivery = streaming ? "steer" : "follow_up";
+				let timer: NodeJS.Timeout;
+				let resolveObserved: (confirmed: boolean) => void = () => {};
+				const observed = new Promise<boolean>((resolve) => {
+					resolveObserved = resolve;
+					pendingNativeMessages.set(request.message, { sessionId: sid, resolve });
+					timer = setTimeout(() => resolve(false), nativeMessageAckTimeoutMs);
+				});
+				try {
+					// Pi's extension API catches rejected prompt promises internally and
+					// returns void. Confirm only when Pi emits this exact user message.
+					pi.sendUserMessage(request.message, { deliverAs: streaming ? "steer" : "followUp" });
+				} catch (error) {
+					if (pendingNativeMessages.get(request.message)?.resolve === resolveObserved) pendingNativeMessages.delete(request.message);
+					clearTimeout(timer!);
+					writeNativeReply(socket, { ...replyBase, ok: false, error: error instanceof Error ? error.message : String(error) });
+					return;
+				}
+				if (await observed) {
+					clearTimeout(timer!);
+					writeNativeReply(socket, { ...replyBase, ok: true, delivery });
+				} else {
+					clearTimeout(timer!);
+					if (pendingNativeMessages.get(request.message)?.resolve === resolveObserved) pendingNativeMessages.delete(request.message);
+					// Missing lifecycle evidence is ambiguous, not a rejection: Pi may
+					// have accepted the request but failed before starting its turn.
+					writeNativeReply(socket, { ...replyBase, error: "Pi did not confirm this message starting" });
+				}
+			});
+		});
+		await new Promise<void>((resolve) => {
+			nativeServer?.once("listening", () => resolve());
+			nativeServer?.once("error", () => {
+				nativeServer = null;
+				nativeSocket = null;
+				nativeSessionId = null;
+				nativeCwd = null;
+				nativeTranscript = null;
+				resolve();
+			});
+			nativeServer?.listen(socketPath);
+		});
+		if (nativeServer) {
+			try {
+				fs.chmodSync(socketPath, 0o600);
+				nativeAccepting = true;
+			} catch {
+				await new Promise<void>((resolve) => nativeServer?.close(() => resolve()));
+				nativeServer = null;
+				nativeSocket = null;
+				nativeSessionId = null;
+				nativeCwd = null;
+				nativeTranscript = null;
+			}
+		}
+	}
+
+	async function stopNative(ctx: any): Promise<void> {
+		nativeAccepting = false;
+		for (const pending of pendingNativeMessages.values()) pending.resolve(false);
+		pendingNativeMessages.clear();
+		if (!nativeServer || !nativeSocket) {
+			nativeServer = null;
+			nativeSocket = null;
+			nativeSessionId = null;
+			nativeCwd = null;
+			nativeTranscript = null;
+			return;
+		}
+		const socketPath = nativeSocket;
+		const sid = nativeSessionId;
+		const cwd = nativeCwd ?? ctx.cwd;
+		const transcript = nativeTranscript ?? safeSessionFile(ctx);
+		await runHookOutput(["event"], {
+			hook_event_name: "SessionEnd",
+			harness: "pi",
+			session_id: sid,
+			cwd,
+			transcript_path: transcript,
+			native_socket: socketPath,
+			native_pid: process.pid,
+		});
+		await new Promise<void>((resolve) => nativeServer?.close(() => resolve()));
+		nativeServer = null;
+		nativeSocket = null;
+		nativeSessionId = null;
+		nativeCwd = null;
+		nativeTranscript = null;
+		try {
+			fs.rmSync(path.dirname(socketPath), { force: true, recursive: true });
+		} catch {
+			/* cleanup is best effort */
+		}
+	}
+
+	async function offerMailbox(ctx: any, prompt: string): Promise<string> {
+		const raw = await runHookOutput(["event"], {
+			hook_event_name: "UserPromptSubmit",
+			harness: "pi",
+			session_id: sessionId(ctx),
+			cwd: ctx.cwd,
+			transcript_path: safeSessionFile(ctx),
+			prompt,
+			native_socket: nativeSocket,
+			native_pid: process.pid,
+		});
+		try {
+			const parsed = JSON.parse(raw);
+			return parsed?.hookSpecificOutput?.additionalContext ?? "";
+		} catch {
+			return "";
+		}
 	}
 
 	function safeSessionFile(ctx: any): string {
@@ -158,6 +388,11 @@ export default function feltExtension(pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		// A switch may be cancelled before this event. Keeping the old endpoint
+		// until this replacement event preserves it on cancellation; once this
+		// event fires, close the old registration before opening the new one.
+		await stopNative(ctx);
+		streaming = false;
 		// Fresh session identity resets both one-shot states; the flag file from
 		// a previous session id simply ages out of tmpdir.
 		injectedSessionId = null;
@@ -171,29 +406,50 @@ export default function feltExtension(pi: ExtensionAPI) {
 			}
 			return;
 		}
+		await startNative(ctx);
 		emit("SessionStart", {}, ctx);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		const sid = sessionId(ctx);
-		emit("UserPromptSubmit", { prompt: event.prompt }, ctx);
+		// Some Pi startup paths report an anonymous session before the first
+		// prompt. Register lazily once the stable session identity is available.
+		if (!nativeServer && sid !== "anonymous" && resolveFelt()) {
+			await startNative(ctx);
+			if (nativeServer) emit("SessionStart", {}, ctx);
+		}
+		const mailboxContext = await offerMailbox(ctx, event.prompt);
 
 		// Session context reaches the model once per session, as the first
 		// prompt lands — pi has no SessionStart additionalContext envelope, and
 		// a before_agent_start message is the persistent equivalent.
+		let sessionContext = "";
 		if (injectedSessionId !== sid) {
 			const bin = resolveFelt();
 			if (bin) {
 				const text = await runSession(bin);
 				if (text.trim()) {
 					injectedSessionId = sid;
-					return {
-						message: { customType: "felt-context", content: text, display: true },
-					};
+					sessionContext = text;
 				}
 			}
 		}
+		const context = [sessionContext, mailboxContext].filter((text) => text.trim()).join("\n\n");
+		if (context) return { message: { customType: "felt-context", content: context, display: true } };
 		return undefined;
+	});
+
+	pi.on("agent_start", async () => {
+		streaming = true;
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		streaming = false;
+		emit("Stop", {}, ctx);
+	});
+
+	pi.on("agent_settled", async () => {
+		streaming = false;
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -267,12 +523,8 @@ export default function feltExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
-		emit("Stop", {}, ctx);
-	});
-
 	pi.on("session_shutdown", async (_event, ctx) => {
-		emit("SessionEnd", {}, ctx);
+		await stopNative(ctx);
 		try {
 			fs.rmSync(flagPath(sessionId(ctx)), { force: true });
 		} catch {

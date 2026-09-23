@@ -19,19 +19,23 @@ defmodule ShuttleWeb.SentFilesController do
   A missing `uid` is a 400; a missing/empty events file yields `{"files": []}`,
   not a 500.
 
-  **The local leg carries a weak `ETag`** over `{uid, file_token(events.jsonl)}`,
-  so the detail panel's live poll re-reads the trail only when the events file
-  actually moved. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
+  **The local leg carries a weak `ETag`** over the request and both source
+  files' change tokens: `events.jsonl` and the session ledger. The ledger
+  matters for native sessions whose event predates the fiber↔session claim; its
+  rotated sibling is included because the reader streams it when present. The
+  detail panel's live poll therefore re-reads the trail whenever either source
+  changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
   forwards no request headers and drops response headers, so a client's
   `If-None-Match` never reaches the owning daemon and its `ETag` never comes
   back.
   """
 
   use Phoenix.Controller, formats: [:json]
+
   import ShuttleWeb.RelayHelpers,
     only: [relay_bytes: 2, integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
 
-  alias Shuttle.{OriginRouter, Poller, SentFiles, WaitingTracker}
+  alias Shuttle.{OriginRouter, Poller, SentFiles, SessionLedger, WaitingTracker}
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
@@ -40,7 +44,7 @@ defmodule ShuttleWeb.SentFilesController do
         relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
 
       :local ->
-        validator = {uid, file_token(WaitingTracker.default_events_file())}
+        validator = {uid, sent_files_tokens()}
 
         json_with_validator(conn, validator, fn -> %{files: SentFiles.for_uid(uid)} end)
     end
@@ -65,7 +69,7 @@ defmodule ShuttleWeb.SentFilesController do
   """
   def show_all(conn, params) do
     with {:ok, since_ms} <- integer_param(params, "since_ms", default: 0) do
-      validator = {since_ms, file_token(WaitingTracker.default_events_file())}
+      validator = {since_ms, sent_files_tokens()}
 
       json_with_validator(conn, validator, fn ->
         %{host: Poller.own_host_id(), files: SentFiles.all_since(since_ms)}
@@ -106,5 +110,20 @@ defmodule ShuttleWeb.SentFilesController do
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
+  end
+
+  # The reader joins event rows to the session ledger, so either source can
+  # change the response while the other stays untouched. The ledger reader
+  # also includes its rotated sibling during the retention window; include
+  # that token so rotation cannot leave a stale 304 behind.
+  defp sent_files_tokens do
+    events = WaitingTracker.default_events_file()
+    ledger = SessionLedger.default_path()
+
+    %{
+      events: file_token(events),
+      ledger: file_token(ledger),
+      ledger_rotated: file_token(ledger <> ".1")
+    }
   end
 end

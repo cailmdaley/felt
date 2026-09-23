@@ -87,12 +87,15 @@ var (
 
 type eventHookInput struct {
 	HookEventName  string `json:"hook_event_name"`
+	Harness        string `json:"harness"`
 	SessionID      string `json:"session_id"`
 	CWD            string `json:"cwd"`
 	TranscriptPath string `json:"transcript_path"`
 	ToolName       string `json:"tool_name"`
 	Prompt         string `json:"prompt"`
 	Model          string `json:"model"`
+	NativeSocket   string `json:"native_socket"`
+	NativePID      int    `json:"native_pid"`
 	// Notification's own discriminator: `idle_prompt`, `permission_prompt`,
 	// `elicitation_dialog`, … The harness says WHY it is notifying, and only
 	// `idle_prompt` means "nobody has typed in a while" rather than "I am

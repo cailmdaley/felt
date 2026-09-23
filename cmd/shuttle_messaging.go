@@ -29,6 +29,7 @@ var (
 	messageLocal       bool
 	messageFile        string
 	messageWake        bool
+	messageContextOnly bool
 	messageFrom        string
 	messageID          string
 	messageRequestJSON bool
@@ -129,8 +130,8 @@ var shuttleMessageCmd = &cobra.Command{
 			if !messageLocal {
 				return fmt.Errorf("--request-json requires --local")
 			}
-			if len(args) != 0 || messageFile != "" || messageWake || messageFrom != "" || messageID != "" || len(messageAttachments) != 0 {
-				return fmt.Errorf("--request-json cannot be combined with positional text, --file, --attach, --wake, --from, or --message-id")
+			if len(args) != 0 || messageFile != "" || cmd.Flags().Changed("wake") || cmd.Flags().Changed("context-only") || messageFrom != "" || messageID != "" || len(messageAttachments) != 0 {
+				return fmt.Errorf("--request-json cannot be combined with positional text, --file, --attach, --wake, --context-only, --from, or --message-id")
 			}
 			return nil
 		}
@@ -216,7 +217,7 @@ func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, err
 			return messaging.Request{}, err
 		}
 	}
-	return messaging.Request{Address: args[0], Text: text, From: resolveMessageSender(messageFrom), Wake: messageWake, MessageID: id, Attachments: attachments}, nil
+	return messaging.Request{Address: args[0], Text: text, From: resolveMessageSender(messageFrom), Wake: messageWake && !messageContextOnly, MessageID: id, Attachments: attachments}, nil
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
@@ -240,6 +241,15 @@ func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
 			return request, fmt.Errorf("decoding message request frame: trailing JSON value")
 		}
 		return request, fmt.Errorf("decoding message request frame: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(scanner.Bytes(), &fields); err != nil {
+		return request, fmt.Errorf("decoding message request frame: %w", err)
+	}
+	if rawWake, present := fields["wake"]; present && bytes.Equal(bytes.TrimSpace(rawWake), []byte("null")) {
+		return request, fmt.Errorf("decoding message request frame: wake must be a boolean")
+	} else if !present {
+		request.Wake = true
 	}
 	if strings.TrimSpace(request.MessageID) == "" {
 		return request, fmt.Errorf("decoding message request frame: message_id is required")
@@ -388,7 +398,8 @@ func init() {
 
 	shuttleMessageCmd.Flags().StringVar(&messageFile, "file", "", "read message text from a file ('-' for stdin)")
 	shuttleMessageCmd.Flags().StringArrayVar(&messageAttachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
-	shuttleMessageCmd.Flags().BoolVar(&messageWake, "wake", false, "request that the native harness wake the addressed session")
+	shuttleMessageCmd.Flags().BoolVar(&messageWake, "wake", true, "request that the native harness wake the addressed session (use --wake=false for context only)")
+	shuttleMessageCmd.Flags().BoolVar(&messageContextOnly, "context-only", false, "deliver context without starting or steering a model turn")
 	shuttleMessageCmd.Flags().StringVar(&messageFrom, "from", "", "label the sender (default: detected harness thread or external)")
 	shuttleMessageCmd.Flags().StringVar(&messageID, "message-id", "", "supply an idempotency key for a safe retry")
 	shuttleMessageCmd.Flags().BoolVar(&messageLocal, "local", false, "send through this host's native adapter without daemon routing")

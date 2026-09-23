@@ -74,6 +74,46 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 	}
 }
 
+func TestEventHookOffersPiMailboxOnlyOnPrompt(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_EVENTS", "off")
+	t.Setenv("SHUTTLE_HOST", "host")
+	hook := func(name string) string {
+		var out bytes.Buffer
+		payload, _ := json.Marshal(eventHookInput{
+			HookEventName:  name,
+			Harness:        "pi",
+			SessionID:      "session",
+			CWD:            "/project",
+			TranscriptPath: filepath.Join(t.TempDir(), "session.jsonl"),
+		})
+		if err := runEventAndMessageHook(bytes.NewReader(payload), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if out := hook("SessionStart"); out != "" || !messaging.MailboxAvailable("pi", "session", "host") {
+		t.Fatalf("Pi hook did not register: %q", out)
+	}
+	request := messaging.Request{Address: "shuttle://host/pi/session", Text: "queued", MessageID: "pi-hook"}
+	if _, err := messaging.Send(context.Background(), "host", request); err != nil {
+		t.Fatal(err)
+	}
+	if out := hook("PreToolUse"); out != "" {
+		t.Fatalf("Pi activity hook drained mailbox: %s", out)
+	}
+	var envelope sessionEnvelope
+	if err := json.Unmarshal([]byte(hook("UserPromptSubmit")), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains([]byte(envelope.HookSpecificOutput.AdditionalContext), []byte("queued")) {
+		t.Fatalf("Pi prompt context missing: %s", envelope.HookSpecificOutput.AdditionalContext)
+	}
+	if out := hook("UserPromptSubmit"); out != "" {
+		t.Fatalf("Pi mailbox replayed: %s", out)
+	}
+}
+
 func TestEventHookDoesNotClassifyUnknownPayloadAsCodex(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	t.Setenv("SHUTTLE_EVENTS", "off")

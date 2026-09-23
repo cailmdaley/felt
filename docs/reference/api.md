@@ -134,9 +134,12 @@ malformed peer becomes an explicit `{host, error}` gap while successful peers
 remain usable. Returned addresses use the configured routing alias:
 `shuttle://HOST/HARNESS/NATIVE_ID`.
 
-`POST /messages` accepts `{address, text, from, wake, message_id}`. The address
-selects the owner strictly; an unknown host is refused rather than attempted
-locally. Its receipt reports only submission state (`accepted`,
+`POST /messages` accepts `{address, text, from, wake, message_id}`. Omitting
+`wake` requests an active task turn; set `wake: false` explicitly for
+context-only delivery. A failed wake remains a failure in the receipt and is
+never silently downgraded to context-only delivery. The address selects the
+owner strictly; an unknown host is refused rather than attempted locally. Its
+receipt reports only submission state (`accepted`,
 `context_added`, `submitted`, `queued`, `unknown`, or `rejected`), transport, and detail;
 it does not claim that the recipient read or acted on the message. Reusing a
 `message_id` with the same request returns the durable receipt, while reusing it

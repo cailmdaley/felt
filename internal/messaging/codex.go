@@ -166,13 +166,13 @@ func (codexAdapter) discover(ctx context.Context, host string) ([]Session, error
 
 func mergeNativeAndHookSessions(native, hooks []Session) []Session {
 	seen := make(map[string]bool, len(native))
-	merged := append([]Session{}, native...)
-	for _, session := range native {
-		seen[session.Address] = true
-	}
-	for _, session := range hooks {
-		if !seen[session.Address] {
-			merged = append(merged, session)
+	merged := make([]Session, 0, len(native)+len(hooks))
+	for _, source := range [][]Session{native, hooks} {
+		for _, session := range source {
+			if !seen[session.Address] {
+				seen[session.Address] = true
+				merged = append(merged, session)
+			}
 		}
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].Address < merged[j].Address })

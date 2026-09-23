@@ -79,7 +79,7 @@ help:
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"
 	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite  AND  the plugin hooks"
-	@echo "  make plugin-hooks-test — exercise claude-plugin/hooks/* with HOME and PATH sandboxed"
+	@echo "  make plugin-hooks-test — exercise harness hooks and the native Pi extension"
 	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"
 	@echo "  make install     — full from-source bootstrap (CLI + daemon + ui + hook + keep-alive)"
 	@echo ""
@@ -166,6 +166,7 @@ bootstrap-test:
 
 plugin-hooks-test:
 	bash scripts/test-plugin-hooks.sh
+	node --experimental-strip-types extensions/pi/test.mjs
 
 # Fail if a maintainer's own host or account name has crept back into tracked
 # source. Fleet members belong in ~/.config/felt/remotes.json, not in the repo.

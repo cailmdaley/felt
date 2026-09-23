@@ -126,7 +126,7 @@ untouched by any of this.
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
 | `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native harness sessions addressable across the fleet (`--host`, `--harness`, `--json`). With a fiber or session, preserve the provenance view: discover the composite session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition through the ledgers; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `felt shuttle message <address> [text\|-]` | Send text and files to the exact session address returned by `sessions` (`--attach`, `--file`, `--wake`, `--from`, `--message-id`, `--json`). `-` and `--file -` read multiline message text; repeat `--attach <path>` to include binary files. Receipts report the transport result and the message ID needed for a safe explicit retry |
+| `felt shuttle message <address> [text\|-]` | Send text and files to the exact session address returned by `sessions` (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). `-` and `--file -` read multiline message text; repeat `--attach <path>` to include binary files. Receipts report the transport result and the message ID needed for a safe explicit retry |
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
@@ -167,55 +167,45 @@ explicit endpoint configuration, durable launch setup, and acceptance checks.
 
 ### Session discovery and messaging
 
-No-argument `sessions` may report a Claude or Codex receiver with `state: "hook"`. This
+No-argument `sessions` may report a Claude, Codex, or Pi receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in
 Unix milliseconds. An abnormal exit can leave a registration behind.
-Hook delivery never wakes a session: queued context is offered by the next
-`SessionStart`, `UserPromptSubmit`, `PreToolUse`, or `PostToolUse` hook.
-The existing `felt hook event` integration registers these receivers;
-`SHUTTLE_MESSAGES=off` disables registration and offers for that hook process.
+Messages wake idle receivers or steer ongoing work by default:
 
-Messaging uses the configured fleet transport to reach the owning daemon.
-Each owner discovers its own harnesses; network reachability alone does not
-provide a messaging transport. Codex app-server sessions use the runtime's
-Unix control socket. Claude receiver hooks register its native inbox socket and
-transcript; explicit wake uses that live process, without launching a second
-session. CLI context-only delivery uses supported hooks. Pi sessions use
-Confer's existing Unix RPC socket and require `--wake` because its message
-operation can start a turn. Terminal keystrokes are not a messaging transport.
+```bash
+felt shuttle sessions --json
+felt shuttle message <address> "Please review the results" --attach results.csv
+felt shuttle message <address> "Background for your next task" --context-only
+```
 
-Task handoffs that should begin without a human prompt use
-`felt shuttle message <address> "task" --wake`. For an idle managed Codex session,
-this calls the owning runtime's turn-start operation. For a running session it
-steers the current turn; it does not schedule an additional turn after completion.
-Codex sessions waiting on approval or user input reject wake until that native
-input is resolved. Pi acknowledges either an active steer or a follow-up prompt.
-The hook mailbox adapters reject wake when no native wake endpoint is registered
-and remain usable for context-only sends.
-Discovery capabilities describe the available adapter, not every feature a
-harness vendor offers.
+`--context-only` queues or adds context without starting a turn or invoking native
+steering. Hooks offer queued context when the receiver next prompts or uses a
+tool; Pi offers it before the next agent turn. `--wake` remains an explicit alias
+for the default; `--wake=false` is equivalent to `--context-only`.
 
-A wake request cannot succeed with a `queued`, `context_added`, or `submitted`
-receipt. If a peer returns one after dispatch, Shuttle reports an unverified
-outcome and does not retry automatically. A missing acknowledgement after sending
-is `unknown`, even when the underlying worker reports a generic failure. Retrying
-the same message ID retrieves the recorded outcome; it cannot force redelivery.
+Shuttle routes to the configured owner host and its live harness integration.
+Claude uses its receiver-registered native inbox; Codex uses the owning App
+Server; Pi uses the Felt extension's native endpoint. Existing Confer Pi workers
+also remain addressable, but standalone Pi sessions do not require Confer.
+Hooks alone cannot wake Claude or Codex: install and enable the receiver's hooks
+for context delivery, and use a supported live native endpoint for wake.
+A failed wake never silently becomes a context-only send. Pending native input
+or approval is handled by the harness, not by injecting terminal keystrokes.
 
-Claude native wake checks the registered socket and process identity, then waits
-for a real assistant response descended from the exact message in the receiver's
-transcript. A socket write or synthetic API-error response is insufficient.
-Native inbox hold remains `unknown` with an explicit held detail; native refusal
-is `rejected`. Shuttle preserves the receiver's inbound policy and does not use
-its child authentication token. Missing model evidence before the bounded wait
-expires remains `unknown`, even if processing later succeeds. Auth-required
-native endpoints need supported peer authentication before they can be used.
-Claude's native inbound setting governs this wake transport. Context-only sends
-use the separately installed Shuttle mailbox hooks; native inbox refusal does
-not disable that channel. `SHUTTLE_MESSAGES=off` disables hook registration and
-mailbox offers in that receiver.
-Pi wake acceptance requires the worker's correlated native acknowledgement;
-workers without that evidence return `unknown` and need an updated Confer worker.
+Receipts describe delivery evidence, not task completion. If delivery is
+uncertain, retry the identical request with the same `--message-id`; this returns
+the recorded result without repeating the turn or copying attachments again.
+Changed content requires a new message ID. There is no automatic retry of an
+uncertain send.
+
+Claude preserves its native inbound hold/refuse policy. Its adapter waits for a
+correlated real model response; if that evidence does not arrive within the
+bounded wait, the result is `unknown`, even if the message is processed later.
+Context-only messages use separately enabled Shuttle hooks. To disable those
+hooks' message registration and delivery, set `SHUTTLE_MESSAGES=off` in the
+receiver environment. Installing hook files does not establish that the harness
+has enabled or trusted them; discovery reflects receiver registration.
 
 | Receipt | Evidence |
 |---|---|

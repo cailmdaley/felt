@@ -124,9 +124,18 @@ defmodule Shuttle.Messaging do
     url = Remote.url_for(remote, "/api/v1/peers") <> "?local=true"
 
     case OriginRouter.forward_client().get(url, @remote_discovery_timeout_ms) do
-      {:ok, body} -> decode_remote(body)
-      {:error, {:http_status, 404}} -> {:error, "peer discovery unsupported"}
-      {:error, reason} -> {:error, render_error(reason)}
+      {:ok, body} ->
+        decode_remote(body)
+
+      {:error, {:http_status, 404}} ->
+        {:error, "peer discovery unsupported"}
+
+      {:error, :timeout} ->
+        {:error,
+         "remote host timed out during session discovery; it may be offline or unreachable"}
+
+      {:error, reason} ->
+        {:error, render_error(reason)}
     end
   end
 
@@ -238,7 +247,7 @@ defmodule Shuttle.Messaging do
          unknown_receipt(
            request,
            "daemon",
-           "forward to #{name} failed; delivery outcome is unknown: #{render_error(reason)}"
+           remote_delivery_error(name, reason)
          )}
     end
   end
@@ -307,7 +316,10 @@ defmodule Shuttle.Messaging do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
     from = Map.get(payload, "from", "")
-    wake = Map.get(payload, "wake", false)
+    # Ordinary messages are task requests. Context-only delivery is explicit
+    # with `wake: false`; keeping the default here also applies to public JSON
+    # callers that omit the field entirely.
+    wake = Map.get(payload, "wake", true)
     id = Map.get(payload, "message_id")
 
     with {:ok, attachments} <- validate_attachments(Map.get(payload, "attachments", []), mode) do
@@ -337,7 +349,11 @@ defmodule Shuttle.Messaging do
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
       true ->
-        raw = Map.take(payload, ["address", "text", "from", "wake", "message_id"])
+        raw =
+          payload
+          |> Map.take(["address", "text", "from", "wake", "message_id"])
+          |> Map.put("wake", wake)
+
         raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)
 
         if raw |> Jason.encode!() |> byte_size() <= @max_frame_bytes do
@@ -516,6 +532,14 @@ defmodule Shuttle.Messaging do
   end
 
   defp valid_part?(part), do: byte_size(part) <= 255 and Regex.match?(@part_pattern, part)
+
+  defp remote_delivery_error(name, :timeout) do
+    "request to #{name} timed out; delivery outcome is unknown. Retry this exact request with the same message_id"
+  end
+
+  defp remote_delivery_error(name, reason) do
+    "forward to #{name} failed; delivery outcome is unknown: #{render_error(reason)}"
+  end
 
   # Go's net/url.PathEscape path-segment mode keeps these RFC 3986 subdelims
   # in addition to unreserved bytes. This must remain byte-identical to the
