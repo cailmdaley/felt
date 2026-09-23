@@ -140,7 +140,7 @@ function basename(path: string): string {
  * fibers, find the `<basename>` segment and take the prefix up to and including
  * it; majority vote across the fibers that carry it (so a coincidental match
  * doesn't win). No fiber carries the segment → `''` (the project is a store
- * root). Case-insensitive (e.g. `MySTRA` ↔ loom path `mystra`).
+ * root). Case-insensitive (e.g. `ProjectA` ↔ loom path `projecta`).
  */
 function substorePrefix(slugs: string[], projectBasename: string): string {
   const target = projectBasename.toLowerCase()

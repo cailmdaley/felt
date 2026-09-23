@@ -21,7 +21,7 @@ import {
 
 const projects: PickerProject[] = [
   { id: 'local:/dev/felt', name: 'felt', path: '/dev/felt', originId: 'local' },
-  { id: 'local:/dev/mystra', name: 'mystra', path: '/dev/mystra', originId: 'local' },
+  { id: 'local:/dev/sample', name: 'sample', path: '/dev/sample', originId: 'local' },
   { id: 'candide:/home/x/cmbx', name: 'cmbx', path: '/home/x/cmbx', originId: 'candide' },
 ]
 
@@ -29,7 +29,7 @@ describe('projectsForHost', () => {
   it('keeps only the selected host’s projects', () => {
     expect(projectsForHost(projects, 'local').map((p) => p.id)).toEqual([
       'local:/dev/felt',
-      'local:/dev/mystra',
+      'local:/dev/sample',
     ])
   })
 
@@ -48,7 +48,7 @@ describe('projectsForHost', () => {
   it('preserves the incoming order, which is the form’s recency ranking', () => {
     const reversed = [...projects].reverse()
     expect(projectsForHost(reversed, 'local').map((p) => p.id)).toEqual([
-      'local:/dev/mystra',
+      'local:/dev/sample',
       'local:/dev/felt',
     ])
   })

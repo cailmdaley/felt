@@ -1,5 +1,5 @@
 import { marked } from 'marked'
-import markedKatex from 'marked-katex-extension'
+import { mathDollars } from './mathDollars.js'
 import 'katex/dist/katex.min.css'
 
 // Configure marked for safe rendering with KaTeX math support.
@@ -14,12 +14,9 @@ marked.setOptions({
   gfm: true,        // GitHub Flavored Markdown
 })
 
-// $..$ for inline math, $$...$$ for display math
-marked.use(markedKatex({
-  throwOnError: false,
-  output: 'html',
-  nonStandard: true, // allow $...$ after punctuation like hyphen (pseudo-$C_\ell$)
-}))
+// $..$ inline math, $$..$$ display math — Pandoc's dollar rules, so prices
+// ("$5 … $1,232") stay prose. See mathDollars.ts.
+marked.use(mathDollars())
 
 // Custom renderer for code blocks to integrate with Prism
 const renderer = new marked.Renderer()
@@ -38,7 +35,7 @@ renderer.link = ({ href, text }: { href: string; text: string }) => {
   return `<a href="${escapeHtml(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
 }
 
-// Strip KaTeX HTML from image alt text (marked-katex-extension processes $ inside alt)
+// Strip KaTeX HTML from image alt text (the math extension renders $…$ inside alt)
 renderer.image = ({ href, text: alt }: { href: string; text?: string }) => {
   const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
   return `<img src="${escapeHtml(href)}" alt="${escapeHtml(cleanAlt)}" loading="lazy" />`
