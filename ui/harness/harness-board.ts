@@ -464,7 +464,7 @@ const MOCK_FEED = {
         ...APP_CONVERSATION.fiber,
         shuttle: {
           ...shuttleBlock(),
-          agent: 'codex-terra',
+          agent: 'codex-luna',
           surface: 'app',
           runtime: { session_uuid: APP_THREAD },
         },
@@ -1205,7 +1205,7 @@ const settingsSummary = (host: string, id: string): Record<string, unknown> => {
 const MOCK_AGENTS = [
   { id: 'claude-opus', cli: 'claude', model: 'opus', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true, cost_class: 'premium', default: true, source: 'builtin' },
   { id: 'claude-haiku', cli: 'claude', model: 'haiku', effort_levels: ['low', 'medium', 'high'], default_effort: 'low', chrome_capable: true, cost_class: 'economy', default: false, source: 'builtin' },
-  { id: 'codex-terra', cli: 'codex', model: 'gpt-x-terra', effort_levels: ['low', 'medium', 'high', 'max'], default_effort: 'medium', cost_class: 'standard', default: false, source: 'user' },
+  { id: 'codex-luna', cli: 'codex', model: 'gpt-x-luna', effort_levels: ['low', 'medium', 'high', 'max'], default_effort: 'medium', cost_class: 'standard', default: false, source: 'user' },
 ]
 
 const mockBuild = (sha: string, bootedAgoMs: number) => ({

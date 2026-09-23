@@ -18,7 +18,6 @@
     "cron-parser": "^5.5.0",
     "katex": "^0.16.27",
     "marked": "^17.0.1",
-    "marked-katex-extension": "^5.1.6",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

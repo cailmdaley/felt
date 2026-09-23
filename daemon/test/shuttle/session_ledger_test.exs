@@ -43,14 +43,14 @@ defmodule Shuttle.SessionLedgerTest do
         fiber: "work/paper/edits",
         session: "0883ade1-08e0-4457-94c6-7ac12137eb0f",
         kind: :dispatch,
-        agent: "codex-terra",
-        model: "gpt-5.6-terra",
+        agent: "codex-luna",
+        model: "gpt-6-luna",
         collaboration: collaboration
       )
 
       assert [record] = decoded(path)
-      assert record["agent"] == "codex-terra"
-      assert record["model"] == "gpt-5.6-terra"
+      assert record["agent"] == "codex-luna"
+      assert record["model"] == "gpt-6-luna"
       assert record["collaboration"] == collaboration
     end
 

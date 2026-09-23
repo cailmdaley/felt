@@ -15,7 +15,7 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 
 	want := []string{
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
-		"codex-sol", "codex-terra", "codex-luna",
+		"codex-astra", "codex-sol", "codex-luna",
 		"pi-luna", "pi-openai-luna", "pi-grok", "pi-gemini-flash",
 		"pi-kimi", "pi-deepseek-flash", "pi-glm-flash", "pi-union-alpha",
 	}
