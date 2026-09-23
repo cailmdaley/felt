@@ -78,6 +78,34 @@ func TestShowReachesEnclosingStore(t *testing.T) {
 	}
 }
 
+func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
+	defer saveShowGlobals()()
+
+	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
+	if err != nil {
+		t.Fatalf("show enclosing UID: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "roles/vizier") {
+		t.Fatalf("show output = %q, want enclosing profile", out)
+	}
+}
+
+func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
+	seedFiber(t, felt.NewStorage(subProj), "local-copy", uid, "", nil, nil)
+	defer saveShowGlobals()()
+
+	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous fiber UID") {
+		t.Fatalf("duplicate UID error = %v\n%s", err, out)
+	}
+}
+
 // TestRmReachesEnclosingStoreAndSaysWhere: the destructive verb acts on the
 // fiber the user named, where it lives, and never on the local same-slug one.
 func TestRmReachesEnclosingStoreAndSaysWhere(t *testing.T) {

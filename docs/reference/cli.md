@@ -24,6 +24,7 @@ Every command accepts these global flags:
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
 | `felt rm <id>` | Permanently delete a fiber |
+| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push |
 
 ## Search and reading
 
@@ -113,7 +114,7 @@ untouched by any of this.
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`); leaves the current session running |
 | `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
-| `felt shuttle assign <fiber>` | Set optional collaborator/role references (`--collaborator <UID> --collaborator-origin <host>`, `--role <UID> --role-origin <host>`), replace with `--json-assignment <JSON>`, or remove with `--clear`, `--clear-collaborator`, `--clear-role`. Preserves lifecycle and execution settings; also works on fibers without a shuttle block |
+| `felt shuttle assign <fiber>` | Set optional local role/collaborator references (`--role <name/path/UID> --collaborator <name/path/UID>`), replace with `--json-assignment <JSON>`, or remove with `--clear`, `--clear-collaborator`, `--clear-role`. Resolves names under `roles/` and stores stable UIDs; preserves lifecycle and execution settings |
 | `felt shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `felt shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
 

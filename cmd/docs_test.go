@@ -67,6 +67,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"setup",
 		"show",
 		"shuttle",
+		"sync",
 		"tree",
 		"uninstall",
 		"unnest",

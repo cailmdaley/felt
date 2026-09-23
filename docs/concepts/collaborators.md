@@ -1,105 +1,83 @@
-# Collaborators and roles
+# Roles and collaborators
 
-Shuttle can optionally assign durable identity and remit to a constitution.
-The assignment is a pair of references to ordinary fibers:
+Roles and collaborators are ordinary Git-synchronized fibers. A central
+`roles/` directory makes them discoverable across projects:
+
+```text
+roles/
+  review/
+    review.md
+    fable/
+      fable.md
+```
+
+A role describes an area of work and shared orientation. Its collaborators
+have their own continuing notes within that role. Create them when useful,
+not as an automatic matrix of every role and model. Their intrinsic fiber IDs
+remain stable when names or paths change.
+
+Collaborator bodies are free-form. Information another worker needs belongs
+in the role or the relevant shared task/project; the individual notes may
+retain fuller reasoning, history, experiments, or attributed disagreements.
+Project knowledge stays in the fibers that own the subject matter. This is a
+working practice, not a second commitments database.
+
+`shuttle.agent` chooses the execution recipe. It is separate from a collaborator
+and from a role. A role may span several task constitutions, whose own scope
+and permissions still govern the work. This also differs from Shuttle's
+scheduled **standing role**, a constitution with `shuttle.kind: standing`.
+
+## Synchronization
+
+Workers run `felt sync` before substantive work and read their task, shared
+role, and assigned collaborator from the local store. The command resolves
+the store's Git repository even through a project's symlinked `.felt` view,
+fetches the tracking remote, and merges the branch's upstream. It does not
+stage or commit local edits. After committing intentional work, run
+`felt sync --push` to incorporate incoming changes and publish to the same
+tracking branch.
+
+Conflicts remain ordinary Git conflicts. A worker with the relevant context
+reconciles them, commits the resolution, and retries. Failed sync is visible;
+no automatic ours/theirs choice, stash, reset, or force-push replaces judgment.
+Git-ignored content is not distributed by this workflow.
+
+Neither a role nor a collaborator has a host owner. The same UID identifies
+its synchronized copies. Constitutions can be synchronized too;
+`shuttle.host` still controls which daemon may dispatch their work. The live
+board's host-addressed APIs and backend conversations remain host-addressed.
+
+## Assignment
+
+```bash
+felt shuttle assign <task> --role review --collaborator fable
+```
+
+Names resolve within the central roles tree. Full role/profile paths and
+intrinsic UIDs are also accepted. The stored references contain stable UIDs:
 
 ```yaml
 collaboration:
-  collaborator:
-    uid: 01...
-    origin: <owning-host>
   role:
     uid: 01...
-    origin: <owning-host>
+  collaborator:
+    uid: 01...
 ```
 
-Either reference may be omitted. A constitution with no `collaboration` block
-continues to work normally.
+The block and either reference are optional. Use `--clear-role`,
+`--clear-collaborator`, or `--clear` to remove references. `--json-assignment`
+accepts an exact replacement object. The assignment writer changes no task
+lifecycle, execution settings, or past session attribution.
 
-## Three independent concerns
+Launch and resume prompts name the references and the synchronization step.
+Workers read the referenced fibers locally by UID. The session ledger records
+the assignment and known model configuration at the event; later changes do
+not rewrite earlier attribution.
 
-| Surface | Meaning |
-|---|---|
-| Collaborator fiber | Who carries commitments and orientation across sessions and tasks |
-| Role fiber | The durable remit, boundaries, and recurring responsibilities |
-| `shuttle.agent` | The execution recipe: harness, model, effort, and other launch settings |
+## Handoffs
 
-A collaborator is not a model. Two identities can use the same model. A model
-switch may continue the same identity or transfer work to a distinct one; make
-that choice and the inherited attribution explicit. A role is not a
-collaborator: one describes the responsibility, the other carries it.
-Constitutions remain the units of work and may link to an existing role.
-
-## The collaborator fiber
-
-Create an ordinary statusless fiber tagged `collaborator`. Its intrinsic UID is
-the stable identity. Keep its body as a current orientation rather than a
-chronicle: commitments, working agreements, corrections with reasons,
-unresolved doubts, and pointers to original sources. Session transcripts and
-the event history retain contribution provenance; assignment does not add a
-mutable author or model field to every fiber.
-
-Fresh sessions work from this compressed orientation, while transcripts,
-commits, and linked fibers preserve the fuller source record. Update the body
-when durable understanding changes during real work. There is no need to wake
-an idle session only to produce a summary.
-
-The first operating practice keeps one active session per collaborator. This
-is a coordination convention, not an exclusivity guarantee enforced by the
-daemon.
-
-## The role fiber
-
-A role is also an ordinary fiber. Its body says what the remit is, what lies
-outside it, what commitments recur, and what evidence should change its
-direction. Existing constitutions refer to that role; they do not need to be
-migrated or rewritten around it. The assigned constitution still determines
-the current worker's scope and gates; a broad role is not permission to execute
-every task within its remit.
-
-This is separate from shuttle's existing **standing role**, meaning a scheduled
-constitution with `shuttle.kind: standing`. A collaboration role may span
-oneshot, pinned, and standing constitutions.
-
-## Assigning a constitution
-
-Use the validated writer:
-
-```bash
-felt shuttle assign <fiber> \
-  --collaborator <collaborator-uid> \
-  --collaborator-origin <owning-host> \
-  --role <role-uid> \
-  --role-origin <owning-host>
-```
-
-Each UID flag is paired with its origin; updating one reference preserves the
-other. `--clear-collaborator` and `--clear-role` remove one reference, while
-`--clear` removes the whole block. For an exact replacement,
-`--json-assignment` accepts the raw object stored under `collaboration`:
-
-```bash
-felt shuttle assign <fiber> --json-assignment \
-  '{"collaborator":{"uid":"01...","origin":"<owning-host>"}}'
-```
-
-Assignment validates the shape and locks the update without trying to resolve
-profiles through a local mirror. It does not change the fiber's status,
-dispatch a worker, or claim authorship.
-
-The CLI targets a fiber in a store visible on its current host. To assign a
-fiber owned by another host, use the owner-routed daemon endpoint and put the
-raw assignment under `collaboration`:
-
-```bash
-curl --fail -sS -X POST http://127.0.0.1:4000/api/v1/felt-edit \
-  -H 'Content-Type: application/json' \
-  -d '{"fiber_id":"<task-fiber>","origin":"<task-owning-host>","collaboration":{"collaborator":{"uid":"<UPPERCASE-ULID>","origin":"<profile-owning-host>"}}}'
-```
-
-The referenced profile and role may themselves have different owners.
-
-Both UID and origin matter across hosts. Workers fetch assigned fibers through
-the owner-routed daemon API and verify that the response reports the requested
-UID and owning host. A git-synced copy on another host is incidental and must
-not be used as the profile or role source.
+Keep the task's Status useful during work. A new session reads it and
+continues. On a model-version change, inherited notes are evidence the
+successor may accept or reconsider, not a command to claim memory. A transfer
+to a distinct collaborator should make the new assignment clear. These can be
+short ordinary handoffs, without mandatory ceremonies or profile templates.

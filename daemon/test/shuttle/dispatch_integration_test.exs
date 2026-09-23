@@ -263,6 +263,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "claude"
     assert script =~ "<<<"
     assert script =~ "Fiber: tests/fresh-oneshot"
+    assert script =~ "felt -C"
+    assert script =~ host
+    {sync_at, _} = :binary.match(script, " sync")
+    {read_at, _} = :binary.match(script, "read its current body and Status")
+    assert sync_at < read_at
 
     # Fresh dispatch: no resume flag, no dismiss block.
     refute script =~ "--resume"
@@ -467,6 +472,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     # fallback whose full dispatch prompt is exercised in the deadlock test below).
     assert script =~ "Mode: resume"
     assert script =~ "Fiber: tests/kanban-resume"
+    assert script =~ "felt -C"
+    assert script =~ host
+    {sync_at, _} = :binary.match(script, " sync")
+    {read_at, _} = :binary.match(script, "read its current body and Status")
+    assert sync_at < read_at
 
     # F2: resuming is a dispatch boundary too — a fresh `dispatched_at` must be
     # stamped synchronously (same session id, since resuming doesn't change
@@ -1629,6 +1639,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "references/standing-roles.md"
     assert script =~ "Fiber: tests/standing-dispatch"
     assert script =~ "run-2026-05-07"
+    assert script =~ "felt -C"
+    assert script =~ host
+    {sync_at, _} = :binary.match(script, " sync")
+    {read_at, _} = :binary.match(script, "read its current body and Status")
+    assert sync_at < read_at
     # NOT the fresh-dispatch orientation paragraph.
     refute script =~ "The orchestration system Shuttle dispatched you on this fiber"
   end

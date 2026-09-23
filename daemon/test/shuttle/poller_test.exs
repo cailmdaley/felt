@@ -3887,11 +3887,11 @@ defmodule Shuttle.PollerTest do
     assert Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == fiber_id))
   end
 
-  # Regression for the 2026-05-30 incident: a cineca/candide restart resurrected
-  # Mac-owned Portolan constitutions locally because the orphan path never read
-  # `host`. The poll path uses the strict ownership predicate — a fiber owned by
-  # another host is never dispatched here.
-  test "poller does not dispatch a foreign-host oneshot whose worker is dead" do
+  # A whole-loom sync can make the same constitution file readable on every
+  # host, but it does not transfer execution ownership. The poll path keeps the
+  # strict `shuttle.host` predicate on both ordinary eligibility and orphan
+  # recovery, so this host must leave the synced copy alone.
+  test "poller does not dispatch a synced fiber copy owned by another host" do
     fiber_id = "tests/orphan-foreign-host"
 
     MockRunner.set_shuttle(fiber_id, """

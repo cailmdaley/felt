@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
@@ -51,6 +53,12 @@ func (r fiberRef) location() string {
 // store when the local view cannot see the fiber. Metadata-only: callers that
 // need the body read it from the store the ref names.
 func resolveFiberRef(storage *felt.Storage, scopeID, arg string) (fiberRef, error) {
+	if felt.LooksLikeUID(arg) {
+		ref, err := resolveUIDFiberRef(storage, arg)
+		if err == nil || !errors.Is(err, errNoFiberUID) {
+			return ref, err
+		}
+	}
 	f, err := storage.FindMetadataInScope(scopeID, arg)
 	if err == nil {
 		return fiberRef{storage: storage, id: f.ID}, nil
@@ -67,6 +75,48 @@ func resolveFiberRef(storage *felt.Storage, scopeID, arg string) (fiberRef, erro
 		return fiberRef{}, err
 	}
 	return fiberRef{storage: outer, id: outerFelt.ID, elsewhere: true, root: ref.Root}, nil
+}
+
+var errNoFiberUID = errors.New("no fiber matches intrinsic UID")
+
+// resolveUIDFiberRef searches the full enclosing namespace because intrinsic
+// identities are global to that store, including fibers outside a project view.
+// It refuses duplicate UIDs instead of choosing whichever path a walk sees first.
+func resolveUIDFiberRef(storage *felt.Storage, uid string) (fiberRef, error) {
+	search := storage
+	root, prefix, enclosing := storage.EnclosingStore()
+	if enclosing {
+		external := storage.ExternalRefs()
+		search = felt.NewStorage(external.ProjectDir())
+	}
+	felts, err := search.ListMetadata()
+	if err != nil {
+		return fiberRef{}, fmt.Errorf("listing fibers for UID %q: %w", uid, err)
+	}
+	var matches []*felt.Felt
+	for _, f := range felts {
+		if f.MatchesUID(uid) {
+			matches = append(matches, f)
+		}
+	}
+	if len(matches) > 1 {
+		ids := make([]string, len(matches))
+		for i, f := range matches {
+			ids[i] = f.ID
+		}
+		return fiberRef{}, fmt.Errorf("ambiguous fiber UID %q matches: %s", uid, strings.Join(ids, ", "))
+	}
+	if len(matches) == 0 {
+		return fiberRef{}, fmt.Errorf("%w %q", errNoFiberUID, uid)
+	}
+	match := matches[0]
+	if !enclosing {
+		return fiberRef{storage: search, id: match.ID}, nil
+	}
+	if strings.HasPrefix(match.ID, prefix+"/") {
+		return fiberRef{storage: storage, id: strings.TrimPrefix(match.ID, prefix+"/")}, nil
+	}
+	return fiberRef{storage: search, id: match.ID, elsewhere: true, root: root}, nil
 }
 
 // liftPair puts two refs in one store so an operation can run over both.

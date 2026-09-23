@@ -12,20 +12,20 @@ import (
 )
 
 // Collaboration is the optional project-owned assignment carried on a fiber.
-// Its references name durable profile/role fibers by intrinsic UID and the host
-// that owns their bytes. It deliberately says nothing about the execution
+// Its references name durable profile/role fibers by intrinsic UID. An
+// optional origin is retained for compatibility with owner-addressed clients.
+// It deliberately says nothing about the execution
 // recipe: shuttle.agent remains the harness/model selection.
 type Collaboration struct {
 	Collaborator *CollaborationRef `json:"collaborator,omitempty" yaml:"collaborator,omitempty"`
 	Role         *CollaborationRef `json:"role,omitempty" yaml:"role,omitempty"`
 }
 
-// CollaborationRef is an owner-addressed reference to a durable fiber identity.
-// UID is intrinsic and survives a profile rename or move; Origin is explicit so
-// a reader never guesses from a locally replicated mirror.
+// CollaborationRef is a reference to a durable fiber identity. UID is intrinsic
+// and survives a profile rename or move. Origin is optional compatibility data.
 type CollaborationRef struct {
 	UID    string `json:"uid" yaml:"uid"`
-	Origin string `json:"origin" yaml:"origin"`
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty"`
 }
 
 // Empty reports whether no collaborator or role has been assigned.
@@ -33,9 +33,7 @@ func (c Collaboration) Empty() bool { return c.Collaborator == nil && c.Role == 
 
 // Validate checks the stored collaboration shape. An assignment must name at
 // least one reference, and every named reference must carry canonical intrinsic
-// identity plus an explicit owning host. It intentionally does not resolve the
-// profile: that read belongs to the daemon's owner-routed plane, never a local
-// CLI mirror.
+// identity. It intentionally does not resolve the profile.
 func (c Collaboration) Validate() error {
 	if c.Empty() {
 		return fmt.Errorf("collaboration must include collaborator and/or role")
@@ -63,8 +61,11 @@ func (r CollaborationRef) validate(name string) error {
 	if _, err := ulid.ParseStrict(r.UID); err != nil {
 		return fmt.Errorf("collaboration.%s.uid must be a ULID: %w", name, err)
 	}
-	if r.Origin == "" || strings.TrimSpace(r.Origin) != r.Origin || strings.IndexFunc(r.Origin, unicode.IsSpace) >= 0 {
-		return fmt.Errorf("collaboration.%s.origin is required and cannot contain whitespace", name)
+	if r.Origin == "" {
+		return nil
+	}
+	if strings.TrimSpace(r.Origin) != r.Origin || strings.IndexFunc(r.Origin, unicode.IsSpace) >= 0 {
+		return fmt.Errorf("collaboration.%s.origin cannot contain whitespace", name)
 	}
 	if r.Origin != strings.ToLower(r.Origin) || r.Origin == "local" || strings.Contains(r.Origin, "://") ||
 		strings.IndexFunc(r.Origin, unicode.IsControl) >= 0 || !validOriginAtom(r.Origin) {

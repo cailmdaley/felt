@@ -247,7 +247,7 @@ defmodule Shuttle.Dispatcher do
   @spec render_prompt(String.t(), keyword()) :: String.t()
   def render_prompt(fiber_id, opts \\ []) do
     compose_prompt(
-      "You are a Shuttle worker. Activate the felt and shuttle skills and read the current constitution and Status.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
       opts
     )
   end
@@ -274,7 +274,7 @@ defmodule Shuttle.Dispatcher do
   @spec render_resume_prompt(String.t(), keyword()) :: String.t()
   def render_resume_prompt(fiber_id, opts \\ []) do
     compose_prompt(
-      "You are a Shuttle worker. Activate the felt and shuttle skills and read the current constitution and Status.\nMode: resume\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
       Keyword.delete(opts, :previous_session)
     )
   end
@@ -319,7 +319,7 @@ defmodule Shuttle.Dispatcher do
     mode = if ad_hoc?, do: "ad-hoc", else: "scheduled"
 
     header =
-      "You are a Shuttle worker. Activate the felt and shuttle skills, read the current constitution and Status, and references/standing-roles.md.\nFiber: #{prompt_fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{prompt_fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
 
     compose_prompt(header, Keyword.put(opts, :kind, "standing"))
   end
@@ -363,16 +363,32 @@ defmodule Shuttle.Dispatcher do
 
   # Prompts carry identity and invocation data; the skill owns worker behavior.
   defp compose_prompt(header, opts) do
+    felt_store = Keyword.get(opts, :felt_store, default_felt_store())
+
     [
       header,
-      "Felt store: #{Keyword.get(opts, :felt_store, default_felt_store())}",
+      "Felt store: #{felt_store}",
+      render_sync_and_read_instructions(felt_store),
       "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
       String.trim_trailing(render_previous_session_line(opts)),
-      Collaboration.prompt_section(Keyword.get(opts, :collaboration))
+      Collaboration.prompt_section(Keyword.get(opts, :collaboration), felt_store)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
     |> append_user_message(opts)
+  end
+
+  defp render_sync_and_read_instructions(store) do
+    sync_command =
+      case store do
+        path when is_binary(path) and path != "" ->
+          "felt -C #{shell_single_quote(path)} sync"
+
+        _ ->
+          "felt sync"
+      end
+
+    "Before substantive work, run `#{sync_command}`. If sync fails for a reason other than merge conflicts, stop and report the exact error in Status; do not claim sync succeeded or that the store is current. If conflicts remain, inspect and resolve relevant files using this assignment and any readable current task or role context. Do not select a side mechanically. Complete the merge, rerun `#{sync_command}`, and proceed only after it succeeds. Then resolve this task's UID from its Fiber path and read its current body and Status with `felt -C <store> show <UID>`. Read referenced role or collaborator fibers the same way; for standing work, read the current `references/standing-roles.md` instructions too."
   end
 
   defp append_user_message(header, opts) do

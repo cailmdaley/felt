@@ -36,7 +36,7 @@ Search and read:
     felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
     felt find "query" [-t tag] [-s closed] [-v]   # searches the WHOLE store: local hits, then the rest of the loom by full id (outer block capped at 20; --limit 0 for all; -j emits one merged array, uncapped, each entry naming its `store`)
     felt session                                   # SessionStart context as plain text
-    felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
+felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
     felt show <id>                                 # full
     felt show <id> -d compact | -d summary         # metadata/outcome/body size/extra keys | + lede + back-refs
     felt show <id> --body                          # body with start line
@@ -54,6 +54,14 @@ Maintain:
     felt check                                     # broken refs, broken data-flow refs, layout issues
     felt migrate [--dry-run]                       # normalize legacy layout
 ```
+
+Before substantive work, run `felt sync` to fetch and merge the actual store's
+Git upstream, including through a symlinked project view. Edit ordinary local
+files, commit intentional changes, then `felt sync --push` at useful checkpoints.
+Resolve relevant conflicts with context and retry; do not automatically choose
+ours/theirs or discard another worker's edits. Report failed synchronization.
+Roles and collaborators are ordinary local fibers; see
+[references/collaborators.md](references/collaborators.md) for their layout.
 
 Runtime and installation truth:
 

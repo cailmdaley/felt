@@ -18,17 +18,13 @@ One repo, one checkout, three artifacts:
 felt owns the data model; shuttle owns the network and the surface. The Elixir
 daemon is the production dispatcher.
 
-**The one invariant to hold before anything else — it binds you, the agent
-operating on the store, not just the code: a fiber's owning host is its only
-read and write path, and git sync is never the answer.** Every fiber is owned
-by exactly one host; cross-host reads and writes are owner-routed over the
-daemon socket (`Shuttle.OriginRouter`). To hand-edit a fiber another host
-owns, POST the local daemon's `/api/v1/felt-edit` (it routes by owner) —
-never `felt edit` against the local checkout, never a loom `git pull`/`push`
-to "sync state". A git mirror that happens to hold a remote fiber's files is
-incidental; any fix, feature, or diagnosis that leans on it is wrong by
-construction. When a cross-host behavior seems to need git, the model is
-being misread — see "Critical invariants" below before acting.
+**Fibers are ordinary Git-synchronized documents; execution is host-owned.**
+Run `felt sync` before substantive work, read and edit the local store, then
+commit intentional changes and publish with `felt sync --push`. Resolve Git
+conflicts with the work's context. Roles and collaborators live under `roles/`
+and have no host owner. A constitution's `shuttle.host` selects the daemon
+allowed to execute it; synchronizing its file does not transfer execution.
+The live board still uses owner-routed APIs for host-local content and control.
 
 ## Where everything else lives
 
@@ -60,22 +56,13 @@ lives in the docs site (`docs/`, published to
   failure.
 - **felt is the data layer; the daemon shells out to the felt CLI.** Don't
   import felt internals into the daemon.
-- **Remote content comes from the owning daemon over the tunnel — NEVER from
-  git sync.** A fiber is owned by exactly one host; only that host's daemon can
-  read its body, files, and assets off its own filesystem. Every cross-host
-  READ (`/api/v1/fibers/:id?body=true`, `/file`) and every cross-host
-  WRITE is **owner-routed via `Shuttle.OriginRouter`**: the composite board
-  stamps each fiber's `origin`, the client carries it back, and the local daemon
-  forwards to the owner's identical endpoint over the SSH LocalForward each
-  remote declares in `~/.config/felt/remotes.json` (`:4000` is local; remotes
-  take `:4001`, `:4002`, …). A git mirror that happens to replicate a remote
-  fiber's files locally is **incidental and must never be relied on** — if any
-  feature works only because a file happened to git-sync, that is a bug. The
-  symptom when this invariant is violated: a remote card shows its outcome (it
-  rides the composite feed) but the body reads empty / "not in the local
-  mirror", because the read was attempted locally instead of being owner-routed.
-  New endpoints that surface a fiber's host-local content MUST route through
-  `OriginRouter`, not assume the bytes are reachable on this host.
+- **Live host-addressed content and control use `Shuttle.OriginRouter`.**
+  The composite board carries each row's `origin` back to the daemon for
+  requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display
+  that host's current content and artifacts without waiting for Git sync.
+  Route requests for host-local assets and execution through the selected
+  daemon. Ordinary synchronized notes, including roles and collaborators,
+  are read and edited locally; they do not need an origin registry.
 - **Agent records live in one source of truth: felt's registry.** felt resolves
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)

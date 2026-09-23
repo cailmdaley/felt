@@ -31,6 +31,14 @@ frontmatter field. The editorial chain lives in the constitution body's
 
 ## Stores and views
 
+Fiber documents synchronize through ordinary Git. Workers use `felt sync`
+before substantive work, edit locally, and publish committed changes with
+`felt sync --push`. A worker resolves relevant conflicts with the work's
+context. Roles and collaborators under `roles/` have stable IDs and no host
+owner. Synchronizing a constitution does not change its `shuttle.host`
+dispatch gate. Host-addressed board requests still use the daemon's routing
+for that host's current content, artifacts, and execution controls.
+
 A **store** is a `.felt/` directory and everything under it — one namespace,
 one git repo. A **view** (or substore) is a project whose `.felt` is a *symlink*
 into a subdirectory of a larger store: this repo's `.felt` points into

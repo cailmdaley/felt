@@ -1,66 +1,53 @@
 # Collaborator continuity
 
-Read this when a dispatch carries a collaborator or role assignment. The felt
-skill's [collaborator reference](../../felt/references/collaborators.md) defines
-the identity and document shapes; this page covers session behavior.
+Read this when a dispatch names a role or collaborator. Their ordinary fiber
+layout and assignment command are in the Felt skill's
+[collaborator reference](../../felt/references/collaborators.md).
 
-## Land with the inherited context
+## Start from shared work
 
-The launch prompt names each assigned UID and origin. Fetch each authoritative
-fiber through the local daemon:
+Run `felt -C <felt-store> sync` before substantive work, then read the current
+task and its `## Status`, the assigned role, and your collaborator fiber if
+one is assigned. Launch prompts provide stable UIDs; use
+`felt -C <felt-store> show <uid>` to read them from the synchronized local store.
+Do not infer a new identity because execution moved to another host.
 
-```text
-GET /api/v1/fibers/<uid>?body=true&origin=<owning-host>
-```
+A failed sync needs attention, not a claim of fresh context. Resolve relevant
+Git conflicts using the role/task context, commit the resolution, then retry.
+If Git or the upstream is unavailable, make that limitation visible. The
+worker can perform this reconciliation; the daemon does not choose a winner
+or require another model session to do it.
 
-Select the matching entry from the response's `fibers` array. Verify both
-returned facts before using it: the top-level `host` must equal the reference's
-explicit `origin`, and the entry's `fiber.uid` must equal the requested UID.
-The router deliberately degrades an unknown origin to a local lookup, so a 200
-response alone is insufficient; a mismatch means the assigned context is
-missing or misrouted. Do not accept a local git mirror in its place.
+Information the next worker needs belongs in the task or shared role/project.
+Other collaborators' full profiles are not required reading. Follow relevant
+source links when a question or disagreement calls for them. A shared account
+can retain attributed disagreement without pretending every collaborator has
+the same view. The task's scope remains controlling.
 
-Read the collaborator profile as the inherited orientation and the role as the
-standing remit. Briefly accept the commitments you are taking over and state
-any disagreement that changes the work. Do not require an acknowledgment of
-every note. Then read the constitution and its current `## Status` as the task
-contract and immediate handoff. The constitution's scope and gates remain
-controlling; the broader role does not authorize work on all constitutions it
-touches. A collaboration role is also different from `shuttle.kind: standing`,
-which means a scheduled constitution.
+## Write during work
 
-A fresh session is a compression boundary, not a new identity. The profile and
-handoff should be enough to move; transcripts, commits, and linked sources hold
-the detail and remain available for surgical recovery. A model switch does not
-decide identity: explicitly choose whether the successor continues the same
-collaborator or transfers the work to a distinct collaborator, and record the
-handoff and inherited attribution either way. Helpers and peer sessions retain
-their own contribution attribution; their work does not silently rewrite the
-assigned identity.
+Keep the task's `## Status` useful after meaningful changes and before yielding
+when the next session would otherwise need to reconstruct the state. Use the
+role for shared orientation across its tasks. Use your collaborator fiber
+freely for whatever helps you think and continue the work. There is no
+mandatory commitments ledger, standard profile template, or acknowledgment
+ceremony.
 
-## Keep the handoff warm
+Edit ordinary local files, commit intentional changes, and publish with
+`felt -C <felt-store> sync --push` at meaningful checkpoints and before the
+final handoff. Check the result. Don't force-push or silently choose a conflict
+winner. Closing a session consolidates the warm handoff; don't wake a cold
+predecessor solely to ask it for a summary.
 
-Rewrite the task's `## Status` after a meaningful transition while the state is
-fresh: a decision changes the direction, a result invalidates the working
-model, a substantial slice lands, or a blocker appears. Also refresh it before
-returning a turn to the human when the next turn would otherwise have to
-reconstruct changed state. The exit handoff consolidates this current account;
-it should not be the first time the session records it.
+## Sessions, versions, and transfers
 
-Update the collaborator fiber when the durable orientation changes: inherited
-commitments, corrections and their reasons, unresolved doubts, or source
-pointers another instance will need. Write through owner-routed
-`POST /api/v1/felt-edit` with the collaborator fiber's explicit `origin` and
-the complete revised body. Never edit another host's mirror directly. Keep
-task progress in the constitution's `## Status`; keep only cross-task
-orientation in the collaborator profile.
+A new session reads the handoff and gets to work. A model-version change is
+worth noting when it affects how inherited conclusions should be understood:
+the successor can accept, revise, or question them without claiming personal
+memory of producing them. If responsibility passes to a different collaborator,
+make who is taking over clear in the ordinary handoff and assignment. Neither
+a model alias nor a session restart settles questions of identity by itself.
 
-Do not wake an idle, cold session solely to ask it for a summary. Preserve the
-last warm handoff and let the next session amend it as part of substantive
-work.
-
-For the initial practice, avoid two simultaneously active sessions carrying
-the same collaborator identity. Shuttle does not enforce exclusivity, so
-coordinate this at dispatch time rather than treating assignment as a lock.
-The human may still keep the current session interactive or request a handoff;
-assignment does not change shuttle's ordinary exit semantics.
+Original transcripts, source fibers, and Git history remain available for
+recovering detail. Assignment does not alter Shuttle's interactive-session or
+exit behavior, and it is not an exclusivity lock.

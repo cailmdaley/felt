@@ -450,10 +450,9 @@ defmodule Shuttle.DispatcherTest do
   test "worker entrypoint carries invocation data without duplicated workflow" do
     prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/store")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "read the current constitution and Status"
+    assert prompt =~ "read its current body and Status"
     assert prompt =~ "Fiber: tests/haiku"
     assert prompt =~ "Kind: oneshot; surface: cli; headless: false"
-    assert String.length(prompt) < 350
     refute prompt =~ "Exit Contract"
     refute prompt =~ "felt shuttle handoff"
     refute prompt =~ "──"
@@ -523,27 +522,52 @@ defmodule Shuttle.DispatcherTest do
     collaboration =
       {:ok,
        %{
-         "collaborator" => %{
-           "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
-           "origin" => "host-a"
-         },
-         "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
+         "collaborator" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3K"},
+         "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "old-host"}
        }}
 
     for prompt <- [
-          Dispatcher.render_prompt("tests/a", collaboration: collaboration),
-          Dispatcher.render_resume_prompt("tests/a", collaboration: collaboration),
-          Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: collaboration)
+          Dispatcher.render_prompt("tests/a",
+            collaboration: collaboration,
+            felt_store: "/tmp/loom"
+          ),
+          Dispatcher.render_resume_prompt("tests/a",
+            collaboration: collaboration,
+            felt_store: "/tmp/loom"
+          ),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1",
+            collaboration: collaboration,
+            felt_store: "/tmp/loom"
+          )
         ] do
       assert prompt =~ "Collaboration:"
-      assert prompt =~ "origin=host-a"
-      assert prompt =~ "origin=host-b"
-      assert prompt =~ "fiber.uid and response.host"
+      assert prompt =~ "felt -C '/tmp/loom' show 01KTS261GJMMRDRHS2QDMEFV3K"
+      assert prompt =~ "felt -C '/tmp/loom' show 01KTS261GJMMRDRHS2QDMEFV3M"
+      assert prompt =~ "Optional origin metadata does not change this local-store lookup"
+      refute prompt =~ "old-host"
+      refute prompt =~ "response.host"
     end
 
     refute Dispatcher.render_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_resume_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
+  end
+
+  test "all worker prompt entrypoints sync before reading current fibers" do
+    prompts = [
+      Dispatcher.render_prompt("tests/a", felt_store: "/tmp/shared loom"),
+      Dispatcher.render_resume_prompt("tests/a", felt_store: "/tmp/shared loom"),
+      Dispatcher.render_standing_run_prompt("tests/a", "run-1", felt_store: "/tmp/shared loom")
+    ]
+
+    Enum.each(prompts, fn prompt ->
+      sync = :binary.match(prompt, "felt -C '/tmp/shared loom' sync") |> elem(0)
+      read = :binary.match(prompt, "read its current body and Status") |> elem(0)
+      assert sync < read
+      assert prompt =~ "Do not select a side mechanically"
+      assert prompt =~ "do not claim sync succeeded"
+      assert prompt =~ "felt -C <store> show <UID>"
+    end)
   end
 
   test "dispatch snapshots collaboration and selected execution recipe into its ledger row" do
@@ -1487,7 +1511,7 @@ defmodule Shuttle.DispatcherTest do
   test "resume reloads current constitution and skills" do
     prompt = Dispatcher.render_resume_prompt("tests/haiku")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "read the current constitution and Status"
+    assert prompt =~ "read its current body and Status"
     assert prompt =~ "Mode: resume"
     assert prompt =~ "Fiber: tests/haiku"
     refute prompt =~ "Exit Contract"
