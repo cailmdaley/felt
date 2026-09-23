@@ -44,12 +44,12 @@
   {
     "id": "codex-sol",
     "cli": "codex",
-    "model": "gpt-5.6-sol",
+    "model": "gpt-6-sol",
     "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
     "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
     "default_effort": "low",
     "cost_class": "premium",
-    "aliases": ["gpt-5.6-sol"]
+    "aliases": ["gpt-6-sol"]
   },
   {
     "id": "codex-terra",
@@ -64,12 +64,12 @@
   {
     "id": "codex-luna",
     "cli": "codex",
-    "model": "gpt-5.6-luna",
+    "model": "gpt-6-luna",
     "extra_flags": "--dangerously-bypass-approvals-and-sandbox",
     "effort_levels": ["low", "medium", "high", "xhigh", "max"],
     "default_effort": "max",
     "cost_class": "economy",
-    "aliases": ["gpt-5.6-luna"]
+    "aliases": ["gpt-6-luna"]
   },
   {
     "id": "pi-luna",
