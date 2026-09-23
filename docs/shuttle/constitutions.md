@@ -185,7 +185,7 @@ list. The maintained fleet ships built in:
 | Family | Built-in ids | Notes |
 |---|---|---|
 | Claude | `claude-opus` (registry default), `claude-sonnet`, `claude-fable`, `claude-haiku` | Browser access ("chrome") is an explicit axis on Claude agents, not a separate agent. |
-| Codex | `codex-sol`, `codex-terra`, `codex-luna` | |
+| Codex | `codex-astra`, `codex-sol`, `codex-terra`, `codex-luna` | Launched with `--approve-for-me`: approval requests go to Codex's automatic reviewer inside the workspace-write sandbox. |
 | Pi | `pi-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash`, `pi-union-alpha` | `pi-union-alpha` uses OpenRouter's free Union Alpha model. |
 
 Two orthogonal axes layer on the base id: `effort` (validated against the

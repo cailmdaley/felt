@@ -55,7 +55,7 @@ step needs the person.
 | `claude-fable` | The heavyweight. Subagent/workflow orchestration (fan-out surveys, migrations, in-session adversarial review), the hardest architecture and taste work, arcs that should converge in one dispatch instead of five. Reach for it when the task earns it, not by default. |
 | `claude-sonnet` | Lighter-weight dispatches where Opus is overkill — routine general/frontend work. Choose it explicitly when you want that tier; an unnamed fiber uses the registry default, `claude-opus`. |
 | `claude-haiku` | Cheap and fast. Easy, repetitive, or low-stakes tasks. |
-| `codex-sol`, `codex-terra`, `codex-luna` | Hard well-defined implementation — gritty refactors and tight algorithmic problems that suit the Codex CLI's sandboxed, head-down harness. Choose the tier that fits the task. |
+| `codex-astra`, `codex-sol`, `codex-terra`, `codex-luna` | Hard well-defined implementation — gritty refactors and tight algorithmic problems that suit the Codex CLI's sandboxed, head-down harness. Choose the tier that fits the task: `codex-astra` for the most demanding work, `codex-luna` for bounded, economical tasks. |
 | `pi-luna`, `pi-openai-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash`, `pi-union-alpha` | Provider-backed pi dispatches. `pi-union-alpha` is the free OpenRouter Union Alpha model. Use `felt shuttle agents` to see which providers are configured on this host. |
 
 `claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
