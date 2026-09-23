@@ -69,17 +69,23 @@ func piNativeFixture(t *testing.T, reply any) (string, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		conn, err := listener.Accept()
-		if err != nil {
-			return
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			request := map[string]any{}
+			if err := json.NewDecoder(bufio.NewReader(conn)).Decode(&request); err != nil {
+				_ = conn.Close()
+				continue // discovery liveness probes intentionally send no frame
+			}
+			response := reply
+			if fn, ok := reply.(func(map[string]any) any); ok {
+				response = fn(request)
+			}
+			_ = json.NewEncoder(conn).Encode(response)
+			_ = conn.Close()
 		}
-		defer conn.Close()
-		request := map[string]any{}
-		_ = json.NewDecoder(bufio.NewReader(conn)).Decode(&request)
-		if fn, ok := reply.(func(map[string]any) any); ok {
-			reply = fn(request)
-		}
-		_ = json.NewEncoder(conn).Encode(reply)
 	}()
 	return socket, func() {
 		_ = listener.Close()
@@ -148,6 +154,9 @@ func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
 	}
 	if !piNativeAvailable("session", "host") {
 		t.Fatal("stale socket should retain its filesystem identity until the replacement starts")
+	}
+	if sessions := piNativeSessions("host"); len(sessions) != 0 {
+		t.Fatalf("dead Pi socket remained discoverable: %#v", sessions)
 	}
 
 	newSocket := filepath.Join(dir, "new-worker.sock")
