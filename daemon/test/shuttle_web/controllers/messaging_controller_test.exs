@@ -61,6 +61,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
       do: {Jason.encode!(%{sessions: [], gaps: "wrong"}), 0}
   end
 
+  defmodule TimeoutClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+    def get(_url, _timeout), do: {:error, :timeout}
+    def post(_url, _body, _content_type, _timeout), do: {:error, :timeout}
+  end
+
   defmodule Client do
     @behaviour Shuttle.RemoteRegistry.Client
     def get("http://remote.test/api/v1/peers?local=true", _timeout) do
@@ -185,6 +191,18 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert %{"host" => "edge", "harness" => "claude", "error" => "mailbox unavailable"} in body[
              "gaps"
            ]
+  end
+
+  test "remote discovery timeouts identify an unreachable host" do
+    Application.put_env(:shuttle, :write_forward_client, TimeoutClient)
+
+    body = api_conn() |> get("/api/v1/peers") |> json_response(200)
+
+    assert %{"host" => "edge", "error" => error} =
+             Enum.find(body["gaps"], &(&1["host"] == "edge"))
+
+    assert error =~ "timed out"
+    assert error =~ "offline or unreachable"
   end
 
   test "remote delivery forwards once through the local sentinel" do
@@ -459,6 +477,25 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert unknown["message_id"] == "malformed"
     assert unknown["address"] == base["address"]
     assert unknown["status"] == "unknown"
+  end
+
+  test "remote wake timeout stays unknown and explains safe retry" do
+    Application.put_env(:shuttle, :write_forward_client, TimeoutClient)
+
+    request = %{
+      "address" => "shuttle://edge/codex/native%2Fid",
+      "text" => "please continue",
+      "wake" => true,
+      "message_id" => "remote-timeout"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
+
+    assert receipt["status"] == "unknown"
+    assert receipt["message_id"] == request["message_id"]
+    assert receipt["detail"] =~ "timed out"
+    assert receipt["detail"] =~ "outcome is unknown"
+    assert receipt["detail"] =~ "same message_id"
   end
 
   test "malformed local receipts preserve request identity as unknown", %{host: host} do
