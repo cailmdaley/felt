@@ -1,11 +1,13 @@
+//go:build !windows
+
 package cmd
 
 import (
+	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -17,207 +19,12 @@ import (
 	"time"
 )
 
-func buildBridgeFakeNative(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "fake-native")
-	cmd := exec.Command("go", "build", "-tags", "bridge_test", "-o", path, "./testdata/codex_bridge")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build fake native: %v\n%s", err, out)
-	}
-	return path
-}
-
-func bridgeTestOptions(codex, socket string, stdin io.Reader, stdout io.Writer) bridgeOptions {
-	return bridgeOptions{
-		codex:   codex,
-		socket:  socket,
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  io.Discard,
-		args:    []string{"-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "-c", "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true"},
-		startup: 2 * time.Second,
-	}
-}
-
-func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
-	codex := buildBridgeFakeNative(t)
-	dir := bridgeTempDir(t)
-	socket := filepath.Join(dir, "private", "app-server.sock")
-	argsFile := filepath.Join(dir, "args.json")
-	envFile := filepath.Join(dir, "env.json")
-	errorFile := filepath.Join(dir, "error.txt")
-	t.Setenv("CODEX_CLI_PATH", "/wrapper/that/must/not/recurse")
-	t.Setenv("CODEX_APP_TOOLS_PIPE_PATH", "/private/app-tools.pipe")
-	t.Setenv("FELT_BRIDGE_ENV_MARKER", "preserve-me")
-	t.Setenv("FELT_BRIDGE_SOCKET", socket)
-	t.Setenv("FELT_BRIDGE_ARGS_FILE", argsFile)
-	t.Setenv("FELT_BRIDGE_ENV_FILE", envFile)
-	t.Setenv("FELT_BRIDGE_ERROR_FILE", errorFile)
-
-	input := `{"id":1,"method":"large","params":{"blob":"` + strings.Repeat("x", 1<<20) + `"}}` + "\n"
-	reader, writer := io.Pipe()
-	output := &bridgeCapture{wrote: make(chan struct{})}
-	o := bridgeTestOptions(codex, socket, reader, output)
-	done := make(chan error, 1)
-	go func() { done <- runCodexDesktopBridge(context.Background(), o) }()
-	if _, err := writer.Write([]byte(input)); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-output.wrote:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for websocket echo")
-	}
-	_ = writer.Close()
-	if err := <-done; err != nil {
-		if errorData, readErr := os.ReadFile(errorFile); readErr == nil {
-			t.Logf("fake native error: %s", errorData)
-		}
-		t.Fatalf("bridge: %v", err)
-	}
-	if output.String() != strings.TrimSuffix(input, "\n")+"\n" {
-		t.Fatalf("echoed output differs: got %d bytes, want %d", output.Len(), len(input))
-	}
-	var args []string
-	bridgeReadJSONFile(t, argsFile, &args)
-	wantPrefix := []string{"-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "-c", "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true"}
-	if len(args) != len(wantPrefix)+2 {
-		t.Fatalf("native args=%q", args)
-	}
-	for i, want := range wantPrefix {
-		if args[i] != want {
-			t.Fatalf("native arg %d=%q, want %q", i, args[i], want)
-		}
-	}
-	if args[len(args)-2] != "--listen" || args[len(args)-1] != "unix://"+socket {
-		t.Fatalf("bridge listen args=%q", args[len(args)-2:])
-	}
-	var env map[string]string
-	bridgeReadJSONFile(t, envFile, &env)
-	if env["CODEX_CLI_PATH"] != codex {
-		t.Fatalf("native CODEX_CLI_PATH=%q, want %q", env["CODEX_CLI_PATH"], codex)
-	}
-	if env["CODEX_APP_TOOLS_PIPE_PATH"] != "/private/app-tools.pipe" || env["FELT_BRIDGE_ENV_MARKER"] != "preserve-me" {
-		t.Fatalf("native environment was not preserved: %#v", env)
-	}
-	if _, err := os.Stat(socket); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("bridge socket remains after cleanup: %v", err)
-	}
-	if lock, err := os.ReadFile(socket + ".lock"); err != nil || len(lock) != 0 {
-		t.Fatalf("owner metadata after cleanup=%q, err=%v", lock, err)
-	}
-}
-
-func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
-	codex := buildBridgeFakeNative(t)
-	dir := bridgeTempDir(t)
-	socket := filepath.Join(dir, "private", "app-server.sock")
-	if err := os.Mkdir(filepath.Dir(socket), 0700); err != nil {
-		t.Fatal(err)
-	}
-	ln, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	if err := os.Chmod(socket, 0600); err != nil {
-		t.Fatal(err)
-	}
-	o := bridgeTestOptions(codex, socket, strings.NewReader("{}\n"), io.Discard)
-	if err := runCodexDesktopBridge(context.Background(), o); err == nil || !strings.Contains(err.Error(), "pre-existing") {
-		t.Fatalf("error=%v, want pre-existing endpoint refusal", err)
-	}
-}
-
-func TestCodexDesktopBridgeTimeoutCleansChildAndEndpoint(t *testing.T) {
-	codex := buildBridgeFakeNative(t)
-	dir := bridgeTempDir(t)
-	socket := filepath.Join(dir, "private", "app-server.sock")
-	t.Setenv("FELT_BRIDGE_NO_SOCKET", "1")
-	o := bridgeTestOptions(codex, socket, strings.NewReader("{}\n"), io.Discard)
-	o.startup = 100 * time.Millisecond
-	if err := runCodexDesktopBridge(context.Background(), o); err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("error=%v, want startup timeout", err)
-	}
-	if _, err := os.Stat(socket); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("socket remains after timeout: %v", err)
-	}
-}
-
-func TestCodexDesktopBridgeCancellationKillsPrivateChild(t *testing.T) {
-	codex := buildBridgeFakeNative(t)
-	dir := bridgeTempDir(t)
-	socket := filepath.Join(dir, "private", "app-server.sock")
-	envFile := filepath.Join(dir, "env.json")
-	t.Setenv("FELT_BRIDGE_SOCKET", socket)
-	t.Setenv("FELT_BRIDGE_ENV_FILE", envFile)
-	reader, writer := io.Pipe()
-	defer writer.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		o := bridgeTestOptions(codex, socket, reader, io.Discard)
-		done <- runCodexDesktopBridge(ctx, o)
-	}()
-	waitForFile(t, envFile)
-	var env map[string]string
-	bridgeReadJSONFile(t, envFile, &env)
-	pid, err := strconv.Atoi(env["FELT_BRIDGE_HELPER_PID"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("bridge did not stop after context cancellation")
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("native child pid %d still exists: %v", pid, err)
-	}
-}
-
-func TestClassifyCodexInvocation(t *testing.T) {
-	if mode, err := classifyCodexInvocation([]string{"--version"}); err != nil || mode != bridgePassthrough {
-		t.Fatalf("version mode=%v, err=%v", mode, err)
-	}
-	if _, err := classifyCodexInvocation([]string{"app-server", "proxy"}); err == nil {
-		t.Fatal("accepted raw app-server proxy")
-	}
-	if _, err := classifyCodexInvocation([]string{"app-server", "--listen", "unix:///tmp/x"}); err == nil {
-		t.Fatal("accepted caller-supplied listen endpoint")
-	}
-}
-
-func bridgeReadJSONFile(t *testing.T, path string, value any) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, value); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func waitForFile(t *testing.T, path string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", path)
+type bridgeHarness struct {
+	cmd             *exec.Cmd
+	input, output   *os.File
+	socket, envFile string
+	stderr          bytes.Buffer
+	done            chan error
 }
 
 func bridgeTempDir(t *testing.T) string {
@@ -226,21 +33,341 @@ func bridgeTempDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
 
-type bridgeCapture struct {
-	bytes.Buffer
-	wrote chan struct{}
+func buildBridgeBinary(t *testing.T, fake bool) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bridge")
+	args := []string{"build", "-o", path, ".."}
+	if fake {
+		args = []string{"build", "-tags", "bridge_test", "-o", path, "./testdata/codex_bridge"}
+	}
+	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	return path
 }
 
-func (w *bridgeCapture) Write(p []byte) (int, error) {
-	n, err := w.Buffer.Write(p)
-	select {
-	case <-w.wrote:
-	default:
-		close(w.wrote)
+func newBridgeHarness(t *testing.T, extraEnv ...string) *bridgeHarness {
+	t.Helper()
+	dir := bridgeTempDir(t)
+	h := &bridgeHarness{socket: filepath.Join(dir, "private", "app-server.sock"), envFile: filepath.Join(dir, "native.json"), done: make(chan error, 1)}
+	native := buildBridgeBinary(t, true)
+	cli := buildBridgeBinary(t, false)
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return n, err
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.input, h.output = inW, outR
+	h.cmd = exec.Command(cli, "shuttle", "codex-desktop-bridge", "--codex", native, "--socket", h.socket, "--", "-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "-c", "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true")
+	h.cmd.Stdin, h.cmd.Stdout, h.cmd.Stderr = inR, outW, &h.stderr
+	h.cmd.Env = append(os.Environ(), "FELT_BRIDGE_SOCKET="+h.socket, "FELT_BRIDGE_ENV_FILE="+h.envFile, "CODEX_CLI_PATH=/wrapper/not/native", "CODEX_APP_TOOLS_PIPE_PATH=/private/app-tools.pipe")
+	h.cmd.Env = append(h.cmd.Env, extraEnv...)
+	for _, setting := range extraEnv {
+		if setting == "FELT_BRIDGE_TEST_ALREADY_ISOLATED=1" {
+			h.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		}
+	}
+	t.Cleanup(func() {
+		h.input.Close()
+		h.output.Close()
+		inR.Close()
+		outW.Close()
+		if h.cmd.Process != nil {
+			_ = h.cmd.Process.Kill()
+		}
+	})
+	if err := h.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	inR.Close()
+	outW.Close()
+	go func() { h.done <- h.cmd.Wait() }()
+	return h
+}
+
+func bridgeEventually(t *testing.T, what string, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out: " + what)
+}
+
+func (h *bridgeHarness) wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-h.done:
+		return err
+	case <-time.After(12 * time.Second):
+		t.Fatal("bridge did not exit")
+		return nil
+	}
+}
+
+func (h *bridgeHarness) clean(t *testing.T) {
+	t.Helper()
+	bridgeEventually(t, "endpoint and relay lock cleanup", func() bool {
+		_, err := os.Lstat(h.socket)
+		lock, e := os.ReadFile(h.socket + ".lock")
+		return errors.Is(err, os.ErrNotExist) && e == nil && len(lock) == 0
+	})
+}
+
+func (h *bridgeHarness) native(t *testing.T) map[string]string {
+	t.Helper()
+	var env map[string]string
+	bridgeEventually(t, "native metadata", func() bool {
+		data, err := os.ReadFile(h.envFile)
+		return err == nil && json.Unmarshal(data, &env) == nil
+	})
+	return env
+}
+
+func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
+	h := newBridgeHarness(t)
+	input := `{"id":1,"blob":"` + strings.Repeat("x", 1<<20) + `"}` + "\n"
+	write := make(chan error, 1)
+	go func() { _, err := h.input.Write([]byte(input)); write <- err }()
+	reply := make(chan string, 1)
+	go func() { line, _ := bufio.NewReader(h.output).ReadString('\n'); reply <- line }()
+	select {
+	case got := <-reply:
+		if got != input {
+			t.Fatalf("echo size=%d want=%d", len(got), len(input))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("echo timeout")
+	}
+	if err := <-write; err != nil {
+		t.Fatal(err)
+	}
+	env := h.native(t)
+	if env["FELT_BRIDGE_HELPER_PID"] != strconv.Itoa(h.cmd.Process.Pid) || env["FELT_BRIDGE_NATIVE_PPID"] != strconv.Itoa(os.Getpid()) {
+		t.Fatalf("native ancestry=%v", env)
+	}
+	if env["CODEX_CLI_PATH"] == "/wrapper/not/native" || env["CODEX_APP_TOOLS_PIPE_PATH"] != "/private/app-tools.pipe" {
+		t.Fatalf("environment=%v", env)
+	}
+	if env["FELT_BRIDGE_LISTEN"] != "unix://"+h.socket {
+		t.Fatalf("listen=%q", env["FELT_BRIDGE_LISTEN"])
+	}
+	h.input.Close()
+	h.wait(t)
+	h.clean(t)
+}
+
+func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
+	h := newBridgeHarness(t)
+	h.native(t)
+	bridgeEventually(t, "endpoint", func() bool { _, e := os.Stat(h.socket); return e == nil })
+	if err := h.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	h.wait(t)
+	h.clean(t)
+}
+
+func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
+	h := newBridgeHarness(t, "FELT_BRIDGE_TEST_ALREADY_ISOLATED=1")
+	h.native(t)
+	h.input.Close()
+	h.wait(t)
+	h.clean(t)
+}
+
+func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
+	h := newBridgeHarness(t)
+	h.native(t)
+	cli, native := buildBridgeBinary(t, false), buildBridgeBinary(t, true)
+	command := exec.Command(cli, "shuttle", "codex-desktop-bridge", "--codex", native, "--socket", h.socket, "--", "app-server")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "another bridge already owns") {
+		t.Fatalf("error=%v output=%s", err, output)
+	}
+	if _, err := h.input.Write([]byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.output.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(h.output).ReadString('\n')
+	if err != nil || line != "{}\n" {
+		t.Fatalf("original owner reply=%q error=%v", line, err)
+	}
+	h.input.Close()
+	h.wait(t)
+	h.clean(t)
+}
+
+func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
+	marker := filepath.Join(bridgeTempDir(t), "descendant.json")
+	h := newBridgeHarness(t, "FELT_BRIDGE_DESCENDANT_FILE="+marker)
+	h.native(t)
+	var child map[string]int
+	bridgeEventually(t, "descendant ready", func() bool { data, e := os.ReadFile(marker); return e == nil && json.Unmarshal(data, &child) == nil })
+	if child["pgid"] != h.cmd.Process.Pid {
+		t.Fatalf("descendant group=%v, native=%d", child, h.cmd.Process.Pid)
+	}
+	finished := false
+	t.Cleanup(func() {
+		if !finished {
+			_ = syscall.Kill(child["pid"], syscall.SIGKILL)
+		}
+	})
+	bridgeEventually(t, "endpoint ready", func() bool { _, e := os.Stat(h.socket); return e == nil })
+	if err := h.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	// The TERM-ignoring descendant holds the captured stderr pipe open. Wait
+	// cannot finish unless the relay kills that descendant after native death.
+	h.wait(t)
+	finished = true
+	h.clean(t)
+}
+
+func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
+	h := newBridgeHarness(t)
+	h.input.Close()
+	h.wait(t)
+	h.clean(t)
+	if strings.Contains(h.stderr.String(), "context canceled") {
+		t.Fatalf("clean EOF logged as failure: %s", h.stderr.String())
+	}
+}
+
+func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
+	h := newBridgeHarness(t, "FELT_BRIDGE_NO_SOCKET=1")
+	h.native(t)
+	if err := h.wait(t); err == nil {
+		t.Fatal("expected startup timeout")
+	}
+	h.clean(t)
+	if !strings.Contains(h.stderr.String(), "timed out waiting") {
+		t.Fatalf("stderr=%s", h.stderr.String())
+	}
+}
+
+func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
+	for _, mode := range []string{"stdin-eof", "parent-exit"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newBridgeHarness(t, "FELT_BRIDGE_LARGE_REPLY=1")
+			h.native(t)
+			if _, err := h.input.Write([]byte("{\"id\":1}\n")); err != nil {
+				t.Fatal(err)
+			}
+			// Read one byte, leaving the rest of a 1 MiB response blocked in the pipe.
+			first := make(chan error, 1)
+			go func() { var b [1]byte; _, e := h.output.Read(b[:]); first <- e }()
+			select {
+			case err := <-first:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(4 * time.Second):
+				t.Fatal("no output")
+			}
+			if mode == "stdin-eof" {
+				h.input.Close()
+			} else {
+				h.cmd.Process.Signal(syscall.SIGTERM)
+			}
+			h.wait(t)
+			h.clean(t)
+		})
+	}
+}
+
+func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
+	dir := bridgeTempDir(t)
+	socket := filepath.Join(dir, "existing.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	before, _ := os.Lstat(socket)
+	cli, native := buildBridgeBinary(t, false), buildBridgeBinary(t, true)
+	command := exec.Command(cli, "shuttle", "codex-desktop-bridge", "--codex", native, "--socket", socket, "--", "app-server")
+	out, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "pre-existing") {
+		t.Fatalf("err=%v out=%s", err, out)
+	}
+	after, _ := os.Lstat(socket)
+	if after == nil || !os.SameFile(before, after) {
+		t.Fatal("existing endpoint was changed")
+	}
+}
+
+func TestCodexDesktopBridgeExecFailureReapsRelay(t *testing.T) {
+	dir := bridgeTempDir(t)
+	native := filepath.Join(dir, "not-executable")
+	socket := filepath.Join(dir, "private", "app-server.sock")
+	if err := os.WriteFile(native, []byte("#!/bin/sh\nexit 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(buildBridgeBinary(t, false), "shuttle", "codex-desktop-bridge", "--codex", native, "--socket", socket, "--", "app-server")
+	out, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "exec native Codex") {
+		t.Fatalf("err=%v out=%s", err, out)
+	}
+	lock, err := os.ReadFile(socket + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var relay int
+	_, err = fmt.Sscanf(string(lock), "relay_pid=%d", &relay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(relay, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("relay %d alive: %v", relay, err)
+	}
+	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("endpoint exists: %v", err)
+	}
+}
+
+func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
+	native := buildBridgeBinary(t, true)
+	marker := filepath.Join(t.TempDir(), "native.json")
+	command := exec.Command(buildBridgeBinary(t, false), "shuttle", "codex-desktop-bridge", "--codex", native, "--", "--version")
+	command.Env = append(os.Environ(), "FELT_BRIDGE_PASSTHROUGH=1", "FELT_BRIDGE_ENV_FILE="+marker)
+	err := command.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 23 {
+		t.Fatalf("exit=%v", err)
+	}
+	data, e := os.ReadFile(marker)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var env map[string]string
+	if e := json.Unmarshal(data, &env); e != nil {
+		t.Fatal(e)
+	}
+	if env["FELT_BRIDGE_HELPER_PID"] != strconv.Itoa(command.Process.Pid) || env["CODEX_CLI_PATH"] != native {
+		t.Fatalf("native identity=%v", env)
+	}
+}
+
+func TestClassifyCodexInvocation(t *testing.T) {
+	if mode, err := classifyCodexInvocation([]string{"--version"}); err != nil || mode != bridgePassthrough {
+		t.Fatalf("mode=%v err=%v", mode, err)
+	}
+	for _, args := range [][]string{{"app-server", "proxy"}, {"app-server", "--listen", "unix:///tmp/x"}} {
+		if _, err := classifyCodexInvocation(args); err == nil {
+			t.Fatalf("accepted %q", args)
+		}
+	}
 }

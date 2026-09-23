@@ -3,15 +3,19 @@
 `felt shuttle codex-desktop-bridge` lets the Desktop app and Shuttle use one
 native local App Server. Desktop launches the bridge through its
 `CODEX_CLI_PATH` executable override. The bridge preserves Desktop's native
-arguments and app-tools environment, starts the bundled App Server on a private
-Unix socket, and translates Desktop's JSONL connection to that socket's
-WebSocket protocol. Shuttle connects to the same server through
+arguments and app-tools environment, execs the bundled App Server in the
+original desktop-child process, and gives it a private Unix socket. A separate
+relay translates Desktop's JSONL connection to that socket's WebSocket protocol.
+Keeping native Codex in the original process preserves the signed ancestry
+required by native app-tools authorization. Shuttle connects to the same server through
 `SHUTTLE_CODEX_SOCKET`.
 
 This is an explicit installation. An ordinary private Desktop stdio server has
 no shared endpoint; finding its thread files does not establish live ownership.
-The bridge follows Desktop's lifetime. Quitting Desktop closes the backend, and
-reopening it supplies the fresh app-tools environment. Shuttle must report the
+The bridge follows Desktop's lifetime. Quitting Desktop closes the backend and
+terminates its private process group, including surviving MCP descendants. The
+relay stays in that group so its identity cannot be reused during cleanup.
+Reopening Desktop supplies the fresh app-tools environment. Shuttle must report the
 endpoint unavailable while Desktop is closed.
 
 ## Installation
@@ -49,7 +53,7 @@ fi
 ```
 
 The guard leaves ordinary shells and explicit launch overrides alone. The
-bridge resets its child's `CODEX_CLI_PATH` to the native executable so nested
+bridge resets native Codex's `CODEX_CLI_PATH` to the native executable so nested
 launchers use the real runtime. Verify an ordinary quit/reopen without `--env`
 before treating the installation as durable.
 

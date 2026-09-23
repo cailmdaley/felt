@@ -21,12 +21,10 @@ defmodule ShuttleWeb.CaptureController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_json: 3, present?: 1]
+  import ShuttleWeb.RelayHelpers,
+    only: [app_server_unavailable_message: 0, relay_json: 3, present?: 1]
 
   alias Shuttle.OriginRouter
-
-  @app_server_unavailable_message "This host has no reachable managed Codex App Server. " <>
-                                    "Select a configured remote host for ChatGPT, or choose CLI."
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -132,7 +130,7 @@ defmodule ShuttleWeb.CaptureController do
           surface: "app",
           tmux_session: nil,
           reason: "app_server_unavailable",
-          message: @app_server_unavailable_message
+          message: app_server_unavailable_message()
         },
         extra
       )

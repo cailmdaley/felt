@@ -97,9 +97,17 @@ defmodule Shuttle.CodexApp do
              )
 
     case result do
-      {:ok, %{"thread" => thread}} -> thread_status(thread, id)
-      {:ok, thread} -> thread_status(thread, id)
-      {:error, _} -> %{state: :unknown, phase: nil}
+      {:ok, %{"thread" => thread}} ->
+        thread_status(thread, id)
+
+      {:ok, thread} ->
+        thread_status(thread, id)
+
+      {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
+        %{state: :not_loaded, phase: nil}
+
+      {:error, _} ->
+        %{state: :unknown, phase: nil}
     end
   end
 
@@ -216,7 +224,7 @@ defmodule Shuttle.CodexApp do
     case get_in(thread, ["status", "type"]) do
       "active" -> :running
       "idle" -> :idle
-      "notLoaded" -> :unknown
+      "notLoaded" -> :not_loaded
       "missing" -> :missing
       _ -> :unknown
     end

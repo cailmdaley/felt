@@ -126,6 +126,80 @@ defmodule Shuttle.AppWorkers do
     end)
   end
 
+  @doc "Reloads a durably owned app thread only when the native server confirms it is not loaded."
+  def recover(id, fiber_id, uid, store) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      with true <- valid_id?(id),
+           true <- nonempty?(fiber_id) and nonempty?(store) and valid_optional_uid?(uid),
+           {:ok, record} <- get(id),
+           true <- owned_by?(record, id, fiber_id, uid, store),
+           {:ok, thread} <- native_thread_before_recovery(id),
+           result <- reload_if_not_loaded(id, thread) do
+        result
+      else
+        false -> {:error, :session_owner_mismatch}
+        {:error, _} = error -> error
+        _ -> {:error, :session_owner_mismatch}
+      end
+    end)
+  end
+
+  defp owned_by?(record, id, fiber_id, uid, store) when is_map(record) do
+    record["active"] == true and record["session_uuid"] == id and
+      record["thread_id"] == id and record["felt_store"] == store and
+      same_fiber?(record, fiber_id, uid) and
+      is_binary(uid) == is_binary(record["uid"])
+  end
+
+  defp owned_by?(_record, _id, _fiber_id, _uid, _store), do: false
+
+  defp native_thread_before_recovery(id) do
+    case client().read_thread(id) do
+      {:ok, %{"id" => ^id, "status" => %{"type" => type}} = thread}
+      when type in ["active", "idle", "notLoaded"] ->
+        {:ok, thread}
+
+      {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
+        {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}}
+
+      {:ok, _} ->
+        {:error, :native_thread_unverified}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :native_thread_unverified}
+    end
+  end
+
+  defp reload_if_not_loaded(_id, %{"status" => %{"type" => type}})
+       when type in ["active", "idle"],
+       do: :ok
+
+  defp reload_if_not_loaded(id, %{"status" => %{"type" => "notLoaded"}}) do
+    case client().resume_thread(id, []) do
+      {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
+      when type in ["active", "idle"] ->
+        :ok
+
+      {:ok, _} ->
+        {:error, :native_thread_unverified}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, :native_thread_unverified}
+    end
+  end
+
+  defp reload_if_not_loaded(_id, _thread), do: {:error, :native_thread_unverified}
+
+  defp nonempty?(value), do: is_binary(value) and value != ""
+  defp valid_optional_uid?(nil), do: true
+  defp valid_optional_uid?(uid), do: nonempty?(uid)
+
   def deactivate(id) do
     update(id, %{"active" => false})
   end

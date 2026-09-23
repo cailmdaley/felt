@@ -4,22 +4,18 @@ package cmd
 
 import (
 	"os"
-	"os/exec"
 	"syscall"
 )
 
-func configureBridgeChild(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
-func signalBridgeChild(cmd *exec.Cmd, sig syscall.Signal) error {
-	if cmd == nil || cmd.Process == nil {
+func configureCurrentBridgeProcess() error {
+	if syscall.Getpgrp() == os.Getpid() {
 		return nil
 	}
-	// Setpgid makes the child's process group private to this invocation. A
-	// negative pid therefore reaches descendants without touching the wrapper
-	// process or an unrelated Codex instance.
-	return syscall.Kill(-cmd.Process.Pid, sig)
+	return syscall.Setpgid(0, 0)
+}
+
+func signalBridgeProcessGroup(pid int, sig syscall.Signal) error {
+	return syscall.Kill(-pid, sig)
 }
 
 func sameUser(info os.FileInfo) bool {

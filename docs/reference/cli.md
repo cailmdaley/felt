@@ -136,12 +136,19 @@ untouched by any of this.
 ### Codex desktop bridge
 
 `felt shuttle codex-desktop-bridge` adapts the desktop application's JSONL
-`CODEX_CLI_PATH` protocol to a native Codex App Server websocket. It starts
-one `app-server` child with the supplied arguments and adds a private Unix
-socket listener; stdin EOF, an input error, or a bridge signal stops that child
-and its descendants. The native child inherits the caller's environment,
-including app-tools pipe variables, while its own `CODEX_CLI_PATH` points at
-the real executable so nested launches do not re-enter the bridge.
+`CODEX_CLI_PATH` protocol to a native Codex App Server websocket. It execs the
+bundled native executable in the original desktop-child process, preserving
+the signed Desktop → Codex → app-tools ancestry. A separate relay child owns
+the desktop JSONL pipes, the private Unix socket lock, and shutdown monitoring.
+The relay stays in the native private process group, pinning its identity until
+shutdown. Desktop stdin EOF or a relay signal stops the native process. Native
+exit cancels the relay even when desktop stdout is blocked. After confirmed
+native exit, the relay removes only the observed socket inode, then terminates
+its entire private group, including itself and any surviving MCP descendants.
+
+Native arguments and environment are preserved, including app-tools pipe
+variables. `CODEX_CLI_PATH` points at the real executable for nested launches.
+Non-server invocations exec the native binary directly, retaining its exit code.
 
 ```sh
 felt shuttle codex-desktop-bridge --codex /absolute/path/to/codex -- \
