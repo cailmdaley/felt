@@ -96,7 +96,8 @@ help:
 
 # ── build ──────────────────────────────────────────────────────────────────
 # `build` is the everything-target; `cli`, `ui`, and `daemon` build individual artifacts.
-build: cli ui daemon
+build: cli ui
+	$(MAKE) daemon
 
 cli:
 	go build .
@@ -140,6 +141,13 @@ endif
 	@# next build, by which time the cycle has retired it.
 	rm -rf bin/rel.next
 	cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel.next
+	@if [ -f ui/dist/index.html ]; then \
+	  for app in bin/rel.next/lib/shuttle-*; do \
+	    mkdir -p "$$app/priv/ui"; \
+	    rm -rf "$$app/priv/ui/dist"; \
+	    cp -R ui/dist "$$app/priv/ui/"; \
+	  done; \
+	fi
 	rm -rf bin/rel.prev
 	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
 	mv bin/rel.next bin/rel
@@ -223,7 +231,8 @@ stop:
 	fi
 
 # Rebuild the UI and daemon together before restarting the service.
-restart: ui daemon
+restart: ui
+	$(MAKE) daemon
 	$(MAKE) stop
 	$(MAKE) start
 

@@ -10,9 +10,9 @@ defmodule ShuttleWeb.Assets do
   Resolution, at RUNTIME, in order:
 
   1. `SHUTTLE_UI_DIST` — explicit override in the daemon's environment.
-  2. The release's own `priv/ui/dist` — the CI release pipeline copies the
-     built bundle into `priv/` before `mix release`, so a fetched daemon
-     serves the bundle it shipped with, wherever the tree is unpacked.
+  2. The release's own `priv/ui/dist` — source builds and packaged releases
+     include the built bundle, so a daemon serves the UI it shipped with
+     independently of changes to its source checkout.
   3. The source checkout's `ui/dist` (compile-time `__DIR__`-derived) — the
      build-on-host path, where the bundle is built or rsynced beside the code.
   """
