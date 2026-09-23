@@ -454,11 +454,19 @@ defmodule Shuttle.CodexApp.Transport do
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 
   defp default_socket do
-    Path.join([
-      System.get_env("CODEX_HOME") || Path.join(System.user_home!(), ".codex"),
-      "app-server-control",
-      "app-server-control.sock"
-    ])
+    home =
+      case System.get_env("CODEX_HOME") do
+        value when value in [nil, ""] -> Path.join(System.user_home!(), ".codex")
+        value -> value
+      end
+
+    case System.get_env("SHUTTLE_CODEX_SOCKET") do
+      value when value in [nil, ""] ->
+        Path.join([home, "app-server-control", "app-server-control.sock"])
+
+      value ->
+        value
+    end
   end
 
   defp disconnect(state, reason, return \\ nil) do

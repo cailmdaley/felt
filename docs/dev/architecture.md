@@ -130,3 +130,13 @@ window, and that is already a no-op off macOS (`activate/1` in
 shuttle attach <fiber>` always works.
 
 Windows is unsupported.
+
+### Explicit Codex endpoint
+
+`SHUTTLE_CODEX_SOCKET` selects the same Unix WebSocket endpoint for app dispatch
+and native session messaging. Set it in the Shuttle daemon's environment when
+using an explicitly shared Desktop backend. Without it, both clients use
+`$CODEX_HOME/app-server-control/app-server-control.sock`, with `CODEX_HOME`
+defaulting to `~/.codex`. An empty override uses that default. An unavailable
+explicit endpoint is an error; clients do not switch to another conversation
+owner or start a replacement backend.

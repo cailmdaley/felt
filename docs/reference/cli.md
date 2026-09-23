@@ -133,6 +133,35 @@ untouched by any of this.
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
 | `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 
+### Codex desktop bridge
+
+`felt shuttle codex-desktop-bridge` adapts the desktop application's JSONL
+`CODEX_CLI_PATH` protocol to a native Codex App Server websocket. It starts
+one `app-server` child with the supplied arguments and adds a private Unix
+socket listener; stdin EOF, an input error, or a bridge signal stops that child
+and its descendants. The native child inherits the caller's environment,
+including app-tools pipe variables, while its own `CODEX_CLI_PATH` points at
+the real executable so nested launches do not re-enter the bridge.
+
+```sh
+felt shuttle codex-desktop-bridge --codex /absolute/path/to/codex -- \
+  -c features.code_mode_host=true app-server \
+  --analytics-default-enabled \
+  -c plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true
+```
+
+The default endpoint is `$CODEX_HOME/shuttle-desktop/app-server.sock`; use
+`--socket` (or the configured `SHUTTLE_CODEX_SOCKET`) when Shuttle's native
+transport needs a different private path. A pre-existing endpoint, an
+endpoint owned by another user, or a directory accessible by other users is
+refused. A stale endpoint should only be removed after its owning process has
+been verified stopped.
+
+See [Desktop installation and rollback](../shuttle/codex-desktop.md) for
+explicit endpoint configuration, durable launch setup, and acceptance checks.
+
+### Session discovery and messaging
+
 No-argument `sessions` may report a Claude, Codex, or Pi receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in

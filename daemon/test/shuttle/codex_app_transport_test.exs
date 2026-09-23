@@ -23,6 +23,52 @@ defmodule Shuttle.CodexApp.TransportTest do
     :ok
   end
 
+  test "selects an explicit socket or the configured Codex home" do
+    previous = Map.new(["CODEX_HOME", "SHUTTLE_CODEX_SOCKET"], &{&1, System.get_env(&1)})
+    home = Path.join(System.tmp_dir!(), "felt-endpoint-#{System.unique_integer([:positive])}")
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+
+      File.rm_rf!(home)
+    end)
+
+    System.put_env("CODEX_HOME", home)
+
+    for mode <- [:override, :codex_home, :empty_override] do
+      {path, peer} =
+        initialized_peer(fn socket ->
+          %{"id" => id, "method" => "endpoint/probe"} = recv_json(socket)
+          send_result(socket, id, %{"selected" => true})
+        end)
+
+      if mode == :override do
+        System.put_env("SHUTTLE_CODEX_SOCKET", path)
+      else
+        directory = Path.join(home, "app-server-control")
+        File.mkdir_p!(directory)
+        selected = Path.join(directory, "app-server-control.sock")
+        File.rm(selected)
+        File.ln_s!(path, selected)
+
+        if mode == :empty_override,
+          do: System.put_env("SHUTTLE_CODEX_SOCKET", ""),
+          else: System.delete_env("SHUTTLE_CODEX_SOCKET")
+      end
+
+      {:ok, client} = Transport.start_link(connect_timeout: 1_000)
+
+      assert {:ok, %{"selected" => true}} =
+               Transport.request(client, "endpoint/probe", %{}, 1_000)
+
+      Transport.close(client)
+      await_peer(peer)
+    end
+  end
+
   test "preserves upgrade bytes and handles segmented, fragmented, ping, and coalesced startup frames" do
     {path, peer} =
       start_peer(fn socket ->
