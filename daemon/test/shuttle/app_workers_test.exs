@@ -53,7 +53,20 @@ defmodule Shuttle.AppWorkersTest do
 
     def resume_thread(id, opts) do
       record({:resume, id, opts})
-      {:ok, %{"id" => Agent.get(__MODULE__, &Map.get(&1, :resume_id, id))}}
+
+      Agent.get_and_update(__MODULE__, fn state ->
+        case Map.fetch(state, :resume_result) do
+          {:ok, result} ->
+            {result, state}
+
+          :error ->
+            result =
+              {:ok, %{"id" => Map.get(state, :resume_id, id), "status" => %{"type" => "active"}}}
+
+            loaded = %{"id" => id, "status" => %{"type" => "active"}}
+            {result, Map.merge(state, %{state: :idle, read_result: {:ok, loaded}})}
+        end
+      end)
     end
 
     def read_thread(id) do
@@ -539,6 +552,222 @@ defmodule Shuttle.AppWorkersTest do
 
     assert Enum.count(results, &(&1 == :ok)) == 1
     assert Enum.count(results, &(&1 == {:error, :already_running})) == 29
+  end
+
+  test "watcher recovery reloads only an explicitly not-loaded owned thread without a turn" do
+    id = "recover-thread"
+    fiber_id = "tests/recover"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => fiber_id,
+        "uid" => "recover-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    App.set(:state, :not_loaded)
+    assert :not_loaded = WorkerBackend.observe("codex-app:" <> id)
+    assert App.calls() == []
+
+    assert :idle =
+             WorkerBackend.observe("codex-app:" <> id, %{
+               fiber_id: fiber_id,
+               uid: "recover-uid",
+               felt_store: Runner.felt_root()
+             })
+
+    assert [{:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert {:ok, %{"active" => true, "fiber_id" => ^fiber_id}} = AppWorkers.get(id)
+    refute Enum.any?(App.calls(), &match?({:turn, _, _, _}, &1))
+  end
+
+  test "watcher passes captured UID and store into not-loaded recovery" do
+    id = "watcher-recover-thread"
+    fiber_id = "tests/watcher-recover"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => fiber_id,
+        "uid" => "watcher-recover-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(:state, :not_loaded)
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+
+    {:ok, %{pid: watcher}} =
+      Poller.start_watcher(
+        %Poller.State{self_ref: self(), runner: Runner, heartbeat_interval_ms: 10},
+        fiber_id,
+        %{
+          session: "codex-app:" <> id,
+          uid: "watcher-recover-uid",
+          felt_store: Runner.felt_root()
+        }
+      )
+
+    assert eventually(fn -> Enum.any?(App.calls(), &match?({:resume, ^id, []}, &1)) end)
+    assert :ok = Shuttle.WorkerWatcher.stop(watcher)
+    assert {:ok, %{"active" => true, "fiber_id" => ^fiber_id}} = AppWorkers.get(id)
+  end
+
+  test "concurrent watcher recovery resumes a thread once" do
+    id = "recover-race"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => "tests/race",
+        "uid" => "race-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+
+    results =
+      1..20
+      |> Task.async_stream(
+        fn _ -> AppWorkers.recover(id, "tests/race", "race-uid", Runner.felt_root()) end,
+        max_concurrency: 20
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.all?(results, &(&1 == :ok))
+    assert Enum.count(App.calls(), &match?({:resume, ^id, []}, &1)) == 1
+  end
+
+  test "watcher recovery rejects stale or mismatched durable ownership before native calls" do
+    id = "recover-owner"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => "tests/owner",
+        "uid" => "owner-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    for {fiber_id, uid, store} <- [
+          {"tests/owner", "stale-uid", Runner.felt_root()},
+          {"tests/owner", "wrong-uid", Runner.felt_root()},
+          {"tests/owner", "owner-uid", Runner.felt_root() <> "-other"},
+          {"", "owner-uid", Runner.felt_root()},
+          {"tests/owner", "", Runner.felt_root()}
+        ] do
+      assert {:error, :session_owner_mismatch} = AppWorkers.recover(id, fiber_id, uid, store)
+    end
+
+    :ok = AppWorkers.deactivate(id)
+
+    assert {:error, :session_owner_mismatch} =
+             AppWorkers.recover(id, "tests/owner", "owner-uid", Runner.felt_root())
+
+    assert App.calls() == []
+  end
+
+  test "watcher recovery validates native identity and retains ownership on disconnect" do
+    id = "recover-verify"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => "tests/verify",
+        "uid" => "verify-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(
+      :read_result,
+      {:ok, %{"id" => "another-thread", "status" => %{"type" => "notLoaded"}}}
+    )
+
+    assert {:error, :native_thread_unverified} =
+             AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
+
+    assert App.calls() == [{:read, id}]
+
+    App.set(:read_result, {:error, :disconnected})
+
+    assert {:error, :disconnected} =
+             AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
+
+    assert {:ok, %{"active" => true}} = AppWorkers.get(id)
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    assert :ok = AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
+    assert Enum.count(App.calls(), &match?({:resume, ^id, []}, &1)) == 1
+  end
+
+  test "watcher recovery rejects malformed reads and an unexpected resumed identity" do
+    id = "recover-malformed"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => "tests/malformed",
+        "uid" => "malformed-uid",
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(:read_result, {:ok, %{"id" => id}})
+
+    assert {:error, :native_thread_unverified} =
+             AppWorkers.recover(id, "tests/malformed", "malformed-uid", Runner.felt_root())
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    App.set(:resume_result, {:ok, %{"id" => "wrong-thread", "status" => %{"type" => "active"}}})
+
+    assert {:error, :native_thread_unverified} =
+             AppWorkers.recover(id, "tests/malformed", "malformed-uid", Runner.felt_root())
+
+    assert {:ok, %{"active" => true}} = AppWorkers.get(id)
+  end
+
+  test "watcher recovery fails closed on valid JSON without an ownership record" do
+    id = "recover-invalid-record"
+    :ok = File.mkdir_p(AppWorkers.root())
+    :ok = File.write(Path.join(AppWorkers.root(), id <> ".json"), "null")
+
+    assert {:ok, nil} = AppWorkers.get(id)
+
+    assert {:error, :session_owner_mismatch} =
+             AppWorkers.recover(id, "tests/invalid-record", "invalid-uid", Runner.felt_root())
+
+    assert App.calls() == []
+  end
+
+  test "already loaded watcher recovery performs no native mutation" do
+    id = "recover-loaded"
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "fiber_id" => "tests/loaded",
+        "uid" => nil,
+        "felt_store" => Runner.felt_root(),
+        "active" => true
+      })
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "idle"}}})
+
+    assert :ok = AppWorkers.recover(id, "tests/loaded", nil, Runner.felt_root())
+    assert [{:read, ^id}] = App.calls()
   end
 
   test "a delayed watcher exit cannot release a replacement using the same conversation" do

@@ -623,7 +623,7 @@ defmodule Shuttle.CodexApp.TransportTest do
        :running, "attention"},
       {%{"type" => "idle"}, :idle, "waiting"},
       {%{"type" => "systemError"}, :unknown, "attention"},
-      {%{"type" => "notLoaded"}, :unknown, nil}
+      {%{"type" => "notLoaded"}, :not_loaded, nil}
     ]
 
     {path, peer} =
@@ -642,6 +642,22 @@ defmodule Shuttle.CodexApp.TransportTest do
       assert %{state: ^state, phase: ^phase} = CodexApp.status("thread-1")
     end
 
+    await_peer(peer)
+  end
+
+  test "native status recognizes the exact not-loaded peer error" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => request_id, "method" => "thread/read"} = recv_json(socket)
+
+        send_error(socket, request_id, %{
+          "code" => -32_600,
+          "message" => "thread not loaded: thread-1"
+        })
+      end)
+
+    configure_adapter(path)
+    assert %{state: :not_loaded, phase: nil} = CodexApp.status("thread-1")
     await_peer(peer)
   end
 

@@ -2707,6 +2707,7 @@ defmodule Shuttle.Poller do
             session: session,
             agent_id: agent_id_from_fiber(fiber),
             uid: Map.get(fiber, "uid"),
+            felt_store: felt_store,
             started_at: now,
             last_activity_at: now
           }
@@ -2760,6 +2761,7 @@ defmodule Shuttle.Poller do
       meta = %{
         fiber_id: fiber_id,
         uid: fiber["uid"],
+        felt_store: owning_store(fiber_id, state),
         session: session,
         agent_id: Keyword.get(opts, :agent) || agent_id_from_fiber(fiber),
         started_at: now,
@@ -2912,6 +2914,7 @@ defmodule Shuttle.Poller do
       session: session,
       agent_id: agent_id,
       uid: Map.get(fiber, "uid"),
+      felt_store: owning_store(fiber_id, state),
       started_at: now,
       last_activity_at: now
     }
@@ -3567,6 +3570,8 @@ defmodule Shuttle.Poller do
       session: Map.fetch!(metadata, :session),
       poller: state.self_ref,
       runner: state.runner,
+      uid: Map.get(metadata, :uid),
+      felt_store: Map.get(metadata, :felt_store),
       heartbeat_interval_ms: state.heartbeat_interval_ms
     ]
 

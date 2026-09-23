@@ -18,13 +18,32 @@ defmodule Shuttle.WorkerBackend do
   end
 
   @doc "Observe app state without releasing ownership on an idle or uncertain result."
-  def observe(session) do
+  def observe(session, expected \\ %{}) do
     case AppWorkers.id(session) do
       nil ->
         :terminal
 
       id ->
         %{state: remote, phase: phase} = AppWorkers.client().status(id)
+
+        {remote, phase} =
+          if remote == :not_loaded do
+            case AppWorkers.recover(
+                   id,
+                   Map.get(expected, :fiber_id),
+                   Map.get(expected, :uid),
+                   Map.get(expected, :felt_store)
+                 ) do
+              :ok ->
+                %{state: recovered, phase: recovered_phase} = AppWorkers.client().status(id)
+                {recovered, recovered_phase}
+
+              {:error, _} ->
+                {remote, phase}
+            end
+          else
+            {remote, phase}
+          end
 
         case {remote, AppWorkers.get(id)} do
           {:missing, {:ok, %{"active" => true} = record}} ->

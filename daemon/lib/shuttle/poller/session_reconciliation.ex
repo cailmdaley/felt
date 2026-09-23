@@ -127,6 +127,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
             session: session,
             agent_id: app_record["agent_id"] || agent_id,
             uid: uid,
+            felt_store: app_record["felt_store"],
             started_at: started_at,
             last_activity_at: started_at
           }
