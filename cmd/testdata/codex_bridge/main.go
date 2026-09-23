@@ -7,15 +7,35 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 func main() {
+	if os.Getenv("FELT_BRIDGE_DESCENDANT") == "1" {
+		signal.Ignore(syscall.SIGTERM)
+		data, _ := json.Marshal(map[string]int{"pid": os.Getpid(), "pgid": syscall.Getpgrp()})
+		_ = os.WriteFile(os.Getenv("FELT_BRIDGE_DESCENDANT_FILE"), data, 0600)
+		for {
+			time.Sleep(time.Second)
+		}
+	}
+	if os.Getenv("FELT_BRIDGE_DESCENDANT_FILE") != "" {
+		child := exec.Command(os.Args[0])
+		child.Env = append(os.Environ(), "FELT_BRIDGE_DESCENDANT=1")
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			panic(err)
+		}
+	}
+
 	listen := ""
 	for i, arg := range os.Args {
 		if arg == "--listen" && i+1 < len(os.Args) {

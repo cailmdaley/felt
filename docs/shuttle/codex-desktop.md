@@ -12,8 +12,10 @@ required by native app-tools authorization. Shuttle connects to the same server 
 
 This is an explicit installation. An ordinary private Desktop stdio server has
 no shared endpoint; finding its thread files does not establish live ownership.
-The bridge follows Desktop's lifetime. Quitting Desktop closes the backend, and
-reopening it supplies the fresh app-tools environment. Shuttle must report the
+The bridge follows Desktop's lifetime. Quitting Desktop closes the backend and
+terminates its private process group, including surviving MCP descendants. The
+relay stays in that group so its identity cannot be reused during cleanup.
+Reopening Desktop supplies the fresh app-tools environment. Shuttle must report the
 endpoint unavailable while Desktop is closed.
 
 ## Installation

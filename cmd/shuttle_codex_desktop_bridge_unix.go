@@ -4,13 +4,8 @@ package cmd
 
 import (
 	"os"
-	"os/exec"
 	"syscall"
 )
-
-func configureBridgeChild(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
 
 func configureCurrentBridgeProcess() error {
 	if syscall.Getpgrp() == os.Getpid() {

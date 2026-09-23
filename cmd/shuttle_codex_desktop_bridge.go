@@ -150,7 +150,6 @@ func runCodexDesktopBridgeProcess(ctx context.Context, raw bridgeOptions) error 
 	relay.Stdin, relay.Stdout, relay.Stderr = o.stdin, o.stdout, o.stderr
 	relay.ExtraFiles = []*os.File{readyW}
 	relay.Env = append(os.Environ(), "FELT_BRIDGE_READY_FD=3", fmt.Sprintf("FELT_BRIDGE_PARENT_PID=%d", os.Getpid()))
-	configureBridgeChild(relay)
 	if err := relay.Start(); err != nil {
 		readyR.Close()
 		readyW.Close()
@@ -238,7 +237,7 @@ func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
 		return errors.New("relay readiness fd must be 3")
 	}
 	parentPID, err := strconv.Atoi(os.Getenv("FELT_BRIDGE_PARENT_PID"))
-	if err != nil || parentPID <= 1 || os.Getppid() != parentPID {
+	if err != nil || parentPID <= 1 || os.Getppid() != parentPID || syscall.Getpgrp() != parentPID {
 		return fmt.Errorf("relay parent pid: %q", os.Getenv("FELT_BRIDGE_PARENT_PID"))
 	}
 	socket, err := bridgeSocketPath(o.socket)
@@ -276,17 +275,13 @@ func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
 	}()
 	endpoint, err := waitForBridgeEndpoint(ctx, socket, parentDone, func() error { return errors.New("native Codex parent exited") }, o.startup)
 	if err != nil {
-		if stopBridgeParent(parentPID, parentDone) {
-			removeOwnedEndpoint(socket, endpoint)
-		}
-		return err
+		fmt.Fprintln(o.stderr, err)
+		return finishBridgeRelay(parentPID, parentDone, socket, endpoint, owner)
 	}
 	ws, err := dialBridgeSocket(ctx, socket)
 	if err != nil {
-		if stopBridgeParent(parentPID, parentDone) {
-			removeOwnedEndpoint(socket, endpoint)
-		}
-		return fmt.Errorf("connecting native Codex websocket: %w", err)
+		fmt.Fprintf(o.stderr, "connecting native Codex websocket: %v\n", err)
+		return finishBridgeRelay(parentPID, parentDone, socket, endpoint, owner)
 	}
 	ws.SetReadLimit(bridgeReadLimit)
 	relayDone := make(chan error, 1)
@@ -299,11 +294,10 @@ func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
 		err = <-relayDone
 	}
 	_ = ws.Close()
-	if !stopBridgeParent(parentPID, parentDone) {
-		return errors.New("native Codex process could not be reaped; endpoint left in place")
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(o.stderr, err)
 	}
-	removeOwnedEndpoint(socket, endpoint)
-	return err
+	return finishBridgeRelay(parentPID, parentDone, socket, endpoint, owner)
 }
 
 type codexInvocationMode uint8
@@ -546,18 +540,25 @@ type bridgeMessage struct {
 	err  error
 }
 
-func relayBridgeJSONL(ctx context.Context, ws *websocket.Conn, stdin io.Reader, stdout io.Writer) error {
-	relayCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func relayBridgeJSONL(ctx context.Context, ws *websocket.Conn, stdin io.Reader, stdout io.Writer) (result error) {
+	relayCtx, cancel := context.WithCancelCause(ctx)
+	defer func() {
+		cause := context.Cause(relayCtx)
+		if errors.Is(cause, io.EOF) {
+			result = nil
+		} else if cause != nil && !errors.Is(cause, context.Canceled) {
+			result = cause
+		}
+		cancel(nil)
+	}()
 	go func() {
 		<-relayCtx.Done()
 		_ = ws.Close()
 	}()
 	input := make(chan bridgeMessage, 1)
 	go func() {
-		readBridgeInput(relayCtx, stdin, input)
 		// EOF or malformed input must also unblock an undrained desktop stdout.
-		cancel()
+		cancel(readBridgeInput(relayCtx, stdin, input))
 	}()
 	output := make(chan bridgeMessage, 1)
 	go readBridgeOutput(relayCtx, ws, output)
@@ -604,20 +605,18 @@ func writeBridgeOutput(ctx context.Context, stdout io.Writer, data []byte) error
 	}
 }
 
-func readBridgeInput(ctx context.Context, r io.Reader, out chan<- bridgeMessage) {
+func readBridgeInput(ctx context.Context, r io.Reader, out chan<- bridgeMessage) error {
 	br := bufio.NewReader(r)
 	for {
 		line, err := readBridgeRecord(br)
 		if errors.Is(err, bufio.ErrBufferFull) {
-			sendBridgeMessage(ctx, out, bridgeMessage{err: errors.New("desktop stdin JSONL record exceeds 64 MiB")})
-			return
+			return errors.New("desktop stdin JSONL record exceeds 64 MiB")
 		}
 		if len(line) > 0 {
 			line = bytes.TrimSuffix(line, []byte("\n"))
 			line = bytes.TrimSuffix(line, []byte("\r"))
 			if len(line) == 0 || !json.Valid(line) {
-				sendBridgeMessage(ctx, out, bridgeMessage{err: errors.New("desktop stdin contains a non-JSONL record")})
-				return
+				return errors.New("desktop stdin contains a non-JSONL record")
 			}
 			sendBridgeMessage(ctx, out, bridgeMessage{data: append([]byte(nil), line...)})
 		}
@@ -625,8 +624,7 @@ func readBridgeInput(ctx context.Context, r io.Reader, out chan<- bridgeMessage)
 			if errors.Is(err, io.EOF) && len(line) > 0 {
 				continue
 			}
-			sendBridgeMessage(ctx, out, bridgeMessage{err: err})
-			return
+			return err
 		}
 	}
 }
@@ -686,6 +684,20 @@ func killUnstartedBridgeRelay(child *exec.Cmd, done <-chan struct{}) {
 	}
 }
 
+// The relay remains in the native private group, pinning its identity even
+// after the native parent exits. Final group termination cannot target a reused
+// group and also stops orphaned MCP descendants. Keep the lock held until exit.
+func finishBridgeRelay(pid int, done <-chan struct{}, socket string, endpoint os.FileInfo, owner *bridgeOwner) error {
+	if syscall.Getpgrp() != pid {
+		return errors.New("bridge lost its private process group; endpoint left in place")
+	}
+	if stopBridgeParent(pid, done) {
+		removeOwnedEndpoint(socket, endpoint)
+		_ = owner.file.Truncate(0)
+	}
+	return signalBridgeProcessGroup(pid, syscall.SIGKILL)
+}
+
 func stopBridgeParent(pid int, done <-chan struct{}) bool {
 	if os.Getppid() != pid {
 		return true
@@ -701,7 +713,9 @@ func stopBridgeParent(pid int, done <-chan struct{}) bool {
 	if os.Getppid() != pid {
 		return true
 	}
-	_ = signalBridgeProcessGroup(pid, syscall.SIGKILL)
+	// Kill only the still-identical parent first, so the relay can confirm
+	// exit and remove its endpoint before terminating its own entire group.
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 	select {
 	case <-done:
 		return waitForBridgeParentReparent(pid)

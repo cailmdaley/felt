@@ -140,9 +140,11 @@ untouched by any of this.
 bundled native executable in the original desktop-child process, preserving
 the signed Desktop → Codex → app-tools ancestry. A separate relay child owns
 the desktop JSONL pipes, the private Unix socket lock, and shutdown monitoring.
-Desktop stdin EOF or a relay signal stops the native process group. Native exit
-cancels the relay even when desktop stdout is blocked. Socket cleanup follows
-confirmed native exit and only removes the observed socket inode.
+The relay stays in the native private process group, pinning its identity until
+shutdown. Desktop stdin EOF or a relay signal stops the native process. Native
+exit cancels the relay even when desktop stdout is blocked. After confirmed
+native exit, the relay removes only the observed socket inode, then terminates
+its entire private group, including itself and any surviving MCP descendants.
 
 Native arguments and environment are preserved, including app-tools pipe
 variables. `CODEX_CLI_PATH` points at the real executable for nested launches.

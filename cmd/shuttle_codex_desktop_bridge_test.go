@@ -210,11 +210,40 @@ func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
 	h.clean(t)
 }
 
+func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
+	marker := filepath.Join(bridgeTempDir(t), "descendant.json")
+	h := newBridgeHarness(t, "FELT_BRIDGE_DESCENDANT_FILE="+marker)
+	h.native(t)
+	var child map[string]int
+	bridgeEventually(t, "descendant ready", func() bool { data, e := os.ReadFile(marker); return e == nil && json.Unmarshal(data, &child) == nil })
+	if child["pgid"] != h.cmd.Process.Pid {
+		t.Fatalf("descendant group=%v, native=%d", child, h.cmd.Process.Pid)
+	}
+	finished := false
+	t.Cleanup(func() {
+		if !finished {
+			_ = syscall.Kill(child["pid"], syscall.SIGKILL)
+		}
+	})
+	bridgeEventually(t, "endpoint ready", func() bool { _, e := os.Stat(h.socket); return e == nil })
+	if err := h.cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	// The TERM-ignoring descendant holds the captured stderr pipe open. Wait
+	// cannot finish unless the relay kills that descendant after native death.
+	h.wait(t)
+	finished = true
+	h.clean(t)
+}
+
 func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
 	h := newBridgeHarness(t)
 	h.input.Close()
 	h.wait(t)
 	h.clean(t)
+	if strings.Contains(h.stderr.String(), "context canceled") {
+		t.Fatalf("clean EOF logged as failure: %s", h.stderr.String())
+	}
 }
 
 func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
