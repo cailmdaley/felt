@@ -169,6 +169,15 @@ func TestMergeNativeAndHookSessionsPrefersNativeRecord(t *testing.T) {
 	}
 }
 
+func TestMergeSessionsCollapsesRepeatedNativeAndHookAddresses(t *testing.T) {
+	native := Session{Address: "shuttle://host/claude/id", State: "idle"}
+	hook := Session{Address: "shuttle://host/claude/other", State: "hook"}
+	got := mergeNativeAndHookSessions([]Session{native, native}, []Session{native, hook, hook})
+	if len(got) != 2 || got[0].Address != native.Address || got[1].Address != hook.Address {
+		t.Fatalf("discovery repeated a routable address: %#v", got)
+	}
+}
+
 func TestClaudeDiscoveryKeepsHookRegistrationWhenNativeCLIUnavailable(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
