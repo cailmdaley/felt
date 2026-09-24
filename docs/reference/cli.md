@@ -114,7 +114,7 @@ untouched by any of this.
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`); leaves the current session running |
 | `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
-| `felt shuttle assign <fiber>` | Set optional local role/collaborator references (`--role <name/path/UID> --collaborator <name/path/UID>`), replace with `--json-assignment <JSON>`, or remove with `--clear`, `--clear-collaborator`, `--clear-role`. Resolves names under `roles/` and stores stable UIDs; preserves lifecycle and execution settings |
+| `felt shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `felt shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `felt shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
 

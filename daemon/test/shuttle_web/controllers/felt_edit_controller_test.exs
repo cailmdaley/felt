@@ -205,6 +205,49 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     refute args =~ "--status"
   end
 
+  test "forwards readable role assignments with collaborator lists and role-only entries" do
+    root =
+      System.tmp_dir!()
+      |> Path.join(
+        "shuttle-felt-edit-readable-collaboration-#{System.unique_integer([:positive])}"
+      )
+
+    store = Path.join(root, "loom")
+    fiber_dir = Path.join([store, ".felt", "tests", "remote-tags"])
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(
+      Path.join(fiber_dir, "remote-tags.md"),
+      "---\nname: Remote tags\nstatus: active\n---\n\nbody\n"
+    )
+
+    args_file = install_fake_felt!(root)
+    old_loom_homes = System.get_env("FELT_STORES")
+    System.put_env("FELT_STORES", store)
+
+    on_exit(fn ->
+      restore_env("FELT_STORES", old_loom_homes)
+      File.rm_rf(root)
+    end)
+
+    collaboration = %{"vizier" => ["fable", "astra"], "organizer" => []}
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/felt-edit",
+        Jason.encode!(%{"fiber_id" => "tests/remote-tags", "collaboration" => collaboration})
+      )
+
+    assert conn.status == 200
+
+    assert ["-C", ^store, "shuttle", "assign", "tests/remote-tags", "--json-assignment", encoded] =
+             File.read!(args_file) |> String.split("\n", trim: true)
+
+    assert Jason.decode!(encoded) == collaboration
+    refute encoded =~ "status"
+  end
+
   test "rejects malformed collaboration before it shells felt" do
     conn =
       post(

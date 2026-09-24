@@ -80,7 +80,7 @@ defmodule Shuttle.SessionLedger do
   Required: `:fiber`, `:session`, `:kind`. Optional: `:tmux`, `:harness`,
   `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
   own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
-  and `:collaboration` (the exact launch-time pointer snapshot). `:model`
+  and `:collaboration` (the exact launch-time participation snapshot). `:model`
   records the configured model passed to a launch command, not a claim about a
   provider's concrete backend checkpoint; callers omit it when no model was
   selected for that session.

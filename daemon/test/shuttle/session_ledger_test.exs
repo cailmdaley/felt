@@ -54,6 +54,41 @@ defmodule Shuttle.SessionLedgerTest do
       assert record["collaboration"] == collaboration
     end
 
+    test "snapshots readable collaboration as participation without rewriting it", %{path: path} do
+      collaboration = %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}
+
+      SessionLedger.record(
+        path: path,
+        fiber: "work/paper/edits",
+        session: "0883ade1-08e0-4457-94c6-7ac12137eb0f",
+        kind: :dispatch,
+        collaboration: collaboration
+      )
+
+      assert [%{"collaboration" => ^collaboration}] = decoded(path)
+      assert [%{"collaboration" => ^collaboration}] = SessionLedger.read_since(0, path: path)
+    end
+
+    test "reads historical UID collaboration snapshots unchanged", %{path: path} do
+      historical = %{
+        "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"},
+        "collaborator" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3K", "origin" => "host-a"}
+      }
+
+      File.write!(
+        path,
+        Jason.encode!(%{
+          "fiber" => "old/fiber",
+          "session" => "old-session",
+          "at" => 100,
+          "kind" => "dispatch",
+          "collaboration" => historical
+        }) <> "\n"
+      )
+
+      assert [%{"collaboration" => ^historical}] = SessionLedger.read_since(0, path: path)
+    end
+
     test "keeps legacy rows without collaboration or execution fields readable", %{path: path} do
       File.write!(
         path,

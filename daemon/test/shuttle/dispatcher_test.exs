@@ -153,6 +153,12 @@ defmodule Shuttle.DispatcherTest do
         },
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
+      "tests/readable-collaborative" => %{
+        status: "active",
+        tags: ["constitution"],
+        collaboration: %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]},
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/shuttle-agent-block" => %{
         status: "active",
         tags: ["constitution"],
@@ -553,6 +559,31 @@ defmodule Shuttle.DispatcherTest do
     refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
   end
 
+  test "readable collaboration prompts name a singleton actor and hide multi-role rosters" do
+    singleton = {:ok, %{"vizier" => ["fable"]}}
+    multi = {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}}
+
+    singleton_prompt =
+      Dispatcher.render_prompt("tests/a", collaboration: singleton, felt_store: "/tmp/loom")
+
+    assert singleton_prompt =~ "You are working as fable within the vizier role."
+    assert singleton_prompt =~ "felt -C '/tmp/loom' show roles/vizier/fable"
+
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a", collaboration: multi),
+          Dispatcher.render_resume_prompt("tests/a", collaboration: multi),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: multi)
+        ] do
+      assert prompt =~ "use the current request or handoff to identify your role and collaborator"
+      assert prompt =~ "do not infer identity from the model"
+      refute prompt =~ "vizier"
+      refute prompt =~ "fable"
+      refute prompt =~ "astra"
+      refute prompt =~ "organizer"
+      refute prompt =~ "opus"
+    end
+  end
+
   test "all worker prompt entrypoints sync before reading current fibers" do
     prompts = [
       Dispatcher.render_prompt("tests/a", felt_store: "/tmp/shared loom"),
@@ -584,6 +615,13 @@ defmodule Shuttle.DispatcherTest do
              },
              "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
            }
+  end
+
+  test "dispatch snapshots the readable collaboration participation map unchanged" do
+    assert {:ok, _} = Dispatcher.dispatch("tests/readable-collaborative", runner: MockRunner)
+
+    assert [record] = Shuttle.SessionLedger.read_since(0)
+    assert record["collaboration"] == %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}
   end
 
   test "render_prompt omits the From User block when no user_message is carried" do

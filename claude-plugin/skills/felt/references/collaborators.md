@@ -1,48 +1,54 @@
 # Roles and collaborators
 
-Roles live at the top of the felt store, with collaborators beneath their role:
+Roles and collaborators are ordinary fibers in the shared felt store. The
+canonical roster lives on a task constitution:
 
-```text
-roles/
-  review/
-    review.md
-    fable/
-      fable.md
-    astra/
-      astra.md
+```yaml
+collaboration:
+  vizier: [fable, astra]
+  organizer: [opus]
 ```
 
-These are ordinary, usually statusless fibers. Tag the role `role` and a
-collaborator `collaborator` for discovery. Create collaborators when useful;
-there is no need to populate every model/role combination. Project knowledge
-stays in its existing fibers, linked from the role.
+Role names map to `roles/<role>/`; collaborator names map to
+`roles/<role>/<collaborator>/`. A role-only entry such as `organizer: []` is
+valid when a task belongs to a role but has no named collaborator. Create identity fibers
+only when durable context will help; there is no need to populate every
+role/collaborator combination.
 
-The role describes the work and holds useful shared context. Collaborators
-can use their own fibers freely: orientation, experiments, disagreements,
-history, or reasons to reconsider a past conclusion. Information another
-worker needs belongs in the role or the relevant shared task/project, even
-when its fuller explanation lives in a collaborator's notes. Preserve who
-held a view when disagreement matters; no particular template is required.
+The task roster refers to identities; it does not choose an execution model.
+The current request establishes who is acting. Do not infer identity from the
+model or invent a separate selector schema. At startup, name an actor only
+when the roster names exactly one role/collaborator pair. With multiple
+entries, read the roster directly from the task YAML; do not repeat it as a
+prompt list.
 
-A collaborator is scoped to its role. `shuttle.agent` separately chooses the
-execution model and harness. A role can cover several constitutions; it is
-not the same as a scheduled constitution (`shuttle.kind: standing`). The
-current task still determines what work is authorized.
+Keep specific, personal notes in the collaborator's own fiber. Put information
+needed across the task in the task constitution, and information shared across
+tasks in the global role or project fibers. Task-local notes can live under
+`<constitution>/roles/<role>/<collaborator>/` and
+`<constitution>/roles/<role>/`; use them when they add useful task context.
+These notes concern the same identities, not new task-specific identities.
+
+Identity is the fiber's intrinsic UID. Authored roster entries use readable
+names and should be updated when a fiber is renamed. Historical UID mappings
+remain readable for compatibility and past records. Session ledgers record
+which roster participated in a session; they do not assert that every listed
+collaborator authored the session or every change.
 
 ## Synchronize, then work locally
 
 ```bash
 felt sync
-felt show roles/review
-felt show roles/review/fable
+felt -C <shared-store> show roles/vizier
+felt -C <shared-store> show roles/vizier/fable
 ```
 
 `felt sync` operates on the Git repository containing the actual felt store,
 including when a project's `.felt` is a symlink into that store. It fetches
 and merges the current branch's upstream. Edit files normally, or use
 `felt edit`. Commit intentional changes, then use `felt sync --push` to merge
-incoming work and publish to the tracking branch. There is no special
-role-saving operation and no host owner on a role or collaborator.
+incoming work and publish to the tracking branch. Roles and collaborators
+have no host owner.
 
 Resolve relevant Git conflicts with the work's context, then stage the
 resolution, commit, and retry synchronization. Do not choose an automatic
@@ -53,30 +59,17 @@ as synchronized. Git-ignored content stays local.
 
 ## Assigning a task
 
-Use meaningful names from the synchronized store:
+Add membership without replacing existing roster entries:
 
 ```bash
-felt shuttle assign <task> --role review --collaborator fable
+felt shuttle assign <task> --role vizier --collaborator fable --collaborator astra
 ```
 
-Full `roles/...` paths and intrinsic UIDs also work. The writer resolves names
-to stable references, so renaming a fiber does not replace its identity:
+Use `--json-assignment` for an exact replacement, such as
+`{"vizier":["fable","astra"],"organizer":[]}`. Use `--clear` to remove
+the roster. Inputs can name profiles by slug, full path, or UID; the stored
+roster uses readable slugs. Renaming a profile means updating authored roster
+entries while keeping the fiber's intrinsic UID.
 
-```yaml
-collaboration:
-  role:
-    uid: 01...
-  collaborator:
-    uid: 01...
-```
-
-The block is optional. `--clear-role`, `--clear-collaborator`, and `--clear`
-remove references; `--json-assignment` replaces the block with validated UID
-references. Assignment changes no worker lifecycle or execution settings.
-Session history records assignments without claiming authorship of every
-fiber touched. Profile content is read locally after sync, not routed by a
-machine address. `shuttle.host` continues to select which daemon may execute
-a constitution, even when its file is synchronized to other machines.
-
-For session behavior and model-version handoffs, read the Shuttle skill's
+For the session handoff and ledger behavior, read the Shuttle skill's
 [continuity reference](../../shuttle/references/continuity.md).

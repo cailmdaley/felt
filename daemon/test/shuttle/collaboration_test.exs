@@ -6,6 +6,38 @@ defmodule Shuttle.CollaborationTest do
   @collaborator "01KTS261GJMMRDRHS2QDMEFV3K"
   @role "01KTS261GJMMRDRHS2QDMEFV3M"
 
+  test "accepts role-to-collaborator slug assignments, including role-only assignments" do
+    assert {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}} =
+             Collaboration.parse(%{"vizier" => ["fable", "astra"], "organizer" => ["opus"]})
+
+    assert {:ok, %{"vizier" => []}} = Collaboration.parse(%{"vizier" => []})
+
+    assert {:ok, %{"role" => ["collaborator"]}} =
+             Collaboration.parse(%{"role" => ["collaborator"]})
+  end
+
+  test "rejects malformed paths and duplicate collaborator slugs" do
+    for assignment <- [
+          %{"../vizier" => ["fable"]},
+          %{"vizier/notes" => ["fable"]},
+          %{"vizier\n" => ["fable"]},
+          %{"Vizier" => ["fable"]},
+          %{"vizier" => ["../fable"]},
+          %{"vizier" => ["fable\n"]},
+          %{"vizier" => ["fable/notes"]},
+          %{"vizier" => ["fable", "fable"]},
+          %{"vizier" => "fable"}
+        ] do
+      assert {:error, _} = Collaboration.parse(assignment)
+    end
+
+    assert {:error, _} =
+             Collaboration.parse(%{
+               "role" => %{"uid" => @role},
+               "vizier" => ["fable"]
+             })
+  end
+
   test "accepts UID-only references and keeps optional origins as metadata" do
     assert {:ok,
             %{
@@ -72,6 +104,76 @@ defmodule Shuttle.CollaborationTest do
     refute prompt =~ "stale-host"
     refute prompt =~ "response.host"
     refute prompt =~ "/api/v1/fibers"
+  end
+
+  test "prompt names only an unambiguous assigned pair" do
+    prompt =
+      Collaboration.prompt_section({:ok, %{"vizier" => ["fable"]}}, "/tmp/shared loom")
+
+    assert prompt =~ "You are working as fable within the vizier role."
+    assert prompt =~ "felt -C '/tmp/shared loom' show roles/vizier"
+    assert prompt =~ "felt -C '/tmp/shared loom' show roles/vizier/fable"
+  end
+
+  @tag :tmp_dir
+  test "readable role paths use the enclosing shared store from project and constitution views",
+       %{
+         tmp_dir: tmp_dir
+       } do
+    loom = Path.join(tmp_dir, "loom")
+    project = Path.join(tmp_dir, "project")
+    constitution = Path.join(tmp_dir, "constitution")
+    project_view = Path.join([loom, ".felt", "projects", "weak-lensing"])
+    constitution_view = Path.join(project_view, "constitution")
+    local_notes = Path.join([project_view, "roles", "vizier", "fable.md"])
+    constitution_notes = Path.join([constitution_view, "roles", "vizier", "fable.md"])
+    global_identity = Path.join([loom, ".felt", "roles", "vizier", "fable.md"])
+
+    File.mkdir_p!(Path.dirname(local_notes))
+    File.mkdir_p!(Path.dirname(constitution_notes))
+    File.mkdir_p!(Path.dirname(global_identity))
+    File.write!(local_notes, "task-local notes")
+    File.write!(constitution_notes, "constitution-local notes")
+    File.write!(global_identity, "global collaborator identity")
+    File.mkdir_p!(project)
+    File.mkdir_p!(constitution)
+    File.ln_s!(project_view, Path.join(project, ".felt"))
+    File.ln_s!(constitution_view, Path.join(constitution, ".felt"))
+
+    collaboration = {:ok, %{"vizier" => ["fable"]}}
+
+    for store <- [
+          project,
+          Path.join(project, ".felt"),
+          constitution,
+          Path.join(constitution, ".felt")
+        ] do
+      prompt = Collaboration.prompt_section(collaboration, store)
+
+      assert prompt =~ "felt -C '#{loom}' show roles/vizier"
+      assert prompt =~ "felt -C '#{loom}' show roles/vizier/fable"
+      refute prompt =~ "felt -C '#{project}'"
+      refute prompt =~ "felt -C '#{constitution}'"
+    end
+  end
+
+  test "role-only and multi-role prompts do not print a participant roster" do
+    role_only = Collaboration.prompt_section({:ok, %{"vizier" => []}})
+    assert role_only =~ "You are working within the vizier role; no collaborator is named."
+    refute role_only =~ "participants"
+
+    multi =
+      Collaboration.prompt_section(
+        {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}}
+      )
+
+    assert multi =~ "use the current request or handoff to identify your role and collaborator"
+    assert multi =~ "do not infer identity from the model"
+    refute multi =~ "vizier"
+    refute multi =~ "fable"
+    refute multi =~ "astra"
+    refute multi =~ "organizer"
+    refute multi =~ "opus"
   end
 
   test "malformed document metadata remains visible in the worker prompt" do

@@ -53,15 +53,17 @@ is not enough.
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
 `POST /felt-edit` also accepts a `collaboration` object to replace a fiber's
-optional assignment. Each `collaborator` or `role` reference contains an
-intrinsic fiber `uid`. Send this separately from
-body, status, or other document edits: the owner runs one locked
-`felt shuttle assign --json-assignment` write. This changes assignment without
-launching a worker or changing the execution agent. The references are pointers,
-not copied profile bodies; workers synchronize their store and read role and
-collaborator content locally by UID. A reference's optional `origin` is accepted
-but does not select a profile read host. The request's top-level `origin` still
-routes the task edit. See [Collaborators](../concepts/collaborators.md).
+optional role roster. It is an exact replacement map from role slugs to arrays
+of collaborator slugs, for example
+`{"vizier":["fable","astra"],"organizer":[]}`. An empty collaborator
+array keeps a role-only entry. Send this separately from body, status, or
+other document edits: the owner runs one locked
+`felt shuttle assign --json-assignment` write. This changes the roster without
+launching a worker or changing the execution agent. The roster stores readable
+names, not copied profile bodies; workers synchronize their store and read
+relevant role and collaborator content locally. The request's top-level
+`origin` still routes the task edit. See
+[Collaborators](../concepts/collaborators.md).
 
 ### Codex app conversations
 

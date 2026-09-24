@@ -59,9 +59,9 @@ type SessionProvenance struct {
 	Harness string `json:"harness,omitempty"`
 	Host    string `json:"host,omitempty"`
 	Tmux    string `json:"tmux,omitempty"`
-	// Collaboration, Agent, and Model are dispatch-time attribution snapshots.
-	// They are never reconstructed from the fiber's current assignment because a
-	// later reassignment or model change must not rewrite session history.
+	// Collaboration snapshots the configured participants, not session authorship.
+	// Agent and Model record execution settings. These launch-time values are not
+	// reconstructed from the fiber's current assignment.
 	Collaboration *shuttle.Collaboration `json:"collaboration,omitempty"`
 	Agent         string                 `json:"agent,omitempty"`
 	Model         string                 `json:"model,omitempty"`
