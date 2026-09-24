@@ -133,6 +133,7 @@ untouched by any of this.
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
+| `felt shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
 | `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 

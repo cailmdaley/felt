@@ -17,10 +17,10 @@ import (
 func runAgents(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 
-	prevJSON, prevSource, prevPath, prevForce := jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce
+	prevJSON, prevSource, prevPath, prevForce, prevReset := jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset
 	prevArgs, prevChangeDir, prevStdout := os.Args, changeDir, os.Stdout
 	defer func() {
-		jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce = prevJSON, prevSource, prevPath, prevForce
+		jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset = prevJSON, prevSource, prevPath, prevForce, prevReset
 		os.Args, changeDir, os.Stdout = prevArgs, prevChangeDir, prevStdout
 		rootCmd.SetArgs(nil)
 		rootCmd.SetOut(io.Discard)
@@ -29,7 +29,7 @@ func runAgents(t *testing.T, args ...string) (stdout, stderr string, err error) 
 
 	// Cobra only assigns flag values on parse, so a prior --json run leaves them
 	// set. Reset to defaults.
-	jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce = false, "", "", false
+	jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset = false, "", "", false, false
 
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
@@ -302,5 +302,53 @@ func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 	}
 	if b.Agent != "my-agent" {
 		t.Fatalf("agent = %q, want my-agent", b.Agent)
+	}
+}
+
+// ---- effort overrides --------------------------------------------------------
+
+func TestShuttleAgentsEffort_SetListReset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.json")
+	t.Setenv("FELT_AGENTS_FILE", path)
+
+	stdout, _, err := runAgents(t, "shuttle", "agents", "effort", "claude-opus", "high")
+	if err != nil || !strings.Contains(stdout, "claude-opus: default_effort high in "+path) {
+		t.Fatalf("effort set: %v\n%s", err, stdout)
+	}
+
+	stdout, _, err = runAgents(t, "shuttle", "agents", "--json")
+	if err != nil {
+		t.Fatalf("agents --json: %v", err)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &records); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	for _, rec := range records {
+		if rec["id"] == "claude-opus" && (rec["default_effort"] != "high" || rec["default_effort_source"] != "override") {
+			t.Fatalf("claude-opus in the listing: %v", rec)
+		}
+	}
+	if table, _, _ := runAgents(t, "shuttle", "agents"); !strings.Contains(table, "default=high(override)") {
+		t.Fatalf("the table should mark the override:\n%s", table)
+	}
+
+	if _, _, err := runAgents(t, "shuttle", "agents", "effort", "claude-opus", "--reset"); err != nil {
+		t.Fatalf("effort --reset: %v", err)
+	}
+	if body, _ := os.ReadFile(path); strings.Contains(string(body), "overrides") {
+		t.Fatalf("reset left the override:\n%s", body)
+	}
+}
+
+func TestShuttleAgentsEffort_ArgumentShape(t *testing.T) {
+	t.Setenv("FELT_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
+	for _, args := range [][]string{
+		{"claude-opus"},
+		{"claude-opus", "high", "--reset"},
+	} {
+		if _, _, err := runAgents(t, append([]string{"shuttle", "agents", "effort"}, args...)...); err == nil {
+			t.Fatalf("effort %v should be refused", args)
+		}
 	}
 }

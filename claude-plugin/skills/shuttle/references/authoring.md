@@ -61,6 +61,6 @@ constitution names an agent, use it.
 
 `claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
 
-**Your registry may be larger.** Run `felt shuttle agents` to list the effective set on this machine. Users layer their own records on top of the builtins in `~/.config/felt/agents.json` — other CLIs, other models, cost classes, aliases. `felt shuttle agents init` seeds that file from the built-ins, working every field. Prefer an agent the listing actually shows; when the user names one you don't recognize, check the listing before assuming it exists.
+**Your registry may be larger.** Run `felt shuttle agents` to list the effective set on this machine. Users layer their own records on top of the builtins in `~/.config/felt/agents.json` — other CLIs, other models, cost classes, aliases. `felt shuttle agents init` seeds that file from the built-ins, working every field; `felt shuttle agents effort <id> <level>` changes one agent's default effort without copying its record. Prefer an agent the listing actually shows; when the user names one you don't recognize, check the listing before assuming it exists.
 
 Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]` (`set-model` is the agent-only shorthand). Edits to `~/.config/felt/agents.json` take effect on the next read — no rebuild — but each remote host reads its own copy.

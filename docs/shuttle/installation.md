@@ -700,8 +700,35 @@ from the built-ins, working every field across several harnesses — edit that. 
 missing file is silent. A malformed file fails loudly and names the path.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
-records over the built-ins by id, last one wins. `"restrict"` drops the built-in
-layer entirely, so the file becomes the complete registry for that host.
+records over the built-ins by id, last one wins — wholesale, never field by
+field. `"restrict"` drops the built-in layer entirely, so the file becomes the
+complete registry for that host.
+
+To change one agent's default effort without copying its whole record, use the
+`overrides` block. It applies after the merge, to built-in and user records
+alike:
+
+```json
+{
+  "version": 1,
+  "builtins": "merge",
+  "agents": [],
+  "overrides": { "claude-opus": { "default_effort": "high" } }
+}
+```
+
+```bash
+felt shuttle agents effort claude-opus high     # write the override
+felt shuttle agents effort claude-opus --reset  # remove it
+```
+
+An alias key lands on its base agent; the CLI keys the entry by that base id.
+`default_effort` is the only field an override sets. An unknown field, an
+unknown agent, or a level outside the agent's `effort_levels` fails the load
+and names the file. `felt shuttle agents` marks an overridden default as
+`default=<level>(override)`, and `--json` carries
+`"default_effort_source": "override"`. The board's settings sheet sets the same
+override from a select on each agent row.
 There is no reserved `human` record.
 
 ## Configuring remotes

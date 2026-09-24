@@ -26,6 +26,9 @@ import (
 //     resolved sub-key — shells this instead of re-implementing the registry.
 //   - `felt shuttle agents init` → seed the user registry file, so extending the
 //     built-in set is a file to edit rather than a format to look up.
+//   - `felt shuttle agents effort <agent> <level>|--reset` → set or clear one
+//     agent's default_effort override in that file. felt is the only structured
+//     writer of the grammar; the daemon's POST /api/v1/agents/effort shells it.
 //
 // The registry is the embedded built-ins with the user registry layered on top
 // ($FELT_AGENTS_FILE, else ~/.config/felt/agents.json). Reads touch no felt
@@ -37,6 +40,7 @@ var (
 	agentsSourceFilter  string
 	agentsInitPath      string
 	agentsInitForce     bool
+	agentsEffortReset   bool
 )
 
 var shuttleAgentsCmd = &cobra.Command{
@@ -51,7 +55,9 @@ record — * default, u user-provided, blank built-in — and closes with a foot
 on stderr naming what loaded from where. --source filters to one layer.
 
 The user file defaults to builtins: "merge". Set builtins: "restrict" in its
-envelope to make the listed records the complete registry for one host.
+envelope to make the listed records the complete registry for one host. Its
+"overrides" block patches one field of any resolved agent (see ` + "`agents effort`" + `);
+the table marks an overridden default as default=<level>(override).
 
 --json emits the bare array the daemon's GET /api/v1/agents serves to the
 browser's agent picker, and nothing else: no footer, no warnings, either
@@ -203,6 +209,43 @@ field across several harnesses — edit it in place.`,
 	},
 }
 
+var shuttleAgentsEffortCmd = &cobra.Command{
+	Use:   "effort <agent> [<level> | --reset]",
+	Short: "Set or clear an agent's default effort in the user registry",
+	Long: `Set the default effort of any agent — built-in or user — without copying
+its record into the user file. Writes an entry in the file's "overrides" block:
+
+  "overrides": { "claude-opus": { "default_effort": "high" } }
+
+An alias resolves to its base agent, and the override is keyed by that id. The
+level must be one of the agent's effort_levels. --reset removes the override.
+Every other key and record in the file is kept, in order. A missing file is
+created; a bare-array file is rewritten in the object form.`,
+	Args: cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		level := ""
+		if len(args) == 2 {
+			level = args[1]
+		}
+		if (level == "") == !agentsEffortReset {
+			return fmt.Errorf("give exactly one of <level> or --reset")
+		}
+		path, id, changed, err := shuttle.SetEffortOverride(args[0], level)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !changed:
+			fmt.Printf("%s: no override in %s\n", id, path)
+		case level == "":
+			fmt.Printf("%s: override removed from %s\n", id, path)
+		default:
+			fmt.Printf("%s: default_effort %s in %s\n", id, level, path)
+		}
+		return nil
+	},
+}
+
 // sourceMarker is the table's leading column: `*` the default agent, `u` a
 // user-provided record, blank a built-in.
 func sourceMarker(a shuttle.AgentRecord) string {
@@ -242,6 +285,9 @@ func formatConstraints(a shuttle.AgentRecord) string {
 	var parts []string
 	if len(a.EffortLevels) > 0 {
 		parts = append(parts, "effort="+strings.Join(a.EffortLevels, ","))
+	}
+	if a.DefaultEffortSource == shuttle.DefaultEffortOverride {
+		parts = append(parts, "default="+a.DefaultEffort+"(override)")
 	}
 	if a.ChromeCapable {
 		parts = append(parts, "chrome")
@@ -284,6 +330,9 @@ func init() {
 	shuttleAgentsInitCmd.Flags().BoolVar(&agentsInitForce, "force", false,
 		"Overwrite an existing file")
 	shuttleAgentsCmd.AddCommand(shuttleAgentsResolveCmd)
+	shuttleAgentsEffortCmd.Flags().BoolVar(&agentsEffortReset, "reset", false,
+		"Remove the agent's default_effort override")
 	shuttleAgentsCmd.AddCommand(shuttleAgentsInitCmd)
+	shuttleAgentsCmd.AddCommand(shuttleAgentsEffortCmd)
 	shuttleCmd.AddCommand(shuttleAgentsCmd)
 }

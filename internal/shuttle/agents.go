@@ -42,6 +42,10 @@ type AgentRecord struct {
 	// Deliberately absent from ResolvedAgent — dispatch does not care where a
 	// record came from.
 	Source string `json:"source,omitempty"`
+	// DefaultEffortSource is "override" when DefaultEffort comes from the user
+	// file's `overrides` block rather than the record itself; empty otherwise.
+	// Loader-assigned provenance, like Source.
+	DefaultEffortSource string `json:"default_effort_source,omitempty"`
 }
 
 // Axes carries the orthogonal per-fiber dispatch axes beyond base agent: effort

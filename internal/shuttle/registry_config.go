@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -44,12 +45,33 @@ const (
 // agentsFileVersion is the only envelope version this felt reads.
 const agentsFileVersion = 1
 
+// DefaultEffortOverride is AgentRecord.DefaultEffortSource for a record whose
+// default_effort comes from the file's `overrides` block.
+const DefaultEffortOverride = "override"
+
 // agentsFile is the user registry's canonical envelope. A bare array is also
 // accepted and read as {version: 1, builtins: "merge", agents: […]}.
+//
+// Overrides patch single fields of the RESOLVED registry, keyed by agent id —
+// the one structured gesture beside wholesale records:
+//
+//	"overrides": { "claude-opus": { "default_effort": "high" } }
+//
+// They apply after the layer merge, so they reach built-in and user records
+// alike without copying a record into the file. An alias key (an `aliases`
+// entry or an alias record) lands on its canonical base agent. default_effort
+// is the only field an override may set; an unknown field, an unknown agent, or
+// an effort outside that agent's effort_levels fails the load.
 type agentsFile struct {
-	Version  int           `json:"version"`
-	Builtins string        `json:"builtins"`
-	Agents   []AgentRecord `json:"agents"`
+	Version   int                        `json:"version"`
+	Builtins  string                     `json:"builtins"`
+	Agents    []AgentRecord              `json:"agents"`
+	Overrides map[string]json.RawMessage `json:"overrides,omitempty"`
+}
+
+// agentOverride is one entry of the `overrides` block.
+type agentOverride struct {
+	DefaultEffort string `json:"default_effort"`
 }
 
 // UserAgentsPath is where the user registry is read from (and written to by
@@ -78,7 +100,12 @@ func layerUserAgents(builtins *AgentRegistry) (*AgentRegistry, error) {
 		}
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
+	return foldUserAgents(builtins, data, path)
+}
 
+// foldUserAgents builds the effective registry from the built-in layer and the
+// user file's bytes: parse, merge by id, then apply overrides.
+func foldUserAgents(builtins *AgentRegistry, data []byte, path string) (*AgentRegistry, error) {
 	file, warnings, err := parseAgentsFile(data, path)
 	if err != nil {
 		return nil, err
@@ -88,6 +115,9 @@ func layerUserAgents(builtins *AgentRegistry) (*AgentRegistry, error) {
 	}
 
 	agents, mergeWarnings := mergeAgentLayers(builtins.agents, file.Agents, file.Builtins)
+	if err := applyOverrides(agents, file.Overrides); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &AgentRegistry{
 		agents:       agents,
 		userPath:     path,
@@ -95,6 +125,81 @@ func layerUserAgents(builtins *AgentRegistry) (*AgentRegistry, error) {
 		builtinCount: builtins.builtinCount,
 		warnings:     append(warnings, mergeWarnings...),
 	}, nil
+}
+
+// applyOverrides patches the merged records in place. Every problem is fatal:
+// an override that silently does nothing is the failure this block exists to
+// make impossible.
+func applyOverrides(agents []AgentRecord, overrides map[string]json.RawMessage) error {
+	keys := make([]string, 0, len(overrides))
+	for k := range overrides {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	claimed := map[int]string{}
+	for _, key := range keys {
+		dec := json.NewDecoder(bytes.NewReader(overrides[key]))
+		dec.DisallowUnknownFields()
+		var ov agentOverride
+		if err := dec.Decode(&ov); err != nil {
+			return fmt.Errorf("overrides[%q]: %w (default_effort is the only field an override sets)", key, err)
+		}
+		if ov.DefaultEffort == "" {
+			return fmt.Errorf("overrides[%q]: default_effort is required", key)
+		}
+		i, err := canonicalIndex(agents, key)
+		if err != nil {
+			return fmt.Errorf("overrides[%q]: %w", key, err)
+		}
+		if prev, ok := claimed[i]; ok {
+			return fmt.Errorf("overrides %q and %q both name agent %q", prev, key, agents[i].ID)
+		}
+		claimed[i] = key
+		if !containsString(agents[i].EffortLevels, ov.DefaultEffort) {
+			if len(agents[i].EffortLevels) == 0 {
+				return fmt.Errorf("overrides[%q]: agent %q has no effort axis", key, agents[i].ID)
+			}
+			return fmt.Errorf("overrides[%q]: effort %q not allowed for agent %q (allowed: %s)",
+				key, ov.DefaultEffort, agents[i].ID, strings.Join(agents[i].EffortLevels, ", "))
+		}
+		agents[i].DefaultEffort = ov.DefaultEffort
+		agents[i].DefaultEffortSource = DefaultEffortOverride
+	}
+	return nil
+}
+
+// canonicalIndex finds the base record a name lands on — by id, by an
+// `aliases` entry, or through an alias record's alias_of — with Find's
+// precedence.
+func canonicalIndex(agents []AgentRecord, name string) (int, error) {
+	reg := &AgentRegistry{agents: agents}
+	rec, ok := reg.Find(name)
+	if !ok {
+		return 0, fmt.Errorf("unknown agent %q", name)
+	}
+	if rec.IsAlias() {
+		base, ok := reg.Find(rec.AliasOf)
+		if !ok {
+			return 0, fmt.Errorf("agent %q aliases unknown base %q", rec.ID, rec.AliasOf)
+		}
+		rec = base
+	}
+	for i := range agents {
+		if agents[i].ID == rec.ID {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("unknown agent %q", name)
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // parseAgentsFile reads the user registry envelope (or a bare array) and
@@ -145,11 +250,12 @@ func parseAgentRecords(data []byte, path string) ([]AgentRecord, error) {
 }
 
 // normalizeAgentRecords applies the two shape relaxations the record format
-// allows, and strips any Source a file tried to declare (provenance is the
-// loader's to assign, never the file's).
+// allows, and strips any provenance a file tried to declare (Source and
+// DefaultEffortSource are the loader's to assign, never the file's).
 func normalizeAgentRecords(agents []AgentRecord) {
 	for i := range agents {
 		agents[i].Source = ""
+		agents[i].DefaultEffortSource = ""
 		if agents[i].Wrapper == "" {
 			agents[i].Wrapper = agents[i].CLI
 		}

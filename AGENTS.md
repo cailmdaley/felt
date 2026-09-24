@@ -67,7 +67,11 @@ lives in the docs site (`docs/`, published to
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
   merged over it by default. The user file can set `builtins: "restrict"` to
-  replace the shipped layer for one host. `felt shuttle agents init` seeds that
+  replace the shipped layer for one host. Records merge wholesale by id; the
+  file's `overrides` block (`{"claude-opus": {"default_effort": "high"}}`)
+  patches `default_effort` on any resolved agent, and `felt shuttle agents
+  effort <id> <level>|--reset` is its one structured writer (the daemon's
+  `POST /api/v1/agents/effort` shells it). `felt shuttle agents init` seeds that
   file from the built-ins — a worked example of every field, ready to edit for
   local additions or overrides. There
   is no reserved `human` agent; a

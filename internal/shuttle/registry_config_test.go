@@ -329,3 +329,253 @@ func indexOf(list []string, want string) int {
 	}
 	return -1
 }
+
+// ---- overrides ----------------------------------------------------------------
+
+func TestOverrides_PatchBuiltinDefaultEffort(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"agents":[],"overrides":{"claude-opus":{"default_effort":"high"}}}`)
+
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	opus := find(t, reg, "claude-opus")
+	if opus.DefaultEffort != "high" || opus.DefaultEffortSource != DefaultEffortOverride {
+		t.Fatalf("claude-opus default_effort = %q (%q), want high (override)", opus.DefaultEffort, opus.DefaultEffortSource)
+	}
+	if opus.Source != SourceBuiltin {
+		t.Fatalf("an override must not move a record's layer: source %q", opus.Source)
+	}
+	if sonnet := find(t, reg, "claude-sonnet"); sonnet.DefaultEffortSource != "" {
+		t.Fatalf("an unnamed agent must not be marked: %+v", sonnet)
+	}
+	_, axes, err := reg.Resolve("claude-opus", "", false)
+	if err != nil || axes.Effort != "high" {
+		t.Fatalf("Resolve effort = %q, %v; want high", axes.Effort, err)
+	}
+}
+
+func TestOverrides_ReachUserRecords(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"agents":[{"id":"mine","cli":"x","effort_levels":["a","b"],"default_effort":"a"}],
+		"overrides":{"mine":{"default_effort":"b"}}}`)
+
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	if got := find(t, reg, "mine").DefaultEffort; got != "b" {
+		t.Fatalf("default_effort = %q, want b", got)
+	}
+}
+
+func TestOverrides_AliasLandsOnCanonical(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"agents":[{"id":"deep","alias_of":"claude-opus","axes":{"chrome":true}}],
+		"overrides":{"deep":{"default_effort":"max"},"gpt-6-astra":{"default_effort":"ultra"}}}`)
+
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	if got := find(t, reg, "claude-opus").DefaultEffort; got != "max" {
+		t.Fatalf("alias record → claude-opus default_effort = %q, want max", got)
+	}
+	if got := find(t, reg, "codex-astra").DefaultEffort; got != "ultra" {
+		t.Fatalf("aliases entry → codex-astra default_effort = %q, want ultra", got)
+	}
+	if find(t, reg, "deep").DefaultEffortSource != "" {
+		t.Fatal("the alias record itself must stay untouched")
+	}
+}
+
+func TestOverrides_LoudFailures(t *testing.T) {
+	cases := map[string]string{
+		"invalid level":      `{"overrides":{"claude-opus":{"default_effort":"ludicrous"}}}`,
+		"unknown agent":      `{"overrides":{"no-such-agent":{"default_effort":"high"}}}`,
+		"unknown field":      `{"overrides":{"claude-opus":{"default_effort":"high","model":"x"}}}`,
+		"empty override":     `{"overrides":{"claude-opus":{}}}`,
+		"no effort axis":     `{"agents":[{"id":"flat","cli":"x"}],"overrides":{"flat":{"default_effort":"high"}}}`,
+		"two keys, one base": `{"overrides":{"codex-astra":{"default_effort":"high"},"gpt-6-astra":{"default_effort":"low"}}}`,
+		"dangling alias":     `{"agents":[{"id":"ghost","alias_of":"nope"}],"overrides":{"ghost":{"default_effort":"high"}}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeUserRegistry(t, body)
+			_, err := LoadAgentRegistry()
+			if err == nil {
+				t.Fatal("expected a load error")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("error should name the file: %v", err)
+			}
+		})
+	}
+}
+
+func TestOverrides_ProvenanceCannotBeSpoofed(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"agents":[{"id":"sneaky","cli":"x","default_effort_source":"override"}]}`)
+
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("LoadAgentRegistry: %v", err)
+	}
+	if got := find(t, reg, "sneaky").DefaultEffortSource; got != "" {
+		t.Fatalf("default_effort_source = %q, want empty", got)
+	}
+}
+
+// ---- the override writer --------------------------------------------------------
+
+func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
+	path := writeUserRegistry(t, `{
+  "builtins": "merge",
+  "comment": {"why": "kept"},
+  "agents": [
+    {"id": "zeta", "cli": "z", "effort_levels": ["lo", "hi"]},
+    {"id": "alpha", "cli": "a", "turbo": true}
+  ],
+  "version": 1
+}`)
+
+	_, id, changed, err := SetEffortOverride("claude-opus", "high")
+	if err != nil || !changed || id != "claude-opus" {
+		t.Fatalf("set = %q, %v, %v", id, changed, err)
+	}
+	if _, _, _, err := SetEffortOverride("zeta", "hi"); err != nil {
+		t.Fatalf("set zeta: %v", err)
+	}
+	body := readFile(t, path)
+	for _, want := range []string{`"comment": {`, `"why": "kept"`, `"turbo": true`, `"overrides": {`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s after set:\n%s", want, body)
+		}
+	}
+	if order := []int{strings.Index(body, `"builtins"`), strings.Index(body, `"comment"`), strings.Index(body, `"agents"`),
+		strings.Index(body, `"zeta"`), strings.Index(body, `"alpha"`), strings.Index(body, `"version"`),
+		strings.Index(body, `"overrides"`)}; !ascending(order) {
+		t.Fatalf("keys or agents reordered (%v):\n%s", order, body)
+	}
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if find(t, reg, "claude-opus").DefaultEffort != "high" || find(t, reg, "zeta").DefaultEffort != "hi" {
+		t.Fatalf("overrides not applied:\n%s", body)
+	}
+
+	for _, name := range []string{"claude-opus", "zeta"} {
+		if _, _, changed, err := SetEffortOverride(name, ""); err != nil || !changed {
+			t.Fatalf("reset %s = %v, %v", name, changed, err)
+		}
+	}
+	if _, _, changed, err := SetEffortOverride("claude-opus", ""); err != nil || changed {
+		t.Fatalf("a second reset should be a no-op: %v, %v", changed, err)
+	}
+	body = readFile(t, path)
+	if strings.Contains(body, "overrides") {
+		t.Fatalf("an empty overrides block should be dropped:\n%s", body)
+	}
+	if !strings.Contains(body, `"why": "kept"`) || !strings.Contains(body, `"turbo": true`) {
+		t.Fatalf("reset lost content:\n%s", body)
+	}
+}
+
+func TestSetEffortOverride_AliasKeysByCanonicalAndReplacesAliasKey(t *testing.T) {
+	path := writeUserRegistry(t, `{"version":1,"agents":[],"overrides":{"gpt-6-astra":{"default_effort":"low"}}}`)
+
+	_, id, _, err := SetEffortOverride("gpt-6-astra", "max")
+	if err != nil || id != "codex-astra" {
+		t.Fatalf("set via alias = %q, %v", id, err)
+	}
+	body := readFile(t, path)
+	if strings.Contains(body, "gpt-6-astra") || !strings.Contains(body, `"codex-astra"`) {
+		t.Fatalf("override should be keyed by the canonical id alone:\n%s", body)
+	}
+}
+
+func TestSetEffortOverride_Refusals(t *testing.T) {
+	path := writeUserRegistry(t, `{"version":1,"agents":[]}`)
+	before := readFile(t, path)
+
+	if _, _, _, err := SetEffortOverride("claude-opus", "ludicrous"); err == nil {
+		t.Fatal("an effort outside effort_levels must be refused")
+	}
+	if _, _, _, err := SetEffortOverride("no-such-agent", "high"); err == nil {
+		t.Fatal("an unknown agent must be refused")
+	}
+	if readFile(t, path) != before {
+		t.Fatal("a refused edit must leave the file untouched")
+	}
+}
+
+func TestSetEffortOverride_CreatesMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "agents.json")
+	t.Setenv("FELT_AGENTS_FILE", path)
+
+	if _, _, changed, err := SetEffortOverride("claude-opus", ""); err != nil || changed {
+		t.Fatalf("resetting with no file = %v, %v; want a no-op", changed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("a no-op reset must not create the file")
+	}
+	if _, _, _, err := SetEffortOverride("claude-opus", "high"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	want := `{
+  "version": 1,
+  "builtins": "merge",
+  "agents": [],
+  "overrides": {
+    "claude-opus": {
+      "default_effort": "high"
+    }
+  }
+}
+`
+	if got := readFile(t, path); got != want {
+		t.Fatalf("created file:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestSetEffortOverride_ConvertsBareArray(t *testing.T) {
+	path := writeUserRegistry(t, `[{"id":"mine","cli":"x","effort_levels":["a","b"]}]`)
+
+	if _, _, _, err := SetEffortOverride("mine", "b"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	body := readFile(t, path)
+	if !strings.HasPrefix(body, "{\n  \"version\": 1,\n  \"builtins\": \"merge\",\n  \"agents\": [") {
+		t.Fatalf("bare array should become the object form:\n%s", body)
+	}
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if rec := find(t, reg, "mine"); rec.DefaultEffort != "b" || rec.Source != SourceUser {
+		t.Fatalf("mine = %+v", rec)
+	}
+}
+
+func TestSetEffortOverride_RefusesABrokenFile(t *testing.T) {
+	writeUserRegistry(t, `{"version":1,"overrides":{"claude-opus":{"default_effort":"ludicrous"}}}`)
+	if _, _, _, err := SetEffortOverride("claude-sonnet", "high"); err == nil {
+		t.Fatal("an edit must not build on a registry that fails to load")
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(body)
+}
+
+func ascending(xs []int) bool {
+	for i := range xs {
+		if xs[i] < 0 || (i > 0 && xs[i] <= xs[i-1]) {
+			return false
+		}
+	}
+	return true
+}
