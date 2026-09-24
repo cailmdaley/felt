@@ -45,10 +45,12 @@ have a readable, greppable, version-controlled markdown file.
 3. **Work.** The worker reads the constitution fresh from disk. It reads the
    previous session's `## Status` handoff. Then it drives toward the desired
    state and picks its own slice. Sequencing emerges; nobody scripts it.
-4. **Hand off.** Before exiting, the worker rewrites `outcome:` (the kanban
+4. **Exit.** Before exiting, the worker rewrites `outcome:` (the kanban
    headline) and the body's `## Status` block (the next worker's landing pad).
-   It then runs `felt shuttle handoff <fiber>`. That stamps a clean-exit marker
-   and ends its own tmux session in one move.
+   Then it exits one of two ways: to continue, it runs `felt shuttle handoff
+   <fiber>`, which stamps a clean-exit marker and ends its own tmux session
+   in one move; to stop, it sets `status: closed` as its final write and does
+   nothing else — the daemon reaps the session and stamps the marker itself.
 5. **Redispatch or review.** A fiber still marked `active` gets a fresh worker
    on the next tick, and that worker lands warm on `## Status`. A fiber the
    worker set to `status: closed` waits for a human verdict.

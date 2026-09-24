@@ -76,6 +76,10 @@ work product into `outcome`, rewrite the constitution's `## Status`, exit via
 `felt shuttle handoff`. On exit the daemon writes `status: closed`
 (untempered) — the awaiting-review marker, the don't-re-fire gate, and the
 human's accept anchor. You do **not** write status or review fields yourself.
+This is the standing-role exception to the shuttle skill's two-verb exit: a
+standing role always exits by calling `handoff`, never by setting
+`status: closed` itself — the daemon applies `closed` on exit because the run
+is over, not because the worker asked to stop.
 
 ---
 

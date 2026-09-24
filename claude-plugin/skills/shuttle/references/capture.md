@@ -29,4 +29,6 @@ A terminal claim identifies `tmux_session` and, when supplied, the native
 name. An app claim identifies `surface: app` and the exact conversation
 `session_uuid`; it does not rename or replace the conversation. Never substitute
 a terminal claim, another conversation ID, or a new app server. App workers end
-their turn after handoff; never kill the shared backend or a parent process.
+their turn after the exit write — `felt shuttle handoff` to continue, or
+`status: closed` to stop — and never kill the shared backend or a parent
+process either way.

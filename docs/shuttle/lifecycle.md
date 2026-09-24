@@ -30,14 +30,18 @@ From there the worker:
    what "done" looks like; the worker sequences the steps.
 3. **Writes back** — rewrites `outcome:`, rewrites `## Status`, corrects the
    spec if the session sharpened it, files findings as sub-fibers, commits.
-4. **Hands off** — runs `felt shuttle handoff <fiber>` as its final action.
+4. **Exits** — with exactly one verb, depending on whether the work
+   continues: to continue, runs `felt shuttle handoff <fiber>` as its final
+   action; to stop, sets `status: closed` as its final write and does
+   nothing else.
 
-App workers use `env -u TMUX felt -C <felt-store> shuttle handoff <fiber>`, then
-finish the turn. The daemon releases ownership once that turn is idle. A
-normal final reply without a handoff keeps the conversation available for the
-human. Stop interrupts an app turn and releases ownership; Resume uses that
-same conversation, while New session explicitly starts another one. Unknown
-connection state never authorizes a duplicate.
+To continue, app workers run `env -u TMUX felt -C <felt-store> shuttle handoff
+<fiber>`, then finish the turn; to stop, they set `status: closed` and finish
+the turn without a handoff call. The daemon releases ownership once that turn
+is idle. A normal final reply without a handoff or a close keeps the
+conversation available for the human. Stop interrupts an app turn and releases
+ownership; Resume uses that same conversation, while New session explicitly
+starts another one. Unknown connection state never authorizes a duplicate.
 
 Workers should exit earlier than feels natural. A clean handoff at half a
 context window beats pushing through a compaction. `## Status` plus the
@@ -69,8 +73,8 @@ shuttle obeys the vocabulary literally. Know which word does what.
 
 | You say | The worker does | Next |
 |---|---|---|
-| "hand off" | case 3 — `status` stays `active` | Daemon redispatches |
-| "close it out" | `status: closed`, then handoff | Card waits for you; no new worker |
+| "hand off" | case 3 — `status` stays `active`, then handoff | Daemon redispatches |
+| "close it out" | `status: closed`, then stop — never handoff | Card waits for you; no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
@@ -220,7 +224,7 @@ earns its keep in four cases:
 3. **Archiving** — a closed fiber's card leaves the board entirely.
 4. **Handing ownership** to a different dispatcher.
 
-Never uninstall to end a worker session. Use `felt shuttle handoff`.
+Never uninstall to end a worker session. Use the ordinary exit — `felt shuttle handoff` to continue, `status: closed` to stop.
 
 ## Diagnosing a missing card
 
