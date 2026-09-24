@@ -130,6 +130,8 @@ export interface AgentRecord {
   default?: boolean
   /** Assigned by the loader: which layer this record came from. */
   source?: 'builtin' | 'user' | string
+  /** "override" when default_effort comes from the file's `overrides` block. */
+  default_effort_source?: 'override' | string
 }
 
 export interface RemoteHealth {
@@ -524,6 +526,19 @@ export const chooseFolder = (
 
 export const loadAgents = (base: string, host: SettingsHost): Promise<AgentRecord[]> =>
   getJSON(base, `/api/v1/agents${originQuery(host.origin)}`, host.label)
+
+/**
+ * Set one agent's default-effort override in the host's `agents.json`, or
+ * clear it with `effort: null`. The daemon shells `felt shuttle agents effort`,
+ * which validates the level against the agent's `effort_levels`.
+ */
+export const setAgentEffort = (
+  base: string,
+  host: SettingsHost,
+  id: string,
+  effort: string | null,
+): Promise<{ output: string }> =>
+  postJSON(base, '/api/v1/agents/effort', { id, effort, origin: host.origin }, host.label, hostGuard(host))
 
 // ── Fleet ───────────────────────────────────────────────────────────────────
 

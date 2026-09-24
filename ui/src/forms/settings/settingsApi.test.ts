@@ -47,6 +47,7 @@ import {
   loadHosts,
   releaseQuarantine,
   saveConfigFile,
+  setAgentEffort,
   type SettingsHost,
 } from './settingsApi.js'
 
@@ -303,6 +304,17 @@ describe('the origin on the wire', () => {
     const calls = recorder(() => json({ ok: true }))
     await releaseQuarantine(BASE, remote)
     expect(calls[0].body).toEqual({ origin: 'candide' })
+  })
+
+  it('routes an agent’s effort override, with null as the reset', async () => {
+    const calls = recorder(() => json({ ok: true, output: 'claude-opus: default_effort high' }))
+    await setAgentEffort(BASE, remote, 'claude-opus', 'high')
+    expect(calls[0].url).toBe(`${BASE}/api/v1/agents/effort`)
+    expect(calls[0].body).toEqual({ id: 'claude-opus', effort: 'high', origin: 'candide' })
+
+    const resetCalls = recorder(() => json({ ok: true, output: '' }))
+    await setAgentEffort(BASE, local, 'claude-opus', null)
+    expect(resetCalls[0].body).toEqual({ id: 'claude-opus', effort: null, origin: '' })
   })
 })
 

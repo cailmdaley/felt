@@ -9,13 +9,19 @@
  * `agent: x`". A table of just the user file would show three records on a
  * host that can run seventeen.
  *
- * There is no form for a record, and that is a decision rather than an
- * omission. The merge is wholesale by id — a user record REPLACES a built-in
- * one rather than patching it — so a form offering one field at a time would
- * be quietly lying about what saving it does. The file is the honest editor,
- * and it is validated by the loader that reads it for real, which fails on an
- * unsupported version or an unknown `builtins` mode and warns about a dangling
- * alias.
+ * There is one structured gesture: each row with an effort axis carries a
+ * select for its default effort. Choosing a level writes an entry in the
+ * file's `overrides` block (`felt shuttle agents effort`, via the daemon),
+ * which patches that one field of the resolved record — built-in or user — and
+ * the row marks it "· override". Resetting removes the entry.
+ *
+ * There is no form for a whole record, and that is a decision rather than an
+ * omission. The merge of records is wholesale by id — a user record REPLACES a
+ * built-in one rather than patching it — so a form offering one field at a
+ * time would be quietly lying about what saving it does. The file is the
+ * honest editor for records, and it is validated by the loader that reads it
+ * for real, which fails on an unsupported version, an unknown `builtins` mode
+ * or a bad override, and warns about a dangling alias.
  *
  * `felt shuttle agents init` seeds that file from the built-ins — a worked
  * example of every field, ready to edit. The lede says so, because the empty
@@ -25,7 +31,16 @@
 import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
-import { loadAgents, type AgentRecord, type ConfigFileSummary, type SettingsHost } from './settingsApi'
+import {
+  loadAgents,
+  setAgentEffort,
+  type AgentRecord,
+  type ConfigFileSummary,
+  type SettingsHost,
+} from './settingsApi'
+
+/** The select's value for "remove the override". Not a level any agent has. */
+const RESET = ''
 
 export interface AgentsSectionProps {
   shuttleBase: string
@@ -43,6 +58,21 @@ export function AgentsSection({
   const [agents, setAgents] = useState<AgentRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [token, setToken] = useState(0)
+  const [saving, setSaving] = useState<string | null>(null)
+
+  const changeEffort = async (agent: AgentRecord, value: string): Promise<void> => {
+    setSaving(agent.id)
+    setError(null)
+    try {
+      await setAgentEffort(shuttleBase, host, agent.id, value === RESET ? null : value)
+      setToken((n) => n + 1)
+      onChanged()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(null)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -113,9 +143,7 @@ export function AgentsSection({
                       agent.provider,
                       agent.model,
                       agent.effort_levels?.length
-                        ? `effort ${agent.effort_levels.join('/')}${
-                            agent.default_effort ? ` (${agent.default_effort})` : ''
-                          }`
+                        ? `effort ${agent.effort_levels.join('/')}`
                         : 'no effort axis',
                       agent.chrome_capable ? 'chrome' : null,
                       agent.cost_class,
@@ -124,6 +152,13 @@ export function AgentsSection({
                       .join(' · ')}
                   </span>
                 </span>
+                {agent.effort_levels?.length ? (
+                  <EffortSelect
+                    agent={agent}
+                    disabled={saving !== null}
+                    onChange={(value) => void changeEffort(agent, value)}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -157,5 +192,43 @@ export function AgentsSection({
         }}
       />
     </>
+  )
+}
+
+/**
+ * One agent's default effort. Choosing a level writes an override; the reset
+ * entry appears only while one is in force, since without it the record's own
+ * default is already what shows.
+ */
+function EffortSelect({
+  agent,
+  disabled,
+  onChange,
+}: {
+  agent: AgentRecord
+  disabled: boolean
+  onChange: (value: string) => void
+}): JSX.Element {
+  const overridden = agent.default_effort_source === 'override'
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 0 auto' }}>
+      {overridden && <span className="set-row-note">· override</span>}
+      <select
+        className="set-select"
+        style={{ minWidth: '5.5rem' }}
+        aria-label={`Default effort for ${agent.id}`}
+        value={agent.default_effort ?? RESET}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!agent.default_effort && <option value={RESET}>none</option>}
+        {(agent.effort_levels ?? []).map((level) => (
+          <option key={level} value={level}>
+            {level}
+          </option>
+        ))}
+        {overridden && <option value={RESET}>reset to record</option>}
+      </select>
+    </span>
   )
 }
