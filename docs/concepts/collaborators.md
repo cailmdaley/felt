@@ -12,7 +12,9 @@ collaboration:
 Role fibers live at `roles/<role>/`; collaborator fibers live at
 `roles/<role>/<collaborator>/`, named for the model that plays the role
 (`roles/vizier/fable`), so the next session of that model can find its own
-notes. `roles/` is fixed at the top level of the store; create profiles by path
+page. Model pages stay thin, voice and stance only; the role holds what the
+office knows. A role may carry a name that emerges from its first run, which
+passes to every holder and which any holder may decline with a note. `roles/` is fixed at the top level of the store; create profiles by path
 with `felt add roles/<role> "<Name>"` and `felt add roles/<role>/<model>
 "<Model> · <role>"`. A role can have an empty collaborator list. Create
 fibers when their durable context is useful, not as an automatic matrix.

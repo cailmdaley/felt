@@ -12,8 +12,11 @@ collaboration:
 Role names map to `roles/<role>/`; collaborator names map to
 `roles/<role>/<collaborator>/`. **A collaborator is named for the model that
 plays the role** — `roles/vizier/fable`, `roles/intendant/opus` — so the next
-session of that model finds its own notes by knowing what it is. Give the
-collaborator fiber a display name like `Opus · intendant`. A role-only entry
+session of that model finds its own page by knowing what it is. Keep that page
+thin (voice and stance); what the office knows belongs on the role. A role may
+carry a name that emerges from its first real run (the intendant is Colbert):
+it belongs to the office, every holder inherits it, and any holder may decline
+it with a note. A role-only entry
 such as `organizer: []` is valid when a task belongs to a role but has no named
 collaborator. Create identity fibers only when durable context will help;
 there is no need to populate every role/collaborator combination.
