@@ -91,7 +91,7 @@ The drag-to-tempered gesture is **kind-aware**: on a standing role awaiting revi
 
 **Outcome-clearing rule.** Only `felt shuttle accept` clears the outcome — the cycle-advance verb, and a fresh outcome is the right precondition for the next run. Resume and New session preserve it because the run is *not* finalized.
 
-**Ghost workers.** If `state.running` shows a fiber with no live tmux session, eligibility blocks re-dispatch; `felt shuttle dispatch <fiber>` triggers a `reconcile_running_fiber` pass that clears stale entries. And **daemon restarts never end worker sessions** — tmux owns the worker process, the daemon only watches it; bouncing the daemon cycles the watcher and re-adopts live sessions on boot.
+**Ghost workers.** If `state.running` shows a fiber with no live tmux session, eligibility blocks re-dispatch; `felt shuttle dispatch <fiber>` triggers a `reconcile_running_fiber` pass that clears stale entries. And **daemon restarts never end worker sessions** — tmux owns the worker process, the daemon only watches it; bouncing the daemon cycles the watcher and re-adopts live sessions on boot. Start or restart the daemon only with bare `shuttle-launch` — the singleton that (re)creates the `shuttle-daemon` tmux session; never run `shuttle-launch --loop` by hand, that's the respawn loop itself, meant to run inside that session.
 
 ## Lifecycle verbs
 
