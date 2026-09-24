@@ -494,7 +494,34 @@ func waitForBridgeEndpoint(ctx context.Context, socket string, childDone <-chan 
 	defer ticker.Stop()
 	for {
 		if info, err := os.Lstat(socket); err == nil {
-			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() && info.Mode()&os.ModeSocket == 0 {
+			if info.Mode()&os.ModeSymlink != 0 {
+				if !sameUser(info) {
+					return info, fmt.Errorf("bridge endpoint symlink %q is not owned by the current user", socket)
+				}
+				targetPath, err := filepath.EvalSymlinks(socket)
+				if err != nil {
+					return info, fmt.Errorf("resolving bridge endpoint symlink %q: %w", socket, err)
+				}
+				target, err := os.Stat(socket)
+				if err != nil {
+					return info, fmt.Errorf("resolving bridge endpoint symlink %q: %w", socket, err)
+				}
+				if target.Mode()&os.ModeSocket == 0 {
+					return info, fmt.Errorf("bridge endpoint symlink %q does not target a Unix socket", socket)
+				}
+				if err := ensureOwnedPrivate(target, "bridge socket"); err != nil {
+					return info, err
+				}
+				directory, err := os.Stat(filepath.Dir(targetPath))
+				if err != nil {
+					return info, fmt.Errorf("checking bridge socket target directory: %w", err)
+				}
+				if err := ensureOwnedPrivate(directory, "bridge socket target directory"); err != nil {
+					return info, err
+				}
+				return info, nil
+			}
+			if !info.Mode().IsRegular() && info.Mode()&os.ModeSocket == 0 {
 				return info, fmt.Errorf("bridge endpoint %q has unexpected type %s", socket, describeFile(info))
 			}
 			if info.Mode()&os.ModeSocket == 0 {
