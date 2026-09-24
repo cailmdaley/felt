@@ -10,15 +10,20 @@ collaboration:
 ```
 
 Role fibers live at `roles/<role>/`; collaborator fibers live at
-`roles/<role>/<collaborator>/`. A role can have an empty collaborator list.
-Create fibers when their durable context is useful, not as an automatic
-matrix. Project knowledge belongs in the fibers that own the subject matter.
+`roles/<role>/<collaborator>/`, named for the model that plays the role
+(`roles/vizier/fable`), so the next session of that model can find its own
+notes. `roles/` is fixed at the top level of the store; create profiles by path
+with `felt add roles/<role> "<Name>"` and `felt add roles/<role>/<model>
+"<Model> · <role>"`. A role can have an empty collaborator list. Create
+fibers when their durable context is useful, not as an automatic matrix.
+Project knowledge belongs in the fibers that own the subject matter.
 
 The roster names identities; it does not select a model or execution backend.
-The current request establishes the acting identity. Startup prompts name an
-actor only when the roster contains exactly one role/collaborator pair. With
-multiple entries, read the task's YAML directly without duplicating it in the
-prompt or inferring identity from a model name.
+Startup prompts name an actor only when the roster contains exactly one
+role/collaborator pair. With multiple entries, the worker reads the task's
+YAML directly and takes the collaborator named for its model. A task without a
+roster gets one from its worker: a fitting role from `roles/`, or a new one,
+with the worker as collaborator.
 
 Keep specific notes in a collaborator's own fiber. Shared information belongs
 in the task or global role/project fibers. Optional task-local notes may live

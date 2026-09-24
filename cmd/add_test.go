@@ -124,3 +124,33 @@ func looksLikeULID(value string) bool {
 	}
 	return true
 }
+
+// TestRolesPlacementIgnoresNestedRolesFibers: a deep fiber named "roles" must
+// not capture the top-level roles namespace, whether a role is created by
+// path or created at the top level and nested there afterwards.
+func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
+	dir, storage := newStore(t)
+	resetAdd := saveAddGlobals()
+	defer resetAdd()
+
+	for _, args := range [][]string{
+		{"add", "games/civbench/harness-model/roles", "Harness roles"},
+		{"add", "roles/vizier", "Vizier"},
+		{"add", "roles/intendant", "Intendant"},
+		{"add", "roles/intendant/opus", "Opus · intendant"},
+		{"add", "--top-level", "steward", "Steward"},
+		{"nest", "steward", "roles"},
+	} {
+		if out, err := runCommand(t, dir, args...); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	for _, id := range []string{"roles/vizier", "roles/intendant", "roles/intendant/opus", "roles/steward"} {
+		if _, err := storage.Read(id); err != nil {
+			t.Fatalf("%s not placed exactly as spelled: %v", id, err)
+		}
+	}
+	if _, err := storage.Read("games/civbench/harness-model/roles/steward"); err == nil {
+		t.Fatal("nest resolved roles to a nested fiber named roles")
+	}
+}

@@ -10,17 +10,26 @@ collaboration:
 ```
 
 Role names map to `roles/<role>/`; collaborator names map to
-`roles/<role>/<collaborator>/`. A role-only entry such as `organizer: []` is
-valid when a task belongs to a role but has no named collaborator. Create identity fibers
-only when durable context will help; there is no need to populate every
-role/collaborator combination.
+`roles/<role>/<collaborator>/`. **A collaborator is named for the model that
+plays the role** — `roles/vizier/fable`, `roles/intendant/opus` — so the next
+session of that model finds its own notes by knowing what it is. Give the
+collaborator fiber a display name like `Opus · intendant`. A role-only entry
+such as `organizer: []` is valid when a task belongs to a role but has no named
+collaborator. Create identity fibers only when durable context will help;
+there is no need to populate every role/collaborator combination.
 
-The task roster refers to identities; it does not choose an execution model.
-The current request establishes who is acting. Do not infer identity from the
-model or invent a separate selector schema. At startup, name an actor only
-when the roster names exactly one role/collaborator pair. With multiple
-entries, read the roster directly from the task YAML; do not repeat it as a
-prompt list.
+Roles and collaborators are created by path; `roles/` always stays at the top
+level of the store:
+
+```bash
+felt -C <shared-store> add roles/intendant "Intendant" -b "<charter: remit, human gates, where the playbooks live>"
+felt -C <shared-store> add roles/intendant/opus "Opus · intendant"
+```
+
+The roster names the identities on a task; it does not choose the execution
+model. At startup the prompt names an actor only when the roster names exactly
+one role/collaborator pair. With multiple entries, read the roster from the
+task YAML and take the collaborator that carries your model's name.
 
 Keep specific, personal notes in the collaborator's own fiber. Put information
 needed across the task in the task constitution, and information shared across
@@ -64,6 +73,11 @@ Add membership without replacing existing roster entries:
 ```bash
 felt shuttle assign <task> --role vizier --collaborator fable --collaborator astra
 ```
+
+A task with no roster gets one from its worker: pick the role under `roles/`
+whose charter fits the work, or create one when none does, and assign it with
+yourself as collaborator (your model name, creating the collaborator fiber if
+it is new).
 
 Use `--json-assignment` for an exact replacement, such as
 `{"vizier":["fable","astra"],"organizer":[]}`. Use `--clear` to remove

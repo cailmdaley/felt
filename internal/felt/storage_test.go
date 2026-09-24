@@ -901,6 +901,30 @@ func TestResolveAddPath(t *testing.T) {
 			wantRewritten: false,
 		},
 		{
+			name: "existing namespace directory wins over a nested basename match",
+			slug: "roles/intendant",
+			existing: []string{
+				"roles/vizier",
+				"games/civbench/harness-model/roles",
+			},
+			wantResolved:  "roles/intendant",
+			wantRewritten: false,
+		},
+		{
+			name:          "roles namespace stays top-level before it exists",
+			slug:          "roles/intendant",
+			existing:      []string{"games/civbench/harness-model/roles"},
+			wantResolved:  "roles/intendant",
+			wantRewritten: false,
+		},
+		{
+			name:          "existing directory without its own fiber is an exact parent",
+			slug:          "notes/new",
+			existing:      []string{"notes/old", "project/notes"},
+			wantResolved:  "notes/new",
+			wantRewritten: false,
+		},
+		{
 			name:          "deep slug under single match keeps the tail",
 			slug:          "launch-cluster/notes/quick",
 			existing:      []string{"lightcone/paper/launch-cluster"},

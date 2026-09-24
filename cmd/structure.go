@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -124,8 +125,13 @@ Replicas should inherit the committed ids rather than minting their own.`,
 var nestCmd = &cobra.Command{
 	Use:   "nest <child> <parent>",
 	Short: "Move a fiber under another fiber",
-	Long:  `Moves an existing fiber subtree under a parent fiber, rewriting IDs and dependencies.`,
-	Args:  cobra.ExactArgs(2),
+	Long: `Moves an existing fiber subtree under a parent, rewriting IDs and dependencies.
+
+A parent spelled as a path that exists in the store is used exactly as
+spelled, including a directory that holds fibers without one of its own
+(roles/ is always the top-level roles namespace). Any other parent resolves
+like a fiber reference.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {
@@ -137,7 +143,7 @@ var nestCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		parentRef, err := resolveFiberRef(storage, scopeID, args[1])
+		parentRef, err := resolveNestParent(storage, scopeID, args[1])
 		if err != nil {
 			return err
 		}
@@ -168,6 +174,22 @@ var nestCmd = &cobra.Command{
 		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.location())
 		return nil
 	},
+}
+
+// resolveNestParent resolves nest's destination. A path that exists in the
+// store — a fiber's directory, or a namespace directory such as roles/ that
+// holds fibers without a fiber of its own — is the destination exactly as
+// spelled, so a slug rescue elsewhere in the tree cannot capture it. Only a
+// path that exists nowhere falls through to fiber resolution.
+func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, error) {
+	dir := path.Clean(strings.Trim(strings.TrimSpace(arg), "/"))
+	if dir == felt.RolesNamespace {
+		return fiberRef{storage: storage, id: dir}, nil
+	}
+	if info, err := os.Stat(filepath.Join(storage.Root(), filepath.FromSlash(dir))); err == nil && info.IsDir() && !strings.HasPrefix(dir, "..") {
+		return fiberRef{storage: storage, id: dir}, nil
+	}
+	return resolveFiberRef(storage, scopeID, arg)
 }
 
 var unnestCmd = &cobra.Command{

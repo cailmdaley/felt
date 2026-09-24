@@ -1340,6 +1340,21 @@ func ParentPath(id string) string {
 	return parent
 }
 
+// RolesNamespace is the top-level directory that holds role profiles
+// (roles/<role>) and their collaborators (roles/<role>/<collaborator>).
+const RolesNamespace = "roles"
+
+// NamespaceExists reports whether dir names an existing fiber or a directory
+// that holds one — the places a new or moved fiber can land exactly as spelled.
+func NamespaceExists(dir string, ids []string) bool {
+	if dir == "" {
+		return false
+	}
+	return slices.ContainsFunc(ids, func(id string) bool {
+		return id == dir || strings.HasPrefix(id, dir+"/")
+	})
+}
+
 // ResolveAddPath disambiguates a new fiber's slug-path against the existing
 // tree. When the leading segment of slug matches the basename of an existing
 // fiber, the slug is rewritten so the new fiber lands under that fiber's
@@ -1349,6 +1364,11 @@ func ParentPath(id string) string {
 // Resolution rules:
 //   - Single-segment slugs (no `/`) are never resolved; top-level creation is
 //     unambiguous in intent.
+//   - A slug whose parent already exists as a directory in the tree — a
+//     fiber, or a namespace directory such as roles/ that holds fibers without
+//     a fiber of its own — is placed exactly as spelled; a basename match
+//     elsewhere never overrides a path that exists. Slugs under RolesNamespace
+//     are always placed as spelled: that namespace is fixed at the top level.
 //   - If no existing fiber has a basename equal to the leading segment, the
 //     slug is returned unchanged.
 //   - If exactly one existing fiber matches, the new path is `<parent>/<slug>`,
@@ -1366,6 +1386,9 @@ func ResolveAddPath(slug string, existingIDs []string) (resolved string, rewritt
 		return slug, false, nil
 	}
 	leading := slug[:strings.Index(slug, "/")]
+	if leading == RolesNamespace || NamespaceExists(ParentPath(slug), existingIDs) {
+		return slug, false, nil
+	}
 
 	// Candidate parents: each existing fiber whose basename matches the
 	// leading segment contributes its parent directory. Parents are

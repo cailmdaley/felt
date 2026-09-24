@@ -84,8 +84,8 @@ defmodule Shuttle.Collaboration do
       _ ->
         [
           "Collaboration assignment:",
-          "Read the collaboration block and use the current request or handoff to identify your role and collaborator; " <>
-            "do not infer identity from the model.",
+          "Read the collaboration block; you are the collaborator named for your model, " <>
+            "in each role that lists it.",
           "Read global role context from the shared store with `felt #{store_arg}show roles/<role>` " <>
             "and `felt #{store_arg}show roles/<role>/<collaborator>`."
         ]

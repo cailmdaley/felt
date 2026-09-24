@@ -167,8 +167,7 @@ defmodule Shuttle.CollaborationTest do
         {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}}
       )
 
-    assert multi =~ "use the current request or handoff to identify your role and collaborator"
-    assert multi =~ "do not infer identity from the model"
+    assert multi =~ "you are the collaborator named for your model"
     refute multi =~ "vizier"
     refute multi =~ "fable"
     refute multi =~ "astra"

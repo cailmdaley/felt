@@ -1,17 +1,19 @@
 # Collaboration continuity
 
-Read this when a task carries a collaboration roster. Its layout and authoring
-practice are in the Felt skill's
-[collaborator reference](../../felt/references/collaborators.md).
+Read this when a task carries a collaboration roster — or carries none, in
+which case the worker gives it one: find the role under `roles/` whose charter
+fits the work (or create one when none does) and assign it with itself as
+collaborator, named for its model (`felt shuttle assign <task> --role
+<role> --collaborator <model>`). Layout, naming, and creation are in the Felt
+skill's [collaborator reference](../../felt/references/collaborators.md).
 
 ## Start from shared work
 
 Run `felt -C <felt-store> sync` before substantive work, then read the current
 task and its `## Status`, the roster in its YAML, and the relevant global or
-task-local role/project/collaborator notes. The current request establishes
-who is acting. Launch prompts name an actor only when the roster has exactly
-one role/collaborator pair; otherwise read the YAML roster directly.
-Do not infer identity from the model or execution host.
+task-local role/project/collaborator notes. Launch prompts name an actor only
+when the roster has exactly one role/collaborator pair; otherwise read the
+YAML roster directly and take the collaborator named for your model.
 
 Read global `roles/<role>/<collaborator>` paths with `felt -C <shared-store>`;
 the launch prompt supplies that store. A project view can also contain

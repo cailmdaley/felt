@@ -209,7 +209,7 @@ func resolveRoleProfile(profiles []*felt.Felt, query string) (*felt.Felt, error)
 	}
 	matches := matchRoleProfiles(profiles, query)
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("assign: no local role profile matches %q", query)
+		return nil, fmt.Errorf("assign: no local role profile matches %q%s", query, createHint(query, "roles/"+query))
 	}
 	if len(matches) > 1 {
 		return nil, fmt.Errorf("assign: ambiguous role %q matches %s", query, profilePaths(matches))
@@ -227,7 +227,11 @@ func resolveCollaboratorProfile(profiles []*felt.Felt, query string, preferredRo
 	}
 	matches := matchCollaboratorProfiles(profiles, query, rolePath)
 	if len(matches) == 0 {
-		return nil, nil, fmt.Errorf("assign: no local collaborator profile matches %q", query)
+		hint := ""
+		if preferredRole != nil {
+			hint = createHint(query, preferredRole.ID+"/"+query)
+		}
+		return nil, nil, fmt.Errorf("assign: no local collaborator profile matches %q%s", query, hint)
 	}
 	if len(matches) > 1 {
 		return nil, nil, fmt.Errorf("assign: ambiguous collaborator %q matches %s", query, profilePaths(matches))
@@ -396,6 +400,15 @@ func containsString(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// createHint names the command that creates a missing profile, for a query
+// that is a plain slug rather than a path or UID.
+func createHint(query, id string) string {
+	if strings.Contains(query, "/") || felt.LooksLikeUID(query) {
+		return ""
+	}
+	return fmt.Sprintf("; create it with `felt add %s \"<Name>\"`", id)
 }
 
 func isRoleRoot(id string) bool {

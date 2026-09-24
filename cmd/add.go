@@ -26,16 +26,20 @@ var addCmd = &cobra.Command{
 The slug is the fiber's path/ID shorthand. The name is the first real content
 and is required explicitly.
 
-When the leading segment of <slug> matches an existing fiber's basename, the
-new fiber is created under that fiber's parent — so 'felt add launch/log' lands
-under an existing 'project/launch' as 'project/launch/log'. Use --top-level to
-skip resolution and create at the root even when nested matches exist;
-ambiguous matches (the leading segment appears in multiple subtrees) abort
-with the candidates listed.
+A <slug> whose parent path already exists — a fiber, or a directory that
+holds fibers such as roles/ — is created exactly there. Otherwise, when the
+leading segment of <slug> matches an existing fiber's basename, the new fiber
+is created under that fiber's parent — so 'felt add launch/log' lands under an
+existing 'project/launch' as 'project/launch/log'. Use --top-level to skip
+resolution and create at the root even when nested matches exist; ambiguous
+matches (the leading segment appears in multiple subtrees) abort with the
+candidates listed. roles/ always stays at the top level.
 
 Examples:
   felt add mocks-unbiased "Are the mocks unbiased?"
-  felt add pure_eb/covariance "Covariance method"`,
+  felt add pure_eb/covariance "Covariance method"
+  felt add roles/intendant "Intendant"
+  felt add roles/intendant/opus "Opus · intendant"`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()

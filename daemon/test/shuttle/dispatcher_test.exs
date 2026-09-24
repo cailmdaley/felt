@@ -574,8 +574,7 @@ defmodule Shuttle.DispatcherTest do
           Dispatcher.render_resume_prompt("tests/a", collaboration: multi),
           Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: multi)
         ] do
-      assert prompt =~ "use the current request or handoff to identify your role and collaborator"
-      assert prompt =~ "do not infer identity from the model"
+      assert prompt =~ "you are the collaborator named for your model"
       refute prompt =~ "vizier"
       refute prompt =~ "fable"
       refute prompt =~ "astra"
