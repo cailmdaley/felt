@@ -84,9 +84,56 @@ func TestCollectFeltReceiptUsesResolvedExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("FELT_BIN", bin)
+	t.Setenv("PATH", dir)
 	got := collectFeltReceipt()
-	if got.Status != receiptHealthy || got.Path != bin || got.Version != "9.8.7" {
+	if got.Status != receiptHealthy || got.Path != bin || got.Version != "9.8.7" || got.Build != "9.8.7 (abc, built now)" {
 		t.Fatalf("resolved executable receipt = %#v", got)
+	}
+}
+
+func TestCollectFeltReceiptFlagsShadowedStaleCopy(t *testing.T) {
+	fresh, stale, twin := t.TempDir(), t.TempDir(), t.TempDir()
+	write := func(dir, build string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "felt"), []byte("#!/bin/sh\nprintf 'felt version "+build+"\\n'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(stale, "dev (0123456789ab)")
+	write(fresh, "dev (3e5bcef70529)")
+	write(twin, "dev (3e5bcef70529)")
+	t.Setenv("FELT_BIN", "")
+
+	t.Setenv("PATH", strings.Join([]string{stale, fresh, twin}, string(os.PathListSeparator)))
+	got := collectFeltReceipt()
+	if got.Status != receiptMismatch || got.Path != filepath.Join(stale, "felt") {
+		t.Fatalf("shadowing receipt = %#v, want mismatch resolved to the first copy", got)
+	}
+	if len(got.Shadowed) != 2 || !strings.Contains(got.Repair, "remove the stale copy") {
+		t.Fatalf("shadowing receipt = %#v, want both differing copies named", got)
+	}
+
+	// Identical builds on PATH are redundant, not skewed.
+	t.Setenv("PATH", strings.Join([]string{fresh, twin}, string(os.PathListSeparator)))
+	if got := collectFeltReceipt(); got.Status != receiptHealthy || len(got.Shadowed) != 0 {
+		t.Fatalf("identical copies receipt = %#v, want healthy", got)
+	}
+}
+
+func TestFeltBuildMatchesVersionSeparatesLocalRevisions(t *testing.T) {
+	for _, tt := range []struct {
+		marker, build string
+		want          bool
+	}{
+		{"dev (3e5bcef70529)", "dev (3e5bcef70529)", true},
+		{"dev (3e5bcef70529)", "dev (0123456789ab)", false},
+		{"dev", "dev (3e5bcef70529)", true},
+		{"1.2.3 (abc, built now)", "1.2.3", true},
+		{"1.2.3", "1.2.4", false},
+	} {
+		if got := feltBuildMatchesVersion(tt.marker, tt.build); got != tt.want {
+			t.Errorf("feltBuildMatchesVersion(%q, %q) = %v, want %v", tt.marker, tt.build, got, tt.want)
+		}
 	}
 }
 

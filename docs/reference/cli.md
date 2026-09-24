@@ -12,7 +12,9 @@ Every command accepts these global flags:
 | `-j, --json` | Output in JSON format |
 | `-h, --help` | Show help for the command |
 
-`felt -v` / `felt --version` prints the version. `felt shuttle` also accepts
+`felt -v` / `felt --version` prints the version and build: a release names
+its commit and date, a local build the source revision it was built from
+(`dev (3e5bcef70529)`). `felt shuttle` also accepts
 `--felt-store <dir>` as an alias for `-C`.
 
 ## Core fiber verbs

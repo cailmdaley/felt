@@ -79,8 +79,9 @@ payload carries source/ref/commit/build/digest identity into the harness cache,
 and a promotion only commits after the cache the native CLI reports as loaded
 proves it holds that generation — a zero exit status alone is rolled back.
 `setup receipt` queries the harness CLIs, recomputes both payload digests,
-binds the marker's felt build to the resolved executable, and rejects a
-pending journal or identity disagreement. An incidental cache directory is
+binds the marker's felt build to the resolved executable, flags any other
+felt on PATH with a different build (a stale copy shadowing or shadowed by
+the install), and rejects a pending journal or identity disagreement. An incidental cache directory is
 not proof that a bundle is loaded.
 
 Statuses: · none (the default — most fibers stay here)  ○ open (todo)  ◐ active (in flight)  ● closed (resolved todo). Status is opt-in: never pass `-s` on `felt add` unless someone should do something.

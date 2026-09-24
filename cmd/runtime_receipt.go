@@ -7,12 +7,14 @@ package cmd
 // does not maintain a second installation database.
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -64,6 +66,17 @@ type ReceiptComponent struct {
 	Repair  string        `json:"repair,omitempty"`
 	Path    string        `json:"path,omitempty"`
 	Version string        `json:"version,omitempty"`
+	// Build is the executable's full `--version` identity, including the
+	// source revision a local build carries.
+	Build string `json:"build,omitempty"`
+	// Shadowed lists other felt executables on PATH whose build differs from
+	// the resolved one; any entry makes the component a mismatch.
+	Shadowed []ReceiptFeltCopy `json:"shadowed,omitempty"`
+}
+
+type ReceiptFeltCopy struct {
+	Path  string `json:"path"`
+	Build string `json:"build"`
 }
 
 type ReceiptBundle struct {
@@ -242,11 +255,28 @@ func collectFeltReceipt() ReceiptComponent {
 	if path == "" {
 		return ReceiptComponent{Status: receiptMissing, Repair: "install felt or put it on PATH (the hooks probe PATH and ~/.local/bin/felt)"}
 	}
-	version := receiptExecutableVersion(path)
-	if version == "" {
+	build := receiptExecutableBuild(path)
+	if build == "" {
 		return ReceiptComponent{Status: receiptMismatch, Path: path, Repair: "run the resolved felt executable with --version; replace a non-felt or unreadable binary"}
 	}
-	return ReceiptComponent{Status: receiptHealthy, Path: path, Version: version}
+	r := ReceiptComponent{Status: receiptHealthy, Path: path, Version: strings.Fields(build)[0], Build: build}
+	for _, other := range feltExecutablesOnPath() {
+		if sameExecutable(other, path) {
+			continue
+		}
+		if otherBuild := receiptExecutableBuild(other); otherBuild != build {
+			r.Shadowed = append(r.Shadowed, ReceiptFeltCopy{Path: other, Build: otherBuild})
+		}
+	}
+	if len(r.Shadowed) > 0 {
+		copies := make([]string, len(r.Shadowed))
+		for i, c := range r.Shadowed {
+			copies[i] = fmt.Sprintf("%s (%q)", c.Path, c.Build)
+		}
+		r.Status = receiptMismatch
+		r.Repair = fmt.Sprintf("felt resolves to %s (%q) but PATH also holds %s; which one a shell, hook, or worker runs depends on its PATH order — remove the stale copy so one felt remains (make cli-install installs to ~/.local/bin)", path, build, strings.Join(copies, ", "))
+	}
+	return r
 }
 
 func resolveReceiptFelt() string {
@@ -265,23 +295,44 @@ func resolveReceiptFelt() string {
 	return ""
 }
 
+// feltExecutablesOnPath lists every felt executable reachable through PATH,
+// in PATH order, one entry per distinct file.
+func feltExecutablesOnPath() []string {
+	var out []string
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, "felt")
+		if !executableFile(candidate) || slices.ContainsFunc(out, func(seen string) bool { return sameExecutable(seen, candidate) }) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func sameExecutable(a, b string) bool {
+	ai, errA := os.Stat(a)
+	bi, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(ai, bi)
+}
+
 func executableFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
-func receiptExecutableVersion(path string) string {
+// receiptExecutableBuild is the identity an executable prints for --version
+// ("dev (3e5bcef70529)", "1.2.3 (abc, built …)"), without the "felt version"
+// prefix, or "" when it prints nothing usable.
+func receiptExecutableBuild(path string) string {
 	out, err := exec.Command(path, "--version").Output()
 	if err != nil {
 		return ""
 	}
 	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-	line = strings.TrimSpace(strings.TrimPrefix(line, "felt version"))
-	fields := strings.Fields(line)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
+	return strings.TrimSpace(strings.TrimPrefix(line, "felt version"))
 }
 
 func collectCodexBundle() []ReceiptBundle {
@@ -683,8 +734,8 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 	buildSkew := ""
 	if activePresent {
 		receipt.Active = &active
-		if felt.Version != "" && !feltBuildMatchesVersion(active.FeltBuild, felt.Version) {
-			buildSkew = fmt.Sprintf("the promoted generation was sealed by felt %q but the resolved executable %s reports %q; rerun the matching felt setup command with that felt", active.FeltBuild, felt.Path, felt.Version)
+		if identity := cmp.Or(felt.Build, felt.Version); identity != "" && !feltBuildMatchesVersion(active.FeltBuild, identity) {
+			buildSkew = fmt.Sprintf("the promoted generation was sealed by felt %q but the resolved executable %s reports %q; rerun the matching felt setup command with that felt", active.FeltBuild, felt.Path, identity)
 		}
 	}
 
@@ -743,12 +794,16 @@ func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) Re
 }
 
 // feltBuildMatchesVersion compares a generation marker's felt_build against
-// the version string the resolved executable prints. The marker may carry
-// trailing build metadata ("1.2.3 (abcdef)"), so only the leading version
-// field is bound; `--version` output reduces to that same field.
-func feltBuildMatchesVersion(feltBuild, version string) bool {
-	fields := strings.Fields(feltBuild)
-	return len(fields) > 0 && fields[0] == version
+// the build identity the resolved executable prints. The version fields must
+// agree; when both sides also carry build metadata ("dev (3e5bcef70529)"), the
+// metadata must agree too, so two local builds of different revisions — both
+// "dev" — are told apart. A side without metadata binds on version alone.
+func feltBuildMatchesVersion(feltBuild, build string) bool {
+	marker, resolved := strings.Fields(feltBuild), strings.Fields(build)
+	if len(marker) == 0 || len(resolved) == 0 || marker[0] != resolved[0] {
+		return false
+	}
+	return len(marker) == 1 || len(resolved) == 1 || strings.Join(marker, " ") == strings.Join(resolved, " ")
 }
 
 // joinReceiptRepairs concatenates two repair lines so a harness-level failure

@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -26,18 +27,50 @@ var Version = "dev"
 
 // SetVersionInfo takes the three values goreleaser injects (see .goreleaser.yml)
 // and splits them: Version keeps the bare semver for the code that computes with
-// it, while `felt --version` prints all three, so "which build is on this box"
-// has an answer on a machine that self-updates. A local build carries main.go's
-// commit/date defaults and prints the bare version instead — "dev (none, built
-// unknown)" tells nobody anything. One line either way: bootstrap.sh pipes this
-// through `head -1`.
+// it, while `felt --version` prints the build too, so "which build is on this
+// box" has an answer on every machine. A release names its commit and date; a
+// local `go build`/`go install` names the source revision Go stamped into the
+// binary ("dev (3e5bcef7a1b2)", with a -dirty suffix for an unclean tree), so
+// two local installs from different checkouts are distinguishable. One line
+// either way: bootstrap.sh pipes this through `head -1`.
 func SetVersionInfo(v, commit, date string) {
 	Version = v
-	if commit == "none" || date == "unknown" {
-		rootCmd.Version = v
-		return
+	if commit == "none" {
+		commit = vcsRevision()
 	}
-	rootCmd.Version = fmt.Sprintf("%s (%s, built %s)", v, commit, date)
+	switch {
+	case commit == "":
+		rootCmd.Version = v
+	case date == "unknown":
+		rootCmd.Version = fmt.Sprintf("%s (%s)", v, commit)
+	default:
+		rootCmd.Version = fmt.Sprintf("%s (%s, built %s)", v, commit, date)
+	}
+}
+
+// vcsRevision is the short source revision Go embeds in a binary built from a
+// checkout, or "" when the build carries none.
+func vcsRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	revision, dirty := "", false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			dirty = setting.Value == "true"
+		}
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if revision != "" && dirty {
+		revision += "-dirty"
+	}
+	return revision
 }
 
 var rootCmd = &cobra.Command{
