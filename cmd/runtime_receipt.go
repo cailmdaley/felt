@@ -150,8 +150,10 @@ var setupReceiptCmd = &cobra.Command{
 	Long: `Report the executable, enabled skill/plugin bundles, hook compatibility,
 and the running Shuttle daemon contract. Use --json for the machine-readable
 receipt consumed by setup and deployment checks. A healthy receipt requires
-every component that is enabled on this host to be present and compatible.`,
-	Args: cobra.NoArgs,
+every component that is enabled on this host to be present and compatible,
+and exactly one felt build on PATH.`,
+	SilenceUsage: true,
+	Args:         cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		receipt := collectRuntimeReceipt()
 		if jsonOutput {
@@ -193,6 +195,9 @@ func collectRuntimeReceipt() RuntimeReceipt {
 		extra = append(extra, r.TmuxServer.Status)
 	}
 	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Daemon.Status, extra...)
+	if r.Felt.Status != receiptHealthy && r.Felt.Status == r.Status && r.Felt.Repair != "" {
+		r.Repair = r.Felt.Repair
+	}
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
 	}
