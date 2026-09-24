@@ -53,6 +53,9 @@ defmodule ShuttleWeb.Router do
     # `felt ls --body --has-field shuttle -s all` for. Local stores only.
     get("/search", SearchController, :show)
     get("/agents", AgentsController, :show)
+    # One agent's default-effort override, owner-routed; shells `felt shuttle
+    # agents effort`, which stays the only writer of that grammar.
+    post("/agents/effort", AgentsController, :effort)
     get("/version", VersionController, :show)
     post("/fiber/create", FiberController, :create)
     # Cheap owner-routed file metadata for the board's live readers. The UI can
