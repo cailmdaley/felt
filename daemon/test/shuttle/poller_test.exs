@@ -3730,6 +3730,74 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  test "reconciling a closed fiber with a still-running worker stamps the clean-exit handoff marker" do
+    # closed-implies-handoff: a fiber flipping to status:closed while its
+    # worker is still running IS the worker's deliberate exit — a crash never
+    # changes status, so closed is deliberate by construction. The reaper must
+    # stamp handed_off_at exactly as the worker's own `felt shuttle handoff`
+    # would, so the exit reads back as clean (fresh redispatch), never a dirty
+    # death (resume).
+    fiber_id = "tests/closed-implies-handoff"
+    fiber = make_fiber(fiber_id)
+    MockRunner.set_fiber(fiber_id, fiber)
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_closed_implies_handoff,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    # Wait for the autonomous tick to dispatch and install the watcher.
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert %{pid: watcher} = Poller.worker_status(poller, fiber_id)
+      assert is_pid(watcher)
+    end)
+
+    %{session: session} = Poller.worker_status(poller, fiber_id)
+
+    dispatched_fiber = MockRunner.fiber(fiber_id)
+    dispatched_at = get_in(dispatched_fiber, ["shuttle", "runtime", "dispatched_at"])
+    assert is_binary(dispatched_at)
+    refute get_in(dispatched_fiber, ["shuttle", "runtime", "handed_off_at"])
+
+    # The worker's own deliberate exit: status flips to closed while the tmux
+    # session (and the daemon's watcher) are still alive. No `felt shuttle
+    # handoff` call — closed itself is now the deliberate-exit signal.
+    MockRunner.set_fiber(fiber_id, Map.put(dispatched_fiber, "status", "closed"))
+
+    send(poller, :run_poll_cycle)
+
+    # The reap here only stops the daemon's watcher (the closed-externally
+    # branch never kills the worker's own tmux session — a real worker ends
+    # its own session as its final act, same as a clean `felt shuttle
+    # handoff` exit); wait on the stamp itself rather than tmux teardown.
+    assert wait_until(fn ->
+             get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) != nil
+           end)
+
+    assert Shuttle.Tmux.present?(MockRunner, session)
+
+    closed_fiber = MockRunner.fiber(fiber_id)
+    handed_off_at = get_in(closed_fiber, ["shuttle", "runtime", "handed_off_at"])
+    assert is_binary(handed_off_at)
+
+    {:ok, dispatched_dt, _} = DateTime.from_iso8601(dispatched_at)
+    {:ok, handed_off_dt, _} = DateTime.from_iso8601(handed_off_at)
+    assert DateTime.compare(handed_off_dt, dispatched_dt) != :lt
+
+    assert Shuttle.Continuation.clean_handoff_since_dispatch?(closed_fiber)
+
+    assert Enum.any?(MockRunner.commands(), fn
+             {"felt", args} -> "mark-runtime" in args and "--handed-off-at" in args
+             _ -> false
+           end)
+  end
+
   test "poller adopts orphan tmux sessions on startup" do
     MockRunner.set_shuttle("tests/orphan", oneshot_shuttle())
     MockRunner.add_tmux_session(Dispatcher.session_name("tests/orphan"))

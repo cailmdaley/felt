@@ -146,7 +146,10 @@ defmodule Shuttle.Poller.SessionReconciliation do
               state
           end
         else
-          # Fiber is closed but tmux session still exists — kill it
+          # Fiber is closed but tmux session still exists — the worker's
+          # deliberate exit (closed implies handoff), so stamp the clean-exit
+          # marker before killing the stale session.
+          Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
           Logger.info("Killing stale session for closed fiber: #{session}")
           _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
           state
@@ -255,6 +258,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
         end
 
       {:kill_closed, fiber_id} ->
+        case Poller.fetch_fiber_full(fiber_id, state) do
+          {:ok, fiber} -> Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
+          {:error, _} -> :ok
+        end
+
         Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
         _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
         state

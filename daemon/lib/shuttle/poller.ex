@@ -3032,11 +3032,13 @@ defmodule Shuttle.Poller do
               handle_worker_exit(state_acc, fiber_id)
 
             Map.get(fiber, "status") == "closed" and not app? ->
+              stamp_handoff_if_stale(state_acc, fiber_id, fiber)
               Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
               stop_watcher(meta)
               remove_running(state_acc, runtime_key)
 
             Map.get(fiber, "status") == "closed" and idle? ->
+              stamp_handoff_if_stale(state_acc, fiber_id, fiber)
               :ok = Shuttle.AppWorkers.deactivate(Shuttle.AppWorkers.id(meta.session))
               stop_watcher(meta)
               remove_running(state_acc, runtime_key)
@@ -3049,6 +3051,32 @@ defmodule Shuttle.Poller do
           state_acc
       end
     end)
+  end
+
+  # A fiber flipping to `status: closed` while its worker is still running IS
+  # the worker's deliberate exit — a crash never changes status, so closed is
+  # deliberate by construction. Every reap path that catches a closed fiber
+  # with a live worker (the per-poll reaper above, and orphan/boot adoption in
+  # `Shuttle.Poller.SessionReconciliation`) calls this to stamp
+  # `shuttle.runtime.handed_off_at` exactly as `felt shuttle handoff` would, so
+  # `Continuation.clean_handoff_since_dispatch?/1` reads the exit as clean
+  # (fresh redispatch) rather than a dirty death (resume). Skipped when
+  # `handed_off_at` is already present and not older than `dispatched_at` — a
+  # worker (or a prior reap) already stamped its own clean exit, and this must
+  # never clobber that stamp with a later `now`.
+  def stamp_handoff_if_stale(%State{} = state, fiber_id, fiber) do
+    dispatched_at = Shuttle.Continuation.dispatched_at(fiber)
+    handed_off_at = Shuttle.Continuation.handed_off_at(fiber)
+
+    stale? =
+      is_nil(handed_off_at) or
+        (not is_nil(dispatched_at) and DateTime.compare(handed_off_at, dispatched_at) == :lt)
+
+    if stale? do
+      Shuttle.Continuation.mark_handed_off(state.runner, owning_store(fiber_id, state), fiber_id)
+    end
+
+    :ok
   end
 
   defp reconcile_missing_running_sessions(%State{running: running} = state)
