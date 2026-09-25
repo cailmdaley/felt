@@ -83,7 +83,7 @@ const COPY: Record<
     filename: 'projects.json',
     lede: (
       <>
-        Where <strong>Stash, Capture and Meeting</strong> can choose work. Adding a project creates{' '}
+        Where <strong>Stash and Capture</strong> can create work. Adding a project creates{' '}
         <code>.felt/</code> if needed. This list is separate from the stores the daemon polls.
       </>
     ),

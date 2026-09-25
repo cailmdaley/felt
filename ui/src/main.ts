@@ -1,7 +1,7 @@
 import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
-import { openStash, openCapture, openMeeting, openSettings } from './forms/mountForms.js'
+import { openStash, openCapture, openSettings } from './forms/mountForms.js'
 
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
@@ -28,13 +28,11 @@ const board = new KanbanModal({
     void openStash({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
   },
   onNewIdeaClick: () => {
-    void openCapture({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
-  },
-  onMeetingClick: () => {
-    void openMeeting({
+    void openCapture({
       shuttleBase,
       onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error'),
-      onStarted: () => { void board.refreshMeeting() },
+      onMeetingResult: (msg, tone) => showToast(msg, tone),
+      onMeetingStarted: () => { void board.refreshMeeting() },
     })
   },
   // ⚙︎ at the right end of the tab strip, and ⌘, / , — the operator files of

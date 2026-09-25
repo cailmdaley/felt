@@ -1,16 +1,16 @@
 /**
- * AppDialog — the paper card shared by the React forms, built on Radix Dialog.
+ * AppDialog — the paper card the Capture form lives in, built on Radix Dialog.
  *
  * Gives focus trap, escape-to-close, accessible labelling, scroll lock, and
  * portal-to-body for free. The standalone UI has no competing modal stack, so
  * the z-index just needs to clear the board (10000/10001 for headroom).
  *
- * The chrome shares the forms' manuscript language: a warm paper field
- * (#F4F0E8) under a slightly darker header band, a brass hairline under the
- * header, and EB Garamond throughout. Stash builds its card from an injected
- * sheet because its card has a dozen internal parts; this reusable dialog
- * carries its chrome inline, with one small sheet for the entrance keyframes
- * (CSS-only, so Radix's mount is what triggers it).
+ * The chrome is the same manuscript language StashForm draws by hand: a warm
+ * paper field (#F4F0E8) under a slightly darker header band, a brass hairline
+ * under the header, and EB Garamond throughout. Stash builds its card from an
+ * injected sheet because it has a dozen internal parts; this one is small
+ * enough to carry its chrome inline, with a single tiny sheet for the entrance
+ * keyframes (CSS-only, so Radix's mount is what triggers it).
  */
 
 import * as Dialog from '@radix-ui/react-dialog'
@@ -87,12 +87,10 @@ function injectAppDialogStyles(): void {
          short (otherwise it floats mid-screen with a field of blank paper
          under it); sticky pins it when the content scrolls, which is the
          case that matters once the keyboard is up. */
-      .app-dialog-body > .capture-form,
-      .app-dialog-body > .meeting-form {
+      .app-dialog-body > .capture-form {
         min-height: 100%;
       }
-      .app-dialog-body > * > .capture-foot,
-      .app-dialog-body > * > .meeting-foot {
+      .app-dialog-body > * > .capture-foot {
         margin-top: auto;
         position: sticky;
         bottom: -16px;
@@ -104,17 +102,14 @@ function injectAppDialogStyles(): void {
         border-top: 1px solid rgba(46, 42, 38, 0.10);
       }
       /* Esc and ⌘↵ are a keyboard's line, and a phone has neither key. */
-      .app-dialog-body > * > .capture-foot > .capture-foot-hint,
-      .app-dialog-body > * > .meeting-foot > .meeting-foot-hint {
+      .app-dialog-body > * > .capture-foot > .capture-foot-hint {
         display: none;
       }
-      .app-dialog-body > * > .capture-foot > .capture-buttons,
-      .app-dialog-body > * > .meeting-foot > .meeting-buttons {
+      .app-dialog-body > * > .capture-foot > .capture-buttons {
         flex: 1;
         gap: 10px;
       }
-      .app-dialog-body > * > .capture-foot > .capture-buttons > .capture-btn,
-      .app-dialog-body > * > .meeting-foot > .meeting-buttons > .meeting-btn {
+      .app-dialog-body > * > .capture-foot > .capture-buttons > .capture-btn {
         flex: 1;
       }
     }

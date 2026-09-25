@@ -63,7 +63,7 @@ import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
-import { meetingPollInterval, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
+import { meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
 import { stopMeeting as requestMeetingStop } from '../forms/meetingApi'
 import {
   collectCards,
@@ -106,8 +106,6 @@ interface KanbanModalOptions {
    * crystallizes it into a fiber. Omit to hide the button.
    */
   onNewIdeaClick?: () => void
-  /** Open the meeting form from the availability-gated `◉` lane action. */
-  onMeetingClick?: () => void
   /**
    * Called when the user asks for settings — the ⚙︎ at the right end of the
    * tab strip, or `⌘,` / `,`. The host opens the settings dialog, which reads
@@ -147,10 +145,22 @@ export class KanbanModal {
   private readonly openMeetingTerminalAfterGesture?: (tmuxSessionName: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
-  private readonly onMeetingClick?: () => void
   private readonly onSettingsClick?: () => void
   private readonly shuttleBase: string
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
+  private readonly handleMeetingVisibilityChange = (): void => {
+    if (document.hidden) {
+      if (this.meetingPollTimer !== null) window.clearTimeout(this.meetingPollTimer)
+      this.meetingPollTimer = null
+      this.meetingFetchController?.abort()
+    } else if (this.meetingFetchPromise) {
+      const pending = this.meetingFetchPromise
+      this.meetingFetchController?.abort()
+      void pending.then(() => this.fetchMeetingStatus())
+    } else {
+      void this.fetchMeetingStatus()
+    }
+  }
 
   private readonly temporal: TemporalFetchers
 
@@ -253,6 +263,8 @@ export class KanbanModal {
   private meetingPollTimer: number | null = null
   private meetingClockTimer: number | null = null
   private meetingFetchPromise: Promise<void> | null = null
+  private meetingFetchController: AbortController | null = null
+  private readonly meetingStopGuard = new MeetingStopGuard()
   /**
    * How many multi-write gestures are still landing.
    *
@@ -297,7 +309,6 @@ export class KanbanModal {
       : undefined
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
-    this.onMeetingClick = options.onMeetingClick
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
@@ -330,43 +341,29 @@ export class KanbanModal {
       // horizon hears about it — the strip has to be there for a row too, now
       // that a row can be put down on a day.
       onDragActivity: () => this.syncDragHorizon(this.surfaces.isDragging()),
-      // Lane actions stay with the surface they feed; Meeting is shown only
-      // when the local daemon reports that hark is available.
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
-      onMeetingClick: this.onMeetingClick,
-      getMeetingAvailable: () => this.meetingStatus.available,
       getMeeting: () => this.meetingStatus.meeting,
-      onMeetingNotes: (meeting) => this.openMeetingNotes(meeting),
+      isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
-      onMeetingStop: () => this.stopCurrentMeeting(),
+      onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
       onRefresh: () => void this.refreshFromSource(),
     })
   }
 
   /** Refresh local meeting availability and lifecycle independently of the fiber feed. */
   async refreshMeeting(): Promise<void> {
+    if (this.meetingFetchPromise) {
+      const pending = this.meetingFetchPromise
+      this.meetingFetchController?.abort()
+      await pending
+    }
     await this.fetchMeetingStatus()
   }
 
-  private openMeetingNotes(meeting: MeetingRecord): void {
-    if (!meeting.fiber) return
-    const card: KanbanCard = {
-      id: meeting.fiber,
-      name: meeting.title || meeting.fiber.split('/').at(-1) || 'Meeting notes',
-      path: '',
-      originId: meeting.host ?? 'local',
-      status: 'open',
-      createdAt: meeting.started_at ?? new Date().toISOString(),
-      effectiveHorizon: 'now',
-      drifted: false,
-      isCycle: false,
-      cycleStart: null,
-    }
-    this.detailModal.openReadOnly(card)
-  }
-
-  private async stopCurrentMeeting(): Promise<void> {
+  private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {
+    if (!this.meetingStopGuard.request(meeting)) return
+    this.surfaces.updateMeetingPresentation()
     try {
       await requestMeetingStop(this.shuttleBase)
     } catch (error) {
@@ -395,9 +392,10 @@ export class KanbanModal {
     this.assembleChrome()
     host.append(this.container!)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
+    document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
-    void this.fetchAndRender()
     this.startPolling()
+    void this.fetchAndRender()
     // ?view=day|week|chronicle|shelf deep-links a view — for humans sharing a
     // spot and for headless QA, which can't press a hotkey. Unknown values
     // fall through to the Desk.
@@ -424,6 +422,7 @@ export class KanbanModal {
     this.activeView?.unmount()
     this.activeView = null
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
+    document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null
@@ -454,8 +453,8 @@ export class KanbanModal {
    * grid, banner, and live region.
    *
    * The masthead band has no "Kanban" title, scope subtitle, or stats line.
-   * Four actions — Stash `+`, New idea `✶`, Meeting `◉`, and Refresh `↻` — live
-   * in the three lane heads (see KanbanSurfaceRenderer.makeColumnActions). The
+   * Three actions — Stash `+`, New idea `✶`, and Refresh `↻` — live in the
+   * lane heads (see KanbanSurfaceRenderer.makeColumnAction). The
    * standalone page begins at the tab strip; the body's top padding is its only
    * top margin.
    */
@@ -1767,44 +1766,63 @@ export class KanbanModal {
 
 
   private async fetchMeetingStatus(): Promise<void> {
-    if (!this.container) return
+    if (!this.container || !shouldRunVisiblePoll(null, Date.now(), this.pollIntervalMs)) return
     if (this.meetingFetchPromise) return this.meetingFetchPromise
+    if (this.meetingPollTimer !== null) {
+      window.clearTimeout(this.meetingPollTimer)
+      this.meetingPollTimer = null
+    }
 
-    this.meetingFetchPromise = (async () => {
+    const controller = new AbortController()
+    this.meetingFetchController = controller
+    const timeout = window.setTimeout(() => controller.abort(), 10_000)
+    let succeeded = false
+    const pending = (async () => {
       try {
-        const response = await fetch(`${this.shuttleBase}/api/v1/meeting`)
+        const response = await fetch(`${this.shuttleBase}/api/v1/meeting`, { signal: controller.signal })
         if (!response.ok || !this.container) return
         const status = parseMeetingStatus(await response.json())
         if (!status) return
+        succeeded = true
+        this.meetingStopGuard.observe(status.meeting)
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
         this.syncMeetingClock()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.surfaces.updateMeetingPresentation()
       } catch {
-        // Meeting availability is best-effort; the regular board poll retries.
+        // Older daemons, unavailable services, and timed-out reads back off to the board cadence.
       } finally {
+        window.clearTimeout(timeout)
+        if (this.meetingFetchController === controller) this.meetingFetchController = null
         this.meetingFetchPromise = null
-        this.scheduleMeetingPoll()
+        this.scheduleMeetingPoll(succeeded)
       }
     })()
-    return this.meetingFetchPromise
+    this.meetingFetchPromise = pending
+    return pending
   }
 
-  private scheduleMeetingPoll(): void {
+  private scheduleMeetingPoll(succeeded = true): void {
     if (this.meetingPollTimer !== null) {
       window.clearTimeout(this.meetingPollTimer)
       this.meetingPollTimer = null
     }
-    if (!this.container || !this.meetingStatus.meeting) return
+    if (!this.container) return
+    // Use the board's visibility gate without its unfocused-window slowdown;
+    // meeting status is lightweight and runs at the contract's visible cadence.
+    const visible = shouldRunVisiblePoll(null, Date.now(), this.pollIntervalMs)
+    const delay = meetingPollDelay(visible, succeeded, this.meetingStatus.meeting)
+    if (delay === null) return
     this.meetingPollTimer = window.setTimeout(() => {
       this.meetingPollTimer = null
       void this.fetchMeetingStatus()
-    }, meetingPollInterval(this.meetingStatus.meeting))
+    }, delay)
   }
 
   private syncMeetingClock(): void {
-    const ticking = this.meetingStatus.meeting !== null && this.meetingStatus.meeting.state !== 'failed'
+    const meeting = this.meetingStatus.meeting
+    const ticking = meeting !== null && meeting.state !== 'failed' && meeting.state !== 'starting' && meeting.started_at !== null
     if (!ticking && this.meetingClockTimer !== null) {
       window.clearInterval(this.meetingClockTimer)
       this.meetingClockTimer = null
@@ -2289,6 +2307,8 @@ export class KanbanModal {
       window.clearInterval(this.pollTimer)
       this.pollTimer = null
     }
+    this.meetingFetchController?.abort()
+    this.meetingFetchController = null
     if (this.meetingPollTimer !== null) {
       window.clearTimeout(this.meetingPollTimer)
       this.meetingPollTimer = null

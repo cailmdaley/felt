@@ -31,6 +31,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
+import { captureOutcome, captureRequestBody, type CaptureMeetingMode, type CaptureResponseData } from './captureApi'
 import type { AgentEntry } from './StashForm'
 import { agentGroups } from './agentGroups'
 import { shuttleOrigin } from './projectModel'
@@ -88,21 +89,14 @@ export interface CaptureFormProps {
   /** Unix-ms of most recent activity per project id — recency ranking for the
    *  default selection and picker order. */
   cityActivityById?: Record<string, number>
-  /** Called after a successful launch. App runs deliberately have no tmux name. */
+  /** Called after an ordinary successful launch. App runs have no tmux name. */
   onSpawned: (launch: { tmuxSession: string; surface: ExecutionSurface }) => void
+  /** Called once the daemon confirms meeting recording began. */
+  onMeetingResult: (result: { host: string; error?: string }) => void
   /** Called on cancel / Esc / overlay click. */
   onCancel: () => void
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
   shuttleBase?: string
-}
-
-interface CaptureResponse {
-  spawned?: boolean
-  tmux_session?: string
-  reason?: string
-  error?: string
-  message?: string
-  surface?: ExecutionSurface
 }
 
 export function CaptureForm({
@@ -112,6 +106,7 @@ export function CaptureForm({
   onProjectAdded,
   nativeFolderPicker = false,
   onSpawned,
+  onMeetingResult,
   onCancel,
   shuttleBase = '',
 }: CaptureFormProps): JSX.Element {
@@ -126,6 +121,8 @@ export function CaptureForm({
   const [effort, setEffort] = useState<string>(CAPTURE_DEFAULT_EFFORT)
   const [chrome, setChrome] = useState<boolean>(false)
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
+  const [meetingAvailable, setMeetingAvailable] = useState(false)
+  const [meetingMode, setMeetingMode] = useState<CaptureMeetingMode | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -149,10 +146,23 @@ export function CaptureForm({
     nativeFolderPicker,
   })
 
+  const meetingEnabled = meetingAvailable && meetingMode !== null
+
   // Autofocus the yap — it's the whole point of the dialog.
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${shuttleBase}/api/v1/meeting`)
+      .then((response) => (response.ok ? response.json() as Promise<{ available?: unknown }> : null))
+      .then((status) => {
+        if (!cancelled && status?.available === true) setMeetingAvailable(true)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [shuttleBase])
 
   // Agent registry (base agents only; aliases resolve to base + axes). The
   // fallback list stays in place when the daemon is unreachable.
@@ -191,7 +201,7 @@ export function CaptureForm({
   const submit = async (): Promise<void> => {
     if (submitting) return
     const trimmed = prompt.trim()
-    if (!trimmed) {
+    if (!trimmed && !meetingEnabled) {
       setError('Say something first — the session needs a yap to work with.')
       textareaRef.current?.focus()
       return
@@ -206,27 +216,32 @@ export function CaptureForm({
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(captureRequestBody({
           prompt: trimmed,
-          project_dir: selectedCity.path,
+          projectDir: selectedCity.path,
           origin: shuttleOrigin(selectedCity.originId),
           agent,
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
-          ...(chrome ? { chrome: true } : {}),
-          ...(isCodexAgent(agentRec) ? { surface } : {}),
-        }),
+          chrome,
+          ...(!meetingEnabled && isCodexAgent(agentRec) ? { surface } : {}),
+          meetingMode: meetingEnabled ? meetingMode : null,
+        })),
       })
-      const data = (await res.json().catch(() => ({}))) as CaptureResponse
-      if (!res.ok || !data.spawned) {
-        const msg =
-          data.reason === 'app_launch_failed'
-            ? 'ChatGPT could not start this Codex run. Check the app connection and try again.'
-            : data.reason === 'project_dir_missing'
-            ? `Project directory not found on the daemon: ${selectedCity.path}`
-            : data.message ?? data.error ?? data.reason ?? `Capture failed (${res.status})`
-        throw new Error(msg)
+      const data = (await res.json().catch(() => ({}))) as CaptureResponseData
+      const outcome = captureOutcome(res, data, {
+        projectDir: selectedCity.path,
+        meetingMode: meetingEnabled ? meetingMode : null,
+        host: selectedHost.label,
+      })
+      if (outcome.kind === 'error') throw new Error(outcome.message)
+      if (outcome.kind === 'meeting-recording') {
+        onMeetingResult({ host: outcome.host, error: outcome.error })
+        return
       }
-      onSpawned({ tmuxSession: data.tmux_session ?? '', surface: data.surface ?? (isCodexAgent(agentRec) ? surface : 'cli') })
+      onSpawned({
+        tmuxSession: outcome.tmuxSession,
+        surface: outcome.surface ?? (isCodexAgent(agentRec) ? surface : 'cli'),
+      })
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? String(err)
       setError(msg.includes('fetch') ? 'Couldn’t reach the Shuttle daemon (:4000).' : msg)
@@ -247,7 +262,7 @@ export function CaptureForm({
       onOpenChange={(next) => {
         if (!next) onCancel()
       }}
-      title="New idea"
+      title={meetingEnabled ? 'Start a meeting' : 'New idea'}
       eyebrow="shuttle · capture"
     >
       <div className="capture-form" onKeyDown={handleKeyDown}>
@@ -256,9 +271,42 @@ export function CaptureForm({
           className="capture-yap"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Speak the idea — a session will write the card"
+          placeholder={meetingEnabled ? "What's the meeting? Who's in it?" : 'Speak the idea — a session will write the card'}
           rows={6}
         />
+        {meetingAvailable && (
+          <div className="capture-meeting-row">
+            <label className="capture-meeting-toggle">
+              <input
+                type="checkbox"
+                checked={meetingEnabled}
+                disabled={submitting}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setMeetingMode('call')
+                  } else {
+                    setMeetingMode(null)
+                  }
+                }}
+              />
+              <span>Meeting</span>
+            </label>
+            {meetingEnabled && (
+              <label className="capture-field capture-meeting-mode">
+                <span className="capture-label">Mode</span>
+                <select
+                  className="capture-select"
+                  value={meetingMode}
+                  disabled={submitting}
+                  onChange={(e) => setMeetingMode(e.target.value as CaptureMeetingMode)}
+                >
+                  <option value="call">Call</option>
+                  <option value="room">Room</option>
+                </select>
+              </label>
+            )}
+          </div>
+        )}
         {/* Host · project · agent · effort — four equal grid columns rather
             than flex children, so the last column's right edge is the
             container's right edge exactly, and a narrow card breaks 2×2
@@ -330,13 +378,15 @@ export function CaptureForm({
               aria-label="Session"
               className="capture-select"
               value={isCodexAgent(agentRec) ? surface : 'cli'}
-              disabled={!isCodexAgent(agentRec)}
+              disabled={meetingEnabled || !isCodexAgent(agentRec)}
               onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
             >
               <option value="app">ChatGPT app</option>
               <option value="cli">Terminal</option>
             </select>
-            <span className="capture-session-help">{sessionHelp(agentRec, surface)}</span>
+            <span className="capture-session-help">
+              {meetingEnabled ? 'Meeting capture runs in Terminal' : sessionHelp(agentRec, surface)}
+            </span>
           </label>
         </div>
         {addProject.pathOpen && onProjectAdded && (
@@ -369,7 +419,7 @@ export function CaptureForm({
         )}
         <div className="capture-foot">
           <span className="capture-foot-hint">
-            <kbd>Esc</kbd> cancel <span className="capture-foot-dot">·</span> <kbd>⌘↵</kbd> spawn
+            <kbd>Esc</kbd> cancel <span className="capture-foot-dot">·</span> <kbd>⌘↵</kbd> {meetingEnabled ? 'start meeting' : 'spawn'}
           </span>
           <div className="capture-buttons">
             <button
@@ -384,9 +434,9 @@ export function CaptureForm({
               type="button"
               className="capture-btn capture-submit"
               onClick={() => void submit()}
-              disabled={submitting || !prompt.trim()}
+              disabled={submitting || (!meetingEnabled && !prompt.trim())}
             >
-              {submitting ? 'Spawning…' : 'Spawn'}
+              {submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
             </button>
           </div>
         </div>
@@ -447,6 +497,27 @@ export function injectCaptureFormStyles(): void {
       border-color: #7C93C8;
       box-shadow: 0 0 0 2px rgba(61, 91, 160, 0.16);
     }
+    .capture-meeting-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 18px;
+    }
+    .capture-meeting-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      font-size: 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .capture-meeting-toggle input {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      accent-color: #3F8278;
+    }
+    .capture-meeting-mode { width: min(14rem, 50%); }
     .capture-controls {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -3,8 +3,8 @@
  *
  * It speaks the forms' manuscript palette (paper `#F4F0E8`, band `#E5DED2`,
  * brass `#C49333`, iron-gall hairlines) rather than the board's pigment
- * variables, because it lives inside `AppDialog` alongside Capture and Meeting
- * and the shared dialog sheets have to look like one kit.
+ * variables, because it lives inside `AppDialog` alongside Stash and Capture
+ * and those three have to look like one kit.
  *
  * **What it does NOT spend colour on.** The board's four pigments are claims
  * about work — who acted, what is owed, what was judged. Configuration is
@@ -16,8 +16,7 @@
  * dot claiming everything is fine.
  *
  * Injected by element id on first render, the same pattern as
- * `injectStashFormStyles`, `injectCaptureFormStyles`, and
- * `injectMeetingFormStyles`.
+ * `injectStashFormStyles` and `injectCaptureFormStyles`.
  */
 
 let injected = false

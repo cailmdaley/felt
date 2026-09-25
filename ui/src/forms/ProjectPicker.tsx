@@ -1,5 +1,5 @@
 /**
- * ProjectPicker — the host + project pair the board's forms share.
+ * ProjectPicker — the host + project pair both forms use.
  *
  * **Two native `<select>`s, and nothing more.** The project half used to be a
  * bespoke filtering combobox, grown for one reason: a native `<select>` seemed
@@ -49,12 +49,6 @@ export interface PickerProject {
   /** Owner-routing key sent as `origin`: `'local'` for the local daemon's own
    *  projects, else the owning remote's bare name (e.g. `cluster-a`). */
   originId: string
-}
-
-/** Project metadata for forms whose fibers live under a known loom substore. */
-export interface ProjectWithLoomPrefix extends PickerProject {
-  /** Loom-relative substore root; `''` when the project is a store root. */
-  loomPrefix: string
 }
 
 /** A host the pickers can point at — one origin of `/api/v1/felt-stores`. */
@@ -401,9 +395,9 @@ export function injectProjectPickerStyles(): void {
 }
 
 /**
- * Host-then-project selection — the state every form runs on, once.
+ * Host-then-project selection — the state both forms run on, once.
  *
- * Capture, Stash and Meeting ask the same question in the same order (which host, then
+ * Capture and Stash ask the same question in the same order (which host, then
  * which of its projects), with the same defaults, the same re-point on a host
  * change, and the same adopt-and-select on "+ Add project…". Only the JSX
  * around it differs, so only the JSX stays in the forms.

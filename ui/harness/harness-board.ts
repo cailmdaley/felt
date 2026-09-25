@@ -6,10 +6,8 @@
  * through the board's real classifier (`parseCompositeFeed` →
  * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
  * Query `?meeting=live` or `?meeting=failed` to stage those meeting states;
- * leave it unset to exercise the idle board and meeting form.
- *
- * The harness also serves the meeting-notes body and project index needed to
- * exercise Notes and parent selection without a live daemon.
+ * leave it unset to exercise the idle board. Add `?capture=meeting` to open
+ * Capture with the daemon reporting meeting support.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -33,7 +31,8 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
-import { openCapture, openMeeting, openStash, openSettings } from '../src/forms/mountForms.js'
+import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
+import { showToast } from '../src/board/utils.js'
 import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
@@ -59,11 +58,10 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live'
   ? {
       state: 'live',
       title: 'Shear telecon',
-      host: FOREIGN_HOST,
-      fiber: 'work/meetings/2026-09-25-shear-telecon',
+      mirror_host: 'project-host',
       started_at: iso(-13 * 60_000 - 12_000),
       last_line: '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
-      transcript: '/home/you/.hark/sessions/shear-telecon.txt',
+      transcript: null,
       tmux_session: 'hark-meeting',
       error: null,
     }
@@ -71,8 +69,7 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live'
     ? {
         state: 'failed',
         title: 'Shear telecon',
-        host: null,
-        fiber: null,
+        mirror_host: null,
         started_at: iso(-2 * 60_000),
         last_line: null,
         transcript: null,
@@ -1293,51 +1290,24 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
     return json({ meeting: mockMeeting }, 202)
   }
-  if (url.endsWith('/api/v1/meeting')) {
-    if (init?.method === 'POST') {
-      const request = body()
+  if (url.endsWith('/api/v1/meeting')) return json({ available: true, meeting: mockMeeting })
+  if (url.endsWith('/api/v1/capture') && init?.method === 'POST') {
+    const request = body()
+    if (request.meeting && typeof request.meeting === 'object') {
+      const prompt = String(request.prompt ?? '').trim()
       mockMeeting = {
         state: 'starting',
-        title: String(request.title ?? ''),
-        host: request.host === 'local' ? null : String(request.host ?? ''),
-        fiber: null,
+        title: prompt.split('\n')[0] || 'Meeting',
         started_at: null,
         last_line: null,
         transcript: null,
+        mirror_host: request.origin === 'local' ? null : 'project-host',
         tmux_session: 'hark-meeting',
         error: null,
       }
-      return json({ meeting: mockMeeting }, 202)
+      return json({ spawned: true, tmux_session: 'capture-scribe', surface: 'cli', meeting: mockMeeting }, 202)
     }
-    return json({ available: true, meeting: mockMeeting })
-  }
-  if (url.includes('/api/v1/fibers/work/meetings/2026-09-25-shear-telecon') && url.includes('body=true')) {
-    const path = 'work/meetings/2026-09-25-shear-telecon'
-    return json({
-      host: LOCAL_HOST,
-      fibers: [{
-        felt_store: '/home/you/loom/.felt',
-        path,
-        fiber: {
-          id: path,
-          slug: path,
-          name: 'Shear telecon',
-          status: 'active',
-          modified_at: iso(-60_000),
-          outcome: 'Open decisions and follow-up checks from the call.',
-          body: '# Shear telecon\n\nThe covariance comparison is stable; rerun the mask split before closing this note.',
-        },
-        origin: FOREIGN_HOST,
-      }],
-      origins: { [FOREIGN_HOST]: { kind: 'remote', stale: false, fiber_count: 1 } },
-    })
-  }
-  if (url.endsWith('/api/v1/fibers')) {
-    return json({ fibers: [
-      { fiber: { slug: 'work', name: 'Work' } },
-      { fiber: { slug: 'work/meetings', name: 'Meetings' } },
-      { fiber: { slug: 'work/analysis', name: 'Analysis' } },
-    ] })
+    return json({ spawned: true, tmux_session: 'capture-session', surface: 'cli' }, 202)
   }
 
   // ── The settings plane ─────────────────────────────────────────────────
@@ -1440,8 +1410,12 @@ try {
   assertUlids()
   const modal = new KanbanModal({
     onStashClick: () => { void openStash({ shuttleBase: '' }) },
-    onNewIdeaClick: () => { void openCapture({ shuttleBase: '' }) },
-    onMeetingClick: () => { void openMeeting({ shuttleBase: '', onStarted: () => { void modal.refreshMeeting() } }) },
+    onNewIdeaClick: () => { void openCapture({
+      shuttleBase: '',
+      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
+      onMeetingResult: (message, tone) => showToast(message, tone),
+      onMeetingStarted: () => { void modal.refreshMeeting() },
+    }) },
     onOpenWorker: (session) => { document.body.dataset.harnessTerminalSession = session },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
@@ -1452,6 +1426,14 @@ try {
   host.style.cssText = 'position:fixed; inset:0;'
   document.body.append(host)
   modal.mount(host)
+  if (new URLSearchParams(window.location.search).get('capture') === 'meeting') {
+    void openCapture({
+      shuttleBase: '',
+      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
+      onMeetingResult: (message, tone) => showToast(message, tone),
+      onMeetingStarted: () => { void modal.refreshMeeting() },
+    })
+  }
 
   // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
   // mock activity/commits cover, so a driving script can ask for exactly the
