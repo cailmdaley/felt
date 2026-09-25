@@ -780,6 +780,28 @@ defmodule Shuttle.MeetingTest do
              Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
   end
 
+  test "an unmatched observation after creation is uncertain, not a failed launch", %{
+    hark_dir: hark_dir
+  } do
+    Application.put_env(:shuttle, :meeting_launch_wait_ms, 300)
+
+    write_meeting(hark_dir, %{"launch" => "old", "phase" => "ended", "pid" => 1, "title" => "old"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["new-session" | _], _opts, _state ->
+        {{"$4\n", 0}, :created}
+
+      "tmux", ["has-session" | _], _opts, _state ->
+        {{"can't find session: hark-meeting", 1}, :created}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+
+    assert {:ok, %{meeting: %{state: "starting", title: "Shear review"}}} =
+             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+  end
+
   test "a reap never kills a newer launch that replaced the inspected one", %{
     hark_dir: hark_dir
   } do

@@ -341,11 +341,6 @@ defmodule Shuttle.Meeting do
         {:ok, %{meeting: %{state: "failed"} = row}, %{tmux: %{launch: ^launch_id}}} ->
           {:error, {:launch_failed, row}}
 
-        {:ok, %{meeting: nil}, _context} ->
-          {:error,
-           {:launch_failed,
-            starting_row(paths, title, "failed", "hark exited before recording started")}}
-
         _starting_or_unreadable ->
           :pending
       end
@@ -363,20 +358,36 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp starting_row(paths, title, state \\ "starting", error \\ nil) do
+  defp starting_row(paths, title) do
     %{
-      state: state,
+      state: "starting",
       title: title,
       started_at: nil,
       last_line: nil,
       transcript: paths.local_transcript,
       mirror_host: paths.mirror_host,
       tmux_session: @session,
-      error: error
+      error: nil
     }
   end
 
-  defp with_meeting_lock(fun), do: :global.trans({{__MODULE__, :meeting}, self()}, fun)
+  # Start, stop and reaping share one lock. It is reentrant within a process, so
+  # a reap reached from the launch wait (already locked) doesn't lock twice.
+  defp with_meeting_lock(fun) do
+    if Process.get(:shuttle_meeting_lock) do
+      fun.()
+    else
+      :global.trans({{__MODULE__, :meeting}, self()}, fn ->
+        Process.put(:shuttle_meeting_lock, true)
+
+        try do
+          fun.()
+        after
+          Process.delete(:shuttle_meeting_lock)
+        end
+      end)
+    end
+  end
 
   defp created_session_id?(output), do: Regex.match?(~r/^\$[0-9]+$/m, output)
 
@@ -392,7 +403,7 @@ defmodule Shuttle.Meeting do
       identity = meeting_identity(tmux, usable_meeting, pid_alive?)
       :ok = Shuttle.Meeting.Control.reconcile(identity)
 
-      with :ok <- if(reap?, do: kill_launch(tmux, opts), else: :ok) do
+      with :ok <- if(reap?, do: with_meeting_lock(fn -> kill_launch(tmux, opts) end), else: :ok) do
         meeting =
           if is_map(meeting) do
             Map.put(meeting, :last_line, last_transcript_line(meeting.transcript))
