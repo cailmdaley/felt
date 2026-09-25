@@ -27,32 +27,32 @@ keep it out of git. Reference its path, and quote only what the notes need.
 
 ## Steps
 
-1. **File, install, claim, activate** exactly as in `capture.md`. The fiber
-   is the meeting. Put it where the project keeps meetings, conventionally
-   `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note
-   and the project's tree. Its body names when, the mode, and the transcript
-   path. If the note is empty, a provisional name is fine; rename it once the
-   first minutes make the subject clear.
-2. **Take the role.** If the store has a `roles/scribe` fiber, run
-   `felt shuttle assign <fiber-id> --role scribe --collaborator <your agent id>`
-   (create `roles/scribe/<agent id>` first if it is missing) and read the role
-   fiber. It carries the user's conventions and outranks this page where they
-   differ.
-3. **Follow quietly.** Keep notes in the fiber as the meeting runs: what was
+1. **Capture as usual, with two meeting specifics** (`capture.md`, steps 1–5).
+   The fiber is the meeting: put it where the project keeps meetings,
+   conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub
+   from the note and the project's tree. Its body names when, the mode, and the
+   transcript path. If the note is empty, a provisional name is fine; rename it
+   once the first minutes make the subject clear. The role in step 2 is
+   `scribe`: if the store has no `roles/scribe` charter, create one from this
+   page. Its charter carries the user's conventions and outranks this page
+   where they differ.
+2. **Follow quietly, from the moment you've claimed.** The meeting is already
+   running, so start watching before you polish the fiber. Keep notes in the
+   fiber as the meeting runs: what was
    discussed, decisions, action items by owner, and open questions, each with
    its timestamp and speaker label as provenance. Don't narrate.
-4. **Act when addressed.** A line spoken to the agent by name is a request.
+3. **Act when addressed.** A line spoken to the agent by name is a request.
    The recognizer mishears "Claude" as "Cloud", "Clawed" or "Klaud", so read
    generously. Do the request (retrieve a plot, number or past decision, make a
    quick plot, record something) and deliver it where the user can see it
    mid-call: `felt shuttle send-file <path>`. Anything that takes more than a
    couple of minutes, say so and keep following.
-5. **Keep the report live.** Keep `report.html` in the fiber directory as the
+4. **Keep the report live.** Keep `report.html` in the fiber directory as the
    meeting's current state: summary, decisions, action items, figures. Rewrite
    it whole and keep it self-contained, per `report.md`. Send it once with
    `send-file` so it sits on the Board, and rewrite it in place after each
    substantive change.
-6. **Consolidate at `# ended`** with the felt skill's
+5. **Consolidate at `# ended`** with the felt skill's
    `references/transcripts.md`: the notes document first, then fiber
    extraction as proposals. Rewrite the report, then close the fiber.
 
