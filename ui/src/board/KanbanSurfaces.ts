@@ -53,6 +53,7 @@ import {
   type BandId,
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
+import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, type MeetingRecord } from './meeting.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -231,6 +232,10 @@ interface KanbanSurfaceRendererOptions {
   /** Open the chat-first capture — the In flight head's `✶` action. Omit to
    *  render the In flight head title + count alone. */
   onNewIdeaClick?: () => void
+  getMeeting?: () => MeetingRecord | null
+  isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
+  onMeetingTerminal?: (session: string) => void
+  onMeetingStop?: (meeting: MeetingRecord) => void | Promise<void>
   /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
    *  (refresh is never read-only). */
   onRefresh: () => void
@@ -283,6 +288,7 @@ export class KanbanSurfaceRenderer {
   private chainDependentsMap: Map<string, string[]> = new Map()
 
   private readonly o: KanbanSurfaceRendererOptions
+  private currentMeetingList: HTMLElement | null = null
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
@@ -1407,8 +1413,11 @@ export class KanbanSurfaceRenderer {
     list.className = 'kbn-col-list'
     list.setAttribute('role', 'list')
     this.installVerticalEdgeScroll(list)
+    const meeting = kind === 'inFlight' ? this.o.getMeeting?.() ?? null : null
+    if (kind === 'inFlight') this.currentMeetingList = list
+    if (meeting) list.append(this.renderMeetingCard(meeting))
 
-    if (cards.length === 0 && ghosts.length === 0) {
+    if (cards.length === 0 && ghosts.length === 0 && !meeting) {
       const empty = document.createElement('div')
       empty.className = 'kbn-empty'
       empty.setAttribute('role', 'listitem')
@@ -1490,6 +1499,122 @@ export class KanbanSurfaceRenderer {
       spec.onClick()
     })
     return btn
+  }
+
+  updateMeetingPresentation(): void {
+    const list = this.currentMeetingList
+    if (!list) return
+    const meeting = this.o.getMeeting?.() ?? null
+    const current = list.querySelector<HTMLElement>('.kbn-meeting-card')
+    if (!meeting) {
+      current?.remove()
+      if (!list.querySelector('.kbn-card, .kbn-empty')) {
+        const empty = document.createElement('div')
+        empty.className = 'kbn-empty'
+        empty.setAttribute('role', 'listitem')
+        empty.textContent = 'Drag a draft here to start its agent.'
+        list.append(empty)
+      }
+      return
+    }
+    list.querySelector('.kbn-empty')?.remove()
+    if (current) this.updateMeetingCard(current, meeting)
+    else list.prepend(this.renderMeetingCard(meeting))
+  }
+
+  updateMeetingDuration(nowMs = Date.now()): void {
+    for (const duration of this.currentMeetingList?.querySelectorAll<HTMLElement>('.kbn-meeting-duration:not([hidden])') ?? []) {
+      const startedAt = duration.dataset.startedAt
+      if (startedAt) duration.textContent = formatMeetingDuration(startedAt, nowMs)
+    }
+  }
+
+  private renderMeetingCard(meeting: MeetingRecord): HTMLElement {
+    const card = document.createElement('article')
+    card.className = 'kbn-meeting-card'
+    card.setAttribute('role', 'region')
+    const title = document.createElement('strong')
+    title.className = 'kbn-meeting-title'
+    const duration = document.createElement('time')
+    duration.className = 'kbn-meeting-duration'
+    const heading = document.createElement('div')
+    heading.className = 'kbn-meeting-heading'
+    heading.append(title, duration)
+
+    const metadata = document.createElement('div')
+    metadata.className = 'kbn-meeting-meta'
+    const host = document.createElement('span')
+    host.className = 'kbn-meeting-host'
+    const state = document.createElement('span')
+    state.className = 'kbn-meeting-state'
+    metadata.append(host, state)
+
+    const lastLine = document.createElement('div')
+    lastLine.className = 'kbn-meeting-last-line'
+    const error = document.createElement('div')
+    error.className = 'kbn-meeting-error'
+    error.setAttribute('role', 'alert')
+    const actions = document.createElement('div')
+    actions.className = 'kbn-meeting-actions'
+    card.append(heading, metadata, lastLine, error, actions)
+    this.updateMeetingCard(card, meeting)
+    return card
+  }
+
+  private updateMeetingCard(card: HTMLElement, meeting: MeetingRecord): void {
+    const actions = meetingActions(meeting, this.o.isMeetingStopRequested?.(meeting) ?? false)
+    const title = meeting.title?.trim() || 'Untitled meeting'
+    card.className = `kbn-meeting-card kbn-meeting-card-${meeting.state}`
+    card.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
+    card.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
+    card.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent = meeting.mirror_host
+      ? `→ ${meeting.mirror_host}`
+      : 'this Mac'
+    card.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
+    const duration = card.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
+    const value = meetingDuration(meeting)
+    duration.dataset.startedAt = meeting.started_at ?? ''
+    duration.textContent = value ?? ''
+    duration.dateTime = meeting.started_at ?? ''
+    duration.hidden = value === null
+    const lastLine = card.querySelector<HTMLElement>('.kbn-meeting-last-line')!
+    lastLine.textContent = meeting.last_line ?? ''
+    lastLine.hidden = !meeting.last_line
+    const error = card.querySelector<HTMLElement>('.kbn-meeting-error')!
+    error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
+    error.hidden = meeting.state !== 'failed'
+
+    const actionGroup = card.querySelector<HTMLElement>('.kbn-meeting-actions')!
+    const actionSignature = [meeting.state, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
+    if (actionGroup.dataset.signature === actionSignature) return
+    actionGroup.dataset.signature = actionSignature
+    actionGroup.replaceChildren()
+    const addAction = (label: string, className: string, disabled: boolean, run: () => void): void => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = `kbn-meeting-action ${className}`
+      button.textContent = label
+      button.disabled = disabled
+      button.addEventListener('click', (event) => {
+        event.stopPropagation()
+        run()
+      })
+      actionGroup.append(button)
+    }
+
+    if (actions.terminal && this.o.onMeetingTerminal) {
+      addAction('Terminal', 'kbn-meeting-terminal', false, () => {
+        const session = this.o.getMeeting?.()?.tmux_session
+        if (session) this.o.onMeetingTerminal?.(session)
+      })
+    }
+    if ((actions.stop || actions.dismiss) && this.o.onMeetingStop) {
+      addAction(actions.dismiss ? 'Dismiss' : 'Stop', 'kbn-meeting-stop', actions.stopDisabled, () => {
+        const current = this.o.getMeeting?.()
+        if (!current || this.o.isMeetingStopRequested?.(current)) return
+        void this.o.onMeetingStop?.(current)
+      })
+    }
   }
 
   /**

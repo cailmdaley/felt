@@ -34,6 +34,10 @@ export interface OpenFormOptions {
   shuttleBase: string
   /** Surface a result (success or failure) to the user, e.g. a board toast. */
   onResult?: (message: string, ok: boolean) => void
+  /** Meeting recording outcomes distinguish a continuing recording from failure. */
+  onMeetingResult?: (message: string, tone: 'success' | 'warning') => void
+  /** Refresh the local meeting row as soon as recording is confirmed. */
+  onMeetingStarted?: () => void
 }
 
 let container: HTMLElement | null = null
@@ -154,6 +158,14 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
       onSpawned={({ tmuxSession: session, surface }) => {
         close()
         opts.onResult?.(surface === 'app' ? 'Codex run started in ChatGPT' : `Capture session spawned${session ? ` · ${session}` : ''}`, true)
+      }}
+      onMeetingResult={({ host, error }) => {
+        close()
+        opts.onMeetingStarted?.()
+        const tone = error ? 'warning' : 'success'
+        const message = error ?? `Recording started; the scribe is starting on ${host}.`
+        if (opts.onMeetingResult) opts.onMeetingResult(message, tone)
+        else opts.onResult?.(message, tone === 'success')
       }}
     />,
   )

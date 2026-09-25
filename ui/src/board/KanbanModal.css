@@ -1337,6 +1337,76 @@
   display: flex; flex-direction: column;
   gap: 8px;
 }
+.kbn-meeting-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(63, 130, 120, 0.36);
+  border-radius: 3px;
+  background: #F3F0E5;
+  color: #2E2A26;
+  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.08);
+}
+.kbn-meeting-card-failed { border-color: rgba(178, 78, 60, 0.48); background: #F6ECE5; }
+.kbn-meeting-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.kbn-meeting-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-weight: 600;
+}
+.kbn-meeting-duration {
+  flex: 0 0 auto;
+  color: #5C544D;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-variant-numeric: tabular-nums;
+}
+.kbn-meeting-meta { display: flex; align-items: center; gap: 7px; color: #756B60; font-size: calc(12px * var(--kbn-type-scale, 1)); }
+.kbn-meeting-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbn-meeting-state {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(63, 130, 120, 0.32);
+  border-radius: 9px;
+  background: rgba(63, 130, 120, 0.10);
+  color: #2E6862;
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  line-height: 1.4;
+}
+.kbn-meeting-card-failed .kbn-meeting-state { border-color: rgba(178, 78, 60, 0.34); background: rgba(178, 78, 60, 0.10); color: #8B3A28; }
+.kbn-meeting-last-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #4C453F;
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.kbn-meeting-last-line[hidden], .kbn-meeting-error[hidden], .kbn-meeting-duration[hidden] { display: none; }
+.kbn-meeting-error { color: #8B3A28; font-size: calc(12px * var(--kbn-type-scale, 1)); overflow-wrap: anywhere; }
+.kbn-meeting-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
+.kbn-meeting-action {
+  padding: 3px 10px;
+  border: 1px solid rgba(46, 42, 38, 0.20);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.48);
+  color: #4C453F;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  cursor: pointer;
+}
+.kbn-meeting-action:hover:not(:disabled) { background: #FFFFFF; border-color: rgba(46, 42, 38, 0.34); }
+.kbn-meeting-action:focus-visible { outline: 1px dashed #3F8278; outline-offset: 2px; }
+.kbn-meeting-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.kbn-meeting-stop { border-color: rgba(178, 78, 60, 0.30); color: #8B3A28; }
 /* Empty column — a quiet marginal line, set in italic with a small
    fleuron to make absence feel intentional rather than missing. */
 .kbn-empty {

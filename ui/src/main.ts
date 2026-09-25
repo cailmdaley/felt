@@ -28,7 +28,12 @@ const board = new KanbanModal({
     void openStash({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
   },
   onNewIdeaClick: () => {
-    void openCapture({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') })
+    void openCapture({
+      shuttleBase,
+      onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error'),
+      onMeetingResult: (msg, tone) => showToast(msg, tone),
+      onMeetingStarted: () => { void board.refreshMeeting() },
+    })
   },
   // ⚙︎ at the right end of the tab strip, and ⌘, / , — the operator files of
   // any host in the fleet. Only a failure to even reach the daemon surfaces a

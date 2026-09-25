@@ -410,7 +410,7 @@ export function fileExt(path: string): string {
 /**
  * Show a toast notification
  */
-export function showToast(message: string, type: 'success' | 'error' = 'success', duration = 3000): void {
+export function showToast(message: string, type: 'success' | 'warning' | 'error' = 'success', duration = 3000): void {
   // Remove existing toasts
   const existing = document.querySelector('.shuttle-toast')
   if (existing) existing.remove()
@@ -418,7 +418,7 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
   const toast = document.createElement('div')
   toast.className = 'shuttle-toast'
   toast.innerHTML = `
-    <span class="toast-icon">${type === 'success' ? '✓' : '✕'}</span>
+    <span class="toast-icon">${type === 'success' ? '✓' : type === 'warning' ? '⚠' : '✕'}</span>
     <span class="toast-message">${escapeHtml(message)}</span>
   `
 
@@ -454,6 +454,7 @@ export function showToast(message: string, type: 'success' | 'error' = 'success'
         font-weight: bold;
       }
       .shuttle-toast.success .toast-icon { color: #c9a959; }
+      .shuttle-toast.warning .toast-icon { color: #D39B36; }
       .shuttle-toast.error .toast-icon { color: #d9534f; }
       @keyframes toast-in {
         from { opacity: 0; transform: translateX(-50%) translateY(100px); }

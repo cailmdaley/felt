@@ -1,19 +1,13 @@
 /**
- * Offline visual-verification harness for the BOARD CHROME (slice B).
+ * Offline verification harness for the Board surface.
  *
- * WHY THIS EXISTS: the live daemon (:4000) is unreachable from any sandboxed
- * process (loopback is network-isolated; curl AND headless chromium both get
- * ECONNREFUSED). So the board can't be verified against the running daemon.
- * This harness builds a single self-contained IIFE bundle that mounts the REAL
- * `KanbanModal` with a MOCKED composite feed, openable via `file://` and
- * screenshot-able with agent-browser. It is the verification surface for the
- * board-chrome-redesign constitution's *Piece one — board chrome*.
- *
- * It stubs `window.fetch` for the one route the board reads
- * (`GET /api/v1/fibers/composite`) and returns a small mock feed; KanbanModal
- * then runs its own real classifier (`parseCompositeFeed` →
- * `buildKanbanResponseFromComposite`) so what you see is the real DOM/CSS the
- * daemon would serve — only the data is mock.
+ * It builds a self-contained IIFE bundle that mounts the real `KanbanModal`
+ * against mocked daemon routes, then opens from `file://`. The feed still runs
+ * through the board's real classifier (`parseCompositeFeed` →
+ * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
+ * Query `?meeting=live` or `?meeting=failed` to stage those meeting states;
+ * leave it unset to exercise the idle board. Add `?capture=meeting` to open
+ * Capture with the daemon reporting meeting support.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -38,6 +32,7 @@
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
+import { showToast } from '../src/board/utils.js'
 import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
@@ -55,8 +50,33 @@ import type {
 //   • status:active + shuttle block          → In flight (a running worker on
 //                                              one, via `runtime.tmux_session`)
 //   • status:closed + no `tempered`          → Awaiting review
+const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
+const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
+let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live'
+  ? {
+      state: 'live',
+      title: 'Shear telecon',
+      mirror_host: 'project-host',
+      started_at: iso(-13 * 60_000 - 12_000),
+      last_line: '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
+      transcript: null,
+      tmux_session: 'hark-meeting',
+      error: null,
+    }
+  : meetingScenario === 'failed'
+    ? {
+        state: 'failed',
+        title: 'Shear telecon',
+        mirror_host: null,
+        started_at: iso(-2 * 60_000),
+        last_line: null,
+        transcript: null,
+        tmux_session: 'hark-meeting',
+        error: 'Could not connect to the selected scribe host.',
+      }
+    : null
 
 const shuttleBlock = (kind = 'oneshot') => ({
   kind,
@@ -80,7 +100,6 @@ const shuttleBlock = (kind = 'oneshot') => ({
  * like a span that is correctly suppressed. Exactly one fiber wears this so
  * both branches are visible at once: one lane with a hostname, the rest bare.
  */
-const FOREIGN_HOST = 'basalt-login-02'
 /** The host serving this page — what every temporal result stamps itself with,
  *  and the note a lane suppresses because it is the page's constant. */
 const LOCAL_HOST = 'ada-workstation'
@@ -1254,7 +1273,7 @@ const mockFleet = (host: string) => {
 const realFetch = window.fetch.bind(window)
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   const body = (): Record<string, unknown> => {
     try {
       return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
@@ -1264,8 +1283,32 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
-  // The board's single read route.
+  // The board's composite feed and the local-only meeting control plane.
   if (url.includes('/api/v1/fibers/composite')) return json(MOCK_FEED)
+  if (url.endsWith('/api/v1/meeting/stop')) {
+    if (!mockMeeting) return json({ error: 'No meeting to stop' }, 404)
+    mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
+    return json({ meeting: mockMeeting }, 202)
+  }
+  if (url.endsWith('/api/v1/meeting')) return json({ available: true, meeting: mockMeeting })
+  if (url.endsWith('/api/v1/capture') && init?.method === 'POST') {
+    const request = body()
+    if (request.meeting && typeof request.meeting === 'object') {
+      const prompt = String(request.prompt ?? '').trim()
+      mockMeeting = {
+        state: 'starting',
+        title: prompt.split('\n')[0] || 'Meeting',
+        started_at: null,
+        last_line: null,
+        transcript: null,
+        mirror_host: request.origin === 'local' ? null : 'project-host',
+        tmux_session: 'hark-meeting',
+        error: null,
+      }
+      return json({ spawned: true, tmux_session: 'capture-scribe', surface: 'cli', meeting: mockMeeting }, 202)
+    }
+    return json({ spawned: true, tmux_session: 'capture-session', surface: 'cli' }, 202)
+  }
 
   // ── The settings plane ─────────────────────────────────────────────────
   // Before the catch-all below, which would otherwise answer every one of
@@ -1360,13 +1403,20 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch
 
 // ── Mount ────────────────────────────────────────────────────────────────────
-// Wire all three head actions so every lane shows its tinted button. onRefresh
-// is owned internally by KanbanModal (it threads its own refreshFromSource).
+// Wire the lane actions so every available button can be exercised offline.
+// Terminal writes its selected session to the document for harness inspection;
+// onRefresh is owned internally by KanbanModal.
 try {
   assertUlids()
   const modal = new KanbanModal({
     onStashClick: () => { void openStash({ shuttleBase: '' }) },
-    onNewIdeaClick: () => { void openCapture({ shuttleBase: '' }) },
+    onNewIdeaClick: () => { void openCapture({
+      shuttleBase: '',
+      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
+      onMeetingResult: (message, tone) => showToast(message, tone),
+      onMeetingStarted: () => { void modal.refreshMeeting() },
+    }) },
+    onOpenWorker: (session) => { document.body.dataset.harnessTerminalSession = session },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
     temporalFetchers: MOCK_TEMPORAL,
@@ -1376,6 +1426,14 @@ try {
   host.style.cssText = 'position:fixed; inset:0;'
   document.body.append(host)
   modal.mount(host)
+  if (new URLSearchParams(window.location.search).get('capture') === 'meeting') {
+    void openCapture({
+      shuttleBase: '',
+      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
+      onMeetingResult: (message, tone) => showToast(message, tone),
+      onMeetingStarted: () => { void modal.refreshMeeting() },
+    })
+  }
 
   // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
   // mock activity/commits cover, so a driving script can ask for exactly the
