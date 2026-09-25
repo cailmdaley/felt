@@ -3,20 +3,12 @@ defmodule ShuttleWeb.CaptureController do
   Agent-API endpoint: POST /api/v1/capture
 
   Spawn-without-constitution: launches a tmux agent session from a free-text
-  prompt — no pre-existing fiber. The chat-to-card intake: the board's "new
-  idea" dialog posts the user's yap here; the spawned session crystallizes it
-  into a fiber, installs the shuttle block, claims itself via `/api/v1/claim`,
-  and continues as the worker realizing it.
+  prompt. The spawned session files a fiber, installs the shuttle block, claims
+  itself via `/api/v1/claim`, and continues as the worker realizing it.
 
-  Owner-routed: a capture carrying an `origin` for a remote host forwards to
-  the owning daemon's identical `/capture` (origin stripped) — the session
-  must spawn where the project lives.
-
-  Body: `prompt` (required, the yap verbatim), `project_dir` (required,
-  absolute path on the owning host), `agent` (optional registry name,
-  default claude-sonnet), `effort` (optional reasoning-effort token, validated
-  against the agent's `effort_levels`), `chrome` (optional boolean, claude
-  harness only), `origin` (optional owner-routing key).
+  A meeting capture starts hark on the daemon receiving the request before the
+  ordinary capture is routed to the project owner. The meeting instructions
+  travel in the capture prompt; the owner does not need meeting-specific code.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -24,37 +16,64 @@ defmodule ShuttleWeb.CaptureController do
   import ShuttleWeb.RelayHelpers,
     only: [app_server_unavailable_message: 0, relay_json: 3, present?: 1]
 
-  alias Shuttle.OriginRouter
+  alias Shuttle.{Meeting, OriginRouter}
 
   def create(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
-      {:remote, remote} ->
-        relay_json(
-          conn,
-          OriginRouter.forward(remote, "/api/v1/capture", conn.body_params),
-          &capture_failed/2
-        )
+    case Map.fetch(params, "meeting") do
+      :error ->
+        route_capture(conn, params, nil)
 
-      :local ->
-        create_local(conn, params)
+      {:ok, meeting} ->
+        case Meeting.start_capture(
+               meeting,
+               Map.get(params, "prompt"),
+               Map.get(params, "origin"),
+               Map.get(params, "surface")
+             ) do
+          {:ok, %{meeting: row, prompt: prompt}} ->
+            params =
+              params
+              |> Map.delete("meeting")
+              |> Map.put("prompt", prompt)
+              |> Map.put("surface", "cli")
+
+            route_capture(conn, params, row)
+
+          {:error, reason} ->
+            meeting_error(conn, reason)
+        end
     end
   end
 
-  defp create_local(conn, params) do
+  defp route_capture(conn, params, meeting_row) do
+    case OriginRouter.route(Map.get(params, "origin")) do
+      {:remote, remote} ->
+        result = OriginRouter.forward(remote, "/api/v1/capture", params)
+        relay_capture(conn, result, meeting_row)
+
+      :local ->
+        create_local(conn, params, meeting_row)
+    end
+  end
+
+  defp create_local(conn, params, meeting_row) do
     prompt = Map.get(params, "prompt")
     project_dir = Map.get(params, "project_dir")
 
     cond do
       not present?(prompt) ->
-        conn |> put_status(400) |> json(%{error: "prompt is required"})
+        capture_error(conn, 400, %{error: "prompt is required"}, meeting_row)
 
       not present?(project_dir) ->
-        conn |> put_status(400) |> json(%{error: "project_dir is required"})
+        capture_error(conn, 400, %{error: "project_dir is required"}, meeting_row)
 
       not File.dir?(project_dir) ->
-        conn
-        |> put_status(422)
-        |> json(%{spawned: false, reason: "project_dir_missing", project_dir: project_dir})
+        capture_error(
+          conn,
+          422,
+          %{spawned: false, reason: "project_dir_missing", project_dir: project_dir},
+          meeting_row
+        )
 
       true ->
         case Shuttle.Poller.capture(prompt,
@@ -65,65 +84,112 @@ defmodule ShuttleWeb.CaptureController do
                surface: Map.get(params, "surface")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
-            json(
+            capture_json(
               conn,
-              Map.merge(%{spawned: true, agent: agent_id}, Shuttle.WorkerBackend.wire(session))
+              Map.merge(%{spawned: true, agent: agent_id}, Shuttle.WorkerBackend.wire(session)),
+              meeting_row
             )
 
           {:error, {:app_launch_failed, id, reason}} ->
             if reason == :app_server_unavailable do
-              app_server_unavailable(conn, %{session_uuid: id})
+              app_server_unavailable(conn, %{session_uuid: id}, meeting_row)
             else
-              conn
-              |> put_status(502)
-              |> json(%{
-                spawned: false,
-                surface: "app",
-                session_uuid: id,
-                tmux_session: nil,
-                reason: "app_launch_failed",
-                error: inspect(reason),
-                message:
-                  "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-              })
+              capture_error(
+                conn,
+                502,
+                %{
+                  spawned: false,
+                  surface: "app",
+                  session_uuid: id,
+                  tmux_session: nil,
+                  reason: "app_launch_failed",
+                  error: inspect(reason),
+                  message:
+                    "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
+                },
+                meeting_row
+              )
             end
 
           {:error, :app_server_unavailable} ->
-            app_server_unavailable(conn)
+            app_server_unavailable(conn, %{}, meeting_row)
 
           {:error, {:invalid_axes, msg}} ->
-            # Axes-validation failures are client errors (bad effort token,
-            # chrome on a non-claude harness) — 422 naming the constraint.
-            conn |> put_status(422) |> json(%{spawned: false, reason: msg})
+            capture_error(conn, 422, %{spawned: false, reason: msg}, meeting_row)
 
-          # A dispatch preflight refused before anything spawned — the agent's
-          # wrapper does not resolve in a login bash, the work directory is not
-          # on this host, or (macOS) there is no tmux server the daemon is
-          # allowed to fork under. Operator config, not a server fault, and the
-          # message is the whole point: render it rather than `inspect`ing the
-          # tuple into a 500.
           {:error, {tag, msg}}
           when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
                  is_binary(msg) ->
-            conn
-            |> put_status(422)
-            |> json(%{spawned: false, reason: to_string(tag), message: msg})
+            capture_error(
+              conn,
+              422,
+              %{spawned: false, reason: to_string(tag), message: msg},
+              meeting_row
+            )
 
           {:error, reason} ->
-            conn
-            |> put_status(500)
-            |> json(%{spawned: false, reason: error_code(reason)})
+            capture_error(conn, 500, %{spawned: false, reason: error_code(reason)}, meeting_row)
         end
     end
+  end
+
+  defp relay_capture(conn, result, nil),
+    do: relay_json(conn, result, &capture_failed/2)
+
+  defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
+    payload = decode_capture_body(body) |> Map.put("meeting", meeting_row)
+    payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
+    conn |> put_status(status) |> json(payload)
+  end
+
+  defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
+    payload =
+      capture_failed(name, reason)
+      |> Map.put("meeting", meeting_row)
+      |> Map.put("recording", true)
+
+    conn |> put_status(502) |> json(payload)
+  end
+
+  defp decode_capture_body(body) do
+    case Jason.decode(body) do
+      {:ok, payload} when is_map(payload) -> payload
+      {:ok, payload} -> %{"response" => payload}
+      {:error, _reason} -> %{"error" => body}
+    end
+  end
+
+  defp capture_json(conn, payload, nil), do: json(conn, payload)
+  defp capture_json(conn, payload, row), do: json(conn, Map.put(payload, "meeting", row))
+
+  defp capture_error(conn, status, payload, nil),
+    do: conn |> put_status(status) |> json(payload)
+
+  defp capture_error(conn, status, payload, row) do
+    payload = payload |> Map.put("meeting", row) |> Map.put("recording", true)
+    conn |> put_status(status) |> json(payload)
+  end
+
+  defp meeting_error(conn, {:validation, message}),
+    do: conn |> put_status(422) |> json(%{error: message})
+
+  defp meeting_error(conn, {:conflict, meeting}) do
+    conn |> put_status(409) |> json(%{error: "a meeting is already active", meeting: meeting})
+  end
+
+  defp meeting_error(conn, :unavailable) do
+    conn |> put_status(503) |> json(%{error: "hark is not available on this host"})
+  end
+
+  defp meeting_error(conn, reason) do
+    conn |> put_status(503) |> json(%{error: error_message(reason)})
   end
 
   defp error_code(reason) when is_binary(reason), do: reason
   defp error_code(reason), do: inspect(reason)
 
-  defp app_server_unavailable(conn, extra \\ %{}) do
-    conn
-    |> put_status(503)
-    |> json(
+  defp app_server_unavailable(conn, extra, meeting_row) do
+    payload =
       Map.merge(
         %{
           spawned: false,
@@ -134,9 +200,14 @@ defmodule ShuttleWeb.CaptureController do
         },
         extra
       )
-    )
+
+    capture_error(conn, 503, payload, meeting_row)
   end
 
   defp capture_failed(name, reason),
     do: %{spawned: false, reason: "forward_failed", origin: name, error: inspect(reason)}
+
+  defp error_message({:operation, message}), do: message
+  defp error_message({:tmux, message}), do: "tmux is unavailable: #{message}"
+  defp error_message(reason), do: inspect(reason)
 end
