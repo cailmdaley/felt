@@ -33,11 +33,10 @@ import {
   ProjectPicker,
   injectProjectPickerStyles,
   type PickerHost,
-  type PickerProject,
+  type ProjectWithLoomPrefix,
   useProjectSelection,
 } from './ProjectPicker'
-import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
-import { fiberIndex } from '../board/wikilinks'
+import { ParentPicker, injectParentPickerStyles } from './ParentPicker'
 import { shuttleOrigin } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 
@@ -61,11 +60,8 @@ export interface AgentEntry {
 }
 
 /** A destination project, derived by the island from the composite feed. */
-export interface StashProject extends PickerProject {
-  /** Loom-relative substore prefix; `''` when the project is a store root.
-   *  Used to scope/strip parent candidates to project-relative slugs. */
-  loomPrefix: string
-}
+/** Destination project shape consumed by Stash and the shared project loader. */
+export type StashProject = ProjectWithLoomPrefix
 
 export interface StashFormProps {
   /** Connected projects (the island supplies the local-only set for create). */
@@ -164,144 +160,6 @@ const KIND_SEGMENTS = [
 /** Human-readable label for an agent entry. */
 function agentLabel(a: AgentEntry): string {
   return a.model ? `${a.id} · ${a.model}` : a.id
-}
-
-// ---------------------------------------------------------------------------
-// Parent-fiber picker — project-scoped, project-relative
-// ---------------------------------------------------------------------------
-
-interface ParentPickerProps {
-  value: string
-  onChange: (value: string) => void
-  /** The selected project's loomPrefix — candidates are scoped to this subtree
-   *  and shown/committed project-relative. `''` = the project is a store root. */
-  scopePrefix: string
-  shuttleBase: string
-}
-
-function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPickerProps): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<FiberSearchResult[]>([])
-  const [highlight, setHighlight] = useState(-1)
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const debounceRef = useRef<number | null>(null)
-
-  // Scope the daemon's (loom-relative) index to the selected project, then
-  // strip the loomPrefix so candidates are project-relative — exactly the id
-  // space the create endpoint expects for this project_dir.
-  const fetchResults = (query: string): void => {
-    fiberIndex(shuttleBase)
-      .then((all) => {
-        const scoped = scopePrefix
-          ? all
-              .filter((f) => f.id === scopePrefix || f.id.startsWith(scopePrefix + '/'))
-              .map((f) => ({ id: f.id.slice(scopePrefix.length).replace(/^\//, ''), name: f.name }))
-              .filter((f) => f.id) // drop the project-root fiber itself (id → '')
-          : all
-        setResults(filterParentCandidates(scoped, query, ''))
-        setHighlight(-1)
-        setOpen(true)
-      })
-      .catch(() => {})
-  }
-
-  useEffect(() => {
-    if (!open) return
-    const onDocMouseDown = (e: MouseEvent): void => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDocMouseDown)
-    return () => document.removeEventListener('mousedown', onDocMouseDown)
-  }, [open])
-
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const v = e.target.value
-    onChange(v)
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => fetchResults(v.trim()), 200)
-  }
-
-  const commit = (r: FiberSearchResult): void => {
-    onChange(r.id)
-    setOpen(false)
-    inputRef.current?.blur()
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      if (!open) {
-        fetchResults(value.trim())
-        return
-      }
-      setHighlight((h) => Math.min(results.length - 1, h + 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setHighlight((h) => Math.max(-1, h - 1))
-    } else if (e.key === 'Enter') {
-      if (open && highlight >= 0 && results[highlight]) {
-        e.preventDefault()
-        commit(results[highlight])
-      }
-    } else if (e.key === 'Escape') {
-      if (open) {
-        // Consume Escape so it dismisses only the dropdown — without
-        // stopPropagation it bubbles to the dialog's handler and closes the
-        // whole form.
-        e.preventDefault()
-        e.stopPropagation()
-        setOpen(false)
-      }
-    }
-  }
-
-  return (
-    <div className="stash-parent-picker" ref={wrapRef}>
-      <input
-        ref={inputRef}
-        type="text"
-        className="stash-input"
-        value={value}
-        onChange={handleInput}
-        onFocus={() => fetchResults(value.trim())}
-        onKeyDown={handleKeyDown}
-        placeholder="standalone-kanban  ·  backend/…"
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-      />
-      {open && (
-        <div className="stash-parent-dropdown" role="listbox">
-          {results.length === 0 ? (
-            <div className="stash-parent-option stash-parent-empty">
-              {value.trim() ? 'No matches' : 'No fibers in this project'}
-            </div>
-          ) : (
-            results.map((r, i) => (
-              <button
-                key={r.id}
-                type="button"
-                className={`stash-parent-option${i === highlight ? ' stash-parent-option-active' : ''}`}
-                data-depth={r.depth}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  commit(r)
-                }}
-                onMouseEnter={() => setHighlight(i)}
-              >
-                <span className="stash-parent-option-name">{r.name}</span>
-                <span className="stash-parent-option-id">{r.id}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,67 +1093,6 @@ export function injectStashFormStyles(): void {
       background: rgba(154, 123, 53, 0.18);
       border-color: rgba(154, 123, 53, 0.42);
     }
-    .stash-parent-picker {
-      position: relative;
-    }
-    .stash-parent-dropdown {
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      z-index: 10;
-      max-height: 240px;
-      overflow-y: auto;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.18);
-      border-radius: 3px;
-      box-shadow: 0 8px 18px rgba(46, 42, 38, 0.18);
-      padding: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-    .stash-parent-option {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 2px;
-      padding: 6px 10px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 2px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 14px;
-      color: #2E2A26;
-      text-align: left;
-      cursor: pointer;
-      transition: background 100ms ease-out;
-    }
-    .stash-parent-option:hover,
-    .stash-parent-option-active {
-      background: rgba(154, 123, 53, 0.18);
-      border-color: rgba(154, 123, 53, 0.40);
-    }
-    .stash-parent-option-name {
-      font-weight: 500;
-      color: #2E2A26;
-    }
-    .stash-parent-option-id {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10.5px;
-      letter-spacing: 0.02em;
-      color: #7A7068;
-    }
-    .stash-parent-option[data-depth="1"] .stash-parent-option-name {
-      font-weight: 600;
-    }
-    .stash-parent-empty {
-      padding: 8px 10px;
-      font-size: 12px;
-      color: #7A7068;
-      font-style: italic;
-      cursor: default;
-    }
     .stash-segmented {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1528,7 +1325,8 @@ export function injectStashFormStyles(): void {
 
   `
   document.head.appendChild(style)
-  // The shared directory picker rides along: both forms that open it are opened
-  // through this same injection point (Stash directly, Capture via mountForms).
+  // Shared project-picker styling rides along; Meeting injects these styles at
+  // its own mount point, while Stash and Capture reach them through mountForms.
   injectProjectPickerStyles()
+  injectParentPickerStyles()
 }

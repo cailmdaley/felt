@@ -1,22 +1,23 @@
 /**
- * React-island manager for the Stash, Capture and Settings sheets.
+ * React-island manager for the Stash, Capture, Meeting and Settings sheets.
  *
  * The kanban board is vanilla TS/DOM; these sheets are the only React in the
  * app. Rather than mount React at boot, we lazily create one root the first
  * time one opens and render into it on demand — `openStash` / `openCapture` /
- * `openSettings` are imperative entry points the board's chrome calls
- * (`onStashClick` / `onNewIdeaClick` / `onSettingsClick`). Only one is open at
- * a time, so a single shared root suffices; closing renders `null`.
+ * `openMeeting` / `openSettings` are imperative entry points the board's
+ * chrome calls. Only one is open at a time, so a single shared root suffices;
+ * closing renders `null`.
  *
- * Both forms need the "project" set — the map-less replacement for Portolan's
+ * The forms need the "project" set — the map-less replacement for Portolan's
  * pinned cities. The authoritative list comes from `/api/v1/felt-stores`; the
  * composite feed supplies activity/ranking metadata only (see projectModel).
- * Both create endpoints are owner-routed now, so both forms get every
- * registered project: a local origin writes/spawns here, a remote origin
- * forwards to its owning daemon.
+ * Stash and Capture are owner-routed creates, so they get every registered
+ * project: a local origin writes or spawns here, a remote origin forwards to
+ * its owning daemon. Meeting uses the same project metadata to start its local
+ * capture with a selected scribe host.
  *
- * The store payload also carries the origin list both forms' HOST picker
- * offers, and whether each daemon can raise a native folder dialog
+ * The store payload also carries the origin list offered by each form's HOST
+ * picker, and whether each daemon can raise a native folder dialog
  * (`native_folder_picker`); that flag decides whether "+ Add project…" asks the
  * OS or asks the human to type the path on the selected host.
  */
@@ -26,6 +27,8 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
 import { CaptureForm, injectCaptureFormStyles, type CaptureProject } from './CaptureForm'
+import { MeetingForm, injectMeetingFormStyles } from './MeetingForm'
+import type { MeetingRecord } from '../board/meeting'
 import { SettingsDialog } from './settings/SettingsDialog'
 import { loadHosts } from './settings/settingsApi'
 
@@ -34,6 +37,11 @@ export interface OpenFormOptions {
   shuttleBase: string
   /** Surface a result (success or failure) to the user, e.g. a board toast. */
   onResult?: (message: string, ok: boolean) => void
+}
+
+export interface OpenMeetingOptions extends OpenFormOptions {
+  /** Called after the start toast so the board can immediately refresh status. */
+  onStarted?: (meeting: MeetingRecord) => void
 }
 
 let container: HTMLElement | null = null
@@ -73,8 +81,8 @@ async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
   return { model, tags: [...tagSet].sort() }
 }
 
-/** The project set both forms consume, in the shape they consume it. Stash's
- *  extra `loomPrefix` rides along harmlessly for Capture. */
+/** Project data for the forms. Capture ignores the nesting prefix; Meeting and
+ *  Stash use it to scope parent-fiber suggestions. */
 function toProjects(model: ProjectModel): StashProject[] {
   return model.projects.map((p) => ({
     id: p.id,
@@ -168,6 +176,34 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
  * before it knows where the typing goes. Settings writes configuration to a
  * host, so it opens already knowing which.
  */
+export async function openMeeting(opts: OpenMeetingOptions): Promise<void> {
+  injectMeetingFormStyles()
+  let feed: LoadedFeed
+  try {
+    feed = await loadFeed(opts.shuttleBase)
+  } catch {
+    opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
+    return
+  }
+
+  ensureRoot().render(
+    <MeetingForm
+      availableCities={toProjects(feed.model)}
+      availableHosts={feed.model.hosts}
+      cityActivityById={feed.model.activityById}
+      shuttleBase={opts.shuttleBase}
+      nativeFolderPicker={feed.model.nativeFolderPicker}
+      onProjectAdded={() => refreshProjects(opts.shuttleBase)}
+      onCancel={close}
+      onStarted={(meeting) => {
+        close()
+        opts.onResult?.(`Meeting started${meeting.title ? ` · ${meeting.title}` : ''}`, true)
+        opts.onStarted?.(meeting)
+      }}
+    />,
+  )
+}
+
 export async function openSettings(opts: OpenFormOptions): Promise<void> {
   let hosts
   try {

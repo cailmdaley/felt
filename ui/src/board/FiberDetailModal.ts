@@ -537,6 +537,15 @@ export class FiberDetailModal {
    * @param card the card the user clicked
    */
   open(card: KanbanCard): void {
+    this.openWithMode(card, false)
+  }
+
+  /** Open a fiber reading without the action controls used for board cards. */
+  openReadOnly(card: KanbanCard): void {
+    this.openWithMode(card, true)
+  }
+
+  private openWithMode(card: KanbanCard, readOnly: boolean): void {
     // ONE LAYER, SWAPPED CONTENT. This is a single reused instance whose open
     // begins by tearing down whatever it was showing — so opening card B over
     // card A reads as close-then-open. Released and re-pushed, that is a
@@ -544,13 +553,13 @@ export class FiberDetailModal {
     // panel straight back down: the "open a second card and nothing appears"
     // bug. Inside a swap the layer simply keeps the entry it already holds.
     if (!this.host) {
-      swapSheet(SHEET_CARD, () => this.openInner(card))
+      swapSheet(SHEET_CARD, () => this.openInner(card, readOnly))
       return
     }
-    this.openInner(card)
+    this.openInner(card, readOnly)
   }
 
-  private openInner(card: KanbanCard): void {
+  private openInner(card: KanbanCard, readOnly = false): void {
     // Tear down any existing open panel first (rapid re-click).
     this.close()
 
@@ -700,7 +709,7 @@ export class FiberDetailModal {
     // what you opened to read. A real constitution keeps its actions.
     const shuttleManaged = isAgentCard(card)
     const controls =
-      this.host && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
+      readOnly || (this.host && !shuttleManaged) ? null : this.buildControls(card, shuttleManaged)
 
     // ── Fiber body pane ─────────────────────────────────────────────────────
     // The fiber itself: outcome lede, then the markdown body, rendered by the

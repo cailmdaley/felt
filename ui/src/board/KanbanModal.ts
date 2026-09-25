@@ -63,6 +63,8 @@ import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
+import { meetingPollInterval, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
+import { stopMeeting as requestMeetingStop } from '../forms/meetingApi'
 import {
   collectCards,
   createTemporalFetchers,
@@ -104,6 +106,8 @@ interface KanbanModalOptions {
    * crystallizes it into a fiber. Omit to hide the button.
    */
   onNewIdeaClick?: () => void
+  /** Open the meeting form from the availability-gated `◉` lane action. */
+  onMeetingClick?: () => void
   /**
    * Called when the user asks for settings — the ⚙︎ at the right end of the
    * tab strip, or `⌘,` / `,`. The host opens the settings dialog, which reads
@@ -140,8 +144,10 @@ interface KanbanScrollSnapshot {
 export class KanbanModal {
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly openWorkerAfterGesture?: (tmuxSessionName: string, shuttleHost?: string) => void
+  private readonly openMeetingTerminalAfterGesture?: (tmuxSessionName: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
+  private readonly onMeetingClick?: () => void
   private readonly onSettingsClick?: () => void
   private readonly shuttleBase: string
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
@@ -243,6 +249,10 @@ export class KanbanModal {
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
   private lastFetchStartedAt: number | null = null
+  private meetingStatus: MeetingStatus = { available: false, meeting: null }
+  private meetingPollTimer: number | null = null
+  private meetingClockTimer: number | null = null
+  private meetingFetchPromise: Promise<void> | null = null
   /**
    * How many multi-write gestures are still landing.
    *
@@ -280,8 +290,14 @@ export class KanbanModal {
           window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
         }
       : undefined
+    // Meeting Terminal is an explicit request for the daemon-local hark pane.
+    // Unlike a worker tap on a phone, it has no app-session link to open.
+    this.openMeetingTerminalAfterGesture = this.onOpenWorker
+      ? (session) => window.setTimeout(() => this.onOpenWorker?.(session), 0)
+      : undefined
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
+    this.onMeetingClick = options.onMeetingClick
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
@@ -314,12 +330,49 @@ export class KanbanModal {
       // horizon hears about it — the strip has to be there for a row too, now
       // that a row can be put down on a day.
       onDragActivity: () => this.syncDragHorizon(this.surfaces.isDragging()),
-      // The masthead dissolved; its three actions now live in the column heads
-      // (Drafts → Stash, In flight → New idea, Awaiting review → Refresh).
+      // Lane actions stay with the surface they feed; Meeting is shown only
+      // when the local daemon reports that hark is available.
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
+      onMeetingClick: this.onMeetingClick,
+      getMeetingAvailable: () => this.meetingStatus.available,
+      getMeeting: () => this.meetingStatus.meeting,
+      onMeetingNotes: (meeting) => this.openMeetingNotes(meeting),
+      onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
+      onMeetingStop: () => this.stopCurrentMeeting(),
       onRefresh: () => void this.refreshFromSource(),
     })
+  }
+
+  /** Refresh local meeting availability and lifecycle independently of the fiber feed. */
+  async refreshMeeting(): Promise<void> {
+    await this.fetchMeetingStatus()
+  }
+
+  private openMeetingNotes(meeting: MeetingRecord): void {
+    if (!meeting.fiber) return
+    const card: KanbanCard = {
+      id: meeting.fiber,
+      name: meeting.title || meeting.fiber.split('/').at(-1) || 'Meeting notes',
+      path: '',
+      originId: meeting.host ?? 'local',
+      status: 'open',
+      createdAt: meeting.started_at ?? new Date().toISOString(),
+      effectiveHorizon: 'now',
+      drifted: false,
+      isCycle: false,
+      cycleStart: null,
+    }
+    this.detailModal.openReadOnly(card)
+  }
+
+  private async stopCurrentMeeting(): Promise<void> {
+    try {
+      await requestMeetingStop(this.shuttleBase)
+    } catch (error) {
+      this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
+    }
+    await this.refreshMeeting()
   }
 
   /**
@@ -400,13 +453,11 @@ export class KanbanModal {
    * close (via its own close button) — the kanban only renders the column
    * grid, banner, and live region.
    *
-   * The masthead band dissolved (board-chrome-redesign): no "Kanban" title,
-   * no scope subtitle, no stats line. Its three actions — Stash `+`, New idea
-   * `✶`, Refresh `↻` — folded into the three column heads, one per lane (see
-   * KanbanSurfaceRenderer.makeColumnAction). The page starts nearly flush at
-   * the top (the tab strip), with only the body's own tight top padding as
-   * margin — the standalone web UI has no workspace corner chrome to clear
-   * (that was Portolan's native shell; this bundle runs in a plain tab).
+   * The masthead band has no "Kanban" title, scope subtitle, or stats line.
+   * Four actions — Stash `+`, New idea `✶`, Meeting `◉`, and Refresh `↻` — live
+   * in the three lane heads (see KanbanSurfaceRenderer.makeColumnActions). The
+   * standalone page begins at the tab strip; the body's top padding is its only
+   * top margin.
    */
   private assembleChrome(): void {
     this.container = document.createElement('div')
@@ -1715,7 +1766,55 @@ export class KanbanModal {
   }
 
 
+  private async fetchMeetingStatus(): Promise<void> {
+    if (!this.container) return
+    if (this.meetingFetchPromise) return this.meetingFetchPromise
+
+    this.meetingFetchPromise = (async () => {
+      try {
+        const response = await fetch(`${this.shuttleBase}/api/v1/meeting`)
+        if (!response.ok || !this.container) return
+        const status = parseMeetingStatus(await response.json())
+        if (!status) return
+        const availabilityChanged = status.available !== this.meetingStatus.available
+        this.meetingStatus = status
+        this.syncMeetingClock()
+        if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
+        else this.surfaces.updateMeetingPresentation()
+      } catch {
+        // Meeting availability is best-effort; the regular board poll retries.
+      } finally {
+        this.meetingFetchPromise = null
+        this.scheduleMeetingPoll()
+      }
+    })()
+    return this.meetingFetchPromise
+  }
+
+  private scheduleMeetingPoll(): void {
+    if (this.meetingPollTimer !== null) {
+      window.clearTimeout(this.meetingPollTimer)
+      this.meetingPollTimer = null
+    }
+    if (!this.container || !this.meetingStatus.meeting) return
+    this.meetingPollTimer = window.setTimeout(() => {
+      this.meetingPollTimer = null
+      void this.fetchMeetingStatus()
+    }, meetingPollInterval(this.meetingStatus.meeting))
+  }
+
+  private syncMeetingClock(): void {
+    const ticking = this.meetingStatus.meeting !== null && this.meetingStatus.meeting.state !== 'failed'
+    if (!ticking && this.meetingClockTimer !== null) {
+      window.clearInterval(this.meetingClockTimer)
+      this.meetingClockTimer = null
+    } else if (ticking && this.meetingClockTimer === null) {
+      this.meetingClockTimer = window.setInterval(() => this.surfaces.updateMeetingDuration(), 1_000)
+    }
+  }
+
   private async fetchAndRender(): Promise<void> {
+    void this.fetchMeetingStatus()
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
@@ -2156,6 +2255,7 @@ export class KanbanModal {
   /** Lightweight auto-poll while mounted. 15s interval. */
   private startPolling(): void {
     this.stopPolling()
+    this.scheduleMeetingPoll()
     this.pollTimer = window.setInterval(() => {
       // Never rebuild the board out from under a held card. The drop targets
       // would move mid-gesture, and — worse — the source node gets replaced, so
@@ -2188,6 +2288,14 @@ export class KanbanModal {
     if (this.pollTimer !== null) {
       window.clearInterval(this.pollTimer)
       this.pollTimer = null
+    }
+    if (this.meetingPollTimer !== null) {
+      window.clearTimeout(this.meetingPollTimer)
+      this.meetingPollTimer = null
+    }
+    if (this.meetingClockTimer !== null) {
+      window.clearInterval(this.meetingClockTimer)
+      this.meetingClockTimer = null
     }
   }
 

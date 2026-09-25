@@ -53,6 +53,7 @@ import {
   type BandId,
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
+import { formatMeetingDuration, meetingActions, meetingStateWord, type MeetingRecord } from './meeting.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -228,9 +229,15 @@ interface KanbanSurfaceRendererOptions {
   /** Stash a new fiber — the Drafts head's `+` action. Omit to render the
    *  Drafts head title + count alone (read-only context). */
   onStashClick?: () => void
-  /** Open the chat-first capture — the In flight head's `✶` action. Omit to
-   *  render the In flight head title + count alone. */
+  /** Open the chat-first capture — the In flight head's `✶` action. */
   onNewIdeaClick?: () => void
+  /** Availability-gated meeting launcher beside the new-idea action. */
+  onMeetingClick?: () => void
+  getMeetingAvailable?: () => boolean
+  getMeeting?: () => MeetingRecord | null
+  onMeetingNotes?: (meeting: MeetingRecord) => void
+  onMeetingTerminal?: (session: string) => void
+  onMeetingStop?: () => void | Promise<void>
   /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
    *  (refresh is never read-only). */
   onRefresh: () => void
@@ -283,6 +290,8 @@ export class KanbanSurfaceRenderer {
   private chainDependentsMap: Map<string, string[]> = new Map()
 
   private readonly o: KanbanSurfaceRendererOptions
+  private currentMeetingList: HTMLElement | null = null
+  private currentMeetingButton: HTMLButtonElement | null = null
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
@@ -1364,8 +1373,13 @@ export class KanbanSurfaceRenderer {
     headLabel.className = 'kbn-col-head-label'
     headLabel.append(headTitle, headCount)
     head.append(headLabel)
-    const action = this.makeColumnAction(kind)
-    if (action) head.append(action)
+    const actions = this.makeColumnActions(kind)
+    if (actions.length > 0) {
+      const actionGroup = document.createElement('div')
+      actionGroup.className = 'kbn-col-actions'
+      actionGroup.append(...actions)
+      head.append(actionGroup)
+    }
 
     const dropToColumn = (e: DragEvent): void => {
       e.preventDefault()
@@ -1408,16 +1422,22 @@ export class KanbanSurfaceRenderer {
     list.setAttribute('role', 'list')
     this.installVerticalEdgeScroll(list)
 
+    const meeting = kind === 'inFlight' ? this.o.getMeeting?.() ?? null : null
+    if (kind === 'inFlight') this.currentMeetingList = list
+    if (meeting) list.append(this.renderMeetingCard(meeting))
+
     if (cards.length === 0 && ghosts.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'kbn-empty'
-      empty.setAttribute('role', 'listitem')
-      empty.textContent = kind === 'drafts'
-        ? (this.o.onStashClick ? 'Use + to create a draft. Describe what done looks like.' : 'Drafts appear here before you launch them.')
-        : kind === 'inFlight'
-          ? 'Drag a draft here to start its agent.'
-          : 'Work returns here when its agent hands it back for review.'
-      list.append(empty)
+      if (!meeting) {
+        const empty = document.createElement('div')
+        empty.className = 'kbn-empty'
+        empty.setAttribute('role', 'listitem')
+        empty.textContent = kind === 'drafts'
+          ? (this.o.onStashClick ? 'Use + to create a draft. Describe what done looks like.' : 'Drafts appear here before you launch them.')
+          : kind === 'inFlight'
+            ? 'Drag a draft here to start its agent.'
+            : 'Work returns here when its agent hands it back for review.'
+        list.append(empty)
+      }
     } else {
       for (const card of cards) {
         list.append(this.renderCard(card, kind, staleness[card.originId], {
@@ -1438,58 +1458,184 @@ export class KanbanSurfaceRenderer {
     return col
   }
 
-  /**
-   * The per-lane head action — one tinted round button at the column head's
-   * right edge, the verb that feeds the lane (color = lane identity):
-   *
-   *   Drafts          → Stash `+`  (ochre)   onStashClick
-   *   In flight       → New idea `✶` (cobalt) onNewIdeaClick
-   *   Awaiting review → Refresh `↻` (teal)   onRefresh
-   *
-   * Returns null for a lane whose callback isn't wired (read-only context) —
-   * those heads render title + count alone. Refresh is always available.
-   * Every button stops click propagation (the head is itself a focusable drop
-   * target). Refresh spins its glyph briefly so in-flight state rides the
-   * button, not a `.kbn-status` text line.
-   */
-  private makeColumnAction(kind: NowColumnKind): HTMLButtonElement | null {
-    const spec =
-      kind === 'drafts'
-        ? this.o.onStashClick && {
-            glyph: '+', modifier: 'drafts',
-            label: 'Stash a new fiber (n)', onClick: this.o.onStashClick,
-          }
-        : kind === 'inFlight'
-          ? this.o.onNewIdeaClick && {
-              glyph: '✶', modifier: 'inFlight',
-              label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick,
-            }
-          : {
-              glyph: '↻', modifier: 'awaitingReview',
-              label: 'Refresh the board', onClick: this.o.onRefresh, spin: true,
-            }
-    if (!spec) return null
+  /** Build the lane's actions as a group so multiple controls share one edge. */
+  private makeColumnActions(kind: NowColumnKind): HTMLButtonElement[] {
+    const make = (spec: {
+      glyph: string
+      modifier: string
+      label: string
+      onClick: () => void
+      spin?: boolean
+    }): HTMLButtonElement => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = `kbn-col-action kbn-col-action-${spec.modifier}`
+      btn.textContent = spec.glyph
+      btn.setAttribute('aria-label', spec.label)
+      btn.title = spec.label
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        if (spec.spin) {
+          btn.classList.remove('kbn-col-action-spinning')
+          void btn.offsetWidth
+          btn.classList.add('kbn-col-action-spinning')
+          window.setTimeout(() => btn.classList.remove('kbn-col-action-spinning'), 650)
+        }
+        spec.onClick()
+      })
+      return btn
+    }
 
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = `kbn-col-action kbn-col-action-${spec.modifier}`
-    btn.textContent = spec.glyph
-    btn.setAttribute('aria-label', spec.label)
-    btn.title = spec.label
-    btn.addEventListener('click', (e) => {
-      // The head is a drop target + focusable; a click on its action must not
-      // bubble up to it (or to the column's open-detail / drag wiring).
-      e.stopPropagation()
-      if ('spin' in spec && spec.spin) {
-        btn.classList.remove('kbn-col-action-spinning')
-        // Reflow so a back-to-back refresh re-triggers the animation.
-        void btn.offsetWidth
-        btn.classList.add('kbn-col-action-spinning')
-        window.setTimeout(() => btn.classList.remove('kbn-col-action-spinning'), 650)
-      }
-      spec.onClick()
-    })
-    return btn
+    if (kind === 'drafts') {
+      return this.o.onStashClick
+        ? [make({ glyph: '+', modifier: 'drafts', label: 'Stash a new fiber (n)', onClick: this.o.onStashClick })]
+        : []
+    }
+    if (kind === 'awaitingReview') {
+      return [make({ glyph: '↻', modifier: 'awaitingReview', label: 'Refresh the board', onClick: this.o.onRefresh, spin: true })]
+    }
+
+    this.currentMeetingButton = null
+    const actions: HTMLButtonElement[] = []
+    if (this.o.onNewIdeaClick) {
+      actions.push(make({ glyph: '✶', modifier: 'inFlight', label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick }))
+    }
+    if (this.o.onMeetingClick && this.o.getMeetingAvailable?.() === true) {
+      const button = make({ glyph: '◉', modifier: 'meeting', label: 'Start a meeting', onClick: this.o.onMeetingClick })
+      const state = this.o.getMeeting?.()?.state
+      button.classList.toggle('kbn-col-action-meeting-live', state === 'live' || state === 'local')
+      this.currentMeetingButton = button
+      actions.push(button)
+    }
+    return actions
+  }
+
+  /** Patch the separate meeting card and its availability-gated head action. */
+  updateMeetingPresentation(): void {
+    const meeting = this.o.getMeeting?.() ?? null
+    this.currentMeetingButton?.classList.toggle(
+      'kbn-col-action-meeting-live',
+      meeting?.state === 'live' || meeting?.state === 'local',
+    )
+    const list = this.currentMeetingList
+    if (!list) return
+    const current = list.querySelector<HTMLElement>('.kbn-meeting-card')
+    if (!meeting) {
+      current?.remove()
+      return
+    }
+    if (current) this.updateMeetingCard(current, meeting)
+    else list.prepend(this.renderMeetingCard(meeting))
+  }
+
+  /** Refresh the duration without rebuilding the card or disturbing focus. */
+  updateMeetingDuration(nowMs = Date.now()): void {
+    for (const duration of this.currentMeetingList?.querySelectorAll<HTMLElement>('.kbn-meeting-duration') ?? []) {
+      duration.textContent = formatMeetingDuration(duration.dataset.startedAt || null, nowMs)
+    }
+  }
+
+  private renderMeetingCard(meeting: MeetingRecord): HTMLElement {
+    const card = document.createElement('article')
+    card.className = 'kbn-meeting-card'
+    card.setAttribute('role', 'region')
+    const mark = document.createElement('span')
+    mark.className = 'kbn-meeting-mark'
+    mark.textContent = '◉'
+    mark.setAttribute('aria-hidden', 'true')
+    const title = document.createElement('strong')
+    title.className = 'kbn-meeting-title'
+    const duration = document.createElement('time')
+    duration.className = 'kbn-meeting-duration'
+    const heading = document.createElement('div')
+    heading.className = 'kbn-meeting-heading'
+    heading.append(mark, title, duration)
+
+    const metadata = document.createElement('div')
+    metadata.className = 'kbn-meeting-meta'
+    const host = document.createElement('span')
+    host.className = 'kbn-meeting-host'
+    const state = document.createElement('span')
+    state.className = 'kbn-meeting-state'
+    metadata.append(host, state)
+
+    const lastLine = document.createElement('div')
+    lastLine.className = 'kbn-meeting-last-line'
+    const error = document.createElement('div')
+    error.className = 'kbn-meeting-error'
+    error.setAttribute('role', 'alert')
+    const actions = document.createElement('div')
+    actions.className = 'kbn-meeting-actions'
+    card.append(heading, metadata, lastLine, error, actions)
+    this.updateMeetingCard(card, meeting)
+    return card
+  }
+
+  private updateMeetingCard(card: HTMLElement, meeting: MeetingRecord): void {
+    const actions = meetingActions(meeting)
+    const title = meeting.title?.trim() || 'Untitled meeting'
+    card.className = `kbn-meeting-card kbn-meeting-card-${meeting.state}`
+    card.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
+    card.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
+    card.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent = meeting.host ?? 'this Mac'
+    card.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
+    const duration = card.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
+    duration.dataset.startedAt = meeting.started_at ?? ''
+    duration.textContent = formatMeetingDuration(meeting.started_at)
+    duration.dateTime = meeting.started_at ?? ''
+    const lastLine = card.querySelector<HTMLElement>('.kbn-meeting-last-line')!
+    lastLine.textContent = meeting.last_line ?? ''
+    lastLine.hidden = !meeting.last_line
+    const error = card.querySelector<HTMLElement>('.kbn-meeting-error')!
+    error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
+    error.hidden = meeting.state !== 'failed'
+
+    const actionGroup = card.querySelector<HTMLElement>('.kbn-meeting-actions')!
+    const actionSignature = [meeting.state, actions.notes, actions.terminal, actions.stop, actions.dismiss].join(':')
+    if (actionGroup.dataset.signature === actionSignature) return
+    actionGroup.dataset.signature = actionSignature
+    actionGroup.replaceChildren()
+    const addAction = (label: string, className: string, run: (button: HTMLButtonElement) => void): void => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = `kbn-meeting-action ${className}`
+      button.textContent = label
+      button.addEventListener('click', (event) => {
+        event.stopPropagation()
+        run(button)
+      })
+      actionGroup.append(button)
+    }
+
+    if (actions.notes && this.o.onMeetingNotes) {
+      addAction('Notes', 'kbn-meeting-notes', () => {
+        const current = this.o.getMeeting?.()
+        if (current && meetingActions(current).notes) this.o.onMeetingNotes?.(current)
+      })
+    }
+    if (actions.terminal && this.o.onMeetingTerminal) {
+      addAction('Terminal', 'kbn-meeting-terminal', () => {
+        const session = this.o.getMeeting?.()?.tmux_session
+        if (session) this.o.onMeetingTerminal?.(session)
+      })
+    }
+    if ((actions.stop || actions.dismiss) && this.o.onMeetingStop) {
+      const isDismiss = actions.dismiss
+      addAction(isDismiss ? 'Dismiss' : 'Stop', 'kbn-meeting-stop', (button) => {
+        button.disabled = true
+        button.textContent = isDismiss ? 'Dismissing…' : 'Stopping…'
+        void Promise.resolve(this.o.onMeetingStop?.()).finally(() => {
+          const current = this.o.getMeeting?.()
+          if (button.isConnected && current?.state !== 'stopping') {
+            button.disabled = false
+            button.textContent = current?.state === 'failed' ? 'Dismiss' : 'Stop'
+          }
+          this.updateMeetingPresentation()
+        })
+      })
+      const stop = actionGroup.lastElementChild as HTMLButtonElement | null
+      if (stop && !isDismiss) stop.disabled = actions.stopDisabled
+    }
   }
 
   /**
@@ -2349,12 +2495,12 @@ export class KanbanSurfaceRenderer {
  *
  * On a phone the segment IS the column's name — same word, same illuminated
  * initial, same count — so the head below it was saying everything twice, and
- * the mobile stylesheet hides it. The one thing the head still owned is the
- * per-lane action (dispatch a draft, wake a worker, refresh a verdict), and
- * that belongs with the name rather than floating over the first card's title.
+ * the mobile stylesheet hides it. The head's actions (draft creation, idea
+ * capture, meeting launch, refresh) belong with the name rather than floating
+ * over the first card's title.
  *
- * Only the active segment shows its glyph (CSS): three actions across a strip
- * that is also the page marks would read as a toolbar.
+ * Only the active segment shows its action group (CSS); the other leaves stay
+ * clear so the page marks do not become a toolbar.
  *
  * Mobile only, and re-done on every render — `KanbanModal` rebuilds the Desk
  * when the viewport crosses the threshold, so the wide board always gets a
@@ -2364,9 +2510,9 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
   const segs = strip.querySelectorAll<HTMLElement>('.kbn-folio-seg')
   const cols = board.querySelectorAll<HTMLElement>('.kbn-col')
   cols.forEach((col, i) => {
-    const action = col.querySelector<HTMLElement>('.kbn-col-action')
+    const actions = col.querySelectorAll<HTMLElement>('.kbn-col-action')
     const seg = segs[i]
-    if (action && seg) seg.append(action)
+    if (seg) seg.append(...actions)
   })
 }
 
