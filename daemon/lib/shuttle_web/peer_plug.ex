@@ -2,10 +2,17 @@ defmodule ShuttleWeb.PeerPlug do
   @moduledoc """
   Records who is on the other end of a request as `conn.assigns.peer`:
 
-      %{transport: :unix | :tcp, forwarded: boolean(), tailscale_login: String.t() | nil}
+      %{
+        transport: :unix | :tcp,
+        uid: non_neg_integer() | nil,
+        forwarded: boolean(),
+        tailscale_login: String.t() | nil
+      }
 
-  Facts only — nothing here allows or refuses a request. They are recorded
-  once at the edge as groundwork for a later authorization step.
+  Facts only — this plug records peer data; `PeerGatePlug` separately decides
+  whether a TCP peer may continue. TCP uid comes from the established
+  client-side row in `/proc/net/tcp` or `/proc/net/tcp6`; it is `nil` when the
+  peer cannot be resolved.
 
     * `transport` — `:unix` when the listener is a unix socket
       (`Shuttle.Host`), else `:tcp`.
@@ -13,19 +20,17 @@ defmodule ShuttleWeb.PeerPlug do
       `x-forwarded-*`, `forwarded`, or `tailscale-*` header is present. On a
       direct connection nothing sets these, so their presence marks a request
       that arrived through something else.
-    * `tailscale_login` — the `tailscale-user-login` header, recorded only on
-      `:unix`, and **not trustworthy there either**. The socket sits in a
-      `0700` directory, but that bounds who can connect, not what they say:
-      it is reached by local processes running as this daemon's user and by
-      ssh tunnels (`ssh -L` to the socket), and a tunnel forwards client bytes
-      verbatim, so whoever reaches a tunnel's local end can send any header.
-      `tailscale serve` cannot vouch for it on the hosts that need a socket —
-      serving to a unix target requires root on a userspace tailscaled. On
-      loopback TCP the value is dropped outright.
+    * `tailscale_login` — the `tailscale-user-login` header. On `:unix` it is
+      recorded as an untrusted assertion: the socket's `0700` directory bounds
+      who can connect, but ssh tunnels forward client bytes verbatim. On TCP,
+      `PeerGatePlug` retains it only after the peer uid passes the gate. The
+      header remains an assertion; the uid identifies the process that could
+      provide it.
 
-  Nothing reads `conn.assigns.peer` yet. Trusting an identity waits on a
-  transport that authenticates one — a uid-gated TCP path — rather than on
-  anything a header can assert.
+  A loopback TCP row is selected by matching the peer address and ephemeral
+  port as the row's local endpoint and the daemon listener as its remote
+  endpoint. The mirror row describes the server socket and carries the
+  daemon's uid, not the client's.
 
   ## What Bandit reports for a unix listener
 
@@ -49,20 +54,30 @@ defmodule ShuttleWeb.PeerPlug do
   def init(opts), do: opts
 
   @impl true
-  def call(conn, _opts) do
-    transport = transport(conn)
+  def call(conn, opts) do
+    peer_data = get_peer_data(conn)
+    transport = transport(peer_data)
 
     assign(conn, :peer, %{
       transport: transport,
+      uid: if(transport == :tcp, do: peer_uid(peer_data, opts)),
       forwarded: forwarded?(conn),
       tailscale_login: if(transport == :unix, do: header(conn, "tailscale-user-login"))
     })
   end
 
-  defp transport(conn) do
-    case get_peer_data(conn) do
-      %{address: {:local, _}} -> :unix
-      _ -> :tcp
+  defp transport(%{address: {:local, _}}), do: :unix
+  defp transport(_peer_data), do: :tcp
+
+  defp peer_uid(peer_data, opts) do
+    listen = Shuttle.listen()
+
+    case Keyword.get(opts, :uid_resolver) do
+      resolver when is_function(resolver, 2) ->
+        resolver.(peer_data, listen)
+
+      nil ->
+        Shuttle.ProcNetTcp.peer_uid(peer_data, listen, Keyword.get(opts, :proc_root, "/proc"))
     end
   end
 

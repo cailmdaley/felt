@@ -4,11 +4,19 @@ defmodule ShuttleWeb.PeerPlugTest do
 
   alias ShuttleWeb.PeerPlug
 
-  defp peer(conn), do: PeerPlug.call(conn, PeerPlug.init([])).assigns.peer
+  defp peer(conn, opts \\ []) do
+    opts = Keyword.put_new(opts, :uid_resolver, fn _peer_data, _listen -> nil end)
+    PeerPlug.call(conn, PeerPlug.init(opts)).assigns.peer
+  end
 
   describe "on loopback tcp" do
     test "a direct request is tcp and unforwarded" do
-      assert peer(conn(:get, "/")) == %{transport: :tcp, forwarded: false, tailscale_login: nil}
+      assert peer(conn(:get, "/")) == %{
+               transport: :tcp,
+               uid: nil,
+               forwarded: false,
+               tailscale_login: nil
+             }
     end
 
     test "a tailscale login header is recorded as forwarded but never trusted" do
@@ -16,7 +24,21 @@ defmodule ShuttleWeb.PeerPlugTest do
         conn(:get, "/")
         |> Plug.Conn.put_req_header("tailscale-user-login", "someone@example.com")
 
-      assert peer(conn) == %{transport: :tcp, forwarded: true, tailscale_login: nil}
+      assert peer(conn) == %{
+               transport: :tcp,
+               uid: nil,
+               forwarded: true,
+               tailscale_login: nil
+             }
+    end
+
+    test "records a uid resolved for the TCP peer" do
+      resolver = fn _peer_data, listen ->
+        assert listen == Shuttle.listen()
+        42
+      end
+
+      assert peer(conn(:get, "/"), uid_resolver: resolver).uid == 42
     end
 
     for header <- ["x-forwarded-for", "x-forwarded-host", "forwarded", "tailscale-user-name"] do
@@ -32,7 +54,12 @@ defmodule ShuttleWeb.PeerPlugTest do
       do: conn(:get, "/") |> put_peer_data(%{address: {:local, ""}, port: 0, ssl_cert: nil})
 
     test "the transport is unix" do
-      assert peer(unix_conn()) == %{transport: :unix, forwarded: false, tailscale_login: nil}
+      assert peer(unix_conn()) == %{
+               transport: :unix,
+               uid: nil,
+               forwarded: false,
+               tailscale_login: nil
+             }
     end
 
     test "the tailscale login header is recorded (not trusted; nothing reads it yet)" do
@@ -40,6 +67,7 @@ defmodule ShuttleWeb.PeerPlugTest do
 
       assert peer(conn) == %{
                transport: :unix,
+               uid: nil,
                forwarded: true,
                tailscale_login: "someone@example.com"
              }
