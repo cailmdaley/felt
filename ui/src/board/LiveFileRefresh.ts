@@ -9,6 +9,9 @@
  */
 
 export const LIVE_FILE_POLL_INTERVAL_MS = 4_000
+
+/** The file endpoint's content-digest ETag: `W/"sha256-<hex>"`. */
+const DIGEST_ETAG = /^W\/"sha256-[0-9a-f]{64}"$/
 const MAX_ERROR_BACKOFF_MS = 60_000
 
 type FileSubscriber = {
@@ -193,9 +196,11 @@ export class LiveFileRefresh {
 
     const controller = new AbortController()
     file.controller = controller
+    // Only a content-digest validator can prove a file unchanged. An owner that
+    // offers anything else (an older daemon's metadata ETag, or a timestamp) is
+    // polled unconditionally and its body compared by fingerprint instead.
     const headers: Record<string, string> = {}
-    if (file.etag) headers['If-None-Match'] = file.etag
-    else if (file.lastModified) headers['If-Modified-Since'] = file.lastModified
+    if (file.etag && DIGEST_ETAG.test(file.etag)) headers['If-None-Match'] = file.etag
 
     let request: Promise<void>
     request = (async () => {

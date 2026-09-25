@@ -44,7 +44,7 @@ defmodule ShuttleWeb.FileController do
   alias Shuttle.OriginRouter
 
   # POSIX mtime (per `time: :posix`) is seconds since 1970; Erlang's gregorian
-  # seconds count from year 0. Both `http_date/1` and `if_modified_since/2` use
+  # seconds count from year 0. `http_date/1` uses
   # this offset to convert between the two, without ever touching a timezone.
   @gregorian_epoch_offset :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
 
@@ -158,13 +158,13 @@ defmodule ShuttleWeb.FileController do
     end
   end
 
-  # `If-None-Match` wins when present (it's the precise check); `If-Modified-Since`
-  # is the fallback a plain `curl`/browser sends on its own. Either one matching
-  # is enough — this is a GET, so there is no lost-update race to protect against.
-  defp not_modified?(conn, etag, mtime) do
+  # Only the content digest decides a 304. `If-Modified-Since` alone never does:
+  # whole-second timestamps can't see a same-second rewrite, and a false 304
+  # freezes a report that is being rewritten while someone reads it.
+  defp not_modified?(conn, etag, _mtime) do
     case get_req_header(conn, "if-none-match") do
       [value | _] -> etag_matches?(value, etag)
-      [] -> if_modified_since(conn, mtime)
+      [] -> false
     end
   end
 
@@ -184,25 +184,9 @@ defmodule ShuttleWeb.FileController do
     |> Enum.flat_map(fn name -> Enum.map(get_req_header(conn, name), &{name, &1}) end)
   end
 
-  defp if_modified_since(conn, mtime) do
-    case get_req_header(conn, "if-modified-since") do
-      [value | _] ->
-        case :httpd_util.convert_request_date(String.to_charlist(value)) do
-          {_date, _time} = since ->
-            :calendar.datetime_to_gregorian_seconds(since) - @gregorian_epoch_offset >= mtime
-
-          :bad_date ->
-            false
-        end
-
-      [] ->
-        false
-    end
-  end
-
   defp weak_etag(body) do
     digest = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
-    ~s(W/"#{digest}")
+    ~s(W/"sha256-#{digest}")
   end
 
   @weekdays {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}

@@ -69,9 +69,9 @@ describe('LiveFileRefresh', () => {
   })
 
   it('uses ETag and does not render a 304 again', async () => {
-    const unchanged = response(304, '', { etag: 'W/"same"' })
+    const unchanged = response(304, '', { etag: 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' })
     const fetchFile = vi.fn()
-      .mockResolvedValueOnce(response(200, 'report', { etag: 'W/"same"' }))
+      .mockResolvedValueOnce(response(200, 'report', { etag: 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' }))
       .mockResolvedValueOnce(unchanged) as unknown as typeof fetch
     const h = harness(fetchFile)
     const onContent = vi.fn()
@@ -82,18 +82,20 @@ describe('LiveFileRefresh', () => {
 
     expect(fetchFile).toHaveBeenNthCalledWith(2, '/file?path=%2Freport.html', expect.objectContaining({
       cache: 'no-store',
-      headers: { 'If-None-Match': 'W/"same"' },
+      headers: { 'If-None-Match': 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' },
     }))
     expect(unchanged.text).not.toHaveBeenCalled()
     expect(onContent).toHaveBeenCalledTimes(1)
     stop()
   })
 
-  it('shares a URL and falls back to Last-Modified when no ETag is available', async () => {
+  it('shares a URL and polls unconditionally, comparing bodies, when the owner offers no digest ETag', async () => {
     const lastModified = 'Tue, 01 Jan 2030 00:00:00 GMT'
+    const legacyEtag = '"1735689600-6"'
     const fetchFile = vi.fn()
-      .mockResolvedValueOnce(response(200, 'report', { 'last-modified': lastModified }))
-      .mockResolvedValueOnce(response(304, '', { 'last-modified': lastModified })) as unknown as typeof fetch
+      .mockResolvedValueOnce(response(200, 'report', { 'last-modified': lastModified, etag: legacyEtag }))
+      .mockResolvedValueOnce(response(200, 'report', { 'last-modified': lastModified, etag: legacyEtag }))
+      .mockResolvedValueOnce(response(200, 'rewrite', { 'last-modified': lastModified, etag: legacyEtag })) as unknown as typeof fetch
     const h = harness(fetchFile)
     const first = vi.fn()
     const second = vi.fn()
@@ -107,11 +109,13 @@ describe('LiveFileRefresh', () => {
 
     h.setNow(LIVE_FILE_POLL_INTERVAL_MS)
     await h.poller.pollNow()
-    expect(fetchFile).toHaveBeenNthCalledWith(2, '/file?path=%2Freport.txt', expect.objectContaining({
-      headers: { 'If-Modified-Since': lastModified },
-    }))
+    expect(fetchFile).toHaveBeenNthCalledWith(2, '/file?path=%2Freport.txt', expect.objectContaining({ headers: {} }))
     expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(1)
+
+    h.setNow(2 * LIVE_FILE_POLL_INTERVAL_MS)
+    await h.poller.pollNow()
+    expect(first).toHaveBeenLastCalledWith('rewrite')
+    expect(second).toHaveBeenLastCalledWith('rewrite')
     stopFirst()
     stopSecond()
   })
@@ -141,11 +145,11 @@ describe('LiveFileRefresh', () => {
   it('honors a forced refresh during an in-flight conditional GET', async () => {
     let finishConditional!: (value: Response) => void
     const fetchFile = vi.fn()
-      .mockResolvedValueOnce(response(200, 'old', { etag: '"old"' }))
+      .mockResolvedValueOnce(response(200, 'old', { etag: 'W/"sha256-0000000000000000000000000000000000000000000000000000000000000000"' }))
       .mockImplementationOnce(() => new Promise<Response>((resolve) => {
         finishConditional = resolve
       }))
-      .mockResolvedValueOnce(response(200, 'new', { etag: '"new"' }))
+      .mockResolvedValueOnce(response(200, 'new', { etag: 'W/"sha256-1111111111111111111111111111111111111111111111111111111111111111"' }))
     const h = harness(fetchFile as typeof fetch)
     const onContent = vi.fn()
     const stop = h.poller.watch('/file', onContent)

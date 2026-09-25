@@ -211,12 +211,13 @@ the capture's project owner.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
-controller ran. A 200 response carries a weak `ETag` and `Last-Modified`; a
-matching `If-None-Match` (preferred) or `If-Modified-Since` returns a bodyless
-304. Owner-routed reads forward these validators and relay the owner's cache
-headers, including a remote 304. If an older owner always returns 200, the
-board compares a client-side content fingerprint and leaves unchanged views
-untouched.
+controller ran. A 200 response carries a weak content-digest `ETag`
+(`W/"sha256-<hex>"`) and `Last-Modified`; only a matching `If-None-Match`
+returns a bodyless 304, because a whole-second timestamp can't see a
+same-second rewrite. Owner-routed reads forward these validators and relay the
+owner's cache headers, including a remote 304. The board sends `If-None-Match`
+only with a digest `ETag`; an owner that offers none is read in full and the
+board compares a content fingerprint, leaving unchanged views untouched.
 
 `/transcript` accepts `session=<uuid>` and an optional `host=<name>`. Its JSON
 receipt carries `availability` (`available_local`, `available_remote`,
