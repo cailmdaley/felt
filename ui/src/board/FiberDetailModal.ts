@@ -2297,6 +2297,8 @@ export class FiberDetailModal {
     const surfaceRow = document.createElement('label')
     surfaceRow.className = 'kbn-detail-session'
     surfaceRow.style.display = shuttleManaged ? '' : 'none'
+    // Hidden until the agent records confirm a Codex agent (see syncDependents).
+    surfaceRow.classList.toggle('kbn-detail-session-hidden', persistedSurface(card.shuttleSurface) !== 'app')
     const surfaceLabel = document.createElement('span')
     surfaceLabel.textContent = 'Session'
     const surfaceHint = document.createElement('span')
@@ -3571,6 +3573,8 @@ export class FiberDetailModal {
       const supportsApp = isCodexAgent(rec)
       if (rec && !supportsApp) surfaceSelect.value = 'cli'
       surfaceSelect.disabled = !supportsApp
+      // The session choice only exists for Codex agents; others always run in a terminal.
+      surfaceSelect.parentElement?.classList.toggle('kbn-detail-session-hidden', !supportsApp)
     }
 
     const selectedAgent = (): string => agentSelect.value

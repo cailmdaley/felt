@@ -210,6 +210,10 @@
 /* Session window — one mono line under the Actions row: when the last worker
    launched, when it handed off, how long it held the fiber. Sits outside the
    collapsible body on purpose; it's a reading, not an action. */
+.kbn-detail-session-hidden {
+  display: none;
+}
+
 .kbn-detail-session {
   display: flex;
   align-items: baseline;

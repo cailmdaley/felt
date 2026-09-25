@@ -762,18 +762,19 @@ export function StashForm({
                 </select>
               </div>
 
-              <label className="stash-field stash-session-field">
-                <span className="stash-label">Session</span>
-                <select className="stash-select"
-                  aria-label="Session"
-                  value={isCodexAgent(constraintAgent) ? surface : 'cli'}
-                  disabled={!isCodexAgent(constraintAgent)}
-                  onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
-                  <option value="app">ChatGPT app</option>
-                  <option value="cli">Terminal</option>
-                </select>
-                <span className="stash-session-help">{sessionHelp(constraintAgent, surface)}</span>
-              </label>
+              {isCodexAgent(constraintAgent) && (
+                <label className="stash-field stash-session-field">
+                  <span className="stash-label">Session</span>
+                  <select className="stash-select"
+                    aria-label="Session"
+                    value={surface}
+                    onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
+                    <option value="app">ChatGPT app</option>
+                    <option value="cli">Terminal</option>
+                  </select>
+                  <span className="stash-session-help">{sessionHelp(constraintAgent, surface)}</span>
+                </label>
+              )}
 
               {/* Kind — segmented control */}
               <div className="stash-field">

@@ -372,22 +372,21 @@ export function CaptureForm({
               ))}
             </select>
           </label>
-          <label className="capture-field capture-session-field">
-            <span className="capture-label">Session</span>
-            <select
-              aria-label="Session"
-              className="capture-select"
-              value={isCodexAgent(agentRec) ? surface : 'cli'}
-              disabled={meetingEnabled || !isCodexAgent(agentRec)}
-              onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
-            >
-              <option value="app">ChatGPT app</option>
-              <option value="cli">Terminal</option>
-            </select>
-            <span className="capture-session-help">
-              {meetingEnabled ? 'Meeting capture runs in Terminal' : sessionHelp(agentRec, surface)}
-            </span>
-          </label>
+          {isCodexAgent(agentRec) && !meetingEnabled && (
+            <label className="capture-field capture-session-field">
+              <span className="capture-label">Session</span>
+              <select
+                aria-label="Session"
+                className="capture-select"
+                value={surface}
+                onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
+              >
+                <option value="app">ChatGPT app</option>
+                <option value="cli">Terminal</option>
+              </select>
+              <span className="capture-session-help">{sessionHelp(agentRec, surface)}</span>
+            </label>
+          )}
         </div>
         {addProject.pathOpen && onProjectAdded && (
           <AddProjectPath
