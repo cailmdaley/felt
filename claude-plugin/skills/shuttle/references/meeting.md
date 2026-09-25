@@ -1,6 +1,8 @@
 # Meeting
 
-A meeting capture is a capture whose input is a live conversation. The user
+A meeting capture is a capture whose input is a live conversation. This page
+covers following it live; turning the finished transcript into notes is the
+felt skill's `references/transcripts.md`. The user
 started it from the board's Capture form in meeting mode. `hark` is recording
 on the user's machine and writing a speaker-labelled transcript to a path on
 this host, and `From User` opens with `Meeting mode`, that path, and the mode
@@ -50,9 +52,9 @@ keep it out of git. Reference its path, and quote only what the notes need.
    it whole and keep it self-contained, per `report.md`. Send it once with
    `send-file` so it sits on the Board, and rewrite it in place after each
    substantive change.
-6. **Consolidate at `# ended`.** Write the final notes, decisions, action items
-   by owner, open questions, and the promotions you propose (a decision fiber,
-   an ASTRA decision, a finding). Rewrite the report, then close the fiber.
+6. **Consolidate at `# ended`** with the felt skill's
+   `references/transcripts.md`: the notes document first, then fiber
+   extraction as proposals. Rewrite the report, then close the fiber.
 
 Things said in a meeting are candidates. Propose promotions; never make one
 silently. Nothing goes to another human (issue, chat, email, wiki) without the
