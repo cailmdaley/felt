@@ -44,7 +44,14 @@ import {
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { suppressNextClick } from './dismissGesture.js'
-import { buildFileViewer, disposeFileViewer, htmlWithBase, isScrollableFile } from './FileViewerPanel.js'
+import {
+  buildFileViewer,
+  disposeFileViewer,
+  htmlWithBase,
+  isScrollableFile,
+  resumeFileViewer,
+  suspendFileViewer,
+} from './FileViewerPanel.js'
 import { refreshLiveFile, watchLiveFile } from './LiveFileRefresh.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
@@ -3133,6 +3140,8 @@ export class FiberDetailModal {
       e.cell.hidden = !on
       e.tab.classList.toggle('kbn-detail-tab-active', on)
       e.tab.setAttribute('aria-selected', String(on))
+      if (on) resumeFileViewer(e.viewer)
+      else suspendFileViewer(e.viewer)
     }
     if (!entry.viewerBuilt) this.buildEntryViewer(entry, card)
   }

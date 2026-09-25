@@ -86,9 +86,28 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 200
       assert [etag] = get_resp_header(conn, "etag")
-      assert etag =~ ~r/^W\/"[0-9a-f]{32}"$/
+      assert etag =~ ~r/^W\/"[0-9a-f]{64}"$/
       assert [_last_modified] = get_resp_header(conn, "last-modified")
       assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
+    end
+
+    test "equal-size rewrites with the same timestamp do not return 304" do
+      path = tmp_path("html")
+      on_exit(fn -> File.rm(path) end)
+      stamp = {{2020, 1, 1}, {0, 0, 0}}
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      File.write!(path, "<p>old</p>")
+      File.touch!(path, stamp)
+      first = get(api_conn(), url)
+      [etag] = get_resp_header(first, "etag")
+
+      File.write!(path, "<p>new</p>")
+      File.touch!(path, stamp)
+      second = api_conn() |> put_req_header("if-none-match", etag) |> get(url)
+
+      assert second.status == 200
+      assert second.resp_body == "<p>new</p>"
     end
 
     test "304 when If-None-Match matches the served ETag" do

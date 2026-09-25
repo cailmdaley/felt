@@ -38,6 +38,24 @@ defmodule ShuttleWeb.CORSTest do
     assert get_resp_header(conn, "access-control-allow-headers") != []
   end
 
+  test "OPTIONS /api/v1/file permits conditional headers and exposes file validators" do
+    conn =
+      local_conn()
+      |> put_req_header("origin", "http://localhost:5173")
+      |> put_req_header("access-control-request-method", "GET")
+      |> put_req_header("access-control-request-headers", "if-none-match,if-modified-since")
+      |> options("/api/v1/file")
+
+    assert conn.status == 204
+    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:5173"]
+    assert [allow_headers] = get_resp_header(conn, "access-control-allow-headers")
+    assert allow_headers =~ "If-None-Match"
+    assert allow_headers =~ "If-Modified-Since"
+    assert [exposed] = get_resp_header(conn, "access-control-expose-headers")
+    assert exposed =~ "ETag"
+    assert exposed =~ "Last-Modified"
+  end
+
   test "OPTIONS /api/v1/agents from Vite dev origin (port 5173) returns 204 + CORS headers" do
     conn =
       local_conn()
@@ -82,6 +100,21 @@ defmodule ShuttleWeb.CORSTest do
 
     assert conn.status == 200
     assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:3000"]
+  end
+
+  test "file validators are readable to an approved dev origin" do
+    path = Path.join(System.tmp_dir!(), "shuttle_cors_#{System.unique_integer([:positive])}.txt")
+    File.write!(path, "hello")
+    on_exit(fn -> File.rm(path) end)
+
+    conn =
+      local_conn()
+      |> put_req_header("origin", "http://localhost:5173")
+      |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+    assert conn.status == 200
+    assert get_resp_header(conn, "etag") != []
+    assert get_resp_header(conn, "access-control-expose-headers") == ["ETag, Last-Modified"]
   end
 
   test "Vary: Origin header is set on responses with CORS headers" do

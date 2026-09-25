@@ -4,8 +4,8 @@
  * A watcher sends conditional GETs when the daemon exposes validators. Older
  * remote daemons may return the full file every time, so each 200 also gets a
  * client-side content fingerprint; views update only when that fingerprint
- * moves. Watchers for the same URL share one request and pause while the page
- * is hidden.
+ * moves. Watchers for the same URL share one request; inactive tabs pause until
+ * activation revalidates them, and hidden pages do no work.
  */
 
 export const LIVE_FILE_POLL_INTERVAL_MS = 4_000
@@ -14,6 +14,8 @@ const MAX_ERROR_BACKOFF_MS = 60_000
 type FileSubscriber = {
   onContent: (content: string) => void
   onError?: (error: unknown) => void
+  active: boolean
+  fingerprint: string | null
 }
 
 type WatchedFile = {
@@ -24,8 +26,14 @@ type WatchedFile = {
   content: string | null
   failures: number
   nextPollAt: number
-  inFlight: boolean
+  inFlight: Promise<void> | null
+  forceRefresh: Promise<void> | null
   controller: AbortController | null
+}
+
+export type LiveFileSubscription = (() => void) & {
+  suspend: () => void
+  resume: () => Promise<void>
 }
 
 export interface LiveFileRefreshOptions {
@@ -72,7 +80,7 @@ export class LiveFileRefresh {
     })
   }
 
-  watch(url: string, onContent: (content: string) => void, onError?: (error: unknown) => void): () => void {
+  watch(url: string, onContent: (content: string) => void, onError?: (error: unknown) => void): LiveFileSubscription {
     let file = this.files.get(url)
     if (!file) {
       file = {
@@ -83,27 +91,46 @@ export class LiveFileRefresh {
         content: null,
         failures: 0,
         nextPollAt: 0,
-        inFlight: false,
+        inFlight: null,
+        forceRefresh: null,
         controller: null,
       }
       this.files.set(url, file)
       this.start()
     }
 
-    const subscriber = { onContent, onError }
+    const subscriber = { onContent, onError, active: true, fingerprint: null }
     file.subscribers.add(subscriber)
     if (file.content !== null) this.deliverContent(subscriber, file.content)
     else void this.pollFile(url, file)
 
-    return () => {
+    let disposed = false
+    const stop = (() => {
+      if (disposed) return
+      disposed = true
       const current = this.files.get(url)
       if (!current) return
       current.subscribers.delete(subscriber)
-      if (current.subscribers.size > 0) return
-      current.controller?.abort()
-      this.files.delete(url)
-      if (this.files.size === 0) this.stop()
+      if (current.subscribers.size === 0) {
+        current.controller?.abort()
+        this.files.delete(url)
+        if (this.files.size === 0) this.stop()
+      } else if (!this.hasActiveSubscribers(current)) {
+        current.controller?.abort()
+      }
+    }) as LiveFileSubscription
+    stop.suspend = () => {
+      if (disposed || !subscriber.active) return
+      subscriber.active = false
+      if (!this.hasActiveSubscribers(file)) file.controller?.abort()
     }
+    stop.resume = () => {
+      if (disposed || subscriber.active) return Promise.resolve()
+      subscriber.active = true
+      if (file.content !== null) this.deliverContent(subscriber, file.content)
+      return this.refresh(url)
+    }
+    return stop
   }
 
   /** Poll every due file now; hidden pages do no work. */
@@ -116,10 +143,27 @@ export class LiveFileRefresh {
   async refresh(url: string): Promise<void> {
     const file = this.files.get(url)
     if (!file || !this.isVisible()) return
+    if (file.forceRefresh) return file.forceRefresh
+
+    const pending = this.forceRead(url, file)
+    file.forceRefresh = pending
+    try {
+      await pending
+    } finally {
+      if (file.forceRefresh === pending) file.forceRefresh = null
+    }
+  }
+
+  private async forceRead(url: string, file: WatchedFile): Promise<void> {
     file.etag = null
     file.lastModified = null
     file.nextPollAt = 0
-    await this.pollFile(url, file)
+    if (file.inFlight) await file.inFlight
+    if (this.files.get(url) !== file || !this.isVisible()) return
+    file.etag = null
+    file.lastModified = null
+    file.nextPollAt = 0
+    await this.pollFile(url, file, true)
   }
 
   private start(): void {
@@ -137,65 +181,81 @@ export class LiveFileRefresh {
     this.stopListening = null
   }
 
-  private async pollFile(url: string, file: WatchedFile): Promise<void> {
-    if (
-      this.files.get(url) !== file ||
-      file.inFlight ||
-      file.subscribers.size === 0 ||
-      !this.isVisible() ||
-      this.now() < file.nextPollAt
-    ) return
+  private async pollFile(url: string, file: WatchedFile, force = false): Promise<void> {
+    if (this.files.get(url) !== file || file.subscribers.size === 0 || !this.isVisible()) return
+    if (!force && !this.hasActiveSubscribers(file)) return
+    if (file.inFlight) {
+      if (!force) return
+      await file.inFlight
+      return this.pollFile(url, file, true)
+    }
+    if (!force && this.now() < file.nextPollAt) return
 
-    file.inFlight = true
     const controller = new AbortController()
     file.controller = controller
     const headers: Record<string, string> = {}
     if (file.etag) headers['If-None-Match'] = file.etag
     else if (file.lastModified) headers['If-Modified-Since'] = file.lastModified
 
-    try {
-      const response = await this.fetchFile(url, {
-        cache: 'no-store',
-        headers,
-        signal: controller.signal,
-      })
-      if (this.files.get(url) !== file) return
+    let request: Promise<void>
+    request = (async () => {
+      try {
+        const response = await this.fetchFile(url, {
+          cache: 'no-store',
+          headers,
+          signal: controller.signal,
+        })
+        if (this.files.get(url) !== file) return
 
-      if (response.status === 304) {
-        file.etag = response.headers.get('etag') ?? file.etag
-        file.lastModified = response.headers.get('last-modified') ?? file.lastModified
+        if (response.status === 304) {
+          file.etag = response.headers.get('etag') ?? file.etag
+          file.lastModified = response.headers.get('last-modified') ?? file.lastModified
+          file.failures = 0
+          file.nextPollAt = this.now() + this.intervalMs
+          return
+        }
+        if (!response.ok) throw new Error(`file request failed: ${response.status}`)
+
+        const content = await response.text()
+        if (this.files.get(url) !== file) return
+        const fingerprint = contentFingerprint(content)
+        file.etag = response.headers.get('etag')
+        file.lastModified = response.headers.get('last-modified')
         file.failures = 0
         file.nextPollAt = this.now() + this.intervalMs
-        return
+        if (fingerprint !== file.fingerprint) {
+          file.fingerprint = fingerprint
+          file.content = content
+          for (const subscriber of file.subscribers) {
+            if (subscriber.active) this.deliverContent(subscriber, content)
+          }
+        }
+      } catch (error) {
+        if (this.files.get(url) !== file || controller.signal.aborted) return
+        file.failures += 1
+        file.nextPollAt = this.now() + Math.min(this.intervalMs * 2 ** file.failures, this.maxBackoffMs)
+        for (const subscriber of file.subscribers) {
+          if (subscriber.active) subscriber.onError?.(error)
+        }
       }
-      if (!response.ok) throw new Error(`file request failed: ${response.status}`)
-
-      const content = await response.text()
-      if (this.files.get(url) !== file) return
-      const fingerprint = contentFingerprint(content)
-      file.etag = response.headers.get('etag')
-      file.lastModified = response.headers.get('last-modified')
-      file.failures = 0
-      file.nextPollAt = this.now() + this.intervalMs
-      if (fingerprint !== file.fingerprint) {
-        file.fingerprint = fingerprint
-        file.content = content
-        for (const subscriber of file.subscribers) this.deliverContent(subscriber, content)
-      }
-    } catch (error) {
-      if (this.files.get(url) !== file || controller.signal.aborted) return
-      file.failures += 1
-      file.nextPollAt = this.now() + Math.min(this.intervalMs * 2 ** file.failures, this.maxBackoffMs)
-      for (const subscriber of file.subscribers) subscriber.onError?.(error)
-    } finally {
-      if (this.files.get(url) === file) {
-        file.inFlight = false
+    })().finally(() => {
+      if (this.files.get(url) === file && file.inFlight === request) {
+        file.inFlight = null
         file.controller = null
       }
-    }
+    })
+    file.inFlight = request
+    await request
+  }
+
+  private hasActiveSubscribers(file: WatchedFile): boolean {
+    return [...file.subscribers].some((subscriber) => subscriber.active)
   }
 
   private deliverContent(subscriber: FileSubscriber, content: string): void {
+    const fingerprint = contentFingerprint(content)
+    if (subscriber.fingerprint === fingerprint) return
+    subscriber.fingerprint = fingerprint
     try {
       subscriber.onContent(content)
     } catch {
@@ -226,7 +286,7 @@ export function watchLiveFile(
   url: string,
   onContent: (content: string) => void,
   onError?: (error: unknown) => void,
-): () => void {
+): LiveFileSubscription {
   return liveFileRefresh.watch(url, onContent, onError)
 }
 

@@ -35,7 +35,8 @@ defmodule ShuttleWeb.CORSPlug do
                        do: "http://#{host}:#{port}"
 
   @allowed_methods "GET, POST, OPTIONS"
-  @allowed_headers "Content-Type, Accept"
+  @allowed_headers "Content-Type, Accept, If-None-Match, If-Modified-Since"
+  @exposed_headers "ETag, Last-Modified"
   @max_age "3600"
   @unsafe_methods ~w(POST PUT PATCH DELETE)
   @forbidden_body "origin not allowed"
@@ -114,6 +115,7 @@ defmodule ShuttleWeb.CORSPlug do
       |> put_resp_header("access-control-allow-origin", origin)
       |> put_resp_header("access-control-allow-methods", @allowed_methods)
       |> put_resp_header("access-control-allow-headers", @allowed_headers)
+      |> put_resp_header("access-control-expose-headers", @exposed_headers)
       |> put_resp_header("access-control-max-age", @max_age)
       |> put_resp_header("vary", "Origin")
     else

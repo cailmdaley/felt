@@ -10,7 +10,7 @@
  */
 
 import './FileViewerPanel.css'
-import { watchLiveFile } from './LiveFileRefresh.js'
+import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
@@ -139,13 +139,23 @@ export function buildFileViewer(
   return wrap
 }
 
-const liveViewDisposers = new WeakMap<HTMLElement, () => void>()
+const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()
 
 /** Stop the shared poll when its viewer tab closes. */
 export function disposeFileViewer(viewer: HTMLElement | null): void {
   if (!viewer) return
-  liveViewDisposers.get(viewer)?.()
-  liveViewDisposers.delete(viewer)
+  liveViewSubscriptions.get(viewer)?.()
+  liveViewSubscriptions.delete(viewer)
+}
+
+/** Pause a hidden reader tab without tearing down its viewer DOM. */
+export function suspendFileViewer(viewer: HTMLElement | null): void {
+  if (viewer) liveViewSubscriptions.get(viewer)?.suspend()
+}
+
+/** Resume a reader tab and revalidate its file while retaining its DOM. */
+export function resumeFileViewer(viewer: HTMLElement | null): void {
+  if (viewer) void liveViewSubscriptions.get(viewer)?.resume()
 }
 
 function buildHtmlViewer(
@@ -225,7 +235,7 @@ function buildHtmlViewer(
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
     },
   )
-  liveViewDisposers.set(wrap, stop)
+  liveViewSubscriptions.set(wrap, stop)
   return wrap
 }
 
@@ -288,7 +298,7 @@ function buildTextViewer(
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
     },
   )
-  liveViewDisposers.set(wrap, stop)
+  liveViewSubscriptions.set(wrap, stop)
   return wrap
 }
 

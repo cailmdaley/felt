@@ -52,7 +52,13 @@ import {
   PANEL_MIN,
   type PanelGeometry,
 } from '../FloatingPanelChrome.js'
-import { buildFileViewer, disposeFileViewer, isScrollableFile } from '../FileViewerPanel.js'
+import {
+  buildFileViewer,
+  disposeFileViewer,
+  isScrollableFile,
+  resumeFileViewer,
+  suspendFileViewer,
+} from '../FileViewerPanel.js'
 import {
   activateTab,
   closeTab,
@@ -497,6 +503,8 @@ export class ShelfReader {
       t.cell.hidden = !on
       t.tab.classList.toggle('kbn-detail-tab-active', on)
       t.tab.setAttribute('aria-selected', String(on))
+      if (on) resumeFileViewer(t.viewer)
+      else suspendFileViewer(t.viewer)
     }
     // Show first, build second: a freshly-built image measures the now-visible
     // cell for its fit-to-width base.

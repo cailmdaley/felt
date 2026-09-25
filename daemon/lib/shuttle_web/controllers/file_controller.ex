@@ -27,7 +27,7 @@ defmodule ShuttleWeb.FileController do
   500s the panel.
 
   **Conditional reads on both owner legs.** A file response carries a weak
-  `ETag` (hashed from path + mtime + size) and `Last-Modified` (from mtime),
+  `ETag` (a SHA-256 digest of the served bytes) and `Last-Modified` (from mtime),
   and honors `If-None-Match` / `If-Modified-Since` with a bodyless 304. The
   owner-routed leg forwards those request headers and relays the owner's
   validators, so an unchanged remote file also costs a header exchange. A peer
@@ -39,7 +39,7 @@ defmodule ShuttleWeb.FileController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [relay_bytes: 2, relay_file_bytes: 2, etag_hash: 1, file_token: 1]
+    only: [relay_bytes: 2, relay_file_bytes: 2, file_token: 1]
 
   alias Shuttle.OriginRouter
 
@@ -131,22 +131,30 @@ defmodule ShuttleWeb.FileController do
     end
   end
 
-  defp serve_with_validators(conn, path, mtime, size) do
-    etag = weak_etag(path, mtime, size)
-    last_modified = http_date(mtime)
+  # Hash and serve the same bytes so a rewrite is visible even when its size
+  # and filesystem timestamp are unchanged.
+  defp serve_with_validators(conn, path, mtime, _size) do
+    case File.read(path) do
+      {:ok, body} ->
+        etag = weak_etag(body)
+        last_modified = http_date(mtime)
 
-    conn =
-      conn
-      |> put_resp_header("etag", etag)
-      |> put_resp_header("last-modified", last_modified)
-      |> put_resp_header("cache-control", "public, max-age=300")
+        conn =
+          conn
+          |> put_resp_header("etag", etag)
+          |> put_resp_header("last-modified", last_modified)
+          |> put_resp_header("cache-control", "public, max-age=300")
 
-    if not_modified?(conn, etag, mtime) do
-      send_resp(conn, 304, "")
-    else
-      conn
-      |> put_resp_content_type(MIME.from_path(path))
-      |> send_file(200, path)
+        if not_modified?(conn, etag, mtime) do
+          send_resp(conn, 304, "")
+        else
+          conn
+          |> put_resp_content_type(MIME.from_path(path))
+          |> send_resp(200, body)
+        end
+
+      {:error, _reason} ->
+        conn |> put_status(404) |> json(%{error: "file not found"})
     end
   end
 
@@ -192,10 +200,10 @@ defmodule ShuttleWeb.FileController do
     end
   end
 
-  # Weak — derived from file metadata (path + mtime + size), not a hash of the
-  # served bytes — matching `ShuttleWeb.RelayHelpers.json_with_validator/3`'s
-  # rationale for its own weak etags.
-  defp weak_etag(path, mtime, size), do: ~s(W/"#{etag_hash({path, mtime, size})}")
+  defp weak_etag(body) do
+    digest = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
+    ~s(W/"#{digest}")
+  end
 
   @weekdays {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
   @months {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}

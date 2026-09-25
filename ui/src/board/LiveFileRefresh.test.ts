@@ -138,6 +138,30 @@ describe('LiveFileRefresh', () => {
     stop()
   })
 
+  it('honors a forced refresh during an in-flight conditional GET', async () => {
+    let finishConditional!: (value: Response) => void
+    const fetchFile = vi.fn()
+      .mockResolvedValueOnce(response(200, 'old', { etag: '"old"' }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        finishConditional = resolve
+      }))
+      .mockResolvedValueOnce(response(200, 'new', { etag: '"new"' }))
+    const h = harness(fetchFile as typeof fetch)
+    const onContent = vi.fn()
+    const stop = h.poller.watch('/file', onContent)
+    await settle()
+
+    h.setNow(LIVE_FILE_POLL_INTERVAL_MS)
+    const conditional = h.poller.pollNow()
+    const forced = h.poller.refresh('/file')
+    finishConditional(response(304))
+    await Promise.all([conditional, forced])
+
+    expect(fetchFile).toHaveBeenCalledTimes(3)
+    expect(onContent).toHaveBeenLastCalledWith('new')
+    stop()
+  })
+
   it('backs off after errors and resumes after the retry delay', async () => {
     const fetchFile = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))
