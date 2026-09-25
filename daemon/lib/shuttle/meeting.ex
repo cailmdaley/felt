@@ -1,45 +1,76 @@
+defmodule Shuttle.Meeting.Control do
+  @moduledoc false
+  use GenServer
+
+  def start_link(opts \\ []),
+    do: GenServer.start_link(__MODULE__, nil, Keyword.put(opts, :name, __MODULE__))
+
+  def reconcile(identity), do: GenServer.call(__MODULE__, {:reconcile, identity})
+  def claim_stop(identity), do: GenServer.call(__MODULE__, {:claim_stop, identity})
+
+  @impl true
+  def init(state), do: {:ok, state}
+
+  @impl true
+  def handle_call({:reconcile, identity}, _from, claim) do
+    {:reply, :ok, if(claim == identity, do: claim, else: nil)}
+  end
+
+  def handle_call({:claim_stop, identity}, _from, identity),
+    do: {:reply, :already_claimed, identity}
+
+  def handle_call({:claim_stop, identity}, _from, _claim),
+    do: {:reply, :claimed, identity}
+end
+
 defmodule Shuttle.Meeting do
   @moduledoc """
-  Starts and observes the local `hark meeting` capture in a dedicated tmux
-  session. The transcript and `meeting.json` remain owned by hark; this module
-  only reads their current state and controls the tmux session or hark process.
+  Starts and observes the local hark capture in a dedicated tmux session.
+  The transcript and `meeting.json` remain owned by hark; this module controls
+  the local capture and derives its state from hark's lifecycle and tmux.
   """
 
   alias Shuttle.{Remote, Remotes, Runner, Tmux}
 
   @session "hark-meeting"
-  @active_phases %{"loading" => true, "live" => true, "local" => true, "stopping" => true}
+  @launch_option "@hark_launch"
+  @active_phases ~w(loading live stopping)
   @tail_bytes 8_192
   @command_timeout_ms 5_000
+  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}"
 
-  @type tmux_status :: :absent | :alive | {:dead, integer()}
+  @type tmux_status ::
+          :absent
+          | %{state: :alive, session_created: integer(), launch: String.t() | nil}
+          | %{state: {:dead, integer()}, session_created: integer(), launch: String.t() | nil}
   @type meeting :: map() | nil
 
-  @doc """
-  Derive the public meeting row and whether a clean, dead session should be
-  reaped. `pid_alive?` is true only when `ps` finds the pid and its command
-  line mentions hark. `pane_tail` is used only as the failed-state fallback.
-  """
+  @doc false
   @spec derive(tmux_status(), map() | nil, boolean(), String.t() | nil) ::
           {meeting(), boolean()}
-  def derive(tmux_status, meeting_json, pid_alive?, pane_tail \\ nil)
+  def derive(tmux_status, meeting_json, pid_alive?, pane_tail \\ nil) do
+    fresh = if fresh_for_session?(tmux_status, meeting_json), do: meeting_json, else: nil
+    phase = if is_map(fresh), do: fresh["phase"], else: nil
 
-  def derive(tmux_status, %{"phase" => phase} = data, true, _pane_tail)
-      when is_map_key(@active_phases, phase) do
-    {meeting_row(data, phase, tmux_status != :absent), false}
+    case tmux_status do
+      :absent ->
+        if phase in @active_phases and pid_alive?,
+          do: {meeting_row(fresh, phase, false), false},
+          else: {nil, false}
+
+      %{state: :alive} ->
+        if phase in @active_phases and pid_alive?,
+          do: {meeting_row(fresh, phase, true), false},
+          else: {meeting_row(fresh, "starting", true), false}
+
+      %{state: {:dead, 0}} when phase == "ended" ->
+        {nil, true}
+
+      %{state: {:dead, _status}} ->
+        data = if is_map(fresh), do: fresh, else: %{}
+        {meeting_row(data, "failed", true, first_error(data["error"], pane_tail)), false}
+    end
   end
-
-  def derive(:alive, meeting_json, _pid_alive?, _pane_tail),
-    do: {meeting_row(meeting_json || %{}, "starting", true), false}
-
-  def derive({:dead, 0}, %{"phase" => "ended"}, _pid_alive?, _pane_tail), do: {nil, true}
-
-  def derive({:dead, _status}, meeting_json, _pid_alive?, pane_tail) do
-    data = if is_map(meeting_json), do: meeting_json, else: %{}
-    {meeting_row(data, "failed", true, first_error(data["error"], pane_tail)), false}
-  end
-
-  def derive(:absent, _meeting_json, _pid_alive?, _pane_tail), do: {nil, false}
 
   @doc "Current local hark availability and meeting state."
   @spec show(keyword()) :: {:ok, map()} | {:error, term()}
@@ -47,34 +78,20 @@ defmodule Shuttle.Meeting do
     with {:ok, snapshot, _context} <- inspect_current(opts), do: {:ok, snapshot}
   end
 
-  @doc "Validate and start one meeting in the local tmux server."
-  @spec start(map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def start(params, opts \\ []) do
-    case command_args(params, "hark") do
-      {:ok, ["hark" | args]} ->
-        with {:ok, snapshot, context} <- inspect_current(opts),
-             :ok <- ensure_startable(snapshot),
-             executable when is_binary(executable) <- find_hark(opts),
-             :ok <- dismiss_failed(context, opts),
-             :ok <- create_session([executable | args], opts),
-             {:ok, result} <- show(opts) do
-          {:ok, result}
-        else
-          nil -> {:error, :unavailable}
-          {:error, _reason} = error -> error
-        end
-
-      {:error, _reason} = error ->
-        error
-    end
+  @doc "Start hark locally and prepare the ordinary capture prompt."
+  @spec start_capture(map(), String.t() | nil, String.t() | nil, String.t() | nil, keyword()) ::
+          {:ok, %{meeting: map(), prompt: String.t()}} | {:error, term()}
+  def start_capture(meeting, note, origin, surface, opts \\ []) do
+    :global.trans({{__MODULE__, :start_capture}, self()}, fn ->
+      do_start_capture(meeting, note, origin, surface, opts)
+    end)
   end
 
   @doc "Stop the local meeting once, or dismiss a dead tmux pane."
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
   def stop(opts \\ []) do
     with {:ok, snapshot, context} <- inspect_current(opts),
-         {:ok, state} <- stop_current(snapshot, context, opts),
-         {:ok, result} <- state do
+         {:ok, result} <- stop_current(snapshot, context, opts) do
       {:ok, result}
     end
   end
@@ -83,85 +100,154 @@ defmodule Shuttle.Meeting do
   @spec hark_executable() :: String.t() | nil
   def hark_executable, do: find_hark([])
 
-  @doc "Build hark's CLI arguments, including resolution of the scribe host."
-  @spec command_args(map(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
-  def command_args(params, executable) when is_map(params) do
-    title = Map.get(params, "title")
-    host = Map.get(params, "host")
-    project_dir = Map.get(params, "project_dir")
-    under = Map.get(params, "under")
-    mode = Map.get(params, "mode")
+  @doc "Derive the meeting name and title from the first line of a note."
+  @spec name_and_title(String.t() | nil, NaiveDateTime.t()) :: {String.t(), String.t()}
+  def name_and_title(note, now \\ NaiveDateTime.local_now()) do
+    first_line =
+      (note || "")
+      |> String.split(["\n", "\r"], parts: 2)
+      |> List.first()
+      |> String.trim()
 
-    with :ok <- validate_text(title, "title"),
-         :ok <- validate_text(project_dir, "project_dir"),
-         :ok <- validate_project_dir(project_dir),
-         :ok <- validate_under(under),
-         :ok <- validate_mode(mode),
-         {:ok, ssh_host} <- resolve_host(host) do
-      {:ok,
-       [executable, "meeting", "--project", project_dir, "--under", under, "--title", title] ++
-         if(ssh_host, do: ["--host", ssh_host], else: []) ++
-         if(mode == "room", do: ["--room"], else: [])}
+    title = if first_line == "", do: "Meeting", else: String.slice(first_line, 0, 80)
+
+    slug =
+      first_line
+      |> String.split(~r/\s+/u, trim: true)
+      |> Enum.take(6)
+      |> Enum.map(&slug_word/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("-")
+
+    timestamp = Calendar.strftime(now, "%Y-%m-%d_%H%M")
+    {if(slug == "", do: timestamp, else: timestamp <> "_" <> slug), title}
+  end
+
+  @doc "Build the scribe instructions for a meeting capture."
+  @spec meeting_message(String.t(), String.t()) :: String.t()
+  def meeting_message(mode, transcript_path) when mode in ["call", "room"] do
+    speakers =
+      if mode == "call",
+        do:
+          "Call mode: `me` is the user's microphone and S1… are the other participants from call audio.",
+        else: "Room mode: everyone is diarized as S1…."
+
+    "Meeting mode. A live meeting has just started and hark is transcribing it: `#{transcript_path}` on this host, one speaker-labelled line per turn, appended as each turn ends (a few seconds behind speech), ending with a `# ended` line. " <>
+      speakers <>
+      " Labels stay anonymous until a `# S2 = name` line appears. File this meeting as a fiber where the project keeps meetings (conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`), with the transcript path in its body. After the claim, assign yourself the `scribe` role (`felt shuttle assign <fiber-id> --role scribe --collaborator <your agent id>`; create the collaborator fiber `roles/scribe/<agent id>` first if it is missing) and act as that role: read the role fiber `roles/scribe` and follow the transcript until `# ended`, then consolidate and close. The transcript stays out of git. The user's note about the meeting follows (it may be empty)."
+  end
+
+  @doc "Resolve capture paths and remote mirror settings for a meeting."
+  @spec meeting_paths(String.t(), String.t() | nil, keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def meeting_paths(name, origin, opts \\ []) do
+    local_transcript = Path.join([hark_dir(opts), "meetings", name <> ".txt"])
+
+    case mirror_destination(origin, opts) do
+      {:ok, nil, nil} ->
+        {:ok,
+         %{
+           transcript: local_transcript,
+           local_transcript: local_transcript,
+           mirror: nil,
+           mirror_host: nil
+         }}
+
+      {:ok, remote, ssh_alias} ->
+        remote_transcript = "~/.hark/meetings/#{name}.txt"
+
+        {:ok,
+         %{
+           transcript: remote_transcript,
+           local_transcript: local_transcript,
+           mirror: "#{ssh_alias}:#{remote_transcript}",
+           mirror_host: remote.name
+         }}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  def command_args(_params, _executable),
-    do: {:error, {:validation, "request body must be a JSON object"}}
-
-  defp validate_text(value, name) when is_binary(value) do
-    cond do
-      String.trim(value) == "" -> {:error, {:validation, "#{name} must not be blank"}}
-      String.contains?(value, <<0>>) -> {:error, {:validation, "#{name} contains a NUL byte"}}
-      true -> :ok
-    end
-  end
-
-  defp validate_text(_value, name),
-    do: {:error, {:validation, "#{name} is required"}}
-
-  defp validate_project_dir(path) do
-    if Path.type(path) == :absolute,
-      do: :ok,
-      else: {:error, {:validation, "project_dir must be an absolute path"}}
-  end
-
-  defp validate_under(path) when is_binary(path) do
-    components = String.split(path, "/")
-
-    if String.trim(path) != "" and Path.type(path) == :relative and
-         Enum.all?(components, &(&1 not in ["", ".", ".."])) do
-      :ok
-    else
-      {:error, {:validation, "under must be a loom-relative path without empty or dot segments"}}
-    end
-  end
-
-  defp validate_under(_), do: {:error, {:validation, "under is required"}}
-
-  defp validate_mode(mode) when mode in ["call", "room"], do: :ok
-  defp validate_mode(_), do: {:error, {:validation, "mode must be 'call' or 'room'"}}
-
-  defp resolve_host("local"), do: {:ok, nil}
-
-  defp resolve_host(host) when is_binary(host) and host != "" do
-    case Enum.find(Remotes.configured(), &(&1.name == host)) do
-      %Remote{} = remote ->
-        case Remote.ssh_host(remote) do
-          ssh when is_binary(ssh) and ssh != "" -> {:ok, ssh}
-          _ -> {:error, {:validation, "remote host #{host} has no SSH alias configured"}}
+  @doc false
+  @spec parse_tmux_result(String.t(), non_neg_integer() | :timeout) ::
+          {:ok, tmux_status()} | {:error, term()}
+  def parse_tmux_result(output, 0) do
+    case output |> String.trim() |> String.split("|", trim: false) do
+      [dead, exit_status, created, launch] ->
+        with {:ok, session_created} <- parse_integer(created),
+             {:ok, state} <- parse_dead(dead, exit_status) do
+          {:ok, %{state: state, session_created: session_created, launch: blank_to_nil(launch)}}
+        else
+          _ -> {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
         end
 
-      nil ->
-        {:error, {:validation, "unknown remote host: #{host}"}}
+      _ ->
+        {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
     end
   end
 
-  defp resolve_host(_), do: {:error, {:validation, "host is required"}}
+  def parse_tmux_result(output, _status) do
+    if Tmux.absence_message?(output),
+      do: {:ok, :absent},
+      else: {:error, {:tmux, String.trim(output)}}
+  end
+
+  defp do_start_capture(meeting, note, origin, surface, opts) do
+    with {:ok, mode} <- validate_meeting(meeting),
+         {:ok, note} <- validate_note(note),
+         executable when is_binary(executable) <- find_hark(opts),
+         {:ok, snapshot, context} <- inspect_current(opts),
+         :ok <- ensure_startable(snapshot),
+         :ok <- validate_surface(surface),
+         {name, title} <-
+           name_and_title(
+             note,
+             Keyword.get(
+               opts,
+               :now,
+               Application.get_env(:shuttle, :meeting_now, NaiveDateTime.local_now())
+             )
+           ),
+         {:ok, paths} <- meeting_paths(name, origin, opts),
+         :ok <- File.mkdir_p(Path.dirname(paths.local_transcript)),
+         :ok <- dismiss_failed(context, opts),
+         launch_id <- launch_id(),
+         argv <- hark_argv(executable, paths, title, mode, launch_id),
+         :ok <- create_session(argv, launch_id, opts),
+         {:ok, result} <- show(opts) do
+      message = meeting_message(mode, paths.transcript)
+      {:ok, %{meeting: result.meeting, prompt: message <> "\n\n" <> note}}
+    else
+      nil -> {:error, :unavailable}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_meeting(%{"mode" => mode}) when mode in ["call", "room"], do: {:ok, mode}
+
+  defp validate_meeting(_),
+    do: {:error, {:validation, "meeting.mode must be 'call' or 'room'"}}
+
+  defp validate_surface("app"),
+    do: {:error, {:validation, "meeting mode requires a terminal capture surface"}}
+
+  defp validate_surface(_), do: :ok
+
+  defp validate_note(nil), do: {:ok, ""}
+
+  defp validate_note(note) when is_binary(note) do
+    if String.contains?(note, <<0>>),
+      do: {:error, {:validation, "prompt contains a NUL byte"}},
+      else: {:ok, note}
+  end
+
+  defp validate_note(_), do: {:error, {:validation, "prompt must be a string"}}
 
   defp ensure_startable(%{meeting: nil}), do: :ok
 
   defp ensure_startable(%{meeting: %{state: state}} = snapshot)
-       when state in ["starting", "loading", "live", "local", "stopping"],
+       when state in ["starting", "loading", "live", "stopping"],
        do: {:error, {:conflict, snapshot.meeting}}
 
   defp ensure_startable(%{meeting: %{state: "failed"}}), do: :ok
@@ -169,50 +255,68 @@ defmodule Shuttle.Meeting do
   defp dismiss_failed(%{meeting: %{state: "failed"}}, opts), do: kill_session(opts)
   defp dismiss_failed(_context, _opts), do: :ok
 
-  defp create_session(argv, opts) do
-    # tmux executes a shell command in the new pane. Quote every argv element
-    # as one POSIX shell word so titles and paths with whitespace or quotes stay
-    # data; no request value is interpolated as shell syntax.
+  defp hark_argv(executable, paths, title, mode, launch_id) do
+    [executable, "-o", paths.local_transcript, "--launch", launch_id, "--title", title] ++
+      if(mode == "room", do: ["--room"], else: []) ++
+      if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
+  end
+
+  defp create_session(argv, launch_id, opts) do
     command = "exec " <> Enum.map_join(argv, " ", &shell_quote/1)
 
     args = [
       "new-session",
       "-d",
+      "-P",
+      "-F",
+      "\#{session_id}",
       "-s",
       @session,
       "-c",
-      home_dir(),
+      home_dir(opts),
       "--",
       command,
       ";",
       "set-option",
-      "-w",
+      "-s",
       "-t",
       "=" <> @session,
+      @launch_option,
+      launch_id,
+      ";",
+      "set-option",
+      "-w",
+      "-t",
+      "=" <> @session <> ":",
       "remain-on-exit",
       "on"
     ]
 
-    case run(opts, "tmux", args) do
-      {_output, 0} ->
-        :ok
+    {output, status} = run(opts, "tmux", args)
+    created? = created_session_id?(output)
 
-      {output, status} ->
-        _ = kill_session(opts)
-        {:error, {:operation, "tmux could not start hark (#{status}): #{String.trim(output)}"}}
+    if status == 0 and created? and session_launch(opts) == launch_id do
+      :ok
+    else
+      if created? and session_launch(opts) == launch_id, do: kill_session(opts)
+
+      {:error, {:operation, "tmux could not start hark (#{status}): #{String.trim(output)}"}}
     end
   end
 
-  defp shell_quote(value) do
-    "'" <> String.replace(value, "'", "'\\''") <> "'"
-  end
+  defp created_session_id?(output), do: Regex.match?(~r/^\$[0-9]+$/m, output)
+
+  defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
   defp inspect_current(opts) do
-    with {:ok, tmux_status} <- tmux_status(opts) do
-      meeting_json = read_meeting_json(opts)
-      pid_alive? = pid_mentions_hark?(meeting_json, opts)
-      tail = if failed_dead_pane?(tmux_status, meeting_json), do: pane_tail(opts), else: nil
-      {meeting, reap?} = derive(tmux_status, meeting_json, pid_alive?, tail)
+    with {:ok, tmux} <- tmux_status(opts) do
+      raw_meeting = read_meeting_json(opts)
+      usable_meeting = if fresh_for_session?(tmux, raw_meeting), do: raw_meeting, else: nil
+      pid_alive? = pid_mentions_hark?(usable_meeting, opts)
+      tail = if failed_dead_pane?(tmux, usable_meeting), do: pane_tail(opts), else: nil
+      {meeting, reap?} = derive(tmux, raw_meeting, pid_alive?, tail)
+      identity = meeting_identity(tmux, usable_meeting, pid_alive?)
+      :ok = Shuttle.Meeting.Control.reconcile(identity)
 
       with :ok <- if(reap?, do: kill_session(opts), else: :ok) do
         meeting =
@@ -222,25 +326,27 @@ defmodule Shuttle.Meeting do
             nil
           end
 
-        snapshot = %{available: not is_nil(find_hark(opts)), meeting: meeting}
-        context = %{tmux_status: tmux_status, meeting_json: meeting_json, meeting: meeting}
-        {:ok, snapshot, context}
+        {:ok, %{available: not is_nil(find_hark(opts)), meeting: meeting},
+         %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting, identity: identity}}
       end
     end
   end
 
   defp stop_current(%{meeting: nil}, _context, _opts), do: {:error, :not_found}
 
-  defp stop_current(%{meeting: %{state: state}}, _context, opts) when state == "stopping",
-    do: {:ok, show(opts)}
+  defp stop_current(%{meeting: %{state: "stopping"}}, _context, opts), do: show(opts)
 
   defp stop_current(%{meeting: %{state: state}}, context, opts)
-       when state in ["loading", "live", "local"] do
+       when state in ["loading", "live"] do
     with pid when not is_nil(pid) <- valid_pid(context.meeting_json),
+         :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch_from(context.meeting_json)}),
          {output, 0} <- run(opts, "kill", ["-INT", pid]) do
       _ = output
-      {:ok, show(opts)}
+      show(opts)
     else
+      :already_claimed ->
+        show(opts)
+
       nil ->
         {:error, {:operation, "meeting process has no valid pid"}}
 
@@ -249,9 +355,12 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp stop_current(%{meeting: %{state: state}}, _context, opts)
-       when state in ["starting", "failed"] do
-    with :ok <- kill_session(opts), do: {:ok, show(opts)}
+  defp stop_current(%{meeting: %{state: "starting"}}, _context, opts) do
+    with :ok <- kill_session(opts), do: show(opts)
+  end
+
+  defp stop_current(%{meeting: %{state: "failed"}}, _context, opts) do
+    with :ok <- kill_session(opts), do: show(opts)
   end
 
   defp read_meeting_json(opts) do
@@ -276,7 +385,8 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp valid_pid(%{"pid" => pid}) when is_integer(pid) and pid > 0, do: Integer.to_string(pid)
+  defp valid_pid(%{"pid" => pid}) when is_integer(pid) and pid > 0,
+    do: Integer.to_string(pid)
 
   defp valid_pid(%{"pid" => pid}) when is_binary(pid) do
     case Integer.parse(pid) do
@@ -288,15 +398,18 @@ defmodule Shuttle.Meeting do
   defp valid_pid(_), do: nil
 
   defp tmux_status(opts) do
-    case run(opts, "tmux", [
-           "display-message",
-           "-p",
-           "-t",
-           "=" <> @session,
-           "\#{pane_dead} \#{pane_dead_status}"
-         ]) do
-      {output, 0} ->
-        parse_pane_status(output)
+    case run(opts, "tmux", ["has-session", "-t", "=" <> @session]) do
+      {_output, 0} ->
+        {output, status} =
+          run(opts, "tmux", [
+            "display-message",
+            "-p",
+            "-t",
+            "=" <> @session <> ":",
+            @tmux_status_format
+          ])
+
+        parse_tmux_result(output, status)
 
       {output, _status} ->
         if Tmux.absence_message?(output),
@@ -305,32 +418,52 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp parse_pane_status(output) do
-    case String.split(String.trim(output)) do
-      ["0"] ->
-        {:ok, :alive}
+  defp parse_dead("0", _status), do: {:ok, :alive}
 
-      ["0", _status] ->
-        {:ok, :alive}
-
-      ["1", status] ->
-        case Integer.parse(status) do
-          {value, ""} -> {:ok, {:dead, value}}
-          _ -> {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
-        end
-
-      _ ->
-        {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
+  defp parse_dead("1", status) do
+    case parse_integer(status) do
+      {:ok, exit_status} -> {:ok, {:dead, exit_status}}
+      _ -> :error
     end
   end
 
-  defp failed_dead_pane?({:dead, status}, meeting_json),
+  defp parse_dead(_, _), do: :error
+
+  defp parse_integer(value) do
+    case Integer.parse(String.trim(value)) do
+      {integer, ""} -> {:ok, integer}
+      _ -> :error
+    end
+  end
+
+  defp blank_to_nil(value) do
+    case String.trim(value) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp fresh_for_session?(:absent, meeting_json), do: is_map(meeting_json)
+
+  defp fresh_for_session?(%{launch: launch}, meeting_json) when is_binary(launch),
+    do: is_map(meeting_json) and meeting_json["launch"] == launch
+
+  defp fresh_for_session?(_tmux, _meeting_json), do: false
+
+  defp failed_dead_pane?(%{state: {:dead, status}}, meeting_json),
     do: not (status == 0 and is_map(meeting_json) and meeting_json["phase"] == "ended")
 
-  defp failed_dead_pane?(_status, _meeting_json), do: false
+  defp failed_dead_pane?(_tmux, _meeting_json), do: false
 
   defp pane_tail(opts) do
-    case run(opts, "tmux", ["capture-pane", "-p", "-t", "=" <> @session, "-S", "-40"]) do
+    case run(opts, "tmux", [
+           "capture-pane",
+           "-p",
+           "-t",
+           "=" <> @session <> ":",
+           "-S",
+           "-40"
+         ]) do
       {output, _status} ->
         lines =
           output
@@ -350,6 +483,13 @@ defmodule Shuttle.Meeting do
 
       {output, _status} ->
         if Tmux.absence_message?(output), do: :ok, else: {:error, {:tmux, String.trim(output)}}
+    end
+  end
+
+  defp session_launch(opts) do
+    case tmux_status(opts) do
+      {:ok, %{launch: launch}} -> launch
+      _ -> nil
     end
   end
 
@@ -390,22 +530,86 @@ defmodule Shuttle.Meeting do
   end
 
   defp meeting_row(data, state, tmux_exists?, error \\ nil) do
+    data = if is_map(data), do: data, else: %{}
+
     %{
       state: state,
       title: data["title"],
-      host: data["host"],
-      fiber: data["fiber"],
       started_at: data["started"],
       last_line: nil,
       transcript: data["transcript"],
+      mirror_host: mirror_host(data["mirror"]),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
-      error: error
+      error: error || data["error"]
     }
   end
 
   defp first_error(error, _fallback) when is_binary(error) and error != "", do: error
   defp first_error(_error, fallback) when is_binary(fallback) and fallback != "", do: fallback
   defp first_error(_error, _fallback), do: nil
+
+  defp meeting_identity(:absent, %{"phase" => phase} = data, true)
+       when phase in @active_phases do
+    identity_for(data)
+  end
+
+  defp meeting_identity(%{} = _tmux, %{"phase" => phase} = data, _pid_alive?)
+       when phase in @active_phases do
+    identity_for(data)
+  end
+
+  defp meeting_identity(_tmux, _data, _pid_alive?), do: nil
+
+  defp identity_for(data) do
+    case valid_pid(data) do
+      nil -> nil
+      pid -> {pid, launch_from(data)}
+    end
+  end
+
+  defp launch_from(%{"launch" => launch}) when is_binary(launch) and launch != "", do: launch
+  defp launch_from(_), do: nil
+
+  defp mirror_host(mirror) when is_binary(mirror) and mirror != "" do
+    [alias_name | _] = String.split(mirror, ":", parts: 2)
+
+    case Enum.find(Remotes.configured(), &(Remote.ssh_host(&1) == alias_name)) do
+      %Remote{name: name} -> name
+      nil -> alias_name
+    end
+  end
+
+  defp mirror_host(_), do: nil
+
+  defp mirror_destination(origin, opts) do
+    case Shuttle.OriginRouter.route(origin, origin_router_opts(opts)) do
+      :local ->
+        {:ok, nil, nil}
+
+      {:remote, %Remote{} = remote} ->
+        case Remote.ssh_host(remote) do
+          alias_name when is_binary(alias_name) and alias_name != "" -> {:ok, remote, alias_name}
+          _ -> {:error, {:validation, "remote origin has no SSH alias for transcript mirroring"}}
+        end
+    end
+  end
+
+  defp origin_router_opts(opts) do
+    opts
+    |> Keyword.take([:own_host_id, :remotes])
+    |> Keyword.put_new(:own_host_id, Shuttle.Poller.own_host_id())
+  end
+
+  defp slug_word(word) do
+    word
+    |> String.normalize(:nfd)
+    |> String.replace(~r/\p{Mn}/u, "")
+    |> String.downcase()
+    |> String.replace(~r/[^\p{L}\p{N}]+/u, "-")
+    |> String.trim("-")
+  end
+
+  defp launch_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp find_hark(opts) do
     configured = Keyword.get(opts, :hark_path, Application.get_env(:shuttle, :hark_path))
@@ -441,11 +645,12 @@ defmodule Shuttle.Meeting do
       end
   end
 
-  defp home_dir do
-    case System.get_env("HOME") do
-      path when is_binary(path) and path != "" -> path
-      _ -> Path.expand("~")
-    end
+  defp home_dir(opts) do
+    Keyword.get(opts, :home_dir) ||
+      case System.get_env("HOME") do
+        path when is_binary(path) and path != "" -> path
+        _ -> Path.expand("~")
+      end
   end
 
   defp run(opts, command, args) do

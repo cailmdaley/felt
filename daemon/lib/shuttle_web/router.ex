@@ -21,9 +21,8 @@ defmodule ShuttleWeb.Router do
     # Spawn-without-constitution: launch a capture session from a free-text
     # prompt; the session files the fiber and claims itself.
     post("/capture", CaptureController, :create)
-    # Local-only hark capture controls. `host` selects the scribe destination;
-    # it does not owner-route the meeting away from this daemon.
-    post("/meeting", MeetingController, :create)
+    # The board starts a recording through /capture; these routes observe and
+    # stop only this daemon's local microphone capture.
     post("/meeting/stop", MeetingController, :stop)
     get("/meeting", MeetingController, :show)
     # The unified kanban write-plane: one call hides resolve + invoke +

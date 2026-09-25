@@ -37,8 +37,7 @@ is not enough.
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
-| `POST /capture` | owner-routed | Launch a session from a free-text prompt; it files the fiber and claims itself |
-| `POST /meeting` | local | Start a local hark capture; `host` selects the scribe host, not the daemon |
+| `POST /capture` | owner-routed; meeting setup is local first | Launch a session from a free-text prompt; meeting mode starts local hark recording before routing the scribe capture |
 | `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
 | `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
@@ -67,10 +66,23 @@ relevant role and collaborator content locally. The request's top-level
 `origin` still routes the task edit. See
 [Collaborators](../concepts/collaborators.md).
 
-### Codex app conversations
+### Capture and meeting mode
 
 `POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
-terminal execution. Existing-fiber dispatch reads the persisted
+terminal execution. It also accepts an optional `meeting: {mode: "call" | "room"}`
+object. Meeting mode starts hark on the daemon that receives the request before
+owner-routing the capture, so the local microphone records immediately while
+the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
+allows `prompt` to be omitted, and replaces the prompt with scribe instructions
+followed by the user's note. It removes `meeting` before forwarding, so the
+owner handles an ordinary terminal capture. The transcript is mirrored to the
+remote project host when `origin` names a configured remote with an SSH alias.
+A successful capture response adds `meeting`; if capture fails after recording
+starts, its status and error body also include `meeting` and `recording: true`.
+
+### Codex app conversations
+
+Existing-fiber dispatch reads the persisted
 `shuttle.surface`; omission preserves CLI execution. Model and effort remain
 agent-registry choices. App execution requires the owning host's local Codex
 App Server and reports an error if it cannot be reached.
@@ -160,35 +172,36 @@ may total at most 20 MiB. Successful receipts include
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
 
-`GET /meeting` returns `{available, meeting}`.
+`GET /meeting` returns `{available, meeting}`. The row is `null` when this
+daemon has no local meeting capture to report. Otherwise it carries
+`state`, `title`, `started_at`, `last_line`, `transcript`, `mirror_host`,
+`tmux_session`, and `error`. `mirror_host` is the configured remote name when
+the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
+A `null` mirror host means the transcript is local.
 
-`meeting` is `null` when no local capture is active or failed.
+`POST /capture` accepts `meeting: {mode: "call" | "room"}`. The daemon derives
+the meeting title and transcript name from the first line of `prompt`, or uses
+`Meeting` when no note is supplied. It starts hark in the local `hark-meeting`
+tmux session, then continues the normal local or forwarded capture flow.
+For a remote `origin`, hark writes locally and mirrors to
+`~/.hark/meetings/<name>.txt` through that remote's configured SSH alias.
+The capture agent receives the scribe message and the optional user note as its
+prompt. `project_dir` remains required by the ordinary capture flow.
 
-A meeting row carries `state`, `title`, `host`, `fiber`, `started_at`, `last_line`, `transcript`, `tmux_session`, and `error`.
+An unavailable hark executable returns **503**. An existing meeting in
+`starting`, `loading`, `live`, or `stopping` returns **409** with its row.
+Meeting mode rejects `surface: "app"` and an invalid mode with **422**.
+If capture fails after hark starts, the capture's status and error body include
+the meeting row and `recording: true`; the local recording continues.
 
-`POST /meeting` accepts `{title, host, project_dir, under, mode}`.
+`POST /meeting/stop` returns HTTP 202 with `{meeting}` or 404 when no meeting
+exists. It sends at most one SIGINT to a live hark process, even while hark's
+lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
+no-op; a `starting` or `failed` meeting dismisses its tmux session.
 
-Set `host` to `"local"` or a configured remote name.
-
-The daemon resolves a remote's SSH alias for hark, but always runs hark on its own machine.
-
-`project_dir` is absolute on the selected scribe host, and `under` is a loom-relative parent fiber.
-
-Set `mode` to `"call"` or `"room"`.
-
-Success returns HTTP 202 with `{meeting}`.
-
-A capture that is starting, running, or stopping returns 409.
-
-Invalid input returns 422, and a missing hark executable returns 503.
-
-`POST /meeting/stop` returns HTTP 202 with `{meeting}`.
-
-It sends one SIGINT to a live capture, does nothing when the capture is already stopping, and dismisses the tmux session when the capture is starting or failed.
-
-It returns 404 when there is no meeting to stop.
-
-These routes are local-only and never use owner routing: the request's `host` selects the scribe destination, not the daemon that receives the request.
+These meeting routes control this daemon's local recording and never use owner
+routing. `POST /capture` starts that recording before it routes the scribe to
+the capture's project owner.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
