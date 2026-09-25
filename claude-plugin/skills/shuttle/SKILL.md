@@ -56,6 +56,8 @@ felt shuttle message <address> "Background for later" --context-only
 felt shuttle message <address> "Results attached" --attach results.csv
 ```
 
+**Reach is per host and one-directional.** `sessions` and `message` see only the hosts named in *this* host's `~/.config/felt/remotes.json` (`felt shuttle remotes list`). A hub that dispatched you can see you without you seeing it: a spoke with no fleet file lists only itself, and a message to a `shuttle://<other-host>/…` address fails with "not reachable". Before concluding a peer is unreachable, check the fleet file; to talk back, register the hub as a remote (Tailscale: `felt shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`, which on a userspace-`tailscaled` host also needs the outbound proxy — and that proxy is an unauthenticated gateway into the whole tailnet, so it belongs on a single-user hub, **never on a shared login node**; the installation guide's "Tailscale as fleet transport" has the recipe and the rule). Where no route is allowed, the shared store is the channel: `felt sync --push` and a note in the fiber; the hub reads it on its next sync.
+
 Ordinary messages start an idle turn or steer ongoing work. `--context-only`
 supplies context at a natural prompt/tool boundary without requesting a turn
 or native steer; idle receivers stay idle. Use it for nonurgent updates and acknowledgments. Replies use the same command. No persistent identity or
