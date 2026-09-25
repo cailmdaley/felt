@@ -80,6 +80,11 @@ owner handles an ordinary terminal capture. The transcript is mirrored to the
 remote project host when `origin` names a configured remote with an SSH alias.
 A successful capture response adds `meeting`; if capture fails after recording
 starts, its status and error body also include `meeting` and `recording: true`.
+Each meeting gets a transcript name no earlier recording used. The daemon watches
+the new recording for a few seconds: if hark exits before it starts recording, the
+scribe is not launched and the response is **503** with the failed `meeting` row
+and `recording: false`. A recording that is still loading, or whose state tmux
+can't report yet, counts as started (`state: "starting"`).
 
 ### Codex app conversations
 

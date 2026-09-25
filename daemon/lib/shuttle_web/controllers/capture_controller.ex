@@ -177,6 +177,17 @@ defmodule ShuttleWeb.CaptureController do
     conn |> put_status(409) |> json(%{error: "a meeting is already active", meeting: meeting})
   end
 
+  defp meeting_error(conn, {:launch_failed, meeting}) do
+    conn
+    |> put_status(503)
+    |> json(%{
+      error:
+        "recording did not start: #{meeting.error || "hark exited before recording started"}",
+      meeting: meeting,
+      recording: false
+    })
+  end
+
   defp meeting_error(conn, :unavailable) do
     conn |> put_status(503) |> json(%{error: "hark is not available on this host"})
   end
