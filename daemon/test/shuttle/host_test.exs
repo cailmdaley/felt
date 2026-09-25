@@ -5,7 +5,7 @@ defmodule Shuttle.HostTest do
   alias Shuttle.Host
 
   @fixture_dir Path.expand("../fixtures/host", __DIR__)
-  @env_vars ~w(FELT_HOST_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR)
+  @env_vars ~w(FELT_HOST_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR SHUTTLE_PEER_UID)
 
   setup do
     previous = Map.new(@env_vars, &{&1, System.get_env(&1)})
@@ -241,11 +241,17 @@ defmodule Shuttle.HostTest do
       previous_endpoint = Application.get_env(:shuttle, ShuttleWeb.Endpoint)
       previous_listen = Application.get_env(:shuttle, :listen)
       previous_class = Application.get_env(:shuttle, :host_class)
+      previous_peer_gate = Application.get_env(:shuttle, :peer_gate)
+      previous_peer_gate_uid = Application.get_env(:shuttle, :peer_gate_expected_uid)
+      previous_proc_root = Application.get_env(:shuttle, :proc_net_root)
 
       on_exit(fn ->
         Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous_endpoint)
         restore_app_env(:listen, previous_listen)
         restore_app_env(:host_class, previous_class)
+        restore_app_env(:peer_gate, previous_peer_gate)
+        restore_app_env(:peer_gate_expected_uid, previous_peer_gate_uid)
+        restore_app_env(:proc_net_root, previous_proc_root)
       end)
 
       base = "/tmp/shuttle-cfg-#{System.unique_integer([:positive])}"
@@ -254,6 +260,7 @@ defmodule Shuttle.HostTest do
 
       System.delete_env("SHUTTLE_LISTEN")
       System.delete_env("SHUTTLE_PORT")
+      System.delete_env("SHUTTLE_PEER_UID")
       System.put_env("SHUTTLE_DATA_DIR", base)
 
       {:ok, base: base, endpoint: previous_endpoint}
@@ -308,7 +315,10 @@ defmodule Shuttle.HostTest do
 
       [head, body] = socket |> recv_all("") |> String.split("\r\n\r\n", parts: 2)
       assert head =~ "HTTP/1.1 200"
-      assert %{"listen" => listen, "host_class" => "shared-multi-user"} = Jason.decode!(body)
+
+      assert %{"listen" => listen, "host_class" => "shared-multi-user", "peer_gate" => "none"} =
+               Jason.decode!(body)
+
       assert listen == "unix://" <> sock
     end
 
@@ -321,6 +331,42 @@ defmodule Shuttle.HostTest do
 
       assert Shuttle.listen() == "unix://" <> Path.join([base, "sock", "daemon.sock"])
       refute File.exists?(Path.join(base, "sock"))
+      assert Application.get_env(:shuttle, :peer_gate) == "none"
+    end
+
+    test "a shared TCP test endpoint bypasses the proc requirement", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
+
+      Shuttle.Application.configure_endpoint()
+
+      assert Shuttle.listen() == "tcp://127.0.0.1:4999"
+      assert Application.get_env(:shuttle, :peer_gate) == "none"
+    end
+
+    test "a shared TCP listener refuses boot when proc is unreadable", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Shuttle.Application.configure_endpoint()
+        end
+
+      assert error.message =~ "shared-multi-user"
+      assert error.message =~ "tcp://127.0.0.1:4999"
+      assert error.message =~ "drop the tcp:// listen"
+      assert error.message =~ "declare the host single-user"
     end
 
     test "a single-user host keeps loopback tcp on the configured port", %{endpoint: endpoint} do

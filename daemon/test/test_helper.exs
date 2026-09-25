@@ -25,4 +25,5 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
 
-ExUnit.start(exclude: [:integration])
+exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
+ExUnit.start(exclude: exclude)
