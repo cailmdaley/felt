@@ -126,8 +126,8 @@ uses the host's Codex project listing until a direct app URL is available.
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
 | `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents` or `remotes` — plus `entries` for the two path lists |
 | `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
-| `GET /file` | owner-routed | Raw bytes by absolute path — what makes `:::{embed}` and relative images work for a remote-owned fiber |
-| `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — the live reader's change probe |
+| `GET /file` | owner-routed | Raw bytes by absolute path, with `ETag` / `Last-Modified` conditional GET for live HTML, markdown, and text readers |
+| `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
@@ -159,7 +159,12 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
-controller ran.
+controller ran. A 200 response carries a weak `ETag` and `Last-Modified`; a
+matching `If-None-Match` (preferred) or `If-Modified-Since` returns a bodyless
+304. Owner-routed reads forward these validators and relay the owner's cache
+headers, including a remote 304. If an older owner always returns 200, the
+board compares a client-side content fingerprint and leaves unchanged views
+untouched.
 
 `/transcript` accepts `session=<uuid>` and an optional `host=<name>`. Its JSON
 receipt carries `availability` (`available_local`, `available_remote`,

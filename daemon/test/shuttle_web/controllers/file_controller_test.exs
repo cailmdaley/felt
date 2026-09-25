@@ -3,15 +3,13 @@ defmodule ShuttleWeb.FileControllerTest do
   Wiring for `GET /api/v1/file` — the owner-routed file-bytes route the
   standalone UI's fiber panel reads for `:::{embed}` artifacts and relative
   images. The local branch (absolute-path read + MIME + bytes) is exercised
-  against real temp files; the remote branch reuses the shared
-  `Shuttle.OriginRouter.forward_get/4` with a stubbed transport, mirroring the
-  felt-edit/transition forward tests.
+  against real temp files; the remote branch uses the header-aware
+  `Shuttle.OriginRouter.forward_file_get/5` with a stubbed transport.
   """
   use ExUnit.Case
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -126,6 +124,48 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.status == 304
     end
 
+    test "If-None-Match takes precedence over a matching If-Modified-Since" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+      [last_modified] = get_resp_header(first, "last-modified")
+      stale_etag = ~s(W/"00000000000000000000000000000000")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", stale_etag)
+        |> put_req_header("if-modified-since", last_modified)
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 200
+      assert conn.resp_body == "hello embed"
+    end
+
+    test "If-None-Match accepts a matching list member and wildcard" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+
+      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+      [etag] = get_resp_header(first, "etag")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", ~s("other", #{etag}))
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 304
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", "*")
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 304
+    end
+
     test "200 (not 304) when the validators are stale — a changed ETag or an earlier If-Modified-Since" do
       path = tmp_path("txt")
       File.write!(path, "hello embed")
@@ -186,6 +226,44 @@ defmodule ShuttleWeb.FileControllerTest do
       # origin stripped; path crosses as a query param to the owner's own /file.
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.png"
+    end
+
+    test "forwards conditional headers and relays a remote 304 with its validators" do
+      etag = ~s(W/"remote-file")
+
+      headers = [
+        {"etag", etag},
+        {"last-modified", "Tue, 01 Jan 2030 00:00:00 GMT"},
+        {"cache-control", "public, max-age=300"}
+      ]
+
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 304, headers, "application/octet-stream", ""}
+      )
+
+      last_modified = "Tue, 01 Jan 2030 00:00:00 GMT"
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> put_req_header("if-modified-since", last_modified)
+        |> get("/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.html")}&origin=candide")
+
+      assert conn.status == 304
+      assert conn.resp_body == ""
+      assert get_resp_header(conn, "etag") == [etag]
+      assert get_resp_header(conn, "last-modified") == [last_modified]
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
+
+      assert StubGetFileClient.last().headers == [
+               {"if-none-match", etag},
+               {"if-modified-since", last_modified}
+             ]
+
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.html"
     end
 
     test "forwards file-info to the owning daemon without downloading the file" do
@@ -249,12 +327,10 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
-
   defp tmp_path(ext),
     do:
       Path.join(
         System.tmp_dir!(),
         "shuttle_file_ctrl_#{System.unique_integer([:positive])}.#{ext}"
       )
-
 end

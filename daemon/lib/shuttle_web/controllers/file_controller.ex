@@ -13,8 +13,8 @@ defmodule ShuttleWeb.FileController do
   `/felt-edit`.** The composite board stamps each fiber with its `origin`; the
   panel carries that origin back. A local-owned path is read here; a
   remote-owned path forwards to the owning daemon's identical `/file` (origin
-  stripped) over the SSH tunnel and relays its bytes + content-type verbatim
-  (`OriginRouter.forward_get/4`).
+  stripped) over the SSH tunnel and relays its bytes, content type, and cache
+  validators (`OriginRouter.forward_file_get/4`).
 
   **Path contract.** `path` must be ABSOLUTE — the panel resolves a fiber's
   `:::{embed} <rel>` against the fiber's own directory client-side before
@@ -26,28 +26,20 @@ defmodule ShuttleWeb.FileController do
   404 for a missing file, while `/file-info` reports `exists: false`; neither
   500s the panel.
 
-  **Cache validators on the local-serve path.** The board re-mounts iframes
-  pointed at this route on every panel open, which would otherwise refetch a
-  multi-MB report in full each time. A local response carries a weak `ETag`
-  (hashed from path + mtime + size) and `Last-Modified` (from mtime), honors
-  `If-None-Match` / `If-Modified-Since` with a bodyless 304, and advertises
-  `Cache-Control: public, max-age=300` so the browser skips the round trip
-  entirely inside that window. The forwarded (remote-owned) leg relays the
-  owning daemon's bytes verbatim via `relay_bytes/2` and carries no validators
-  of its own here — a future pass could thread them through
-  `OriginRouter.forward_get/4`, but that widens the relay contract for every
-  other owner-routed GET, not just this one.
-
-  **This is why `/file-info` exists rather than a conditional GET or a HEAD.**
-  `OriginRouter.forward_get/4` forwards no request headers and drops response
-  headers, so a cross-host `If-None-Match`/`If-Modified-Since` never reaches the
-  owning daemon and its validators never come back; and `Plug.Head` rewrites
-  HEAD to GET before routing, so a HEAD would pull the whole body over the
-  tunnel. A metadata-only JSON route is the only cheap owner-routed change probe.
+  **Conditional reads on both owner legs.** A file response carries a weak
+  `ETag` (hashed from path + mtime + size) and `Last-Modified` (from mtime),
+  and honors `If-None-Match` / `If-Modified-Since` with a bodyless 304. The
+  owner-routed leg forwards those request headers and relays the owner's
+  validators, so an unchanged remote file also costs a header exchange. A peer
+  without conditional-GET support still returns 200; the board compares the
+  returned content fingerprint before changing its view. `/file-info` remains
+  available for metadata-only probes used by other artifact types.
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, etag_hash: 1, if_none_match?: 2, file_token: 1]
+
+  import ShuttleWeb.RelayHelpers,
+    only: [relay_bytes: 2, relay_file_bytes: 2, etag_hash: 1, file_token: 1]
 
   alias Shuttle.OriginRouter
 
@@ -59,7 +51,15 @@ defmodule ShuttleWeb.FileController do
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/file", %{"path" => path}))
+        relay_file_bytes(
+          conn,
+          OriginRouter.forward_file_get(
+            remote,
+            "/api/v1/file",
+            %{"path" => path},
+            conditional_headers(conn)
+          )
+        )
 
       :local ->
         serve_local(conn, path)
@@ -73,8 +73,8 @@ defmodule ShuttleWeb.FileController do
   @doc """
   Return cheap metadata for a file without reading its bytes.
 
-  The board's live reader uses this as a change probe for constitutions, inline
-  embeds, and already-open sent files. A missing path is a successful response
+  The board uses this metadata probe for browser-native artifacts that are not
+  rendered through the live text/HTML reader. A missing path is a successful response
   with `exists: false`, so a report that is still being written can be detected
   when it appears without treating an expected absence as a transport error.
   """
@@ -97,7 +97,9 @@ defmodule ShuttleWeb.FileController do
 
   defp serve_info(conn, path) do
     with_regular_file(conn, path,
-      found: fn mtime, size -> info_json(conn, %{exists: true, modified_at: mtime, size: size}) end,
+      found: fn mtime, size ->
+        info_json(conn, %{exists: true, modified_at: mtime, size: size})
+      end,
       missing: fn -> info_json(conn, %{exists: false}) end
     )
   end
@@ -152,7 +154,26 @@ defmodule ShuttleWeb.FileController do
   # is the fallback a plain `curl`/browser sends on its own. Either one matching
   # is enough — this is a GET, so there is no lost-update race to protect against.
   defp not_modified?(conn, etag, mtime) do
-    if_none_match?(conn, etag) || if_modified_since(conn, mtime)
+    case get_req_header(conn, "if-none-match") do
+      [value | _] -> etag_matches?(value, etag)
+      [] -> if_modified_since(conn, mtime)
+    end
+  end
+
+  defp etag_matches?(header, etag) do
+    String.split(header, ",")
+    |> Enum.any?(fn candidate ->
+      candidate = String.trim(candidate)
+      candidate == "*" or weak_tag(candidate) == weak_tag(etag)
+    end)
+  end
+
+  defp weak_tag("W/" <> tag), do: tag
+  defp weak_tag(tag), do: tag
+
+  defp conditional_headers(conn) do
+    ["if-none-match", "if-modified-since"]
+    |> Enum.flat_map(fn name -> Enum.map(get_req_header(conn, name), &{name, &1}) end)
   end
 
   defp if_modified_since(conn, mtime) do

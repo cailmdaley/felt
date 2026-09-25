@@ -183,14 +183,14 @@ defmodule Shuttle.OriginRouter do
   @doc """
   Forward a GET to the owning remote daemon's identical `path` with `query`
   appended as a query string (the `origin` key stripped, so the owner serves the
-  fiber as local). Used by the file-bytes route (`/api/v1/file`): only the owning
-  daemon can read its own host's filesystem, so a remote-owned embed/asset must
-  be fetched from that daemon, not this one's git mirror.
+  request as local). Used by owner-routed GETs that do not need request or
+  response headers; file bytes with cache validators use `forward_file_get/4`.
 
   Returns `{:forwarded, status, content_type, body}` — the remote's raw bytes and
   content type for the caller to relay verbatim — or `{:error, {:forward_failed,
   name, reason}}` on a tunnel failure. The body is binary-safe (images, PDFs),
-  unlike the text-only feed `get/2`.
+  unlike the text-only feed `get/2`. File bytes that need conditional headers use
+  `forward_file_get/5`.
 
   Opts: `:forward_timeout_ms`.
   """
@@ -205,6 +205,45 @@ defmodule Shuttle.OriginRouter do
     case client.get_file(url, timeout) do
       {:ok, status, content_type, body} -> {:forwarded, status, content_type, body}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
+    end
+  end
+
+  @doc """
+  Forward a file GET with conditional request headers and retain the response
+  validators for the caller. The owner's `ETag`, `Last-Modified`, and cache
+  policy can then reach the browser, while a 304 crosses the same tunnel as a
+  bodyless response.
+
+  Clients without `get_file/3` use their binary-safe `get_file/2` callback and
+  return no response validators. This keeps older transport adapters functional;
+  callers still receive a 200 body and can compare its content locally.
+  """
+  @spec forward_file_get(Remote.t(), String.t(), map(), [{String.t(), String.t()}], keyword()) ::
+          {:forwarded, non_neg_integer(), [{String.t(), String.t()}], String.t(), binary()}
+          | {:error, term()}
+  def forward_file_get(%Remote{} = remote, path, query, req_headers, opts \\ [])
+      when is_map(query) and is_list(req_headers) do
+    client = forward_client()
+    timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
+    stripped = query |> Map.delete("origin") |> Map.delete(:origin)
+    url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
+
+    response =
+      if Code.ensure_loaded?(client) and function_exported?(client, :get_file, 3) do
+        client.get_file(url, req_headers, timeout)
+      else
+        client.get_file(url, timeout)
+      end
+
+    case response do
+      {:ok, status, headers, content_type, body} when is_list(headers) ->
+        {:forwarded, status, headers, content_type, body}
+
+      {:ok, status, content_type, body} ->
+        {:forwarded, status, [], content_type, body}
+
+      {:error, reason} ->
+        {:error, {:forward_failed, remote.name, reason}}
     end
   end
 

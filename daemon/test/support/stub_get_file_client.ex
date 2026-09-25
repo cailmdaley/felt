@@ -1,9 +1,9 @@
 defmodule Shuttle.Test.StubGetFileClient do
   @moduledoc """
-  GET transport stub for the owner-routed forward leg (`forward_get` →
-  `get_file/2`).
+  GET transport stub for owner-routed byte requests (`forward_get` and
+  `forward_file_get` → `get_file/2` or `get_file/3`).
 
-  Records the last URL it was asked to fetch and replays a scripted response, so
+  Records the last URL and request headers and replays a scripted response, so
   a cross-host body read runs without a real tunnel. Injected by putting this
   module name in `:write_forward_client`.
 
@@ -19,8 +19,10 @@ defmodule Shuttle.Test.StubGetFileClient do
   def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
   def last, do: Agent.get(__MODULE__, & &1.last)
 
-  def get_file(url, _timeout_ms) do
-    Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url}))
+  def get_file(url, _timeout_ms), do: get_file(url, [], 0)
+
+  def get_file(url, req_headers, _timeout_ms) do
+    Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, headers: req_headers}))
     Agent.get(__MODULE__, & &1.response)
   end
 end

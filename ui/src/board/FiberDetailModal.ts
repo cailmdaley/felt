@@ -44,7 +44,8 @@ import {
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
 import { suppressNextClick } from './dismissGesture.js'
-import { buildFileViewer, isScrollableFile } from './FileViewerPanel.js'
+import { buildFileViewer, disposeFileViewer, htmlWithBase, isScrollableFile } from './FileViewerPanel.js'
+import { refreshLiveFile, watchLiveFile } from './LiveFileRefresh.js'
 import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import {
@@ -252,6 +253,8 @@ interface OpenFileEntry extends ZoomableTab {
   tab: HTMLElement
   scroll: number
   viewerBuilt: boolean
+  viewer: HTMLElement | null
+  frameScrollCleanup: (() => void) | null
 }
 
 /** The unchanged sentinel {@link FiberDetailModal.fetchSentFiles} returns on a
@@ -280,10 +283,10 @@ const ATTACH_FRAME_WIDTH = 800
  * honest fallback is to run immediately — the feature degrades to eager, not
  * to absent.
  */
-function whenVisible(el: Element, fn: () => void): void {
+function whenVisible(el: Element, fn: () => void): () => void {
   if (typeof IntersectionObserver === 'undefined') {
     fn()
-    return
+    return () => {}
   }
   const io = new IntersectionObserver((entries) => {
     for (const entry of entries) {
@@ -294,6 +297,7 @@ function whenVisible(el: Element, fn: () => void): void {
     }
   }, { rootMargin: '200px' })
   io.observe(el)
+  return () => io.disconnect()
 }
 const PERSIST_PREFIX = 'shuttle:detail:'
 
@@ -390,6 +394,8 @@ export class FiberDetailModal {
    *  under the head. Held so re-reading the body replaces the strip rather
    *  than stacking a second one under it. */
   private attachHost: HTMLElement | null = null
+  private readonly attachmentWatches: Array<() => void> = []
+  private readonly attachmentLiveUrls = new Set<string>()
   /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
    *  dispatch (carrying user_message + resume_mode inline), lifecycle,
    *  felt-nest — owner-routed by the card's `originId` carried as
@@ -908,6 +914,7 @@ export class FiberDetailModal {
     // Closing the card closes its file-viewer window too — the two windows are
     // a pair bound to one card. (closeViewerWindow nulls the viewer refs.)
     this.closeViewerWindow()
+    this.disposeAttachmentPreviews()
     // The card's own claim goes LAST. The sheet stack is LIFO, and only its top
     // can give an entry back — releasing the card before the viewer and the
     // followed-reference panel above it would leave both stranded.
@@ -934,6 +941,7 @@ export class FiberDetailModal {
     this.sentFilesRevision = ''
     this.sentFilesEtag = null
     this.resourceRevisions.clear()
+    this.attachmentLiveUrls.clear()
   }
 
   /**
@@ -1024,6 +1032,7 @@ export class FiberDetailModal {
       : ''
 
     prose.classList.remove('kbn-detail-prose-empty')
+    this.disposeAttachmentPreviews()
     this.attachHost?.replaceChildren()
     if (body) {
       // Resolve a relative `:::{embed}` / image against the fiber's own dir
@@ -1094,6 +1103,7 @@ export class FiberDetailModal {
    * they stay two groups because they are two things.
    */
   private renderAttachments(attachments: readonly Attachment[], card: KanbanCard): void {
+    this.disposeAttachmentPreviews()
     const host = this.attachHost
     if (!host) return
     host.replaceChildren()
@@ -1113,6 +1123,11 @@ export class FiberDetailModal {
 
     wrap.append(heading, strip)
     host.append(wrap)
+  }
+
+  private disposeAttachmentPreviews(): void {
+    this.attachmentWatches.splice(0).forEach((stop) => stop())
+    this.attachmentLiveUrls.clear()
   }
 
   /** One attachment card: a face (image thumbnail, else the extension glyph),
@@ -1207,49 +1222,65 @@ export class FiberDetailModal {
     }
 
     if (kind === 'html') {
-      whenVisible(face, () => {
-        const frame = document.createElement('iframe')
-        frame.className = 'kbn-detail-attach-frame'
-        // Inert on every axis a card face should be inert on: no scripts
-        // (`sandbox=""` is the maximally restrictive value, not the absent
-        // one), no pointer events, out of the tab order. It is a picture of
-        // the document that happens to be made of the document.
-        frame.setAttribute('sandbox', '')
-        frame.setAttribute('tabindex', '-1')
-        frame.setAttribute('aria-hidden', 'true')
-        frame.src = src
+      this.attachmentLiveUrls.add(src)
+      this.attachmentWatches.push(whenVisible(face, () => {
+        let frame: HTMLIFrameElement | null = null
+        let stagingFrame: HTMLIFrameElement | null = null
+        let generation = 0
         // Render at a desktop width, then shrink the whole thing into the
         // face — a report laid out at 148px would reflow into a column of
         // single words and look nothing like itself.
-        const width = face.clientWidth || 128
-        frame.style.setProperty('--attach-frame-scale', String(width / ATTACH_FRAME_WIDTH))
-        frame.addEventListener('load', () => glyph.remove())
-        face.append(frame)
-      })
+        const scale = (preview: HTMLIFrameElement): void => {
+          preview.className = 'kbn-detail-attach-frame'
+          preview.setAttribute('sandbox', '')
+          preview.setAttribute('tabindex', '-1')
+          preview.setAttribute('aria-hidden', 'true')
+          preview.style.setProperty('--attach-frame-scale', String((face.clientWidth || 128) / ATTACH_FRAME_WIDTH))
+        }
+        this.attachmentWatches.push(watchLiveFile(src, (html) => {
+          stagingFrame?.remove()
+          const next = document.createElement('iframe')
+          scale(next)
+          next.style.visibility = 'hidden'
+          stagingFrame = next
+          const token = ++generation
+          let loaded = false
+          next.addEventListener('load', () => {
+            if (loaded || token !== generation || stagingFrame !== next) return
+            loaded = true
+            frame?.replaceWith(next)
+            frame = next
+            stagingFrame = null
+            next.style.visibility = ''
+            glyph.remove()
+          })
+          face.append(next)
+          next.srcdoc = htmlWithBase(html, src)
+        }))
+      }))
       return face
     }
 
     if (kind === 'markdown' || kind === 'text') {
-      whenVisible(face, () => {
-        // The daemon's file route ignores `Range` (it answers 200 with the
-        // whole body), so the slice is ours to make. These files are small —
-        // the cost is the request, not the bytes.
-        void fetch(src)
-          .then((res) => (res.ok ? res.text() : null))
-          .then((text) => {
-            if (text === null || !face.isConnected) return
-            const preview = previewText(text.slice(0, PREVIEW_BYTES))
-            if (!preview) return
-            const pre = document.createElement('span')
-            pre.className = 'kbn-detail-attach-peek'
-            pre.textContent = preview
+      this.attachmentLiveUrls.add(src)
+      this.attachmentWatches.push(whenVisible(face, () => {
+        let previewEl: HTMLElement | null = null
+        this.attachmentWatches.push(watchLiveFile(src, (text) => {
+          const preview = previewText(text.slice(0, PREVIEW_BYTES))
+          if (!preview) {
+            previewEl?.remove()
+            previewEl = null
+            return
+          }
+          if (!previewEl) {
+            previewEl = document.createElement('span')
+            previewEl.className = 'kbn-detail-attach-peek'
             glyph.remove()
-            face.append(pre)
-          })
-          .catch(() => {
-            /* best-effort — the glyph is already there */
-          })
-      })
+            face.append(previewEl)
+          }
+          previewEl.textContent = preview
+        }))
+      }))
     }
 
     return face
@@ -1410,6 +1441,13 @@ export class FiberDetailModal {
     const files = await this.fetchSentFiles(card)
     if (this.overlay !== overlay) return
     if (files !== null && files !== SENT_FILES_UNCHANGED) this.applySentFiles(files, card)
+
+    await Promise.all([
+      ...this.openFiles.map((entry) => refreshLiveFile(
+        fileBytesUrl(this.shuttleBase, entry.file.fullPath, card.originId ?? ''),
+      )),
+      ...[...this.attachmentLiveUrls].map((url) => refreshLiveFile(url)),
+    ])
 
     for (const [, nodes] of this.artifactNodesByPath()) {
       nodes.forEach((node) => this.reloadArtifactNode(node))
@@ -1935,6 +1973,11 @@ export class FiberDetailModal {
       this.viewerGeom = readPanelGeometry(this.viewerWindow)
     }
     if (this.viewerWindow) holdSheet(SHEET_VIEWER, false)
+    this.openFiles.forEach((entry) => {
+      entry.frameScrollCleanup?.()
+      disposeFileViewer(entry.viewer)
+      entry.viewer = null
+    })
     this.viewerWindow?.remove()
     this.viewerWindow = null
     this.rightCol = null
@@ -3055,6 +3098,8 @@ export class FiberDetailModal {
       scroll,
       zoom,
       viewerBuilt: false,
+      viewer: null,
+      frameScrollCleanup: null,
       zoomTarget: null,
       baseW: 0,
     }
@@ -3104,20 +3149,20 @@ export class FiberDetailModal {
       entry.file.fullPath,
       card.originId,
       scrollable
-        ? (iframe) => {
-            // Restore the persisted reading position once the doc has loaded
-            // (same-origin: served from the app's own daemon).
+        ? (iframe, refreshed) => {
+            entry.frameScrollCleanup?.()
             try {
-              iframe.contentWindow?.scrollTo(0, entry.scroll)
               const win = iframe.contentWindow
-              if (win) {
-                win.addEventListener('scroll', () => {
-                  entry.scroll = win.scrollY
-                  this.queueScrollWrite()
-                }, { passive: true })
+              if (!refreshed) win?.scrollTo(0, entry.scroll)
+              else if (win) entry.scroll = win.scrollY
+              const onScroll = (): void => {
+                entry.scroll = win?.scrollY ?? entry.scroll
+                this.queueScrollWrite()
               }
+              win?.addEventListener('scroll', onScroll, { passive: true })
+              entry.frameScrollCleanup = () => win?.removeEventListener('scroll', onScroll)
             } catch {
-              /* cross-origin / unreadable — no scroll restore */
+              entry.frameScrollCleanup = null
             }
           }
         : undefined,
@@ -3133,6 +3178,7 @@ export class FiberDetailModal {
           }
         : undefined,
     )
+    entry.viewer = viewer
     entry.cell.append(viewer)
     // Zoom target: the <img> for images (sized in px so it magnifies PAST the
     // column width), else the viewer wrap (CSS `zoom` for iframes). The cell
@@ -3158,6 +3204,9 @@ export class FiberDetailModal {
       entry.path,
     )
     if (!closed) return
+    entry.frameScrollCleanup?.()
+    disposeFileViewer(entry.viewer)
+    entry.viewer = null
     entry.tab.remove()
     entry.cell.remove()
     this.openFiles = [...state.tabs]
