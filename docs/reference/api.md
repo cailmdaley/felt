@@ -38,6 +38,8 @@ is not enough.
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
 | `POST /capture` | owner-routed | Launch a session from a free-text prompt; it files the fiber and claims itself |
+| `POST /meeting` | local | Start a local hark capture; `host` selects the scribe host, not the daemon |
+| `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
 | `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -131,6 +133,7 @@ uses the host's Codex project listing until a direct app URL is available.
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
+| `GET /meeting` | local | Report hark availability and meeting state on this daemon's host |
 
 `GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
 configured daemon once with `local=true`; an offline, old, timed-out, or
@@ -156,6 +159,36 @@ may total at most 20 MiB. Successful receipts include
 `files: [{name, path, sha256, size}]`, where each path names the receiver-local
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
+
+`GET /meeting` returns `{available, meeting}`.
+
+`meeting` is `null` when no local capture is active or failed.
+
+A meeting row carries `state`, `title`, `host`, `fiber`, `started_at`, `last_line`, `transcript`, `tmux_session`, and `error`.
+
+`POST /meeting` accepts `{title, host, project_dir, under, mode}`.
+
+Set `host` to `"local"` or a configured remote name.
+
+The daemon resolves a remote's SSH alias for hark, but always runs hark on its own machine.
+
+`project_dir` is absolute on the selected scribe host, and `under` is a loom-relative parent fiber.
+
+Set `mode` to `"call"` or `"room"`.
+
+Success returns HTTP 202 with `{meeting}`.
+
+A capture that is starting, running, or stopping returns 409.
+
+Invalid input returns 422, and a missing hark executable returns 503.
+
+`POST /meeting/stop` returns HTTP 202 with `{meeting}`.
+
+It sends one SIGINT to a live capture, does nothing when the capture is already stopping, and dismisses the tmux session when the capture is starting or failed.
+
+It returns 404 when there is no meeting to stop.
+
+These routes are local-only and never use owner routing: the request's `host` selects the scribe destination, not the daemon that receives the request.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
