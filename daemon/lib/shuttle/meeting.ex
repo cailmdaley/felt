@@ -51,6 +51,7 @@ defmodule Shuttle.Meeting do
   def derive(tmux_status, meeting_json, pid_alive?, pane_tail \\ nil) do
     fresh = if fresh_for_session?(tmux_status, meeting_json), do: meeting_json, else: nil
     phase = if is_map(fresh), do: fresh["phase"], else: nil
+    clean_end? = phase == "ended" and fresh["error"] in [nil, ""]
 
     case tmux_status do
       :absent ->
@@ -63,7 +64,7 @@ defmodule Shuttle.Meeting do
           do: {meeting_row(fresh, phase, true), false},
           else: {meeting_row(fresh, "starting", true), false}
 
-      %{state: {:dead, 0}} when phase == "ended" ->
+      %{state: {:dead, 0}} when clean_end? ->
         {nil, true}
 
       %{state: {:dead, _status}} ->
@@ -123,18 +124,15 @@ defmodule Shuttle.Meeting do
     {if(slug == "", do: timestamp, else: timestamp <> "_" <> slug), title}
   end
 
-  @doc "Build the scribe instructions for a meeting capture."
+  @doc """
+  The facts a meeting capture's agent needs; the procedure lives in the shuttle
+  skill's `references/meeting.md`.
+  """
   @spec meeting_message(String.t(), String.t()) :: String.t()
   def meeting_message(mode, transcript_path) when mode in ["call", "room"] do
-    speakers =
-      if mode == "call",
-        do:
-          "Call mode: `me` is the user's microphone and S1… are the other participants from call audio.",
-        else: "Room mode: everyone is diarized as S1…."
-
-    "Meeting mode. A live meeting has just started and hark is transcribing it: `#{transcript_path}` on this host, one speaker-labelled line per turn, appended as each turn ends (a few seconds behind speech), ending with a `# ended` line. " <>
-      speakers <>
-      " Labels stay anonymous until a `# S2 = name` line appears. File this meeting as a fiber where the project keeps meetings (conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`), with the transcript path in its body. After the claim, assign yourself the `scribe` role (`felt shuttle assign <fiber-id> --role scribe --collaborator <your agent id>`; create the collaborator fiber `roles/scribe/<agent id>` first if it is missing) and act as that role: read the role fiber `roles/scribe` and follow the transcript until `# ended`, then consolidate and close. The transcript stays out of git. The user's note about the meeting follows (it may be empty)."
+    "Meeting mode (#{mode}). hark is transcribing a live meeting to `#{transcript_path}` on this host. " <>
+      "Read the shuttle skill's references/meeting.md before anything else and follow it. " <>
+      "The user's note about the meeting follows (it may be empty)."
   end
 
   @doc "Resolve capture paths and remote mirror settings for a meeting."
@@ -451,7 +449,9 @@ defmodule Shuttle.Meeting do
   defp fresh_for_session?(_tmux, _meeting_json), do: false
 
   defp failed_dead_pane?(%{state: {:dead, status}}, meeting_json),
-    do: not (status == 0 and is_map(meeting_json) and meeting_json["phase"] == "ended")
+    do:
+      not (status == 0 and is_map(meeting_json) and meeting_json["phase"] == "ended" and
+             meeting_json["error"] in [nil, ""])
 
   defp failed_dead_pane?(_tmux, _meeting_json), do: false
 

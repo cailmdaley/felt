@@ -106,17 +106,28 @@ defmodule Shuttle.MeetingTest do
              Meeting.name_and_title("Cósmić shear", now)
   end
 
-  test "meeting message describes the two speaker modes and leaves the note after the instructions" do
+  test "meeting message carries the facts and points at the skill's meeting reference" do
     call = Meeting.meeting_message("call", "/tmp/meetings/session.txt")
     room = Meeting.meeting_message("room", "/tmp/meetings/session.txt")
 
-    assert call =~ "`me` is the user's microphone"
-    assert call =~ "S1… are the other participants"
-    assert room =~ "everyone is diarized as S1…"
-    assert call =~ "read the role fiber `roles/scribe`"
-    assert call =~ "until `# ended`"
+    assert call =~ "Meeting mode (call)."
+    assert room =~ "Meeting mode (room)."
+    assert call =~ "`/tmp/meetings/session.txt` on this host"
+    assert call =~ "references/meeting.md"
     assert call =~ "The user's note about the meeting follows (it may be empty)."
-    refute room =~ "`me` is the user's microphone"
+  end
+
+  test "an ended recording that carries an error is a failure, not a clean end" do
+    dead = %{state: {:dead, 0}, session_created: 1, launch: "L1"}
+    ended = %{"launch" => "L1", "phase" => "ended", "title" => "t", "error" => nil}
+
+    assert {nil, true} = Meeting.derive(dead, ended, false)
+
+    unfinished =
+      Map.put(ended, "error", "mirror incomplete; resume with: hark mirror --resume a b")
+
+    assert {%{state: "failed", error: "mirror incomplete; resume with: hark mirror --resume a b"},
+            false} = Meeting.derive(dead, unfinished, false)
   end
 
   test "local and remote origins select the transcript path and mirror alias" do
@@ -424,7 +435,7 @@ defmodule Shuttle.MeetingTest do
     refute Map.has_key?(request, "meeting")
     refute Map.has_key?(request, "origin")
     assert request["surface"] == "cli"
-    assert request["prompt"] =~ "Room mode: everyone is diarized as S1…"
+    assert request["prompt"] =~ "Meeting mode (room)."
     assert request["prompt"] =~ "Discuss the residuals"
 
     new_session =

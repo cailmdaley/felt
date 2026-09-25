@@ -73,8 +73,9 @@ terminal execution. It also accepts an optional `meeting: {mode: "call" | "room"
 object. Meeting mode starts hark on the daemon that receives the request before
 owner-routing the capture, so the local microphone records immediately while
 the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
-allows `prompt` to be omitted, and replaces the prompt with scribe instructions
-followed by the user's note. It removes `meeting` before forwarding, so the
+allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
+(mode and transcript path, plus a pointer to the shuttle skill's
+`references/meeting.md`) followed by the user's note. It removes `meeting` before forwarding, so the
 owner handles an ordinary terminal capture. The transcript is mirrored to the
 remote project host when `origin` names a configured remote with an SSH alias.
 A successful capture response adds `meeting`; if capture fails after recording
