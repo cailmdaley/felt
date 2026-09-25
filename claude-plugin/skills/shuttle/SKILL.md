@@ -35,6 +35,7 @@ a degraded input without mistaking the responsive daemon for a healthy read.
 | You are | Read |
 |---|---|
 | Capturing a new idea | [references/capture.md](references/capture.md), then the worker loop below. |
+| A meeting capture (`From User` opens with `Meeting mode`) | [references/capture.md](references/capture.md), then [references/meeting.md](references/meeting.md). |
 | A dispatched worker | This file, top to bottom. |
 | Authoring a constitution | [references/authoring.md](references/authoring.md) — `felt add` → spec → `felt shuttle install`, drafts vs dispatch, agent selection, human-in-the-loop gates. |
 | Operating / debugging the system | [references/operating.md](references/operating.md) — lifecycle verbs, kanban columns, card-missing triage, remote hosts, uninstall. |

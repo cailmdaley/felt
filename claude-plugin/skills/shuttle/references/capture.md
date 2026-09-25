@@ -5,6 +5,9 @@ A capture starts from the user's idea rather than an existing constitution. Read
 launch supplies the owning felt store, project directory, install metadata, and
 an exact claim endpoint and JSON body.
 
+When `From User` opens with `Meeting mode`, the input is a live meeting
+transcript: read [meeting.md](meeting.md) too. It extends these steps.
+
 1. **Crystallize.** Search for related fibers, choose the right parent, and file
    the idea with a lede and Desired State proportionate to what the user has
    actually asked. Keep its status `open`.
