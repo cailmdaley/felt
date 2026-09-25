@@ -86,7 +86,7 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 200
       assert [etag] = get_resp_header(conn, "etag")
-      assert etag =~ ~r/^W\/"[0-9a-f]{64}"$/
+      assert etag =~ ~r/^W\/"sha256-[0-9a-f]{64}"$/
       assert [_last_modified] = get_resp_header(conn, "last-modified")
       assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
     end
@@ -127,20 +127,23 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.resp_body == ""
     end
 
-    test "304 when If-Modified-Since is at or after the file's mtime" do
+    test "If-Modified-Since alone never returns 304" do
       path = tmp_path("txt")
       File.write!(path, "hello embed")
       on_exit(fn -> File.rm(path) end)
 
       first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
       [last_modified] = get_resp_header(first, "last-modified")
+      [etag] = get_resp_header(first, "etag")
+      assert etag =~ ~r/^W\/"sha256-[0-9a-f]{64}"$/
 
       conn =
         api_conn()
         |> put_req_header("if-modified-since", last_modified)
         |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
 
-      assert conn.status == 304
+      assert conn.status == 200
+      assert conn.resp_body == "hello embed"
     end
 
     test "If-None-Match takes precedence over a matching If-Modified-Since" do
