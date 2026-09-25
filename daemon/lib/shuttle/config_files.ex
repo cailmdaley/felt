@@ -3,7 +3,7 @@ defmodule Shuttle.ConfigFiles do
   The operator files, as one addressable set — so a surface that is not a shell
   can read and rewrite them.
 
-  Everything shuttle can be told about a host lives in four JSON files under
+  Everything shuttle can be told about a host lives in five JSON files under
   `~/.config/felt/`, and until the board grew a settings page the only way to
   turn one of those knobs was an editor on the machine that owns it. That was
   fine while the board was something you opened beside a terminal. It stopped
@@ -17,6 +17,7 @@ defmodule Shuttle.ConfigFiles do
   | `:projects` | `projects.json` | which checkouts the Stash/Capture pickers offer |
   | `:agents` | `agents.json` | this host's layer over the shipped agent registry |
   | `:remotes` | `remotes.json` | the remote daemons this host aggregates |
+  | `:host` | `host.json` | this host's class, and so where the daemon listens |
 
   ## Text, not a model
 
@@ -48,6 +49,9 @@ defmodule Shuttle.ConfigFiles do
       an unparseable `defaults.https_proxy`, a managed tunnel with no port).
     * `:agents` → `felt shuttle agents --json` under `FELT_AGENTS_FILE` — which
       fails loud on an unsupported `version` or an unknown `builtins` mode.
+    * `:host` → `felt shuttle host --json` under `FELT_HOST_FILE` — an unknown
+      class, or a `listen` that is not loopback tcp or a short absolute unix
+      path.
     * `:stores` / `:projects` → checked here, against the shape
       `Shuttle.PathListConfig` actually accepts, because no CLI verb reads them.
 
@@ -62,15 +66,20 @@ defmodule Shuttle.ConfigFiles do
   effect for the CLI and not for the process dispatching work, and the two
   disagreeing about who this machine is is the worst failure this system has.
   Changing it is a stop-edit-start, which is a shell's job.
+
+  `host.json` is writable here, but the daemon reads it once per boot
+  (`Shuttle.host_class/0`, `Shuttle.listen/0`): a saved class or listen address
+  takes effect at the next restart, and until then `GET /api/v1/version`
+  reports the values the daemon is actually running under.
   """
 
-  alias Shuttle.{Felt, FeltStores, Projects, Remotes}
+  alias Shuttle.{Felt, FeltStores, Host, Projects, Remotes}
 
   require Logger
 
-  @type id :: :stores | :projects | :agents | :remotes
+  @type id :: :stores | :projects | :agents | :remotes | :host
 
-  @ids [:stores, :projects, :agents, :remotes]
+  @ids [:stores, :projects, :agents, :remotes, :host]
 
   @doc "Every writable operator file's id, in the order a settings page reads."
   @spec ids() :: [id()]
@@ -87,17 +96,19 @@ defmodule Shuttle.ConfigFiles do
   def parse_id("projects"), do: {:ok, :projects}
   def parse_id("agents"), do: {:ok, :agents}
   def parse_id("remotes"), do: {:ok, :remotes}
+  def parse_id("host"), do: {:ok, :host}
   def parse_id(_), do: :error
 
   @doc """
   Where a file resolves on this host, exactly as its own reader resolves it —
   each one's `*_FILE` environment override, else `~/.config/felt/<stem>.json`.
 
-  Three of the four delegate to the module that already answers this, so a
+  Four of the five delegate to the module that already answers this, so a
   settings page can never show a path the daemon is not in fact reading.
   """
   @spec path(id()) :: String.t()
   def path(:remotes), do: Remotes.config_path()
+  def path(:host), do: Host.config_path()
   def path(:stores), do: FeltStores.config_path()
   def path(:projects), do: Projects.config_path()
 
@@ -112,8 +123,9 @@ defmodule Shuttle.ConfigFiles do
   One line per file: where it is, whether it exists, how big, when it last
   moved, and whether anything is overriding it.
 
-  A file that does not exist is not an error — three of the four are optional
-  by design (an absent `remotes.json` is a correct local-only daemon), so
+  A file that does not exist is not an error — every one is optional by design
+  (an absent `remotes.json` is a correct local-only daemon, an absent
+  `host.json` a single-user host), so
   `exists: false` is a state to render, not a failure to report.
   """
   @spec index() :: [map()]
@@ -144,7 +156,8 @@ defmodule Shuttle.ConfigFiles do
   @doc """
   The two path-list files as a LIST, parsed by the reader that owns them.
 
-  `nil` for `:agents` and `:remotes`, whose contents are not a list of paths.
+  `nil` for `:agents`, `:remotes` and `:host`, whose contents are not a list
+  of paths.
 
   It exists so a structured editor can read the authoritative current list from
   the host that owns it, rather than from the hub's cached origins feed. That
@@ -200,7 +213,7 @@ defmodule Shuttle.ConfigFiles do
   # file without saying so would let you carefully fix a setting that has no
   # effect, which is worse than having no editor.
   #
-  # The fleet and agent files have no such form (deliberately, in both cases:
+  # The fleet, agent and host files have no such form (deliberately, in both cases:
   # a structured entry has no comma grammar), so they never override.
   defp env_override(id) when id in [:stores, :projects] do
     var = if id == :stores, do: "FELT_STORES", else: "FELT_PROJECTS"
@@ -314,8 +327,11 @@ defmodule Shuttle.ConfigFiles do
   @spec validate(id(), String.t()) :: :ok | {:error, String.t()} | {:unavailable, String.t()}
   def validate(id, text) when is_binary(text) do
     case Jason.decode(text) do
-      {:ok, decoded} -> validate_decoded(id, text, decoded)
-      {:error, %Jason.DecodeError{} = error} -> {:error, "not valid JSON: #{Exception.message(error)}"}
+      {:ok, decoded} ->
+        validate_decoded(id, text, decoded)
+
+      {:error, %Jason.DecodeError{} = error} ->
+        {:error, "not valid JSON: #{Exception.message(error)}"}
     end
   end
 
@@ -330,6 +346,9 @@ defmodule Shuttle.ConfigFiles do
 
   defp validate_decoded(:agents, text, _decoded),
     do: validate_via_felt(text, "FELT_AGENTS_FILE", ["shuttle", "agents", "--json"])
+
+  defp validate_decoded(:host, text, _decoded),
+    do: validate_via_felt(text, "FELT_HOST_FILE", ["shuttle", "host", "--json"])
 
   # No CLI verb reads the path-list files, so the shape check lives here — and
   # it is the shape `PathListConfig` accepts, not a stricter one. In particular
@@ -477,10 +496,19 @@ defmodule Shuttle.ConfigFiles do
     case File.rm(path) do
       :ok ->
         Logger.info("ConfigFiles: removed #{path}")
-        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:digest, nil) |> Map.put(:entries, entries(id))}
+
+        {:ok,
+         summary(id)
+         |> Map.put(:text, "")
+         |> Map.put(:digest, nil)
+         |> Map.put(:entries, entries(id))}
 
       {:error, :enoent} ->
-        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:digest, nil) |> Map.put(:entries, entries(id))}
+        {:ok,
+         summary(id)
+         |> Map.put(:text, "")
+         |> Map.put(:digest, nil)
+         |> Map.put(:entries, entries(id))}
 
       {:error, reason} ->
         {:error, "#{path}: #{:file.format_error(reason)}"}

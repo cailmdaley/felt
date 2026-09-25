@@ -39,7 +39,7 @@ defmodule Shuttle.RemotesTest do
       |> File.read!()
       |> Jason.decode!()
 
-    for {fixture, want} <- expected, fixture != "_comment" do
+    for {fixture, want} <- expected, not String.starts_with?(fixture, "_") do
       @fixture fixture
       @want want
 
@@ -66,6 +66,7 @@ defmodule Shuttle.RemotesTest do
               "display" => Remote.display_name(r),
               "port" => r.port || 0,
               "remote_port" => r.remote_port,
+              "remote_socket" => r.remote_socket || "",
               "poll_interval_ms" => r.poll_interval_ms,
               "request_timeout_ms" => r.request_timeout_ms,
               "stale_multiplier" => r.stale_multiplier,
@@ -75,6 +76,30 @@ defmodule Shuttle.RemotesTest do
           end)
 
         assert got == @want["remotes"]
+      end
+    end
+  end
+
+  describe "fixtures neither reader may accept" do
+    # expected.json's `_rejected`: the Go validator refuses the whole file;
+    # the daemon drops the named remote and never uses it.
+    rejected =
+      "../fixtures/remotes/expected.json"
+      |> Path.expand(__DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.fetch!("_rejected")
+      |> Map.delete("_comment")
+
+    for {fixture, %{"remote" => remote, "field" => field}} <- rejected do
+      @fixture fixture
+      @remote remote
+
+      test "#{fixture}: the daemon never uses #{remote} (bad #{field})" do
+        System.put_env("FELT_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
+        names = Enum.map(Remotes.registered(), & &1.name)
+        refute @remote in names
+        assert names != [], "the fixture's valid remotes should still read"
       end
     end
   end

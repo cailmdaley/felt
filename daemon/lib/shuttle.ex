@@ -44,33 +44,36 @@ defmodule Shuttle do
   end
 
   @doc """
-  The port the local daemon's HTTP surface binds (and is reached on).
+  The address the daemon's HTTP surface listens on, as `tcp://127.0.0.1:PORT`
+  or `unix:///path` — see `Shuttle.Host` for the resolution rule.
 
-  `SHUTTLE_PORT` else 4000 — the same resolution
-  `Shuttle.Application.configure_endpoint/0` uses to bind, read from the
-  environment so it is answerable before (or without) the endpoint config.
+  The value `Shuttle.Application.configure_endpoint/0` bound at boot when it
+  has run, so a host.json edited under a live daemon does not make it report
+  an address it is not on; otherwise resolved fresh.
   """
-  @spec daemon_port() :: pos_integer()
-  def daemon_port do
-    resolve_daemon_port(System.get_env("SHUTTLE_PORT"))
-  end
-
-  @doc false
-  @spec resolve_daemon_port(String.t() | nil, term()) :: pos_integer()
-  def resolve_daemon_port(value, fallback \\ 4000)
-
-  def resolve_daemon_port(nil, fallback), do: valid_port_or_default(fallback)
-  def resolve_daemon_port("", fallback), do: valid_port_or_default(fallback)
-
-  def resolve_daemon_port(value, _fallback) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {port, ""} when port in 1..65_535 -> port
-      _ -> raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535"
+  @spec listen() :: String.t()
+  def listen do
+    case Application.get_env(:shuttle, :listen) do
+      value when is_binary(value) -> value
+      _ -> Shuttle.Host.listen()
     end
   end
 
-  defp valid_port_or_default(port) when is_integer(port) and port in 1..65_535, do: port
-  defp valid_port_or_default(_), do: 4000
+  @doc """
+  This host's class (`Shuttle.Host`), as bound at boot when
+  `Shuttle.Application.configure_endpoint/0` has run, otherwise read fresh.
+
+  Frozen for the same reason `listen/0` is: the class decides where the daemon
+  listens, so a daemon that re-read it live could report a class it is not
+  running under.
+  """
+  @spec host_class() :: Shuttle.Host.class()
+  def host_class do
+    case Application.get_env(:shuttle, :host_class) do
+      class when class in [:single_user, :shared_multi_user, :exposed] -> class
+      _ -> Shuttle.Host.class()
+    end
+  end
 end
 
 defmodule Shuttle.Application do
@@ -79,6 +82,8 @@ defmodule Shuttle.Application do
   """
 
   use Application
+
+  require Logger
 
   # Optional children, in start order. Each is gated by an app-config flag that
   # defaults to on; config/test.exs turns most of them off so the suite drives
@@ -141,7 +146,24 @@ defmodule Shuttle.Application do
     # child — the Phoenix.ConnTest modules need it in the tree.
     children = children ++ optional ++ [ShuttleWeb.Endpoint]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor)
+    with {:ok, pid} <-
+           Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor) do
+      restrict_bound_socket()
+      {:ok, pid}
+    end
+  end
+
+  # The endpoint is the last child, so by now a unix listener has bound its
+  # socket; narrow it to the owner. Raising here fails boot, which is the
+  # right answer for a socket this daemon cannot secure.
+  @doc false
+  def restrict_bound_socket do
+    server? = Keyword.get(Application.get_env(:shuttle, ShuttleWeb.Endpoint, []), :server, true)
+
+    case Application.get_env(:shuttle, :listen) do
+      "unix://" <> path when server? -> Shuttle.Host.restrict_bound_socket!(path)
+      _ -> :ok
+    end
   end
 
   # Resolve everything the HTTP endpoint needs to bind, at RUNTIME.
@@ -152,26 +174,46 @@ defmodule Shuttle.Application do
   # machine-specific therefore has to be decided here instead — this function
   # is the daemon's runtime config layer, and it always runs.
   #
-  # It used to early-return whenever `:server` was already set. Since the
-  # daemon's own config (config/dev.exs then, config/prod.exs now) sets
-  # `server: true`, that made the whole body dead in every daemon build (and
-  # SHUTTLE_PORT dead with it). Each value now falls back individually, so an
-  # explicitly-configured one still wins — config/test.exs's `server: false`
-  # and port 4002 survive untouched.
+  # Each value falls back individually, so an explicitly-configured one still
+  # wins — config/test.exs's `server: false` and port 4002 survive untouched.
+  # The listen address itself comes from `Shuttle.Host`; the config's port is
+  # only the lowest-ranked input to its single-user default.
   @doc false
   def configure_endpoint do
     existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])
     http = Keyword.get(existing, :http, [])
+    server? = Keyword.get(existing, :server, true)
 
-    port =
-      Shuttle.resolve_daemon_port(System.get_env("SHUTTLE_PORT"), Keyword.get(http, :port, 4000))
+    %{class: class, listen: listen} = Shuttle.Host.resolve!(Keyword.get(http, :port, 4000))
+
+    bind =
+      case listen do
+        {:tcp, ip, port} ->
+          [ip: ip, port: port]
+
+        # thousand_island requires port 0 alongside a `{:local, path}` ip.
+        # The socket directory is only touched by a daemon that will bind it;
+        # the test endpoint (`server: false`) must not create or unlink
+        # anything under a developer's data dir.
+        {:unix, path} ->
+          if server?, do: Shuttle.Host.prepare_unix_socket!(path)
+          [ip: {:local, path}, port: 0]
+      end
+
+    listen_string = Shuttle.Host.format_listen(listen)
+    Application.put_env(:shuttle, :listen, listen_string)
+    Application.put_env(:shuttle, :host_class, class)
+
+    Logger.info(
+      "Shuttle listening on #{listen_string} (host class #{Shuttle.Host.class_name(class)})"
+    )
 
     merged =
       Keyword.merge(existing,
-        http: Keyword.merge([ip: {127, 0, 0, 1}], Keyword.put(http, :port, port)),
+        http: Keyword.merge(http, bind),
         adapter: Keyword.get(existing, :adapter, Bandit.PhoenixAdapter),
         url: Keyword.get(existing, :url, host: "localhost"),
-        server: Keyword.get(existing, :server, true),
+        server: server?,
         secret_key_base: secret_key_base(existing)
       )
 

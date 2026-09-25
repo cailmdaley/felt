@@ -1,5 +1,5 @@
 {
-  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil). `ssh: \"\"` means the entry has NO ssh path at all \u2014 ssh defaults to the name only for port-forwarded entries, so a bare `url` remote the operator gave no `ssh` is one the recovery cascade must not try to revive over ssh. `https_proxy` is the document-level `defaults.https_proxy` after parsing, as a {host, port} pair rather than a rendered string: \"localhost:1055\" and \"localhost:01055\" are the same endpoint but different strings, so a string expectation could not say which normalization it meant. {\"host\": \"\", \"port\": 0} means no proxy configured. Host carries no IPv6 brackets. The rejected-input table lives in each suite as a unit test, mirrored line for line, since a fixture file can only hold readings that succeed. `manager` appears only on PORTLESS entries, and only there because it is only there that the two readers must agree: a portless remote has no tunnel to supervise, so both say \"none\" on every platform. For a port entry the two deliberately answer different questions \u2014 Go says which supervisor a hub would INSTALL with, the daemon says what its recovery cascade can BOUNCE \u2014 so asserting one value would be asserting a bug.",
+  "_comment": "Normalized readings of the sibling fixtures, asserted by BOTH the Go suite (cmd/shuttle_remotes_test.go) and the Elixir suite (daemon/test/shuttle/remotes_test.exs). Two readers, one expectation file: a default that drifts in one language fails in both. `port: 0` means absent (Go's zero value; Elixir's nil). `ssh: \"\"` means the entry has NO ssh path at all — ssh defaults to the name only for port-forwarded entries, so a bare `url` remote the operator gave no `ssh` is one the recovery cascade must not try to revive over ssh. `https_proxy` is the document-level `defaults.https_proxy` after parsing, as a {host, port} pair rather than a rendered string: \"localhost:1055\" and \"localhost:01055\" are the same endpoint but different strings, so a string expectation could not say which normalization it meant. {\"host\": \"\", \"port\": 0} means no proxy configured. Host carries no IPv6 brackets. The rejected-input table lives in each suite as a unit test, mirrored line for line, since a fixture file can only hold readings that succeed. `manager` appears only on PORTLESS entries, and only there because it is only there that the two readers must agree: a portless remote has no tunnel to supervise, so both say \"none\" on every platform. For a port entry the two deliberately answer different questions — Go says which supervisor a hub would INSTALL with, the daemon says what its recovery cascade can BOUNCE — so asserting one value would be asserting a bug. `remote_socket` is the remote daemon's unix socket, forwarded in place of remote_port; the two are mutually exclusive, so an entry with a socket reads remote_port 0 (absent) rather than the 4000 default. It is asserted on every row: \"\" means the entry forwards a TCP port.",
   "canonical.json": {
     "launchd_label_prefix": "com.example",
     "remotes": [
@@ -10,6 +10,7 @@
         "display": "hub-a (site A)",
         "port": 4001,
         "remote_port": 4200,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -22,6 +23,7 @@
         "display": "hub-b",
         "port": 4004,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 9000,
         "request_timeout_ms": 30000,
         "stale_multiplier": 6,
@@ -43,6 +45,7 @@
         "display": "hub-a",
         "port": 4001,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -55,6 +58,7 @@
         "display": "hub-b",
         "port": 4002,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -76,6 +80,7 @@
         "display": "hub-a",
         "port": 4001,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 7000,
         "request_timeout_ms": 20000,
         "stale_multiplier": 3,
@@ -88,6 +93,7 @@
         "display": "hub-b",
         "port": 4002,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 7000,
         "request_timeout_ms": 1000,
         "stale_multiplier": 3,
@@ -109,6 +115,7 @@
         "display": "hub-a",
         "port": 0,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -131,6 +138,7 @@
         "display": "hub-a",
         "port": 0,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -144,6 +152,7 @@
         "display": "hub-b",
         "port": 0,
         "remote_port": 4000,
+        "remote_socket": "",
         "poll_interval_ms": 5000,
         "request_timeout_ms": 2000,
         "stale_multiplier": 4,
@@ -154,6 +163,48 @@
     "https_proxy": {
       "host": "localhost",
       "port": 1055
+    }
+  },
+  "socket.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "http://127.0.0.1:4001",
+        "ssh": "hub-a",
+        "display": "hub-a",
+        "port": 4001,
+        "remote_port": 0,
+        "remote_socket": "/srv/shuttle/sock/daemon.sock",
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-a"
+      },
+      {
+        "name": "hub-b",
+        "url": "http://127.0.0.1:4002",
+        "ssh": "hub-b",
+        "display": "hub-b",
+        "port": 4002,
+        "remote_port": 4200,
+        "remote_socket": "",
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-b"
+      }
+    ],
+    "https_proxy": {
+      "host": "",
+      "port": 0
+    }
+  },
+  "_rejected": {
+    "_comment": "Inputs neither reader may accept as written. Each names the offending remote and field. The Go validator refuses the whole file; the daemon must at least never use the named remote.",
+    "hostile_socket.json": {
+      "remote": "hub-b",
+      "field": "remote_socket"
     }
   }
 }

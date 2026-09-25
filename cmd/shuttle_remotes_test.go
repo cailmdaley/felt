@@ -17,6 +17,7 @@ type remoteFixture struct {
 	Display          string `json:"display"`
 	Port             int    `json:"port"`
 	RemotePort       int    `json:"remote_port"`
+	RemoteSocket     string `json:"remote_socket"`
 	PollIntervalMS   int    `json:"poll_interval_ms"`
 	RequestTimeoutMS int    `json:"request_timeout_ms"`
 	StaleMultiplier  int    `json:"stale_multiplier"`
@@ -65,7 +66,7 @@ func TestRemotesFixtureParity(t *testing.T) {
 
 	cases := 0
 	for fixture, blob := range expected {
-		if fixture == "_comment" {
+		if strings.HasPrefix(fixture, "_") {
 			continue
 		}
 		cases++
@@ -105,6 +106,7 @@ func TestRemotesFixtureParity(t *testing.T) {
 					Display:          got.Display,
 					Port:             got.Port,
 					RemotePort:       got.RemotePort,
+					RemoteSocket:     got.RemoteSocket,
 					PollIntervalMS:   got.PollIntervalMS,
 					RequestTimeoutMS: got.RequestTimeoutMS,
 					StaleMultiplier:  got.StaleMultiplier,
@@ -122,6 +124,44 @@ func TestRemotesFixtureParity(t *testing.T) {
 	}
 	if cases == 0 {
 		t.Fatal("expected.json listed no fixtures")
+	}
+}
+
+// TestRemotesFixtureRejected — the fixtures under expected.json's _rejected
+// fail to load, naming the offending remote and field.
+func TestRemotesFixtureRejected(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(remotesFixtureDir, "expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Rejected map[string]json.RawMessage `json:"_rejected"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	cases := 0
+	for fixture, blob := range doc.Rejected {
+		if strings.HasPrefix(fixture, "_") {
+			continue
+		}
+		cases++
+		var want struct{ Remote, Field string }
+		if err := json.Unmarshal(blob, &want); err != nil {
+			t.Fatalf("%s: %v", fixture, err)
+		}
+		t.Setenv("FELT_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
+		_, err := loadRemotesFile()
+		if err == nil {
+			t.Errorf("%s loaded; want a refusal of %s.%s", fixture, want.Remote, want.Field)
+			continue
+		}
+		if !strings.Contains(err.Error(), `"`+want.Remote+`"`) || !strings.Contains(err.Error(), want.Field) {
+			t.Errorf("%s: error %q does not name %s.%s", fixture, err, want.Remote, want.Field)
+		}
+	}
+	if cases == 0 {
+		t.Fatal("expected.json lists no _rejected fixtures")
 	}
 }
 
@@ -224,6 +264,15 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 		// a supervisor for it is a contradiction, not a default to fill in.
 		{"managed tunnel without a port", `[{"name":"a","url":"https://a.example.ts.net","tunnel":{"manager":"systemd"}}]`, "needs a local port to forward"},
 		{"launchd tunnel without a port", `[{"name":"a","url":"https://a.example.ts.net","tunnel":{"manager":"launchd"}}]`, "needs a local port to forward"},
+		{"remote port and socket", `[{"name":"a","port":4001,"remote_port":4000,"remote_socket":"/srv/s.sock"}]`, "mutually exclusive"},
+		{"relative remote socket", `[{"name":"a","port":4001,"remote_socket":"sock/daemon.sock"}]`, "absolute"},
+		{"remote socket with a colon", `[{"name":"a","port":4001,"remote_socket":"/srv/a:b.sock"}]`, "letters, digits"},
+		{"remote socket with a command substitution", `[{"name":"a","port":4001,"remote_socket":"/srv/$(id).sock"}]`, "letters, digits"},
+		{"remote socket with a quote", `[{"name":"a","port":4001,"remote_socket":"/srv/a'b.sock"}]`, "letters, digits"},
+		{"remote socket with xml", `[{"name":"a","port":4001,"remote_socket":"/srv/</string>.sock"}]`, "letters, digits"},
+		{"remote socket with a percent", `[{"name":"a","port":4001,"remote_socket":"/srv/%h.sock"}]`, "letters, digits"},
+		{"remote socket with dot-dot", `[{"name":"a","port":4001,"remote_socket":"/srv/../etc/d.sock"}]`, "clean path"},
+		{"remote socket with a trailing slash", `[{"name":"a","port":4001,"remote_socket":"/srv/sock/"}]`, "clean path"},
 		{"proxy with a path", `{"defaults":{"https_proxy":"http://h:1/x"},"remotes":[{"name":"a","port":4001}]}`, "https_proxy"},
 	}
 	for _, tc := range cases {

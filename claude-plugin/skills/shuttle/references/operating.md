@@ -124,6 +124,12 @@ curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
 
 ## Claiming a fiber into your session
 
+The examples below use the single-user default, `http://localhost:4000`. On a
+shared or exposed host the daemon listens on a unix socket instead; `felt
+shuttle host` prints the address. There, pass the socket to curl and keep the
+`localhost` host, which the daemon's loopback check requires:
+`curl --unix-socket <path> http://localhost/api/v1/claim ...`.
+
 For a Shuttle-launched **app capture**, use the exact conversation id supplied in its prompt:
 
 ```bash

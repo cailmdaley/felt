@@ -2,7 +2,7 @@ defmodule ShuttleWeb.ConfigControllerTest do
   @moduledoc """
   `/api/v1/config` — the operator files over HTTP, reads included.
 
-  Every test points ALL FOUR `*_FILE` env vars at throwaway paths and clears the
+  Every test points ALL FIVE `*_FILE` env vars at throwaway paths and clears the
   compact `FELT_STORES` / `FELT_PROJECTS` forms, so no request here can reach
   the developer's real `~/.config/felt/` — nor the fixtures `test_helper.exs`
   pins the agents and remotes files at.
@@ -26,7 +26,8 @@ defmodule ShuttleWeb.ConfigControllerTest do
     stores: "FELT_STORES_FILE",
     projects: "FELT_PROJECTS_FILE",
     agents: "FELT_AGENTS_FILE",
-    remotes: "FELT_REMOTES_FILE"
+    remotes: "FELT_REMOTES_FILE",
+    host: "FELT_HOST_FILE"
   ]
 
   @compact_vars ["FELT_STORES", "FELT_PROJECTS"]
@@ -64,7 +65,7 @@ defmodule ShuttleWeb.ConfigControllerTest do
   end
 
   describe "GET /api/v1/config" do
-    test "lists the four files and the paths they resolve to", %{paths: paths} do
+    test "lists the five files and the paths they resolve to", %{paths: paths} do
       File.write!(paths[:stores], @stores_doc)
 
       conn = get(api_conn(), "/api/v1/config")
@@ -73,9 +74,16 @@ defmodule ShuttleWeb.ConfigControllerTest do
       body = Jason.decode!(conn.resp_body)
       assert body["host"] == Shuttle.Poller.own_host_id()
 
-      assert Enum.map(body["files"], & &1["id"]) == ["stores", "projects", "agents", "remotes"]
+      assert Enum.map(body["files"], & &1["id"]) == [
+               "stores",
+               "projects",
+               "agents",
+               "remotes",
+               "host"
+             ]
+
       assert Enum.map(body["files"], & &1["path"]) == Enum.map(ConfigFiles.ids(), &paths[&1])
-      assert Enum.map(body["files"], & &1["exists"]) == [true, false, false, false]
+      assert Enum.map(body["files"], & &1["exists"]) == [true, false, false, false, false]
 
       [stores | _] = body["files"]
       assert stores["size"] == byte_size(@stores_doc)

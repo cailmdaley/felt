@@ -1,0 +1,4 @@
+{
+  "class": "exposed",
+  "listen": "unix:///srv//shuttle-fixture/./sock/daemon.sock"
+}

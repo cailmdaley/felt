@@ -20,7 +20,11 @@ var shuttleSnapshotCmd = &cobra.Command{
 	Short: "Print the local daemon's state snapshot",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		body, err := getDaemon(daemonURL()+"/api/v1/state", daemonReadTimeout)
+		endpoint, err := daemonEndpoint("/api/v1/state")
+		if err != nil {
+			return err
+		}
+		body, err := getDaemon(endpoint, daemonReadTimeout)
 		if err != nil {
 			return err
 		}
@@ -39,7 +43,11 @@ var shuttleDispatchCmd = &cobra.Command{
 			"fiber_id": args[0],
 			"ad_hoc":   adHoc,
 		})
-		body, err := postDaemon(daemonURL()+"/api/v1/dispatch", payload, daemonPostTimeout)
+		endpoint, err := daemonEndpoint("/api/v1/dispatch")
+		if err != nil {
+			return err
+		}
+		body, err := postDaemon(endpoint, payload, daemonPostTimeout)
 		if err != nil {
 			return err
 		}

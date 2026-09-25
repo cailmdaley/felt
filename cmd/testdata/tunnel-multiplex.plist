@@ -9,7 +9,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>while :; do if ssh -O check beta-login 2>/dev/null; then ssh -N -S /home/tester/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L 4004:localhost:4200 beta-login; fi; sleep 30; done</string>
+    <string>while :; do if ssh -O check beta-login 2>/dev/null; then ssh -N -S /home/tester/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L '4004:localhost:4200' beta-login; fi; sleep 30; done</string>
   </array>
 
   <key>EnvironmentVariables</key>

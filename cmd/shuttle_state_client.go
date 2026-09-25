@@ -85,7 +85,11 @@ type CompositeState struct {
 // discovers the daemon is down, so it adds the how-to-fix hint the shared
 // transport has no business carrying.
 func fetchComposite() (*CompositeState, error) {
-	out, err := fetchCompositeFrom(daemonURL() + "/api/v1/state/composite")
+	endpoint, err := daemonEndpoint("/api/v1/state/composite")
+	if err != nil {
+		return nil, err
+	}
+	out, err := fetchCompositeFrom(endpoint)
 	if err != nil {
 		if isLifecycleTransportError(err) {
 			return nil, fmt.Errorf("%w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)

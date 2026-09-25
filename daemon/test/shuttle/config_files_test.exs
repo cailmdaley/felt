@@ -1,14 +1,14 @@
 defmodule Shuttle.ConfigFilesTest do
   @moduledoc """
-  `Shuttle.ConfigFiles` — the four operator files as addressable bytes.
+  `Shuttle.ConfigFiles` — the five operator files as addressable bytes.
 
-  Every test points ALL FOUR `*_FILE` env vars at throwaway paths and clears the
+  Every test points ALL FIVE `*_FILE` env vars at throwaway paths and clears the
   two compact `FELT_STORES` / `FELT_PROJECTS` forms, so nothing here can read or
   write the developer's real `~/.config/felt/` — nor the suite-wide fixtures
   `test_helper.exs` pins `FELT_AGENTS_FILE` / `FELT_REMOTES_FILE` at, which this
   module would otherwise happily overwrite.
 
-  The felt shell-out `validate/2` runs for `:remotes` / `:agents` is stubbed at
+  The felt shell-out `validate/2` runs for `:remotes` / `:agents` / `:host` is stubbed at
   the `:felt_runner` seam, so a real felt on the developer's PATH never decides
   whether these tests pass.
   """
@@ -22,7 +22,8 @@ defmodule Shuttle.ConfigFilesTest do
     stores: "FELT_STORES_FILE",
     projects: "FELT_PROJECTS_FILE",
     agents: "FELT_AGENTS_FILE",
-    remotes: "FELT_REMOTES_FILE"
+    remotes: "FELT_REMOTES_FILE",
+    host: "FELT_HOST_FILE"
   ]
 
   # The two compact comma-separated forms — the only ones that exist.
@@ -110,17 +111,18 @@ defmodule Shuttle.ConfigFilesTest do
   end
 
   describe "parse_id/1" do
-    test "accepts the four file stems, which are also `ids/0`" do
+    test "accepts the five file stems, which are also `ids/0`" do
       assert ConfigFiles.parse_id("stores") == {:ok, :stores}
       assert ConfigFiles.parse_id("projects") == {:ok, :projects}
       assert ConfigFiles.parse_id("agents") == {:ok, :agents}
       assert ConfigFiles.parse_id("remotes") == {:ok, :remotes}
+      assert ConfigFiles.parse_id("host") == {:ok, :host}
 
-      assert ConfigFiles.ids() == [:stores, :projects, :agents, :remotes]
+      assert ConfigFiles.ids() == [:stores, :projects, :agents, :remotes, :host]
     end
 
     test "rejects anything it does not name" do
-      for raw <- ["", "store", "Stores", "stores.json", "remotes ", "host", "../stores"] do
+      for raw <- ["", "store", "Stores", "stores.json", "remotes ", "hosts", "../stores"] do
         assert ConfigFiles.parse_id(raw) == :error, "expected #{inspect(raw)} to be refused"
       end
     end
@@ -146,7 +148,8 @@ defmodule Shuttle.ConfigFilesTest do
                stores: Path.expand("~/.config/felt/stores.json"),
                projects: Path.expand("~/.config/felt/projects.json"),
                agents: Path.expand("~/.config/felt/agents.json"),
-               remotes: Path.expand("~/.config/felt/remotes.json")
+               remotes: Path.expand("~/.config/felt/remotes.json"),
+               host: Path.expand("~/.config/felt/host.json")
              }
     end
   end
@@ -428,6 +431,17 @@ defmodule Shuttle.ConfigFilesTest do
       assert call.staged == {:ok, @agents_doc}
     end
 
+    test "asks the host verb about the host file, under FELT_HOST_FILE" do
+      doc = ~s({"class":"shared-multi-user"})
+      assert ConfigFiles.validate(:host, doc) == :ok
+
+      call = MockFelt.last()
+      assert call.args == ["shuttle", "host", "--json"]
+      assert [{"FELT_HOST_FILE", tmp}] = call.env
+      refute tmp == ConfigFiles.path(:host)
+      assert call.staged == {:ok, doc}
+    end
+
     test "a non-zero exit becomes felt's own stdout, verbatim" do
       MockFelt.reply_with(fn _call ->
         {~s(remote "hub-a": port 4001 already used by "hub-b"\n), 1}
@@ -501,7 +515,7 @@ defmodule Shuttle.ConfigFilesTest do
 
       assert Enum.map(rows, & &1.id) == ConfigFiles.ids()
       assert Enum.map(rows, & &1.path) == Enum.map(ConfigFiles.ids(), &paths[&1])
-      assert Enum.map(rows, & &1.exists) == [true, false, false, false]
+      assert Enum.map(rows, & &1.exists) == [true, false, false, false, false]
     end
   end
 end

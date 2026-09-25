@@ -36,6 +36,7 @@ defmodule ShuttleWeb.Endpoint do
   )
 
   plug(ShuttleWeb.CORSPlug)
+  plug(ShuttleWeb.PeerPlug)
   plug(Plug.Head)
   plug(ShuttleWeb.Router)
 end

@@ -108,6 +108,64 @@ defmodule Shuttle.RemoteRegistryTest do
 
   # ── Remote struct ──
 
+  describe "Remote.from_config/1 with a remote_socket" do
+    test "a socket entry reads remote_port 0 and keeps its local tcp port" do
+      r =
+        Remote.from_config(%{
+          "name" => "hub-a",
+          "port" => 4001,
+          "remote_socket" => " /srv/shuttle/sock/daemon.sock "
+        })
+
+      assert r.remote_socket == "/srv/shuttle/sock/daemon.sock"
+      assert r.remote_port == 0
+      assert r.url == "http://127.0.0.1:4001"
+      assert Remote.ssh_host(r) == "hub-a"
+    end
+
+    test "an empty remote_socket is absent" do
+      r = Remote.from_config(%{"name" => "hub-a", "port" => 4001, "remote_socket" => ""})
+      assert r.remote_socket == nil
+      assert r.remote_port == 4000
+    end
+
+    test "the allowlist admits the characters a real socket path uses" do
+      for path <- ["/home/op/.shuttle/sock/daemon.sock", "/srv/a-b_c@d+e/x.sock"] do
+        assert %Remote{remote_socket: ^path} =
+                 Remote.from_config(%{"name" => "hub-a", "port" => 4001, "remote_socket" => path})
+      end
+    end
+
+    # Mirrors the remote_socket rows of the rejected-input table in
+    # cmd/shuttle_remotes_test.go, line for line, plus the non-string case.
+    test "entries the Go reader refuses are dropped" do
+      for entry <- [
+            %{"remote_socket" => "/srv/s.sock", "remote_port" => 4000},
+            %{"remote_socket" => "sock/daemon.sock"},
+            %{"remote_socket" => "/srv/a:b.sock"},
+            %{"remote_socket" => "/srv/$(id).sock"},
+            %{"remote_socket" => "/srv/a'b.sock"},
+            %{"remote_socket" => "/srv/</string>.sock"},
+            %{"remote_socket" => "/srv/%h.sock"},
+            %{"remote_socket" => "/srv/../etc/d.sock"},
+            %{"remote_socket" => "/srv/sock/"},
+            %{"remote_socket" => "/srv/a b.sock"},
+            # and the extra hostile paths Go's renderer test refuses
+            %{"remote_socket" => "/srv/$(touch pwned).sock"},
+            %{"remote_socket" => "/srv/a'; rm -rf ~; '.sock"},
+            %{"remote_socket" => "/srv/</string><string>-oProxyCommand=x.sock"},
+            %{"remote_socket" => ~s(/srv/a"b.sock)},
+            %{"remote_socket" => "/srv//d.sock"},
+            %{"remote_socket" => "/srv/./d.sock"},
+            %{"remote_socket" => 42}
+          ] do
+        assert Remote.from_config(Map.merge(%{"name" => "hub-a", "port" => 4001}, entry)) ==
+                 nil,
+               "expected #{inspect(entry)} to be dropped"
+      end
+    end
+  end
+
   describe "Remote.from_config/1" do
     test "parses a complete map" do
       r =
@@ -855,6 +913,51 @@ defmodule Shuttle.RemoteRegistryTest do
 
       refute Enum.any?(scripts, &String.contains?(&1, "tailscaled-launch")),
              "a tunnelled remote's transport is this host's tunnel, not a far-side agent"
+    end
+
+    test "the ssh health check asks a socket remote's daemon over its socket" do
+      MockClient.set("http://127.0.0.1:4001/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("ssh", [{"session=present\nhttp=healthy\n", 0}])
+
+      remote = %Remote{
+        name: "hub-a",
+        url: "http://127.0.0.1:4001",
+        port: 4001,
+        remote_port: 0,
+        remote_socket: "/srv/shuttle/sock/daemon.sock",
+        poll_interval_ms: 1,
+        request_timeout_ms: 100,
+        stale_multiplier: 2,
+        tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_socket_ssh_check,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          restart_wait_ms: 1,
+          backoff_schedule_ms: [2],
+          user_uid: "501"
+        )
+
+      Enum.each(1..3, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_socket_ssh_check)
+        Process.sleep(2)
+      end)
+
+      scripts = for {"ssh", args} <- MockRunner.calls(), do: List.last(args)
+      assert [script | _] = scripts
+
+      assert script =~
+               "curl -sf --max-time 3 --unix-socket '/srv/shuttle/sock/daemon.sock' http://localhost/api/v1/state"
+
+      refute script =~ "127.0.0.1:0"
     end
 
     test "a url remote with no tunnel and no ssh just reports stale" do

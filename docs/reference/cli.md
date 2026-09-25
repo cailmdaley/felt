@@ -259,9 +259,11 @@ the existing owner-served file surface.
 | Command | Purpose |
 |---|---|
 | `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
-| `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--display`, `--checkout`, `--multiplex`) |
+| `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
+| `felt shuttle host class <class>` | Set this host's trust class in `~/.config/felt/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
+| `felt shuttle host --json` | Print the resolved host class and listen address |
 | `felt shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`). launchd on macOS, systemd user units on Linux |
 | `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
 | `felt shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |

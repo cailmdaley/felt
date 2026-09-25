@@ -1030,7 +1030,6 @@ defmodule Shuttle.Poller do
             effort: Keyword.get(opts, :effort),
             chrome: Keyword.get(opts, :chrome) == true,
             surface: Keyword.get(opts, :surface),
-            port: Shuttle.daemon_port(),
             host: state.own_host_id
           )
 

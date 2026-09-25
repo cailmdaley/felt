@@ -21,7 +21,7 @@
            own, within 30s. */}}
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done</string>
+    <string>while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L '{{ .Forward }}' {{ .SSHHost }}; fi; sleep 30; done</string>
     {{- else }}
     <string>{{ .AutoSSHPath }}</string>
     <string>-N</string>
@@ -42,7 +42,7 @@
     <string>IdentityAgent={{ .SSHAuthSock }}</string>
     {{- end }}
     <string>-L</string>
-    <string>{{ .LocalPort }}:localhost:{{ .RemotePort }}</string>
+    <string>{{ .Forward }}</string>
     <string>{{ .SSHHost }}</string>
     {{- end }}
   </array>

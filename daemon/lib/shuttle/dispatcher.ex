@@ -421,7 +421,6 @@ defmodule Shuttle.Dispatcher do
     * `:effort` — reasoning-effort token, validated against the agent's
       `effort_levels` (same contract as `shuttle.effort` on a fiber)
     * `:chrome` — boolean; claude harness only (same as `shuttle.chrome`)
-    * `:port` — daemon HTTP port for the claim callback
     * `:host` — owning host id to stamp into the shuttle block (optional)
 
   Returns `{:ok, %{session:, session_uuid:, agent_id:}}` or `{:error, reason}`.
@@ -434,7 +433,6 @@ defmodule Shuttle.Dispatcher do
     agent_name = Keyword.get(opts, :agent) || "claude-sonnet"
     effort = Keyword.get(opts, :effort)
     chrome = Keyword.get(opts, :chrome) == true
-    port = Keyword.get(opts, :port, 4000)
     host = Keyword.get(opts, :host)
 
     surface = Keyword.get(opts, :surface) || "cli"
@@ -457,7 +455,6 @@ defmodule Shuttle.Dispatcher do
           render_capture_prompt(yap,
             session: session,
             felt_store: felt_store,
-            port: port,
             session_uuid: session_uuid,
             agent_id: agent.id,
             project_dir: work_dir,
@@ -567,12 +564,19 @@ defmodule Shuttle.Dispatcher do
     Project dir: #{Keyword.fetch!(opts, :project_dir)}
     Headless: #{Keyword.get(opts, :headless, false)}
     Install: #{Jason.encode!(install)}
-    Claim endpoint: http://localhost:#{Keyword.get(opts, :port, 4000)}/api/v1/claim
+    Claim endpoint: #{claim_endpoint(Keyword.get(opts, :listen, Shuttle.listen()))}
     Claim: #{Jason.encode!(claim)}
     """
 
     append_user_message(String.trim_trailing(header), user_message: yap)
   end
+
+  # Where the capture worker POSTs its claim. On a unix listener the worker has
+  # no TCP port to hit, so the line carries the socket form curl understands.
+  defp claim_endpoint("unix://" <> path),
+    do: "http://localhost/api/v1/claim via `curl --unix-socket '#{path}'`"
+
+  defp claim_endpoint("tcp://" <> authority), do: "http://#{authority}/api/v1/claim"
 
   # `capture-<hex>` — distinguishable, collision-free enough, and crucially
   # not `-shuttle`-suffixed (see `capture/2`).

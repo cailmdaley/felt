@@ -42,6 +42,7 @@ type RuntimeReceipt struct {
 	Bundles    []ReceiptBundle          `json:"bundles"`
 	Hooks      ReceiptComponent         `json:"hooks"`
 	Daemon     ReceiptDaemon            `json:"daemon"`
+	Host       ReceiptHost              `json:"host"`
 	Generation ReceiptGenerationReceipt `json:"generation"`
 	// macOS only: who forked the running tmux server. Absent on every other
 	// platform, where nothing charges a process tree's file access to its root.
@@ -97,6 +98,10 @@ type ReceiptDaemon struct {
 	Expected any           `json:"expected,omitempty"`
 	Observed any           `json:"observed,omitempty"`
 	Contract bool          `json:"contract_ok"`
+	// Listen and HostClass are what the running daemon says it bound at boot,
+	// from /api/v1/version; empty when unreachable or not reported.
+	Listen    string `json:"listen,omitempty"`
+	HostClass string `json:"host_class,omitempty"`
 }
 
 // ReceiptGenerationReceipt is the receipt-side view of the promoted source
@@ -166,6 +171,7 @@ and exactly one felt build on PATH.`,
 			return nil
 		}
 		fmt.Printf("runtime %s\n", receipt.Status)
+		printHostReceipt(receipt.Host)
 		if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
 			fmt.Printf("tmux server: daemon-born — %s\n", receipt.TmuxServer.Repair)
 		}
@@ -190,7 +196,8 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	r.Daemon = collectDaemonReceipt()
 	r.Generation = collectGenerationReceipt(r.Bundles, r.Felt)
 	r.TmuxServer = collectTmuxServerReceipt()
-	extra := []receiptStatus{r.Generation.Status}
+	r.Host = collectHostReceipt(r.Daemon)
+	extra := []receiptStatus{r.Generation.Status, r.Host.Status}
 	if r.TmuxServer != nil {
 		extra = append(extra, r.TmuxServer.Status)
 	}
@@ -202,6 +209,7 @@ func collectRuntimeReceipt() RuntimeReceipt {
 		r.Repair = r.Generation.Repair
 	}
 	applyTmuxServerRepair(&r)
+	foldComponentRepair(&r, r.Host.Status, r.Host.Repair)
 	return r
 }
 
@@ -213,20 +221,39 @@ func collectRuntimeReceipt() RuntimeReceipt {
 // generation repair is the one exception that wins outright; a wrong install is
 // more fundamental than a wrongly-rooted server.
 func applyTmuxServerRepair(r *RuntimeReceipt) {
-	if r.TmuxServer == nil || r.TmuxServer.Status == receiptHealthy ||
-		r.TmuxServer.Status != r.Status || r.TmuxServer.Repair == "" {
+	if r.TmuxServer != nil {
+		foldComponentRepair(r, r.TmuxServer.Status, r.TmuxServer.Repair)
+	}
+}
+
+// foldComponentRepair folds one component's specific remedy into the
+// top-level repair line when that component shares the receipt's status. It
+// replaces an empty or generic line, is appended to another component's
+// specific one, and yields to a generation repair.
+func foldComponentRepair(r *RuntimeReceipt, status receiptStatus, repair string) {
+	if status == receiptHealthy || status != r.Status || repair == "" {
 		return
 	}
 	switch {
 	case r.Generation.Status != receiptHealthy:
 		// The install being wrong at all outranks everything here.
-	case r.Repair == "" || r.Repair == receiptRepair(r.Status):
+	case r.Repair == "" || r.Repair == receiptRepair(r.Status) || strings.HasPrefix(r.Repair, "complete the partially installed"):
 		// Nothing, or `combineReceiptStatus`'s generic catch-all line — the
 		// specific remedy is strictly better than either.
-		r.Repair = r.TmuxServer.Repair
-	case strings.Contains(r.Repair, r.TmuxServer.Repair):
+		r.Repair = repair
+	case strings.Contains(r.Repair, repair):
 	default:
-		r.Repair = r.Repair + "; also: " + r.TmuxServer.Repair
+		r.Repair = r.Repair + "; also: " + repair
+	}
+}
+
+// printHostReceipt is the human path's host line and its findings.
+func printHostReceipt(h ReceiptHost) {
+	if h.Class != "" {
+		fmt.Printf("host %s (%s)\n", h.Class, h.Listen)
+	}
+	for _, p := range h.Problems {
+		fmt.Printf("  host: %s\n", p)
 	}
 }
 
@@ -666,19 +693,30 @@ func codexHooksTrusted() bool {
 }
 
 func collectDaemonReceipt() ReceiptDaemon {
-	d := ReceiptDaemon{URL: daemonURL(), Status: receiptMissing, Repair: "start the Shuttle daemon, then rerun `felt setup receipt --json`"}
-	data, err := getDaemon(strings.TrimRight(daemonURL(), "/")+"/api/v1/version", daemonReadTimeout)
+	base, err := daemonURL()
+	if err != nil {
+		// Only the listener resolution can fail here; its own error words the
+		// repair exactly as the host component does, so the two fold into one.
+		_, hostErr := resolveHostSettings()
+		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(hostErr)}
+	}
+	d := ReceiptDaemon{URL: base, Status: receiptMissing, Repair: "start the Shuttle daemon, then rerun `felt setup receipt --json`"}
+	data, err := getDaemon(strings.TrimRight(base, "/")+"/api/v1/version", daemonReadTimeout)
 	if err != nil {
 		return d
 	}
 	var response struct {
-		Contract struct {
+		Listen    string `json:"listen"`
+		HostClass string `json:"host_class"`
+		Contract  struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
 			OK       *bool           `json:"ok"`
 		} `json:"contract"`
 	}
-	if json.Unmarshal(data, &response) != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
+	decodeErr := json.Unmarshal(data, &response)
+	d.Listen, d.HostClass = response.Listen, response.HostClass
+	if decodeErr != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d
 	}

@@ -1,0 +1,305 @@
+{
+  "_comment": "Host class and listener resolution, asserted by BOTH the Go suite (cmd/shuttle_host_class_test.go) and the Elixir daemon suite. Each case names an input host file (null = no file at all) and the environment to resolve under. Every case runs with SHUTTLE_DATA_DIR=/srv/shuttle-fixture unless its env overrides it, and with SHUTTLE_LISTEN and SHUTTLE_PORT unset unless its env sets them, so no case depends on HOME (the BEAM fixes its home at boot and cannot follow a per-test HOME). `expect` is either the resolved {class, class_source, listen, listen_source} or {error: <kind>}. Sources: class_source is `file` or `default`; listen_source is `SHUTTLE_LISTEN`, `file`, or `class-default`. Error kinds are the contract, not messages: malformed (invalid JSON, not an object, invalid UTF-8 anywhere in the file, or a class/listen that is null or not a string), duplicate_key (a top-level key repeated: parsers disagree on which copy wins), bad_class, bad_listen, non_loopback, bad_port, socket_path_too_long (a cleaned unix path of 100 bytes or more), relative_socket_path, bad_socket_path (a '..' segment or a trailing '/'). Otherwise a unix path is cleaned ('//' and '/./' collapse) and the cleaned form is what `listen` reports. The class-default socket is the data dir and '/sock/daemon.sock' joined as strings, then validated, so a '..' in SHUTTLE_DATA_DIR is refused, not cleaned away; SHUTTLE_DATA_DIR expands only a leading '~' and is never made absolute against the working directory, so a relative one is relative_socket_path.",
+  "base_env": {
+    "SHUTTLE_DATA_DIR": "/srv/shuttle-fixture"
+  },
+  "cases": [
+    {
+      "name": "missing_file",
+      "file": null,
+      "env": {},
+      "expect": {
+        "class": "single-user",
+        "class_source": "default",
+        "listen": "tcp://127.0.0.1:4000",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "missing_file_port",
+      "file": null,
+      "env": {
+        "SHUTTLE_PORT": "4100"
+      },
+      "expect": {
+        "class": "single-user",
+        "class_source": "default",
+        "listen": "tcp://127.0.0.1:4100",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "single_user",
+      "file": "single_user.json",
+      "env": {},
+      "expect": {
+        "class": "single-user",
+        "class_source": "file",
+        "listen": "tcp://127.0.0.1:4000",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "shared",
+      "file": "shared.json",
+      "env": {},
+      "expect": {
+        "class": "shared-multi-user",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/sock/daemon.sock",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "exposed",
+      "file": "exposed.json",
+      "env": {},
+      "expect": {
+        "class": "exposed",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/sock/daemon.sock",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "shared_ignores_port",
+      "file": "shared.json",
+      "env": {
+        "SHUTTLE_PORT": "4100"
+      },
+      "expect": {
+        "class": "shared-multi-user",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/sock/daemon.sock",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "listen_override",
+      "file": "listen_override.json",
+      "env": {},
+      "expect": {
+        "class": "shared-multi-user",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/custom.sock",
+        "listen_source": "file"
+      }
+    },
+    {
+      "name": "listen_only",
+      "file": "listen_only.json",
+      "env": {},
+      "expect": {
+        "class": "single-user",
+        "class_source": "default",
+        "listen": "tcp://127.0.0.1:4100",
+        "listen_source": "file"
+      }
+    },
+    {
+      "name": "env_listen_override",
+      "file": "listen_override.json",
+      "env": {
+        "SHUTTLE_LISTEN": "tcp://127.0.0.1:4200"
+      },
+      "expect": {
+        "class": "shared-multi-user",
+        "class_source": "file",
+        "listen": "tcp://127.0.0.1:4200",
+        "listen_source": "SHUTTLE_LISTEN"
+      }
+    },
+    {
+      "name": "bad_class",
+      "file": "bad_class.json",
+      "env": {},
+      "expect": {
+        "error": "bad_class"
+      }
+    },
+    {
+      "name": "malformed",
+      "file": "malformed.json",
+      "env": {},
+      "expect": {
+        "error": "malformed"
+      }
+    },
+    {
+      "name": "non_loopback",
+      "file": "non_loopback.json",
+      "env": {},
+      "expect": {
+        "error": "non_loopback"
+      }
+    },
+    {
+      "name": "env_non_loopback",
+      "file": null,
+      "env": {
+        "SHUTTLE_LISTEN": "tcp://10.0.0.5:4000"
+      },
+      "expect": {
+        "error": "non_loopback"
+      }
+    },
+    {
+      "name": "env_bad_scheme",
+      "file": null,
+      "env": {
+        "SHUTTLE_LISTEN": "http://127.0.0.1:4000"
+      },
+      "expect": {
+        "error": "bad_listen"
+      }
+    },
+    {
+      "name": "bad_port",
+      "file": null,
+      "env": {
+        "SHUTTLE_PORT": "40x0"
+      },
+      "expect": {
+        "error": "bad_port"
+      }
+    },
+    {
+      "name": "listen_bad_port",
+      "file": null,
+      "env": {
+        "SHUTTLE_LISTEN": "tcp://127.0.0.1:70000"
+      },
+      "expect": {
+        "error": "bad_port"
+      }
+    },
+    {
+      "name": "socket_path_too_long",
+      "file": "long_path.json",
+      "env": {},
+      "expect": {
+        "error": "socket_path_too_long"
+      }
+    },
+    {
+      "name": "data_dir_too_long",
+      "file": "shared.json",
+      "env": {
+        "SHUTTLE_DATA_DIR": "/srv/yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      },
+      "expect": {
+        "error": "socket_path_too_long"
+      }
+    },
+    {
+      "name": "relative_socket_path",
+      "file": "relative_path.json",
+      "env": {},
+      "expect": {
+        "error": "relative_socket_path"
+      }
+    },
+    {
+      "name": "duplicate_key",
+      "file": "duplicate_key.json",
+      "env": {},
+      "expect": {
+        "error": "duplicate_key"
+      }
+    },
+    {
+      "name": "null_class",
+      "file": "null_class.json",
+      "env": {},
+      "expect": {
+        "error": "malformed"
+      }
+    },
+    {
+      "name": "null_listen",
+      "file": "null_listen.json",
+      "env": {},
+      "expect": {
+        "error": "malformed"
+      }
+    },
+    {
+      "name": "invalid_utf8",
+      "file": "invalid_utf8.json",
+      "env": {},
+      "expect": {
+        "error": "malformed"
+      }
+    },
+    {
+      "name": "dotdot_path",
+      "file": "dotdot_path.json",
+      "env": {},
+      "expect": {
+        "error": "bad_socket_path"
+      }
+    },
+    {
+      "name": "trailing_slash",
+      "file": "trailing_slash.json",
+      "env": {},
+      "expect": {
+        "error": "bad_socket_path"
+      }
+    },
+    {
+      "name": "env_dotdot_path",
+      "file": null,
+      "env": {
+        "SHUTTLE_LISTEN": "unix:///srv/../tmp/daemon.sock"
+      },
+      "expect": {
+        "error": "bad_socket_path"
+      }
+    },
+    {
+      "name": "data_dir_dotdot",
+      "file": "shared.json",
+      "env": {
+        "SHUTTLE_DATA_DIR": "/srv/a/../b"
+      },
+      "expect": {
+        "error": "bad_socket_path"
+      }
+    },
+    {
+      "name": "unclean_path",
+      "file": "unclean_path.json",
+      "env": {},
+      "expect": {
+        "class": "exposed",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/sock/daemon.sock",
+        "listen_source": "file"
+      }
+    },
+    {
+      "name": "data_dir_trailing_slash",
+      "file": "shared.json",
+      "env": {
+        "SHUTTLE_DATA_DIR": "/srv/shuttle-fixture/"
+      },
+      "expect": {
+        "class": "shared-multi-user",
+        "class_source": "file",
+        "listen": "unix:///srv/shuttle-fixture/sock/daemon.sock",
+        "listen_source": "class-default"
+      }
+    },
+    {
+      "name": "data_dir_relative",
+      "file": "shared.json",
+      "env": {
+        "SHUTTLE_DATA_DIR": "shuttle-data"
+      },
+      "expect": {
+        "error": "relative_socket_path"
+      }
+    }
+  ]
+}

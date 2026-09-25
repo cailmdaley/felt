@@ -88,21 +88,22 @@ if [ "${1:-}" = "--loop" ]; then
   # is appending to. The rendered plist/unit export SHUTTLE_LOG for the same
   # reason.
   export SHUTTLE_LOG="$LOG"
-  PORT="${SHUTTLE_PORT:-4000}"
   backoff=2
   while :; do
     if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 67108864 ]; then
       mv -f "$LOG" "$LOG.1" 2>/dev/null || true
     fi
-    # A foreign daemon can already be answering on $PORT — a manual `bin/shuttle
-    # start`, or a tmux session that outlived this loop's own. `--force` skips
+    # A foreign daemon can already be answering at this host's listen address —
+    # a manual `bin/shuttle start`, or a tmux session that outlived this loop's
+    # own. `bin/shuttle status` probes the same address the daemon binds (a
+    # unix socket on a shared host, loopback TCP otherwise). `--force` skips
     # the health probe bare `start` does (bin/shuttle:605-618), so without this
     # check the loop would crash-dump into :eaddrinuse every iteration. Probe
     # first and stand down for a healthy foreign daemon instead of forcing a
     # start; an unhealthy or absent daemon falls through to the normal start
     # below, unchanged.
-    if curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/v1/state" >/dev/null 2>&1; then
-      echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon already healthy on :$PORT; standing down" | tee -a "$LOG" >&2
+    if ./bin/shuttle status >/dev/null 2>&1; then
+      echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon already healthy; standing down" | tee -a "$LOG" >&2
       sleep 300
       continue
     fi

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -202,14 +203,18 @@ func parseProxyEndpoint(raw string) (proxyEndpoint, error) {
 // never accepted as an address — two ways to name one origin is exactly how a
 // mis-stamped origin silently degrades to local.
 type remoteSpec struct {
-	Name       string        `json:"name"`
-	Display    string        `json:"display,omitempty"`
-	SSH        string        `json:"ssh,omitempty"`
-	Port       int           `json:"port,omitempty"`
-	RemotePort int           `json:"remote_port,omitempty"`
-	URL        string        `json:"url,omitempty"`
-	Enabled    *bool         `json:"enabled,omitempty"`
-	Tunnel     *remoteTunnel `json:"tunnel,omitempty"`
+	Name       string `json:"name"`
+	Display    string `json:"display,omitempty"`
+	SSH        string `json:"ssh,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	RemotePort int    `json:"remote_port,omitempty"`
+	// RemoteSocket: the daemon's unix socket on the remote host, forwarded in
+	// place of remote_port — a shared-multi-user remote listens on no TCP port
+	// at all. Absolute; mutually exclusive with remote_port.
+	RemoteSocket string        `json:"remote_socket,omitempty"`
+	URL          string        `json:"url,omitempty"`
+	Enabled      *bool         `json:"enabled,omitempty"`
+	Tunnel       *remoteTunnel `json:"tunnel,omitempty"`
 
 	PollIntervalMS   int `json:"poll_interval_ms,omitempty"`
 	RequestTimeoutMS int `json:"request_timeout_ms,omitempty"`
@@ -390,11 +395,21 @@ func normalizeRemotes(doc *remotesFile) error {
 		if r.Display == "" {
 			r.Display = r.Name
 		}
-		if r.RemotePort == 0 {
-			r.RemotePort = defaultRemoteDaemonPort
-		}
-		if r.RemotePort < 1 || r.RemotePort > 65535 {
-			return fmt.Errorf("remote %q: remote_port %d out of range 1-65535", r.Name, r.RemotePort)
+		r.RemoteSocket = strings.TrimSpace(r.RemoteSocket)
+		if r.RemoteSocket != "" {
+			if r.RemotePort != 0 {
+				return fmt.Errorf("remote %q: remote_port and remote_socket are mutually exclusive; the remote daemon listens on one or the other", r.Name)
+			}
+			if err := validateRemoteSocket(r.RemoteSocket); err != nil {
+				return fmt.Errorf("remote %q: remote_socket %q: %w", r.Name, r.RemoteSocket, err)
+			}
+		} else {
+			if r.RemotePort == 0 {
+				r.RemotePort = defaultRemoteDaemonPort
+			}
+			if r.RemotePort < 1 || r.RemotePort > 65535 {
+				return fmt.Errorf("remote %q: remote_port %d out of range 1-65535", r.Name, r.RemotePort)
+			}
 		}
 
 		if r.Port != 0 {
@@ -465,6 +480,26 @@ func normalizeRemotes(doc *remotesFile) error {
 		}
 	}
 
+	return nil
+}
+
+// remoteSocketPattern is the whole alphabet a remote socket path may use. It
+// is an allowlist because the path is rendered into a launchd plist (XML), a
+// systemd unit, and a `sh -c` loop: no quote, "$", backtick, "<", "&", "%",
+// ":" (the -L field separator) or whitespace can reach any of them.
+var remoteSocketPattern = regexp.MustCompile(`^/[A-Za-z0-9._/@+-]+$`)
+
+// validateRemoteSocket checks a remote socket path for what `ssh -L` and the
+// job templates can carry: an absolute, clean path in the allowlisted
+// alphabet. Its length is the remote kernel's business and is checked there,
+// by the remote's own `host --json`.
+func validateRemoteSocket(path string) error {
+	if !remoteSocketPattern.MatchString(path) {
+		return fmt.Errorf("must be an absolute path of letters, digits and . _ / @ + - only")
+	}
+	if filepath.Clean(path) != path {
+		return fmt.Errorf("must be a clean path (no '..', '.', '//' or trailing '/')")
+	}
 	return nil
 }
 
@@ -539,6 +574,7 @@ var (
 	remotesAddDisplay    string
 	remotesAddPort       int
 	remotesAddRemotePort int
+	remotesAddRemoteSock string
 	remotesAddCheckout   string
 	remotesAddMultiplex  bool
 	remotesAddURL        string
@@ -559,6 +595,7 @@ Examples:
   felt shuttle remotes list
   felt shuttle remotes add hub-a --port 4001
   felt shuttle remotes add hub-b --port 4004 --multiplex
+  felt shuttle remotes add hub-d --port 4005 --remote-socket /home/op/.shuttle/sock/daemon.sock
   felt shuttle remotes add hub-c --url https://hub-c.example.ts.net
   felt shuttle remotes rm hub-a
   felt shuttle remotes path`,
@@ -629,13 +666,14 @@ var remotesAddCmd = &cobra.Command{
 			return err
 		}
 		entry := remoteSpec{
-			Name:       args[0],
-			SSH:        remotesAddSSH,
-			Display:    remotesAddDisplay,
-			Port:       remotesAddPort,
-			RemotePort: remotesAddRemotePort,
-			URL:        remotesAddURL,
-			Checkout:   remotesAddCheckout,
+			Name:         args[0],
+			SSH:          remotesAddSSH,
+			Display:      remotesAddDisplay,
+			Port:         remotesAddPort,
+			RemotePort:   remotesAddRemotePort,
+			URL:          remotesAddURL,
+			RemoteSocket: remotesAddRemoteSock,
+			Checkout:     remotesAddCheckout,
 		}
 		// No manager is written unless the operator asked for one: an entry with
 		// no port already reads as `none` and a port entry already reads as this
@@ -734,6 +772,7 @@ func init() {
 	remotesAddCmd.Flags().StringVar(&remotesAddDisplay, "display", "", "Presentation label (default: the remote name)")
 	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required)")
 	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
+	remotesAddCmd.Flags().StringVar(&remotesAddRemoteSock, "remote-socket", "", "Daemon unix socket on the remote host, forwarded instead of --remote-port")
 	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
 	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor for a --port entry, none without one)")
 	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")

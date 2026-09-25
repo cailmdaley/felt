@@ -1,0 +1,3 @@
+{
+  "listen": "unix:///srv/shuttle-fixture/sock/"
+}

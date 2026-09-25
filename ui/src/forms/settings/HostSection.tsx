@@ -30,9 +30,11 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   loadHostState,
+  loadVersion,
   releaseQuarantine,
   type HostState,
   type SettingsHost,
+  type VersionInfo,
 } from './settingsApi'
 
 export interface HostSectionProps {
@@ -58,6 +60,7 @@ function when(iso: string | undefined): string {
 
 export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Element {
   const [state, setState] = useState<HostState | null>(null)
+  const [version, setVersion] = useState<VersionInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState(0)
@@ -86,6 +89,27 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
       cancelled = true
     }
   }, [shuttleBase, host.origin, token])
+
+  // `/api/v1/version` is NOT owner-routed — it always answers for the daemon
+  // serving THIS page, never a remote — so it is only meaningful, and only
+  // fetched, when the host being configured is that daemon itself.
+  useEffect(() => {
+    if (!host.isLocal) {
+      setVersion(null)
+      return
+    }
+    let cancelled = false
+    loadVersion(shuttleBase)
+      .then((data) => {
+        if (!cancelled) setVersion(data)
+      })
+      .catch(() => {
+        if (!cancelled) setVersion(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [shuttleBase, host.isLocal, token])
 
   // Live while open — the quarantine can be released from elsewhere, a worker
   // can finish, and every age here is computed at render from a fixed stamp.
@@ -149,7 +173,22 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
             <dd>{host.isLocal ? '(this daemon)' : host.origin}</dd>
             <dt>stores polled</dt>
             <dd>{(state.felt_stores ?? []).length}</dd>
+            {host.isLocal && (
+              <>
+                <dt>host class</dt>
+                <dd>{version?.host_class ?? 'unknown'}</dd>
+                <dt>listening on</dt>
+                <dd>{version?.listen ?? 'unknown'}</dd>
+              </>
+            )}
           </dl>
+          {host.isLocal && (
+            <p className="set-row-note" style={{ marginTop: '4px' }}>
+              As this daemon is actually bound right now — set in{' '}
+              <span className="set-mono">host.json</span> under the Host class tab, but frozen
+              here until the next restart.
+            </p>
+          )}
           <p className="set-row-note" style={{ marginTop: '8px' }}>
             A fiber dispatches on this host only when its{' '}
             <span className="set-mono">shuttle.host:</span> is exactly this id. It comes from{' '}

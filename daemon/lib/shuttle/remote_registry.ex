@@ -929,11 +929,20 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
+  # Where the remote daemon answers on its own host: its unix socket when the
+  # fleet names one, else its loopback port. `remote_socket` is already free of
+  # whitespace and `:`; single-quoting keeps any other shell metacharacter inert.
+  defp remote_state_target(%Remote{remote_socket: socket}) when is_binary(socket),
+    do: "--unix-socket '#{String.replace(socket, "'", ~S('\''))}' http://localhost/api/v1/state"
+
+  defp remote_state_target(%Remote{remote_port: port}),
+    do: "http://127.0.0.1:#{port}/api/v1/state"
+
   defp ssh_check(%Remote{} = remote, runner) do
     script =
       [
         ~s(if tmux has-session -t shuttle-daemon 2>/dev/null || tmux -S "$HOME/.shuttle/tmux.sock" has-session -t shuttle-daemon 2>/dev/null; then echo session=present; else echo session=absent; fi),
-        ~s(if curl -sf --max-time 3 http://127.0.0.1:#{remote.remote_port}/api/v1/state >/dev/null; then echo http=healthy; else echo http=unhealthy; fi)
+        ~s(if curl -sf --max-time 3 #{remote_state_target(remote)} >/dev/null; then echo http=healthy; else echo http=unhealthy; fi)
       ]
       |> Enum.join("; ")
 
@@ -1190,7 +1199,9 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   `felt shuttle remotes add` takes effect without a daemon bounce — so a
   request re-reads it whenever the fleet file's `{mtime, size}` token has
   moved, and otherwise pays one stat. See `Shuttle.Remotes.https_proxy/0` for
-  why a hub needs one at all.
+  why a hub needs one at all. A host whose class is not `single-user`
+  (`Shuttle.Host`) never applies it; its https requests fail with the refusal
+  as their reason instead.
 
   Every callback catches exits as well as errors. `:httpc` is a gen_server
   behind a facade, and a caller must not inherit its death: a transport fault
@@ -1202,6 +1213,8 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   cross-host read and write the hub makes.
   """
   @behaviour Shuttle.RemoteRegistry.Client
+
+  require Logger
 
   # The two profiles — see the moduledoc. Both are started on first use and
   # never stopped.
@@ -1227,25 +1240,25 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @impl true
   def get(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
-    profile = prepare()
+    with {:ok, profile} <- prepare(url) do
+      request = {String.to_charlist(url), []}
+      http_opts = http_opts(url, timeout_ms)
 
-    request = {String.to_charlist(url), []}
-    http_opts = http_opts(url, timeout_ms)
+      # `body_format: :binary` returns the response body as a raw binary. Without
+      # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
+      # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
+      # every multibyte char (— × é …). ASCII survives (< 128), so the corruption
+      # hides until a special character appears. Keep this binary-safe like get_file/2.
+      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
+        {:ok, {{_, 200, _}, _headers, body}} ->
+          {:ok, body}
 
-    # `body_format: :binary` returns the response body as a raw binary. Without
-    # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
-    # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
-    # every multibyte char (— × é …). ASCII survives (< 128), so the corruption
-    # hides until a special character appears. Keep this binary-safe like get_file/2.
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-      {:ok, {{_, 200, _}, _headers, body}} ->
-        {:ok, body}
+        {:ok, {{_, status, _}, _headers, _body}} ->
+          {:error, {:http_status, status}}
 
-      {:ok, {{_, status, _}, _headers, _body}} ->
-        {:error, {:http_status, status}}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
@@ -1263,20 +1276,20 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   @impl true
   def get(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    profile = prepare()
+    with {:ok, profile} <- prepare(url) do
+      headers =
+        Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
 
-    headers =
-      Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+      request = {String.to_charlist(url), headers}
+      http_opts = http_opts(url, timeout_ms)
 
-    request = {String.to_charlist(url), headers}
-    http_opts = http_opts(url, timeout_ms)
+      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
+        {:ok, {{_, status, _}, resp_headers, body}} ->
+          {:ok, status, normalize_headers(resp_headers), body}
 
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-      {:ok, {{_, status, _}, resp_headers, body}} ->
-        {:ok, status, normalize_headers(resp_headers), body}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
@@ -1298,19 +1311,19 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def post(url, body, content_type, timeout_ms)
       when is_binary(url) and is_binary(body) and is_binary(content_type) and
              is_integer(timeout_ms) do
-    profile = prepare()
+    with {:ok, profile} <- prepare(url) do
+      request =
+        {String.to_charlist(url), [], String.to_charlist(content_type), body}
 
-    request =
-      {String.to_charlist(url), [], String.to_charlist(content_type), body}
+      http_opts = http_opts(url, timeout_ms)
 
-    http_opts = http_opts(url, timeout_ms)
+      case :httpc.request(:post, request, http_opts, [body_format: :binary], profile) do
+        {:ok, {{_, status, _}, _headers, resp_body}} ->
+          {:ok, status, resp_body}
 
-    case :httpc.request(:post, request, http_opts, [body_format: :binary], profile) do
-      {:ok, {{_, status, _}, _headers, resp_body}} ->
-        {:ok, status, resp_body}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
@@ -1337,24 +1350,24 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   @impl true
   def get_file(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    profile = prepare()
+    with {:ok, profile} <- prepare(url) do
+      headers =
+        Enum.map(req_headers, fn {key, value} ->
+          {String.to_charlist(key), String.to_charlist(value)}
+        end)
 
-    headers =
-      Enum.map(req_headers, fn {key, value} ->
-        {String.to_charlist(key), String.to_charlist(value)}
-      end)
+      request = {String.to_charlist(url), headers}
+      http_opts = http_opts(url, timeout_ms)
 
-    request = {String.to_charlist(url), headers}
-    http_opts = http_opts(url, timeout_ms)
+      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
+        {:ok, {{_, status, _}, response_headers, body}} ->
+          normalized_headers = normalize_headers(response_headers)
 
-    case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-      {:ok, {{_, status, _}, response_headers, body}} ->
-        normalized_headers = normalize_headers(response_headers)
+          {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
 
-        {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
@@ -1370,20 +1383,72 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   # Everything a request needs before it goes out: the apps started, the
   # profile it will use alive, and that profile carrying the fleet file's
-  # current proxy. Returns the profile to use.
-  defp prepare do
+  # current proxy. `{:ok, profile}`, or `{:error, reason}` when the request
+  # would need a proxy this host refuses to use (`proxy_refusal/1`).
+  defp prepare(url) do
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
 
     case current_proxy() do
       nil ->
         ensure_profile(@direct_profile)
-        @direct_profile
+        {:ok, @direct_profile}
 
       {host, port} = proxy ->
-        pid = ensure_profile(@proxied_profile)
-        apply_proxy(pid, proxy, host, port)
-        @proxied_profile
+        case proxy_refusal(url) do
+          nil ->
+            pid = ensure_profile(@proxied_profile)
+            apply_proxy(pid, proxy, host, port)
+            {:ok, @proxied_profile}
+
+          reason ->
+            {:error, reason}
+        end
+    end
+  end
+
+  # The fleet proxy is a single-user host's tool. On a shared or exposed host
+  # the loopback proxy port is reachable by every account on the machine, and
+  # whatever it carries — this operator's mesh identity — is carried for all
+  # of them, so routing the fleet through it is an exposure this daemon will
+  # not participate in. The proxy is never applied there.
+  #
+  # Only https requests are refused, because only they would use it
+  # (httpc consults `https_proxy` for https alone): ssh-tunnelled loopback
+  # remotes keep working. The refusal is a reason string, so it lands in the
+  # remote's `last_error` and the fleet view says why that remote is stale
+  # instead of it going quietly dark. Logged once per boot, naming both files,
+  # since the fix is an edit to one of them.
+  @refusal_logged_key {__MODULE__, :proxy_refusal_logged}
+
+  defp proxy_refusal(url) do
+    if https?(url), do: refusal_for_class(Shuttle.host_class())
+  end
+
+  defp refusal_for_class(:single_user), do: nil
+
+  defp refusal_for_class(class) do
+    name = Shuttle.Host.class_name(class)
+
+    unless :persistent_term.get(@refusal_logged_key, false) do
+      :persistent_term.put(@refusal_logged_key, true)
+
+      Logger.error(
+        "RemoteRegistry: refusing defaults.https_proxy from #{Shuttle.Remotes.config_path()} " <>
+          "because #{Shuttle.Host.config_path()} declares host class #{name}; " <>
+          "https remotes will report unreachable until one of the two changes"
+      )
+    end
+
+    "https_proxy refused: host class #{name}"
+  end
+
+  # The scheme as httpc will read it — case-insensitively, so `HTTPS://` is
+  # the https request it is, for both the proxy gate and TLS verification.
+  defp https?(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme} when is_binary(scheme) -> String.downcase(scheme) == "https"
+      _ -> false
     end
   end
 
@@ -1468,7 +1533,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp http_opts(url, timeout_ms) do
     base = [{:timeout, timeout_ms}, {:connect_timeout, timeout_ms}]
 
-    if String.starts_with?(url, "https://"), do: [{:ssl, tls_opts()} | base], else: base
+    if https?(url), do: [{:ssl, tls_opts()} | base], else: base
   end
 
   defp tls_opts do

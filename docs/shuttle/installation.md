@@ -731,6 +731,85 @@ and names the file. `felt shuttle agents` marks an overridden default as
 override from a select on each agent row.
 There is no reserved `human` record.
 
+## Host classes and trust boundaries
+
+The daemon's control plane has no authentication: anything that reaches its
+listener can read and write every registered fiber, read transcripts, and
+launch or kill workers as the user running it. The design makes the
+*listener* the boundary, so the boundary has to match the host it runs on.
+
+Every host declares a class in `~/.config/felt/host.json`:
+
+```json
+{"class": "single-user"}
+```
+
+Set it with `felt shuttle host class <class>`; read it back with `felt
+shuttle host --json` or the board's settings sheet. Three classes exist.
+`single-user` is a laptop, a workstation, a single-user VM — loopback is
+yours alone. `shared-multi-user` is an HPC login node: loopback is shared
+with every logged-in user, `/proc/net/tcp` is world-readable, and any
+`127.0.0.1` listener is theirs to reach as freely as yours. `exposed` is
+reachable beyond your tailnet; felt does not support that class today and
+treats it like `shared-multi-user`.
+
+The class changes where the daemon listens. `single-user` listens on
+`tcp://127.0.0.1:4000` (override the port with `SHUTTLE_PORT`).
+`shared-multi-user` and `exposed` listen on a Unix socket instead,
+`~/.shuttle/sock/daemon.sock`, inside a `0700` directory the daemon creates
+and verifies before it binds — it refuses to bind if the directory is missing
+that mode. `host.json`'s `listen` key, or `SHUTTLE_LISTEN`, overrides either
+default, and the CLI resolves the same address to reach it. A remote entry's
+`remote_socket` key points an SSH tunnel's far end at the socket instead of a
+port — verified end to end as `ssh -L 127.0.0.1:<port>:~/.shuttle/sock/daemon.sock
+<host>` against an OpenSSH 8.0 login node — and the local `felt` CLI on that
+host dials the same socket directly. A host whose only inbound is SSH
+tunnels can run entirely off the socket, with no TCP listener at all.
+
+The socket is not a `tailscale serve` target, on any class. `tailscale
+serve … unix:<sock>` against a userspace `tailscaled` run unprivileged — the
+case on an HPC login node — is refused outright: "must be root, or be an
+operator and able to run sudo tailscale to serve a path or Unix socket." The
+macOS system `tailscaled` cannot reach a filesystem socket at all and answers
+502. So a host fronted with `tailscale serve`, whatever its class, serves the
+TCP loopback port — both "The board on your phone" below and "Tailscale as
+fleet transport" target `4000`, never the socket path.
+
+That leaves a gap on a shared host that is also reached through `tailscale
+serve`: it needs a loopback TCP listener, and that listener is
+unauthenticated today — `felt setup receipt` flags it as the residual risk on
+a `shared-multi-user` host that serves. The socket half of the story is
+already sound: a co-tenant cannot reach a socket they cannot traverse to —
+`namei -m ~/.shuttle/sock/daemon.sock` shows the permissions along the whole
+path as the evidence — and every request that arrives over it was delivered
+by `sshd` running as you, which is what makes an identity attached to it
+trustworthy where a bare loopback caller could forge one. The design's answer
+for the TCP listener, not yet built, is the same idea applied there: admit
+only loopback peers owned by the daemon's own uid, read from
+`/proc/net/tcp`, so `tailscaled` and `sshd`-as-you pass and a co-tenant
+connecting directly is refused.
+
+The same class gates dial-out. The daemon refuses `defaults.https_proxy`
+(configured below, under `defaults.https_proxy`) unless the host is
+`single-user`, because `tailscaled --outbound-http-proxy-listen` is an
+unauthenticated loopback gateway into the whole tailnet, and a co-tenant who
+finds it arrives everywhere wearing your node's identity. A `shared-multi-user`
+host dials out over ssh instead. To reach the tailnet from userspace mode
+without the proxy, use `ssh -o ProxyCommand="tailscale nc %h %p" <node>`,
+which rides `tailscaled`'s private LocalAPI socket rather than an
+unauthenticated listener. Tunnel *local* ends are still plain TCP loopback
+today and are flagged, not fixed, on a shared host.
+
+`felt setup receipt` is where this is checked. It reports the declared
+class, the resolved listen address, the set of distinct logged-in users, the
+socket directory's mode and owner, and every listening TCP socket owned by a
+fleet process (the daemon, tunnels, `tailscaled`), and it goes `mismatch`
+with a repair line whenever the host contradicts its declared class. Four
+checks worth watching turn the receipt red on purpose: declaring
+`single-user` on a login node, `chmod 755`-ing the socket directory, setting
+`SHUTTLE_LISTEN=tcp` on a shared host, and setting `defaults.https_proxy` on
+a shared host.
+
 ## Configuring remotes
 
 One daemon can aggregate other daemons over SSH tunnels. The fleet file lists
@@ -799,7 +878,14 @@ on a login node where you cannot install a kernel module or a system service:
    ```
    `tailscale up` prints a login URL the first time; approve it from any
    already-authenticated device or browser. `serve --bg` is what actually
-   exposes the daemon — see the policy caveat before you run it.
+   exposes the daemon — the target is always the TCP loopback port, on every
+   host class: an unprivileged userspace `tailscaled` refuses to serve a
+   Unix socket ("must be root, or be an operator and able to run sudo
+   tailscale to serve a path or Unix socket"), and the macOS system
+   `tailscaled` cannot reach a filesystem socket at all. See [Host classes
+   and trust boundaries](#host-classes-and-trust-boundaries) for what that
+   means for a `shared-multi-user` host, and the policy caveat before you run
+   it.
 
    `tailscale up` is not optional. A `tailscaled` running under
    `tailscaled-launch` with `up` never approved looks, from the hub's side,
@@ -877,34 +963,32 @@ this path.
 ### The proxy is a gateway
 
 `--outbound-http-proxy-listen` is an **unauthenticated** route into the whole
-tailnet, and `tailscaled` offers no authentication option for it. It binds to
-`127.0.0.1`, which is a real boundary on a laptop and none at all on a shared
-login node: every user logged into that node shares its loopback, so any of
-them can run
+tailnet, and `tailscaled` offers no authentication option for it. See [Host
+classes and trust boundaries](#host-classes-and-trust-boundaries): the daemon
+refuses `defaults.https_proxy` on any host declared `shared-multi-user` or
+`exposed`, because the proxy binds to `127.0.0.1`, which is a real boundary on
+a laptop and none at all on a shared login node — every user logged into that
+node shares its loopback, so any of them can run
 
 ```bash
 curl -x http://127.0.0.1:1055 https://<any-node>.<tailnet>.ts.net/api/v1/state
 ```
 
-and reach every daemon in your tailnet — including the `:4000` control API that
+and reach every daemon in your tailnet, including the control API that
 launches and kills workers. An HPC login node routinely has a dozen other
 people on it.
 
-Two consequences for how you deploy this.
-
-**Only a hub needs the proxy.** A node that merely runs `tailscale serve` to
+Only a hub needs the proxy — a node that merely runs `tailscale serve` to
 expose its own daemon needs no outbound route at all, so a proxy there is pure
 exposure for no function. This is why `bin/tailscaled-launch` ships with both
-its listeners off: turn the HTTP proxy on for the one host that composites the
-fleet, and nowhere else. (`socks5-listen` is the same switch for
+its listeners off: turn the HTTP proxy on only for a `single-user` hub that
+composites the fleet. (`socks5-listen` is the same switch for
 `--socks5-server`; nothing in felt or shuttle uses it.)
 
-**On the hub itself the risk is real and unmitigated at this layer.** If your
-hub is a shared login node, other users on that node can reach your tailnet for
-as long as the proxy runs. Prefer a hub whose loopback is yours alone — a
-laptop, a workstation, a single-user VM — and if it has a TUN-mode Tailscale
-install it needs no proxy at all. Where that is not possible, the fix is
-authentication on the daemons' own `:4000`, not a less obvious port.
+A hub that is itself a shared host dials out over ssh instead of the proxy —
+see [Host classes and trust boundaries](#host-classes-and-trust-boundaries)
+for the `tailscale nc` ProxyCommand that reaches the tailnet through
+`tailscaled`'s private LocalAPI socket.
 
 ### Policy caveat
 

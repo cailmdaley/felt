@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "remotes": [
+    {"name": "hub-a", "port": 4001, "remote_socket": "/srv/shuttle/sock/daemon.sock"},
+    {"name": "hub-b", "port": 4002, "remote_socket": "/srv/$(touch pwned)'</string>.sock"}
+  ]
+}

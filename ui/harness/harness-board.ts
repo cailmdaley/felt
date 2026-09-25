@@ -1174,12 +1174,14 @@ const settingsFiles: Record<string, Record<string, string>> = {
       '",\n      "url": "https://' +
       FOREIGN_HOST +
       '.example.ts.net",\n      "tunnel": { "manager": "none" }\n    },\n    {\n      "name": "hub-a",\n      "ssh": "hub-a",\n      "port": 4001,\n      "tunnel": { "multiplex": true }\n    }\n  ]\n}\n',
+    host: '{\n  "class": "single-user"\n}\n',
   },
   [FOREIGN_HOST]: {
     stores: '{\n  "version": 1,\n  "felt_stores": [\n    "/scratch/you/loom"\n  ]\n}\n',
     projects: '{\n  "version": 1,\n  "projects": [\n    "/scratch/you/analysis"\n  ]\n}\n',
     agents: '',
     remotes: '',
+    host: '{\n  "class": "shared-multi-user",\n  "listen": "unix:///run/shuttle/daemon.sock"\n}\n',
   },
 }
 
@@ -1378,7 +1380,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/api/v1/config')) {
     const host = settingsOrigin(url)
-    return json({ host, files: ['stores', 'projects', 'agents', 'remotes'].map((id) => settingsSummary(host, id)) })
+    return json({
+      host,
+      files: ['stores', 'projects', 'agents', 'remotes', 'host'].map((id) => settingsSummary(host, id)),
+    })
   }
   if (url.includes('/api/v1/fleet')) {
     if (init?.method === 'POST') return json({ ok: true, host: bodyOrigin(), output: 'saved (harness)' })
@@ -1388,6 +1393,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ ok: true, host: bodyOrigin(), output: 'would install hub-a -> ~/Library/LaunchAgents/io.shuttle.shuttle-tunnel-hub-a.plist' })
   }
   if (url.includes('/api/v1/agents')) return json(MOCK_AGENTS)
+  // NOT owner-routed, on purpose (see settingsApi's loadVersion doc) — always
+  // this harness's own local-host state, regardless of any `?origin=`.
+  if (url.includes('/api/v1/version')) {
+    return json({
+      ...mockBuild('a1b2c3d', 7_200_000),
+      contract: { ok: true, expected: 2, observed: 2 },
+      listen: 'unix:///home/you/.shuttle/sock/daemon.sock',
+      host_class: 'single-user',
+    })
+  }
   if (url.includes('/api/v1/state/composite')) {
     return json({
       local: mockHostState(LOCAL_HOST),

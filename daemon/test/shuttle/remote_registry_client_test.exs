@@ -114,4 +114,102 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       assert body == @utf8_body
     end
   end
+
+  describe "the fleet proxy on a host that is not single-user" do
+    setup do
+      prev_proxy = Application.get_env(:shuttle, :https_proxy)
+      prev_class = Application.get_env(:shuttle, :host_class)
+
+      on_exit(fn ->
+        Application.put_env(:shuttle, :https_proxy, prev_proxy)
+        Shuttle.Test.EnvHelpers.restore_app_env(:host_class, prev_class)
+      end)
+
+      # Port 9 is discard: if the refusal failed and the request went through
+      # the proxy, it would come back as a connect error, not the refusal.
+      Application.put_env(:shuttle, :https_proxy, "127.0.0.1:9")
+      :ok
+    end
+
+    for {class, name} <- [shared_multi_user: "shared-multi-user", exposed: "exposed"] do
+      @class class
+      @name name
+
+      test "#{name}: an https request fails with the refusal as its reason" do
+        Application.put_env(:shuttle, :host_class, @class)
+        reason = "https_proxy refused: host class #{@name}"
+
+        assert Default.get("https://hub.example.invalid/api/v1/state", 1_000) == {:error, reason}
+
+        assert Default.get("https://hub.example.invalid/x", [], 1_000) == {:error, reason}
+
+        assert Default.post("https://hub.example.invalid/x", "{}", "application/json", 1_000) ==
+                 {:error, reason}
+
+        assert Default.get_file("https://hub.example.invalid/x", 1_000) == {:error, reason}
+      end
+    end
+
+    test "an http:// remote still goes direct", %{url: url} do
+      Application.put_env(:shuttle, :host_class, :shared_multi_user)
+      assert {:ok, body} = Default.get(url, 2_000)
+      assert body == @utf8_body
+    end
+
+    test "a single-user host sends https through the proxy" do
+      # A fake proxy: accept one connection and report the first bytes httpc
+      # sends it. A CONNECT for the remote's authority is the proxy in use.
+      Application.put_env(:shuttle, :host_class, :single_user)
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+      Application.put_env(:shuttle, :https_proxy, "127.0.0.1:#{port}")
+      parent = self()
+
+      Task.start(fn ->
+        {:ok, conn} = :gen_tcp.accept(listener, 5_000)
+        {:ok, data} = :gen_tcp.recv(conn, 0, 5_000)
+        send(parent, {:proxy_saw, data})
+        :gen_tcp.close(conn)
+      end)
+
+      assert {:error, _} = Default.get("https://hub.example.invalid/api/v1/state", 2_000)
+      assert_receive {:proxy_saw, data}, 5_000
+      assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
+      :gen_tcp.close(listener)
+    end
+
+    test "an upper-case HTTPS:// scheme is refused like a lower-case one" do
+      Application.put_env(:shuttle, :host_class, :shared_multi_user)
+
+      assert Default.get("HTTPS://hub.example.invalid/api/v1/state", 1_000) ==
+               {:error, "https_proxy refused: host class shared-multi-user"}
+    end
+
+    test "the refusal surfaces as the remote's last_error in the registry" do
+      Application.put_env(:shuttle, :host_class, :shared_multi_user)
+
+      remote = %Shuttle.Remote{
+        name: "hub-a",
+        url: "https://hub-a.example.invalid",
+        poll_interval_ms: 1,
+        request_timeout_ms: 1_000,
+        stale_multiplier: 2,
+        tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        Shuttle.RemoteRegistry.start_link(
+          name: :reg_proxy_refused,
+          remotes: [remote],
+          auto_poll: false,
+          tick_interval_ms: 60_000
+        )
+
+      :ok = Shuttle.RemoteRegistry.poll_now(:reg_proxy_refused)
+
+      hub = Shuttle.RemoteRegistry.snapshot(:reg_proxy_refused, "hub-a")
+      assert hub.stale
+      assert hub.last_error == "https_proxy refused: host class shared-multi-user"
+    end
+  end
 end

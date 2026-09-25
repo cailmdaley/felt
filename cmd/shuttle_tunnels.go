@@ -55,6 +55,9 @@ type tunnelSpec struct {
 	UnitName   string
 	LocalPort  int
 	RemotePort int
+	// RemoteSocket, when set, is the remote daemon's unix socket, forwarded in
+	// place of RemotePort.
+	RemoteSocket string
 	// Multiplex: ride an existing ControlMaster socket (~/.ssh/ctl/%C, the
 	// ssh-config ControlPath) instead of opening independent connections.
 	// For a host behind interactive 2FA a fresh unattended ssh can never
@@ -68,10 +71,13 @@ type tunnelSpec struct {
 }
 
 type tunnelTemplateData struct {
-	Label       string
-	SSHHost     string
-	LocalPort   int
-	RemotePort  int
+	Label     string
+	SSHHost   string
+	LocalPort int
+	// Forward is the whole `ssh -L` argument; RemoteEnd names its far side
+	// for a human (":4000" or a socket path).
+	Forward     string
+	RemoteEnd   string
 	AutoSSHPath string
 	SSHAuthSock string
 	LogPath     string
@@ -259,7 +265,8 @@ func installTunnels(requested []string) error {
 				Label:       spec.Label,
 				SSHHost:     spec.SSHHost,
 				LocalPort:   spec.LocalPort,
-				RemotePort:  spec.RemotePort,
+				Forward:     spec.forward(),
+				RemoteEnd:   spec.remoteEnd(),
 				Multiplex:   spec.Multiplex,
 				AutoSSHPath: autosshPath,
 				SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
@@ -520,14 +527,35 @@ func resolveManagedTunnelSpecs(doc remotesFile) []tunnelSpec {
 
 func tunnelSpecFor(r remoteSpec, labelPrefix string) tunnelSpec {
 	return tunnelSpec{
-		Name:       r.Name,
-		SSHHost:    r.SSH,
-		Label:      r.label(labelPrefix),
-		UnitName:   r.unitName(),
-		LocalPort:  r.Port,
-		RemotePort: r.RemotePort,
-		Multiplex:  r.tunnelOpts().Multiplex,
+		Name:         r.Name,
+		SSHHost:      r.SSH,
+		Label:        r.label(labelPrefix),
+		UnitName:     r.unitName(),
+		LocalPort:    r.Port,
+		RemotePort:   r.RemotePort,
+		RemoteSocket: r.RemoteSocket,
+		Multiplex:    r.tunnelOpts().Multiplex,
 	}
+}
+
+// forward is the `ssh -L` argument: `<local>:localhost:<remote>` for a port,
+// and OpenSSH's `[bind:]port:remote_socket` form (OpenSSH 6.7+) for a socket,
+// bound to 127.0.0.1 so the forward is never a wildcard listener.
+func (s tunnelSpec) forward() string {
+	if s.RemoteSocket != "" {
+		return fmt.Sprintf("127.0.0.1:%d:%s", s.LocalPort, s.RemoteSocket)
+	}
+	return fmt.Sprintf("%d:localhost:%d", s.LocalPort, s.RemotePort)
+}
+
+// tunnelForwardPattern is every forward() can legitimately produce.
+var tunnelForwardPattern = regexp.MustCompile(`^(?:[0-9]+:localhost:[0-9]+|127\.0\.0\.1:[0-9]+:/[A-Za-z0-9._/@+-]+)$`)
+
+func (s tunnelSpec) remoteEnd() string {
+	if s.RemoteSocket != "" {
+		return s.RemoteSocket
+	}
+	return fmt.Sprintf(":%d", s.RemotePort)
 }
 
 // tunnelJobPattern matches ONLY the filename shape this command itself
@@ -628,6 +656,12 @@ func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, 
 }
 
 func renderTunnelJob(tmpl *template.Template, data tunnelTemplateData) ([]byte, error) {
+	// The forward lands in XML, a systemd unit and a `sh -c` loop. The fleet
+	// validator already refuses anything outside this alphabet; this guard
+	// keeps a spec built any other way from rendering at all.
+	if !tunnelForwardPattern.MatchString(data.Forward) {
+		return nil, fmt.Errorf("refusing to render tunnel forward %q: not a port or allowlisted socket forward", data.Forward)
+	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, err

@@ -1,0 +1,4 @@
+{
+  "class": "shared-multi-user",
+  "listen": "unix:///srv/shuttle-fixture/custom.sock"
+}

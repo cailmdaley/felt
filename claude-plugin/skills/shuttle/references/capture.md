@@ -23,7 +23,8 @@ transcript: read [meeting.md](meeting.md) too. It extends these steps.
    the poller launch another worker before you claim this session.
 4. **Claim.** POST the supplied `Claim` JSON to `Claim endpoint` with
    `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
-   you created. Encode JSON with a JSON library and pass it as a file or structured
+   you created. When the endpoint names a unix socket, send the request through
+   it exactly as given (`curl --unix-socket <path> http://localhost/...`). Encode JSON with a JSON library and pass it as a file or structured
    request body; do not interpolate user input into shell quoting. Require a
    successful claim before continuing. A lost response can be retried with the
    same body; a rejection must not be followed by activation.

@@ -21,7 +21,7 @@
 # remote that silently never appears on the board.
 
 [Unit]
-Description=Shuttle tunnel to {{ .SSHHost }} (127.0.0.1:{{ .LocalPort }} -> :{{ .RemotePort }})
+Description=Shuttle tunnel to {{ .SSHHost }} (127.0.0.1:{{ .LocalPort }} -> {{ .RemoteEnd }})
 Documentation=https://cailmdaley.github.io/felt/shuttle/
 # launchd's KeepAlive retries forever. systemd's default start-rate limiter
 # instead parks a unit in `failed` after 5 restarts and stops trying — so a
@@ -50,9 +50,9 @@ WorkingDirectory={{ .Home }}
 # `%%C` (doubled): systemd expands `%`-specifiers in ExecStart before /bin/sh
 # ever sees the line, and a bare `%C` would reach ssh as the unit's cache
 # directory instead of ssh's own ControlPath connection hash.
-ExecStart=/bin/sh -c 'while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}; fi; sleep 30; done'
+ExecStart=/bin/sh -c 'while :; do if ssh -O check {{ .SSHHost }} 2>/dev/null; then ssh -N -S {{ .Home }}/.ssh/ctl/%%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -L "{{ .Forward }}" {{ .SSHHost }}; fi; sleep 30; done'
 {{- else }}
-ExecStart={{ .AutoSSHPath }} -N -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes{{ if .SSHAuthSock }} -o IdentityAgent={{ .SSHAuthSock }}{{ end }} -L {{ .LocalPort }}:localhost:{{ .RemotePort }} {{ .SSHHost }}
+ExecStart={{ .AutoSSHPath }} -N -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes{{ if .SSHAuthSock }} -o IdentityAgent={{ .SSHAuthSock }}{{ end }} -L "{{ .Forward }}" {{ .SSHHost }}
 {{- end }}
 
 # AUTOSSH_GATETIME=0: never treat a short-lived first connection as a fatal

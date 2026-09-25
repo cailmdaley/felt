@@ -10,24 +10,6 @@ defmodule ShuttleTest do
     assert Shuttle.version() =~ ~r/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
   end
 
-  test "daemon_port reads SHUTTLE_PORT, defaulting to 4000" do
-    # config/test.exs does not set SHUTTLE_PORT, so the default is observable.
-    assert Shuttle.daemon_port() == 4000
-
-    System.put_env("SHUTTLE_PORT", "4321")
-    on_exit(fn -> System.delete_env("SHUTTLE_PORT") end)
-    assert Shuttle.daemon_port() == 4321
-  end
-
-  test "daemon_port rejects an invalid SHUTTLE_PORT with a useful error" do
-    System.put_env("SHUTTLE_PORT", "not-a-port")
-    on_exit(fn -> System.delete_env("SHUTTLE_PORT") end)
-
-    assert_raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535", fn ->
-      Shuttle.daemon_port()
-    end
-  end
-
   # `configure_endpoint/0` is the daemon's RUNTIME config layer. It matters
   # because a release bakes evaluated compile-time config into the artifact —
   # so the port, the server flag, and the signing key must be decidable on the
@@ -35,7 +17,15 @@ defmodule ShuttleTest do
   describe "Shuttle.Application.configure_endpoint/0" do
     setup do
       previous = Application.get_env(:shuttle, ShuttleWeb.Endpoint)
-      on_exit(fn -> Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous) end)
+      previous_listen = Application.get_env(:shuttle, :listen)
+      previous_class = Application.get_env(:shuttle, :host_class)
+
+      on_exit(fn ->
+        Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous)
+        Shuttle.Test.EnvHelpers.restore_app_env(:listen, previous_listen)
+        Shuttle.Test.EnvHelpers.restore_app_env(:host_class, previous_class)
+      end)
+
       :ok
     end
 
@@ -57,14 +47,14 @@ defmodule ShuttleTest do
       assert configured(http: [])[:server] == true
     end
 
-    test "SHUTTLE_PORT is live again — it was dead while dev.exs set server: true" do
+    test "SHUTTLE_PORT outranks the configured port" do
       config = configured([http: [port: 4000], server: true], %{"SHUTTLE_PORT" => "4321"})
       assert config[:http][:port] == 4321
       assert config[:http][:ip] == {127, 0, 0, 1}
     end
 
     test "an invalid SHUTTLE_PORT fails before the endpoint binds" do
-      assert_raise ArgumentError, "SHUTTLE_PORT must be an integer between 1 and 65535", fn ->
+      assert_raise ArgumentError, ~r/SHUTTLE_PORT: port "not-a-port" must be an integer/, fn ->
         configured([http: [port: 4000], server: true], %{"SHUTTLE_PORT" => "not-a-port"})
       end
     end

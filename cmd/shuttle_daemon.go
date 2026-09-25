@@ -2,16 +2,19 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 )
 
-// The :4000 daemon HTTP client — the felt CLI's window onto the running shuttle
+// The daemon HTTP client — the felt CLI's window onto the running shuttle
 // daemon. Most `felt shuttle` verbs are pure local-frontmatter writes, but a few
 // need the daemon: host identity (so a freshly installed block is born owned with
 // the host the poller will compare against), and the soft lifecycle hop for
@@ -21,16 +24,91 @@ import (
 // payload shapes — is unchanged so the transitional `shuttle-ctl` -> `felt
 // shuttle` shim is transparent to the Elixir daemon that shells these verbs.
 
-const defaultDaemonURL = "http://127.0.0.1:4000"
-
 // daemonURL is the local shuttle daemon's base URL. No CLI flag by design — the
-// daemon is a per-machine service. SHUTTLE_DAEMON_URL overrides it (tests point
-// it at an httptest stub).
-func daemonURL() string {
+// daemon is a per-machine service. SHUTTLE_DAEMON_URL overrides it outright
+// (tests point it at an httptest stub); otherwise it follows the listener the
+// daemon binds (resolveHostSettings): http://127.0.0.1:<port> for a TCP
+// listener, and the synthetic http://shuttle.invalid for a unix socket, which
+// daemonHTTPClient dials through the socket.
+//
+// A host file or listener setting that does not resolve is an error naming
+// its source, never a URL: a malformed operator file must not read as "daemon
+// unreachable", which callers answer with a local fallback.
+func daemonURL() (string, error) {
 	if v := os.Getenv("SHUTTLE_DAEMON_URL"); v != "" {
-		return v
+		return v, nil
 	}
-	return defaultDaemonURL
+	s, err := resolveHostSettings()
+	if err != nil {
+		return "", fmt.Errorf("resolving the daemon listener: %w", err)
+	}
+	if s.listen.Network == "tcp" {
+		return "http://" + s.listen.Address, nil
+	}
+	return "http://" + daemonSocketHost, nil
+}
+
+// daemonEndpoint is daemonURL() plus a path.
+func daemonEndpoint(path string) (string, error) {
+	base, err := daemonURL()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(base, "/") + path, nil
+}
+
+// daemonHTTPClient is the one constructor for an HTTP client that talks to a
+// shuttle daemon. A request to the synthetic host dials the local daemon's
+// unix socket; every other host (a remote daemon over its tunnel port) dials
+// normally, so one client serves getDaemon's local and remote callers alike.
+func daemonHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// The socket is local; an $HTTP_PROXY must never capture it.
+	proxy := transport.Proxy
+	transport.Proxy = func(req *http.Request) (*url.URL, error) {
+		if req.URL.Host == daemonSocketHost || proxy == nil {
+			return nil, nil
+		}
+		return proxy(req)
+	}
+	base := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr != daemonSocketHost+":80" {
+			return base(ctx, network, addr)
+		}
+		s, err := resolveHostSettings()
+		if err != nil {
+			return nil, err
+		}
+		if s.listen.Network != "unix" {
+			return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", s.listen.Address)
+	}
+	// The daemon's CORS plug admits only loopback authorities, so the synthetic
+	// host must not reach it: the request carries `Host: localhost` on the wire.
+	// The daemon never redirects, so a Location header is not a hop to follow:
+	// an absolute one would carry the request off the socket onto TCP.
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: socketHostTransport{transport},
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("daemon redirected to %s; the daemon API never redirects, refusing to follow", req.URL)
+		},
+	}
+}
+
+// socketHostTransport rewrites the wire Host of a request to the synthetic
+// socket host to `localhost`, leaving the URL (and so the dial) untouched.
+type socketHostTransport struct{ next http.RoundTripper }
+
+func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == daemonSocketHost {
+		req = req.Clone(req.Context())
+		req.Host = "localhost"
+	}
+	return t.next.RoundTrip(req)
 }
 
 // Timeouts for the daemon transport. Three, not one, because they bound
@@ -64,7 +142,7 @@ func (e daemonStatusError) Error() string {
 // isLifecycleTransportError has one error shape to recognize. Callers that want
 // JSON unmarshal the returned bytes themselves.
 func getDaemon(url string, timeout time.Duration) ([]byte, error) {
-	client := &http.Client{Timeout: timeout}
+	client := daemonHTTPClient(timeout)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
@@ -74,7 +152,7 @@ func getDaemon(url string, timeout time.Duration) ([]byte, error) {
 }
 
 func postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, error) {
-	client := &http.Client{Timeout: timeout}
+	client := daemonHTTPClient(timeout)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
@@ -129,7 +207,11 @@ func postLifecycle(action string, payload map[string]any) (string, error) {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}
 
-	respBody, err := postDaemon(daemonURL()+"/api/v1/lifecycle", body, daemonLifecycleTimeout)
+	endpoint, err := daemonEndpoint("/api/v1/lifecycle")
+	if err != nil {
+		return "", err
+	}
+	respBody, err := postDaemon(endpoint, body, daemonLifecycleTimeout)
 	if err != nil {
 		return "", err
 	}

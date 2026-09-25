@@ -27,8 +27,30 @@ else
   LAUNCHER=""
 fi
 
-PORT="${SHUTTLE_PORT:-4000}"
-BASE="http://127.0.0.1:$PORT"
+# Where the daemon listens — `felt shuttle host --json`, the same resolution
+# the daemon binds with: a unix socket on a shared or exposed host, loopback
+# TCP otherwise. A felt that errors (a malformed host.json, a refused listen
+# address) stops the verb with felt's own message; only a felt that has no
+# `host` verb at all, or no felt, falls back to 127.0.0.1:${SHUTTLE_PORT:-4000}.
+# Sets SOCK (empty for tcp), BASE, and ADDR (for messages).
+resolve_listen() {
+  SOCK=""
+  listen=""
+  if command -v felt >/dev/null 2>&1; then
+    if out=$(felt shuttle host --json 2>&1); then
+      listen=$(printf '%s\n' "$out" | sed -n 's/.*"listen": *"\([^"]*\)".*/\1/p' | head -n 1)
+    else
+      echo "shuttle: cannot resolve the daemon's listen address:" >&2
+      printf '%s\n' "$out" >&2
+      exit 1
+    fi
+  fi
+  case "$listen" in
+    unix://*) SOCK="${listen#unix://}"; BASE="http://localhost"; ADDR="$listen" ;;
+    tcp://*) BASE="http://${listen#tcp://}"; ADDR="$listen" ;;
+    *) BASE="http://127.0.0.1:${SHUTTLE_PORT:-4000}"; ADDR="tcp://127.0.0.1:${SHUTTLE_PORT:-4000}" ;;
+  esac
+}
 
 need_launcher() {
   if [ -z "$LAUNCHER" ]; then
@@ -37,15 +59,17 @@ need_launcher() {
   fi
 }
 
-api_get() { curl -fsS --max-time 5 "$BASE$1"; }
+# `--unix-socket` only when there is one; the socket path is free of
+# whitespace (felt refuses it), so the unquoted expansion splits cleanly.
+api_get() { curl -fsS --max-time 5 ${SOCK:+--unix-socket "$SOCK"} "$BASE$1"; }
 
 api_post() {
   path="$1"
   body="${2:-}"
   if [ -n "$body" ]; then
-    curl -fsS --max-time 10 -X POST -H "Content-Type: application/json" -d "$body" "$BASE$path"
+    curl -fsS --max-time 10 ${SOCK:+--unix-socket "$SOCK"} -X POST -H "Content-Type: application/json" -d "$body" "$BASE$path"
   else
-    curl -fsS --max-time 10 -X POST "$BASE$path"
+    curl -fsS --max-time 10 ${SOCK:+--unix-socket "$SOCK"} -X POST "$BASE$path"
   fi
 }
 
@@ -604,15 +628,20 @@ CMD="${1:-}"
 case "$CMD" in
   start)
     need_launcher
+    [ "${1:-}" = "--force" ] || resolve_listen
     if [ "${1:-}" != "--force" ] && api_get /api/v1/state >/dev/null 2>&1; then
-      echo "Daemon already running at localhost:$PORT." >&2
+      echo "Daemon already running at $ADDR." >&2
       echo "If a keep-alive supervisor owns it, cycle it there:" >&2
       echo "  launchctl kickstart -k gui/\$(id -u)/io.shuttle.daemon   (macOS)" >&2
       echo "  systemctl --user restart shuttle-daemon.service         (Linux)" >&2
       # Deliberately not `make stop`: a fetched install has no Makefile, and
       # this message reaches that reader too.
       echo "Otherwise stop the listener directly:" >&2
-      echo "  lsof -ti:$PORT -sTCP:LISTEN | xargs kill" >&2
+      if [ -n "$SOCK" ]; then
+        echo "  lsof -t -- $SOCK | xargs kill" >&2
+      else
+        echo "  lsof -ti:${BASE##*:} -sTCP:LISTEN | xargs kill" >&2
+      fi
       echo "Pass --force to launch anyway." >&2
       exit 1
     fi
@@ -622,16 +651,19 @@ case "$CMD" in
     ;;
 
   snapshot)
-    api_get /api/v1/state || { echo "(daemon down at localhost:$PORT)" >&2; exit 2; }
+    resolve_listen
+    api_get /api/v1/state || { echo "(daemon down at $ADDR)" >&2; exit 2; }
     echo
     ;;
 
   status)
-    api_get /api/v1/state || { echo "(daemon down at localhost:$PORT)" >&2; exit 2; }
+    resolve_listen
+    api_get /api/v1/state || { echo "(daemon down at $ADDR)" >&2; exit 2; }
     echo
     ;;
 
   release)
+    resolve_listen
     if api_post /api/v1/quarantine/release >/dev/null; then
       echo "quarantine released — parked launches will dispatch on the next tick"
     else
@@ -643,6 +675,7 @@ case "$CMD" in
   reset)
     REMOTE="${1:-}"
     [ -n "$REMOTE" ] || { echo "Usage: shuttle reset <remote>" >&2; exit 1; }
+    resolve_listen
     if api_post "/api/v1/remotes/$REMOTE/reset" >/dev/null; then
       echo "circuit breaker reset for $REMOTE — recovery cascade re-running"
     else
@@ -657,10 +690,11 @@ case "$CMD" in
     # Dispatch goes through the running daemon (same as `felt shuttle
     # dispatch`). The escript-era daemonless in-process dispatch is gone:
     # start the daemon first.
+    resolve_listen
     if api_post /api/v1/dispatch "{\"fiber_id\":\"$FIBER\"}"; then
       echo
     else
-      echo "dispatch failed: daemon unreachable at localhost:$PORT (start it first)" >&2
+      echo "dispatch failed: daemon unreachable at $ADDR (start it first)" >&2
       exit 1
     fi
     ;;
@@ -676,6 +710,7 @@ case "$CMD" in
   version)
     # Prefer the live daemon's build stamp; fall back to the release's own
     # version when no daemon is up.
+    resolve_listen
     if api_get /api/v1/version 2>/dev/null; then
       echo
     else

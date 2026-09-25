@@ -259,6 +259,7 @@ defmodule ShuttleWeb.FleetController do
       string_flag(params, "tunnel_manager", "--tunnel-manager"),
       int_flag(params, "port", "--port"),
       int_flag(params, "remote_port", "--remote-port"),
+      string_flag(params, "remote_socket", "--remote-socket"),
       bool_flag(params, "multiplex", "--multiplex")
     ]
     |> List.flatten()

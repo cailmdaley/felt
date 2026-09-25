@@ -36,7 +36,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=/home/tester
-ExecStart=/usr/bin/autossh -N -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -L 4001:localhost:4000 alpha-login
+ExecStart=/usr/bin/autossh -N -M 0 -S none -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=no -o ExitOnForwardFailure=yes -L "4001:localhost:4000" alpha-login
 
 # AUTOSSH_GATETIME=0: never treat a short-lived first connection as a fatal
 # start failure, so a tunnel to a host that is still booting keeps retrying.

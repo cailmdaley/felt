@@ -8,6 +8,10 @@ defmodule ShuttleWeb.VersionController do
   (`Shuttle.Contract.expected_level/0`) versus what it PROBED at boot from the
   CLI (`felt shuttle contract`, cached in the Poller's `contract_check`
   state). Makes a skew human-visible remotely, not just in the boot log/board.
+
+  Also where this daemon listens (`listen`, e.g. `"unix:///…/daemon.sock"`)
+  and the host class that chose it (`host_class`, e.g. `"single-user"`), as
+  bound at boot.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -15,7 +19,13 @@ defmodule ShuttleWeb.VersionController do
   @state_timeout_ms 1_500
 
   def show(conn, _params) do
-    json(conn, Map.put(Shuttle.BuildStamp.stamp(), :contract, contract_check()))
+    json(
+      conn,
+      Shuttle.BuildStamp.stamp()
+      |> Map.put(:contract, contract_check())
+      |> Map.put(:listen, Shuttle.listen())
+      |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
+    )
   end
 
   # The Poller probes once at boot and caches the result (`contract_check`
@@ -29,6 +39,11 @@ defmodule ShuttleWeb.VersionController do
     |> Map.put(:expected, Shuttle.Contract.expected_level())
   catch
     :exit, _ ->
-      %{expected: Shuttle.Contract.expected_level(), observed: nil, ok: nil, reason: "poller_unavailable"}
+      %{
+        expected: Shuttle.Contract.expected_level(),
+        observed: nil,
+        ok: nil,
+        reason: "poller_unavailable"
+      }
   end
 end

@@ -1,0 +1,3 @@
+{
+  "listen": "unix://sock/daemon.sock"
+}

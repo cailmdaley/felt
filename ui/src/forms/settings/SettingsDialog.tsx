@@ -31,6 +31,7 @@ import { AppDialog } from '../AppDialog'
 import { SettingsDraftContext } from './SettingsDraftContext'
 import { AgentsSection } from './AgentsSection'
 import { FleetSection } from './FleetSection'
+import { HostClassSection } from './HostClassSection'
 import { HostSection } from './HostSection'
 import { PathListSection } from './PathListSection'
 import { injectSettingsStyles } from './settingsStyles'
@@ -41,13 +42,14 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
-type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'host'
+type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host'
 
 const SECTIONS: Array<{ id: SectionId; label: string }> = [
   { id: 'stores', label: 'Stores' },
   { id: 'projects', label: 'Projects' },
   { id: 'agents', label: 'Agents' },
   { id: 'fleet', label: 'Fleet' },
+  { id: 'hostClass', label: 'Host class' },
   { id: 'host', label: 'Host' },
 ]
 
@@ -281,6 +283,14 @@ export function SettingsDialog({
             )}
             {section === 'fleet' && (
               <FleetSection shuttleBase={shuttleBase} host={host} onChanged={changed} />
+            )}
+            {section === 'hostClass' && (
+              <HostClassSection
+                shuttleBase={shuttleBase}
+                host={host}
+                summary={summaryFor('host')}
+                onChanged={changed}
+              />
             )}
             {section === 'host' && <HostSection shuttleBase={shuttleBase} host={host} />}
           </div>

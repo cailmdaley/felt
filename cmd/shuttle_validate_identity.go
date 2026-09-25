@@ -128,7 +128,11 @@ Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 // URL. The fleet file is the single source of the port map, so this list can no
 // longer drift from what the tunnels install and the daemon polls.
 func defaultIdentityDaemonURLs() ([]string, error) {
-	urls := []string{fmt.Sprintf("http://127.0.0.1:%d", defaultRemoteDaemonPort)}
+	local, err := daemonURL()
+	if err != nil {
+		return nil, err
+	}
+	urls := []string{local}
 	remotes, err := configuredRemotes()
 	if err != nil {
 		return nil, err

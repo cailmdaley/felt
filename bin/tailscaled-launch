@@ -60,21 +60,21 @@
 # and reach every daemon in the tailnet, `:4000` control API included. An HPC
 # login node routinely has a dozen other people on it.
 #
-# Only a hub needs this. A node that merely runs `tailscale serve` to expose
-# its own daemon needs no outbound proxy at all, so running one there is pure
-# exposure for no function. Hence: set $TAILSCALED_HTTP_PROXY to the listen
-# address (e.g. `localhost:1055`) on the ONE host that composites the fleet,
-# and leave it unset everywhere else. When you do set it, `defaults.https_proxy`
-# in ~/.config/felt/remotes.json must name the same address — two independent
-# settings in independent files, and nothing checks that they agree.
+# Only a hub needs this, and only a hub whose loopback is its own. The daemon
+# refuses `defaults.https_proxy` unless ~/.config/felt/host.json declares the
+# host `single-user` (docs/shuttle/installation.md, "Host classes and trust
+# boundaries"), so on a shared login node the proxy buys nothing and
+# `felt setup receipt` flags it. A shared host dials out over ssh instead —
+# into the tailnet from userspace mode via
+# `ssh -o ProxyCommand="tailscale nc %h %p"`, which rides this tailscaled's
+# private LocalAPI socket and opens no listener. Set $TAILSCALED_HTTP_PROXY
+# to the listen address (e.g. `localhost:1055`) on a single-user hub only;
+# `defaults.https_proxy` in remotes.json must name the same address — two
+# settings in two files, and the receipt reports when the class forbids it.
 #
 # $TAILSCALED_SOCKS5 is the same switch for `--socks5-server`, and nothing in
 # felt or shuttle uses it; it exists only because a human occasionally wants a
 # SOCKS route out of a login node. Same exposure, same default: off.
-#
-# Neither flag has an authentication option. On a shared node the residual
-# risk of enabling the proxy is real and unmitigated at this layer — the fix
-# there is authentication on the daemons' own :4000, not a cleverer port.
 
 set -u
 
@@ -114,7 +114,7 @@ TAILSCALED=$(command -v tailscaled 2>/dev/null || printf '%s' "$HOME/.local/bin/
 }
 
 if [ "${1:-}" = "--loop" ]; then
-  mkdir -p "$ST" || exit 1
+  mkdir -p -m 700 "$ST" && chmod 700 "$ST" || exit 1
   LOG="$ST/tailscaled.log"
   # Size-rotate at 16MB keeping one previous generation, the same mechanism
   # shuttle-launch uses (mv the current file aside between respawns) but a
@@ -163,7 +163,7 @@ if [ "${1:-}" = "--restart" ]; then
   RESTART=1
 fi
 
-mkdir -p "$ST" || exit 1
+mkdir -p -m 700 "$ST" && chmod 700 "$ST" || exit 1
 
 # Re-enter THIS copy of the script, the way shuttle-launch does: running it
 # straight out of a checkout must not silently start the installed copy (or

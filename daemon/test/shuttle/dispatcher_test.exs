@@ -1717,7 +1717,7 @@ defmodule Shuttle.DispatcherTest do
       Dispatcher.render_capture_prompt("make the board sing\nwith two lines",
         session: "capture-ab12cd34",
         felt_store: "/Users/x/loom",
-        port: 4123,
+        listen: "tcp://127.0.0.1:4123",
         session_uuid: "uuid-cap-1",
         agent_id: "claude-opus",
         project_dir: "/Users/x/projects/portolan",
@@ -1734,7 +1734,20 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ ~s("agent":"claude-opus")
     assert prompt =~ ~s("host":"test-host")
     # The claim callback, with this session's identity baked in.
-    assert prompt =~ "http://localhost:4123/api/v1/claim"
+    assert prompt =~ "Claim endpoint: http://127.0.0.1:4123/api/v1/claim"
+    # On a unix listener the worker has no port; the line carries the socket form.
+    unix_prompt =
+      Dispatcher.render_capture_prompt("yap",
+        session: "capture-ab12cd34",
+        felt_store: "/Users/x/loom",
+        listen: "unix:///srv/shuttle/sock/daemon.sock",
+        agent_id: "claude-opus",
+        project_dir: "/Users/x/projects/portolan",
+        host: "test-host"
+      )
+
+    assert unix_prompt =~
+             "Claim endpoint: http://localhost/api/v1/claim via `curl --unix-socket '/srv/shuttle/sock/daemon.sock'`"
     assert prompt =~ ~s("tmux_session":"capture-ab12cd34")
     assert prompt =~ ~s("session_uuid":"uuid-cap-1")
     # Capture behavior is defined once in its reference.
@@ -1753,7 +1766,7 @@ defmodule Shuttle.DispatcherTest do
       host: "host-a",
       effort: "high",
       chrome: true,
-      port: 4567
+      listen: "tcp://127.0.0.1:4567"
     ]
 
     for surface <- ["cli", "app"] do
@@ -1764,7 +1777,7 @@ defmodule Shuttle.DispatcherTest do
 
       assert String.ends_with?(prompt, "From User:\n" <> message)
       assert prompt =~ "references/capture.md"
-      assert prompt =~ "http://localhost:4567/api/v1/claim"
+      assert prompt =~ "Claim endpoint: http://127.0.0.1:4567/api/v1/claim"
       [_, install_json] = Regex.run(~r/^Install: (.+)$/m, prompt)
       [_, claim_json] = Regex.run(~r/^Claim: (.+)$/m, prompt)
       install = Jason.decode!(install_json)

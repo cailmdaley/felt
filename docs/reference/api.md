@@ -322,7 +322,7 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move) |
+| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address) and `host_class` (the declared trust class) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |

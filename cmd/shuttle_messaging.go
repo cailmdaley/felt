@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -51,7 +50,11 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 		}
 		directory = messaging.Discover(ctx, host)
 	} else {
-		u, parseErr := url.Parse(daemonURL() + "/api/v1/peers")
+		endpoint, urlErr := daemonEndpoint("/api/v1/peers")
+		if urlErr != nil {
+			return urlErr
+		}
+		u, parseErr := url.Parse(endpoint)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -325,7 +328,10 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	if err != nil {
 		return receipt, fmt.Errorf("encoding message: %w", err)
 	}
-	endpoint := daemonURL() + "/api/v1/messages"
+	endpoint, err := daemonEndpoint("/api/v1/messages")
+	if err != nil {
+		return receipt, err
+	}
 	timeout := 30 * time.Second
 	if len(request.Attachments) > 0 {
 		// A distinct route makes old daemons refuse the entire send instead of
@@ -333,10 +339,10 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 		endpoint += "/files"
 		timeout = 120 * time.Second
 	}
-	client := &http.Client{Timeout: timeout}
+	client := daemonHTTPClient(timeout)
 	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
 	if err != nil {
-		return receipt, fmt.Errorf("reaching daemon at %s: %w", daemonURL(), err)
+		return receipt, fmt.Errorf("reaching daemon at %s: %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMessageReceiptBytes+1))

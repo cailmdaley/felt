@@ -20,7 +20,7 @@
  */
 
 /** Which operator file. The wire names are the files' own stems. */
-export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes'
+export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes' | 'host'
 
 /** What a config file is called on screen, and what it governs. */
 export const CONFIG_FILENAME: Record<ConfigId, string> = {
@@ -28,7 +28,12 @@ export const CONFIG_FILENAME: Record<ConfigId, string> = {
   projects: 'projects.json',
   agents: 'agents.json',
   remotes: 'remotes.json',
+  host: 'host.json',
 }
+
+/** The three values `host.json`'s `"class"` accepts. */
+export const HOST_CLASSES = ['single-user', 'shared-multi-user', 'exposed'] as const
+export type HostClass = (typeof HOST_CLASSES)[number]
 
 export interface ConfigFileSummary {
   id: ConfigId
@@ -57,7 +62,7 @@ export interface ConfigFile extends ConfigFileSummary {
   text: string
   /**
    * The two path-list files, parsed by the reader that owns them; null for
-   * `agents` and `remotes`.
+   * `agents`, `remotes` and `host`.
    *
    * This is where a structured list editor gets its rows — NOT the origins
    * feed, which reports an empty list for a remote the hub has not heard from
@@ -621,3 +626,22 @@ export async function loadHostState(base: string, host: SettingsHost): Promise<H
 /** Release a host's boot quarantine — owner-routed, so a hub can arm a remote. */
 export const releaseQuarantine = (base: string, host: SettingsHost): Promise<unknown> =>
   postJSON(base, '/api/v1/quarantine/release', { origin: host.origin }, host.label)
+
+// ── Version ─────────────────────────────────────────────────────────────────
+
+export interface VersionInfo extends BuildStamp {
+  contract?: { ok: boolean | null; expected: number | null; observed: number | null }
+  /** Where this daemon is bound at boot, e.g. `unix:///…/daemon.sock`. */
+  listen?: string
+  /** The `host.json` class that chose that address, e.g. `single-user`. */
+  host_class?: string
+}
+
+/**
+ * `GET /api/v1/version` — NOT owner-routed. Every other read on this page
+ * carries `origin` and is forwarded to the host being configured; this one
+ * route has no such forwarding, so it only ever answers for the daemon
+ * actually serving the page. Callers show it only when `host.isLocal`.
+ */
+export const loadVersion = (base: string): Promise<VersionInfo> =>
+  getJSON(base, '/api/v1/version', '(this daemon)')

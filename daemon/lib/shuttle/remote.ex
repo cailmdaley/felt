@@ -8,7 +8,10 @@ defmodule Shuttle.Remote do
   stamping, `Shuttle.OriginRouter.route/2`, and `--remote NAME` all key off it.
 
   `url` is whatever local URL the SSH tunnel maps the remote daemon's
-  `127.0.0.1:<remote_port>` to. Give a `port` and the URL derives from it
+  listener to — `127.0.0.1:<remote_port>`, or `remote_socket` when that daemon
+  listens on a unix socket (`Shuttle.Host`). Either way the local end of the
+  tunnel is a TCP port, so to this daemon a socket remote is an ordinary
+  tunnelled one; only the far end differs. Give a `port` and the URL derives from it
   (`http://127.0.0.1:<port>`); give a `url` outright for a remote reached
   without a locally-managed tunnel.
 
@@ -29,6 +32,7 @@ defmodule Shuttle.Remote do
     :display,
     :port,
     remote_port: 4_000,
+    remote_socket: nil,
     tunnel: %{manager: :launchd, multiplex: false, label: nil},
     enabled: true,
     poll_interval_ms: 5_000,
@@ -48,7 +52,8 @@ defmodule Shuttle.Remote do
           ssh: String.t() | nil,
           display: String.t(),
           port: pos_integer() | nil,
-          remote_port: pos_integer(),
+          remote_port: non_neg_integer(),
+          remote_socket: String.t() | nil,
           tunnel: tunnel(),
           enabled: boolean(),
           poll_interval_ms: pos_integer(),
@@ -70,7 +75,11 @@ defmodule Shuttle.Remote do
     * `display` — `name`. Presentation only, never an address: two ways to name
       one origin is how a mis-stamped origin silently degrades to `:local`.
     * `url` — `http://127.0.0.1:<port>`
-    * `remote_port` — 4000 (the daemon port on the far side of the tunnel)
+    * `remote_port` — 4000 (the daemon port on the far side of the tunnel),
+      or 0 when the entry names a `remote_socket` instead. The two are
+      mutually exclusive, and an entry naming both is dropped, as is a
+      `remote_socket` outside the Go reader's rule (an absolute, clean path of
+      `A-Za-z0-9._/@+-`) — the Go reader refuses the same entries
     * `tunnel.manager` — `:none` for any entry with no `port` (nothing to
       forward means nothing to supervise, on every platform); otherwise
       `:launchd` on darwin, `:none` elsewhere. This answers
@@ -100,7 +109,9 @@ defmodule Shuttle.Remote do
     url = fetch(entry, :url) || derived_url(port)
 
     with {:ok, port} <- port,
-         {:ok, remote_port} <- normalize_remote_port(fetch(entry, :remote_port)),
+         {:ok, remote_socket} <- normalize_remote_socket(fetch(entry, :remote_socket)),
+         {:ok, remote_port} <-
+           normalize_remote_port(fetch(entry, :remote_port), remote_socket),
          {:ok, poll_interval_ms} <- positive_integer(fetch(entry, :poll_interval_ms), 5_000),
          {:ok, request_timeout_ms} <- positive_integer(fetch(entry, :request_timeout_ms), 2_000),
          {:ok, stale_multiplier} <- positive_integer(fetch(entry, :stale_multiplier), 4),
@@ -112,6 +123,7 @@ defmodule Shuttle.Remote do
         display: string_or(fetch(entry, :display), name),
         port: port,
         remote_port: remote_port,
+        remote_socket: remote_socket,
         tunnel: tunnel_from(fetch(entry, :tunnel), port),
         enabled: fetch(entry, :enabled) != false,
         poll_interval_ms: poll_interval_ms,
@@ -141,13 +153,40 @@ defmodule Shuttle.Remote do
   defp normalize_port(port) when is_integer(port) and port in 1..65_535, do: {:ok, port}
   defp normalize_port(_), do: :error
 
-  defp normalize_remote_port(nil), do: {:ok, @default_remote_port}
-  defp normalize_remote_port(0), do: {:ok, @default_remote_port}
+  defp normalize_remote_port(port, socket) when is_binary(socket) and port in [nil, 0],
+    do: {:ok, 0}
 
-  defp normalize_remote_port(port) when is_integer(port) and port in 1..65_535,
+  defp normalize_remote_port(_port, socket) when is_binary(socket), do: :error
+  defp normalize_remote_port(nil, nil), do: {:ok, @default_remote_port}
+  defp normalize_remote_port(0, nil), do: {:ok, @default_remote_port}
+
+  defp normalize_remote_port(port, nil) when is_integer(port) and port in 1..65_535,
     do: {:ok, port}
 
-  defp normalize_remote_port(_), do: :error
+  defp normalize_remote_port(_, nil), do: :error
+
+  defp normalize_remote_socket(nil), do: {:ok, nil}
+
+  # The Go reader's rule, byte for byte: an absolute, clean path of characters
+  # that survive `ssh -L`, the launchd plist and the systemd unit unquoted.
+  @remote_socket ~r{\A/[A-Za-z0-9._/@+-]+\z}
+
+  defp normalize_remote_socket(value) when is_binary(value) do
+    case String.trim(value) do
+      "" ->
+        {:ok, nil}
+
+      path ->
+        if Regex.match?(@remote_socket, path) and clean?(path), do: {:ok, path}, else: :error
+    end
+  end
+
+  defp normalize_remote_socket(_), do: :error
+
+  # Go's `filepath.Clean(path) == path` for an absolute path: no `.` or `..`
+  # segment, no `//`, no trailing `/`.
+  defp clean?("/" <> rest),
+    do: rest |> String.split("/") |> Enum.all?(&(&1 not in ["", ".", ".."]))
 
   defp positive_integer(nil, default), do: {:ok, default}
   defp positive_integer(0, default), do: {:ok, default}

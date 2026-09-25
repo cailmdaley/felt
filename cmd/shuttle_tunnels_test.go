@@ -133,7 +133,7 @@ func TestInstallTunnels_Systemd(t *testing.T) {
 	for _, want := range []string{
 		"[Service]",
 		"ExecStart=/usr/bin/autossh",
-		"-L 4001:localhost:4000 alpha-login",
+		`-L "4001:localhost:4000" alpha-login`,
 		"WantedBy=default.target",
 	} {
 		if !strings.Contains(body, want) {
@@ -257,7 +257,8 @@ func renderForTest(t *testing.T, tmplText string, spec tunnelSpec) string {
 		Label:       spec.Label,
 		SSHHost:     spec.SSHHost,
 		LocalPort:   spec.LocalPort,
-		RemotePort:  spec.RemotePort,
+		Forward:     spec.forward(),
+		RemoteEnd:   spec.remoteEnd(),
 		Multiplex:   spec.Multiplex,
 		AutoSSHPath: "/usr/bin/autossh",
 		LogPath:     "/tmp/tunnel.log",
@@ -819,5 +820,96 @@ func assertGolden(t *testing.T, name, got string) {
 	}
 	if got != string(want) {
 		t.Errorf("job differs from %s\n--- got ---\n%s\n--- want ---\n%s", path, got, want)
+	}
+}
+
+// TestRenderTunnelJob_RemoteSocketForward — a remote whose daemon listens on a
+// unix socket is forwarded with OpenSSH's port:socket form, bound to loopback,
+// in every template and both transports; no TCP remote port leaks in.
+func TestRenderTunnelJob_RemoteSocketForward(t *testing.T) {
+	const sock = "/srv/shuttle/sock/daemon.sock"
+	for _, tmpl := range []struct{ name, text string }{
+		{"plist", tunnelPlistTemplate},
+		{"service", tunnelServiceTemplate},
+	} {
+		for _, multiplex := range []bool{false, true} {
+			got := renderForTest(t, tmpl.text, tunnelSpec{
+				Name: "alpha", SSHHost: "alpha-login", Label: "io.shuttle.shuttle-tunnel-alpha",
+				LocalPort: 4001, RemoteSocket: sock, Multiplex: multiplex,
+			})
+			if !strings.Contains(got, "127.0.0.1:4001:"+sock) {
+				t.Errorf("%s multiplex=%v: forward should be 127.0.0.1:4001:%s\n%s", tmpl.name, multiplex, sock, got)
+			}
+			if strings.Contains(got, "localhost:") {
+				t.Errorf("%s multiplex=%v: a socket forward must not name a TCP remote port\n%s", tmpl.name, multiplex, got)
+			}
+		}
+	}
+}
+
+func TestResolveTunnelSpecs_RemoteSocket(t *testing.T) {
+	writeRemotes(t, `{"version":1,"remotes":[
+	  {"name":"alpha","port":4001,"remote_socket":"/srv/shuttle/sock/daemon.sock","tunnel":{"manager":"launchd"}}
+	]}`)
+	specs, err := resolveTunnelSpecs(nil)
+	if err != nil {
+		t.Fatalf("resolveTunnelSpecs: %v", err)
+	}
+	if len(specs) != 1 || specs[0].RemoteSocket != "/srv/shuttle/sock/daemon.sock" || specs[0].RemotePort != 0 {
+		t.Fatalf("spec = %+v, want the socket and no remote port", specs)
+	}
+	if got := specs[0].forward(); got != "127.0.0.1:4001:/srv/shuttle/sock/daemon.sock" {
+		t.Errorf("forward = %q", got)
+	}
+}
+
+// TestRenderTunnelJob_RefusesHostileForward — a spec that did not come
+// through the fleet validator still cannot inject into a plist, a unit, or
+// the multiplex `sh -c` loop: the renderer refuses any forward outside the
+// allowlisted alphabet, in every template.
+func TestRenderTunnelJob_RefusesHostileForward(t *testing.T) {
+	hostile := []string{
+		"/srv/$(touch pwned).sock",
+		"/srv/a'; rm -rf ~; '.sock",
+		"/srv/</string><string>-oProxyCommand=x.sock",
+		"/srv/a\"b.sock",
+		"/srv/%h.sock",
+		"/srv/a b.sock",
+	}
+	for _, tmplText := range []string{tunnelPlistTemplate, tunnelServiceTemplate} {
+		tmpl := template.Must(template.New("shuttle-tunnel").Parse(tmplText))
+		for _, sock := range hostile {
+			for _, multiplex := range []bool{false, true} {
+				spec := tunnelSpec{Name: "alpha", SSHHost: "alpha-login", LocalPort: 4001, RemoteSocket: sock, Multiplex: multiplex}
+				out, err := renderTunnelJob(tmpl, tunnelTemplateData{
+					Label: "l", SSHHost: spec.SSHHost, LocalPort: spec.LocalPort,
+					Forward: spec.forward(), RemoteEnd: spec.remoteEnd(), Multiplex: multiplex,
+					AutoSSHPath: "/usr/bin/autossh", LogPath: "/tmp/t.log", Home: "/home/tester",
+				})
+				if err == nil {
+					t.Errorf("rendered hostile socket %q:\n%s", sock, out)
+				}
+			}
+			if err := validateRemoteSocket(sock); err == nil {
+				t.Errorf("validator accepted hostile socket %q", sock)
+			}
+		}
+	}
+}
+
+// TestRenderTunnelJob_SocketForwardIsQuoted — the forward is quoted for the
+// shell that reads it: single quotes inside the plist's sh script, double
+// quotes inside the unit (systemd strips them for exec, sh for the loop).
+func TestRenderTunnelJob_SocketForwardIsQuoted(t *testing.T) {
+	const sock = "/srv/shuttle/sock/daemon.sock"
+	spec := tunnelSpec{Name: "alpha", SSHHost: "alpha-login", Label: "l", LocalPort: 4001, RemoteSocket: sock, Multiplex: true}
+	if got := renderForTest(t, tunnelPlistTemplate, spec); !strings.Contains(got, "-L '127.0.0.1:4001:"+sock+"' alpha-login") {
+		t.Errorf("plist multiplex forward not single-quoted:\n%s", got)
+	}
+	for _, multiplex := range []bool{false, true} {
+		spec.Multiplex = multiplex
+		if got := renderForTest(t, tunnelServiceTemplate, spec); !strings.Contains(got, `-L "127.0.0.1:4001:`+sock+`" alpha-login`) {
+			t.Errorf("unit multiplex=%v forward not double-quoted:\n%s", multiplex, got)
+		}
 	}
 }

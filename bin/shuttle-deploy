@@ -10,7 +10,8 @@
 #                                             # no live master — human must approve
 #
 # Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
-# safe"): pull → make build → cycle the daemon (kill the :4000 listener, then
+# safe"): pull → make build → cycle the daemon (kill its listener — the
+# loopback port or unix socket `felt shuttle host` resolves on that host — then
 # let the host's own supervisor bring it back — launchd kickstart on macOS, a
 # systemd user unit's Restart=always, or the tmux respawn loop) → verify
 # git_short_sha flipped → release the boot quarantine the restart armed.
@@ -151,9 +152,52 @@ if [ "$PUSH" = 1 ]; then
   git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
 fi
 
+# Shell snippets that reach the daemon on whichever host runs them, at the
+# address that host's `felt shuttle host --json` resolves: its unix socket on a
+# shared or exposed host, its loopback port otherwise. A felt that errors (a
+# malformed host.json, a refused listen address) stops the snippet with felt's
+# message; only a felt with no `host` verb, or no felt, falls back to
+# 127.0.0.1:4000. The prelude sets `sock` (empty for tcp), `port` and `base`.
+listen_prelude() {
+  printf '%s' 'l=; if command -v felt >/dev/null 2>&1; then '
+  printf '%s' 'out=$(felt shuttle host --json 2>&1) || { echo "cannot resolve the daemon listen address: $out" >&2; exit 3; }; '
+  printf '%s' 'l=$(printf "%s\n" "$out" | sed -n '"'"'s/.*"listen": *"\([^"]*\)".*/\1/p'"'"' | head -n 1); fi; '
+  printf '%s' 'sock=; port=4000; '
+  printf '%s' 'case "$l" in unix://*) sock="${l#unix://}";; tcp://127.0.0.1:*) port="${l##*:}";; esac; '
+  printf '%s' 'base=http://127.0.0.1:$port; [ -n "$sock" ] && base=http://localhost; '
+}
+
+# Resolve the listen address on a host up front, with felt's error visible —
+# every later step discards stderr, and a resolution failure there would only
+# surface as a daemon that never answers.
+check_listen() { # $1 = "" (local) | host
+  local out
+  if [ -z "$1" ]; then out=$(bash -lc "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"' 2>&1)
+  else out=$(ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"')" 2>&1); fi
+  case "$out" in
+    *listen-ok*) return 0 ;;
+    *) bad "cannot resolve the daemon's listen address: $(printf '%s' "$out" | tail -n 3)"; return 1 ;;
+  esac
+}
+
+daemon_call() { # $1 = extra curl args, $2 = API path
+  listen_prelude
+  printf '%s' "curl -s --max-time 10 $1"' ${sock:+--unix-socket "$sock"} "$base'"$2"'"'
+}
+
+# Kill whatever holds the daemon's listener; the host's supervisor restarts it.
+daemon_kill() {
+  listen_prelude
+  printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi | xargs -r kill'
+}
+
+run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so felt is on PATH)
+  if [ -z "$1" ]; then bash -lc "$2"
+  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi 2>/dev/null
+}
+
 version_json() { # $1 = "" (local) | host
-  local cmd="curl -s --max-time 10 localhost:4000/api/v1/version"
-  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "$cmd"; fi 2>/dev/null
+  run_on "$1" "$(daemon_call "" /api/v1/version)"
 }
 
 version_sha() { # $1 = "" (local) | host
@@ -169,9 +213,7 @@ version_booted_at() { # $1 = "" | host
 }
 
 release_quarantine() { # $1 = "" | host
-  local cmd="curl -s --max-time 10 -X POST localhost:4000/api/v1/quarantine/release"
-  if [ -z "$1" ]; then $cmd; else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "$cmd"; fi 2>/dev/null \
-    | grep -q '"ok":true'
+  run_on "$1" "$(daemon_call "-X POST" /api/v1/quarantine/release)" | grep -q '"ok":true'
 }
 
 wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA from a FRESH boot
@@ -192,11 +234,12 @@ deploy_local() {
   say "local ($TARGET_SHA)"
   bash -lc "cd $(shell_quote "$REPO") && make build" >/dev/null \
     || { bad "make build failed"; return 1; }
-  # Kill the :4000 listener FIRST: the daemon may be running outside launchd
+  # Kill the listener FIRST: the daemon may be running outside launchd
   # (a hand-started `bin/shuttle start`), where kickstart restarts nothing and
   # the old BEAM keeps running the previous release. The booted_at check in
   # wait_for_sha verifies that the cycle actually happened.
-  lsof -ti:4000 -sTCP:LISTEN | xargs -r kill 2>/dev/null; sleep 2
+  check_listen "" || return 1
+  run_on "" "$(daemon_kill)"; sleep 2
   launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
     || bash -lc "cd $(shell_quote "$REPO") && make restart" >/dev/null
   wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
@@ -221,7 +264,8 @@ deploy_remote() {
       || { bad "could not sync agent registry"; return 1; }
   fi
   # Cycle the listener; the host's supervisor starts the rebuilt release.
-  ssh $flags "$dest" "lsof -ti:4000 -sTCP:LISTEN | xargs -r kill" 2>/dev/null
+  check_listen "$host" || return 1
+  run_on "$host" "$(daemon_kill)"
   wait_for_sha "$host" \
     || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \

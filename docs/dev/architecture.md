@@ -114,6 +114,60 @@ creation and a direct link into the ChatGPT app are separate capabilities:
 session identity does not imply a working phone URL. Shuttle must not invent
 a cloud-task URL for a local conversation.
 
+## Trust boundaries
+
+The daemon's control plane has no authentication: anything that reaches its
+listener can read and write every registered fiber, read transcripts, and
+launch or kill workers as the user running it. The stance this follows from is
+that the *listener* is the boundary, so the listener has to match the trust
+of the host it runs on rather than the daemon carrying its own authentication
+layer.
+
+A host declares its trust class — `single-user`, `shared-multi-user`, or
+`exposed` — in `~/.config/felt/host.json`, set with `felt shuttle host class`
+and read with `felt shuttle host --json`. The class is a declared fact the
+operator asserts, not something the daemon infers from the host; `felt setup
+receipt` is the check that the assertion still holds against reality (logged-in
+users, the socket directory's mode, every fleet-owned listening socket).
+
+The class determines where the daemon binds. `single-user` listens on
+`tcp://127.0.0.1:4000` (`SHUTTLE_PORT`). `shared-multi-user` and `exposed`
+listen on the Unix socket `~/.shuttle/sock/daemon.sock`, inside a `0700`
+directory the daemon creates and verifies before binding — a directory found
+with looser permissions is a refusal to bind, not a downgrade. `host.json`'s
+`listen` key or `SHUTTLE_LISTEN` overrides either default, and the CLI
+resolves the same address to reach the daemon it is driving. A Unix socket
+changes who can even open a connection: a caller has to traverse the
+filesystem to the socket path, so only `sshd` running as the host's owner (an
+SSH tunnel's far end) or the local CLI can reach it, which is a permission
+check the kernel enforces rather than one the daemon has to implement. A host
+whose only inbound is SSH tunnels can run entirely off the socket.
+`tailscaled` cannot be a party to that check: `tailscale serve` cannot target
+a Unix socket from an unprivileged userspace instance, and the macOS system
+`tailscaled` cannot reach a filesystem socket at all — so a host fronted with
+`tailscale serve`, whatever its class, still needs a loopback TCP listener,
+and that listener is unauthenticated today.
+
+The daemon also refuses to dial out through `defaults.https_proxy` (a
+`remotes.json` setting that points outbound tailnet requests at a local
+Tailscale HTTP proxy) unless the host is `single-user`: that proxy is an
+unauthenticated loopback gateway to the whole tailnet, and on a shared host
+every co-tenant can reach it.
+
+Every connection the endpoint accepts gets peer facts assigned onto it —
+`conn.assigns.peer` carries the transport (`unix` or `tcp`), whether the
+request arrived through a forwarding proxy, and a `tailscale_login` identity.
+Nothing authorizes on these facts yet. A Unix-socket connection is already
+peer-verified by the kernel, by the reachability argument above; a TCP
+loopback connection — including one `tailscale serve` forwards through on a
+shared host — carries no such guarantee, so a `tailscale_login` header
+arriving over it is only as trustworthy as the transport that could have
+forged it. Closing that gap is the reason the peer facts exist: the design,
+not yet built, is a check against `/proc/net/tcp` that admits only loopback
+peers owned by the daemon's own uid, so `tailscaled` and `sshd`-as-you pass
+and a co-tenant dialing the port directly is refused. They are the hook a
+future capability-scoped authorization layer reads once it exists.
+
 ## Platform story
 
 **Linux and macOS are both supported for single-host use.** One host runs the

@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -97,7 +96,11 @@ type sessionLedgerResponse struct {
 }
 
 func fetchSessionLedger() (*sessionLedgerResponse, error) {
-	ledger, err := getDaemonJSON[sessionLedgerResponse](daemonURL()+sessionsCompositePath, "parsing session ledger")
+	endpoint, err := daemonEndpoint(sessionsCompositePath)
+	if err != nil {
+		return nil, err
+	}
+	ledger, err := getDaemonJSON[sessionLedgerResponse](endpoint, "parsing session ledger")
 	if err != nil {
 		if isLifecycleTransportError(err) {
 			return nil, fmt.Errorf("reading session provenance: %w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
@@ -111,7 +114,11 @@ func fetchSessionLedger() (*sessionLedgerResponse, error) {
 // receipt is JSON; bytes are fetched separately through the native transcript
 // raw endpoint so this command never requires a transcript encoding.
 func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
-	u, err := url.Parse(daemonURL() + transcriptPath)
+	endpoint, err := daemonEndpoint(transcriptPath)
+	if err != nil {
+		return TranscriptReceipt{}, err
+	}
+	u, err := url.Parse(endpoint)
 	if err != nil {
 		return TranscriptReceipt{}, err
 	}
@@ -234,10 +241,17 @@ type compositeFiberRow struct {
 	Fiber  map[string]any `json:"fiber"`
 }
 
+// compositeFiberRows is best-effort enrichment: every caller runs after the
+// same command fetched the session ledger, which has already failed loud on an
+// unresolvable daemon listener.
 func compositeFiberRows() []compositeFiberRow {
+	endpoint, err := daemonEndpoint("/api/v1/fibers/composite")
+	if err != nil {
+		return nil
+	}
 	response, err := getDaemonJSON[struct {
 		Fibers []compositeFiberRow `json:"fibers"`
-	}](daemonURL()+"/api/v1/fibers/composite", "parsing composite fibers")
+	}](endpoint, "parsing composite fibers")
 	if err != nil {
 		return nil
 	}
@@ -351,12 +365,16 @@ type sessionOwner struct {
 // commits made before the hook existed or outside a harness session — it is a
 // coverage boundary, not proof the commit has no session.
 func commitSession(sha string) (string, error) {
+	endpoint, err := daemonEndpoint("/api/v1/commits/composite")
+	if err != nil {
+		return "", err
+	}
 	response, err := getDaemonJSON[struct {
 		Records []struct {
 			SHA     string `json:"sha"`
 			Session string `json:"session"`
 		} `json:"records"`
-	}](daemonURL()+"/api/v1/commits/composite", "parsing commit ledger")
+	}](endpoint, "parsing commit ledger")
 	if err != nil {
 		return "", err
 	}
@@ -703,7 +721,11 @@ func transcriptCachePath(session string) (string, string, error) {
 }
 
 func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
-	u, err := url.Parse(daemonURL() + "/api/v1/transcript/raw")
+	endpoint, err := daemonEndpoint("/api/v1/transcript/raw")
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(endpoint)
 	if err != nil {
 		return "", err
 	}
@@ -713,7 +735,7 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 		q.Set("host", receipt.Host)
 	}
 	u.RawQuery = q.Encode()
-	client := &http.Client{Timeout: transcriptTransferTimeout}
+	client := daemonHTTPClient(transcriptTransferTimeout)
 	resp, err := client.Get(u.String())
 	if err != nil {
 		return "", fmt.Errorf("reaching daemon at %s: %w", u.String(), err)

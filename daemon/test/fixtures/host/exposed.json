@@ -1,0 +1,4 @@
+{
+  "class": "exposed",
+  "note": "unknown keys are carried, not read"
+}

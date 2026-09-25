@@ -1,0 +1,3 @@
+{
+  "listen": "unix:///srv/shuttle-fixture/../etc/daemon.sock"
+}
