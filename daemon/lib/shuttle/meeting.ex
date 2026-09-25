@@ -37,6 +37,8 @@ defmodule Shuttle.Meeting do
   @active_phases ~w(loading live stopping)
   @tail_bytes 8_192
   @command_timeout_ms 5_000
+  @launch_wait_ms 5_000
+  @launch_poll_ms 100
   @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}"
 
   @type tmux_status ::
@@ -83,18 +85,18 @@ defmodule Shuttle.Meeting do
   @spec start_capture(map(), String.t() | nil, String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, %{meeting: map(), prompt: String.t()}} | {:error, term()}
   def start_capture(meeting, note, origin, surface, opts \\ []) do
-    :global.trans({{__MODULE__, :start_capture}, self()}, fn ->
-      do_start_capture(meeting, note, origin, surface, opts)
-    end)
+    with_meeting_lock(fn -> do_start_capture(meeting, note, origin, surface, opts) end)
   end
 
   @doc "Stop the local meeting once, or dismiss a dead tmux pane."
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
   def stop(opts \\ []) do
-    with {:ok, snapshot, context} <- inspect_current(opts),
-         {:ok, result} <- stop_current(snapshot, context, opts) do
-      {:ok, result}
-    end
+    with_meeting_lock(fn ->
+      with {:ok, snapshot, context} <- inspect_current(opts),
+           {:ok, result} <- stop_current(snapshot, context, opts) do
+        {:ok, result}
+      end
+    end)
   end
 
   @doc "The validated hark executable selected for this daemon."
@@ -207,15 +209,14 @@ defmodule Shuttle.Meeting do
                Application.get_env(:shuttle, :meeting_now, NaiveDateTime.local_now())
              )
            ),
-         {:ok, paths} <- meeting_paths(name, origin, opts),
-         :ok <- File.mkdir_p(Path.dirname(paths.local_transcript)),
          :ok <- dismiss_failed(context, opts),
+         {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
          argv <- hark_argv(executable, paths, title, mode, launch_id),
          :ok <- create_session(argv, launch_id, opts),
-         {:ok, result} <- show(opts) do
+         {:ok, row} <- await_launch(launch_id, paths, title, opts) do
       message = meeting_message(mode, paths.transcript)
-      {:ok, %{meeting: result.meeting, prompt: message <> "\n\n" <> note}}
+      {:ok, %{meeting: row, prompt: message <> "\n\n" <> note}}
     else
       nil -> {:error, :unavailable}
       {:error, _reason} = error -> error
@@ -250,7 +251,9 @@ defmodule Shuttle.Meeting do
 
   defp ensure_startable(%{meeting: %{state: "failed"}}), do: :ok
 
-  defp dismiss_failed(%{meeting: %{state: "failed"}}, opts), do: kill_session(opts)
+  defp dismiss_failed(%{meeting: %{state: "failed"}, tmux: tmux}, opts),
+    do: kill_launch(tmux, opts)
+
   defp dismiss_failed(_context, _opts), do: :ok
 
   defp hark_argv(executable, paths, title, mode, launch_id) do
@@ -272,13 +275,14 @@ defmodule Shuttle.Meeting do
       @session,
       "-c",
       home_dir(opts),
+      "-e",
+      "HARK_DIR=" <> hark_dir(opts),
       "--",
       command,
       ";",
       "set-option",
-      "-s",
       "-t",
-      "=" <> @session,
+      "=" <> @session <> ":",
       @launch_option,
       launch_id,
       ";",
@@ -290,17 +294,89 @@ defmodule Shuttle.Meeting do
       "on"
     ]
 
+    # Once the session exists hark may be recording, so only a launch that
+    # provably created nothing is an error; anything after that is observed.
     {output, status} = run(opts, "tmux", args)
-    created? = created_session_id?(output)
 
-    if status == 0 and created? and session_launch(opts) == launch_id do
-      :ok
-    else
-      if created? and session_launch(opts) == launch_id, do: kill_session(opts)
+    cond do
+      status == 0 or created_session_id?(output) ->
+        :ok
 
-      {:error, {:operation, "tmux could not start hark (#{status}): #{String.trim(output)}"}}
+      match?({:ok, %{launch: ^launch_id}}, tmux_status(opts)) ->
+        :ok
+
+      true ->
+        {:error, {:operation, "tmux could not start hark (#{status}): #{String.trim(output)}"}}
     end
   end
+
+  # A reserved name never reuses a transcript: an earlier meeting in the same
+  # minute with the same note would otherwise be appended to after its end.
+  defp reserve_meeting_paths(name, origin, opts, suffix \\ 1) do
+    candidate = if suffix == 1, do: name, else: "#{name}-#{suffix}"
+
+    with {:ok, paths} <- meeting_paths(candidate, origin, opts),
+         :ok <- File.mkdir_p(Path.dirname(paths.local_transcript)) do
+      if File.exists?(paths.local_transcript),
+        do: reserve_meeting_paths(name, origin, opts, suffix + 1),
+        else: {:ok, paths}
+    end
+  end
+
+  # Watch the new launch briefly so a hark that dies at once never gets a
+  # scribe. A slow import or an unreadable tmux leaves it `starting`.
+  defp await_launch(launch_id, paths, title, opts) do
+    wait_ms = Application.get_env(:shuttle, :meeting_launch_wait_ms, @launch_wait_ms)
+    deadline = System.monotonic_time(:millisecond) + wait_ms
+    await_launch(launch_id, paths, title, opts, deadline)
+  end
+
+  defp await_launch(launch_id, paths, title, opts, deadline) do
+    observed =
+      case inspect_current(opts) do
+        {:ok, %{meeting: %{state: state} = row}, %{tmux: %{launch: ^launch_id}}}
+        when state in @active_phases ->
+          {:ok, row}
+
+        {:ok, %{meeting: %{state: "failed"} = row}, %{tmux: %{launch: ^launch_id}}} ->
+          {:error, {:launch_failed, row}}
+
+        {:ok, %{meeting: nil}, _context} ->
+          {:error,
+           {:launch_failed,
+            starting_row(paths, title, "failed", "hark exited before recording started")}}
+
+        _starting_or_unreadable ->
+          :pending
+      end
+
+    cond do
+      observed != :pending ->
+        observed
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:ok, starting_row(paths, title)}
+
+      true ->
+        Process.sleep(@launch_poll_ms)
+        await_launch(launch_id, paths, title, opts, deadline)
+    end
+  end
+
+  defp starting_row(paths, title, state \\ "starting", error \\ nil) do
+    %{
+      state: state,
+      title: title,
+      started_at: nil,
+      last_line: nil,
+      transcript: paths.local_transcript,
+      mirror_host: paths.mirror_host,
+      tmux_session: @session,
+      error: error
+    }
+  end
+
+  defp with_meeting_lock(fun), do: :global.trans({{__MODULE__, :meeting}, self()}, fun)
 
   defp created_session_id?(output), do: Regex.match?(~r/^\$[0-9]+$/m, output)
 
@@ -316,7 +392,7 @@ defmodule Shuttle.Meeting do
       identity = meeting_identity(tmux, usable_meeting, pid_alive?)
       :ok = Shuttle.Meeting.Control.reconcile(identity)
 
-      with :ok <- if(reap?, do: kill_session(opts), else: :ok) do
+      with :ok <- if(reap?, do: kill_launch(tmux, opts), else: :ok) do
         meeting =
           if is_map(meeting) do
             Map.put(meeting, :last_line, last_transcript_line(meeting.transcript))
@@ -353,12 +429,9 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp stop_current(%{meeting: %{state: "starting"}}, _context, opts) do
-    with :ok <- kill_session(opts), do: show(opts)
-  end
-
-  defp stop_current(%{meeting: %{state: "failed"}}, _context, opts) do
-    with :ok <- kill_session(opts), do: show(opts)
+  defp stop_current(%{meeting: %{state: state}}, context, opts)
+       when state in ["starting", "failed"] do
+    with :ok <- kill_launch(context.tmux, opts), do: show(opts)
   end
 
   defp read_meeting_json(opts) do
@@ -486,12 +559,16 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp session_launch(opts) do
+  # Kill the hark-meeting session only while it is still the launch that was
+  # inspected; an unlocked reader (GET) must never kill a newer launch.
+  defp kill_launch(%{launch: launch}, opts) do
     case tmux_status(opts) do
-      {:ok, %{launch: launch}} -> launch
-      _ -> nil
+      {:ok, %{launch: ^launch}} -> kill_session(opts)
+      _ -> :ok
     end
   end
+
+  defp kill_launch(_tmux, _opts), do: :ok
 
   defp last_transcript_line(path) when is_binary(path) and path != "" do
     case read_file_tail(path, @tail_bytes) do

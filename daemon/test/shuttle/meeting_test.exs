@@ -57,7 +57,8 @@ defmodule Shuttle.MeetingTest do
     :remotes,
     :own_host_id,
     :write_forward_client,
-    :meeting_now
+    :meeting_now,
+    :meeting_launch_wait_ms
   ]
   @tmux_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}"
 
@@ -676,6 +677,133 @@ defmodule Shuttle.MeetingTest do
            end)
 
     refute Enum.any?(calls, fn {command, _, _} -> command == "kill" end)
+  end
+
+  test "a second meeting in the same minute gets its own transcript and HARK_DIR is explicit", %{
+    hark_dir: hark_dir
+  } do
+    existing = Path.join(hark_dir, "meetings/2026-09-25_1403_shear-review.txt")
+    File.mkdir_p!(Path.dirname(existing))
+    File.write!(existing, "# hark\n# ended 14:04:00\n")
+    set_starting_meeting_handler(hark_dir)
+
+    assert {:ok, %{prompt: prompt}} =
+             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+
+    {"tmux", ["new-session" | args], _} =
+      Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    command = List.last(Enum.take_while(args, &(&1 != ";")))
+    assert command =~ "2026-09-25_1403_shear-review-2.txt"
+    refute command =~ "shear-review.txt'"
+    assert prompt =~ "2026-09-25_1403_shear-review-2.txt"
+
+    assert ["-e", "HARK_DIR=" <> ^hark_dir] =
+             Enum.slice(args, Enum.find_index(args, &(&1 == "-e")), 2)
+
+    assert File.read!(existing) == "# hark\n# ended 14:04:00\n"
+  end
+
+  test "a hark that exits at launch starts no scribe and says why", %{tmp_dir: tmp_dir} do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    start_supervised!({Shuttle.Test.MeetingCaptureForwardClient, {:ok, 200, "{}"}})
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["has-session" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["new-session" | args], _opts, _state ->
+        {{"$4\n", 0}, launch_from_tmux_args(args)}
+
+      "tmux", ["display-message" | _], _opts, launch ->
+        {{"1|2|1234|#{launch}\n", 0}, launch}
+
+      "tmux", ["capture-pane" | _], _opts, launch ->
+        {{"hark: error: unrecognized arguments: --launch\n", 0}, launch}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/capture",
+        Jason.encode!(%{
+          "meeting" => %{"mode" => "call"},
+          "prompt" => "Shear review",
+          "project_dir" => Path.join(tmp_dir, "remote-project"),
+          "origin" => "project-host"
+        })
+      )
+
+    assert conn.status == 503
+
+    assert %{"recording" => false, "error" => error, "meeting" => %{"state" => "failed"}} =
+             Jason.decode!(conn.resp_body)
+
+    assert error =~ "recording did not start"
+    assert error =~ "unrecognized arguments: --launch"
+    assert Shuttle.Test.MeetingCaptureForwardClient.last() == nil
+  end
+
+  test "an unreadable tmux after creation still reports recording as starting" do
+    Application.put_env(:shuttle, :meeting_launch_wait_ms, 300)
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["has-session" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["new-session" | _], _opts, _state ->
+        {{"$4\n", 0}, :created}
+
+      "tmux", ["has-session" | _], _opts, :created ->
+        {{"server exited unexpectedly", 1}, :created}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+
+    assert {:ok, %{meeting: %{state: "starting", tmux_session: "hark-meeting"}}} =
+             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+  end
+
+  test "a reap never kills a newer launch that replaced the inspected one", %{
+    hark_dir: hark_dir
+  } do
+    write_meeting(hark_dir, %{"launch" => "L1", "phase" => "ended", "pid" => 1, "title" => "old"})
+
+    Shuttle.Test.MeetingRunner.set_handler(
+      fn
+        "tmux", ["display-message" | _], _opts, 0 ->
+          {{"1|0|1234|L1\n", 0}, 1}
+
+        "tmux", ["display-message" | _], _opts, n ->
+          {{"0|0|1235|L2\n", 0}, n + 1}
+
+        _command, _args, _opts, state ->
+          {{"", 0}, state}
+      end,
+      0
+    )
+
+    assert {:ok, _snapshot} = Meeting.show()
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["kill-session" | _], args)
+           end)
   end
 
   defp set_current_meeting_handler(launch, pid) do
