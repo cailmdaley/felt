@@ -9,6 +9,8 @@ defmodule ShuttleWeb.Endpoint do
 
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+  plug(ShuttleWeb.PeerPlug)
+  plug(ShuttleWeb.PeerGatePlug)
 
   # Serve the built Shuttle UI bundle so the daemon is one process (API + UI).
   # `only:` restricts to the bundle's first-segment dirs/files, so `/api/*`,
@@ -36,7 +38,6 @@ defmodule ShuttleWeb.Endpoint do
   )
 
   plug(ShuttleWeb.CORSPlug)
-  plug(ShuttleWeb.PeerPlug)
   plug(Plug.Head)
   plug(ShuttleWeb.Router)
 end

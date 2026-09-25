@@ -9,9 +9,9 @@ defmodule ShuttleWeb.VersionController do
   CLI (`felt shuttle contract`, cached in the Poller's `contract_check`
   state). Makes a skew human-visible remotely, not just in the boot log/board.
 
-  Also where this daemon listens (`listen`, e.g. `"unix:///…/daemon.sock"`)
-  and the host class that chose it (`host_class`, e.g. `"single-user"`), as
-  bound at boot.
+  Also where this daemon listens (`listen`, e.g. `"unix:///…/daemon.sock"`),
+  the host class that chose it (`host_class`, e.g. `"single-user"`), and the
+  TCP peer gate mode (`peer_gate`: `"uid"` or `"none"`), as bound at boot.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -25,6 +25,7 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:contract, contract_check())
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
+      |> Map.put(:peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
     )
   end
 

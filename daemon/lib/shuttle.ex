@@ -201,8 +201,14 @@ defmodule Shuttle.Application do
       end
 
     listen_string = Shuttle.Host.format_listen(listen)
+
+    {peer_gate, peer_gate_expected_uid} =
+      configure_peer_gate(class, listen, listen_string, server?)
+
     Application.put_env(:shuttle, :listen, listen_string)
     Application.put_env(:shuttle, :host_class, class)
+    Application.put_env(:shuttle, :peer_gate, peer_gate)
+    Application.put_env(:shuttle, :peer_gate_expected_uid, peer_gate_expected_uid)
 
     Logger.info(
       "Shuttle listening on #{listen_string} (host class #{Shuttle.Host.class_name(class)})"
@@ -218,6 +224,45 @@ defmodule Shuttle.Application do
       )
 
     Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
+  end
+
+  defp configure_peer_gate(class, {:tcp, _ip, _port}, listen_string, true)
+       when class in [:shared_multi_user, :exposed] do
+    proc_root = Application.get_env(:shuttle, :proc_net_root, "/proc")
+
+    unless Shuttle.ProcNetTcp.readable?(proc_root) do
+      raise ArgumentError,
+            "refusing to listen on #{listen_string} for host class #{Shuttle.Host.class_name(class)}: " <>
+              "uid peer gating requires readable /proc/net/tcp; drop the tcp:// listen so the " <>
+              "class's unix socket is used, or declare the host single-user"
+    end
+
+    {"uid", configured_peer_uid()}
+  end
+
+  defp configure_peer_gate(_class, _listen, _listen_string, _server?), do: {"none", nil}
+
+  defp configured_peer_uid do
+    case System.get_env("SHUTTLE_PEER_UID") do
+      nil ->
+        case System.cmd("id", ["-u"]) do
+          {uid, 0} -> parse_peer_uid!(uid, "id -u")
+          {_output, status} -> raise ArgumentError, "id -u failed with status #{status}"
+        end
+
+      value ->
+        parse_peer_uid!(value, "SHUTTLE_PEER_UID")
+    end
+  end
+
+  defp parse_peer_uid!(value, source) do
+    value = String.trim(value)
+
+    if Regex.match?(~r/\\A[0-9]+\\z/, value) do
+      String.to_integer(value)
+    else
+      raise ArgumentError, "#{source} must be a non-negative integer, got #{inspect(value)}"
+    end
   end
 
   # The endpoint's signing key.
