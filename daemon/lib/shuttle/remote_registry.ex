@@ -1150,12 +1150,19 @@ defmodule Shuttle.RemoteRegistry.Client do
               {:ok, status :: non_neg_integer(), content_type :: String.t(), body :: binary()}
               | {:error, term()}
 
-  # Only the write transport (Transition forwarding) needs post/4, and only the
-  # file-bytes forward (`OriginRouter.forward_get/4`) needs get_file/2; the
-  # read-only registry stubs implement get/2 alone. get/3 is the conditional-fetch
-  # transport (`If-None-Match` → 304) the fiber feed uses; a client without it
-  # falls back to unconditional get/2.
-  @optional_callbacks post: 4, get_file: 2, get: 3
+  @callback get_file(
+              url :: String.t(),
+              req_headers :: [{String.t(), String.t()}],
+              timeout_ms :: non_neg_integer()
+            ) ::
+              {:ok, status :: non_neg_integer(), resp_headers :: [{String.t(), String.t()}],
+               content_type :: String.t(), body :: binary()}
+              | {:error, term()}
+
+  # Only file responses that need conditional-GET relay use get_file/3. Clients
+  # without it retain the binary-safe get_file/2 path; read-only registry stubs
+  # need only get/2.
+  @optional_callbacks post: 4, get_file: 2, get_file: 3, get: 3
 end
 
 defmodule Shuttle.RemoteRegistry.Client.Default do
@@ -1315,21 +1322,36 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
-  # Binary-safe file fetch used by `OriginRouter.forward_get/4`: `body_format:
-  # :binary` keeps image/PDF bytes intact (unlike `get/2`, which is text-only),
-  # and the response carries the remote's status + content-type so the local
-  # daemon can relay them verbatim. Any non-200 (404, etc.) is relayed too —
-  # the kanban shows the remote's own "file not found", not a tunnel error.
+  # Binary-safe file fetch used by owner-routed byte reads. The header-aware
+  # form carries validators across the tunnel and returns the owner's response
+  # headers for the local daemon to relay. `body_format: :binary` keeps images
+  # and PDFs intact, and non-200 statuses (including 304) remain intact too.
   @impl true
   def get_file(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
+    case get_file(url, [], timeout_ms) do
+      {:ok, status, _headers, content_type, body} -> {:ok, status, content_type, body}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def get_file(url, req_headers, timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
     profile = prepare()
 
-    request = {String.to_charlist(url), []}
+    headers =
+      Enum.map(req_headers, fn {key, value} ->
+        {String.to_charlist(key), String.to_charlist(value)}
+      end)
+
+    request = {String.to_charlist(url), headers}
     http_opts = http_opts(url, timeout_ms)
 
     case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-      {:ok, {{_, status, _}, headers, body}} ->
-        {:ok, status, content_type_header(headers), body}
+      {:ok, {{_, status, _}, response_headers, body}} ->
+        normalized_headers = normalize_headers(response_headers)
+
+        {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
 
       {:error, reason} ->
         {:error, reason}

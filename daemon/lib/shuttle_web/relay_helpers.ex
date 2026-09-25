@@ -56,6 +56,31 @@ defmodule ShuttleWeb.RelayHelpers do
   end
 
   @doc """
+  Relay an owner-routed file response with only its end-to-end cache headers.
+  The allowlist preserves conditional-GET semantics without leaking hop-by-hop
+  headers from the remote HTTP connection.
+  """
+  def relay_file_bytes(conn, {:forwarded, status, headers, content_type, body}) do
+    conn = if status == 304, do: conn, else: put_resp_content_type(conn, content_type, nil)
+
+    conn =
+      Enum.reduce(headers, conn, fn {name, value}, acc ->
+        case String.downcase(name) do
+          name when name in ["etag", "last-modified", "cache-control"] ->
+            put_resp_header(acc, name, value)
+
+          _ ->
+            acc
+        end
+      end)
+
+    send_resp(conn, status, body)
+  end
+
+  def relay_file_bytes(conn, {:error, {:forward_failed, _name, _reason}} = result),
+    do: relay_bytes(conn, result)
+
+  @doc """
   Relay a plain-text forward verbatim, or render a 502 tunnel failure.
 
   Identical across the felt-edit / felt-nest / lifecycle endpoints, whose

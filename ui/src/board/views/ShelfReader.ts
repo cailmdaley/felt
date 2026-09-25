@@ -52,7 +52,13 @@ import {
   PANEL_MIN,
   type PanelGeometry,
 } from '../FloatingPanelChrome.js'
-import { buildFileViewer, isScrollableFile } from '../FileViewerPanel.js'
+import {
+  buildFileViewer,
+  disposeFileViewer,
+  isScrollableFile,
+  resumeFileViewer,
+  suspendFileViewer,
+} from '../FileViewerPanel.js'
 import {
   activateTab,
   closeTab,
@@ -206,6 +212,8 @@ interface ReaderTab extends ZoomableTab {
   scroll: number
   built: boolean
   iframe: HTMLIFrameElement | null
+  viewer: HTMLElement | null
+  frameScrollCleanup: (() => void) | null
 }
 
 export class ShelfReader {
@@ -272,6 +280,7 @@ export class ShelfReader {
     if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
     this.onDock?.(null)
     this.harvest()
+    this.state.tabs.forEach((entry) => this.disposeTab(entry))
     this.win.remove()
     this.win = null
     this.strip = null
@@ -290,6 +299,7 @@ export class ShelfReader {
       if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
       this.onDock?.(null)
       this.harvest()
+      this.state.tabs.forEach((entry) => this.disposeTab(entry))
       this.win.remove()
     }
     this.win = null
@@ -465,6 +475,8 @@ export class ShelfReader {
       zoom,
       built: false,
       iframe: null,
+      viewer: null,
+      frameScrollCleanup: null,
       zoomTarget: null,
       baseW: 0,
     }
@@ -491,6 +503,8 @@ export class ShelfReader {
       t.cell.hidden = !on
       t.tab.classList.toggle('kbn-detail-tab-active', on)
       t.tab.setAttribute('aria-selected', String(on))
+      if (on) resumeFileViewer(t.viewer)
+      else suspendFileViewer(t.viewer)
     }
     // Show first, build second: a freshly-built image measures the now-visible
     // cell for its fit-to-width base.
@@ -501,6 +515,7 @@ export class ShelfReader {
     const { state, closed } = closeTab(this.state, path)
     if (!closed) return
     this.state = state
+    this.disposeTab(closed)
     closed.tab.remove()
     closed.cell.remove()
     const next = state.active ? state.tabs.find((t) => t.path === state.active) : null
@@ -514,6 +529,14 @@ export class ShelfReader {
     this.onChange?.()
   }
 
+  private disposeTab(entry: ReaderTab): void {
+    entry.frameScrollCleanup?.()
+    entry.frameScrollCleanup = null
+    disposeFileViewer(entry.viewer)
+    entry.viewer = null
+    entry.iframe = null
+  }
+
   private buildViewer(entry: ReaderTab): void {
     if (entry.built) return
     entry.built = true
@@ -523,25 +546,26 @@ export class ShelfReader {
       entry.path,
       origin,
       isScrollableFile(entry.path)
-        ? (iframe) => {
+        ? (iframe, refreshed) => {
             entry.iframe = iframe
+            entry.frameScrollCleanup?.()
             try {
-              iframe.contentWindow?.scrollTo(0, entry.scroll)
               const win = iframe.contentWindow
-              win?.addEventListener(
-                'scroll',
-                () => {
-                  entry.scroll = win.scrollY
-                  this.writeSoon()
-                },
-                { passive: true },
-              )
+              if (!refreshed) win?.scrollTo(0, entry.scroll)
+              else if (win) entry.scroll = win.scrollY
+              const onScroll = (): void => {
+                entry.scroll = win?.scrollY ?? entry.scroll
+                this.writeSoon()
+              }
+              win?.addEventListener('scroll', onScroll, { passive: true })
+              entry.frameScrollCleanup = () => win?.removeEventListener('scroll', onScroll)
             } catch {
-              /* cross-origin / unreadable — no scroll restore */
+              entry.frameScrollCleanup = null
             }
           }
         : undefined,
     )
+    entry.viewer = viewer
     entry.cell.append(viewer)
     setZoomTarget(entry, viewer, entry.file.fullPath)
   }
