@@ -96,12 +96,18 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 	oldArgs := os.Args
 	oldChangeDir := changeDir
 	oldStdout := os.Stdout
+	oldJSON := jsonOutput
 	defer func() {
 		os.Args = oldArgs
 		changeDir = oldChangeDir
 		os.Stdout = oldStdout
+		jsonOutput = oldJSON
 	}()
 
+	// Cobra assigns a persistent flag's variable only when it parses that flag,
+	// so a run with --json leaves the package global set for every later test in
+	// the package. Reset to the default going in, restore going out.
+	jsonOutput = false
 	changeDir = dir
 	rootCmd.SetArgs(args)
 

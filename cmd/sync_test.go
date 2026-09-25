@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,8 +60,13 @@ func writeSyncFile(t *testing.T, dir, name, body string) {
 
 func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 	t.Helper()
+	return runFixtureSyncOpts(t, f, syncOptions{Push: push})
+}
+
+func runFixtureSyncOpts(t *testing.T, f syncFixture, opts syncOptions) (string, error) {
+	t.Helper()
 	var out bytes.Buffer
-	err := syncStore(context.Background(), f.clone, push, &out)
+	err := syncStore(context.Background(), f.clone, opts, &out)
 	return out.String(), err
 }
 
@@ -486,4 +492,216 @@ func FuzzSyncStateSequencePreservesLocalFiles(fz *testing.F) {
 			}
 		}
 	})
+}
+
+// syncPeer clones the fixture's remote as a second working copy, the stand-in
+// for another machine pushing into the shared store.
+func syncPeer(t *testing.T, f syncFixture) string {
+	t.Helper()
+	peer := filepath.Join(f.root, "peer")
+	syncTestGit(t, f.root, "clone", f.remote, peer)
+	syncTestGit(t, peer, "config", "user.name", "Peer")
+	syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+	return peer
+}
+
+// pushManyFibers commits count new fiber files from the peer, the shape of a
+// real store sync: every incoming file is a `create mode` line in Git's own
+// merge output.
+func pushManyFibers(t *testing.T, peer string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		name := fmt.Sprintf(".felt/fiber-%03d/fiber-%03d.md", i, i)
+		writeSyncFile(t, peer, name, fmt.Sprintf("fiber %d\n", i))
+	}
+	syncTestGit(t, peer, "add", "-A")
+	syncTestGit(t, peer, "commit", "-m", fmt.Sprintf("%d incoming fibers", count))
+	syncTestGit(t, peer, "push")
+}
+
+func TestSyncSummaryIsShortAndCarriesTheCounts(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	pushManyFibers(t, peer, 120)
+	writeSyncFile(t, f.clone, "base.md", "locally edited\n")
+	writeSyncFile(t, f.clone, "untracked.md", "untracked\n")
+
+	out, err := runFixtureSync(t, f, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > 4 {
+		t.Fatalf("summary spent %d lines on a 120-file sync:\n%s", len(lines), out)
+	}
+	for _, chatter := range []string{"create mode", "Fast-forward", "Updating ", "|", "fiber-000"} {
+		if strings.Contains(out, chatter) {
+			t.Fatalf("summary leaked Git's per-file output (%q):\n%s", chatter, out)
+		}
+	}
+	for _, want := range []string{"1 commit fast-forwarded", "120 files changed", "(+120/-0)", "1 modified, 1 untracked"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSyncVerbosePassesGitOutputThrough(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	pushManyFibers(t, peer, 5)
+
+	out, err := runFixtureSyncOpts(t, f, syncOptions{Verbose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Fetching origin for", "Fast-forward", "create mode 100644 .felt/fiber-000/fiber-000.md"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("verbose output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSyncNoopSpendsOneLine(t *testing.T) {
+	f := newSyncFixture(t)
+	out, err := runFixtureSync(t, f, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(out, "\n"); got != 1 {
+		t.Fatalf("no-op sync printed %d lines:\n%s", got, out)
+	}
+	if !strings.Contains(out, "already current") {
+		t.Fatalf("no-op sync does not say so:\n%s", out)
+	}
+}
+
+func TestSyncSummaryReportsUnpushedWorkAndPush(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	writeSyncFile(t, f.clone, "local.md", "local\n")
+	syncTestGit(t, f.clone, "add", "local.md")
+	syncTestGit(t, f.clone, "commit", "-m", "local")
+	pushManyFibers(t, peer, 3)
+
+	out, err := runFixtureSync(t, f, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "1 commit merged") {
+		t.Fatalf("divergent sync not reported as a merge:\n%s", out)
+	}
+	if !strings.Contains(out, "2 commits unpushed") {
+		t.Fatalf("unpushed work not surfaced:\n%s", out)
+	}
+
+	out, err = runFixtureSync(t, f, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "2 commits pushed to origin/") {
+		t.Fatalf("push not reported:\n%s", out)
+	}
+	if out, err = runFixtureSync(t, f, true); err != nil || !strings.Contains(out, "already current") {
+		t.Fatalf("sync after publishing = %q, %v", out, err)
+	}
+}
+
+func TestSyncConflictErrorNamesEveryConflictedPath(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	names := []string{"base.md", ".felt/a/a.md", ".felt/b/b.md"}
+	for _, name := range names[1:] {
+		writeSyncFile(t, f.clone, name, "shared\n")
+	}
+	syncTestGit(t, f.clone, "add", "-A")
+	syncTestGit(t, f.clone, "commit", "-m", "shared files")
+	syncTestGit(t, f.clone, "push")
+	syncTestGit(t, peer, "pull")
+	for _, name := range names {
+		writeSyncFile(t, f.clone, name, "local side\n")
+		writeSyncFile(t, peer, name, "remote side\n")
+	}
+	syncTestGit(t, f.clone, "add", "-A")
+	syncTestGit(t, f.clone, "commit", "-m", "local edits")
+	syncTestGit(t, peer, "add", "-A")
+	syncTestGit(t, peer, "commit", "-m", "remote edits")
+	syncTestGit(t, peer, "push")
+
+	_, err := runFixtureSync(t, f, false)
+	if err == nil {
+		t.Fatal("conflicting merge should fail")
+	}
+	for _, name := range names {
+		if !strings.Contains(err.Error(), name) {
+			t.Fatalf("conflict error does not name %s:\n%v", name, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "3 files conflicted") {
+		t.Fatalf("conflict error does not count the conflicts:\n%v", err)
+	}
+}
+
+func TestSyncFailureQuotesGitVerbatim(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	writeSyncFile(t, peer, "base.md", "remote\n")
+	syncTestGit(t, peer, "add", "base.md")
+	syncTestGit(t, peer, "commit", "-m", "remote edit")
+	syncTestGit(t, peer, "push")
+	writeSyncFile(t, f.clone, "base.md", "local unstaged\n")
+
+	_, err := runFixtureSync(t, f, false)
+	if err == nil {
+		t.Fatal("overlapping unstaged change should block the merge")
+	}
+	if !strings.Contains(err.Error(), "local changes to the following files would be overwritten") {
+		t.Fatalf("Git's own explanation was swallowed:\n%v", err)
+	}
+	if got := strings.Count(err.Error(), "Please commit your changes"); got != 1 {
+		t.Fatalf("Git's explanation appears %d times, not once:\n%v", got, err)
+	}
+	if !strings.Contains(err.Error(), "base.md") {
+		t.Fatalf("blocking path not named:\n%v", err)
+	}
+}
+
+func TestSyncStagedRefusalNamesThePaths(t *testing.T) {
+	f := newSyncFixture(t)
+	writeSyncFile(t, f.clone, ".felt/staged/staged.md", "keep\n")
+	syncTestGit(t, f.clone, "add", "-A")
+	_, err := runFixtureSync(t, f, false)
+	if err == nil || !strings.Contains(err.Error(), ".felt/staged/staged.md") {
+		t.Fatalf("staged refusal does not name the path: %v", err)
+	}
+}
+
+func TestSyncDetachedHeadNamesTheCommit(t *testing.T) {
+	f := newSyncFixture(t)
+	head := syncTestGit(t, f.clone, "rev-parse", "--short", "HEAD")
+	syncTestGit(t, f.clone, "checkout", "--detach", "HEAD")
+	_, err := runFixtureSync(t, f, false)
+	if err == nil || !strings.Contains(err.Error(), "detached at "+head) {
+		t.Fatalf("detached HEAD error = %v", err)
+	}
+}
+
+func TestSyncJSONSummary(t *testing.T) {
+	f := newSyncFixture(t)
+	peer := syncPeer(t, f)
+	pushManyFibers(t, peer, 4)
+	out, err := runFixtureSyncOpts(t, f, syncOptions{JSON: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report syncReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("summary is not JSON: %v\n%s", err, out)
+	}
+	if report.Result != syncResultFastForward || report.CommitsIn != 1 || report.FilesChanged != 4 || report.Insertions != 4 {
+		t.Fatalf("JSON summary = %+v", report)
+	}
+	if report.Branch == "" || report.Upstream == "" || report.Store == "" {
+		t.Fatalf("JSON summary lost its identity fields: %+v", report)
+	}
 }

@@ -60,6 +60,12 @@ Git upstream, including through a symlinked project view. Edit ordinary local
 files, commit intentional changes, then `felt sync --push` at useful checkpoints.
 Resolve relevant conflicts with context and retry; do not automatically choose
 ours/theirs or discard another worker's edits. Report failed synchronization.
+
+A successful sync prints at most four lines — commits in, commits out, files
+changed, and the local worktree state — so read those counts rather than asking
+Git again. A failure prints Git's own text, and a conflicted merge names every
+conflicted path: those paths are the work list. `felt sync -v` adds Git's
+fetch, merge, and push output; `felt sync -j` emits the same summary as JSON.
 Roles and collaborators are ordinary local fibers; see
 [references/collaborators.md](references/collaborators.md) for their layout.
 

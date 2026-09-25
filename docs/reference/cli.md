@@ -26,7 +26,7 @@ its commit and date, a local build the source revision it was built from
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
 | `felt rm <id>` | Permanently delete a fiber |
-| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push |
+| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push. Success is a summary of at most four lines — commits in, commits out, files changed, local worktree state; failures carry Git's own text, and a conflicted merge names every conflicted path (`-v` for Git's fetch/merge/push output, `-j` for the summary as JSON) |
 
 ## Search and reading
 
