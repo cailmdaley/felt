@@ -9,6 +9,15 @@ defmodule ShuttleWeb.PeerGatePlugTest do
 
   @loopback {127, 0, 0, 1}
   @expected_uid 1000
+  @linux_root_skip_message (case System.cmd("id", ["-u"]) do
+                              {uid, 0} ->
+                                if String.trim(uid) == "0",
+                                  do: "real-listener gate test requires a non-root uid",
+                                  else: false
+
+                              _ ->
+                                false
+                            end)
 
   defp call_gate(uid, class \\ :shared_multi_user, transport \\ :tcp, login \\ nil) do
     peer_data =
@@ -112,9 +121,11 @@ defmodule ShuttleWeb.PeerGatePlugTest do
   end
 
   @tag :linux
+  @tag skip: @linux_root_skip_message
   test "a real Bandit TCP listener gates requests by the proc-resolved uid" do
     {uid_text, 0} = System.cmd("id", ["-u"])
     uid = String.to_integer(String.trim(uid_text))
+    refute uid == 0
     port = unused_port()
     keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid, :peer_gate_uid_source]
     previous = Map.new(keys, &{&1, Application.fetch_env(:shuttle, &1)})

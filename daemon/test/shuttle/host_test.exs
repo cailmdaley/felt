@@ -1,5 +1,6 @@
 defmodule Shuttle.HostTest do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Host
@@ -360,6 +361,44 @@ defmodule Shuttle.HostTest do
       assert Application.get_env(:shuttle, :peer_gate) == "none"
     end
 
+    test "a shared TCP listener reports the daemon euid and source", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      {host_file, proc_root} = shared_tcp_fixtures(base)
+      System.put_env("FELT_HOST_FILE", host_file)
+      Application.put_env(:shuttle, :proc_net_root, proc_root)
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      Shuttle.Application.configure_endpoint()
+
+      {uid_text, 0} = System.cmd("id", ["-u"])
+      assert Application.get_env(:shuttle, :peer_gate) == "uid"
+
+      assert Application.get_env(:shuttle, :peer_gate_expected_uid) ==
+               String.to_integer(String.trim(uid_text))
+
+      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "euid"
+    end
+
+    test "a shared TCP uid override is reported and warned about", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      {host_file, proc_root} = shared_tcp_fixtures(base)
+      System.put_env("FELT_HOST_FILE", host_file)
+      System.put_env("SHUTTLE_PEER_UID", "424242")
+      Application.put_env(:shuttle, :proc_net_root, proc_root)
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      log = capture_log(fn -> Shuttle.Application.configure_endpoint() end)
+
+      assert log =~ "SHUTTLE_PEER_UID is set"
+      assert Application.get_env(:shuttle, :peer_gate) == "uid"
+      assert Application.get_env(:shuttle, :peer_gate_expected_uid) == 424_242
+      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "env"
+    end
+
     test "a shared TCP listener refuses boot when proc is unreadable", %{
       base: base,
       endpoint: endpoint
@@ -417,6 +456,26 @@ defmodule Shuttle.HostTest do
         Shuttle.Application.configure_endpoint()
       end
     end
+  end
+
+  defp shared_tcp_fixtures(base) do
+    host_file = Path.join(base, "shared-tcp-host.json")
+
+    File.write!(
+      host_file,
+      Jason.encode!(%{"class" => "shared-multi-user", "listen" => "tcp://127.0.0.1:4999"})
+    )
+
+    proc_root = Path.join(base, "proc")
+    net_dir = Path.join(proc_root, "net")
+    File.mkdir_p!(net_dir)
+
+    File.write!(
+      Path.join(net_dir, "tcp"),
+      "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+    )
+
+    {host_file, proc_root}
   end
 
   # Every listening socket in this VM, by address: `{ip, port}` for TCP and
