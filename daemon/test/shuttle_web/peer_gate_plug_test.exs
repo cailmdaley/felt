@@ -80,6 +80,18 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     assert ShuttleWeb.PeerGateThrottle.allow_warning?(interval_uid, 60_000)
   end
 
+  # Negative control: remove allow_warning?/2's ArgumentError rescue and this call raises.
+  test "allows a refusal warning when the throttle table is missing" do
+    :ok = Supervisor.terminate_child(Shuttle.Supervisor, ShuttleWeb.PeerGateThrottle)
+
+    try do
+      uid = System.unique_integer([:positive])
+      assert ShuttleWeb.PeerGateThrottle.allow_warning?(uid)
+    after
+      {:ok, _pid} = Supervisor.restart_child(Shuttle.Supervisor, ShuttleWeb.PeerGateThrottle)
+    end
+  end
+
   test "refuses a foreign uid with a JSON 403" do
     conn = call_gate(2000, :exposed, :tcp, "forged@example.com")
 

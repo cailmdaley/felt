@@ -41,5 +41,7 @@ defmodule ShuttleWeb.PeerGateThrottle do
             false
         end
     end
+  rescue
+    ArgumentError -> true
   end
 end
