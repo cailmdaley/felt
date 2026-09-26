@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -43,6 +44,11 @@ func daemonURL() (string, error) {
 		return "", fmt.Errorf("resolving the daemon listener: %w", err)
 	}
 	if s.listen.Network == "tcp" {
+		if hostClass(s.Class).usesSocket() && runtime.GOOS == "linux" {
+			if err := refuseForeignDaemonPortOwner("/proc", s.Listen, os.Geteuid()); err != nil {
+				return "", err
+			}
+		}
 		return "http://" + s.listen.Address, nil
 	}
 	return "http://" + daemonSocketHost, nil

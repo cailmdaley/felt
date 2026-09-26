@@ -64,6 +64,33 @@ func TestParseProcNetTCP(t *testing.T) {
 
 // TestProcListeners — the ss-less path joins rows to processes through a
 // fake /proc and keeps only the caller's uid.
+func TestProcListenerOwnersAndDaemonDialGuard(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "net"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
+		"   0: 0100007F:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n" +
+		"   1: 0100007F:0FA1 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 4343 1\n"
+	if err := os.WriteFile(filepath.Join(root, "net", "tcp"), []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4000", 1000); err != nil {
+		t.Errorf("owned listener refused: %v", err)
+	}
+	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4001", 1000); err == nil ||
+		!strings.Contains(err.Error(), "127.0.0.1:4001: held by uid 2000, not you") {
+		t.Errorf("foreign listener error = %v", err)
+	}
+	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4002", 1000); err != nil {
+		t.Errorf("absent listener should be left to the dial: %v", err)
+	}
+	if _, err := procListenerOwners(filepath.Join(root, "absent"), "127.0.0.1", 4000); err == nil {
+		t.Error("unreadable proc root should be distinguishable from an absent listener")
+	}
+}
+
 func TestProcListeners(t *testing.T) {
 	root := t.TempDir()
 	must := func(err error) {
@@ -232,6 +259,31 @@ func TestEvaluateHost(t *testing.T) {
 				t.Error("listeners must encode as [], never null")
 			}
 		})
+	}
+}
+
+func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
+	listen := "tcp://127.0.0.1:4000"
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+		},
+		daemonClass:      "shared-multi-user",
+		daemonListen:     listen,
+		daemonPeerGate:   "uid",
+		daemonPortOwner:  &ReceiptDaemonPortOwner{UID: 2000, IsCaller: false},
+		daemonPortListen: listen,
+	})
+	if got.Status != receiptMismatch || got.PeerGate != nil {
+		t.Fatalf("foreign listener with a forged uid-gate version = %+v", got)
+	}
+	if got.DaemonPortOwner == nil || got.DaemonPortOwner.UID != 2000 || got.DaemonPortOwner.IsCaller {
+		t.Fatalf("daemon port owner not retained: %+v", got.DaemonPortOwner)
+	}
+	problems := strings.Join(got.Problems, "\n")
+	if !strings.Contains(problems, "127.0.0.1:4000 is held by uid 2000, not you") ||
+		!strings.Contains(got.Repair, "stop trusting this port") {
+		t.Fatalf("foreign listener finding = %+v", got)
 	}
 }
 

@@ -785,14 +785,22 @@ refuses a co-tenant connecting directly. The `tailscale_login` header is
 retained on TCP only after uid admission; the header itself is still an
 assertion.
 
-The socket path is protected by its `0700` directory: a co-tenant cannot
-traverse to it, and `namei -m ~/.shuttle/sock/daemon.sock` shows the
-permissions along the whole path. A shared or exposed host refuses to boot a
-TCP listener when `/proc/net/tcp` is unreadable, as on macOS. Use the class's
-Unix socket, or declare `single-user` when loopback is private to the
-operator. `felt setup receipt` reports `peer_gate: uid` when the daemon gates
-its shared-class TCP listener and treats an ungated TCP listener as a
-mismatch.
+The TCP uid gate does not cover port squatting on a shared host: the port is
+a shared resource, and another user can bind it while the daemon is down.
+Because that listener runs as the other user, its HTTP response could claim
+`peer_gate: "uid"` and imitate the daemon. On Linux, `felt setup receipt` and
+the CLI check the matching `/proc/net/tcp{,6}` LISTEN row's uid; a foreign
+owner is a mismatch, and the CLI refuses to talk to it. They skip this check
+where `/proc` is unavailable, including macOS. A Unix socket in the protected
+`0700` directory has no equivalent TCP-port squatting window: a co-tenant
+cannot claim the path or connect through it.
+
+`namei -m ~/.shuttle/sock/daemon.sock` shows the Unix socket's permissions
+along the whole path. A shared or exposed host refuses to boot a TCP listener
+when `/proc/net/tcp` is unreadable, as on macOS. Use the class's Unix socket,
+or declare `single-user` when loopback is private to the operator. `felt
+setup receipt` reports `peer_gate: uid` when the daemon gates its
+shared-class TCP listener and treats an ungated TCP listener as a mismatch.
 
 The same class gates dial-out. The daemon refuses `defaults.https_proxy`
 (configured below, under `defaults.https_proxy`) unless the host is

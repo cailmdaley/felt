@@ -28,12 +28,13 @@ import (
 
 // ReceiptHost reports the declared class against the observed host.
 type ReceiptHost struct {
-	Status      receiptStatus    `json:"status"`
-	Repair      string           `json:"repair,omitempty"`
-	Class       string           `json:"class,omitempty"`
-	ClassSource string           `json:"class_source,omitempty"`
-	Listen      string           `json:"listen,omitempty"`
-	PeerGate    *ReceiptPeerGate `json:"peer_gate,omitempty"`
+	Status          receiptStatus           `json:"status"`
+	Repair          string                  `json:"repair,omitempty"`
+	Class           string                  `json:"class,omitempty"`
+	ClassSource     string                  `json:"class_source,omitempty"`
+	Listen          string                  `json:"listen,omitempty"`
+	PeerGate        *ReceiptPeerGate        `json:"peer_gate,omitempty"`
+	DaemonPortOwner *ReceiptDaemonPortOwner `json:"daemon_port_owner,omitempty"`
 	// UsersLoggedIn is the count of distinct users `who` reports; absent when
 	// `who` could not be read.
 	UsersLoggedIn *int              `json:"users_logged_in,omitempty"`
@@ -47,6 +48,12 @@ type ReceiptHost struct {
 	// Problems are the individual findings behind a non-healthy status, one
 	// line each, for the human path.
 	Problems []string `json:"problems,omitempty"`
+}
+
+// ReceiptDaemonPortOwner identifies the uid holding the daemon's TCP port.
+type ReceiptDaemonPortOwner struct {
+	UID      int  `json:"uid"`
+	IsCaller bool `json:"is_caller"`
 }
 
 // ReceiptPeerGate explains the daemon's loopback TCP admission boundary.
@@ -107,6 +114,9 @@ type hostEvidence struct {
 	daemonListen   string
 	daemonClass    string
 	daemonPeerGate string
+	// daemonPortOwner is the uid holding the resolved or reported TCP listener.
+	daemonPortOwner  *ReceiptDaemonPortOwner
+	daemonPortListen string
 	// isDaemonCommand recognizes a shuttle daemon by its command line.
 	isDaemonCommand func(string) bool
 }
@@ -114,6 +124,7 @@ type hostEvidence struct {
 func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
 	ev := gatherHostEvidence()
 	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
+	ev.daemonPortOwner, ev.daemonPortListen = observedDaemonPortOwner(ev, os.Geteuid())
 	return evaluateHost(ev)
 }
 
@@ -225,6 +236,54 @@ func parsePSCommands(out string) map[int]string {
 	return commands
 }
 
+// observedDaemonPortOwner checks the running listener first, then the resolved
+// listener. Linux /proc is the only source that exposes socket owners across
+// uids; platforms without it leave this evidence absent.
+func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPortOwner, string) {
+	if runtime.GOOS != "linux" ||
+		!(hostClass(ev.settings.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()) {
+		return nil, ""
+	}
+	candidates := []string{}
+	for _, listen := range []string{ev.daemonListen, ev.settings.Listen} {
+		if strings.HasPrefix(listen, "tcp://") && !slices.Contains(candidates, listen) {
+			candidates = append(candidates, listen)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+	rows, err := readProcTCP("/proc")
+	if err != nil {
+		return nil, ""
+	}
+	var callerOwner *ReceiptDaemonPortOwner
+	var callerListen string
+	for _, listen := range candidates {
+		address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if row.Address != address || row.Port != port {
+				continue
+			}
+			owner := &ReceiptDaemonPortOwner{UID: row.UID, IsCaller: row.UID == callerUID}
+			if !owner.IsCaller {
+				return owner, listen
+			}
+			if callerOwner == nil {
+				callerOwner, callerListen = owner, listen
+			}
+		}
+	}
+	return callerOwner, callerListen
+}
+
 // evaluateHost applies the status rules to gathered evidence.
 func evaluateHost(ev hostEvidence) ReceiptHost {
 	h := ReceiptHost{Status: receiptHealthy, Listeners: []ReceiptListener{}}
@@ -249,8 +308,16 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 
 	const restartRepair = "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 	socketClass := hostClass(h.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()
+	portOwnerMismatch := ev.daemonPortOwner != nil && !ev.daemonPortOwner.IsCaller
+	if ev.daemonPortOwner != nil {
+		h.DaemonPortOwner = ev.daemonPortOwner
+	}
+	if portOwnerMismatch {
+		mismatch(fmt.Sprintf("%s is held by uid %d, not you", ev.daemonPortListen, ev.daemonPortOwner.UID),
+			"stop trusting this port: stop the foreign listener and restart Shuttle, or use the protected Unix socket")
+	}
 	gatedDaemonTCP := hostClass(h.Class).usesSocket() && hostClass(ev.daemonClass).usesSocket() &&
-		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid"
+		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" && !portOwnerMismatch
 	if gatedDaemonTCP {
 		h.PeerGate = &ReceiptPeerGate{
 			Mode:   "uid",
@@ -512,18 +579,9 @@ func splitListenAddr(s string) (string, int, bool) {
 // procListeners is the ss-less Linux path: LISTEN rows of /proc/net/tcp{,6}
 // owned by uid, joined to their process through /proc/<pid>/fd socket inodes.
 func procListeners(procRoot string, uid int) ([]rawListener, error) {
-	var rows []procTCPRow
-	read := false
-	for _, name := range []string{"tcp", "tcp6"} {
-		data, err := os.ReadFile(filepath.Join(procRoot, "net", name))
-		if err != nil {
-			continue
-		}
-		read = true
-		rows = append(rows, parseProcNetTCP(string(data))...)
-	}
-	if !read {
-		return nil, fmt.Errorf("no %s/net/tcp", procRoot)
+	rows, err := readProcTCP(procRoot)
+	if err != nil {
+		return nil, err
 	}
 	owners := procSocketOwners(procRoot)
 	var ls []rawListener
@@ -538,6 +596,66 @@ func procListeners(procRoot string, uid int) ([]rawListener, error) {
 		ls = append(ls, l)
 	}
 	return ls, nil
+}
+
+// procListenerOwners reads LISTEN rows for one exact address and port without
+// filtering by uid. An absent row is not an error: the daemon may be down.
+func procListenerOwners(procRoot, address string, port int) ([]int, error) {
+	rows, err := readProcTCP(procRoot)
+	if err != nil {
+		return nil, err
+	}
+	var uids []int
+	for _, row := range rows {
+		if row.Address == address && row.Port == port {
+			uids = append(uids, row.UID)
+		}
+	}
+	return uids, nil
+}
+
+// refuseForeignDaemonPortOwner blocks a local daemon dial when /proc names a
+// listener owned by another uid. No row or unreadable /proc leaves the daemon
+// availability check to the request itself.
+func refuseForeignDaemonPortOwner(procRoot, listen string, callerUID int) error {
+	if !strings.HasPrefix(listen, "tcp://") {
+		return nil
+	}
+	address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+	if err != nil {
+		return nil
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return nil
+	}
+	uids, err := procListenerOwners(procRoot, address, port)
+	if err != nil {
+		return nil
+	}
+	for _, uid := range uids {
+		if uid != callerUID {
+			return fmt.Errorf("refusing to talk to %s: held by uid %d, not you", net.JoinHostPort(address, portText), uid)
+		}
+	}
+	return nil
+}
+
+func readProcTCP(procRoot string) ([]procTCPRow, error) {
+	var rows []procTCPRow
+	read := false
+	for _, name := range []string{"tcp", "tcp6"} {
+		data, err := os.ReadFile(filepath.Join(procRoot, "net", name))
+		if err != nil {
+			continue
+		}
+		read = true
+		rows = append(rows, parseProcNetTCP(string(data))...)
+	}
+	if !read {
+		return nil, fmt.Errorf("no %s/net/tcp", procRoot)
+	}
+	return rows, nil
 }
 
 type procTCPRow struct {
