@@ -233,7 +233,10 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 		body map[string]any
 		want receiptStatus
 	}{
-		{"healthy", map[string]any{"contract": map[string]any{"expected": 2, "observed": 2, "ok": true}}, receiptHealthy},
+		{"healthy", map[string]any{
+			"listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user", "peer_gate": "uid",
+			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
+		}, receiptHealthy},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
 	}
 	for _, tt := range tests {
@@ -250,6 +253,9 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}
 			if tt.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
+			}
+			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid") {
+				t.Fatalf("version listener fields = listen %q, class %q, peer_gate %q", got.Listen, got.HostClass, got.PeerGate)
 			}
 		})
 	}

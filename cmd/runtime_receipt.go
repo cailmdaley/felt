@@ -98,10 +98,11 @@ type ReceiptDaemon struct {
 	Expected any           `json:"expected,omitempty"`
 	Observed any           `json:"observed,omitempty"`
 	Contract bool          `json:"contract_ok"`
-	// Listen and HostClass are what the running daemon says it bound at boot,
+	// Listen, HostClass, and PeerGate are the daemon's bound listener policy,
 	// from /api/v1/version; empty when unreachable or not reported.
 	Listen    string `json:"listen,omitempty"`
 	HostClass string `json:"host_class,omitempty"`
+	PeerGate  string `json:"peer_gate,omitempty"`
 }
 
 // ReceiptGenerationReceipt is the receipt-side view of the promoted source
@@ -708,6 +709,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 	var response struct {
 		Listen    string `json:"listen"`
 		HostClass string `json:"host_class"`
+		PeerGate  string `json:"peer_gate"`
 		Contract  struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
@@ -715,7 +717,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 		} `json:"contract"`
 	}
 	decodeErr := json.Unmarshal(data, &response)
-	d.Listen, d.HostClass = response.Listen, response.HostClass
+	d.Listen, d.HostClass, d.PeerGate = response.Listen, response.HostClass, response.PeerGate
 	if decodeErr != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d

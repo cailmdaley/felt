@@ -158,7 +158,7 @@ func TestEvaluateHost(t *testing.T) {
 			isDaemonCommand: func(cmd string) bool { return isShuttleDaemonCommand(cmd, func(string) bool { return false }) }},
 			receiptHealthy, "", ""},
 		{"shared, daemon on tcp", hostEvidence{settings: unixSettings("shared-multi-user"), socketDir: goodDir, listeners: daemonTCP, listenFrom: "ss", daemonPorts: []int{4000}},
-			receiptMismatch, "restart the daemon so it binds the unix socket; retarget `tailscale serve` and tunnels at it", "beam.smp (daemon) listens on TCP 127.0.0.1:4000"},
+			receiptMismatch, "restart onto a daemon that gates TCP peers by uid", "beam.smp (daemon) listens on TCP 127.0.0.1:4000"},
 		{"exposed, tunnel on tcp", hostEvidence{settings: unixSettings("exposed"), socketDir: goodDir,
 			listeners: []rawListener{{Process: "ssh", PID: 2, Address: "::1", Port: 4001}}, listenFrom: "lsof", tunnelPorts: []int{4001}},
 			receiptMismatch, "stop the tunnel's TCP local end", "ssh (tunnel) listens on TCP [::1]:4001"},
@@ -189,7 +189,10 @@ func TestEvaluateHost(t *testing.T) {
 		// daemon on a port this shell does not know about.
 		{"shared, daemon reports tcp", hostEvidence{settings: unixSettings("shared-multi-user"), socketDir: goodDir, listenFrom: "ss", users: &one,
 			daemonClass: "shared-multi-user", daemonListen: "tcp://127.0.0.1:4999"},
-			receiptMismatch, "restart the daemon so it binds the unix socket", "reports a TCP listener tcp://127.0.0.1:4999"},
+			receiptMismatch, "restart onto a daemon that gates TCP peers by uid", "reports a TCP listener tcp://127.0.0.1:4999"},
+		{"shared, daemon reports tcp without gate", hostEvidence{settings: unixSettings("shared-multi-user"), socketDir: goodDir, listenFrom: "ss", users: &one,
+			daemonClass: "shared-multi-user", daemonListen: "tcp://127.0.0.1:4999", daemonPeerGate: "none"},
+			receiptMismatch, "restart onto a daemon that gates TCP peers by uid", "reports a TCP listener tcp://127.0.0.1:4999"},
 		{"daemon booted under another class", hostEvidence{settings: unixSettings("shared-multi-user"), socketDir: goodDir, listenFrom: "ss", users: &one,
 			daemonClass: "single-user", daemonListen: "tcp://127.0.0.1:4000"},
 			receiptMismatch, "takes the declared class", "booted as single-user"},
@@ -204,7 +207,7 @@ func TestEvaluateHost(t *testing.T) {
 			isDaemonCommand: func(cmd string) bool {
 				return isShuttleDaemonCommand(cmd, func(p string) bool { return p == "/opt/shuttle/bin/shuttled" })
 			}},
-			receiptMismatch, "restart the daemon so it binds", "beam.smp (daemon) listens on TCP 127.0.0.1:4999"},
+			receiptMismatch, "restart onto a daemon that gates TCP peers by uid", "beam.smp (daemon) listens on TCP 127.0.0.1:4999"},
 		{"shared, no tool but a proxy", hostEvidence{settings: unixSettings("shared-multi-user"), socketDir: goodDir, httpsProxy: "localhost:1055"},
 			receiptMismatch, "https_proxy", "proxy"},
 		{"broken host file", hostEvidence{settingsErr: errors.New("host.json: class \"x\" is not one of …")},
@@ -232,6 +235,58 @@ func TestEvaluateHost(t *testing.T) {
 	}
 }
 
+// TestEvaluateHost_UidGatedDaemonListener checks the daemon exemption and
+// confirms that unrelated fleet listeners remain findings.
+func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
+	one := 1
+	settings := hostSettings{
+		Class:       "shared-multi-user",
+		ClassSource: "file",
+		Listen:      "tcp://127.0.0.1:4000",
+		listen:      listenAddr{"tcp", "127.0.0.1:4000"},
+	}
+	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
+
+	got := evaluateHost(hostEvidence{
+		settings:       settings,
+		users:          &one,
+		listenFrom:     "ss",
+		listeners:      daemonTCP,
+		daemonPorts:    []int{4000},
+		daemonClass:    "shared-multi-user",
+		daemonListen:   "tcp://127.0.0.1:4000",
+		daemonPeerGate: "uid",
+	})
+	if got.Status != receiptHealthy || got.Repair != "" || len(got.Problems) != 0 {
+		t.Fatalf("uid-gated daemon listener = %+v, want healthy", got)
+	}
+	if got.PeerGate == nil || got.PeerGate.Mode != "uid" || !strings.Contains(got.PeerGate.Reason, "/proc/net/tcp") {
+		t.Fatalf("peer gate receipt = %+v", got.PeerGate)
+	}
+	if len(got.Listeners) != 1 || got.Listeners[0].Role != "daemon" {
+		t.Fatalf("receipt should retain the observed daemon listener: %+v", got.Listeners)
+	}
+
+	got = evaluateHost(hostEvidence{
+		settings:       settings,
+		users:          &one,
+		listenFrom:     "ss",
+		listeners:      append(daemonTCP, rawListener{Process: "tailscaled", PID: 2, Address: "127.0.0.1", Port: 1055}, rawListener{Process: "autossh", PID: 3, Address: "127.0.0.1", Port: 4001}),
+		daemonPorts:    []int{4000},
+		tunnelPorts:    []int{4001},
+		daemonClass:    "shared-multi-user",
+		daemonListen:   "tcp://127.0.0.1:4000",
+		daemonPeerGate: "uid",
+	})
+	if got.Status != receiptMismatch || len(got.Problems) != 2 {
+		t.Fatalf("non-daemon fleet listeners should remain mismatches: %+v", got)
+	}
+	problems := strings.Join(got.Problems, "\n")
+	if strings.Contains(problems, "beam.smp") || !strings.Contains(problems, "tailscaled") || !strings.Contains(problems, "autossh") {
+		t.Fatalf("unexpected uid-gated listener findings: %q", problems)
+	}
+}
+
 // TestEvaluateHost_OneRepairPerRemedy — each listener is its own problem, but
 // two daemon listeners share one repair, and each role words its own.
 func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
@@ -246,7 +301,7 @@ func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
 			{Process: "tailscaled", PID: 3, Address: "127.0.0.1", Port: 1055},
 		},
 	})
-	if len(got.Problems) != 4 || strings.Count(got.Repair, "restart the daemon so it binds") != 1 ||
+	if len(got.Problems) != 4 || strings.Count(got.Repair, "restart onto a daemon that gates TCP peers by uid") != 1 ||
 		!strings.Contains(got.Repair, "stop the tunnel") || !strings.Contains(got.Repair, "run tailscaled without") {
 		t.Fatalf("got %+v", got)
 	}

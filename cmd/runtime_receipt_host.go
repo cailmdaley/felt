@@ -1,10 +1,11 @@
 package cmd
 
 // The receipt's host component: does the way this machine is actually running
-// match the class it declares? A shared-multi-user or exposed host must have
-// no fleet process listening on TCP (every local user can reach a loopback
-// port), no mesh-VPN proxy in the fleet file, and a socket directory only its
-// owner can enter. A single-user host must actually be single-user.
+// match the class it declares? A shared-multi-user or exposed host may keep
+// its daemon on loopback TCP only when it reports uid gating; other fleet TCP
+// listeners remain findings. It also avoids an unauthenticated mesh-VPN proxy
+// and keeps its socket directory private. A single-user host must actually be
+// single-user.
 //
 // Evidence is best effort and read-only: listeners come from `ss` (or /proc)
 // on Linux and `lsof` on macOS, users from `who`. A missing tool makes the
@@ -27,11 +28,12 @@ import (
 
 // ReceiptHost reports the declared class against the observed host.
 type ReceiptHost struct {
-	Status      receiptStatus `json:"status"`
-	Repair      string        `json:"repair,omitempty"`
-	Class       string        `json:"class,omitempty"`
-	ClassSource string        `json:"class_source,omitempty"`
-	Listen      string        `json:"listen,omitempty"`
+	Status      receiptStatus    `json:"status"`
+	Repair      string           `json:"repair,omitempty"`
+	Class       string           `json:"class,omitempty"`
+	ClassSource string           `json:"class_source,omitempty"`
+	Listen      string           `json:"listen,omitempty"`
+	PeerGate    *ReceiptPeerGate `json:"peer_gate,omitempty"`
 	// UsersLoggedIn is the count of distinct users `who` reports; absent when
 	// `who` could not be read.
 	UsersLoggedIn *int              `json:"users_logged_in,omitempty"`
@@ -45,6 +47,12 @@ type ReceiptHost struct {
 	// Problems are the individual findings behind a non-healthy status, one
 	// line each, for the human path.
 	Problems []string `json:"problems,omitempty"`
+}
+
+// ReceiptPeerGate explains the daemon's loopback TCP admission boundary.
+type ReceiptPeerGate struct {
+	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
 }
 
 // ReceiptSocketDir is the socket directory, inspected without following a
@@ -96,15 +104,16 @@ type hostEvidence struct {
 	httpsProxy  string
 	// daemonListen and daemonClass are what the running daemon reports on
 	// /api/v1/version; empty when it was not reached.
-	daemonListen string
-	daemonClass  string
+	daemonListen   string
+	daemonClass    string
+	daemonPeerGate string
 	// isDaemonCommand recognizes a shuttle daemon by its command line.
 	isDaemonCommand func(string) bool
 }
 
 func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
 	ev := gatherHostEvidence()
-	ev.daemonListen, ev.daemonClass = daemon.Listen, daemon.HostClass
+	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
 	return evaluateHost(ev)
 }
 
@@ -238,8 +247,16 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		}
 	}
 
-	const restartRepair = "restart the daemon so it binds the unix socket; retarget `tailscale serve` and tunnels at it"
+	const restartRepair = "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 	socketClass := hostClass(h.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()
+	gatedDaemonTCP := hostClass(h.Class).usesSocket() && hostClass(ev.daemonClass).usesSocket() &&
+		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid"
+	if gatedDaemonTCP {
+		h.PeerGate = &ReceiptPeerGate{
+			Mode:   "uid",
+			Reason: "the daemon uses /proc/net/tcp{,6} to admit loopback peers owned by its uid or root",
+		}
+	}
 	if ev.daemonClass != "" && ev.daemonClass != h.Class {
 		mismatch(fmt.Sprintf("the running daemon booted as %s; this host declares %s", ev.daemonClass, h.Class),
 			"restart the daemon so it takes the declared class")
@@ -248,17 +265,20 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		mismatch(fmt.Sprintf("the running daemon listens on %s; this host resolves %s", ev.daemonListen, h.Listen),
 			"restart the daemon so it binds the resolved listener")
 	}
-	if socketClass && strings.HasPrefix(ev.daemonListen, "tcp://") {
+	if socketClass && strings.HasPrefix(ev.daemonListen, "tcp://") && !gatedDaemonTCP {
 		mismatch(fmt.Sprintf("the running daemon reports a TCP listener %s on a %s host", ev.daemonListen, h.Class), restartRepair)
 	}
 
 	if hostClass(h.Class).usesSocket() {
-		if ev.settings.listen.Network == "tcp" {
+		if ev.settings.listen.Network == "tcp" && !gatedDaemonTCP {
 			mismatch(fmt.Sprintf("class %s declares a TCP listener %s", h.Class, h.Listen),
 				fmt.Sprintf("drop the tcp:// listen from %s so the daemon takes the class's unix socket, then restart it; retarget `tailscale serve` and tunnels at the socket",
 					describeHostSource(ev.settings.ListenSource, ev.settings.File)))
 		}
 		for _, l := range h.Listeners {
+			if gatedDaemonTCP && l.Role == "daemon" && daemonTCPListenerMatches(l, ev.daemonListen) {
+				continue
+			}
 			mismatch(fmt.Sprintf("%s (%s) listens on TCP %s", l.Process, l.Role, net.JoinHostPort(l.Address, strconv.Itoa(l.Port))), listenerRepair(l.Role))
 		}
 		if h.HTTPSProxy != "" {
@@ -302,6 +322,20 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	return h
 }
 
+// daemonTCPListenerMatches identifies the live listener named by /version.
+func daemonTCPListenerMatches(listener ReceiptListener, listen string) bool {
+	if !strings.HasPrefix(listen, "tcp://") {
+		return false
+	}
+
+	address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(portText)
+	return err == nil && listener.Address == address && listener.Port == port
+}
+
 // listenerRepair is the remedy for a fleet TCP listener on a host whose
 // class already requires a unix socket.
 func listenerRepair(role string) string {
@@ -311,7 +345,7 @@ func listenerRepair(role string) string {
 	case "tailscaled":
 		return "run tailscaled without a local TCP listener (no --outbound-http-proxy-listen or --socks5-server), and point `tailscale serve` at the daemon's socket"
 	}
-	return "restart the daemon so it binds the unix socket; retarget `tailscale serve` and tunnels at it"
+	return "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 }
 
 // hostFileRepair words the repair for a host file or listener setting that
