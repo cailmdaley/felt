@@ -51,7 +51,13 @@ func procAddressHex(address net.IP) string {
 	} else {
 		address = address.To16()
 	}
-	if address == nil {
+	return procAddressHexBytes(address)
+}
+
+func procAddressHex6(address net.IP) string { return procAddressHexBytes(address.To16()) }
+
+func procAddressHexBytes(address net.IP) string {
+	if address == nil || (len(address) != 4 && len(address) != 16) {
 		panic("invalid proc address fixture")
 	}
 	encoded := make([]byte, len(address))
@@ -59,6 +65,27 @@ func procAddressHex(address net.IP) string {
 		binary.NativeEndian.PutUint32(encoded[i:i+4], binary.BigEndian.Uint32(address[i:i+4]))
 	}
 	return fmt.Sprintf("%X", encoded)
+}
+
+func procTCPRowFixture(local net.IP, localPort int, remote net.IP, remotePort int, state string, uid int, inode string, tcp6 bool) string {
+	encode := procAddressHex
+	if tcp6 {
+		encode = procAddressHex6
+	}
+	return fmt.Sprintf("   0: %s:%04X %s:%04X %s 00000000:00000000 00:00000000 00000000 %5d        0 %s 1\n",
+		encode(local), localPort, encode(remote), remotePort, state, uid, inode)
+}
+
+func writeProcTCPFixture(t *testing.T, root, tcp, tcp6 string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "net"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"tcp": tcp, "tcp6": tcp6} {
+		if err := os.WriteFile(filepath.Join(root, "net", name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestParseProcNetTCP(t *testing.T) {
@@ -72,42 +99,90 @@ func TestParseProcNetTCP(t *testing.T) {
 	v6 := fmt.Sprintf("   0: %s:0FA1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5151 1 0000000000000000 100 0 0 10 0\n", loopback6)
 	got := append(parseProcNetTCP(v4), parseProcNetTCP(v6)...)
 	want := []procTCPRow{
-		{Address: "127.0.0.1", Port: 4000, UID: 1000, Inode: "4242"},
-		{Address: "::1", Port: 4001, UID: 0, Inode: "5151"},
+		{Address: "127.0.0.1", Port: 4000, RemoteAddress: "0.0.0.0", State: "0A", UID: 1000, Inode: "4242"},
+		{Address: "::1", Port: 4001, RemoteAddress: "::", State: "0A", UID: 0, Inode: "5151"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
 }
 
-// TestProcListeners — the ss-less path joins rows to processes through a
-// fake /proc and keeps only the caller's uid.
-func TestProcListenerOwnersAndDaemonDialGuard(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "net"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	loopback := procAddressHex(net.IPv4(127, 0, 0, 1))
-	fixture := fmt.Sprintf("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"+
-		"   0: %s:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n"+
-		"   1: %s:0FA1 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 4343 1\n",
-		loopback, loopback)
-	if err := os.WriteFile(filepath.Join(root, "net", "tcp"), []byte(fixture), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// Negative control: changing row.UID != callerUID to == makes the foreign-owner case fail.
+func TestCheckProcTCPConnectionOwner(t *testing.T) {
+	serverIP, clientIP := net.IPv4(127, 0, 0, 1), net.IPv4(127, 0, 0, 1)
+	const serverPort, clientPort = 4000, 51432
 
-	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4000", 1000); err != nil {
-		t.Errorf("owned listener refused: %v", err)
+	t.Run("established row owned by caller", func(t *testing.T) {
+		root := t.TempDir()
+		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 1000, "4242", false), "")
+		if err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000); err != nil {
+			t.Fatalf("own established row refused: %v", err)
+		}
+	})
+
+	t.Run("foreign established row refused", func(t *testing.T) {
+		root := t.TempDir()
+		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 2000, "4242", false), "")
+		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
+		if err == nil || err.Error() != "127.0.0.1:4000 is held by uid 2000, not you" {
+			t.Fatalf("foreign owner error = %v", err)
+		}
+	})
+
+	t.Run("missing established row fails closed", func(t *testing.T) {
+		root := t.TempDir()
+		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "0A", 1000, "4242", false), "")
+		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
+		if err == nil || !strings.Contains(err.Error(), "no matching established") {
+			t.Fatalf("missing row error = %v", err)
+		}
+	})
+
+	t.Run("v4-mapped tcp6 row matches", func(t *testing.T) {
+		root := t.TempDir()
+		mapped := net.ParseIP("::ffff:127.0.0.1")
+		writeProcTCPFixture(t, root, "", procTCPRowFixture(mapped, serverPort, mapped, clientPort, "01", 1000, "4242", true))
+		if err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000); err != nil {
+			t.Fatalf("v4-mapped row refused: %v", err)
+		}
+	})
+
+	t.Run("unreadable proc fails closed", func(t *testing.T) {
+		err := checkProcTCPConnectionOwner(filepath.Join(t.TempDir(), "absent"), "127.0.0.1:4000", "127.0.0.1:51432", 1000)
+		if err == nil || !strings.Contains(err.Error(), "cannot read /proc/net/tcp") {
+			t.Fatalf("unreadable proc error = %v", err)
+		}
+	})
+}
+
+func TestObservedDaemonPortOwnerIncludesWildcardListeners(t *testing.T) {
+	settings := hostSettings{Class: "shared-multi-user", Listen: "tcp://127.0.0.1:4000"}
+	ev := hostEvidence{settings: settings, daemonClass: "shared-multi-user", daemonListen: settings.Listen}
+	cases := []struct {
+		name    string
+		address net.IP
+		tcp6    bool
+	}{
+		{"loopback", net.IPv4(127, 0, 0, 1), false},
+		{"ipv4 wildcard", net.IPv4zero, false},
+		{"ipv6 wildcard", net.ParseIP("::"), true},
+		{"mapped ipv4 wildcard", net.ParseIP("::ffff:0.0.0.0"), true},
+		{"mapped loopback", net.ParseIP("::ffff:127.0.0.1"), true},
 	}
-	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4001", 1000); err == nil ||
-		!strings.Contains(err.Error(), "127.0.0.1:4001: held by uid 2000, not you") {
-		t.Errorf("foreign listener error = %v", err)
-	}
-	if err := refuseForeignDaemonPortOwner(root, "tcp://127.0.0.1:4002", 1000); err != nil {
-		t.Errorf("absent listener should be left to the dial: %v", err)
-	}
-	if _, err := procListenerOwners(filepath.Join(root, "absent"), "127.0.0.1", 4000); err == nil {
-		t.Error("unreadable proc root should be distinguishable from an absent listener")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			row := procTCPRowFixture(tc.address, 4000, net.IPv4zero, 0, "0A", 2000, "4242", tc.tcp6)
+			if tc.tcp6 {
+				writeProcTCPFixture(t, root, "", row)
+			} else {
+				writeProcTCPFixture(t, root, row, "")
+			}
+			owner, listen := observedDaemonPortOwnerFromProc(ev, 1000, root)
+			if owner == nil || owner.UID != 2000 || owner.IsCaller || listen != settings.Listen {
+				t.Fatalf("observed owner = %+v at %q; want uid 2000 for %s", owner, listen, tc.name)
+			}
+		})
 	}
 }
 

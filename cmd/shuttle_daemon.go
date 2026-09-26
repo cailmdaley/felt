@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -44,11 +45,6 @@ func daemonURL() (string, error) {
 		return "", fmt.Errorf("resolving the daemon listener: %w", err)
 	}
 	if s.listen.Network == "tcp" {
-		if hostClass(s.Class).usesSocket() && runtime.GOOS == "linux" {
-			if err := refuseForeignDaemonPortOwner("/proc", s.Listen, os.Geteuid()); err != nil {
-				return "", err
-			}
-		}
 		return "http://" + s.listen.Address, nil
 	}
 	return "http://" + daemonSocketHost, nil
@@ -79,18 +75,21 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 	}
 	base := transport.DialContext
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if addr != daemonSocketHost+":80" {
-			return base(ctx, network, addr)
+		if addr == daemonSocketHost+":80" {
+			s, err := resolveHostSettings()
+			if err != nil {
+				return nil, err
+			}
+			if s.listen.Network != "unix" {
+				return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
+			}
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", s.listen.Address)
 		}
-		s, err := resolveHostSettings()
-		if err != nil {
-			return nil, err
+		if isSocketClassDaemonTCP(network, addr) {
+			return dialAndCheckDaemonTCP(ctx, base, network, addr, "/proc", os.Geteuid())
 		}
-		if s.listen.Network != "unix" {
-			return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
-		}
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", s.listen.Address)
+		return base(ctx, network, addr)
 	}
 	// The daemon's CORS plug admits only loopback authorities, so the synthetic
 	// host must not reach it: the request carries `Host: localhost` on the wire.
@@ -103,6 +102,38 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 			return fmt.Errorf("daemon redirected to %s; the daemon API never redirects, refusing to follow", req.URL)
 		},
 	}
+}
+
+func isSocketClassDaemonTCP(network, address string) bool {
+	if runtime.GOOS != "linux" || !strings.HasPrefix(network, "tcp") {
+		return false
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	localhost := strings.EqualFold(host, "localhost")
+	if !localhost && (ip == nil || !ip.IsLoopback()) {
+		return false
+	}
+	settings, err := resolveHostSettings()
+	if err != nil || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+		return false
+	}
+	gotPort, err := strconv.Atoi(portText)
+	if err != nil {
+		return false
+	}
+	wantAddress, wantPort, err := parseTCPEndpoint(settings.listen.Address)
+	if err != nil || gotPort != wantPort {
+		return false
+	}
+	if localhost {
+		return true
+	}
+	gotAddress, gotPort, err := parseTCPEndpoint(address)
+	return err == nil && gotAddress == wantAddress && gotPort == wantPort
 }
 
 // socketHostTransport rewrites the wire Host of a request to the synthetic

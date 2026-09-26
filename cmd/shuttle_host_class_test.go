@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -185,6 +187,36 @@ func TestDaemonURL_FollowsListen(t *testing.T) {
 	check("unix", "http://shuttle.invalid")
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:9")
 	check("override", "http://127.0.0.1:9")
+}
+
+func TestDaemonHTTPClientChecksLiveSocketClassTCP(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the accepted-socket owner check reads Linux /proc")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("connected"))
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { _ = server.Close() })
+
+	addr := listener.Addr().String()
+	hostFile := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, hostFile, nil, nil)
+	if err := os.WriteFile(hostFile, []byte(fmt.Sprintf(`{"class":"shared-multi-user","listen":"tcp://%s"}`, addr)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := getDaemon("http://"+addr, daemonReadTimeout)
+	if err != nil {
+		t.Fatalf("the daemon HTTP client rejected its own listener: %v", err)
+	}
+	if string(body) != "connected" {
+		t.Fatalf("response = %q, want connected", body)
+	}
 }
 
 func mustDaemonEndpoint(t *testing.T, path string) string {

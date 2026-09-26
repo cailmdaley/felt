@@ -13,6 +13,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -244,8 +245,14 @@ func parsePSCommands(out string) map[int]string {
 // listener. Linux /proc is the only source that exposes socket owners across
 // uids; platforms without it leave this evidence absent.
 func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPortOwner, string) {
-	if runtime.GOOS != "linux" ||
-		!(hostClass(ev.settings.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()) {
+	if runtime.GOOS != "linux" {
+		return nil, ""
+	}
+	return observedDaemonPortOwnerFromProc(ev, callerUID, "/proc")
+}
+
+func observedDaemonPortOwnerFromProc(ev hostEvidence, callerUID int, procRoot string) (*ReceiptDaemonPortOwner, string) {
+	if !(hostClass(ev.settings.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()) {
 		return nil, ""
 	}
 	candidates := []string{}
@@ -257,14 +264,14 @@ func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPort
 	if len(candidates) == 0 {
 		return nil, ""
 	}
-	rows, err := readProcTCP("/proc")
+	rows, err := readProcTCP(procRoot)
 	if err != nil {
 		return nil, ""
 	}
 	var callerOwner *ReceiptDaemonPortOwner
 	var callerListen string
 	for _, listen := range candidates {
-		address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+		_, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
 		if err != nil {
 			continue
 		}
@@ -273,7 +280,7 @@ func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPort
 			continue
 		}
 		for _, row := range rows {
-			if row.Address != address || row.Port != port {
+			if row.Port != port || !daemonListenerAddress(row.Address) {
 				continue
 			}
 			owner := &ReceiptDaemonPortOwner{UID: row.UID, IsCaller: row.UID == callerUID}
@@ -618,50 +625,121 @@ func procListeners(procRoot string, uid int) ([]rawListener, error) {
 	return ls, nil
 }
 
-// procListenerOwners reads LISTEN rows for one exact address and port without
-// filtering by uid. An absent row is not an error: the daemon may be down.
-func procListenerOwners(procRoot, address string, port int) ([]int, error) {
-	rows, err := readProcTCP(procRoot)
+// daemonListenerAddress reports a local address a co-tenant could use to
+// squat on the loopback daemon port, including wildcard and v4-mapped binds.
+func daemonListenerAddress(address string) bool {
+	ip := net.ParseIP(address)
+	if ip == nil {
+		return false
+	}
+	for _, candidate := range []string{"127.0.0.1", "0.0.0.0", "::", "::ffff:0.0.0.0", "::ffff:127.0.0.1"} {
+		if ip.Equal(net.ParseIP(candidate)) {
+			return true
+		}
+	}
+	return false
+}
+
+// daemonTCPOwnerCheckError is a fail-closed refusal from the post-connect
+// owner check. A UID is present only when /proc identified a foreign owner.
+type daemonTCPOwnerCheckError struct {
+	address string
+	uid     int
+	foreign bool
+	reason  string
+}
+
+func (e *daemonTCPOwnerCheckError) Error() string {
+	if e.foreign {
+		return fmt.Sprintf("%s is held by uid %d, not you", e.address, e.uid)
+	}
+	return fmt.Sprintf("could not verify owner of %s: %s", e.address, e.reason)
+}
+
+func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), network, address, procRoot string, callerUID int) (net.Conn, error) {
+	conn, err := dial(ctx, network, address)
 	if err != nil {
 		return nil, err
 	}
-	var uids []int
-	for _, row := range rows {
-		if row.Address == address && row.Port == port {
-			uids = append(uids, row.UID)
-		}
+	if err := checkDaemonTCPConnOwner(procRoot, conn, callerUID); err != nil {
+		_ = conn.Close()
+		return nil, err
 	}
-	return uids, nil
+	return conn, nil
 }
 
-// refuseForeignDaemonPortOwner blocks a local daemon dial when /proc names a
-// listener owned by another uid. No row or unreadable /proc leaves the daemon
-// availability check to the request itself.
-func refuseForeignDaemonPortOwner(procRoot, listen string, callerUID int) error {
-	if !strings.HasPrefix(listen, "tcp://") {
-		return nil
-	}
-	address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+func checkDaemonTCPConnOwner(procRoot string, conn net.Conn, callerUID int) error {
+	return checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
+}
+
+// checkProcTCPConnectionOwner matches the server-side ESTABLISHED row for a
+// connected client socket. That row's uid belongs to the process which accepted
+// the connection; its endpoint order is the mirror of the daemon's peer gate.
+func checkProcTCPConnectionOwner(procRoot, serverLocal, clientLocal string, callerUID int) error {
+	address, port, err := parseTCPEndpoint(serverLocal)
 	if err != nil {
-		return nil
+		return &daemonTCPOwnerCheckError{address: serverLocal, reason: fmt.Sprintf("invalid server endpoint: %v", err)}
 	}
-	port, err := strconv.Atoi(portText)
+	clientAddress, clientPort, err := parseTCPEndpoint(clientLocal)
 	if err != nil {
-		return nil
+		return &daemonTCPOwnerCheckError{address: net.JoinHostPort(address, strconv.Itoa(port)), reason: fmt.Sprintf("invalid client endpoint: %v", err)}
 	}
-	uids, err := procListenerOwners(procRoot, address, port)
+	display := net.JoinHostPort(address, strconv.Itoa(port))
+	rows, err := readProcTCPRows(procRoot)
 	if err != nil {
-		return nil
+		return &daemonTCPOwnerCheckError{address: display, reason: fmt.Sprintf("cannot read /proc/net/tcp{,6}: %v", err)}
 	}
-	for _, uid := range uids {
-		if uid != callerUID {
-			return fmt.Errorf("refusing to talk to %s: held by uid %d, not you", net.JoinHostPort(address, portText), uid)
+	found := false
+	for _, row := range rows {
+		if row.State != "01" || row.Address != address || row.Port != port ||
+			row.RemoteAddress != clientAddress || row.RemotePort != clientPort {
+			continue
 		}
+		found = true
+		if row.UID != callerUID {
+			return &daemonTCPOwnerCheckError{address: display, uid: row.UID, foreign: true}
+		}
+	}
+	if !found {
+		return &daemonTCPOwnerCheckError{address: display, reason: "no matching established /proc/net/tcp{,6} row for this connection"}
 	}
 	return nil
 }
 
+func parseTCPEndpoint(endpoint string) (string, int, error) {
+	host, portText, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", 0, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", 0, fmt.Errorf("%q is not an IP address", host)
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid port %q", portText)
+	}
+	return ip.String(), port, nil
+}
+
 func readProcTCP(procRoot string) ([]procTCPRow, error) {
+	rows, err := readProcTCPRows(procRoot)
+	if err != nil {
+		return nil, err
+	}
+	var listeners []procTCPRow
+	for _, row := range rows {
+		if row.State == "0A" {
+			listeners = append(listeners, row)
+		}
+	}
+	return listeners, nil
+}
+
+func readProcTCPRows(procRoot string) ([]procTCPRow, error) {
 	var rows []procTCPRow
 	read := false
 	for _, name := range []string{"tcp", "tcp6"} {
@@ -670,49 +748,82 @@ func readProcTCP(procRoot string) ([]procTCPRow, error) {
 			continue
 		}
 		read = true
-		rows = append(rows, parseProcNetTCP(string(data))...)
+		rows = append(rows, parseProcNetTCPRows(string(data))...)
 	}
 	if !read {
-		return nil, fmt.Errorf("no %s/net/tcp", procRoot)
+		return nil, fmt.Errorf("no readable %s/net/tcp or tcp6", procRoot)
 	}
 	return rows, nil
 }
 
 type procTCPRow struct {
-	Address string
-	Port    int
-	UID     int
-	Inode   string
+	Address       string
+	Port          int
+	RemoteAddress string
+	RemotePort    int
+	State         string
+	UID           int
+	Inode         string
 }
 
-// parseProcNetTCP reads the LISTEN (st 0A) rows of /proc/net/tcp or tcp6:
-//
-//	sl local_address rem_address st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
-//
-// The local address is hex in host byte order, one 32-bit word at a time.
-func parseProcNetTCP(data string) []procTCPRow {
+// parseProcNetTCP reads rows from /proc/net/tcp or tcp6. Addresses are hex in
+// host byte order, one 32-bit word at a time.
+func parseProcNetTCPRows(data string) []procTCPRow {
 	var rows []procTCPRow
 	sc := bufio.NewScanner(strings.NewReader(data))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
-		if len(f) < 10 || f[3] != "0A" {
+		if len(f) < 10 {
 			continue
 		}
-		hexAddr, hexPort, ok := strings.Cut(f[1], ":")
+		address, port, ok := parseProcEndpoint(f[1])
 		if !ok {
 			continue
 		}
-		port, err := strconv.ParseInt(hexPort, 16, 32)
-		if err != nil {
+		remoteAddress, remotePort, ok := parseProcEndpoint(f[2])
+		if !ok {
 			continue
 		}
 		uid, err := strconv.Atoi(f[7])
 		if err != nil {
 			continue
 		}
-		rows = append(rows, procTCPRow{Address: decodeProcAddr(hexAddr), Port: int(port), UID: uid, Inode: f[9]})
+		rows = append(rows, procTCPRow{
+			Address: address, Port: port, RemoteAddress: remoteAddress, RemotePort: remotePort,
+			State: f[3], UID: uid, Inode: f[9],
+		})
 	}
 	return rows
+}
+
+func parseProcEndpoint(endpoint string) (string, int, bool) {
+	hexAddr, hexPort, ok := strings.Cut(endpoint, ":")
+	if !ok {
+		return "", 0, false
+	}
+	port, err := strconv.ParseInt(hexPort, 16, 32)
+	if err != nil || port < 0 || port > 65535 {
+		return "", 0, false
+	}
+	address := net.ParseIP(decodeProcAddr(hexAddr))
+	if address == nil {
+		return "", 0, false
+	}
+	if v4 := address.To4(); v4 != nil {
+		address = v4
+	}
+	return address.String(), int(port), true
+}
+
+// parseProcNetTCP retains the LISTEN-only contract used by listener evidence.
+func parseProcNetTCP(data string) []procTCPRow {
+	var listeners []procTCPRow
+	for _, row := range parseProcNetTCPRows(data) {
+		if row.State == "0A" {
+			listeners = append(listeners, row)
+		}
+	}
+	return listeners
 }
 
 func decodeProcAddr(h string) string {
