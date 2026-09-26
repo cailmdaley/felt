@@ -63,10 +63,12 @@ lives in the docs site (`docs/`, published to
   Route requests for host-local assets and execution through the selected
   daemon. Ordinary synchronized notes, including roles and collaborators,
   are read and edited locally; they do not need an origin registry.
-- **Agent records live in one source of truth: felt's registry.** felt resolves
+- **Dispatched agent records live in one source of truth: felt's registry.** felt resolves
   the registry as two layers — `internal/shuttle/agents.builtin.json` (embedded)
   with the user file (`$FELT_AGENTS_FILE`, else `~/.config/felt/agents.json`)
-  merged over it by default. The user file can set `builtins: "restrict"` to
+  merged over it by default. Loom's `setup.sh` separately owns interactive Pi's
+  global `~/.pi/agent/settings.json`; this registry does not configure that
+  interactive default. The user file can set `builtins: "restrict"` to
   replace the shipped layer for one host. Records merge wholesale by id; the
   file's `overrides` block (`{"claude-opus": {"default_effort": "high"}}`)
   patches `default_effort` on any resolved agent, and `felt shuttle agents

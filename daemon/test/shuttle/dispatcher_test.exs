@@ -1163,12 +1163,12 @@ defmodule Shuttle.DispatcherTest do
         "id" => "codex-luna",
         "cli" => "codex",
         "wrapper" => "codex",
-        "model" => "gpt-5.6-luna"
+        "model" => "gpt-6-luna"
       })
 
     cmd = Agents.build_command(agent, "hello world")
     assert cmd =~ "codex"
-    assert cmd =~ "--model 'gpt-5.6-luna'"
+    assert cmd =~ "--model 'gpt-6-luna'"
     assert cmd =~ "'hello world'"
     refute cmd =~ "<<<"
   end
