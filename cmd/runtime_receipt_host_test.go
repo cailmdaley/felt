@@ -318,8 +318,14 @@ func TestInspectSocketDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(base, "sock")
-	if d := inspectSocketDir(dir, euid); d.Exists || d.BadAncestor != "" {
-		t.Errorf("absent dir under a private temp dir: %+v", d)
+	// The check walks every ancestor to /, so a TMPDIR under a group-writable
+	// home leaves nothing here to assert about; that is the environment, not
+	// the inspection.
+	if d := inspectSocketDir(dir, euid); d.BadAncestor != "" {
+		t.Skipf("TMPDIR has an unsafe ancestor: %s", d.BadAncestor)
+	}
+	if d := inspectSocketDir(dir, euid); d.Exists {
+		t.Errorf("absent dir reported present: %+v", d)
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
