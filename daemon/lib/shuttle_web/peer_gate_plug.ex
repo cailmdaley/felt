@@ -8,6 +8,12 @@ defmodule ShuttleWeb.PeerGatePlug do
   connections rely on the socket directory's filesystem permissions. The
   Tailscale login header is retained on TCP only after the uid gate admits the
   connection.
+
+  Whether the gate applies is decided from the facts alone — the transport and
+  `Shuttle.host_class/0` — never from a flag: a shared or exposed host that is
+  missing its expected uid (`:peer_gate_expected_uid` unset) refuses every
+  non-root TCP peer rather than admitting them. `/api/v1/version`'s
+  `peer_gate` reports the same decision; it does not make it.
   """
 
   @behaviour Plug
@@ -24,9 +30,8 @@ defmodule ShuttleWeb.PeerGatePlug do
   def call(conn, opts) do
     peer = conn.assigns[:peer] || %{}
     host_class = Keyword.get(opts, :host_class, Shuttle.host_class())
-    gate = Keyword.get(opts, :peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
 
-    if peer.transport == :tcp and host_class in @shared_classes and gate == "uid" do
+    if peer.transport == :tcp and host_class in @shared_classes do
       admit_or_refuse(conn, peer, Keyword.get(opts, :expected_uid, expected_uid()))
     else
       conn

@@ -48,6 +48,8 @@ defmodule ShuttleWeb.PeerPlug do
 
   @behaviour Plug
 
+  @gated_classes [:shared_multi_user, :exposed]
+
   import Plug.Conn
 
   @impl true
@@ -69,6 +71,8 @@ defmodule ShuttleWeb.PeerPlug do
   defp transport(%{address: {:local, _}}), do: :unix
   defp transport(_peer_data), do: :tcp
 
+  # Resolved only on the classes whose gate consults it: on a single-user host
+  # the fact would cost a /proc/net/tcp read per request and nothing reads it.
   defp peer_uid(peer_data, opts) do
     listen = Shuttle.listen()
 
@@ -77,7 +81,9 @@ defmodule ShuttleWeb.PeerPlug do
         resolver.(peer_data, listen)
 
       nil ->
-        Shuttle.ProcNetTcp.peer_uid(peer_data, listen, Keyword.get(opts, :proc_root, "/proc"))
+        if Keyword.get(opts, :host_class, Shuttle.host_class()) in @gated_classes do
+          Shuttle.ProcNetTcp.peer_uid(peer_data, listen, Keyword.get(opts, :proc_root, "/proc"))
+        end
     end
   end
 

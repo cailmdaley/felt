@@ -237,33 +237,10 @@ defmodule Shuttle.Application do
               "class's unix socket is used, or declare the host single-user"
     end
 
-    {"uid", configured_peer_uid()}
+    {"uid", Shuttle.Host.expected_peer_uid!()}
   end
 
   defp configure_peer_gate(_class, _listen, _listen_string, _server?), do: {"none", nil}
-
-  defp configured_peer_uid do
-    case System.get_env("SHUTTLE_PEER_UID") do
-      nil ->
-        case System.cmd("id", ["-u"]) do
-          {uid, 0} -> parse_peer_uid!(uid, "id -u")
-          {_output, status} -> raise ArgumentError, "id -u failed with status #{status}"
-        end
-
-      value ->
-        parse_peer_uid!(value, "SHUTTLE_PEER_UID")
-    end
-  end
-
-  defp parse_peer_uid!(value, source) do
-    value = String.trim(value)
-
-    if Regex.match?(~r/\\A[0-9]+\\z/, value) do
-      String.to_integer(value)
-    else
-      raise ArgumentError, "#{source} must be a non-negative integer, got #{inspect(value)}"
-    end
-  end
 
   # The endpoint's signing key.
   #

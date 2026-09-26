@@ -22,7 +22,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
       |> maybe_add_login(login)
       |> PeerPlug.call(uid_resolver: fn _peer, _listen -> uid end)
 
-    PeerGatePlug.call(conn, host_class: class, peer_gate: "uid", expected_uid: @expected_uid)
+    PeerGatePlug.call(conn, host_class: class, expected_uid: @expected_uid)
   end
 
   defp maybe_add_login(conn, nil), do: conn
@@ -35,6 +35,17 @@ defmodule ShuttleWeb.PeerGatePlugTest do
 
     refute conn.halted
     assert conn.assigns.peer.tailscale_login == "user@example.com"
+  end
+
+  test "refuses a non-root peer when no expected uid is configured (fails closed)" do
+    conn =
+      conn(:get, "/")
+      |> put_peer_data(%{address: @loopback, port: 43_210, ssl_cert: nil})
+      |> PeerPlug.call(uid_resolver: fn _peer, _listen -> @expected_uid end)
+      |> PeerGatePlug.call(host_class: :shared_multi_user, expected_uid: nil)
+
+    assert conn.halted
+    assert conn.status == 403
   end
 
   test "admits root" do

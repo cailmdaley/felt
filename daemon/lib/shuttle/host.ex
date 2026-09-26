@@ -126,6 +126,45 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc """
+  The uid the TCP peer gate admits: `SHUTTLE_PEER_UID` when set (the negative
+  control — point it at a wrong uid and watch your own connection refused),
+  else this process's euid from `id -u`. Raises on anything but a decimal.
+  """
+  @spec expected_peer_uid!() :: non_neg_integer()
+  def expected_peer_uid! do
+    case System.get_env("SHUTTLE_PEER_UID") do
+      nil ->
+        case System.cmd("id", ["-u"]) do
+          {out, 0} -> parse_uid!(out, "id -u")
+          {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
+        end
+
+      value ->
+        parse_uid!(value, "SHUTTLE_PEER_UID")
+    end
+  end
+
+  @doc "`{:ok, uid}` for a decimal string (surrounding whitespace allowed), else `:error`."
+  @spec parse_uid(String.t()) :: {:ok, non_neg_integer()} | :error
+  def parse_uid(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_uid!(value, source) do
+    case parse_uid(value) do
+      {:ok, uid} ->
+        uid
+
+      :error ->
+        raise ArgumentError,
+              "#{source} must be a non-negative integer, got #{inspect(String.trim(value))}"
+    end
+  end
+
   @doc "This host's class, read fresh. Raises on a malformed host.json."
   @spec class() :: class()
   def class, do: resolve!().class
