@@ -13,6 +13,7 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -719,13 +720,11 @@ func decodeProcAddr(h string) string {
 	if err != nil || (len(raw) != 4 && len(raw) != 16) {
 		return h
 	}
-	// Each 4-byte word is little-endian on every architecture Linux reports
-	// this way for; reverse within words.
+	// /proc prints each 32-bit address word in host byte order; write it in
+	// network order for net.IP.
 	ip := make(net.IP, len(raw))
 	for w := 0; w < len(raw); w += 4 {
-		for b := 0; b < 4; b++ {
-			ip[w+b] = raw[w+3-b]
-		}
+		binary.BigEndian.PutUint32(ip[w:w+4], binary.NativeEndian.Uint32(raw[w:w+4]))
 	}
 	return ip.String()
 }

@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,16 +45,31 @@ func TestParseLsofListeners(t *testing.T) {
 	}
 }
 
+func procAddressHex(address net.IP) string {
+	if ipv4 := address.To4(); ipv4 != nil {
+		address = ipv4
+	} else {
+		address = address.To16()
+	}
+	if address == nil {
+		panic("invalid proc address fixture")
+	}
+	encoded := make([]byte, len(address))
+	for i := 0; i < len(address); i += 4 {
+		binary.NativeEndian.PutUint32(encoded[i:i+4], binary.BigEndian.Uint32(address[i:i+4]))
+	}
+	return fmt.Sprintf("%X", encoded)
+}
+
 func TestParseProcNetTCP(t *testing.T) {
-	// 0100007F:0FA0 is 127.0.0.1:4000 (LISTEN, uid 1000); the ESTABLISHED row
-	// (01) and the header are skipped.
-	v4 := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 0100007F:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1 0000000000000000 100 0 0 10 0
-   1: 0100007F:0FA1 0100007F:D431 01 00000000:00000000 00:00000000 00000000  1000        0 4343 1 0000000000000000 100 0 0 10 0
-`
+	loopback4 := procAddressHex(net.IPv4(127, 0, 0, 1))
+	loopback6 := procAddressHex(net.ParseIP("::1"))
+	v4 := fmt.Sprintf("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"+
+		"   0: %s:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1 0000000000000000 100 0 0 10 0\n"+
+		"   1: %s:0FA1 %s:D431 01 00000000:00000000 00:00000000 00000000  1000        0 4343 1 0000000000000000 100 0 0 10 0\n",
+		loopback4, loopback4, loopback4)
 	// ::1 port 4001, uid 0.
-	v6 := `   0: 00000000000000000000000001000000:0FA1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5151 1 0000000000000000 100 0 0 10 0
-`
+	v6 := fmt.Sprintf("   0: %s:0FA1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5151 1 0000000000000000 100 0 0 10 0\n", loopback6)
 	got := append(parseProcNetTCP(v4), parseProcNetTCP(v6)...)
 	want := []procTCPRow{
 		{Address: "127.0.0.1", Port: 4000, UID: 1000, Inode: "4242"},
@@ -70,9 +87,11 @@ func TestProcListenerOwnersAndDaemonDialGuard(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "net"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fixture := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
-		"   0: 0100007F:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n" +
-		"   1: 0100007F:0FA1 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 4343 1\n"
+	loopback := procAddressHex(net.IPv4(127, 0, 0, 1))
+	fixture := fmt.Sprintf("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"+
+		"   0: %s:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n"+
+		"   1: %s:0FA1 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 4343 1\n",
+		loopback, loopback)
 	if err := os.WriteFile(filepath.Join(root, "net", "tcp"), []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -101,10 +120,11 @@ func TestProcListeners(t *testing.T) {
 		}
 	}
 	must(os.MkdirAll(filepath.Join(root, "net"), 0o755))
-	must(os.WriteFile(filepath.Join(root, "net", "tcp"), []byte(
+	loopback := procAddressHex(net.IPv4(127, 0, 0, 1))
+	must(os.WriteFile(filepath.Join(root, "net", "tcp"), []byte(fmt.Sprintf(
 		"  sl  local_address rem_address   st\n"+
-			"   0: 0100007F:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n"+
-			"   1: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 9999 1\n"), 0o644))
+			"   0: %s:0FA0 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4242 1\n"+
+			"   1: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 9999 1\n", loopback)), 0o644))
 	must(os.MkdirAll(filepath.Join(root, "1234", "fd"), 0o755))
 	must(os.WriteFile(filepath.Join(root, "1234", "comm"), []byte("beam.smp\n"), 0o644))
 	must(os.Symlink("socket:[4242]", filepath.Join(root, "1234", "fd", "20")))

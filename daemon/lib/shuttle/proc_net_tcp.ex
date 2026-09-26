@@ -5,8 +5,8 @@ defmodule Shuttle.ProcNetTcp do
   A connection is identified by its established client-side row: the local
   endpoint is the peer address and ephemeral port, while the remote endpoint
   is the daemon listener. The mirror server-side row has the daemon's uid and
-  must not be used. Addresses are matched in either byte order and IPv4-mapped
-  IPv6 loopback addresses normalize to IPv4.
+  must not be used. Address words are decoded in the host's native byte order,
+  and IPv4-mapped IPv6 loopback addresses normalize to IPv4.
   """
 
   @tcp_state "01"
@@ -107,30 +107,24 @@ defmodule Shuttle.ProcNetTcp do
   defp endpoint_matches?({addresses, port}, {[target], port}), do: target in addresses
   defp endpoint_matches?(_actual, _expected), do: false
 
-  defp proc_addresses(hex) when byte_size(hex) == 8 do
+  defp proc_addresses(hex) when byte_size(hex) in [8, 32] do
     with {:ok, bytes} <- Base.decode16(hex, case: :mixed),
-         do: {:ok, bytes |> endian_variants(4) |> normalize_variants()}
-  end
-
-  defp proc_addresses(hex) when byte_size(hex) == 32 do
-    with {:ok, bytes} <- Base.decode16(hex, case: :mixed),
-         do: {:ok, bytes |> endian_variants(4) |> normalize_variants()}
+         native <- decode_native_order(bytes),
+         address when not is_nil(address) <- normalize_bytes(native) do
+      {:ok, [address]}
+    else
+      _ -> :error
+    end
   end
 
   defp proc_addresses(_hex), do: :error
 
-  defp endian_variants(bytes, 4) when byte_size(bytes) == 4 do
-    [bytes, reverse_bytes(bytes)]
+  defp decode_native_order(bytes) when byte_size(bytes) == 4 do
+    if :erlang.system_info(:endian) == :little, do: reverse_bytes(bytes), else: bytes
   end
 
-  defp endian_variants(bytes, 4) when byte_size(bytes) == 16 do
-    [bytes, reverse_words(bytes)]
-  end
-
-  defp normalize_variants(variants) do
-    variants
-    |> Enum.map(&normalize_bytes/1)
-    |> Enum.reject(&is_nil/1)
+  defp decode_native_order(bytes) when byte_size(bytes) == 16 do
+    if :erlang.system_info(:endian) == :little, do: reverse_words(bytes), else: bytes
   end
 
   defp normalize_address(address) when is_tuple(address) and tuple_size(address) == 4 do

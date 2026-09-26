@@ -6,28 +6,37 @@ defmodule Shuttle.ProcNetTcpTest do
   @fixture_root Path.expand("../fixtures/proc_net_tcp", __DIR__)
   @loopback {127, 0, 0, 1}
 
-  test "matches the client row when the proc IPv4 address is little-endian" do
+  test "matches IPv4 loopback only in the host's native byte order" do
     data = File.read!(Path.join(@fixture_root, "tcp"))
 
-    assert ProcNetTcp.uid_from_data(data, @loopback, 54_321, @loopback, 4000) == 1234
+    {native_port, native_uid, other_port} =
+      case :erlang.system_info(:endian) do
+        :little -> {54_321, 1234, 54_322}
+        :big -> {54_322, 2345, 54_321}
+      end
+
+    assert ProcNetTcp.uid_from_data(data, @loopback, native_port, @loopback, 4000) == native_uid
+    # The opposite-order row decodes to 1.0.0.127 and must not match 127.0.0.1.
+    assert ProcNetTcp.uid_from_data(data, @loopback, other_port, @loopback, 4000) == nil
   end
 
-  test "matches the client row when the proc IPv4 address is big-endian" do
-    data = File.read!(Path.join(@fixture_root, "tcp"))
-
-    assert ProcNetTcp.uid_from_data(data, @loopback, 54_322, @loopback, 4000) == 2345
-  end
-
-  test "matches an IPv4-mapped loopback peer in tcp6" do
+  test "matches IPv4-mapped loopback only in the host's native byte order" do
     data = File.read!(Path.join(@fixture_root, "tcp6"))
 
-    assert ProcNetTcp.uid_from_data(data, @loopback, 54_323, @loopback, 4000) == 3456
+    {native_port, native_uid, other_port} =
+      case :erlang.system_info(:endian) do
+        :little -> {54_323, 3456, 54_324}
+        :big -> {54_324, 4567, 54_323}
+      end
+
+    assert ProcNetTcp.uid_from_data(data, @loopback, native_port, @loopback, 4000) == native_uid
+    assert ProcNetTcp.uid_from_data(data, @loopback, other_port, @loopback, 4000) == nil
   end
 
   test "returns nil when the established client row is absent" do
     data = File.read!(Path.join(@fixture_root, "tcp"))
 
-    assert ProcNetTcp.uid_from_data(data, @loopback, 54_324, @loopback, 4000) == nil
+    assert ProcNetTcp.uid_from_data(data, @loopback, 54_325, @loopback, 4000) == nil
   end
 
   test "returns nil when the proc table files are missing" do
