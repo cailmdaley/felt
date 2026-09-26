@@ -316,7 +316,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		mismatch(fmt.Sprintf("%s is held by uid %d, not you", ev.daemonPortListen, ev.daemonPortOwner.UID),
 			"stop trusting this port: stop the foreign listener and restart Shuttle, or use the protected Unix socket")
 	}
-	gatedDaemonTCP := hostClass(h.Class).usesSocket() && hostClass(ev.daemonClass).usesSocket() &&
+	gatedDaemonTCP := hostClass(h.Class) == hostClassShared && hostClass(ev.daemonClass) == hostClassShared &&
 		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" && !portOwnerMismatch
 	if gatedDaemonTCP {
 		h.PeerGate = &ReceiptPeerGate{

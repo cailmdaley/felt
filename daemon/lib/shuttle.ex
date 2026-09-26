@@ -226,13 +226,17 @@ defmodule Shuttle.Application do
     Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
   end
 
-  defp configure_peer_gate(class, {:tcp, _ip, _port}, listen_string, true)
-       when class in [:shared_multi_user, :exposed] do
+  defp configure_peer_gate(:exposed, {:tcp, _ip, _port}, listen_string, true) do
+    raise ArgumentError,
+          "refusing to listen on #{listen_string} for host class exposed: exposed hosts serve only the unix socket; the front proxy must dial the socket"
+  end
+
+  defp configure_peer_gate(:shared_multi_user, {:tcp, _ip, _port}, listen_string, true) do
     proc_root = Application.get_env(:shuttle, :proc_net_root, "/proc")
 
     unless Shuttle.ProcNetTcp.readable?(proc_root) do
       raise ArgumentError,
-            "refusing to listen on #{listen_string} for host class #{Shuttle.Host.class_name(class)}: " <>
+            "refusing to listen on #{listen_string} for host class shared-multi-user: " <>
               "uid peer gating requires readable /proc/net/tcp; drop the tcp:// listen so the " <>
               "class's unix socket is used, or declare the host single-user"
     end

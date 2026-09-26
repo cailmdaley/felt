@@ -144,11 +144,15 @@ check the kernel enforces rather than one the daemon has to implement. A host
 whose only inbound is SSH tunnels can run entirely off the socket.
 An unprivileged userspace `tailscaled` cannot target a Unix socket with
 `tailscale serve`, and the macOS system `tailscaled` cannot reach a filesystem
-socket at all. A host using either arrangement needs a loopback TCP listener.
-On `shared-multi-user` and `exposed` hosts, `PeerGatePlug` protects that
-listener before static assets or request-body parsing: it admits only a peer
-whose uid from `/proc/net/tcp` or `/proc/net/tcp6` matches the daemon's
-effective uid. An unresolved or foreign uid receives a 403 response.
+socket at all. A shared host using either arrangement needs a loopback TCP
+listener. An exposed host instead places a front proxy before the daemon; that
+proxy dials the daemon's Unix socket.
+
+On shared TCP listeners, `PeerGatePlug` runs before static assets or
+request-body parsing and admits only a peer whose uid from `/proc/net/tcp` or
+`/proc/net/tcp6` matches the daemon's effective uid. An unresolved or foreign
+uid receives a 403 response. The plug also refuses exposed TCP requests that
+reach it, while daemon boot refuses to create an exposed TCP listener.
 
 The gate identifies the last local process, not the original client. A relay
 running as the daemon's owner can pass co-tenant traffic with that owner's uid;
@@ -170,9 +174,10 @@ shared and exposed TCP listeners; single-user TCP and Unix connections bypass
 that gate. Unix reachability is bounded by the socket directory's filesystem
 permissions. The `tailscale_login` value is retained on TCP only after the uid
 gate admits the peer, but the header remains an assertion rather than an
-independent credential. A shared or exposed TCP listener refuses to boot when
-`/proc/net/tcp` is unreadable; use the class's Unix socket or declare the host
-`single-user` when loopback is private to its operator.
+independent credential. A shared TCP listener refuses to boot when
+`/proc/net/tcp` is unreadable; an exposed TCP listener is refused regardless
+of `/proc`. Use the class's Unix socket or declare the host `single-user` when
+loopback is private to its operator.
 
 ## Platform story
 

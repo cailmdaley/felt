@@ -23,7 +23,7 @@ import (
 //     reach a loopback port, so the daemon binds a unix socket inside a 0700
 //     directory instead, and filesystem permissions are the access control.
 //   - exposed: a host reachable from outside (a mesh-VPN node serving the
-//     board). Same listener rule as shared-multi-user.
+//     board). The daemon must use a unix socket; its front proxy dials it.
 //
 // This is the Go half of a two-reader contract, like the fleet file: the
 // daemon resolves the same class and listener from the same file, and

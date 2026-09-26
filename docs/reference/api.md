@@ -322,14 +322,16 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address), `host_class` (the declared trust class), and `peer_gate` (`"uid"` when shared/exposed TCP peers are uid-gated, otherwise `"none"`) |
+| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address), `host_class` (the declared trust class), and `peer_gate` (`"uid"` for a shared-multi-user TCP listener, otherwise `"none"`) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
 
-A shared or exposed TCP peer refused by the uid gate receives HTTP 403 before
-static assets are served or a request body is parsed:
+A TCP peer refused by the uid gate receives HTTP 403 before static assets
+are served or a request body is parsed. Exposed hosts refuse TCP listeners at
+boot; this response also describes the gate's defense-in-depth behavior if an
+exposed TCP request reaches the plug:
 
 ```json
 {"error":"peer_refused","reason":"uid 2000 is not the daemon's uid 1000"}

@@ -373,6 +373,23 @@ defmodule Shuttle.HostTest do
       assert error.message =~ "declare the host single-user"
     end
 
+    test "an exposed host refuses TCP and directs the front proxy to its socket", %{
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "exposed.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Shuttle.Application.configure_endpoint()
+        end
+
+      assert error.message =~ "host class exposed"
+      assert error.message =~ "exposed hosts serve only the unix socket"
+      assert error.message =~ "the front proxy must dial the socket"
+    end
+
     test "a single-user host keeps loopback tcp on the configured port", %{endpoint: endpoint} do
       System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "single_user.json"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)

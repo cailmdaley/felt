@@ -321,6 +321,19 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 		t.Fatalf("receipt should retain the observed daemon listener: %+v", got.Listeners)
 	}
 
+	exposedListen := "tcp://127.0.0.1:4000"
+	exposed := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "exposed", Listen: exposedListen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+		},
+		daemonClass:    "exposed",
+		daemonListen:   exposedListen,
+		daemonPeerGate: "uid",
+	})
+	if exposed.Status != receiptMismatch || exposed.PeerGate != nil {
+		t.Fatalf("exposed TCP must not receive the shared-host gate exemption: %+v", exposed)
+	}
+
 	got = evaluateHost(hostEvidence{
 		settings:       settings,
 		users:          &one,
