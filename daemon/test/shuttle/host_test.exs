@@ -245,6 +245,7 @@ defmodule Shuttle.HostTest do
       previous_class = Application.get_env(:shuttle, :host_class)
       previous_peer_gate = Application.get_env(:shuttle, :peer_gate)
       previous_peer_gate_uid = Application.get_env(:shuttle, :peer_gate_expected_uid)
+      previous_peer_gate_uid_source = Application.get_env(:shuttle, :peer_gate_uid_source)
       previous_proc_root = Application.get_env(:shuttle, :proc_net_root)
 
       on_exit(fn ->
@@ -253,6 +254,7 @@ defmodule Shuttle.HostTest do
         restore_app_env(:host_class, previous_class)
         restore_app_env(:peer_gate, previous_peer_gate)
         restore_app_env(:peer_gate_expected_uid, previous_peer_gate_uid)
+        restore_app_env(:peer_gate_uid_source, previous_peer_gate_uid_source)
         restore_app_env(:proc_net_root, previous_proc_root)
       end)
 
@@ -320,8 +322,13 @@ defmodule Shuttle.HostTest do
       [head, body] = socket |> recv_all("") |> String.split("\r\n\r\n", parts: 2)
       assert head =~ "HTTP/1.1 200"
 
-      assert %{"listen" => listen, "host_class" => "shared-multi-user", "peer_gate" => "none"} =
-               Jason.decode!(body)
+      assert %{
+               "listen" => listen,
+               "host_class" => "shared-multi-user",
+               "peer_gate" => "none",
+               "peer_gate_uid" => nil,
+               "peer_gate_uid_source" => nil
+             } = Jason.decode!(body)
 
       assert listen == "unix://" <> sock
     end

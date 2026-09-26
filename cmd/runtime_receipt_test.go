@@ -235,6 +235,7 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 	}{
 		{"healthy", map[string]any{
 			"listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user", "peer_gate": "uid",
+			"peer_gate_uid": 1000, "peer_gate_uid_source": "euid",
 			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
 		}, receiptHealthy},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
@@ -254,8 +255,9 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			if tt.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
 			}
-			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid") {
-				t.Fatalf("version listener fields = listen %q, class %q, peer_gate %q", got.Listen, got.HostClass, got.PeerGate)
+			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid" ||
+				got.PeerGateUID == nil || *got.PeerGateUID != 1000 || got.PeerGateUIDSource != "euid") {
+				t.Fatalf("version listener fields = listen %q, class %q, peer_gate %q, uid %v from %q", got.Listen, got.HostClass, got.PeerGate, got.PeerGateUID, got.PeerGateUIDSource)
 			}
 		})
 	}

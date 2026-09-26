@@ -790,6 +790,12 @@ retained on TCP only after uid admission; the header itself is still an
 assertion. `PeerGatePlug` also refuses exposed TCP requests that reach it, but
 the daemon refuses to boot an exposed TCP listener.
 
+The gate admits the daemon's effective uid by default. `SHUTTLE_PEER_UID` is
+an explicit override; the daemon logs a warning when it is set, and
+`GET /api/v1/version` reports the admitted uid and whether it came from the
+environment. `felt setup receipt` flags an environment override or a uid that
+differs from the CLI user's uid. Leave the variable unset for normal use.
+
 The gate identifies the last local process, not the original client. A relay
 running as the daemon's owner can pass a co-tenant's traffic with that owner's
 uid. Examples include a userspace Tailscale SOCKS/HTTP proxy, `ssh -D` or

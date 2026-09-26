@@ -322,7 +322,7 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address), `host_class` (the declared trust class), and `peer_gate` (`"uid"` for a shared-multi-user TCP listener, otherwise `"none"`) |
+| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address), `host_class` (the declared trust class), `peer_gate` (`"uid"` for a shared-multi-user TCP listener, otherwise `"none"`), `peer_gate_uid` (the admitted integer uid or `null`), and `peer_gate_uid_source` (`"euid"`, `"env"`, or `null`) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |

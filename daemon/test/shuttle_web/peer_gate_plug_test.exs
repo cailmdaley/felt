@@ -101,7 +101,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     {uid_text, 0} = System.cmd("id", ["-u"])
     uid = String.to_integer(String.trim(uid_text))
     port = unused_port()
-    keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid]
+    keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid, :peer_gate_uid_source]
     previous = Map.new(keys, &{&1, Application.fetch_env(:shuttle, &1)})
 
     on_exit(fn ->
@@ -115,6 +115,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     Application.put_env(:shuttle, :host_class, :shared_multi_user)
     Application.put_env(:shuttle, :peer_gate, "uid")
     Application.put_env(:shuttle, :peer_gate_expected_uid, uid)
+    Application.put_env(:shuttle, :peer_gate_uid_source, "euid")
 
     {:ok, server} =
       Bandit.start_link(
@@ -128,7 +129,11 @@ defmodule ShuttleWeb.PeerGatePlugTest do
 
     {allowed_head, allowed_body} = request_version(port)
     assert allowed_head =~ "HTTP/1.1 200"
-    assert Jason.decode!(allowed_body)["peer_gate"] == "uid"
+    assert %{
+             "peer_gate" => "uid",
+             "peer_gate_uid" => ^uid,
+             "peer_gate_uid_source" => "euid"
+           } = Jason.decode!(allowed_body)
 
     Application.put_env(:shuttle, :peer_gate_expected_uid, uid + 1)
     {refused_head, refused_body} = request_version(port)

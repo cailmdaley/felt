@@ -111,9 +111,11 @@ type hostEvidence struct {
 	httpsProxy  string
 	// daemonListen and daemonClass are what the running daemon reports on
 	// /api/v1/version; empty when it was not reached.
-	daemonListen   string
-	daemonClass    string
-	daemonPeerGate string
+	daemonListen            string
+	daemonClass             string
+	daemonPeerGate          string
+	daemonPeerGateUID       *int
+	daemonPeerGateUIDSource string
 	// daemonPortOwner is the uid holding the resolved or reported TCP listener.
 	daemonPortOwner  *ReceiptDaemonPortOwner
 	daemonPortListen string
@@ -124,6 +126,7 @@ type hostEvidence struct {
 func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
 	ev := gatherHostEvidence()
 	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
+	ev.daemonPeerGateUID, ev.daemonPeerGateUIDSource = daemon.PeerGateUID, daemon.PeerGateUIDSource
 	ev.daemonPortOwner, ev.daemonPortListen = observedDaemonPortOwner(ev, os.Geteuid())
 	return evaluateHost(ev)
 }
@@ -315,6 +318,22 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	if portOwnerMismatch {
 		mismatch(fmt.Sprintf("%s is held by uid %d, not you", ev.daemonPortListen, ev.daemonPortOwner.UID),
 			"stop trusting this port: stop the foreign listener and restart Shuttle, or use the protected Unix socket")
+	}
+	if ev.daemonPeerGate == "uid" {
+		callerUID := os.Geteuid()
+		switch {
+		case ev.daemonPeerGateUIDSource == "env":
+			if ev.daemonPeerGateUID != nil {
+				mismatch(fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", *ev.daemonPeerGateUID, callerUID),
+					"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+			} else {
+				mismatch("the daemon reports SHUTTLE_PEER_UID as its peer-gate source but reports no admitted uid",
+					"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+			}
+		case ev.daemonPeerGateUID != nil && *ev.daemonPeerGateUID != callerUID:
+			mismatch(fmt.Sprintf("the daemon admits uid %d; you are uid %d", *ev.daemonPeerGateUID, callerUID),
+				"run the CLI and daemon as the same uid, then restart the daemon")
+		}
 	}
 	gatedDaemonTCP := hostClass(h.Class) == hostClassShared && hostClass(ev.daemonClass) == hostClassShared &&
 		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" && !portOwnerMismatch

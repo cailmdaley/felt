@@ -11,7 +11,7 @@ defmodule ShuttleWeb.VersionController do
 
   Also where this daemon listens (`listen`, e.g. `"unix:///…/daemon.sock"`),
   the host class that chose it (`host_class`, e.g. `"single-user"`), and the
-  TCP peer gate mode (`peer_gate`: `"uid"` or `"none"`), as bound at boot.
+  TCP peer gate mode, admitted uid, and uid source as bound at boot.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -26,6 +26,8 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
       |> Map.put(:peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
+      |> Map.put(:peer_gate_uid, Application.get_env(:shuttle, :peer_gate_expected_uid))
+      |> Map.put(:peer_gate_uid_source, Application.get_env(:shuttle, :peer_gate_uid_source))
     )
   end
 

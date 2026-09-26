@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -257,6 +258,33 @@ func TestEvaluateHost(t *testing.T) {
 			}
 			if got.Listeners == nil {
 				t.Error("listeners must encode as [], never null")
+			}
+		})
+	}
+}
+
+func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
+	callerUID := os.Geteuid()
+	foreignUID := callerUID + 1
+	listen := "tcp://127.0.0.1:4000"
+	settings := hostSettings{
+		Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+	}
+	cases := []struct {
+		name, source, problem string
+		uid                   int
+	}{
+		{"environment override", "env", fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", callerUID, callerUID), callerUID},
+		{"different daemon uid", "euid", fmt.Sprintf("the daemon admits uid %d; you are uid %d", foreignUID, callerUID), foreignUID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evaluateHost(hostEvidence{
+				settings: settings, daemonClass: "shared-multi-user", daemonListen: listen, daemonPeerGate: "uid",
+				daemonPeerGateUID: &tc.uid, daemonPeerGateUIDSource: tc.source,
+			})
+			if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), tc.problem) {
+				t.Fatalf("peer-gate uid identity finding = %+v, want %q", got, tc.problem)
 			}
 		})
 	}

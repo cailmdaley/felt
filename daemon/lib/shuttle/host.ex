@@ -126,23 +126,26 @@ defmodule Shuttle.Host do
     end
   end
 
-  @doc """
-  The uid the TCP peer gate admits: `SHUTTLE_PEER_UID` when set (the negative
-  control — point it at a wrong uid and watch your own connection refused),
-  else this process's euid from `id -u`. Raises on anything but a decimal.
-  """
-  @spec expected_peer_uid!() :: non_neg_integer()
-  def expected_peer_uid! do
+  @doc "The uid and source used by the TCP peer gate. Raises on an invalid uid."
+  @spec expected_peer_uid_config!() :: {non_neg_integer(), :euid | :env}
+  def expected_peer_uid_config! do
     case System.get_env("SHUTTLE_PEER_UID") do
       nil ->
         case System.cmd("id", ["-u"]) do
-          {out, 0} -> parse_uid!(out, "id -u")
+          {out, 0} -> {parse_uid!(out, "id -u"), :euid}
           {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
         end
 
       value ->
-        parse_uid!(value, "SHUTTLE_PEER_UID")
+        {parse_uid!(value, "SHUTTLE_PEER_UID"), :env}
     end
+  end
+
+  @doc "The uid the TCP peer gate admits."
+  @spec expected_peer_uid!() :: non_neg_integer()
+  def expected_peer_uid! do
+    {uid, _source} = expected_peer_uid_config!()
+    uid
   end
 
   @doc "`{:ok, uid}` for a decimal string (surrounding whitespace allowed), else `:error`."
