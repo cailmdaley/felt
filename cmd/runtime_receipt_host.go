@@ -332,21 +332,26 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	if ev.daemonPeerGate == "uid" {
 		callerUID := os.Geteuid()
 		switch {
+		case ev.daemonPeerGateUIDSource == "env" && ev.daemonPeerGateUID == nil:
+			mismatch("the daemon reports SHUTTLE_PEER_UID as its peer-gate source but reports no admitted uid",
+				"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+		case ev.daemonPeerGateUIDSource == "" || ev.daemonPeerGateUID == nil:
+			mismatch("the daemon reports uid gating without saying which uid; restart onto the current build",
+				"restart onto the current build")
 		case ev.daemonPeerGateUIDSource == "env":
-			if ev.daemonPeerGateUID != nil {
-				mismatch(fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", *ev.daemonPeerGateUID, callerUID),
-					"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
-			} else {
-				mismatch("the daemon reports SHUTTLE_PEER_UID as its peer-gate source but reports no admitted uid",
-					"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
-			}
-		case ev.daemonPeerGateUID != nil && *ev.daemonPeerGateUID != callerUID:
+			mismatch(fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", *ev.daemonPeerGateUID, callerUID),
+				"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+		case ev.daemonPeerGateUIDSource != "euid":
+			mismatch(fmt.Sprintf("the daemon reports unknown peer-gate uid source %q", ev.daemonPeerGateUIDSource),
+				"restart onto the current build")
+		case *ev.daemonPeerGateUID != callerUID:
 			mismatch(fmt.Sprintf("the daemon admits uid %d; you are uid %d", *ev.daemonPeerGateUID, callerUID),
 				"run the CLI and daemon as the same uid, then restart the daemon")
 		}
 	}
 	gatedDaemonTCP := hostClass(h.Class) == hostClassShared && hostClass(ev.daemonClass) == hostClassShared &&
-		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" && !portOwnerMismatch
+		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" &&
+		ev.daemonPeerGateUIDSource != "" && ev.daemonPeerGateUID != nil && !portOwnerMismatch
 	if gatedDaemonTCP {
 		h.PeerGate = &ReceiptPeerGate{
 			Mode:   "uid",

@@ -371,6 +371,7 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 	}{
 		{"environment override", "env", fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", callerUID, callerUID), callerUID},
 		{"different daemon uid", "euid", fmt.Sprintf("the daemon admits uid %d; you are uid %d", foreignUID, callerUID), foreignUID},
+		{"missing uid source", "", "the daemon reports uid gating without saying which uid; restart onto the current build", callerUID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -385,17 +386,36 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 	}
 }
 
-func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
+// Negative control: remove the missing-source/value switch case and this daemon can look healthy.
+func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
 	listen := "tcp://127.0.0.1:4000"
 	got := evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
-		daemonClass:      "shared-multi-user",
-		daemonListen:     listen,
-		daemonPeerGate:   "uid",
-		daemonPortOwner:  &ReceiptDaemonPortOwner{UID: 2000, IsCaller: false},
-		daemonPortListen: listen,
+		daemonClass: "shared-multi-user", daemonListen: listen, daemonPeerGate: "uid",
+		daemonPeerGateUIDSource: "euid",
+	})
+	if got.Status != receiptMismatch || got.PeerGate != nil ||
+		!strings.Contains(strings.Join(got.Problems, "\n"), "without saying which uid") {
+		t.Fatalf("uid gate without an admitted uid = %+v, want mismatch without a verified PeerGate", got)
+	}
+}
+
+func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
+	listen := "tcp://127.0.0.1:4000"
+	callerUID := os.Geteuid()
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+		},
+		daemonClass:             "shared-multi-user",
+		daemonListen:            listen,
+		daemonPeerGate:          "uid",
+		daemonPeerGateUID:       &callerUID,
+		daemonPeerGateUIDSource: "euid",
+		daemonPortOwner:         &ReceiptDaemonPortOwner{UID: 2000, IsCaller: false},
+		daemonPortListen:        listen,
 	})
 	if got.Status != receiptMismatch || got.PeerGate != nil {
 		t.Fatalf("foreign listener with a forged uid-gate version = %+v", got)
@@ -413,7 +433,7 @@ func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
 // TestEvaluateHost_UidGatedDaemonListener checks the daemon exemption and
 // confirms that unrelated fleet listeners remain findings.
 func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
-	one := 1
+	one, callerUID := 1, os.Geteuid()
 	settings := hostSettings{
 		Class:       "shared-multi-user",
 		ClassSource: "file",
@@ -423,14 +443,16 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
 
 	got := evaluateHost(hostEvidence{
-		settings:       settings,
-		users:          &one,
-		listenFrom:     "ss",
-		listeners:      daemonTCP,
-		daemonPorts:    []int{4000},
-		daemonClass:    "shared-multi-user",
-		daemonListen:   "tcp://127.0.0.1:4000",
-		daemonPeerGate: "uid",
+		settings:                settings,
+		users:                   &one,
+		listenFrom:              "ss",
+		listeners:               daemonTCP,
+		daemonPorts:             []int{4000},
+		daemonClass:             "shared-multi-user",
+		daemonListen:            "tcp://127.0.0.1:4000",
+		daemonPeerGate:          "uid",
+		daemonPeerGateUID:       &callerUID,
+		daemonPeerGateUIDSource: "euid",
 	})
 	if got.Status != receiptHealthy || got.Repair != "" || len(got.Problems) != 0 {
 		t.Fatalf("uid-gated daemon listener = %+v, want healthy", got)
@@ -458,15 +480,17 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 
 	got = evaluateHost(hostEvidence{
-		settings:       settings,
-		users:          &one,
-		listenFrom:     "ss",
-		listeners:      append(daemonTCP, rawListener{Process: "tailscaled", PID: 2, Address: "127.0.0.1", Port: 1055}, rawListener{Process: "autossh", PID: 3, Address: "127.0.0.1", Port: 4001}),
-		daemonPorts:    []int{4000},
-		tunnelPorts:    []int{4001},
-		daemonClass:    "shared-multi-user",
-		daemonListen:   "tcp://127.0.0.1:4000",
-		daemonPeerGate: "uid",
+		settings:                settings,
+		users:                   &one,
+		listenFrom:              "ss",
+		listeners:               append(daemonTCP, rawListener{Process: "tailscaled", PID: 2, Address: "127.0.0.1", Port: 1055}, rawListener{Process: "autossh", PID: 3, Address: "127.0.0.1", Port: 4001}),
+		daemonPorts:             []int{4000},
+		tunnelPorts:             []int{4001},
+		daemonClass:             "shared-multi-user",
+		daemonListen:            "tcp://127.0.0.1:4000",
+		daemonPeerGate:          "uid",
+		daemonPeerGateUID:       &callerUID,
+		daemonPeerGateUIDSource: "euid",
 	})
 	if got.Status != receiptMismatch || len(got.Problems) != 2 {
 		t.Fatalf("non-daemon fleet listeners should remain mismatches: %+v", got)
