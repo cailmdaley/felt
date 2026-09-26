@@ -142,11 +142,13 @@ filesystem to the socket path, so only `sshd` running as the host's owner (an
 SSH tunnel's far end) or the local CLI can reach it, which is a permission
 check the kernel enforces rather than one the daemon has to implement. A host
 whose only inbound is SSH tunnels can run entirely off the socket.
-`tailscaled` cannot be a party to that check: `tailscale serve` cannot target
-a Unix socket from an unprivileged userspace instance, and the macOS system
-`tailscaled` cannot reach a filesystem socket at all — so a host fronted with
-`tailscale serve`, whatever its class, still needs a loopback TCP listener,
-and that listener is unauthenticated today.
+An unprivileged userspace `tailscaled` cannot target a Unix socket with
+`tailscale serve`, and the macOS system `tailscaled` cannot reach a filesystem
+socket at all. A host using either arrangement needs a loopback TCP listener.
+On `shared-multi-user` and `exposed` hosts, `PeerGatePlug` protects that
+listener before static assets or request-body parsing: it admits only a peer
+whose uid from `/proc/net/tcp` or `/proc/net/tcp6` matches the daemon's
+effective uid or root. An unresolved or foreign uid receives a 403 response.
 
 The daemon also refuses to dial out through `defaults.https_proxy` (a
 `remotes.json` setting that points outbound tailnet requests at a local
@@ -154,19 +156,16 @@ Tailscale HTTP proxy) unless the host is `single-user`: that proxy is an
 unauthenticated loopback gateway to the whole tailnet, and on a shared host
 every co-tenant can reach it.
 
-Every connection the endpoint accepts gets peer facts assigned onto it —
-`conn.assigns.peer` carries the transport (`unix` or `tcp`), whether the
-request arrived through a forwarding proxy, and a `tailscale_login` identity.
-Nothing authorizes on these facts yet. A Unix-socket connection is already
-peer-verified by the kernel, by the reachability argument above; a TCP
-loopback connection — including one `tailscale serve` forwards through on a
-shared host — carries no such guarantee, so a `tailscale_login` header
-arriving over it is only as trustworthy as the transport that could have
-forged it. Closing that gap is the reason the peer facts exist: the design,
-not yet built, is a check against `/proc/net/tcp` that admits only loopback
-peers owned by the daemon's own uid, so `tailscaled` and `sshd`-as-you pass
-and a co-tenant dialing the port directly is refused. They are the hook a
-future capability-scoped authorization layer reads once it exists.
+Every connection gets peer facts in `conn.assigns.peer`: transport (`unix` or
+`tcp`), TCP uid when `/proc` resolves it, whether forwarding headers are
+present, and a `tailscale_login` header. The uid gate consumes those facts on
+shared and exposed TCP listeners; single-user TCP and Unix connections bypass
+that gate. Unix reachability is bounded by the socket directory's filesystem
+permissions. The `tailscale_login` value is retained on TCP only after the uid
+gate admits the peer, but the header remains an assertion rather than an
+independent credential. A shared or exposed TCP listener refuses to boot when
+`/proc/net/tcp` is unreadable; use the class's Unix socket or declare the host
+`single-user` when loopback is private to its operator.
 
 ## Platform story
 
