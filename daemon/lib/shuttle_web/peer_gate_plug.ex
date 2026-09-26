@@ -56,7 +56,9 @@ defmodule ShuttleWeb.PeerGatePlug do
     reason = refusal_reason(uid, expected_uid)
     peer_data = get_peer_data(conn)
 
-    Logger.warning("refused TCP peer #{format_peer(peer_data)}: #{reason}")
+    if ShuttleWeb.PeerGateThrottle.allow_warning?(uid) do
+      Logger.warning("refused TCP peer #{format_peer(peer_data)}: #{reason}")
+    end
 
     conn
     |> put_resp_content_type("application/json")

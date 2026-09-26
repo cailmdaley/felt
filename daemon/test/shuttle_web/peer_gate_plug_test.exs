@@ -1,6 +1,7 @@
 defmodule ShuttleWeb.PeerGatePlugTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
   import Plug.Test
 
   alias ShuttleWeb.PeerGatePlug
@@ -54,6 +55,20 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     assert conn.halted
     assert conn.status == 403
     assert Jason.decode!(conn.resp_body)["reason"] == "uid 0 is not the daemon's uid 1000"
+  end
+
+  test "throttles refusal warnings by uid for 60 seconds" do
+    uid = 2_000_000 + System.unique_integer([:positive])
+    first_log = capture_log(fn -> call_gate(uid) end)
+    second_log = capture_log(fn -> call_gate(uid) end)
+
+    assert first_log =~ "refused TCP peer"
+    refute second_log =~ "refused TCP peer"
+
+    interval_uid = uid + 1_000_000_000
+    assert ShuttleWeb.PeerGateThrottle.allow_warning?(interval_uid, 0)
+    refute ShuttleWeb.PeerGateThrottle.allow_warning?(interval_uid, 59_999)
+    assert ShuttleWeb.PeerGateThrottle.allow_warning?(interval_uid, 60_000)
   end
 
   test "refuses a foreign uid with a JSON 403" do
@@ -129,6 +144,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
 
     {allowed_head, allowed_body} = request_version(port)
     assert allowed_head =~ "HTTP/1.1 200"
+
     assert %{
              "peer_gate" => "uid",
              "peer_gate_uid" => ^uid,

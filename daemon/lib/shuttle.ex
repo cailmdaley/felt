@@ -133,7 +133,8 @@ defmodule Shuttle.Application do
       Shuttle.Meeting.Control,
       # Owns the ETS table the per-session token folds are cached in. Pure
       # cache: a restart costs one re-read per session, never a wrong number.
-      Shuttle.TokenSpend
+      Shuttle.TokenSpend,
+      ShuttleWeb.PeerGateThrottle
     ]
 
     optional =
@@ -181,7 +182,9 @@ defmodule Shuttle.Application do
   @doc false
   def configure_endpoint do
     if System.get_env("SHUTTLE_PEER_UID") do
-      Logger.warning("SHUTTLE_PEER_UID is set; it overrides the effective uid when shared TCP peer gating is active")
+      Logger.warning(
+        "SHUTTLE_PEER_UID is set; it overrides the effective uid when shared TCP peer gating is active"
+      )
     end
 
     existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])
