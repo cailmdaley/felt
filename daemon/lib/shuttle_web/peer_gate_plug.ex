@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.PeerGatePlug do
   @moduledoc """
   Refuses TCP peers on shared and exposed hosts unless `/proc` assigns them the
-  daemon's expected uid or root.
+  daemon's exact expected uid. Root is not a separate admission exception.
 
   `PeerPlug` gathers transport and uid facts; this plug applies the admission
   policy separately, before static assets or request-body parsing. Unix
@@ -9,11 +9,19 @@ defmodule ShuttleWeb.PeerGatePlug do
   Tailscale login header is retained on TCP only after the uid gate admits the
   connection.
 
-  Whether the gate applies is decided from the facts alone — the transport and
-  `Shuttle.host_class/0` — never from a flag: a shared or exposed host that is
-  missing its expected uid (`:peer_gate_expected_uid` unset) refuses every
-  non-root TCP peer rather than admitting them. `/api/v1/version`'s
-  `peer_gate` reports the same decision; it does not make it.
+  The gate identifies the last local TCP process, not the original client. A
+  relay running as the daemon's owner can pass co-tenant traffic with that
+  owner's uid; examples include userspace Tailscale SOCKS/HTTP proxies,
+  `ssh -D`/`-L`, socat, and code-server or Jupyter `/proxy/` routes. Operators
+  must not run relays as themselves. Root has no separate exception: it is
+  denied unless the daemon itself runs as uid 0, and root can already inspect
+  or control that daemon process.
+
+  Whether the gate applies is decided from the transport and
+  `Shuttle.host_class/0`, never from a flag. A shared or exposed host missing
+  its expected uid (`:peer_gate_expected_uid` unset) refuses every TCP peer.
+  `/api/v1/version`'s `peer_gate` reports the same decision; it does not make
+  it.
   """
 
   @behaviour Plug
@@ -39,7 +47,7 @@ defmodule ShuttleWeb.PeerGatePlug do
   end
 
   defp admit_or_refuse(conn, %{uid: uid}, expected_uid)
-       when is_integer(uid) and (uid == expected_uid or uid == 0) do
+       when is_integer(uid) and uid == expected_uid do
     login = conn |> get_req_header("tailscale-user-login") |> List.first()
     assign(conn, :peer, Map.put(conn.assigns.peer, :tailscale_login, blank_to_nil(login)))
   end

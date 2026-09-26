@@ -778,12 +778,20 @@ listener before static assets or request-body parsing. It resolves the
 client-side established connection row in `/proc/net/tcp` or `/proc/net/tcp6`
 by matching the peer address and ephemeral port as the local endpoint and the
 daemon's address and port as the remote endpoint. A peer is admitted only
-when the row's uid is the daemon's effective uid or root. A foreign uid or an
+when the row's uid is the daemon's effective uid. A foreign uid or an
 unresolved row receives HTTP 403 with `error: "peer_refused"`; request headers
 cannot bypass the gate. This admits a same-user userspace `tailscaled` and
 refuses a co-tenant connecting directly. The `tailscale_login` header is
 retained on TCP only after uid admission; the header itself is still an
 assertion.
+
+The gate identifies the last local process, not the original client. A relay
+running as the daemon's owner can pass a co-tenant's traffic with that owner's
+uid. Examples include a userspace Tailscale SOCKS/HTTP proxy, `ssh -D` or
+`ssh -L`, socat, and code-server or Jupyter `/proxy/` routes. Operators must
+not run relays as themselves. Root has no separate admission exception; it is
+denied unless the daemon itself runs as uid 0, and root can already inspect or
+control that daemon process.
 
 The TCP uid gate does not cover port squatting on a shared host: the port is
 a shared resource, and another user can bind it while the daemon is down.

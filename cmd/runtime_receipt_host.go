@@ -321,7 +321,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	if gatedDaemonTCP {
 		h.PeerGate = &ReceiptPeerGate{
 			Mode:   "uid",
-			Reason: "the daemon uses /proc/net/tcp{,6} to admit loopback peers owned by its uid or root",
+			Reason: "the daemon uses /proc/net/tcp{,6} to admit loopback peers with its exact uid",
 		}
 	}
 	if ev.daemonClass != "" && ev.daemonClass != h.Class {

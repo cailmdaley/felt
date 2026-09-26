@@ -148,7 +148,14 @@ socket at all. A host using either arrangement needs a loopback TCP listener.
 On `shared-multi-user` and `exposed` hosts, `PeerGatePlug` protects that
 listener before static assets or request-body parsing: it admits only a peer
 whose uid from `/proc/net/tcp` or `/proc/net/tcp6` matches the daemon's
-effective uid or root. An unresolved or foreign uid receives a 403 response.
+effective uid. An unresolved or foreign uid receives a 403 response.
+
+The gate identifies the last local process, not the original client. A relay
+running as the daemon's owner can pass co-tenant traffic with that owner's uid;
+examples include userspace Tailscale SOCKS/HTTP proxies, `ssh -D`/`-L`, socat,
+and code-server or Jupyter `/proxy/` routes. Operators must not run relays as
+themselves. Root has no separate admission exception; it can already inspect
+or control the daemon process.
 
 The daemon also refuses to dial out through `defaults.https_proxy` (a
 `remotes.json` setting that points outbound tailnet requests at a local

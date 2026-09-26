@@ -37,7 +37,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     assert conn.assigns.peer.tailscale_login == "user@example.com"
   end
 
-  test "refuses a non-root peer when no expected uid is configured (fails closed)" do
+  test "refuses every peer when no expected uid is configured (fails closed)" do
     conn =
       conn(:get, "/")
       |> put_peer_data(%{address: @loopback, port: 43_210, ssl_cert: nil})
@@ -48,8 +48,12 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     assert conn.status == 403
   end
 
-  test "admits root" do
-    refute call_gate(0).halted
+  test "root has no admission exception" do
+    conn = call_gate(0)
+
+    assert conn.halted
+    assert conn.status == 403
+    assert Jason.decode!(conn.resp_body)["reason"] == "uid 0 is not the daemon's uid 1000"
   end
 
   test "refuses a foreign uid with a JSON 403" do
@@ -129,13 +133,8 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     Application.put_env(:shuttle, :peer_gate_expected_uid, uid + 1)
     {refused_head, refused_body} = request_version(port)
 
-    if uid == 0 do
-      # Root is an explicit admission exception, independent of the override.
-      assert refused_head =~ "HTTP/1.1 200"
-    else
-      assert refused_head =~ "HTTP/1.1 403"
-      assert Jason.decode!(refused_body)["error"] == "peer_refused"
-    end
+    assert refused_head =~ "HTTP/1.1 403"
+    assert Jason.decode!(refused_body)["error"] == "peer_refused"
   end
 
   defp unused_port do

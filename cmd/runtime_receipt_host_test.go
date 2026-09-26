@@ -312,7 +312,9 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	if got.Status != receiptHealthy || got.Repair != "" || len(got.Problems) != 0 {
 		t.Fatalf("uid-gated daemon listener = %+v, want healthy", got)
 	}
-	if got.PeerGate == nil || got.PeerGate.Mode != "uid" || !strings.Contains(got.PeerGate.Reason, "/proc/net/tcp") {
+	if got.PeerGate == nil || got.PeerGate.Mode != "uid" ||
+		!strings.Contains(got.PeerGate.Reason, "/proc/net/tcp") ||
+		!strings.Contains(got.PeerGate.Reason, "exact uid") || strings.Contains(got.PeerGate.Reason, "root") {
 		t.Fatalf("peer gate receipt = %+v", got.PeerGate)
 	}
 	if len(got.Listeners) != 1 || got.Listeners[0].Role != "daemon" {
