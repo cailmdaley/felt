@@ -89,6 +89,8 @@ defmodule Shuttle.HostTest do
     setup do
       base = "/tmp/shuttle-host-#{System.unique_integer([:positive])}"
       File.mkdir_p!(base)
+      # Explicit mode: under a 002 umask mkdir yields 0775 and the ancestry check refuses it.
+      File.chmod!(base, 0o755)
       on_exit(fn -> File.rm_rf(base) end)
       {:ok, base: base, sock: Path.join([base, "sock", "daemon.sock"])}
     end
@@ -256,6 +258,8 @@ defmodule Shuttle.HostTest do
 
       base = "/tmp/shuttle-cfg-#{System.unique_integer([:positive])}"
       File.mkdir_p!(base)
+      # Explicit mode: under a 002 umask mkdir yields 0775 and the ancestry check refuses it.
+      File.chmod!(base, 0o755)
       on_exit(fn -> File.rm_rf(base) end)
 
       System.delete_env("SHUTTLE_LISTEN")
