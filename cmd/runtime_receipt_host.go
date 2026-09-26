@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // ReceiptHost reports the declared class against the observed host.
@@ -638,6 +640,23 @@ func daemonListenerAddress(address string) bool {
 		}
 	}
 	return false
+}
+
+// checkResolvedDaemonPortOwner checks the socket-class TCP exception used by
+// bin/shuttle. A refused connection means there is no listener to inspect yet.
+func checkResolvedDaemonPortOwner(settings hostSettings) error {
+	if runtime.GOOS != "linux" || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+		return nil
+	}
+	conn, err := net.DialTimeout("tcp", settings.listen.Address, 2*time.Second)
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("checking owner of %s: %w", settings.listen.Address, err)
+	}
+	defer conn.Close()
+	return checkDaemonTCPConnOwner("/proc", conn, os.Geteuid())
 }
 
 // daemonTCPOwnerCheckError is a fail-closed refusal from the post-connect

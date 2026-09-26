@@ -59,11 +59,27 @@ need_launcher() {
   fi
 }
 
+check_tcp_owner() {
+  [ -n "$SOCK" ] && return 0
+  if ! command -v felt >/dev/null 2>&1; then
+    echo "shuttle: felt is required to check the TCP daemon listener owner" >&2
+    exit 1
+  fi
+  if ! felt shuttle host check-owner; then
+    echo "shuttle: refusing the TCP request after the daemon owner check failed" >&2
+    exit 1
+  fi
+}
+
 # `--unix-socket` only when there is one; the socket path is free of
 # whitespace (felt refuses it), so the unquoted expansion splits cleanly.
-api_get() { curl -fsS --max-time 5 ${SOCK:+--unix-socket "$SOCK"} "$BASE$1"; }
+api_get() {
+  check_tcp_owner
+  curl -fsS --max-time 5 ${SOCK:+--unix-socket "$SOCK"} "$BASE$1"
+}
 
 api_post() {
+  check_tcp_owner
   path="$1"
   body="${2:-}"
   if [ -n "$body" ]; then

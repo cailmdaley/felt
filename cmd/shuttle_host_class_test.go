@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -187,6 +188,68 @@ func TestDaemonURL_FollowsListen(t *testing.T) {
 	check("unix", "http://shuttle.invalid")
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:9")
 	check("override", "http://127.0.0.1:9")
+}
+
+// Negative control: remove check_tcp_owner from api_get and the refusal case reaches curl.
+func TestBinShuttleChecksTCPOwnerBeforeCurl(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		failOwner bool
+		wantErr   bool
+		wantCalls string
+	}{
+		{"owner accepted", false, false, "host-json\ncheck-owner\ncurl"},
+		{"owner refused", true, true, "host-json\ncheck-owner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			calls := filepath.Join(t.TempDir(), "calls")
+			felt := "#!/bin/sh\ncase \"$*\" in\n" +
+				"  'shuttle host --json') echo host-json >> \"$CALLS\"; printf '%s\\n' '{\"listen\":\"tcp://127.0.0.1:4000\"}' ;;\n" +
+				"  'shuttle host check-owner') echo check-owner >> \"$CALLS\"; [ \"${FAIL_OWNER:-0}\" = 0 ] ;;\n" +
+				"  *) exit 2 ;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(binDir, "felt"), []byte(felt), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(binDir, "curl"), []byte("#!/bin/sh\necho curl >> \"$CALLS\"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("CALLS", calls)
+			if tc.failOwner {
+				t.Setenv("FAIL_OWNER", "1")
+			} else {
+				t.Setenv("FAIL_OWNER", "0")
+			}
+
+			cmd := exec.Command("sh", "../bin/shuttle", "status")
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("bin/shuttle status error = %v, output %q", err, out)
+			}
+			if tc.wantErr && !strings.Contains(string(out), "owner check failed") {
+				t.Fatalf("owner refusal was not surfaced: %q", out)
+			}
+			gotCalls, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(gotCalls)) != tc.wantCalls {
+				t.Fatalf("calls = %q, want %q", gotCalls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
+	for _, settings := range []hostSettings{
+		{Class: "single-user", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}},
+		{Class: "shared-multi-user", listen: listenAddr{Network: "unix", Address: "/tmp/daemon.sock"}},
+	} {
+		if err := checkResolvedDaemonPortOwner(settings); err != nil {
+			t.Fatalf("check for %+v: %v", settings, err)
+		}
+	}
 }
 
 func TestDaemonHTTPClientChecksLiveSocketClassTCP(t *testing.T) {

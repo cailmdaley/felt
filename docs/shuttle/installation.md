@@ -804,15 +804,13 @@ not run relays as themselves. Root has no separate admission exception; it is
 denied unless the daemon itself runs as uid 0, and root can already inspect or
 control that daemon process.
 
-The TCP uid gate does not cover port squatting on a shared host: the port is
-a shared resource, and another user can bind it while the daemon is down.
-Because that listener runs as the other user, its HTTP response could claim
-`peer_gate: "uid"` and imitate the daemon. On Linux, `felt setup receipt` and
-the CLI check the matching `/proc/net/tcp{,6}` LISTEN row's uid; a foreign
-owner is a mismatch, and the CLI refuses to talk to it. They skip this check
-where `/proc` is unavailable, including macOS. A Unix socket in the protected
-`0700` directory has no equivalent TCP-port squatting window: a co-tenant
-cannot claim the path or connect through it.
+The TCP uid gate does not cover port squatting on a shared host: the port is a shared resource, and another user can bind it while the daemon is down.
+Because that listener runs as the other user, its HTTP response could claim `peer_gate: "uid"` and imitate the daemon.
+On Linux, each felt CLI connection to the local TCP daemon checks the server-side established row in `/proc/net/tcp{,6}` after connecting and refuses a foreign or unverified owner.
+`bin/shuttle` runs `felt shuttle host check-owner` on its own connection before each TCP `curl`; the ownership check and the later `curl` are separate connections.
+`felt setup receipt` reports the uid from matching LISTEN rows when available.
+These checks do not protect a browser request that `tailscale serve` forwards while the daemon is down: Serve does not check the listener owner, and the browser cannot distinguish a squat listener from the daemon.
+A Unix socket in the protected `0700` directory has no equivalent TCP-port squatting window: a co-tenant cannot claim the path or connect through it.
 
 `namei -m ~/.shuttle/sock/daemon.sock` shows the Unix socket's permissions
 along the whole path. A shared host refuses to boot TCP when
