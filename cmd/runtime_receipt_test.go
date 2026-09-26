@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -224,6 +225,29 @@ enabled = true
 	bundles := collectCodexBundle()
 	if len(bundles) != 1 || bundles[0].Status != receiptMissing {
 		t.Fatalf("configured but absent Codex Felt = %#v, want one missing bundle", bundles)
+	}
+}
+
+func TestCollectDaemonReceiptUsesListenerResolutionError(t *testing.T) {
+	hostFile := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, hostFile, nil, nil)
+	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectDaemonReceipt()
+	if got.Status != receiptMismatch || !strings.Contains(got.Repair, hostFile) || strings.Contains(got.Repair, "<nil>") {
+		t.Fatalf("daemon listener repair = %+v, want the host-file resolution error", got)
+	}
+}
+
+// Negative control: drop the owner-check error branch and the repair no longer matches the CLI.
+func TestDaemonReceiptOwnerCheckRepairMatchesCLI(t *testing.T) {
+	ownerErr := &daemonTCPOwnerCheckError{address: "127.0.0.1:4000", uid: 2000, foreign: true}
+	err := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", ownerErr)
+	got := daemonReceiptOnTransportError(ReceiptDaemon{Status: receiptMissing, Repair: "start the daemon"}, err)
+	if got.Status != receiptMismatch || got.Repair != ownerErr.Error() {
+		t.Fatalf("daemon owner-check repair = %+v, want CLI message %q", got, ownerErr.Error())
 	}
 }
 

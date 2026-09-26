@@ -9,6 +9,7 @@ package cmd
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -698,15 +699,12 @@ func codexHooksTrusted() bool {
 func collectDaemonReceipt() ReceiptDaemon {
 	base, err := daemonURL()
 	if err != nil {
-		// Only the listener resolution can fail here; its own error words the
-		// repair exactly as the host component does, so the two fold into one.
-		_, hostErr := resolveHostSettings()
-		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(hostErr)}
+		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(err)}
 	}
 	d := ReceiptDaemon{URL: base, Status: receiptMissing, Repair: "start the Shuttle daemon, then rerun `felt setup receipt --json`"}
 	data, err := getDaemon(strings.TrimRight(base, "/")+"/api/v1/version", daemonReadTimeout)
 	if err != nil {
-		return d
+		return daemonReceiptOnTransportError(d, err)
 	}
 	var response struct {
 		Listen            string `json:"listen"`
@@ -736,6 +734,14 @@ func collectDaemonReceipt() ReceiptDaemon {
 		d.Status, d.Repair = receiptHealthy, ""
 	} else {
 		d.Status, d.Repair = receiptMismatch, "restart or upgrade the daemon and felt together so their Shuttle contract levels match"
+	}
+	return d
+}
+
+func daemonReceiptOnTransportError(d ReceiptDaemon, err error) ReceiptDaemon {
+	var ownerErr *daemonTCPOwnerCheckError
+	if errors.As(err, &ownerErr) {
+		d.Status, d.Repair = receiptMismatch, ownerErr.Error()
 	}
 	return d
 }
