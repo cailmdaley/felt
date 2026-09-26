@@ -313,6 +313,10 @@ func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
 func TestInspectSocketDir(t *testing.T) {
 	euid := os.Geteuid()
 	base := t.TempDir()
+	// Explicit mode: under a 002 umask TempDir is 0775, which the ancestry check names.
+	if err := os.Chmod(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(base, "sock")
 	if d := inspectSocketDir(dir, euid); d.Exists || d.BadAncestor != "" {
 		t.Errorf("absent dir under a private temp dir: %+v", d)
