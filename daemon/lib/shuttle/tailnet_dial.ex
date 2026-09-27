@@ -106,14 +106,17 @@ defmodule Shuttle.TailnetDial do
   end
 
   @doc false
-  def unregister_bridge(host, port) do
+  def unregister_bridge(remote_name, host, port) do
     case :ets.lookup(@table, {:remote, host, port}) do
-      [{{:remote, ^host, ^port}, remote_name}] -> :ets.delete(@table, {:bridge, remote_name})
-      _ -> :ok
+      [{{:remote, ^host, ^port}, ^remote_name}] ->
+        :ets.delete(@table, {:socket, host, port})
+        :ets.delete(@table, {:remote, host, port})
+
+      _ ->
+        :ok
     end
 
-    :ets.delete(@table, {:socket, host, port})
-    :ets.delete(@table, {:remote, host, port})
+    :ets.delete(@table, {:bridge, remote_name})
   rescue
     ArgumentError -> :ok
   end

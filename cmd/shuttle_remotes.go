@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -372,13 +373,15 @@ func configuredRemotes() ([]remoteSpec, error) {
 //
 // Validation is fail-loud on the things that silently break routing: a nameless
 // entry has no routing key, a duplicate name means two daemons answer to one
-// origin, and a duplicate local port means one tunnel shadows another.
+// origin, duplicate local ports shadow tunnels, and private HTTPS remotes may
+// not claim the same authority.
 func normalizeRemotes(doc *remotesFile) error {
 	if doc.LaunchdLabelPrefix == "" {
 		doc.LaunchdLabelPrefix = defaultLaunchdLabelPrefix
 	}
 
 	defaults := remoteDefaults{}
+	privateDialConfigured := false
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
 		proxy, err := defaults.normalizedHTTPSProxy()
@@ -393,11 +396,13 @@ func normalizeRemotes(doc *remotesFile) error {
 			return fmt.Errorf("defaults.https_proxy and defaults.tailscale_socket are mutually exclusive")
 		}
 		defaults.TailscaleSocket = socket
+		privateDialConfigured = socket != ""
 		doc.Defaults = &defaults
 	}
 
 	seenNames := map[string]bool{}
 	seenPorts := map[int]string{}
+	seenHTTPSAuthorities := map[string]string{}
 
 	for i := range doc.Remotes {
 		r := &doc.Remotes[i]
@@ -456,6 +461,13 @@ func normalizeRemotes(doc *remotesFile) error {
 			r.URL = fmt.Sprintf("http://127.0.0.1:%d", r.Port)
 		}
 
+		if authority := privateHTTPSAuthority(r.URL); privateDialConfigured && r.enabledOr() && authority != "" {
+			if other, duplicate := seenHTTPSAuthorities[authority]; duplicate {
+				return fmt.Errorf("remote %q: duplicate https authority %q already used by %q", r.Name, authority, other)
+			}
+			seenHTTPSAuthorities[authority] = r.Name
+		}
+
 		// Replace rather than mutate through the pointer: a caller may be
 		// validating a shallow copy of a sparse document it intends to SAVE
 		// (see `remotes add`), and filling the default in place would write the
@@ -509,6 +521,27 @@ func normalizeRemotes(doc *remotesFile) error {
 	}
 
 	return nil
+}
+
+func privateHTTPSAuthority(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" {
+		return ""
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	} else if number, err := strconv.Atoi(port); err == nil {
+		port = strconv.Itoa(number)
+	} else {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // remoteSocketPattern is the whole alphabet a remote socket path may use. It

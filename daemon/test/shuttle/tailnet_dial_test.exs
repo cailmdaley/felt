@@ -56,6 +56,30 @@ defmodule Shuttle.TailnetDialTest do
     refute TailnetDial.socket_path(unsafe_name, base) == TailnetDial.socket_path(digest, base)
   end
 
+  test "unregistering a stale remote cannot remove another authority owner", %{base: base} do
+    {:ok, manager} =
+      TailnetDial.start_link(
+        remotes: [],
+        tailscale_socket: Path.join(base, "localapi.sock"),
+        data_dir: Path.join(base, "data"),
+        refresh?: false
+      )
+
+    Process.unlink(manager)
+    on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
+
+    host = "shared.example.ts.net"
+    TailnetDial.register_bridge(host, 443, "stale", "/stale.sock")
+    TailnetDial.register_bridge(host, 443, "current", "/current.sock")
+
+    TailnetDial.unregister_bridge("stale", host, 443)
+
+    assert TailnetDial.socket_for(host, 443) == "/current.sock"
+    assert TailnetDial.remote_for(host, 443) == "current"
+    assert TailnetDial.bridge_pid("current") == self()
+    assert TailnetDial.bridge_pid("stale") == nil
+  end
+
   test "hashed socket components use a compact 16-hex digest", %{base: base} do
     name = String.duplicate("remote-", 12)
     filename = name |> TailnetDial.socket_path(base) |> Path.basename()

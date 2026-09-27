@@ -233,6 +233,10 @@
     "both_defaults.json": {
       "remote": "",
       "field": "defaults.https_proxy and defaults.tailscale_socket"
+    },
+    "duplicate_https_authority.json": {
+      "remote": "hub-b",
+      "field": "https authority"
     }
   }
 }

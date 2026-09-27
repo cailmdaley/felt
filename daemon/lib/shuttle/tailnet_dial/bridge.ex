@@ -64,6 +64,7 @@ defmodule Shuttle.TailnetDial.Bridge do
            acceptor: acceptor,
            acceptor_monitor: acceptor_monitor,
            path: path,
+           name: name,
            host: host,
            port: port
          }}
@@ -102,6 +103,7 @@ defmodule Shuttle.TailnetDial.Bridge do
           acceptor: acceptor,
           acceptor_monitor: monitor,
           path: path,
+          name: name,
           host: host,
           port: port
         }
@@ -109,7 +111,7 @@ defmodule Shuttle.TailnetDial.Bridge do
     Process.exit(acceptor, :shutdown)
     Process.demonitor(monitor, [:flush])
     :gen_tcp.close(listener)
-    Shuttle.TailnetDial.unregister_bridge(host, port)
+    Shuttle.TailnetDial.unregister_bridge(name, host, port)
     File.rm(path)
     :ok
   end

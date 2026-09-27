@@ -395,8 +395,54 @@ defmodule Shuttle.Remotes do
   defp apply_defaults(entry, _defaults), do: entry
 
   defp normalize(entries) do
-    entries
-    |> Shuttle.RegistryCommon.normalize_remotes()
-    |> Enum.filter(& &1.enabled)
+    remotes =
+      entries
+      |> Shuttle.RegistryCommon.normalize_remotes()
+      |> Enum.filter(& &1.enabled)
+
+    if tailscale_socket_configured?(),
+      do: reject_duplicate_https_authorities(remotes),
+      else: remotes
+  end
+
+  defp reject_duplicate_https_authorities(remotes) do
+    {_seen, accepted} =
+      Enum.reduce(remotes, {MapSet.new(), []}, fn remote, {seen, accepted} ->
+        case https_authority(remote.url) do
+          nil ->
+            {seen, [remote | accepted]}
+
+          authority ->
+            if MapSet.member?(seen, authority) do
+              {seen, accepted}
+            else
+              {MapSet.put(seen, authority), [remote | accepted]}
+            end
+        end
+      end)
+
+    Enum.reverse(accepted)
+  end
+
+  defp https_authority(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} = uri
+      when is_binary(scheme) and is_binary(host) and host != "" ->
+        if String.downcase(scheme) == "https" do
+          {canonical_host(host), uri.port || 443}
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp canonical_host(host) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, address} -> address |> :inet.ntoa() |> to_string() |> String.downcase()
+      _ -> String.downcase(host)
+    end
   end
 end

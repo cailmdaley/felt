@@ -153,13 +153,13 @@ defmodule Shuttle.TailnetDial.Reconciler do
             Map.put(acc, name, %{pid: pid, spec: old_spec})
 
           _ when is_pid(pid) ->
-            Shuttle.TailnetDial.unregister_bridge(old_spec.host, old_spec.port)
+            Shuttle.TailnetDial.unregister_bridge(name, old_spec.host, old_spec.port)
             Shuttle.TailnetDial.clear_error(name)
             DynamicSupervisor.terminate_child(@dynamic_supervisor, pid)
             acc
 
           _ ->
-            Shuttle.TailnetDial.unregister_bridge(old_spec.host, old_spec.port)
+            Shuttle.TailnetDial.unregister_bridge(name, old_spec.host, old_spec.port)
             Shuttle.TailnetDial.clear_error(name)
             acc
         end
