@@ -11,7 +11,7 @@ description: >
 
 # felt — Working with Fibers
 
-A fiber is one concern — a task, decision, question, finding, or spec — kept as a markdown file with YAML frontmatter. Fibers live in a `.felt/` directory, one folder each, and folders nest:
+A fiber is one thing worth keeping track of — a todo, a question, a decision, a finding, a spec, a reference note — kept as a markdown file with YAML frontmatter. Fibers live in a `.felt/` directory, one folder each, and folders nest:
 
 ```
 .felt/
@@ -40,8 +40,7 @@ The fiducial fit in [[bao-analysis]] needs a value for the nonlinear damping sca
 
 Freed under a flat prior, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock-validation]]) and α's error grows by ~30%, while the mean α moves by less than 0.1σ:
 
-:::{embed} sigma-scan.png
-:::
+![Σ_nl scan across the mocks](sigma-scan.png)
 
 Decided *not* to use a Gaussian prior instead: it reproduces the fixed-value result at extra sampler cost.
 ```
@@ -52,7 +51,7 @@ Decided *not* to use a Gaussian prior instead: it reproduces the fixed-value res
 - **status** — marks a todo, and is opt-in. This fiber was filed `open` when the question came up and closed with its outcome once answered. The values are ○ `open`, ◐ `active` (in flight) and ● `closed`, and `felt ls` lists the first two. A finding or decision recorded after the fact is complete as written and carries no status; most fibers never have one. A todo can also carry a `due: YYYY-MM-DD` date (`-D`).
 - **tags** — free labels for filtering (`felt ls -t decision`).
 - **body** — opens with a lede, like the first paragraph above: what this is and where it sits, readable alone, since `felt show -d summary` shows it without the rest. Detail follows. `[[wikilinks]]` are the second relationship, and they belong inside the sentence that says why the link matters, as with `mock-validation` above; a list of links at the bottom usually means the relationships haven't been thought through.
-- **companion files** — plots, PDFs, recordings, a `report.html` — sit in the fiber's folder beside the markdown and travel with it through nest and sync. `:::{embed} <path>` inlines one where it helps, with the path relative to the folder; the Shuttle board (a web view of the store) renders embeds, and the CLI treats them as text.
+- **companion files** — plots, PDFs, recordings, a report — sit in the fiber's folder beside the markdown and travel with it through nest and sync. Link them from the body with a relative path, as the scan above is.
 - **your own fields** — add any frontmatter your project needs and felt keeps it intact through every edit: `felt edit <id> --set key=value` for scalars, the file for anything structured, `felt show <id> --field key` to read one back. One convention felt reads itself: entries in an `inputs:` list with `from: <fiber>` declare a data-flow edge, a third relationship. `felt show <id> --consumers` lists the fibers that draw on this one, and `felt check` flags a `from:` that names no fiber.
 - **felt's own stamps** — felt also writes a ULID `id:`, an identity that survives moves and renames and works as an `<id>` too, along with `created-at`, `updated-at` and `closed-at`. Leave them alone; a hand-typed value is overwritten on the next write.
 
