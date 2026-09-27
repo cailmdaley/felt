@@ -22,33 +22,33 @@ its commit and date, a local build the source revision it was built from
 | Command | Purpose |
 |---|---|
 | `felt init` | Create or repair the local `.felt/` directory and support files |
-| `felt add <slug> <name>` | Create a new fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level`) |
+| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name) |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
-| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
-| `felt rm <id>` | Permanently delete a fiber |
+| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store) |
+| `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are |
 | `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push |
 
 ## Search and reading
 
 | Command | Purpose |
 |---|---|
-| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
-| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `rm`, `shuttle`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `-v`, `--limit`, `-j`) |
+| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact name, id, or basename, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
+| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `nest`, `rm`, `tree`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `-v`, `--limit`, `-j`) |
 | `felt session` | Print the SessionStart context as plain text |
-| `felt tree [id]` | Show the containment tree (`-L`/`--depth` caps depth; elided branches show how much is below) |
+| `felt tree [id]` | Show the containment tree, every status included (`-L`/`--depth` caps depth; elided branches show how much is below) |
 
 ## Structure
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting ids and dependencies |
-| `felt unnest <child>` | Promote a nested fiber subtree to the top level |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting ids and `inputs.from` references; wikilinks stay as written and resolve by basename |
+| `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting as `nest` does |
 
 ## Maintenance
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, legacy keys, slug collisions |
+| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` and `depends_on` refs, legacy forms, slug collisions; exits non-zero on errors |
 | `felt migrate` | Normalize legacy storage into the current model (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
@@ -58,11 +58,12 @@ its commit and date, a local build the source revision it was built from
 |---|---|
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
+| `felt setup pi` | Install the felt package for pi (`--uninstall`) |
 | `felt setup receipt` | Report the executable, promoted and actually loaded harness generations, hooks, pending promotion state, and live daemon contract (`--json` for the machine-readable receipt) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
 | `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate (`--executable` overrides the felt binary probed for contract compatibility) |
-| `felt uninstall` | Remove the felt plugin from Claude Code and Codex (inverse of `setup claude`/`setup codex`) |
-| `felt update` | Update felt to the latest version, refreshing plugin wiring too |
+| `felt uninstall` | Remove the felt plugin from Claude Code and Codex and the felt package from pi (inverse of `setup claude`/`codex`/`pi`) |
+| `felt update` | Update felt to the latest release, moving the Claude Code plugin and any installed Codex or pi integration to the matching tag |
 
 ## `felt hook` (agent-harness adapters)
 
@@ -75,6 +76,7 @@ people.
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
 | `felt hook event` | Append one harness hook event to the host-local shuttle activity stream (`~/.shuttle/events.jsonl`) |
+| `felt hook commit` | Record a commit a Bash call just made on the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
 
 ## `felt shuttle` (dispatch layer)
 
