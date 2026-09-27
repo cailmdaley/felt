@@ -155,11 +155,26 @@ defmodule Shuttle.Remotes do
   end
 
   @doc """
-  The hub's tailscaled LocalAPI socket from `defaults.tailscale_socket`, or
-  `nil` when the fleet has no private dial transport configured.
+  Whether the fleet requests private Tailscale dialing, including when its
+  configured socket value is invalid.
 
   `$TS_SOCKET` is deliberately not read: the fleet file is the operator-visible
   source of truth shared by the daemon and `felt shuttle remotes list`.
+  """
+  @spec tailscale_socket_configured?() :: boolean()
+  def tailscale_socket_configured? do
+    case Application.get_env(:shuttle, :tailscale_socket) do
+      nil -> file_tailscale_socket_configured?()
+      false -> false
+      value when is_binary(value) -> String.trim(value) != ""
+      _ -> true
+    end
+  end
+
+  @doc """
+  The hub's normalized tailscaled LocalAPI socket from
+  `defaults.tailscale_socket`, or `nil` when the fleet has no valid private
+  dial transport configured.
   """
   @spec tailscale_socket() :: String.t() | nil
   def tailscale_socket do
@@ -214,6 +229,22 @@ defmodule Shuttle.Remotes do
     case read_document() do
       {:ok, doc} -> doc |> defaults_block() |> Map.get("https_proxy") |> parse_proxy()
       :error -> nil
+    end
+  end
+
+  defp file_tailscale_socket_configured? do
+    case read_document() do
+      {:ok, doc} ->
+        defaults = defaults_block(doc)
+
+        case Map.get(defaults, "tailscale_socket") do
+          value when is_binary(value) -> String.trim(value) != ""
+          nil -> false
+          _ -> Map.has_key?(defaults, "tailscale_socket")
+        end
+
+      :error ->
+        false
     end
   end
 

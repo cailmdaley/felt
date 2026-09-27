@@ -28,6 +28,7 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
       |> Map.put(:peer_gate_uid, Application.get_env(:shuttle, :peer_gate_expected_uid))
       |> Map.put(:peer_gate_uid_source, Application.get_env(:shuttle, :peer_gate_uid_source))
+      |> Map.put(:tailnet_dial, Shuttle.TailnetDial.status())
     )
   end
 

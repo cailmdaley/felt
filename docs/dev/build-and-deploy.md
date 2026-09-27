@@ -53,14 +53,17 @@ supervisor.
 ## Deploying
 
 **Remote hosts are configured in `~/.config/felt/remotes.json`** (`felt shuttle
-remotes list|add|rm|path`). Each entry names an ssh alias and a local forwarded
-port; the daemon reaches a remote's API over that tunnel. How a given host
-authenticates is your ssh config's business — but note that an ssh alias needing
-a live credential (a short-lived certificate, a 2FA-backed ControlMaster) fails
-*instantly* with `Permission denied` once that credential lapses, and the
-symptom looks like a dead host: the kanban **Attach** button opens a terminal
-that flashes and dies. Refresh the credential before concluding shuttle is
-broken.
+remotes list|add|rm|path`). SSH entries name an alias and local forwarded port;
+the daemon reaches their API over that tunnel.
+HTTPS `url` entries dial the remote directly, optionally through the private
+Tailscale LocalAPI bridge configured by `defaults.tailscale_socket` (see
+[Configuring remotes](../shuttle/installation.md#configuring-remotes)).
+How an SSH entry authenticates is your ssh config's business — but an alias
+needing a live credential (a short-lived certificate, a 2FA-backed
+ControlMaster) fails *instantly* with `Permission denied` once that credential
+lapses, and the symptom looks like a dead host: the kanban **Attach** button
+opens a terminal that flashes and dies.
+Refresh the credential before concluding shuttle is broken.
 
 `bin/shuttle-deploy` is a developer convenience for source checkouts.
 It reads `~/.config/felt/remotes.json`; entries with a `checkout` field are deploy targets.

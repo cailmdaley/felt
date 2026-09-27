@@ -91,6 +91,7 @@ defmodule Shuttle.Application do
   # :start_remote_temporal_registry have no prod config entry at all — they ride
   # the inline `true` default. The endpoint is deliberately NOT in this list.
   @optional_children [
+    {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},
     {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
     {:start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
