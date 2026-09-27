@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -741,7 +742,15 @@ func collectDaemonReceipt() ReceiptDaemon {
 func daemonReceiptOnTransportError(d ReceiptDaemon, err error) ReceiptDaemon {
 	var ownerErr *daemonTCPOwnerCheckError
 	if errors.As(err, &ownerErr) {
-		d.Status, d.Repair = receiptMismatch, ownerErr.Error()
+		switch {
+		case ownerErr.foreign:
+			d.Repair = fmt.Sprintf("stop the process holding %s (uid %d), then restart the daemon", ownerErr.address, ownerErr.uid)
+		case ownerErr.pending:
+			d.Repair = fmt.Sprintf("the listener did not accept within %d s; retry, and if it persists inspect what holds %s", int(acceptWait/time.Second), ownerErr.address)
+		default:
+			d.Repair = ownerErr.Error()
+		}
+		d.Status = receiptMismatch
 	}
 	return d
 }

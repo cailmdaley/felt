@@ -241,13 +241,30 @@ func TestCollectDaemonReceiptUsesListenerResolutionError(t *testing.T) {
 	}
 }
 
-// Negative control: drop the owner-check error branch and the repair no longer matches the CLI.
-func TestDaemonReceiptOwnerCheckRepairMatchesCLI(t *testing.T) {
-	ownerErr := &daemonTCPOwnerCheckError{address: "127.0.0.1:4000", uid: 2000, foreign: true}
-	err := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", ownerErr)
-	got := daemonReceiptOnTransportError(ReceiptDaemon{Status: receiptMissing, Repair: "start the daemon"}, err)
-	if got.Status != receiptMismatch || got.Repair != ownerErr.Error() {
-		t.Fatalf("daemon owner-check repair = %+v, want CLI message %q", got, ownerErr.Error())
+func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  *daemonTCPOwnerCheckError
+		want string
+	}{
+		{
+			name: "foreign owner",
+			err:  &daemonTCPOwnerCheckError{address: "127.0.0.1:4000", uid: 2000, foreign: true},
+			want: "stop the process holding 127.0.0.1:4000 (uid 2000), then restart the daemon",
+		},
+		{
+			name: "accept timeout",
+			err:  &daemonTCPOwnerCheckError{address: "[::1]:4000", pending: true},
+			want: "the listener did not accept within 2 s; retry, and if it persists inspect what holds [::1]:4000",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", tc.err)
+			got := daemonReceiptOnTransportError(ReceiptDaemon{Status: receiptMissing, Repair: "start the daemon"}, err)
+			if got.Status != receiptMismatch || got.Repair != tc.want {
+				t.Fatalf("daemon owner-check repair = %+v, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
