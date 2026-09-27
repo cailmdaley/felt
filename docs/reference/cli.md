@@ -289,3 +289,18 @@ fiber. Outside a harness, pass `--session <native-session-id>`.
 The event stream uses the same configuration as `felt hook event`; recording
 works offline and confirms registration, not a completed client download.
 Legacy `SendUserFile` hook events remain supported.
+
+### `felt shuttle follow <transcript>`
+
+Stream a live meeting transcript to an agent in batches, each followed by one
+blank line. Run it under a harness monitor that reads stdout as it arrives.
+The file may not exist yet; follow waits for it. Everything already in the file
+at the first read is printed at once. After that, new complete lines are held
+until a line addresses the agent (a whole word from `--names`, case-insensitive,
+default `claude,cloud,clawed,klaud`, matched after any leading `HH:MM:SS`
+timestamp), the pending utterance text reaches `--words` (default 150), or
+`--seconds` (default 15) pass since the first pending line arrived. A line
+starting `# ended` flushes and ends the follow with exit 0. Lines starting `#`
+ride along without counting words or addressing the agent. A partial trailing
+line waits for its newline, a file that shrinks is read again from the start,
+and the file is polled once per second.
