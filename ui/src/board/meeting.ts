@@ -204,6 +204,36 @@ export function parseTranscriptLine(line: string): TranscriptLine {
     : { time: null, speaker: null, text: line }
 }
 
+
+/** Redraw a transcript list when its lines change, staying pinned to the
+ *  newest line unless the reader has scrolled back. */
+export function paintTranscript(tail: HTMLOListElement, lines: string[]): void {
+  const signature = lines.join('\n')
+  if (tail.dataset.signature === signature) return
+  const following = !tail.dataset.signature ||
+    tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 4
+  tail.dataset.signature = signature
+  tail.hidden = lines.length === 0
+  tail.replaceChildren(...lines.map((raw) => {
+    const line = parseTranscriptLine(raw)
+    const item = document.createElement('li')
+    item.className = 'kbn-meeting-line'
+    if (line.time) item.title = line.time
+    if (line.speaker) {
+      const speaker = document.createElement('span')
+      speaker.className = 'kbn-meeting-speaker'
+      speaker.textContent = line.speaker
+      item.append(speaker, ' ')
+    }
+    item.append(line.text)
+    return item
+  }))
+  if (!following) return
+  // A freshly built tail has no layout until the desk mounts it.
+  tail.scrollTop = tail.scrollHeight
+  if (!tail.isConnected) requestAnimationFrame(() => { tail.scrollTop = tail.scrollHeight })
+}
+
 export interface DeskColumns {
   drafts: KanbanCard[]
   inFlight: KanbanCard[]

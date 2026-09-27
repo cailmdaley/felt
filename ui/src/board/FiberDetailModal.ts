@@ -22,6 +22,7 @@ import {
 import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
+import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
@@ -123,6 +124,8 @@ export interface MeetingJoinControl {
   /** Record a meeting and join it to the card's constitution with `note`;
    *  resolves to the error to show, or null once recording began. */
   join(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null>
+  /** The meeting the board last observed, if any. */
+  current(): MeetingRecord | null
 }
 
 export interface SessionWindow {
@@ -736,6 +739,9 @@ export class FiberDetailModal {
   /** Unsubscribe from the mobile-threshold watch, live while the panel is open.
    *  Crossing 700px re-frames the panel between window and sheet in place. */
   private mobileWatch: (() => void) | null = null
+  /** The open card and its transcript pane, repainted by {@link syncMeeting}. */
+  private transcriptCard: KanbanCard | null = null
+  private transcriptPane: HTMLElement | null = null
 
   constructor(
     shuttleBase: string,
@@ -978,7 +984,8 @@ export class FiberDetailModal {
     // The card panel is one flex column — header, controls, files, body. The
     // file viewer is a SEPARATE floating window (openViewerWindow), so the
     // card keeps its own size and never grows.
-    overlay.append(header, ...(controls ? [controls] : []), files, page)
+    const transcript = this.buildTranscriptPane(card)
+    overlay.append(header, ...(controls ? [controls] : []), transcript, files, page)
     if (this.host) {
       // A tab's card: no frame of its own, no z-order, no registration — it is
       // inside the panel's window, which carries all three for it.
@@ -1097,7 +1104,59 @@ export class FiberDetailModal {
     this.startLiveRefresh()
   }
 
+  /**
+   * The meeting this card hosts, as a scrolling transcript under the controls.
+   * Hidden until the board's meeting record names this card; repainted by
+   * {@link syncMeeting} on every meeting poll, following the newest line.
+   */
+  private buildTranscriptPane(card: KanbanCard): HTMLElement {
+    const pane = document.createElement('section')
+    pane.className = 'kbn-detail-transcript'
+    pane.hidden = true
+    const meta = document.createElement('div')
+    meta.className = 'kbn-detail-transcript-meta'
+    const dot = document.createElement('span')
+    dot.className = 'kbn-detail-transcript-dot'
+    dot.setAttribute('aria-hidden', 'true')
+    const state = document.createElement('span')
+    state.className = 'kbn-detail-transcript-state'
+    const title = document.createElement('span')
+    title.className = 'kbn-detail-transcript-title'
+    meta.append(dot, state, title)
+    const list = document.createElement('ol')
+    list.className = 'kbn-detail-transcript-lines'
+    list.setAttribute('aria-label', 'Transcript')
+    list.setAttribute('aria-live', 'polite')
+    list.tabIndex = 0
+    pane.append(meta, list)
+    this.transcriptCard = card
+    this.transcriptPane = pane
+    this.syncMeeting()
+    return pane
+  }
+
+  /** Repaint the open card's transcript from the board's current meeting. */
+  syncMeeting(): void {
+    const pane = this.transcriptPane
+    const card = this.transcriptCard
+    if (!pane || !card) return
+    const meeting = this.meeting?.current() ?? null
+    const hosted = meetingHostCard(meeting, [card]) !== null
+    pane.hidden = !hosted || meeting === null || meeting.tail.length === 0
+    if (!meeting || !hosted) return
+    for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
+      pane.classList.toggle(`kbn-detail-transcript-${st}`, meeting.state === st)
+    }
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-state')!.textContent =
+      meetingStateWord(meeting.state)
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-title')!.textContent =
+      meeting.title?.trim() ?? ''
+    paintTranscript(pane.querySelector<HTMLOListElement>('.kbn-detail-transcript-lines')!, meeting.tail)
+  }
+
   close(): void {
+    this.transcriptCard = null
+    this.transcriptPane = null
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
     if (this.mobileWatch) {

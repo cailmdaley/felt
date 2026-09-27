@@ -53,7 +53,7 @@ import {
   type BandId,
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
-import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, parseTranscriptLine, seatMeetingHost, type MeetingRecord } from './meeting.js'
+import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, paintTranscript, seatMeetingHost, type MeetingRecord } from './meeting.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -1640,7 +1640,7 @@ export class KanbanSurfaceRenderer {
     duration.textContent = value ?? ''
     duration.dateTime = meeting.started_at ?? ''
     duration.hidden = value === null
-    this.updateMeetingTail(block.querySelector<HTMLOListElement>('.kbn-meeting-tail')!, meeting.tail)
+    paintTranscript(block.querySelector<HTMLOListElement>('.kbn-meeting-tail')!, meeting.tail)
     const error = block.querySelector<HTMLElement>('.kbn-meeting-error')!
     error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
     error.hidden = meeting.state !== 'failed'
@@ -1676,35 +1676,6 @@ export class KanbanSurfaceRenderer {
         if (session) this.o.onMeetingTerminal?.(session)
       })
     }
-  }
-
-  /** Redraw the transcript tail when it changes, staying pinned to the newest
-   *  line unless the reader has scrolled back. */
-  private updateMeetingTail(tail: HTMLOListElement, lines: string[]): void {
-    const signature = lines.join('\n')
-    if (tail.dataset.signature === signature) return
-    const following = !tail.dataset.signature ||
-      tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 4
-    tail.dataset.signature = signature
-    tail.hidden = lines.length === 0
-    tail.replaceChildren(...lines.map((raw) => {
-      const line = parseTranscriptLine(raw)
-      const item = document.createElement('li')
-      item.className = 'kbn-meeting-line'
-      if (line.time) item.title = line.time
-      if (line.speaker) {
-        const speaker = document.createElement('span')
-        speaker.className = 'kbn-meeting-speaker'
-        speaker.textContent = line.speaker
-        item.append(speaker, ' ')
-      }
-      item.append(line.text)
-      return item
-    }))
-    if (!following) return
-    // A freshly built tail has no layout until the desk mounts it.
-    tail.scrollTop = tail.scrollHeight
-    if (!tail.isConnected) requestAnimationFrame(() => { tail.scrollTop = tail.scrollHeight })
   }
 
   /**

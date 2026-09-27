@@ -730,6 +730,89 @@
   color: #8C3B2E;
 }
 
+/* ── Meeting transcript ──────────────────────────────────────────────────
+   The card's meeting, under the controls: a state line in the dropdown's
+   mono voice, then the spoken lines, pinned to the newest. */
+.kbn-detail-transcript {
+  flex-shrink: 0;
+  padding: 8px 20px 10px;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.12);
+  background: linear-gradient(rgba(63, 130, 120, 0.05), transparent 24px);
+}
+.kbn-detail-transcript[hidden] {
+  display: none;
+}
+.kbn-detail-transcript-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 5px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  color: #9A8F80;
+}
+.kbn-detail-transcript-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9A8F80;
+}
+.kbn-detail-transcript-live .kbn-detail-transcript-dot {
+  background: #3F8278;
+  box-shadow: 0 0 0 3px rgba(63, 130, 120, 0.18);
+  animation: kbn-detail-transcript-breathe 2.4s ease-in-out infinite;
+}
+.kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: #A5553F; }
+@keyframes kbn-detail-transcript-breathe {
+  50% { box-shadow: 0 0 0 5px rgba(63, 130, 120, 0.05); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-detail-transcript-live .kbn-detail-transcript-dot { animation: none; }
+}
+.kbn-detail-transcript-state {
+  flex: 0 0 auto;
+  color: #2E6862;
+  text-transform: lowercase;
+}
+.kbn-detail-transcript-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-detail-transcript-lines {
+  margin: 0;
+  padding: 0 4px 0 0;
+  list-style: none;
+  max-height: calc(6 * 1.45em);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: calc(14px * var(--kbn-type-scale, 1));
+  line-height: 1.45;
+  color: #2E2A26;
+  overflow-wrap: anywhere;
+}
+.kbn-detail-transcript-lines:focus-visible {
+  outline: 1px dashed #3F8278;
+  outline-offset: 2px;
+}
+.kbn-detail-transcript-lines .kbn-meeting-line + .kbn-meeting-line {
+  margin-top: 1px;
+}
+.kbn-detail-transcript-lines .kbn-meeting-speaker {
+  display: inline-block;
+  min-width: 2.2em;
+  margin-right: 4px;
+  color: #2E6862;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 /* ── Resize handles ──────────────────────────────────────────────────── */
 .kbn-detail-rh {
   position: absolute;

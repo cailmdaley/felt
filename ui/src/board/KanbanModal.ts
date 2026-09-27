@@ -325,6 +325,7 @@ export class KanbanModal {
         meeting: {
           canJoin: () => meetingJoinable(this.meetingStatus),
           join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
+          current: () => this.meetingStatus.meeting,
         },
       },
     )
@@ -1820,6 +1821,7 @@ export class KanbanModal {
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
         this.syncMeetingClock()
+        this.detailModal.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.presentMeeting()
       } catch {
