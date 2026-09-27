@@ -276,38 +276,11 @@ export function CaptureForm({
           rows={6}
         />
         {meetingAvailable && (
-          <div className="capture-meeting-row">
-            <label className="capture-meeting-toggle">
-              <input
-                type="checkbox"
-                checked={meetingEnabled}
-                disabled={submitting}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setMeetingMode('call')
-                  } else {
-                    setMeetingMode(null)
-                  }
-                }}
-              />
-              <span>Meeting</span>
-            </label>
-            {meetingEnabled && (
-              <label className="capture-field capture-meeting-mode">
-                <span className="capture-label">Mode</span>
-                <select
-                  className="capture-select"
-                  value={meetingMode}
-                  disabled={submitting}
-                  onChange={(e) => setMeetingMode(e.target.value as MeetingMode)}
-                >
-                  {MEETING_MODES.map(({ value, label }) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
+          <MeetingControl
+            mode={meetingEnabled ? meetingMode : null}
+            disabled={submitting}
+            onChange={setMeetingMode}
+          />
         )}
         {/* Host · project · agent · effort — four equal grid columns rather
             than flex children, so the last column's right edge is the
@@ -447,6 +420,51 @@ export function CaptureForm({
 }
 
 /**
+ * Meeting: a pressed-state button, then the Call | Room segments. The
+ * segments are always laid out and only hidden, so switching meeting on
+ * reveals them in space the row already holds and nothing below moves.
+ */
+export function MeetingControl({ mode, disabled, onChange }: {
+  mode: MeetingMode | null
+  disabled: boolean
+  onChange: (mode: MeetingMode | null) => void
+}): JSX.Element {
+  return (
+    <div className="capture-meeting-row">
+      <button
+        type="button"
+        className="capture-meeting-toggle"
+        aria-pressed={mode !== null}
+        disabled={disabled}
+        onClick={() => onChange(mode === null ? 'call' : null)}
+      >
+        Meeting
+      </button>
+      <div
+        className="capture-meeting-modes"
+        role="radiogroup"
+        aria-label="Meeting mode"
+        hidden={mode === null}
+      >
+        {MEETING_MODES.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            className="capture-meeting-mode"
+            aria-checked={mode === value}
+            disabled={disabled}
+            onClick={() => onChange(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Inject the Capture dialog's CSS once — idempotent by element id, the same
  * pattern as `injectStashFormStyles`. The shared pickers' sheet rides along,
  * because `AddProjectPath` still draws from it.
@@ -498,27 +516,99 @@ export function injectCaptureFormStyles(): void {
       border-color: #7C93C8;
       box-shadow: 0 0 0 2px rgba(61, 91, 160, 0.16);
     }
+    /* One fixed height for the toggle and the segments, and the segments
+       hidden by visibility rather than removed: the row is the same box
+       whether meeting is on or off. */
     .capture-meeting-row {
       display: flex;
-      align-items: flex-end;
-      gap: 18px;
+      align-items: center;
+      gap: 10px;
+      height: 32px;
     }
     .capture-meeting-toggle {
+      box-sizing: border-box;
+      height: 32px;
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      min-height: 32px;
-      font-size: 14px;
+      padding: 0 14px 0 12px;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 15px;
+      color: #5C544D;
+      background: #FFFFFF;
+      border: 1px solid rgba(46, 42, 38, 0.20);
+      border-radius: 3px;
       cursor: pointer;
       user-select: none;
+      transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
     }
-    .capture-meeting-toggle input {
-      width: 15px;
-      height: 15px;
-      margin: 0;
-      accent-color: #3F8278;
+    /* A ring that fills when the meeting is on. */
+    .capture-meeting-toggle::before {
+      content: '';
+      box-sizing: border-box;
+      width: 10px;
+      height: 10px;
+      border: 1.5px solid currentColor;
+      border-radius: 50%;
     }
-    .capture-meeting-mode { width: min(14rem, 50%); }
+    .capture-meeting-toggle:hover:not(:disabled) {
+      color: #2E2A26;
+      background: rgba(46, 42, 38, 0.04);
+    }
+    .capture-meeting-toggle[aria-pressed="true"] {
+      color: #2F665E;
+      background: rgba(63, 130, 120, 0.10);
+      border-color: rgba(63, 130, 120, 0.55);
+    }
+    .capture-meeting-toggle[aria-pressed="true"]::before {
+      background: #3F8278;
+      border-color: #3F8278;
+    }
+    .capture-meeting-modes {
+      box-sizing: border-box;
+      height: 32px;
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      background: rgba(46, 42, 38, 0.035);
+      border: 1px solid rgba(46, 42, 38, 0.20);
+      border-radius: 3px;
+    }
+    /* Keep the box, drop the paint, the tab stops and the a11y node. */
+    .capture-meeting-modes[hidden] {
+      display: inline-flex;
+      visibility: hidden;
+    }
+    .capture-meeting-mode {
+      padding: 0 14px;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 15px;
+      line-height: 1;
+      color: #7A7068;
+      background: transparent;
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    .capture-meeting-mode:hover:not([aria-checked="true"]):not(:disabled) {
+      color: #2E2A26;
+    }
+    .capture-meeting-mode[aria-checked="true"] {
+      color: #2E2A26;
+      background: #FFFFFF;
+      box-shadow: 0 0 0 1px rgba(46, 42, 38, 0.12), 0 1px 2px rgba(46, 42, 38, 0.10);
+      cursor: default;
+    }
+    .capture-meeting-toggle:focus-visible,
+    .capture-meeting-mode:focus-visible {
+      outline: 2px solid rgba(154, 123, 53, 0.45);
+      outline-offset: 1px;
+    }
+    .capture-meeting-toggle:disabled,
+    .capture-meeting-mode:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .capture-controls {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -675,7 +765,10 @@ export function injectCaptureFormStyles(): void {
       color: #2E2A26;
     }
     /* Muted cobalt — matches the ✶ trigger and the In Flight lane accent. */
+    /* Wide enough for "Start meeting", so the meeting toggle leaves Cancel
+       where it was. */
     .capture-submit {
+      min-width: 8em;
       background: #3D5BA0;
       color: #FFFFFF;
       border-color: #2C4378;
