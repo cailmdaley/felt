@@ -1209,8 +1209,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   behind a facade, and a caller must not inherit its death: a transport fault
   belongs in the remote's `last_error`, not in the caller's mailbox.
 
-  TLS for `https://` remotes is verified explicitly against the OS CA store.
-  Fleet URLs on a mesh VPN carry publicly-trusted certificates; there is no
+  Production TLS for `https://` remotes is verified explicitly against the OS
+  CA store. Test builds enable a compile-time-gated CA override for local TLS
+  fixtures; runtime production configuration cannot add trust anchors. Fleet
+  URLs on a mesh VPN carry publicly-trusted certificates; there is no
   `verify_none` path here and adding one would silently un-authenticate every
   cross-host read and write the hub makes.
   """
@@ -1233,6 +1235,11 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # calls into httpc when the value has genuinely changed.
   @applied_key {__MODULE__, :applied_https_proxy}
   @tailscale_socket_key {__MODULE__, :tailscale_socket}
+  @tailnet_dial_test_cacerts_enabled Application.compile_env(
+                                       :shuttle,
+                                       :tailnet_dial_test_cacerts_enabled,
+                                       false
+                                     )
 
   # Loopback never goes through the proxy: ssh-tunnelled remotes are
   # `http://127.0.0.1:<port>` and the daemon's own endpoints are local. httpc
@@ -1660,9 +1667,16 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @doc false
   def tls_opts do
+    cacerts =
+      if @tailnet_dial_test_cacerts_enabled do
+        Application.get_env(:shuttle, :tailnet_dial_test_cacerts) || :public_key.cacerts_get()
+      else
+        :public_key.cacerts_get()
+      end
+
     [
       verify: :verify_peer,
-      cacerts: Application.get_env(:shuttle, :tailnet_dial_cacerts) || :public_key.cacerts_get(),
+      cacerts: cacerts,
       depth: 3,
       customize_hostname_check: [
         match_fun: :public_key.pkix_verify_hostname_match_fun(:https)

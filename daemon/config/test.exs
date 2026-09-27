@@ -18,7 +18,8 @@ config :shuttle,
   # The same shield one level down: `false` means "explicitly no proxy", so no
   # test can pick up the developer's real fleet proxy and try to CONNECT
   # through it.
-  https_proxy: false
+  https_proxy: false,
+  tailnet_dial_test_cacerts_enabled: true
 
 # Test daemon identity. Resolved at Poller boot by
 # `Shuttle.Poller.resolve_own_host_id/0`, which owns the precedence order. We

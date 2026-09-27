@@ -145,8 +145,8 @@ defmodule Shuttle.TailnetDialTest do
     tls_port: tls_port
   } do
     certs = test_cacerts()
-    previous = Application.get_env(:shuttle, :tailnet_dial_cacerts)
-    Application.delete_env(:shuttle, :tailnet_dial_cacerts)
+    previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.delete_env(:shuttle, :tailnet_dial_test_cacerts)
     on_exit(fn -> restore_cacerts(previous) end)
 
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
@@ -177,7 +177,7 @@ defmodule Shuttle.TailnetDialTest do
     assert {:tailnet_dial, :tls, reason} = TailnetDial.last_error(remote.name)
     assert Enum.any?(["unknown_ca", "selfsigned_peer", "bad_cert"], &(inspect(reason) =~ &1))
 
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, certs)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, certs)
 
     assert {:ok, "tailnet-response"} =
              Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
@@ -197,10 +197,10 @@ defmodule Shuttle.TailnetDialTest do
     base: base,
     tls_port: tls_port
   } do
-    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
     previous_proxy = Application.get_env(:shuttle, :https_proxy)
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
     on_exit(fn -> restore_cacerts(previous_cacerts) end)
 
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
@@ -278,8 +278,8 @@ defmodule Shuttle.TailnetDialTest do
   end
 
   test "an idle client connection expires after twice the remote request timeout", %{base: base} do
-    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
     on_exit(fn -> restore_cacerts(previous_cacerts) end)
 
     {tls_port, _peer} = start_silent_tls_peer(base)
@@ -297,8 +297,8 @@ defmodule Shuttle.TailnetDialTest do
   end
 
   test "a closed client cannot leave a stalled TLS relay task behind", %{base: base} do
-    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
     on_exit(fn -> restore_cacerts(previous_cacerts) end)
 
     {tls_port, _peer} = start_silent_tls_peer(base)
@@ -319,8 +319,8 @@ defmodule Shuttle.TailnetDialTest do
   end
 
   test "a half-closed TLS peer cannot leave a draining relay task behind", %{base: base} do
-    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
     on_exit(fn -> restore_cacerts(previous_cacerts) end)
 
     {tls_port, _peer} = start_silent_tls_peer(base, close_write?: true)
@@ -423,8 +423,8 @@ defmodule Shuttle.TailnetDialTest do
     tls_port: tls_port
   } do
     certs = test_cacerts()
-    previous = Application.get_env(:shuttle, :tailnet_dial_cacerts)
-    Application.put_env(:shuttle, :tailnet_dial_cacerts, certs)
+    previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, certs)
     on_exit(fn -> restore_cacerts(previous) end)
 
     wrong_host = "wrong.example.ts.net"
@@ -821,8 +821,10 @@ defmodule Shuttle.TailnetDialTest do
   defp restore_app_env(name, nil), do: Application.delete_env(:shuttle, name)
   defp restore_app_env(name, value), do: Application.put_env(:shuttle, name, value)
 
-  defp restore_cacerts(nil), do: Application.delete_env(:shuttle, :tailnet_dial_cacerts)
-  defp restore_cacerts(value), do: Application.put_env(:shuttle, :tailnet_dial_cacerts, value)
+  defp restore_cacerts(nil), do: Application.delete_env(:shuttle, :tailnet_dial_test_cacerts)
+
+  defp restore_cacerts(value),
+    do: Application.put_env(:shuttle, :tailnet_dial_test_cacerts, value)
 
   defp eventually(fun, attempts \\ 100)
   defp eventually(_fun, 0), do: false
