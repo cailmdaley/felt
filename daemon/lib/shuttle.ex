@@ -204,8 +204,8 @@ defmodule Shuttle.Application do
         # the test endpoint (`server: false`) must not create or unlink
         # anything under a developer's data dir.
         {:unix, path} ->
-          if server?, do: Shuttle.Host.prepare_unix_socket!(path)
-          [ip: {:local, path}, port: 0]
+          bound_path = if server?, do: Shuttle.Host.prepare_unix_socket!(path), else: path
+          [ip: {:local, bound_path}, port: 0]
       end
 
     listen_string = Shuttle.Host.format_listen(listen)

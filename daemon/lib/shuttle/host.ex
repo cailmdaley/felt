@@ -390,7 +390,8 @@ defmodule Shuttle.Host do
   end
 
   @doc """
-  Make a unix socket path safe to bind, or raise.
+  Make a unix socket path safe to bind, or raise. Returns the fully resolved
+  physical socket path so callers bind the same path that passed the checks.
 
   The socket's directory is the access check — anyone who can traverse it can
   connect — so the guarantee is only as strong as the path to it. Every
@@ -418,13 +419,16 @@ defmodule Shuttle.Host do
 
   `opts[:euid]` overrides the effective uid (tests).
   """
-  @spec prepare_unix_socket!(String.t(), keyword()) :: :ok
+  @spec prepare_unix_socket!(String.t(), keyword()) :: String.t()
   def prepare_unix_socket!(path, opts \\ []) do
     euid = Keyword.get_lazy(opts, :euid, &effective_uid/0)
     dir = Path.dirname(path)
     parent = secure_ancestors!(Path.dirname(dir), euid)
-    ensure_socket_dir!(Path.join(parent, Path.basename(dir)), euid)
-    clear_stale_socket!(path)
+    socket_dir = Path.join(parent, Path.basename(dir))
+    ensure_socket_dir!(socket_dir, euid)
+    resolved_path = Path.join(socket_dir, Path.basename(path))
+    clear_stale_socket!(resolved_path)
+    resolved_path
   end
 
   @doc """
@@ -472,7 +476,7 @@ defmodule Shuttle.Host do
     candidate = Path.join(current, name)
 
     case File.lstat(candidate) do
-      {:ok, %File.Stat{type: :symlink}} ->
+      {:ok, %File.Stat{type: :symlink, uid: uid}} when uid in [euid, 0] ->
         target = File.read_link!(candidate)
 
         case Path.split(target) do
@@ -482,6 +486,11 @@ defmodule Shuttle.Host do
           parts ->
             walk!(current, parts ++ rest, euid, links + 1)
         end
+
+      {:ok, %File.Stat{type: :symlink, uid: uid}} ->
+        raise ArgumentError,
+              "refusing to follow symlink #{candidate}: it is owned by uid #{uid}, " <>
+                "neither this daemon's uid #{euid} nor root"
 
       {:ok, %File.Stat{type: :directory}} ->
         check_ancestor!(candidate, euid)

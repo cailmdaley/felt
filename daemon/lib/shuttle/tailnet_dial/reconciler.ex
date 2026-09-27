@@ -49,9 +49,8 @@ defmodule Shuttle.TailnetDial.Reconciler do
         error = Shuttle.TailnetDial.last_error(name)
         pid = Shuttle.TailnetDial.bridge_pid(name)
 
-        ready? =
-          is_pid(pid) and Process.alive?(pid) and
-            Shuttle.TailnetDial.socket_for(spec.host, spec.port) == spec.path
+        socket = Shuttle.TailnetDial.socket_for(spec.host, spec.port)
+        ready? = is_pid(pid) and Process.alive?(pid) and is_binary(socket)
 
         {stage, reason} =
           case error do
@@ -63,7 +62,7 @@ defmodule Shuttle.TailnetDial.Reconciler do
           name: name,
           host: spec.host,
           port: spec.port,
-          socket: spec.path,
+          socket: socket || spec.path,
           status:
             cond do
               error -> "error"

@@ -346,12 +346,12 @@ defmodule Shuttle.TailnetDialTest do
     Process.unlink(manager)
     on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
 
-    first_path = TailnetDial.socket_path("hub-a", Path.join(base, "data"))
-
     assert eventually(
-             fn -> TailnetDial.socket_for("hub-a.example.ts.net", 443) == first_path end,
+             fn -> is_binary(TailnetDial.socket_for("hub-a.example.ts.net", 443)) end,
              400
            )
+
+    first_path = TailnetDial.socket_for("hub-a.example.ts.net", 443)
 
     assert %{configured: true, socket: ^localapi, bridges: [%{name: "hub-a", status: "ready"}]} =
              TailnetDial.status()
@@ -367,17 +367,18 @@ defmodule Shuttle.TailnetDialTest do
       {"hub-b", "hub-c.example.ts.net"}
     ])
 
-    second_path = TailnetDial.socket_path("hub-b", Path.join(base, "data"))
     send(Shuttle.TailnetDial.Reconciler, :refresh)
 
     assert eventually(
              fn ->
                TailnetDial.socket_for("hub-a.example.ts.net", 443) == nil and
                  TailnetDial.socket_for("hub-b.example.ts.net", 443) == first_path and
-                 TailnetDial.socket_for("hub-c.example.ts.net", 443) == second_path
+                 is_binary(TailnetDial.socket_for("hub-c.example.ts.net", 443))
              end,
              400
            )
+
+    second_path = TailnetDial.socket_for("hub-c.example.ts.net", 443)
 
     write_fleet(remote_file, localapi, [])
 
@@ -439,7 +440,9 @@ defmodule Shuttle.TailnetDialTest do
 
     Process.unlink(manager)
     on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
-    assert TailnetDial.socket_for(host, port) == TailnetDial.socket_path(remote.name, data_dir)
+    socket = TailnetDial.socket_for(host, port)
+    assert is_binary(socket)
+    assert {:ok, %File.Stat{type: :other}} = File.lstat(socket)
     remote
   end
 

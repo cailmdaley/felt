@@ -25,8 +25,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   def init(opts) do
     # Trap supervisor shutdown so terminate/2 can remove the private socket path.
     Process.flag(:trap_exit, true)
-    path = Keyword.fetch!(opts, :path)
-    :ok = Shuttle.Host.prepare_unix_socket!(path)
+    path = opts |> Keyword.fetch!(:path) |> Shuttle.Host.prepare_unix_socket!()
 
     {:ok, listener} =
       :gen_tcp.listen(0, [
