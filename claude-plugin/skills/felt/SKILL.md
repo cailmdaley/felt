@@ -10,9 +10,9 @@ description: >
 
 # felt — Working with Fibers
 
-Fibers are concerns — tasks, decisions, questions, findings, specs — each a markdown file with YAML frontmatter at `.felt/<id>/<slug>.md`, where the id is the nested path (`bao-analysis/damping-prior`). They relate by containment (the path), by `[[wikilinks]]` in the body, and by any conventions a project adds; add whatever extra frontmatter fields your project needs and felt keeps them intact.
+A fiber is one concern — a task, decision, question, finding, or spec — kept as a markdown file with YAML frontmatter. Fibers live in a `.felt/` directory, one folder each, and nest: `.felt/bao-analysis/damping-prior/damping-prior.md` is the fiber whose id is `bao-analysis/damping-prior`.
 
-A representative fiber, `bao-analysis/damping-prior`:
+## Anatomy of a fiber
 
 ```markdown
 ---
@@ -26,7 +26,20 @@ The fiducial fit in [[bao-analysis]] needs a value for the nonlinear damping sca
 Freed under a flat prior, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock-validation]]) and α's error grows by ~30%, while the mean α moves by less than 0.1σ. Decided *not* to use a Gaussian prior instead: it reproduces the fixed-value result at extra sampler cost.
 ```
 
-It has no status because nobody needs to act on it. The outcome reads on its own in `felt ls`, the first paragraph says what this is and where it sits before any detail, and the links do work inside sentences.
+- **id** — the path. Containment is the first relationship: this fiber sits under `bao-analysis`, and `felt tree` walks the hierarchy.
+- **name** — a short label.
+- **outcome** — the conclusion, in a sentence that stands alone: what was learned or decided, and why. It is what `felt ls` shows, so "done" is a failed outcome.
+- **status** — absent here, which is the default. Status is opt-in and means someone should act: ○ `open` a todo, ◐ `active` in flight, ● `closed` resolved. A decision, finding, or note exists by being filed and needs none.
+- **tags** — free labels for filtering (`felt ls -t decision`).
+- **body** — opens with a paragraph that says what this is and where it sits, readable alone (`felt show -d summary` shows it); detail follows. `[[wikilinks]]` are the second relationship, and they earn their place inside sentences.
+- **your own fields** — add any frontmatter a project needs; felt keeps it intact (`felt edit <id> --set key=value` for scalars). `created-at` / `updated-at` are felt's, stamped on every write — never hand-edit them.
+- **companion files** — plots, recordings, a `report.html` — sit beside `damping-prior.md` and are inlined in the body with a `:::{embed} <path>` line (syntax in the shuttle skill).
+
+## Stores and sync
+
+A project whose `.felt` symlinks into a larger store is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest` act on the fiber where it lives and say `(in <root>)` when that is elsewhere. Linking a project into a store is a one-time setup with a data-loss trap; follow https://cailmdaley.github.io/felt/concepts/cross-project/.
+
+Before substantive work, run `felt sync` to merge the store's Git upstream (it follows a view to the real store). Commit intentional changes and `felt sync --push` at useful checkpoints. Resolve conflicts with context and retry; never pick a side mechanically or discard another worker's edits, and report a failed sync rather than treating local content as current.
 
 ## Working paths
 
@@ -37,23 +50,14 @@ felt add <slug> "name" -t tag -o "one-line outcome"   # file; nests under an exi
 felt edit <id> -o "what was learned" -s closed        # conclude a thread
 felt ls                                               # open/active work in this view
 felt ls "query"                                       # search this view (closed matches counted, not shown)
-felt find "query"                                     # search the whole store, across views
+felt find "query"                                     # search the whole store
 felt show <id> -d summary                             # metadata, outcome, lede, back-refs
 felt tree <id> -L 2                                   # containment around a fiber
 felt nest <child> <parent>                            # reshape
 felt check                                            # broken links, layout issues
-felt sync  /  felt sync --push                        # merge the store's upstream / publish
 ```
 
-Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<slug>.md` directly. Use a `|-` block scalar for an outcome longer than a sentence — `-o "…"` mangles quotes and newlines. Never hand-edit `created-at` / `updated-at`; felt stamps them on every write. Scalar project fields can be set with `felt edit <id> --set key=value` / `--unset key`.
-
-**Statuses:** · none (the default — most fibers stay here) ○ open (todo) ◐ active (in flight) ● closed (resolved). `open`/`active` mean *someone should do something*; a finding, decision, recipe, or note exists by being filed and stays statusless. Never pass `-s` on `felt add` unless someone should act, and close in the same motion when an outcome reads complete.
-
-**Stores and views.** A project whose `.felt` symlinks into a larger store is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere. Linking a new project into a store is a one-time setup with a data-loss trap; follow https://cailmdaley.github.io/felt/concepts/cross-project/.
-
-**Sync.** Before substantive work, run `felt sync` to merge the store's Git upstream (it follows a symlinked view to the real store). Edit local files, commit intentional changes, and `felt sync --push` at useful checkpoints. Resolve relevant conflicts with context and retry; never pick ours/theirs mechanically or discard another worker's edits. Report a failed sync rather than treating local content as current.
-
-**Companion files** (plots, recordings, a `report.html`) live in the fiber's directory beside `<slug>.md`; the body inlines any of them with a `:::{embed} <path>` line (syntax in the shuttle skill).
+Bodies, long outcomes, and structured fields: Read then Edit the fiber's file directly. An outcome longer than a sentence goes in a `|-` block scalar — `-o "…"` mangles quotes and newlines.
 
 ---
 
@@ -61,7 +65,7 @@ Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<s
 
 **File while working.** The moment to update a fiber is right after something crystallizes, while the understanding still has edges. Don't ask permission to file: the user's corrections and opinions are the primary trigger, and when the direction shifts, the fiber shifts too. Don't file empty stubs "for later" — file when the work is real.
 
-**Sweep the session before you close out or hand off.** Continuous filing catches most things; the rest gets filed before you leave. Reread the session for what stayed implicit — decisions (including what you decided *not* to do, and why), questions answered, patterns, findings — and file each under the parent it belongs to, statusless unless someone should act. Then bring the outcome and status of every fiber you touched up to date. An outcome that says "done" has failed: put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone, because it is what `felt ls` shows. Names are concise labels; body and outcome carry the content.
+**Sweep the session before you close out or hand off.** Continuous filing catches most things; the rest gets filed before you leave. Reread the session for what stayed implicit — decisions (including what you decided *not* to do, and why), questions answered, patterns, findings — and file each under the parent it belongs to, statusless unless someone should act. Then bring the outcome and status of every fiber you touched up to date.
 
 **Tend the store as you go.** Tidying is part of every session, and you have full standing permission for it: whenever you touch a region of the store and see mess, fix it in the same motion, and when `felt session` shows `## Attention`, clear it this session. Don't ask first; mention a cleanup only when it needs judgment or would derail the current task. Larger passes suit a background subagent while you keep working. What good shape looks like:
 
