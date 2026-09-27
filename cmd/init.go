@@ -10,9 +10,11 @@ import (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize a new felt repository",
-	Long:  `Creates or repairs the local .felt/ directory and felt support files.`,
-	Args:  cobra.NoArgs,
+	Short: "Create a store here, or repair its support files",
+	Long: `Creates .felt/ and its .gitignore in the current directory, or in -C dir; it
+does not look for an enclosing store. In an existing store it restores a
+missing .gitignore and changes nothing else.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Honor -C. resolveProjectRoot can't serve here: it requires an
 		// existing .felt/, which is precisely what init is there to create.

@@ -156,12 +156,12 @@ type receiptInstalledPlugin struct {
 // than a top-level doctor so its scope remains the installation boundary.
 var setupReceiptCmd = &cobra.Command{
 	Use:   "receipt",
-	Short: "Report the installed runtime receipt",
-	Long: `Report the executable, enabled skill/plugin bundles, hook compatibility,
-and the running Shuttle daemon contract. Use --json for the machine-readable
-receipt consumed by setup and deployment checks. A healthy receipt requires
-every component that is enabled on this host to be present and compatible,
-and exactly one felt build on PATH.`,
+	Short: "Report whether felt's installed pieces are present and compatible",
+	Long: `Reports the executable, the enabled skill and plugin bundles, hook
+compatibility, and the running shuttle daemon's contract. It exits non-zero
+unless every component enabled on this host is present and compatible and
+exactly one felt build is on PATH. -j prints the machine-readable receipt that
+setup and deployment checks read.`,
 	SilenceUsage: true,
 	Args:         cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

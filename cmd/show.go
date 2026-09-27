@@ -19,22 +19,22 @@ var (
 
 var showCmd = &cobra.Command{
 	Use:   "show <id>",
-	Short: "Show details of a felt",
-	Long: `Displays details of a felt at the requested detail level.
+	Short: "Show a fiber",
+	Long: `-d sets how much prints:
+  name     name and tags
+  compact  metadata, outcome, body size, extra frontmatter keys
+  summary  compact plus body links, back-references in this view, and the
+           lede paragraph
+  full     everything, body included (the default)
 
-Detail levels control progressive disclosure:
-  name     Name and tags only
-  compact  Metadata, outcome, body size, and additional YAML field keys
-  summary  Compact + lede paragraph + citations/consumers
-  full     Everything (default)
-
-Targeted views:
-  --body            return the body plus its start line for editing
-  --citations       return narrative back-references only
-  --consumers       return reverse data-flow consumers only
-  --field <name>    return one frontmatter field by raw YAML key, formatted
-                    for shell consumers (scalars on one line, sequences of
-                    scalars one-per-line, structured values as YAML)`,
+A selector prints one thing instead, and only one may be given: --body (with
+its start line in the file), --citations (fibers that wikilink here),
+--consumers (fibers naming it in inputs.from), or --field (one frontmatter key
+by its YAML name: a scalar on one line, a list of scalars one per line,
+anything else as YAML; a missing key prints nothing). --citations and
+--consumers search the whole store, not just this view.`,
+	Example: `  felt show analysis/covariance -d summary
+  felt show analysis/covariance --field status`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
@@ -179,11 +179,11 @@ func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 func init() {
 	showCmd.GroupID = groupFibers
 	rootCmd.AddCommand(showCmd)
-	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output the body plus its start line")
+	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Print the body and the line it starts on")
 	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")
-	showCmd.Flags().BoolVar(&showCitations, "citations", false, "Output narrative back-references only")
-	showCmd.Flags().BoolVar(&showConsumers, "consumers", false, "Output reverse data-flow consumers only")
-	showCmd.Flags().StringVar(&showField, "field", "", "Output one frontmatter field by raw YAML key (shell-friendly formatting)")
+	showCmd.Flags().BoolVar(&showCitations, "citations", false, "Print the fibers that wikilink here")
+	showCmd.Flags().BoolVar(&showConsumers, "consumers", false, "Print the fibers that name this one in inputs.from")
+	showCmd.Flags().StringVar(&showField, "field", "", "Print one frontmatter field by its YAML key, formatted for the shell")
 }
 
 type showBodyOutput struct {

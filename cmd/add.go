@@ -20,26 +20,18 @@ var (
 
 var addCmd = &cobra.Command{
 	Use:   "add <slug> <name>",
-	Short: "Create a new felt",
-	Long: `Creates a new felt with the given slug and name.
+	Short: "Create a fiber",
+	Long: `Creates .felt/<slug>/<basename>.md and prints the new id. <name> is the
+display name; the fiber has no status unless -s gives it one.
 
-The slug is the fiber's path/ID shorthand. The name is the first real content
-and is required explicitly.
-
-A <slug> whose parent path already exists — a fiber, or a directory that
-holds fibers such as roles/ — is created exactly there. Otherwise, when the
-leading segment of <slug> matches an existing fiber's basename, the new fiber
-is created under that fiber's parent — so 'felt add launch/log' lands under an
-existing 'project/launch' as 'project/launch/log'. Use --top-level to skip
-resolution and create at the root even when nested matches exist; ambiguous
-matches (the leading segment appears in multiple subtrees) abort with the
-candidates listed. roles/ always stays at the top level.
-
-Examples:
-  felt add mocks-unbiased "Are the mocks unbiased?"
-  felt add pure_eb/covariance "Covariance method"
-  felt add roles/intendant "Intendant"
-  felt add roles/intendant/opus "Opus · intendant"`,
+When <slug>'s parent path exists (a fiber, or a directory of fibers such as
+roles/), the fiber lands exactly there. Otherwise a leading segment that is an
+existing fiber's basename places <slug> under that fiber's parent: with
+project/launch in the store, launch/log becomes project/launch/log (reported
+on stderr). An ambiguous match aborts with the candidates; --top-level skips
+resolution and uses <slug> as spelled.`,
+	Example: `  felt add analysis/covariance "Covariance method" -s open
+  felt add analysis/jackknife-bias "Jackknife bias" -o "negligible below 200 patches"`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := resolveProjectRoot()
@@ -128,7 +120,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
 	addCmd.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
-	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable)")
-	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome (the conclusion)")
-	addCmd.Flags().BoolVar(&addTopLevel, "top-level", false, "Create at the top level; don't resolve <slug> against existing fibers")
+	addCmd.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable or comma-separated)")
+	addCmd.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome: what was decided or learned")
+	addCmd.Flags().BoolVar(&addTopLevel, "top-level", false, "Use <slug> as spelled; don't resolve it against existing fibers")
 }

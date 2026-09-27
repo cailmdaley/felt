@@ -82,7 +82,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 
 func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
 	usage := rootCmd.UsageString()
-	for _, leaked := range []string{"Body text", "Outcome (the conclusion)", "Status (open, active, closed)"} {
+	for _, leaked := range []string{"Body text", "Outcome: what was decided", "Status (open, active, closed)"} {
 		if strings.Contains(usage, leaked) {
 			t.Fatalf("root usage still leaks add-only flag %q:\n%s", leaked, usage)
 		}

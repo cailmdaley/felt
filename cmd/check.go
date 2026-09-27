@@ -9,19 +9,16 @@ import (
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Lint fibers for structural quality issues",
-	Long: `Runs felt's repository checks.
-
-Current checks cover:
-  - fibers that fail to parse (invisible to every other command)
-  - broken narrative wikilinks / body references
-  - broken inputs.from data-flow references
-  - legacy title frontmatter keys
-  - legacy depends-on frontmatter keys
-  - legacy MyST body anchors
-  - slug collisions between bare and nested fiber forms
-  - multiple bare .md files at .felt/ root
-  - a shuttle host: that is this machine under a pre-normalization name`,
+	Short: "Report broken links and store layout problems",
+	Long: `Exits non-zero when it finds an error. It reports:
+  - fibers that fail to parse, which every other command skips
+  - empty names
+  - wikilinks, inputs.from, and depends_on ids that resolve to no fiber
+  - legacy title, depends-on, and MyST anchor forms (felt migrate converts them)
+  - a slug in both bare and nested form, and more than one bare .md at the
+    .felt root
+  - a shuttle host: naming this machine by a pre-normalization spelling
+    (a warning)`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

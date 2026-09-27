@@ -8,9 +8,11 @@ import (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm <id>",
-	Short: "Delete a felt",
-	Long:  `Permanently removes a felt from the repository.`,
-	Args:  cobra.ExactArgs(1),
+	Short: "Delete a fiber",
+	Long: `Deletes the fiber's file. Nested fibers are not removed: they keep their ids
+under a directory that no longer has a fiber of its own. Links to the deleted
+fiber are left broken; felt check reports them.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {

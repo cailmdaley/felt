@@ -47,41 +47,24 @@ func claudeMarketplaceClonePath() string {
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Setup integrations",
-	Long:  `Setup felt integrations with external tools.`,
+	Short: "Install and inspect felt's agent-harness integrations",
 }
 
 var setupClaudeCmd = &cobra.Command{
 	Use:   "claude",
 	Short: "Install the felt plugin for Claude Code via the plugin marketplace",
-	Long: `Install the felt plugin for Claude Code.
+	Long: `Installs the felt plugin for Claude Code: the felt and shuttle skills, and
+hooks that inject the session context, hold tool use until the felt skill is
+active, stamp updated-at on fibers edited directly, and record harness events
+and commits for shuttle (these write nothing unless shuttle's state directory,
+~/.shuttle by default, exists). Re-running updates it.
 
-Registers the felt plugin marketplace and installs the felt plugin from
-it. The plugin bundles the felt skill plus four hooks: SessionStart and
-PreToolUse surface active fibers and gate non-felt tool use, PostToolUse
-stamps updated-at on a directly edited fiber, and an activity-event hook
-records harness events for shuttle (writing nothing unless ~/.shuttle
-exists). Idempotent — re-running is safe.
-
-By default, acquires ` + marketplaceRepo + ` from GitHub into a disposable
-checkout, validates and promotes the complete payload, then registers the
-promoted local generation with Claude Code. No local checkout is required
-(brew or curl installs work). Tagged felt binaries pin the plugin to the
-matching tag (e.g. ` + marketplaceRepo + `#v1.0.0); ` + "`dev`" + ` builds
-track the default branch.
-
-Wraps the official Claude Code CLI:
-
-    claude plugin marketplace add ` + marketplaceRepo + `[#v<tag>]
-    claude plugin install felt@` + marketplaceName + `
-
-Resolution order for --source (override the default GitHub registration):
-  1. --source <path>      path to a felt repo checkout containing
-                          .claude-plugin/marketplace.json
-  2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
-                          (the parent of which becomes the marketplace root)
-
-Use --uninstall to remove.`,
+The plugin comes from ` + marketplaceRepo + ` on GitHub at this binary's tag (a dev
+build takes the default branch), or from --source <checkout>, or from
+$FELT_PLUGIN_DIR (the plugin directory; its parent is the marketplace root).
+felt validates it, promotes it to a local generation, and registers that with
+claude plugin marketplace add and claude plugin install. --uninstall removes
+the plugin and its marketplace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
@@ -101,34 +84,14 @@ Use --uninstall to remove.`,
 var setupCodexCmd = &cobra.Command{
 	Use:   "codex",
 	Short: "Install the felt plugin for Codex via the plugin marketplace",
-	Long: `Install the felt plugin for Codex.
+	Long: `Installs the felt plugin for Codex: the felt and shuttle skills and the same
+hooks as the Claude Code plugin. Re-running updates it.
 
-Registers the felt plugin marketplace and installs the felt plugin from
-it. The plugin bundles the felt and shuttle skills plus the hooks that
-surface active fibers and record harness activity for shuttle.
-Idempotent — re-running is safe.
-
-By default, acquires ` + marketplaceRepo + ` from GitHub, validates and
-promotes the complete payload, then registers that local generation through
-Codex's native plugin commands. Tagged felt binaries pin acquisition to the
-matching tag.
-
-Wraps the official Codex CLI (Codex's @ref syntax — Claude uses #ref):
-
-    codex plugin marketplace add ` + marketplaceRepo + `[@v<tag>]
-    codex plugin add felt@` + marketplaceName + `
-
-Codex reviews a plugin's hooks before running them: your next interactive
-Codex session will ask you to trust felt's, and until you accept, the
-skills load but the hooks stay dormant.
-
-Resolution order for --source (override the default GitHub registration):
-  1. --source <path>      path to a felt repo checkout containing
-                          .claude-plugin/marketplace.json
-  2. $FELT_PLUGIN_DIR     env var pointing directly at the plugin directory
-                          (the parent of which becomes the marketplace root)
-
-Use --uninstall to remove.`,
+The source is chosen as for felt setup claude; felt validates it, promotes it
+to a local generation, and registers that with codex plugin marketplace add
+and codex plugin add. Codex asks you to trust the plugin's hooks in your next
+interactive session; until you accept, the skills load but the hooks stay
+dormant. --uninstall removes the plugin and its marketplace.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
@@ -160,22 +123,14 @@ Use --uninstall to remove.`,
 var setupPiCmd = &cobra.Command{
 	Use:   "pi",
 	Short: "Install the felt package for pi via the pi package manager",
-	Long: `Install the felt integration for pi (@earendil-works/pi-coding-agent).
+	Long: `Installs the felt package for pi (@earendil-works/pi-coding-agent): the felt
+and shuttle skills and a pi extension that injects the session context,
+enforces the skill-activation gate, and records harness activity for shuttle.
+Re-running is safe.
 
-Installs the felt pi package — the shared felt and shuttle skills plus a pi
-extension that injects session context, enforces the skill-activation gate,
-and records harness activity for shuttle. Idempotent — re-running is safe.
-
-By default, installs ` + marketplaceRepo + ` directly from GitHub — pi clones
-the repo itself, so no local checkout is required. Tagged felt binaries pin
-the package to the matching tag (e.g. git:github.com/cailmdaley/felt@v1.0.0);
-` + "`dev`" + ` builds track the default branch.
-
-Wraps the official pi CLI:
-
-    pi install git:github.com/cailmdaley/felt[@v<tag>]
-
-Use --uninstall to remove.`,
+Runs pi install git:github.com/` + marketplaceRepo + `@v<tag> for this binary's tag
+(a dev build takes the default branch); pi clones the repository itself.
+--uninstall removes the package.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uninstall, _ := cmd.Flags().GetBool("uninstall")
 
@@ -197,15 +152,11 @@ Use --uninstall to remove.`,
 var setupSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Link felt skills to a target directory",
-	Long: `Link felt skills from the plugin directory into a target directory.
-
-By default, links to ~/.claude/skills. Use --target to specify a different directory.
-Existing entries are replaced.
-
-Resolution order for --source:
-  1. --source <path>      path to a felt repo checkout or plugin directory
-  2. $FELT_PLUGIN_DIR     env var pointing at the plugin directory
-  3. ~/.claude/plugins/marketplaces/` + marketplaceName + `  if ` + "`felt setup claude`" + ` has run`,
+	Long: `Symlinks each skill in the plugin directory into --target (default
+~/.claude/skills), replacing existing entries of the same name. The plugin is
+found from --source (a checkout or its plugin directory), then
+$FELT_PLUGIN_DIR, then a directory marketplace registered with Claude Code,
+then Claude Code's clone at ~/.claude/plugins/marketplaces/` + marketplaceName + `.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
 		source, _ := cmd.Flags().GetString("source")
@@ -230,12 +181,10 @@ Resolution order for --source:
 var setupValidateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate a complete local plugin candidate",
-	Long: `Validate a local felt checkout before promoting it to an agent plugin.
-
-This checks both Claude and Codex manifests, the shared skills and executable
-hooks, and the felt↔Shuttle contract reported by the selected executable. It
-does not change the installed plugin or cache, so release and CI gates can use
-it safely.`,
+	Long: `Checks a felt checkout (--source, required) as a plugin candidate: the Claude
+and Codex manifests, the shared skills, the executable hooks, and the shuttle
+contract the selected felt executable reports. It changes nothing installed,
+so release and CI gates can run it.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		if source == "" {
@@ -268,7 +217,7 @@ func init() {
 	setupPiCmd.Flags().Bool("uninstall", false, "Remove the felt pi package")
 	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
 	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupValidateCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	setupValidateCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory (required)")
 	setupValidateCmd.Flags().String("executable", "", "felt executable to probe (default: running felt)")
 	setupCmd.AddCommand(setupClaudeCmd)
 	setupCmd.AddCommand(setupCodexCmd)

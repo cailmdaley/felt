@@ -44,34 +44,26 @@ func listForOutput(storage *felt.Storage, hasFields []string) ([]*felt.Felt, err
 
 var lsCmd = &cobra.Command{
 	Use:   "ls [query]",
-	Short: "List and search felts",
-	Long: `Lists felts in THIS view, showing open and active by default.
+	Short: "List and search fibers in this view",
+	Long: `Bare ls lists the open and active fibers in this view, oldest first. A query
+matches name, outcome, extra frontmatter text, and id as a case-insensitive
+substring; exact matches on name, id, or basename sort first. --body also
+searches bodies.
 
-felt ls lists the view; felt find searches the store. In a project store
-mounted inside a larger one, ls never leaves the view — every flag below
-filters this store's own listing, and stays fast. Use felt find to search the
-whole enclosing store.
+A filter (query, -t, --has-field) widens to every status and counts closed
+matches in a trailing hint instead of printing them; -s names the statuses
+outright (open, active, closed, all). -n lists the N most recent of every
+status, by closed-at, else created-at.
 
-A filter (-t, query, --has-field) widens the search to every status except
-closed; closed matches are counted in a trailing hint instead of printed.
--n shows all statuses, closed included — it ranks by closed-at. Use -s to
-override: open, active, closed, or all.
+Query matches under a matching ancestor fold into it with a count; -v lists
+them flat. --json is neither folded nor stripped of closed matches.
 
-Use -t to filter by tag (AND logic, prefix matching with trailing colon):
-  -t rule:                    matches any rule:* tag
-  -t rule:cosebis_data_vector exact tag match
-
-Optional query searches name, outcome, additional YAML field text, and fiber id (slug):
-  felt ls cosebis             substring search (name, outcome, frontmatter, and id)
-  felt ls dj-rico             matches fibers whose id contains "dj-rico"
-  felt ls -r "rule:.*data"    regex search (also applied to fiber id)
-  felt ls -e "exact-slug"     exact name or exact id match
-
-Use --body with query to include body search, and with --json to emit body text.
-
-Query results collapse by containment: a match whose ancestor also matches is
-folded into that ancestor, which carries a count of what it swallowed. Use -v to
-list every match flat. --json is always uncollapsed.`,
+ls never leaves this view. When this .felt is mounted inside a larger store,
+felt find searches the rest of it.`,
+	Example: `  felt ls                                 open and active fibers
+  felt ls covariance --body               search, bodies included
+  felt ls -t rule: -s all                 every fiber with a rule:* tag
+  felt ls --json --json-field id,status   machine-readable, two fields`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := requireStore()
@@ -221,13 +213,13 @@ func init() {
 	lsCmd.GroupID = groupSearch
 	rootCmd.AddCommand(lsCmd)
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
-	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
-	lsCmd.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show N most recent (by closed-at or created-at)")
-	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Include body search for queries and body field in JSON output")
-	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Exact name match only (with query)")
-	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat query as regular expression")
-	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter/JSON field (repeatable or comma-separated)")
-	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only this top-level field (repeatable or comma-separated)")
+	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
+	lsCmd.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show the N most recent, every status (by closed-at, else created-at)")
+	lsCmd.Flags().BoolVar(&lsBody, "body", false, "Also search bodies; with --json, include the body")
+	lsCmd.Flags().BoolVarP(&lsExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
+	lsCmd.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
+	lsCmd.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	lsCmd.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
 	lsCmd.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 }
 
@@ -657,12 +649,13 @@ type ContainmentNode struct {
 // tree command - containment hierarchy
 var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
-	Short: "Show containment tree",
-	Long: `Shows the containment tree (filesystem nesting) for fibers.
-
-Use -L/--depth to cap how deep the tree is drawn; elided branches are marked
-with the count of what lies below them. --json is always the full tree.`,
-	Args: cobra.MaximumNArgs(1),
+	Short: "Show the containment tree",
+	Long: `Draws fibers by nesting, every status included: the whole view, or with an id
+that fiber's subtree, from the enclosing store when it lives there. -L caps
+the depth and marks each cut branch with the count below it; --json is always
+the full tree.`,
+	Example: `  felt tree analysis -L 2`,
+	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := requireStore()
 		if err != nil {

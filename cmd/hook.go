@@ -15,12 +15,12 @@ import (
 
 var sessionCmd = &cobra.Command{
 	Use:   "session",
-	Short: "Print the session context text",
-	Long: `Print the plain text context that felt contributes at agent session
-start: the activation directive plus active and recently touched fibers.
-
-Hook adapters wrap this text in whatever envelope their harness expects. For
-Claude/Codex's current SessionStart wire format, see ` + "`felt hook session`" + `.`,
+	Short: "Print the start-of-session context",
+	Long: `Prints what an agent is given at session start: the skill directive, up to
+five open or active fibers and five other recently updated ones, and an
+Attention list when the store needs tidying (top-level sprawl, open or active
+fibers with children, a broad active set, a long open queue, tracked fibers
+older than 30 days). felt hook session wraps the same text for harness hooks.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Print(buildSessionContext())
@@ -34,10 +34,10 @@ Claude/Codex's current SessionStart wire format, see ` + "`felt hook session`" +
 // emit machine envelopes.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
-	Short: "Integration hooks (plugin glue; see claude-plugin/hooks/)",
-	Long: `Hook subcommands emit the machine envelopes expected by agent harnesses.
-They are adapter commands, not the primary human-facing felt surface. Use
-` + "`felt session`" + ` to inspect the SessionStart context as readable text.`,
+	Short: "Harness hook adapters, called by the plugin's hooks",
+	Long: `Each subcommand reads a harness hook payload on stdin and writes the envelope
+that harness expects. They are plumbing for the plugin; felt session prints the
+session context as readable text.`,
 }
 
 type sessionEnvelope struct {
@@ -89,15 +89,10 @@ non-Claude sessions like Codex, this is a pass-through.`,
 var hookPostToolCmd = &cobra.Command{
 	Use:   "posttool",
 	Short: "PostToolUse: stamp updated-at when an agent edits a fiber file directly",
-	Long: `Reads the PostToolUse payload from stdin. When the tool was an Edit/Write/
+	Long: `Reads the PostToolUse payload from stdin. When the tool was Edit, Write, or
 MultiEdit on a markdown file inside a felt store, stamps the owning fiber's
-git-durable recency anchor (frontmatter updated-at).
-
-This is what makes direct Edit-tool body edits count toward recency without
-felt's own read commands ever writing files: the harness fires this hook at the
-moment of the edit, so the stamping happens in the agent layer, not in felt's
-Sync. Edits felt makes itself (felt add/edit) already stamp inline. Silent
-pass-through for non-edit tools, non-felt files, and any error.`,
+updated-at, so a direct edit counts toward recency as felt add and felt edit
+do. Silent for any other tool, file, or error.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
