@@ -129,12 +129,13 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("missing established row fails closed", func(t *testing.T) {
+	t.Run("missing established row is one-shot pending", func(t *testing.T) {
 		root := t.TempDir()
-		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "0A", 1000, "4242", false), "")
+		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "03", 1000, "4242", false), "")
 		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
-		if err == nil || !strings.Contains(err.Error(), "no matching established") {
-			t.Fatalf("missing row error = %v", err)
+		var owner *daemonTCPOwnerCheckError
+		if !errors.As(err, &owner) || !owner.pending || owner.foreign || !strings.Contains(err.Error(), "no established row yet") {
+			t.Fatalf("missing row error = %v; want one-shot pending", err)
 		}
 	})
 

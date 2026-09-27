@@ -671,8 +671,8 @@ type daemonTCPOwnerCheckError struct {
 	uid     int
 	foreign bool
 	reason  string
-	// pending: the row exists but its uid is 0, which the kernel reports until
-	// the listening process accept()s the connection. The caller retries.
+	// pending: the connection has no established row yet, or its row still
+	// carries uid 0 before accept(). The caller retries.
 	pending bool
 }
 
@@ -753,7 +753,7 @@ func checkProcTCPConnectionOwner(procRoot, serverLocal, clientLocal string, call
 		}
 	}
 	if !found {
-		return &daemonTCPOwnerCheckError{address: display, reason: "no matching established /proc/net/tcp{,6} row for this connection"}
+		return &daemonTCPOwnerCheckError{address: display, pending: true, reason: "no established row yet"}
 	}
 	return nil
 }
