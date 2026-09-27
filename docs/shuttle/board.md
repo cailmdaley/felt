@@ -104,7 +104,9 @@ pinned role it accepts and re-parks to the strip, on a oneshot it writes the
 terminus. Only `accept` clears the outcome.
 
 Beyond the columns the Desk offers a fiber and file viewer, Stash and Capture
-dialogs, Attach, and a requeue/resume dialog with a directive box.
+dialogs, and Attach. Each card's panel folds a drawer under its title: a message
+box with New session and Resume, the next launch's agent, effort, session and
+kind, the card's due day and parent, and Temper / Compost.
 
 ### Attach
 

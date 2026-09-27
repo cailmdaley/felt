@@ -38,11 +38,17 @@
  *   ?reload=1      — open 2 files, tear the modal down, re-instantiate +
  *                    re-open the SAME card → confirm persistence rehydrates
  *   ?kind=pinned   — stamp a shuttle block of that kind (oneshot|standing|
- *                    pinned) onto the card and open the Actions disclosure, so
- *                    the Worker section's three-way Kind control is on screen.
- *                    The selected segment must be the card's OWN kind — the
- *                    editor used to coerce `pinned` to One-shot, which made
- *                    unpinning from the panel impossible.
+ *                    pinned) onto the card and open the drawer, so the
+ *                    three-way Kind control is on screen. The selected
+ *                    segment must be the card's OWN kind, so One-shot unpins.
+ *   ?drawer=1      — open the drawer on the default one-shot card
+ *   ?agent=codex-sol — the card's agent (default claude-sonnet); a Codex agent
+ *                    reveals the Session choice
+ *   ?run=clean|aloft|dirty|yesterday — stamp a last-run window on the card
+ *   ?meeting=1     — lend the panel a meeting control, so the composer shows
+ *                    its Meeting menu
+ *   ?due=2026-10-09 — a due day; with ?rest=1 the card is resting
+ *   ?human=1       — a card with no shuttle block (Promote)
  */
 import { FiberDetailModal } from '../src/board/FiberDetailModal.js'
 import type { KanbanCard } from '../src/board/KanbanTypes.js'
@@ -125,6 +131,18 @@ const MOCK_CARD: KanbanCard = {
   cycleStart: null,
 }
 
+// The registry as `felt shuttle agents --json` returns it — enough families
+// that the picker's groups, effort lists and chrome/session gating all show.
+const MOCK_AGENTS = [
+  { id: 'claude-opus', cli: 'claude', model: 'opus', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'xhigh', chrome_capable: true, default: true },
+  { id: 'claude-sonnet', cli: 'claude', model: 'sonnet', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true },
+  { id: 'claude-fable', cli: 'claude', model: 'fable', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true },
+  { id: 'codex-sol', cli: 'codex', model: 'gpt-6-sol', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default_effort: 'high' },
+  { id: 'codex-luna', cli: 'codex', model: 'gpt-6-luna', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium' },
+  { id: 'pi-grok', cli: 'pi', model: 'grok-4.6', effort_levels: ['low', 'medium', 'high'], default_effort: 'medium' },
+  { id: 'pi-kimi', cli: 'pi', model: 'moonshotai/kimi-latest' },
+]
+
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
 const realFetch = window.fetch.bind(window)
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -156,7 +174,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // fixed `modified_at` so the initial read still seeds a baseline.
   if (url.includes('/api/v1/fibers') && !url.includes('body=true')) return json({ fibers: [] })
   // Agent registry
-  if (url.includes('/api/v1/agents')) return json([])
+  if (url.includes('/api/v1/agents')) return json(MOCK_AGENTS)
 
   return realFetch(input as RequestInfo, init)
 }) as typeof fetch
@@ -203,25 +221,53 @@ function makeModal(): FiberDetailModal {
     () => {},
     // No board behind the panel — a terminal move just logs and closes.
     (card, target) => { console.log('[harness] transition', card.id, '→', target) },
+    undefined,
+    params.get('meeting') === '1'
+      ? {
+          meeting: {
+            canJoin: () => true,
+            join: async (card, mode, note) => {
+              console.log('[harness] meeting', card.id, mode, note)
+              return null
+            },
+          },
+        }
+      : undefined,
   )
 }
 
 // A shuttle block, stamped on demand — the Kind control is hidden until the
 // card is shuttle-managed, so the default (block-less) card can't show it.
 const KIND_PARAM = new URLSearchParams(location.search).get('kind')
+const RUN_PARAM = params.get('run')
+const HOUR = 3_600_000
+const RUN: Partial<KanbanCard> =
+  RUN_PARAM === 'clean' ? { dispatchedAt: new Date(Date.now() - 3 * HOUR).toISOString(), handedOffAt: new Date(Date.now() - 1.6 * HOUR).toISOString() }
+    : RUN_PARAM === 'aloft' ? { dispatchedAt: new Date(Date.now() - 0.7 * HOUR).toISOString(), runningWorker: 'shuttle-board-chrome', runtimePhase: 'working' }
+      : RUN_PARAM === 'dirty' ? { dispatchedAt: new Date(Date.now() - 5 * HOUR).toISOString() }
+        : RUN_PARAM === 'yesterday' ? { dispatchedAt: new Date(Date.now() - 26 * HOUR).toISOString(), handedOffAt: new Date(Date.now() - 24.5 * HOUR).toISOString() }
+          : {}
+const DUE: Partial<KanbanCard> = {
+  ...(params.get('due') ? { due: params.get('due')! } : {}),
+  ...(params.get('rest') === '1' ? { storedHorizon: 'stashed' as const, effectiveHorizon: 'stashed' as const } : {}),
+}
 const HARNESS_CARD: KanbanCard =
-  KIND_PARAM === 'oneshot' || KIND_PARAM === 'standing' || KIND_PARAM === 'pinned'
-    ? {
+  params.get('human') === '1'
+    ? { ...MOCK_CARD, ...DUE }
+    : {
         ...MOCK_CARD,
-        shuttleKind: KIND_PARAM,
-        shuttleAgent: 'claude-sonnet',
+        shuttleKind: KIND_PARAM === 'standing' || KIND_PARAM === 'pinned' ? KIND_PARAM : 'oneshot',
+        shuttleAgent: params.get('agent') ?? 'claude-sonnet',
+        shuttleEffort: params.get('effort') ?? undefined,
         shuttleHost: 'ada-workstation',
         shuttleProjectDir: '/home/ada/dev/felt',
+        ...(params.get('agent')?.startsWith('codex') ? { shuttleSurface: 'app' as const } : {}),
         ...(KIND_PARAM === 'standing'
           ? { shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris' }
           : {}),
+        ...RUN,
+        ...DUE,
       }
-    : MOCK_CARD
 
 let modal = makeModal()
 modal.open(HARNESS_CARD)
@@ -240,8 +286,8 @@ window.setTimeout(() => {
   const closeLast = params.get('close') === '1'
   const pdfs = params.get('pdfs') === '1'
 
-  if (KIND_PARAM) {
-    // The Worker section lives inside the collapsed Actions disclosure.
+  if (KIND_PARAM || params.get('drawer') === '1') {
+    // The settings live inside the folded drawer.
     document.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')?.click()
     return
   }
@@ -274,7 +320,7 @@ window.setTimeout(() => {
     window.setTimeout(() => {
       modal.close()
       modal = makeModal()
-      modal.open(MOCK_CARD)
+      modal.open(HARNESS_CARD)
       ;(window as unknown as { __harness: unknown }).__harness = { modal, MOCK_CARD, MOCK_SENT_FILES }
     }, 700)
     return

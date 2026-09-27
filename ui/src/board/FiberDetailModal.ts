@@ -22,7 +22,7 @@ import {
 import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
-import { defaultSurface, isCodexAgent, persistedSurface, sessionHelp, type ExecutionSurface } from '../forms/executionSurface.js'
+import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
@@ -67,8 +67,8 @@ import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar, showCel
 import { closeTab, openTab } from './ReaderTabs.js'
 import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
 import { humanizeCron } from './KanbanRules.js'
+import { formatDue } from './KanbanSurfaces.js'
 import {
-  civilDayToLocalDate,
   dueCivilDay,
   formatSpanMinutes,
   instantMs,
@@ -127,20 +127,21 @@ export interface MeetingJoinControl {
 
 export interface SessionWindow {
   text: string
-  /** The run ended on the worker's own handoff stamp — earns the teal ✓. */
-  clean: boolean
+  /** `clean`: the run ended on the worker's own handoff stamp (the verdigris
+   *  ✓). `unclean`: it stopped without one. `running`: a worker is still up. */
+  state: 'running' | 'clean' | 'unclean'
   /** Full localized instants for the hover. */
   title: string
 }
 
 /**
- * The session window: one line saying when the last worker launched, when it
- * handed off, and how long it held the fiber.
+ * The session window: when the last worker launched, when it handed off, and
+ * how long it held the fiber — the right-hand reading on the drawer's strip.
  *
- *   dispatched 14:02 · handed off 17:38 · 3h 36m      — a clean, concluded run
- *   dispatched Aug 4 14:02 · handed off 17:38 · …     — the same run, days ago
- *   dispatched 14:02 · aloft                          — a worker still running
- *   dispatched 14:02 · no clean handoff               — it stopped without one
+ *   14:02 → 17:38 · 3h 36m            — a clean, concluded run (✓ beside it)
+ *   Aug 4 14:02 → 17:38 · 3h 36m      — the same run, days ago
+ *   since 14:02                       — a worker still running
+ *   14:02 · no handoff                — it stopped without stamping one
  *
  * A DAY appears in front of a time exactly when the bare time would mislead:
  * on the dispatch when the run didn't start today, and on the handoff when it
@@ -152,7 +153,7 @@ export interface SessionWindow {
  * Both instants ride the composite feed inside felt's `shuttle` map
  * (`shuttle.runtime.dispatched_at` / `handed_off_at`), so this needs nothing
  * from the daemon. Returns null with no `dispatched_at` — a fiber that has
- * never run has no window to show, and an empty line would be worse than none.
+ * never run has no window to show.
  *
  * A `handed_off_at` EARLIER than `dispatched_at` is the previous run's stamp,
  * not this one's (the daemon's own `last_serviced` guard turns on the same
@@ -172,62 +173,256 @@ export function sessionWindow(
   const concluded = handedOff !== undefined && handedOff >= dispatched
 
   const startedToday = isoDayLocal(dispatched) === isoDayLocal(nowMs)
-  const parts = [`dispatched ${startedToday ? clockTime(dispatched) : dayStamp(dispatched)}`]
+  const start = startedToday ? clockTime(dispatched) : dayStamp(dispatched)
 
   if (card.runningWorker) {
     return {
-      text: [...parts, 'aloft'].join(' · '),
-      clean: false,
+      text: `since ${start}`,
+      state: 'running',
       title: `Worker launched ${new Date(dispatched).toLocaleString()} and is still running.`,
     }
   }
   if (concluded && handedOff !== undefined) {
     const spannedMidnight = isoDayLocal(handedOff) !== isoDayLocal(dispatched)
-    parts.push(
-      `handed off ${spannedMidnight ? dayStamp(handedOff) : clockTime(handedOff)}`,
-      // Sub-minute runs read `0m` rather than seconds: the pair of clock times
-      // above already tells that story, and this figure is for scale.
-      formatSpanMinutes(Math.max(0, Math.round((handedOff - dispatched) / 60_000))),
-    )
+    const end = spannedMidnight ? dayStamp(handedOff) : clockTime(handedOff)
+    // Sub-minute runs read `0m` rather than seconds: the pair of clock times
+    // already tells that story, and this figure is for scale.
+    const span = formatSpanMinutes(Math.max(0, Math.round((handedOff - dispatched) / 60_000)))
     return {
-      text: parts.join(' · '),
-      clean: true,
+      text: `${start} → ${end} · ${span}`,
+      state: 'clean',
       title:
         `Launched ${new Date(dispatched).toLocaleString()}; ` +
         `handed off ${new Date(handedOff).toLocaleString()}.`,
     }
   }
   return {
-    text: [...parts, 'no clean handoff'].join(' · '),
-    clean: false,
+    text: `${start} · no handoff`,
+    state: 'unclean',
     title:
       `Launched ${new Date(dispatched).toLocaleString()}. The worker never stamped a ` +
       'handoff for this run — it was killed, crashed, or is still being reconciled.',
   }
 }
 
-/** {@link sessionWindow} as the one mono line the detail panel shows. */
-function buildSessionWindow(card: KanbanCard): HTMLElement | null {
-  const window_ = sessionWindow(card)
-  if (!window_) return null
+/**
+ * Whether the board places this card by its `due:` day. A standing role is
+ * placed by its cron and an active pinned role rests on the Pinned strip —
+ * neither is ever sorted by due, so neither shows or edits one.
+ */
+function placedByDue(card: Pick<KanbanCard, 'shuttleKind' | 'status'>): boolean {
+  return !(card.shuttleKind === 'standing' || (card.shuttleKind === 'pinned' && card.status === 'active'))
+}
 
-  const el = document.createElement('div')
-  el.className = 'kbn-detail-session'
-  el.title = window_.title
+/**
+ * What the drawer's folded strip says about a card, as data — the strip is a
+ * reading of the fiber, not a label for the controls under it.
+ *
+ *   claude-fable medium · pinned · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
+ *
+ * `actor` is the agent id (cobalt) on a shuttle card and `me` (cinnabar) on a
+ * human one, the same word the board card prints. `cadence` is said only when
+ * it isn't the default: a pinned role says so, a standing one speaks its cron,
+ * a one-shot says nothing. `place` is `host:dir` with the home directory
+ * folded to `~`. `due` is dropped where the board never reads it
+ * ({@link placedByDue}).
+ */
+export interface StripFacts {
+  actor: { text: string; agent: boolean }
+  effort?: string
+  chrome: boolean
+  cadence?: { text: string; title?: string }
+  place?: { text: string; title: string }
+  due?: string
+  run: SessionWindow | null
+}
 
-  const line = document.createElement('span')
-  line.className = 'kbn-detail-session-line'
-  line.textContent = window_.text
-  el.append(line)
-
-  if (window_.clean) {
-    const mark = document.createElement('span')
-    mark.className = 'kbn-detail-session-clean'
-    mark.textContent = '✓'
-    mark.title = 'Clean exit — the worker stamped its own handoff.'
-    el.append(mark)
+export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripFacts {
+  const agent = isAgentCard(card)
+  let cadence: StripFacts['cadence']
+  if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
+    const spoken = humanizeCron(card.shuttleSchedule)
+    cadence = spoken
+      ? { text: spoken, title: `cron: ${card.shuttleSchedule}${card.shuttleTz ? ` (${card.shuttleTz})` : ''}` }
+      : { text: card.shuttleSchedule }
+  } else if (card.shuttleKind === 'pinned') {
+    cadence = { text: 'pinned' }
   }
-  return el
+  const dir = card.shuttleProjectDir?.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
+  const placeText = [card.shuttleHost, dir].filter(Boolean).join(':')
+  const place = placeText
+    ? { text: placeText, title: [card.shuttleHost, card.shuttleProjectDir].filter(Boolean).join(':') }
+    : undefined
+  return {
+    actor: { text: agent ? (card.shuttleAgent ?? 'agent') : 'me', agent },
+    effort: agent ? card.shuttleEffort : undefined,
+    chrome: agent && card.shuttleChrome === true,
+    cadence,
+    place,
+    due: card.due && placedByDue(card) ? formatDue(card.due) : undefined,
+    run: sessionWindow(card, nowMs),
+  }
+}
+
+/** {@link stripFacts} drawn: the facts on the left, the run window on the
+ *  right — or on a line of its own where the panel is too narrow for both. */
+function buildStrip(card: KanbanCard): HTMLElement {
+  const facts = stripFacts(card)
+  const strip = document.createElement('span')
+  strip.className = 'kbn-ctl-strip'
+  const line = document.createElement('span')
+  line.className = 'kbn-ctl-facts'
+  strip.append(line)
+  const put = (cls: string, text: string, title?: string, into: HTMLElement = line): HTMLElement => {
+    const el = document.createElement('span')
+    el.className = cls
+    el.textContent = text
+    if (title) el.title = title
+    into.append(el)
+    return el
+  }
+  const who = document.createElement('span')
+  who.className = 'kbn-ctl-who'
+  const actor = document.createElement('span')
+  actor.className = facts.actor.agent ? 'kbn-ctl-agent' : 'kbn-ctl-you'
+  actor.textContent = facts.actor.text
+  who.append(actor)
+  for (const extra of [facts.effort, facts.chrome ? 'chrome' : undefined]) {
+    if (!extra) continue
+    const el = document.createElement('span')
+    el.className = 'kbn-ctl-effort'
+    el.textContent = extra
+    who.append(el)
+  }
+  line.append(who)
+  if (facts.cadence) put('kbn-ctl-cadence', facts.cadence.text, facts.cadence.title)
+  if (facts.place) put('kbn-ctl-place', facts.place.text, facts.place.title)
+  if (facts.due) put('kbn-ctl-due', `due ${facts.due}`)
+  if (facts.run) {
+    const run = put('kbn-ctl-run', facts.run.text, facts.run.title, strip)
+    if (facts.run.state === 'clean') {
+      const mark = document.createElement('span')
+      mark.className = 'kbn-ctl-run-clean'
+      mark.textContent = '✓'
+      run.append(mark)
+    } else if (facts.run.state === 'unclean') {
+      run.classList.add('kbn-ctl-run-dirty')
+    }
+  }
+  return strip
+}
+
+/** The line "Wait for me" puts at the head of a dispatch message. */
+const WAIT_FOR_ME_LINE = "Wait for me before doing anything heavy — let's talk first.\n\n"
+
+function ctlButton(label: string, cls: string): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = `kbn-ctl-btn ${cls}`
+  btn.textContent = label
+  return btn
+}
+
+/** An on/off chip over a real checkbox: the checkbox keeps the keyboard and
+ *  `.checked`, the chip is its face. */
+function ctlToggle(label: string, cls: string): { label: HTMLLabelElement; input: HTMLInputElement } {
+  const el = document.createElement('label')
+  el.className = `kbn-ctl-toggle ${cls}`
+  const input = document.createElement('input')
+  input.type = 'checkbox'
+  const text = document.createElement('span')
+  text.textContent = label
+  el.append(input, text)
+  return { label: el, input }
+}
+
+/** A row of mutually exclusive choices, all visible at once. */
+interface Segmented<T extends string> {
+  el: HTMLElement
+  buttons: HTMLButtonElement[]
+  readonly value: T
+  /** Select without firing `onPick` — for programmatic changes. */
+  set(value: T): void
+  setDisabled(disabled: boolean): void
+  /** Called after the user picks a DIFFERENT value. */
+  onPick(fn: (value: T) => void): void
+}
+
+function segmented<T extends string>(
+  name: string,
+  options: ReadonlyArray<readonly [T, string]>,
+  initial: T,
+): Segmented<T> {
+  const el = document.createElement('div')
+  el.className = 'kbn-ctl-segmented'
+  el.setAttribute('role', 'radiogroup')
+  el.setAttribute('aria-label', name)
+  let value = initial
+  const listeners: Array<(value: T) => void> = []
+  const buttons = options.map(([v, label]) => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'kbn-ctl-segment'
+    btn.setAttribute('role', 'radio')
+    btn.dataset.value = v
+    btn.textContent = label
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (value === v) return
+      paint(v)
+      for (const fn of listeners) fn(v)
+    })
+    return btn
+  })
+  function paint(v: T): void {
+    value = v
+    for (const btn of buttons) {
+      const on = btn.dataset.value === v
+      btn.setAttribute('aria-checked', String(on))
+      btn.tabIndex = on ? 0 : -1
+    }
+  }
+  paint(initial)
+  // One Tab stop; arrows move the choice, as in any radio group.
+  el.addEventListener('keydown', (e) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    const at = buttons.findIndex((b) => b.dataset.value === value)
+    const next = buttons[(at + step + buttons.length) % buttons.length]
+    if (next.disabled) return
+    next.focus()
+    next.click()
+  })
+  el.append(...buttons)
+  return {
+    el,
+    buttons,
+    get value() {
+      return value
+    },
+    set: paint,
+    setDisabled(disabled) {
+      for (const btn of buttons) btn.disabled = disabled
+    },
+    onPick(fn) {
+      listeners.push(fn)
+    },
+  }
+}
+
+/** One ledger line: a label, then its controls. */
+function field(label: string, ...controls: HTMLElement[]): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'kbn-ctl-field'
+  const name = document.createElement('span')
+  name.className = 'kbn-ctl-label'
+  name.textContent = label
+  const value = document.createElement('div')
+  value.className = 'kbn-ctl-value'
+  value.append(...controls)
+  row.append(name, value)
+  return row
 }
 
 /**
@@ -512,7 +707,7 @@ export class FiberDetailModal {
    * own, and differs from an origin card in exactly the ways that follow from
    * "this is a reference you followed, not a fiber you went to work on":
    *
-   *   · its actions dropdown appears only if the fiber actually carries a
+   *   · its drawer appears only if the fiber actually carries a
    *     shuttle block — a plain note has nothing to dispatch, and offering
    *     Temper/Compost/New session on it is noise; a real constitution keeps
    *     its actions;
@@ -721,14 +916,13 @@ export class FiberDetailModal {
     // it to, and a pointer drag on it would fight the body's scroll.
     if (!this.host && !this.isSheet()) this.attachDrag(overlay, header)
 
-    // ── Controls dropdown ───────────────────────────────────────────────────
-    // One cluster, directly under the title, collapsed by default. Expanded
-    // it holds the directive entry and every action the card supports.
+    // ── Drawer ──────────────────────────────────────────────────────────────
+    // Directly under the title, folded by default (see `buildControls`).
     //
     // A LINKED card shows it only when the fiber carries a shuttle block. A
     // reference followed out of a body is usually a note or a decision — there
-    // is nothing to dispatch, and a dropdown offering to run it is noise on
-    // what you opened to read. A real constitution keeps its actions.
+    // is nothing to dispatch, and a drawer offering to run it is noise on what
+    // you opened to read. A real constitution keeps its actions.
     const shuttleManaged = isAgentCard(card)
     const controls =
       this.host && !shuttleManaged ? null : this.buildControls(card, shuttleManaged)
@@ -812,7 +1006,7 @@ export class FiberDetailModal {
     if (!this.host) {
       this.escapeHandler = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return
-        if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
+        if (document.activeElement?.closest('.kbn-detail-parent-input, .kbn-detail-parent-dropdown')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
         // was read from closes.
@@ -2085,17 +2279,26 @@ export class FiberDetailModal {
     })
   }
 
-  // ── Controls dropdown ───────────────────────────────────────────────────
+  // ── Controls drawer ─────────────────────────────────────────────────────
 
   /**
-   * The one cluster holding every card action. Collapsed: a slim toggle row
-   * with at-a-glance worker chips. Expanded: directive + dispatch actions,
-   * review moves, worker config (agent / kind / schedule), and parent.
+   * The card's drawer — every action and setting the card takes, folded under
+   * one strip directly beneath the title.
+   *
+   * Folded, the strip is a reading of the fiber ({@link stripFacts}): who works
+   * it, how it recurs, where it runs, when it is due, how its last run went.
+   * Unfolded, three things in the order they are reached for: the composer (a
+   * message and the dispatch verbs that carry it), the ledger (what the next
+   * launch reads, beside the card's own due day and parent), and the verdicts
+   * that close the card.
+   *
+   * Type carries the grammar, so no line of it needs a caption: mono for
+   * machine values (ids, effort, cron, paths, times), serif for human words
+   * (verbs, choices, the message), tracked caps for field labels and nothing
+   * else. Pigments keep the board's meanings — cobalt for the machine, gold
+   * for what is owed, verdigris for the verdict.
    */
-  private buildControls(
-    card: KanbanCard,
-    shuttleManaged: boolean,
-  ): HTMLElement {
+  private buildControls(card: KanbanCard, shuttleManaged: boolean): HTMLElement {
     const wrap = document.createElement('div')
     wrap.className = 'kbn-detail-controls'
 
@@ -2103,45 +2306,24 @@ export class FiberDetailModal {
     toggle.type = 'button'
     toggle.className = 'kbn-detail-controls-toggle'
     toggle.setAttribute('aria-expanded', 'false')
-
     const chevron = document.createElement('span')
     chevron.className = 'kbn-detail-controls-chevron'
     chevron.setAttribute('aria-hidden', 'true')
-    chevron.textContent = '▸'
-
-    const toggleLabel = document.createElement('span')
-    toggleLabel.className = 'kbn-detail-controls-label'
-    toggleLabel.textContent = 'Actions'
-
-    const summary = document.createElement('span')
-    summary.className = 'kbn-detail-controls-summary'
-    const chips: string[] = []
-    const hovers: string[] = []
-    if (card.shuttleAgent) chips.push(card.shuttleAgent)
-    if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
-      // Say the cadence the way a person would — "weekdays 9:00" — and keep the
-      // raw cron on the hover. `0 9 * * 1-5` is a thing you decode, not a thing
-      // you read, and the trail exists to be read at a glance. An expression the
-      // humanizer can't say faithfully falls back to the raw string.
-      const spoken = humanizeCron(card.shuttleSchedule)
-      chips.push(spoken ?? card.shuttleSchedule)
-      if (spoken) hovers.push(`cron: ${card.shuttleSchedule}`)
-    } else if (card.shuttleKind) chips.push(card.shuttleKind)
-    if (card.shuttleHost) chips.push(card.shuttleHost)
-    const projectDir = card.shuttleProjectDir
-    if (projectDir) {
-      // Home-relativize for the chip (~/dev/shuttle); full path on hover.
-      chips.push(projectDir.replace(/^\/(?:Users|home)\/[^/]+\//, '~/'))
-      hovers.push(projectDir)
+    // The strip is the toggle's visible face; its name leads with the word.
+    const name = document.createElement('span')
+    name.className = 'kbn-ctl-sr'
+    name.textContent = 'Actions'
+    // The strip follows the drawer's edits: every committed setting is
+    // reflected into a local copy of the card and the strip redrawn from it.
+    let view = card
+    let strip = buildStrip(view)
+    const reflect = (patch: Partial<KanbanCard>): void => {
+      view = { ...view, ...patch }
+      const next = buildStrip(view)
+      strip.replaceWith(next)
+      strip = next
     }
-    summary.textContent = chips.join(' · ')
-    if (hovers.length > 0) summary.title = hovers.join('\n')
-
-    toggle.append(chevron, toggleLabel, summary)
-
-    const head = document.createElement('div')
-    head.className = 'kbn-detail-controls-head'
-    head.append(toggle)
+    toggle.append(chevron, name, strip)
 
     const body = document.createElement('div')
     body.className = 'kbn-detail-controls-body'
@@ -2149,19 +2331,14 @@ export class FiberDetailModal {
 
     toggle.addEventListener('click', (e) => {
       e.stopPropagation()
-      const expanded = body.hidden
-      body.hidden = !expanded
-      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
-      chevron.textContent = expanded ? '▾' : '▸'
-      wrap.classList.toggle('kbn-detail-controls-open', expanded)
+      const opening = body.hidden
+      body.hidden = !opening
+      toggle.setAttribute('aria-expanded', String(opening))
+      wrap.classList.toggle('kbn-detail-controls-open', opening)
     })
 
-    // The session window sits between the toggle row and the collapsible body:
-    // visible while collapsed, because "when did this last run, and did it
-    // finish cleanly?" is the question you open a card to answer.
-    const sessionWindow = buildSessionWindow(card)
-    wrap.append(head, ...(sessionWindow ? [sessionWindow] : []), body)
-    this.buildControlsBody(body, card, shuttleManaged)
+    wrap.append(toggle, body)
+    this.buildControlsBody(body, card, shuttleManaged, reflect)
     return wrap
   }
 
@@ -2169,442 +2346,604 @@ export class FiberDetailModal {
     body: HTMLElement,
     card: KanbanCard,
     shuttleManaged: boolean,
+    reflect: (patch: Partial<KanbanCard>) => void,
   ): void {
     // A drag or click inside a field is the field's own — it must not reach the
     // header's drag or the panel's click-away.
-    const swallowDrag = (el: HTMLElement): void => {
+    const swallow = (el: HTMLElement): void => {
       for (const type of ['mousedown', 'click'] as const) {
         el.addEventListener(type, (e) => e.stopPropagation())
       }
     }
 
-    // ── Next dispatch (message + action buttons) ──────────────────────────
-    // One canonical surface for "what happens when this fiber dispatches
-    // next." The message textarea is the optional payload, carried inline on
-    // the dispatch call (`user_message`); "talk to me first" intent rides the
-    // directive text, prepended via the one-click "Wait for me" affordance.
-    const actionsSec = this.buildSection(shuttleManaged ? 'Next dispatch' : 'Actions')
-    const actionsErr = document.createElement('div')
-    actionsErr.className = 'kbn-detail-error'
-    actionsErr.style.display = 'none'
-
-    const messageTa = document.createElement('textarea')
-    messageTa.className = 'kbn-detail-directive'
-    messageTa.placeholder = 'What should the worker do next?'
-    const messageHelp = document.createElement('div')
-    messageHelp.className = 'kbn-detail-session-help'
-    messageHelp.textContent = 'Add instructions before New session or Resume. Leave blank to follow the constitution and current handoff.'
-    messageTa.rows = 3
-    messageTa.setAttribute('aria-label', 'Message for next worker')
-    swallowDrag(messageTa)
-
-    const WAIT_FOR_ME_LINE = "Wait for me before doing anything heavy — let's talk first.\n\n"
-    const waitBtn = document.createElement('button')
-    waitBtn.type = 'button'
-    waitBtn.className = 'kbn-detail-wait-btn'
-    waitBtn.textContent = '⏸ Wait for me'
-    waitBtn.title = 'Prepend a "talk first" line to the message so the worker checks in before doing heavy work.'
-    waitBtn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      if (!messageTa.value.startsWith(WAIT_FOR_ME_LINE)) {
-        messageTa.value = WAIT_FOR_ME_LINE + messageTa.value
-      }
-      messageTa.focus()
-    })
-
-    const actionsRow = document.createElement('div')
-    actionsRow.className = 'kbn-detail-actions-row'
-
-    const temperBtn = this.buildActionBtn('Temper', 'tempered')
-    temperBtn.title = 'Close as tempered (human-accepted)'
-
-    const compostBtn = this.buildActionBtn('Compost', 'composted')
-    compostBtn.title = 'Close as composted (human-rejected)'
-
-    if (shuttleManaged) {
-      const requeueBtn = this.buildActionBtn('New session ▸', 'primary')
-      requeueBtn.title =
-        'Start a fresh worker with your instructions, constitution and current handoff; outcome preserved'
-
-      const resumeBtn = this.buildActionBtn('Resume ▸', 'primary')
-      resumeBtn.title = 'Resume the previous conversation with your instructions; outcome preserved'
-      // Resume is always offered for a shuttle-managed card — never gated on a
-      // card-visible session id. The Claude session id lives in the fiber's
-      // `shuttle.session_uuid` frontmatter field, stamped by the daemon at
-      // dispatch; `card.sessionId` is always absent and the frontend cannot
-      // see what to resume. The daemon resolves continuation from the
-      // `shuttle:` block at dispatch time (resume_mode='previous' reads
-      // `shuttle.session_uuid`) and surfaces a precise error if there is
-      // genuinely nothing to resume. Gating on `card.sessionId` is exactly what grayed
-      // Resume out for EVERY card — it had already grayed standing roles, which
-      // never persisted one. See gotcha-standing-role-resume-button-grayed.
-
-      actionsRow.append(requeueBtn, resumeBtn, temperBtn, compostBtn)
-
-      requeueBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void this.runRequeue(card, messageTa.value.trim(), 'fresh', requeueBtn, actionsErr)
-      })
-      resumeBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void this.runRequeue(card, messageTa.value.trim(), 'previous', resumeBtn, actionsErr)
-      })
-    } else {
-      actionsRow.append(temperBtn, compostBtn)
-    }
-
-    temperBtn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.close()
-      this.onTransition(card, 'tempered')
-    })
-    compostBtn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.close()
-      this.onTransition(card, 'composted')
-    })
-
-    // One storyline row under the directive: set intent (⏸), dispatch
-    // (New session / Resume), then the review verdicts pushed to the right
-    // edge (Temper carries margin-left:auto in CSS) so the two families
-    // read as distinct clusters without a second row.
-    if (shuttleManaged) {
-      actionsRow.prepend(waitBtn)
-      actionsSec.append(messageTa, messageHelp, actionsRow, actionsErr)
-      if (this.meeting?.canJoin()) actionsSec.append(this.buildMeetingRow(card, messageTa, swallowDrag))
-    } else {
-      actionsSec.append(actionsRow, actionsErr)
-    }
-
-    // ── Worker (shuttle options) ──────────────────────────────────────────
-    // Console-style editor for the fiber's shuttle frontmatter block: agent,
-    // kind, schedule cadence. Agent axes (base × effort × chrome) commit
-    // through `commitAxes` → the daemon's `set-agent` action (preserves
-    // session.id + review history); kind/schedule/tz changes go through
-    // `livePatch` → the daemon's `reshape` action, which rewrites the shape
-    // keys alone and leaves agent/status/outcome where they are.
-    const originalAgent = card.shuttleAgent ?? ''
-    // The kind editor is the full three-way: One-shot | Standing | Pinned. It
-    // used to coerce `pinned` to `oneshot` for its baseline, which made a
-    // pinned card display "One-shot" as selected and made One-shot a no-op
-    // early-return — unpinning from the panel was impossible. The card's kind
-    // is read straight through; an absent block reads as oneshot.
-    const originalKind: ShuttleKind = card.shuttleKind ?? 'oneshot'
-    const originalSchedule = card.shuttleSchedule ?? ''
-    const originalTz = card.shuttleTz ?? 'Europe/Paris'
-
-    let selectedKind: ShuttleKind = originalKind
-    /** Set on mousedown over a NON-standing segment while a promotion is staged
-     *  but uncommitted, so the cron field's blur doesn't commit on the way out. */
-    let abandoningPromotion = false
-    let selectedSchedule = originalSchedule
-    let selectedTz = originalTz
-
-    const dispatchSec = this.buildSection(shuttleManaged ? 'Next session settings' : 'Promote to shuttle')
-    if (shuttleManaged) {
-      const settingsHelp = document.createElement('div')
-      settingsHelp.className = 'kbn-detail-session-help'
-      settingsHelp.textContent = 'Settings are saved for the next launch. The current session keeps running unchanged.'
-      dispatchSec.append(settingsHelp)
-    }
-    const promoteBtn = shuttleManaged ? null : this.buildActionBtn('Promote to shuttle', 'primary')
-    const promoteErr = document.createElement('div')
-    promoteErr.className = 'kbn-detail-error'
-    promoteErr.style.display = 'none'
-
-    // Row 1: agent — base agent select × effort select × chrome toggle. The
-    // three orthogonal axes compose into one validated `set-agent` write; the
-    // effort options and chrome availability are populated from the selected
-    // agent's registry constraint metadata (no hardcoded lists here).
-    const agentRow = document.createElement('div')
-    agentRow.className = 'kbn-detail-field-row'
-
-    const agentLabel = document.createElement('label')
-    agentLabel.className = 'kbn-detail-label'
-    agentLabel.textContent = 'Agent'
-
-    const agentSelect = document.createElement('select')
-    agentSelect.className = 'kbn-detail-select'
-
-    const loadingOpt = document.createElement('option')
-    loadingOpt.value = ''
-    loadingOpt.textContent = 'Loading agents…'
-    agentSelect.append(loadingOpt)
-
-    agentLabel.setAttribute('for', 'kbn-detail-agent')
-    agentSelect.id = 'kbn-detail-agent'
-
-    // Effort select — its <option>s are the selected agent's concrete
-    // `effort_levels`. There is deliberately no synthetic "default" option:
-    // an omitted fiber value resolves to the registry's `default_effort`, so
-    // the control always names the level dispatch will actually use.
-    const effortSelect = document.createElement('select')
-    effortSelect.className = 'kbn-detail-select kbn-detail-select-effort'
-    effortSelect.id = 'kbn-detail-effort'
-    effortSelect.setAttribute('aria-label', 'Reasoning effort')
-    effortSelect.title = 'Reasoning effort used for this fiber'
-
-    // Chrome toggle — enabled only for chrome-capable (claude) agents.
-    const chromeWrap = document.createElement('label')
-    chromeWrap.className = 'kbn-detail-chrome-toggle'
-    chromeWrap.title = 'Run the worker with Claude --chrome (claude harness only)'
-    const chromeToggle = document.createElement('input')
-    chromeToggle.type = 'checkbox'
-    chromeToggle.id = 'kbn-detail-chrome'
-    const chromeText = document.createElement('span')
-    chromeText.textContent = 'chrome'
-    chromeWrap.append(chromeToggle, chromeText)
-
-    const surfaceSelect = document.createElement('select')
-    surfaceSelect.className = 'kbn-detail-select'
-    surfaceSelect.disabled = true
-    surfaceSelect.setAttribute('aria-label', 'Session')
-    surfaceSelect.title = 'Session destination'
-    for (const [value, label] of [['app', 'ChatGPT app'], ['cli', 'Terminal']] as const) {
-      const opt = document.createElement('option')
-      opt.value = value
-      opt.textContent = label
-      surfaceSelect.append(opt)
-    }
-
-    // Effort + chrome compose onto an existing shuttle block via set-agent;
-    // a not-yet-promoted human card has no block to mutate, so the axes only
-    // appear once the card is shuttle-managed. (Promotion's install path takes
-    // base model only; the axes are then editable on the installed block.)
-    effortSelect.style.display = shuttleManaged ? '' : 'none'
-    chromeWrap.style.display = shuttleManaged ? '' : 'none'
-    surfaceSelect.value = persistedSurface(card.shuttleSurface)
-
-    agentRow.append(agentLabel, agentSelect, effortSelect, chromeWrap)
-    const surfaceRow = document.createElement('label')
-    surfaceRow.className = 'kbn-detail-session'
-    surfaceRow.style.display = shuttleManaged ? '' : 'none'
-    // Hidden until the agent records confirm a Codex agent (see syncDependents).
-    surfaceRow.classList.toggle('kbn-detail-session-hidden', persistedSurface(card.shuttleSurface) !== 'app')
-    const surfaceLabel = document.createElement('span')
-    surfaceLabel.textContent = 'Session'
-    const surfaceHint = document.createElement('span')
-    surfaceHint.className = 'kbn-detail-session-help'
-    surfaceHint.textContent = sessionHelp(undefined, persistedSurface(card.shuttleSurface))
-    surfaceRow.append(surfaceLabel, surfaceSelect, surfaceHint)
-    dispatchSec.append(agentRow, surfaceRow)
-    // Data-load + listener wiring is deferred until livePatch/statusEl exist
-    // (below), since the axis commit posts through them.
-
-    // Row 2: kind segmented control
-    const kindRow = document.createElement('div')
-    kindRow.className = 'kbn-detail-field-row'
-
-    const kindLabel = document.createElement('span')
-    kindLabel.className = 'kbn-detail-label'
-    kindLabel.textContent = 'Kind'
-
-    const kindSegmented = document.createElement('div')
-    kindSegmented.className = 'kbn-detail-segmented'
-    kindSegmented.setAttribute('role', 'radiogroup')
-    kindSegmented.setAttribute('aria-label', 'Dispatch kind')
-
-    // Schedule row declared up here so the kind buttons can toggle its
-    // visibility; populated below.
-    const scheduleRow = document.createElement('div')
-    scheduleRow.className = 'kbn-detail-field-row kbn-detail-field-row-schedule'
-
-    const buildKindBtn = (
-      value: ShuttleKind,
-      label: string,
-      hint: string,
-    ): HTMLButtonElement => {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'kbn-detail-segment'
-      btn.setAttribute('role', 'radio')
-      btn.setAttribute('aria-checked', value === selectedKind ? 'true' : 'false')
-      btn.dataset.kind = value
-      if (value === selectedKind) btn.classList.add('kbn-detail-segment-active')
-      btn.title = hint
-
-      const name = document.createElement('span')
-      name.className = 'kbn-detail-segment-name'
-      name.textContent = label
-      btn.append(name)
-
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        if (selectedKind === value) return
-        selectedKind = value
-        for (const sibling of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
-          const isActive = sibling.dataset.kind === value
-          sibling.classList.toggle('kbn-detail-segment-active', isActive)
-          sibling.setAttribute('aria-checked', isActive ? 'true' : 'false')
-        }
-        scheduleRow.style.display = shuttleManaged && value === 'standing' ? '' : 'none'
-        // Seed a plausible cron + tz so the user edits rather than fighting an
-        // empty input — but SEEDING IS NOT CHOOSING. Nothing is written until
-        // the cron is confirmed (see `commitScheduleTz`); focus the field so
-        // the thing left to do is the thing under the cursor.
-        if (value === 'standing') {
-          if (!selectedSchedule) {
-            selectedSchedule = '0 9 * * 1-5'
-            scheduleInput.value = selectedSchedule
-          }
-          if (!selectedTz) {
-            selectedTz = 'Europe/Paris'
-            tzInput.value = selectedTz
-          }
-          scheduleInput.focus()
-          scheduleInput.select()
-        }
-      })
-      return btn
-    }
-
-    const oneshotBtn = buildKindBtn('oneshot', 'One-shot', 'Single dispatch on enable')
-    const standingBtn = buildKindBtn('standing', 'Standing', 'Recurring cron-scheduled role')
-    const pinnedBtn = buildKindBtn(
-      'pinned',
-      'Pinned',
-      'Standing interface that rests on the Pinned strip',
-    )
-    kindSegmented.append(oneshotBtn, standingBtn, pinnedBtn)
-    kindRow.append(kindLabel, kindSegmented)
-    kindRow.style.display = shuttleManaged ? '' : 'none'
-    dispatchSec.append(kindRow)
-
-    // Row 3: schedule + tz (visible only when kind=standing)
-    const scheduleLabel = document.createElement('label')
-    scheduleLabel.className = 'kbn-detail-label'
-    scheduleLabel.textContent = 'Cron'
-    scheduleLabel.setAttribute('for', 'kbn-detail-schedule')
-
-    const scheduleInput = document.createElement('input')
-    scheduleInput.type = 'text'
-    scheduleInput.id = 'kbn-detail-schedule'
-    scheduleInput.className = 'kbn-detail-input kbn-detail-input-mono'
-    scheduleInput.placeholder = '0 9 * * 1-5'
-    scheduleInput.value = selectedSchedule
-    scheduleInput.title = '5-field cron · e.g. 0 9 * * 1-5 (weekdays 09:00)'
-    scheduleInput.addEventListener('input', () => {
-      selectedSchedule = scheduleInput.value
-    })
-    swallowDrag(scheduleInput)
-
-    const tzInput = document.createElement('input')
-    tzInput.type = 'text'
-    tzInput.className = 'kbn-detail-input kbn-detail-input-tz'
-    tzInput.placeholder = 'Europe/Paris'
-    tzInput.value = selectedTz
-    tzInput.title = 'IANA timezone name'
-    tzInput.setAttribute('aria-label', 'Timezone (IANA name)')
-    tzInput.addEventListener('input', () => {
-      selectedTz = tzInput.value
-    })
-    swallowDrag(tzInput)
-
-    scheduleRow.append(scheduleLabel, scheduleInput, tzInput)
-    scheduleRow.style.display = shuttleManaged && selectedKind === 'standing' ? '' : 'none'
-    dispatchSec.append(scheduleRow)
-    if (promoteBtn) dispatchSec.append(promoteBtn, promoteErr)
-
-    // ── Live-apply status pill ────────────────────────────────────────────
-    // No Save button. Every field commits on its own event: agent on
-    // `change`, kind on click, schedule/tz on `blur`/Enter, parent on
-    // autocomplete pick. statusEl shows "Saving…" / "Saved"; errors surface
-    // in errorEl. Originals advance after each successful PATCH.
+    // Every setting commits on its own event — there is no Save button. One
+    // quiet status line and one error line serve the whole drawer.
     const statusEl = document.createElement('span')
     statusEl.className = 'kbn-detail-save-status'
     statusEl.setAttribute('aria-live', 'polite')
-
     const errorEl = document.createElement('div')
     errorEl.className = 'kbn-detail-error'
     errorEl.style.display = 'none'
 
-    // ── Parent fiber ──────────────────────────────────────────────────────
-    const parentSec = this.buildSection('Parent fiber')
+    if (shuttleManaged) body.append(this.buildComposer(card, swallow))
 
-    const idSegments = card.id.split('/')
-    const currentParentId = idSegments.length > 1
-      ? idSegments.slice(0, -1).join('/')
-      : null
+    const ledger = document.createElement('div')
+    ledger.className = 'kbn-ctl-ledger'
+    ledger.append(
+      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, swallow, reflect),
+      this.buildCardFields(card, statusEl, errorEl, swallow, reflect),
+    )
 
-    let selectedParentId: string | null = currentParentId
+    const foot = document.createElement('div')
+    foot.className = 'kbn-ctl-foot'
+    const temper = ctlButton('Temper', 'kbn-ctl-temper')
+    const compost = ctlButton('Compost', 'kbn-ctl-compost')
+    temper.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.close()
+      this.onTransition(card, 'tempered')
+    })
+    compost.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.close()
+      this.onTransition(card, 'composted')
+    })
+    foot.append(errorEl, statusEl, temper, compost)
 
-    const currentParentEl = document.createElement('div')
-    currentParentEl.className = 'kbn-detail-current-parent'
-    currentParentEl.textContent = currentParentId
-      ? `↳ ${currentParentId}`
-      : '↳ top-level (no parent)'
+    body.append(ledger, foot)
+  }
 
-    const parentSearchWrap = document.createElement('div')
-    parentSearchWrap.className = 'kbn-detail-parent-wrap'
+  /**
+   * The composer: a message, and the verbs that carry it to a worker. The
+   * message is optional — blank, the worker follows the constitution and its
+   * handoff — and rides the dispatch inline (`user_message`).
+   *
+   * Resume is always offered, never gated on a card-visible session id: the
+   * session to resume lives in the fiber's `shuttle.session_uuid`, which the
+   * daemon reads at dispatch (resume_mode='previous') and answers with a
+   * precise error when there is genuinely nothing to resume. Gating it on
+   * `card.sessionId` grayed Resume out on every card
+   * (gotcha-standing-role-resume-button-grayed).
+   */
+  private buildComposer(card: KanbanCard, swallow: (el: HTMLElement) => void): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'kbn-ctl-compose'
 
-    const parentInput = document.createElement('input')
-    parentInput.type = 'text'
-    parentInput.className = 'kbn-detail-parent-input'
-    parentInput.placeholder = 'Search for a new parent…'
-    parentInput.setAttribute('aria-label', 'Search parent fiber')
-    parentInput.setAttribute('autocomplete', 'off')
-    parentInput.setAttribute('role', 'combobox')
-    parentInput.setAttribute('aria-expanded', 'false')
-    parentInput.setAttribute('aria-haspopup', 'listbox')
-    swallowDrag(parentInput)
+    const box = document.createElement('div')
+    box.className = 'kbn-ctl-composer'
+    const message = document.createElement('textarea')
+    message.className = 'kbn-detail-directive'
+    message.rows = 2
+    message.placeholder = 'What should the worker do next?'
+    message.setAttribute('aria-label', 'Message for the next worker')
+    swallow(message)
+    // The box grows with what is written rather than wearing a resize grip.
+    const fit = (): void => {
+      message.style.height = 'auto'
+      message.style.height = `${message.scrollHeight}px`
+    }
+    message.addEventListener('input', fit)
 
-    const parentDropdown = document.createElement('div')
-    parentDropdown.className = 'kbn-detail-parent-dropdown'
-    parentDropdown.style.display = 'none'
-    parentDropdown.setAttribute('role', 'listbox')
+    const err = document.createElement('div')
+    err.className = 'kbn-detail-error'
+    err.style.display = 'none'
 
-    // The one pick-handler every caller (search debounce, keyboard Enter,
-    // dropdown click) goes through: adopt the choice, then commit it. Its body
-    // runs only on a user pick, long after `livePatch` and `baseline` below
-    // are initialised.
-    const onPickParent = (result: FiberSearchResult): void => {
-      selectedParentId = result.id
-      parentInput.value = result.name
-      parentInput.setAttribute('aria-expanded', 'false')
-      parentDropdown.style.display = 'none'
-      const targetParentId = selectedParentId
-      if (targetParentId === baseline.parentId) return
-      livePatch({ parentId: targetParentId }, () => {
-        baseline.parentId = targetParentId
-        currentParentEl.textContent = targetParentId
-          ? `↳ ${targetParentId}`
-          : '↳ top-level (no parent)'
+    const foot = document.createElement('div')
+    foot.className = 'kbn-ctl-composer-foot'
+    const wait = ctlToggle('Wait for me', 'kbn-ctl-wait')
+    swallow(wait.label)
+    foot.append(wait.label)
+    if (this.meeting?.canJoin()) foot.append(this.buildMeeting(card, message, err))
+
+    const fresh = ctlButton('New session', 'kbn-ctl-send')
+    const resume = ctlButton('Resume', 'kbn-ctl-send')
+    const sends = document.createElement('span')
+    sends.className = 'kbn-ctl-sends'
+    sends.append(fresh, resume)
+    foot.append(sends)
+
+    // "Wait for me" rides the message as its first line: the worker reads a
+    // talk-first request exactly where it reads every other instruction.
+    const directive = (): string => {
+      const text = message.value.trim()
+      return wait.input.checked ? `${WAIT_FOR_ME_LINE}${text}`.trim() : text
+    }
+    fresh.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void this.runRequeue(card, directive(), 'fresh', fresh, err)
+    })
+    resume.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void this.runRequeue(card, directive(), 'previous', resume, err)
+    })
+
+    box.append(message, foot)
+    wrap.append(box, err)
+    return wrap
+  }
+
+  /**
+   * Meeting, for this constitution: a recording dot and one button per kind
+   * of meeting — pressing Call or Room is what starts it, and nothing else
+   * does. The recording runs on this machine; the composer's message becomes
+   * the meeting's note, and the worker — live or not — receives the meeting
+   * as a joined constitution.
+   */
+  private buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, err: HTMLElement): HTMLElement {
+    const wrap = document.createElement('span')
+    wrap.className = 'kbn-ctl-meet'
+    const buttons = MEETING_MODES.map(({ value, label }) => {
+      const btn = ctlButton(label, 'kbn-ctl-meet-btn')
+      btn.setAttribute('aria-label', `Record a ${label.toLowerCase()} meeting`)
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        for (const b of buttons) b.disabled = true
+        btn.textContent = 'Starting…'
+        err.style.display = 'none'
+        void this.meeting!.join(card, value, note.value).then((error) => {
+          for (const b of buttons) b.disabled = false
+          btn.textContent = label
+          if (error) {
+            err.textContent = error
+            err.style.display = ''
+          } else {
+            note.value = ''
+            note.dispatchEvent(new Event('input'))
+          }
+        })
+      })
+      return btn
+    })
+    wrap.append(...buttons)
+    return wrap
+  }
+
+  /**
+   * The worker half of the ledger — what the next launch reads. Agent axes
+   * (base × effort × chrome × session) commit through `commitAxes` → the
+   * daemon's `set-agent` action, which preserves session identity and review
+   * history. Kind and schedule go through `livePatch` → `reshape`, which
+   * rewrites the shape keys alone and leaves agent, status and outcome where
+   * they are. None of it touches a running worker; a live session keeps the
+   * settings it launched with.
+   *
+   * A card with no shuttle block shows only the agent it would be promoted
+   * with, and the Promote verb.
+   */
+  private buildWorkerFields(
+    card: KanbanCard,
+    shuttleManaged: boolean,
+    statusEl: HTMLElement,
+    errorEl: HTMLElement,
+    swallow: (el: HTMLElement) => void,
+    reflect: (patch: Partial<KanbanCard>) => void,
+  ): HTMLElement {
+    const col = document.createElement('div')
+    col.className = 'kbn-ctl-fields'
+
+    const agentSelect = document.createElement('select')
+    agentSelect.id = 'kbn-detail-agent'
+    agentSelect.className = 'kbn-ctl-select kbn-ctl-agent-select'
+    agentSelect.setAttribute('aria-label', 'Agent')
+    // Until the registry answers, the select holds the card's own agent — the
+    // value it will show once it does, so nothing flickers.
+    agentSelect.append(new Option(card.shuttleAgent || '…', card.shuttleAgent ?? ''))
+    swallow(agentSelect)
+
+    // Effort options are the selected agent's concrete `effort_levels`. There
+    // is deliberately no synthetic "default": an omitted fiber value resolves
+    // to the registry's `default_effort`, so the control always names the
+    // level dispatch will actually use.
+    const effortSelect = document.createElement('select')
+    effortSelect.id = 'kbn-detail-effort'
+    effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
+    effortSelect.setAttribute('aria-label', 'Effort')
+    if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
+    swallow(effortSelect)
+
+    const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
+    chrome.input.id = 'kbn-detail-chrome'
+    chrome.input.checked = card.shuttleChrome === true
+    // Until the registry says which agents take it, show Chrome where it is on.
+    chrome.label.hidden = !chrome.input.checked
+    swallow(chrome.label)
+
+    const surface = segmented<ExecutionSurface>(
+      'Session',
+      [['cli', 'Terminal'], ['app', 'App']],
+      persistedSurface(card.shuttleSurface),
+    )
+    const surfaceRow = field('Session', surface.el)
+    // Revealed once the registry confirms a Codex agent — the only harness
+    // with a choice to make — and inert until then.
+    surfaceRow.hidden = persistedSurface(card.shuttleSurface) !== 'app'
+    surface.setDisabled(true)
+
+    if (!shuttleManaged) {
+      const promote = ctlButton('Promote', 'kbn-ctl-send')
+      promote.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const agent = agentSelect.value.trim()
+        if (!agent) {
+          errorEl.textContent = 'Choose an agent first.'
+          errorEl.style.display = ''
+          return
+        }
+        promote.disabled = true
+        promote.textContent = 'Promoting…'
+        errorEl.style.display = 'none'
+        void this.promoteToShuttle(card, agent, promote, errorEl)
+      })
+      col.append(field('Agent', agentSelect, promote))
+      // The picker only fills the select the promotion reads; there is no
+      // block to write to yet.
+      void this.loadAgentPicker(
+        { agentSelect, effortSelect, chromeToggle: chrome.input, surface, surfaceRow: null },
+        { agent: '', effort: '', chrome: false, surface: 'cli' },
+        async () => true,
+      )
+      return col
+    }
+
+    col.append(field('Agent', agentSelect, effortSelect, chrome.label), surfaceRow)
+    void this.loadAgentPicker(
+      { agentSelect, effortSelect, chromeToggle: chrome.input, surface, surfaceRow },
+      {
+        agent: card.shuttleAgent ?? '',
+        effort: card.shuttleEffort ?? '',
+        chrome: card.shuttleChrome ?? false,
+        surface: persistedSurface(card.shuttleSurface),
+      },
+      async (axes) => {
+        const ok = await this.commitAxes(card, axes, statusEl, errorEl)
+        if (ok) {
+          reflect({
+            shuttleAgent: axes.agent,
+            shuttleEffort: axes.effort || undefined,
+            shuttleChrome: axes.chrome,
+            shuttleSurface: axes.surface,
+          })
+        }
+        return ok
+      },
+    ).then(() => {
+      // An omitted effort resolves to the registry default; once the picker
+      // knows it, the strip names it too.
+      if (!card.shuttleEffort && effortSelect.value) reflect({ shuttleEffort: effortSelect.value })
+    })
+
+    // ── Kind + cron ──────────────────────────────────────────────────────
+    // The card's kind is read straight through — an absent block reads as
+    // one-shot — so a pinned card shows Pinned and One-shot unpins it.
+    const baseline = {
+      kind: (card.shuttleKind ?? 'oneshot') as ShuttleKind,
+      schedule: card.shuttleSchedule ?? '',
+      tz: card.shuttleTz ?? 'Europe/Paris',
+    }
+    const kind = segmented<ShuttleKind>(
+      'Kind',
+      [['oneshot', 'One-shot'], ['standing', 'Standing'], ['pinned', 'Pinned']],
+      baseline.kind,
+    )
+
+    const cronInput = document.createElement('input')
+    cronInput.type = 'text'
+    cronInput.id = 'kbn-detail-schedule'
+    cronInput.className = 'kbn-ctl-input kbn-ctl-cron'
+    cronInput.placeholder = '0 9 * * 1-5'
+    cronInput.value = baseline.schedule
+    cronInput.spellcheck = false
+    cronInput.setAttribute('aria-label', 'Cron')
+    swallow(cronInput)
+
+    const tzInput = document.createElement('input')
+    tzInput.type = 'text'
+    tzInput.className = 'kbn-ctl-input kbn-ctl-tz'
+    tzInput.placeholder = 'Europe/Paris'
+    tzInput.value = baseline.tz
+    tzInput.spellcheck = false
+    tzInput.setAttribute('aria-label', 'Timezone')
+    swallow(tzInput)
+
+    // The cron said the way a person would, beside the expression.
+    const spoken = document.createElement('span')
+    spoken.className = 'kbn-ctl-spoken'
+    const paintSpoken = (): void => {
+      spoken.textContent = humanizeCron(cronInput.value.trim()) ?? ''
+    }
+    paintSpoken()
+    cronInput.addEventListener('input', paintSpoken)
+
+    const cronRow = field('Cron', cronInput, tzInput, spoken)
+    cronRow.hidden = baseline.kind !== 'standing'
+    col.append(field('Kind', kind.el), cronRow)
+
+    const livePatch = (
+      changes: { shuttleKind?: ShuttleKind; shuttleSchedule?: string; shuttleTz?: string },
+      onCommitted: () => void,
+      onFailed?: () => void,
+    ): void => {
+      void this.livePatch(card, changes, statusEl, errorEl).then((ok) => {
+        if (ok) onCommitted()
+        else onFailed?.()
       })
     }
 
-    const openDropdown = () => {
-      void this.searchParents(
-        parentInput.value.trim(),
-        card.id,
-        parentDropdown,
-        onPickParent,
-      ).then(() => {
-        if (parentDropdown.style.display !== 'none') {
-          parentInput.setAttribute('aria-expanded', 'true')
+    // One-shot and Pinned commit on the click: neither needs anything the
+    // user hasn't given, and neither throws away what a re-toggle can't
+    // restore.
+    //
+    // PROMOTING to Standing does NOT commit on the click. The toggle reveals
+    // and seeds the cron (`0 9 * * 1-5`, Europe/Paris) — seeding is not
+    // choosing — and the promotion is written when the cron is confirmed, on
+    // blur or Enter (`commitSchedule`). A promotion abandoned mid-toggle stays
+    // one-shot on the wire: a schedule is something you state, never
+    // something you're given.
+    //
+    // PINNING HERE IS SHAPE-ONLY, unlike the board's drag onto the Pinned
+    // strip, which kills a live worker, reshapes, then pauses. The drag
+    // targets a surface where things are at rest; this control edits a field
+    // and says nothing about now. So it posts the reshape alone, and the read
+    // model places the card.
+    const commitKind = (value: ShuttleKind): void => {
+      if (value === baseline.kind) return
+      if (value === 'standing') {
+        errorEl.style.display = 'none'
+        statusEl.textContent = '↵ to save'
+        return
+      }
+      statusEl.textContent = ''
+      livePatch(
+        { shuttleKind: value },
+        () => {
+          baseline.kind = value
+          reflect({ shuttleKind: value })
+        },
+        // A refused write puts the control back on what the wire says, so
+        // the next click on the same choice retries it.
+        () => {
+          kind.set(baseline.kind)
+          cronRow.hidden = baseline.kind !== 'standing'
+        },
+      )
+    }
+
+    /** Set on mousedown over a non-Standing segment while a promotion is
+     *  staged but uncommitted, so the cron field's blur doesn't commit on the
+     *  way out. */
+    let abandoningPromotion = false
+    kind.onPick((value) => {
+      cronRow.hidden = value !== 'standing'
+      if (value === 'standing') {
+        if (!cronInput.value.trim()) cronInput.value = '0 9 * * 1-5'
+        if (!tzInput.value.trim()) tzInput.value = 'Europe/Paris'
+        paintSpoken()
+        cronInput.focus()
+        cronInput.select()
+      }
+      commitKind(value)
+    })
+    for (const btn of kind.buttons) {
+      // Backing OUT of an uncommitted promotion must write nothing, and the
+      // hazard is the BLUR the click causes: picking Standing focuses the cron
+      // field, and clicking away blurs it, which is what commits. mousedown
+      // runs before blur, so this is where the intent is knowable.
+      btn.addEventListener('mousedown', () => {
+        if (btn.dataset.value !== 'standing' && baseline.kind !== 'standing') {
+          abandoningPromotion = true
+        }
+      })
+      btn.addEventListener('click', () => {
+        abandoningPromotion = false
+      })
+    }
+
+    // Schedule + tz commit on blur and Enter — `input` would patch mid-typed
+    // cron fragments. This is ALSO where a promotion to Standing lands, which
+    // is why the guard reads the kind chosen in the panel rather than the
+    // wire's: confirming the cron IS the act of promoting.
+    const commitSchedule = (): void => {
+      if (abandoningPromotion) {
+        abandoningPromotion = false
+        statusEl.textContent = ''
+        return
+      }
+      if (kind.value !== 'standing') return
+      const schedule = cronInput.value.trim()
+      const tz = tzInput.value.trim() || 'UTC'
+      const promoting = baseline.kind !== 'standing'
+      if (!promoting && schedule === baseline.schedule && tz === baseline.tz) return
+      if (!schedule) {
+        errorEl.textContent = 'A standing role needs a cron expression.'
+        errorEl.style.display = ''
+        return
+      }
+      livePatch({ shuttleKind: 'standing', shuttleSchedule: schedule, shuttleTz: tz }, () => {
+        baseline.kind = 'standing'
+        baseline.schedule = schedule
+        baseline.tz = tz
+        statusEl.textContent = ''
+        reflect({ shuttleKind: 'standing', shuttleSchedule: schedule, shuttleTz: tz })
+      })
+    }
+    for (const input of [cronInput, tzInput]) {
+      input.addEventListener('blur', commitSchedule)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          input.blur()
         }
       })
     }
 
-    parentInput.addEventListener('input', () => {
+    return col
+  }
+
+  /**
+   * The card half of the ledger: its due day and its parent.
+   *
+   * Due is the one way to name a date the hand cannot reach — the drag-reveal
+   * timeline renders `DRAG_HORIZON_DAYS` (14) ahead — and the way a resting
+   * card gets a day to come back on, so on a resting card the field is named
+   * for that: Returns. A cycle's due is its band's closing edge: Ends. A
+   * standing role (placed by its cron) and a resting pinned role (on the
+   * Pinned strip) are never sorted by `due:`, so they carry no field.
+   */
+  private buildCardFields(
+    card: KanbanCard,
+    statusEl: HTMLElement,
+    errorEl: HTMLElement,
+    swallow: (el: HTMLElement) => void,
+    reflect: (patch: Partial<KanbanCard>) => void,
+  ): HTMLElement {
+    const col = document.createElement('div')
+    col.className = 'kbn-ctl-fields'
+    const livePatch = (changes: { parentId?: string | null; due?: string | null }, onCommitted: () => void): void => {
+      void this.livePatch(card, changes, statusEl, errorEl).then((ok) => {
+        if (ok) onCommitted()
+      })
+    }
+
+    if (placedByDue(card)) {
+      // Seeded through `dueCivilDay`, NEVER `new Date(card.due)`: felt stores a
+      // civil day as UTC midnight, and the Date round trip names the day BEFORE
+      // in every negative-offset zone (see civilDay.ts). The bare `YYYY-MM-DD`
+      // the input wants is also what goes back on the wire.
+      let current = dueCivilDay(card.due) ?? null
+      const input = document.createElement('input')
+      input.type = 'date'
+      input.className = 'kbn-ctl-input kbn-ctl-date'
+      const label = card.isCycle ? 'Ends' : card.storedHorizon === 'stashed' ? 'Returns' : 'Due'
+      input.setAttribute('aria-label', card.isCycle ? 'Cycle end date' : label === 'Returns' ? 'Return date' : 'Due date')
+      input.value = current ?? ''
+      swallow(input)
+      const clear = ctlButton('×', 'kbn-ctl-clear')
+      clear.setAttribute('aria-label', 'Clear date')
+      const paint = (): void => {
+        clear.hidden = !input.value
+        input.classList.toggle('kbn-ctl-empty', !input.value)
+      }
+      paint()
+
+      const commit = (next: string | null): void => {
+        if ((next ?? '') === (current ?? '')) return
+        livePatch({ due: next }, () => {
+          current = next
+          input.value = next ?? ''
+          paint()
+          reflect({ due: next ?? undefined })
+        })
+      }
+      // `change`, not `input`: a native picker fires `input` per keystroke of a
+      // half-typed year. Emptying the field is itself the clear; × is its
+      // visible spelling.
+      input.addEventListener('change', () => commit(input.value || null))
+      clear.addEventListener('click', (e) => {
+        e.stopPropagation()
+        commit(null)
+      })
+      col.append(field(label, input, clear))
+    }
+
+    col.append(field('Parent', this.buildParentPicker(card, livePatch, swallow)))
+    return col
+  }
+
+  /**
+   * The parent: its id, standing as the value, and a search in its place the
+   * moment it is clicked. One pick commits; Escape or a click away puts the
+   * id back.
+   */
+  private buildParentPicker(
+    card: KanbanCard,
+    livePatch: (changes: { parentId: string | null }, onCommitted: () => void) => void,
+    swallow: (el: HTMLElement) => void,
+  ): HTMLElement {
+    const segments = card.id.split('/')
+    let parentId: string | null = segments.length > 1 ? segments.slice(0, -1).join('/') : null
+
+    const wrap = document.createElement('div')
+    wrap.className = 'kbn-detail-parent-wrap'
+
+    const shown = document.createElement('button')
+    shown.type = 'button'
+    shown.className = 'kbn-ctl-parent'
+    const paint = (): void => {
+      shown.textContent = parentId ?? '—'
+      shown.title = parentId ? `Parent: ${parentId}` : 'Top level'
+    }
+    paint()
+
+    const search = document.createElement('input')
+    search.type = 'text'
+    search.className = 'kbn-ctl-input kbn-detail-parent-input'
+    search.placeholder = 'Search fibers…'
+    search.hidden = true
+    search.setAttribute('aria-label', 'Search parent fiber')
+    search.setAttribute('autocomplete', 'off')
+    search.setAttribute('role', 'combobox')
+    search.setAttribute('aria-expanded', 'false')
+    search.setAttribute('aria-haspopup', 'listbox')
+    swallow(search)
+
+    const dropdown = document.createElement('div')
+    dropdown.className = 'kbn-detail-parent-dropdown'
+    dropdown.style.display = 'none'
+    dropdown.setAttribute('role', 'listbox')
+
+    const hideDropdown = (): void => {
+      dropdown.style.display = 'none'
+      search.setAttribute('aria-expanded', 'false')
+    }
+    const closeSearch = (): void => {
+      hideDropdown()
+      search.hidden = true
+      shown.hidden = false
+    }
+
+    const onPick = (result: FiberSearchResult): void => {
+      closeSearch()
+      shown.focus()
+      if (result.id === parentId) return
+      livePatch({ parentId: result.id }, () => {
+        parentId = result.id
+        paint()
+      })
+    }
+    const openDropdown = (): void => {
+      void this.searchParents(search.value.trim(), card.id, dropdown, onPick).then(() => {
+        if (dropdown.style.display !== 'none') search.setAttribute('aria-expanded', 'true')
+      })
+    }
+
+    shown.addEventListener('click', (e) => {
+      e.stopPropagation()
+      shown.hidden = true
+      search.hidden = false
+      search.value = ''
+      search.focus()
+    })
+    search.addEventListener('input', () => {
       if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
       this.searchDebounce = window.setTimeout(() => openDropdown(), 200)
     })
-    parentInput.addEventListener('focus', () => openDropdown())
-    parentInput.addEventListener('keydown', (e) => {
+    search.addEventListener('focus', () => openDropdown())
+    search.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowDown') {
-        const first = parentDropdown.querySelector<HTMLElement>('button')
-        if (first) { e.preventDefault(); first.focus() }
+        const first = dropdown.querySelector<HTMLElement>('button')
+        if (first) {
+          e.preventDefault()
+          first.focus()
+        }
       } else if (e.key === 'Escape') {
         e.preventDefault()
-        parentDropdown.style.display = 'none'
-        parentInput.setAttribute('aria-expanded', 'false')
+        e.stopPropagation()
+        closeSearch()
+        shown.focus()
       }
     })
-
-    parentDropdown.addEventListener('keydown', (e) => {
-      const opts = Array.from(
-        parentDropdown.querySelectorAll<HTMLElement>('button:not(:disabled)'),
-      )
+    dropdown.addEventListener('keydown', (e) => {
+      const opts = Array.from(dropdown.querySelectorAll<HTMLElement>('button:not(:disabled)'))
       const idx = opts.indexOf(document.activeElement as HTMLElement)
       if (e.key === 'ArrowDown' && idx < opts.length - 1) {
         e.preventDefault()
@@ -2612,370 +2951,25 @@ export class FiberDetailModal {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         if (idx > 0) opts[idx - 1].focus()
-        else parentInput.focus()
+        else search.focus()
       } else if (e.key === 'Escape') {
         e.preventDefault()
-        // Focus the input first — hiding a container that holds the focused
-        // element drops focus to <body> before we can redirect it.
-        parentInput.focus()
-        parentDropdown.style.display = 'none'
-        parentInput.setAttribute('aria-expanded', 'false')
+        e.stopPropagation()
+        // Focus first — hiding a container that holds the focused element
+        // drops focus to <body> before it can be redirected.
+        shown.hidden = false
+        shown.focus()
+        closeSearch()
       }
     })
-
-    parentSearchWrap.addEventListener('focusout', () => {
+    wrap.addEventListener('focusout', () => {
       window.setTimeout(() => {
-        if (!parentSearchWrap.contains(document.activeElement)) {
-          parentDropdown.style.display = 'none'
-          parentInput.setAttribute('aria-expanded', 'false')
-        }
+        if (!wrap.contains(document.activeElement)) closeSearch()
       }, 150)
     })
 
-    parentSearchWrap.append(parentInput, parentDropdown)
-    parentSec.append(currentParentEl, parentSearchWrap)
-
-    // Track originals as a mutable closure so each successful PATCH can
-    // advance the baseline.
-    const baseline = {
-      agent: originalAgent,
-      kind: originalKind,
-      schedule: originalSchedule,
-      tz: originalTz,
-      parentId: currentParentId,
-      // The CIVIL DAY the card's `due:` names, never the raw stored value: the
-      // comparison below decides whether an edit is a real change, and
-      // `2026-10-01` vs `2026-10-01T00:00:00Z` are the same day written twice.
-      due: dueCivilDay(card.due) ?? null,
-    }
-
-    const livePatch = (
-      changes: {
-        shuttleKind?: ShuttleKind
-        shuttleSchedule?: string
-        shuttleTz?: string
-        parentId?: string | null
-        due?: string | null
-      },
-      onCommitted?: () => void,
-    ): void => {
-      if (Object.keys(changes).length === 0) return
-      void this.livePatch(card, changes, statusEl, errorEl).then((ok: boolean) => {
-        if (ok && onCommitted) onCommitted()
-      })
-    }
-
-    // Agent axes: base agent × effort × chrome compose into one validated
-    // `set-agent` write (preserves session history, like the old set-model).
-    // The picker repopulates effort options + chrome availability from the
-    // selected agent's registry metadata and commits on any axis change.
-    {
-      // For a shuttle-managed card every axis change commits via set-agent;
-      // for a human card the picker only populates the base-agent select the
-      // promote button reads (no block to mutate yet → no-op commit).
-      void this.loadAgentPicker(
-        { agentSelect, effortSelect, chromeToggle, surfaceSelect, surfaceHint },
-        {
-          agent: originalAgent,
-          effort: card.shuttleEffort ?? '',
-          chrome: card.shuttleChrome ?? false,
-          surface: persistedSurface(card.shuttleSurface),
-        },
-        shuttleManaged
-          ? (axes) => {
-              void this.commitAxes(card, axes, statusEl, errorEl, () => {
-                baseline.agent = axes.agent
-              })
-              return true
-            }
-          : () => {},
-      )
-    }
-
-    // Kind. One-shot and Pinned commit on the click: neither needs information
-    // the user hasn't already given, and neither throws anything away that a
-    // re-toggle can't restore.
-    //
-    // PROMOTING oneshot → standing does NOT commit. It used to, and it wrote a
-    // cron the user had never seen: the button's own handler seeds `0 9 * * 1-5
-    // / Europe/Paris` into the inputs, and this then read those inputs straight
-    // back out and PATCHed them. One click on "Standing" and the fiber was a
-    // weekday-09:00 role by our choice, not theirs. Now the toggle only reveals
-    // and seeds the fields; `commitScheduleTz` writes the promotion when the
-    // cron is confirmed on blur or Enter. A card abandoned mid-toggle stays
-    // oneshot on the wire, which matches the Stash form's explicit-schedule
-    // ethos — a schedule is something you state, never something you're given.
-    //
-    // PINNING FROM THE PANEL IS SHAPE-ONLY, and that is a deliberate divergence
-    // from the board's drag-onto-the-Pinned-strip gesture (`commitPin`), which
-    // kills a live worker, reshapes, and THEN pauses. The two gestures mean
-    // different things: the drag targets a SURFACE, and the Pinned strip is
-    // where things are at rest, so "come to rest" is half of what was asked.
-    // This control edits a FIELD — the human said "be a pinned role", nothing
-    // about now. So it posts the reshape alone: no kill, no pause. The read
-    // model then places the card on its own — an `active` pinned role
-    // classifies onto the strip, a running one stays In-flight via the
-    // live-worker override, a closed one stays in Awaiting review.
-    const commitKind = (value: ShuttleKind): void => {
-      if (value === baseline.kind) return
-      if (value === 'standing') {
-        errorEl.style.display = 'none'
-        statusEl.textContent = 'confirm the cron to save'
-        return
-      }
-      statusEl.textContent = ''
-      livePatch({ shuttleKind: value }, () => {
-        baseline.kind = value
-      })
-    }
-    for (const btn of kindSegmented.querySelectorAll<HTMLButtonElement>('button')) {
-      // Backing OUT of an uncommitted promotion must write nothing, and the
-      // hazard is not the click — it's the BLUR the click causes. Toggling to
-      // Standing focuses the cron field; clicking One-shot blurs it, and blur is
-      // what commits the schedule. Left alone, `mousedown → blur → click` fired
-      // the promotion with the SEEDED cron a fraction of a second before the
-      // click that meant "never mind". mousedown runs before blur, so this is
-      // where the intent is knowable.
-      btn.addEventListener('mousedown', () => {
-        // Any segment that isn't Standing is a way OUT of a staged promotion —
-        // Pinned as much as One-shot.
-        if (btn.dataset.kind !== 'standing' && baseline.kind !== 'standing') {
-          abandoningPromotion = true
-        }
-      })
-      btn.addEventListener('click', () => {
-        const value = btn.dataset.kind as ShuttleKind | undefined
-        if (value) commitKind(value)
-        abandoningPromotion = false
-      })
-    }
-
-    // Schedule + tz: fire on `blur` and Enter — `input` would generate
-    // noisy patches from mid-typing cron fragments. The reshape path
-    // requires kind=standing alongside, so always send all three.
-    //
-    // This is ALSO where a oneshot → standing promotion lands, which is why the
-    // guard reads `selectedKind` (what the user has chosen in the panel) rather
-    // than `baseline.kind` (what the wire currently says). Confirming the cron
-    // IS the act of promoting; until then the toggle is just a revealed form.
-    const commitScheduleTz = (): void => {
-      // The user is on their way out of an uncommitted promotion (see the
-      // mousedown guard on the kind control) — this blur is the side effect of
-      // backing out, not a confirmation.
-      if (abandoningPromotion) {
-        abandoningPromotion = false
-        statusEl.textContent = ''
-        return
-      }
-      if (selectedKind !== 'standing') return
-      const newSchedule = scheduleInput.value.trim()
-      const newTz = tzInput.value.trim() || 'UTC'
-      const promoting = baseline.kind !== 'standing'
-      if (!promoting && newSchedule === baseline.schedule && newTz === baseline.tz) return
-      if (!newSchedule) {
-        errorEl.textContent = 'A cron expression is required for standing roles.'
-        errorEl.style.display = ''
-        return
-      }
-      livePatch(
-        {
-          shuttleKind: 'standing',
-          shuttleSchedule: newSchedule,
-          shuttleTz: newTz,
-        },
-        () => {
-          // The promotion lands here too, so the baseline kind advances with
-          // the schedule that carried it.
-          baseline.kind = 'standing'
-          baseline.schedule = newSchedule
-          baseline.tz = newTz
-          statusEl.textContent = ''
-        },
-      )
-    }
-    scheduleInput.addEventListener('blur', commitScheduleTz)
-    scheduleInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        scheduleInput.blur()
-      }
-    })
-    tzInput.addEventListener('blur', commitScheduleTz)
-    tzInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        tzInput.blur()
-      }
-    })
-
-    // ── Due ───────────────────────────────────────────────────────────────
-    // The only way to name a date the hand cannot reach. Dropping a card on a
-    // day IS the usual way to say "next Tuesday", but the drag-reveal timeline
-    // renders `DRAG_HORIZON_DAYS` (14) days ahead, so a fiber
-    // due in October is undatable from the board in August.
-    //
-    // It is also how a card gets out of the dead half of Resting. A rest with
-    // no date is the half nothing ever surfaces again; a future date written
-    // here turns it into a snooze — the due-drift override in
-    // `effectiveHorizon` pulls the card onto the desk when the day arrives.
-    // (Dragging into Resting preserves a future due nowadays, so it no longer
-    // MAKES that dead rest — but a card can still reach it by being stashed
-    // dateless, or by having an already-elapsed deadline dropped on the way in.)
-    //
-    // Built here, after `livePatch` exists, rather than up by the other
-    // sections; `metaCol` below decides where it lands on the page.
-    const dueSec = this.buildSection(card.isCycle ? 'Cycle end' : 'Due')
-
-    // A standing role is placed by cron and a resting pinned role lives on the
-    // Pinned strip — the read model never sorts either by `due:`, so a write
-    // here would be dead frontmatter. `setSurface` refuses the same planning
-    // gesture with an explanation rather than a silent no-op; refuse it in the
-    // same voice, naming the gesture that DOES work.
-    const dueRefusal =
-      card.shuttleKind === 'standing'
-        ? `“${card.name}” is a standing role — it runs on its schedule. Edit the schedule to change when it runs.`
-        : card.shuttleKind === 'pinned' && card.status === 'active'
-          ? `“${card.name}” is a pinned role — it rests on the Pinned strip. Unpin it to plan it.`
-          : null
-
-    if (dueRefusal) {
-      const refusalEl = document.createElement('div')
-      // The panel's muted small-text style; named for its first use, reused
-      // here rather than minting a class for one more line of the same voice.
-      refusalEl.className = 'kbn-detail-current-parent'
-      refusalEl.textContent = dueRefusal
-      dueSec.append(refusalEl)
-    } else {
-      // Blank is a STATE, not an absence of one — a oneshot with no due date is
-      // an ordinary card, the way a fiber with no parent is an ordinary fiber.
-      // So the section says which state it is in, in the same `↳` line the
-      // parent section uses for `top-level (no parent)`, rather than leaving the
-      // reader to infer it from an empty box. The year is spelled out because
-      // this field exists for the dates the timeline cannot reach.
-      const dueCurrentEl = document.createElement('div')
-      dueCurrentEl.className = 'kbn-detail-current-parent'
-      const paintCurrent = (due: string | null): void => {
-        const date = civilDayToLocalDate(due ?? undefined)
-        dueCurrentEl.textContent = date
-          ? `↳ ${date.toLocaleDateString(undefined, {
-              weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-            })}`
-          : '↳ no due date'
-      }
-      paintCurrent(baseline.due)
-
-      const dueRow = document.createElement('div')
-      dueRow.className = 'kbn-detail-field-row'
-
-      const dueInput = document.createElement('input')
-      dueInput.type = 'date'
-      dueInput.className = 'kbn-detail-input'
-      dueInput.setAttribute('aria-label', card.isCycle ? 'Cycle closing date' : 'Due date')
-      // Seeded through `dueCivilDay`, NEVER `new Date(card.due)`: felt stores a
-      // civil day as UTC midnight, and the Date round trip names the day BEFORE
-      // in every negative-offset zone — the exact defect civilDay.ts exists to
-      // prevent. `dueCivilDay` hands back the bare `YYYY-MM-DD` the input wants,
-      // and that same bare day is what goes back on the wire, so the value never
-      // becomes an instant in either direction.
-      dueInput.value = dueCivilDay(card.due) ?? ''
-      swallowDrag(dueInput)
-
-      const clearBtn = this.buildActionBtn('Clear', 'composted')
-      clearBtn.title = card.isCycle
-        ? 'Clear the closing edge — the band runs open-ended from its start'
-        : 'Clear the due date'
-      clearBtn.disabled = baseline.due === null
-
-      const dueHint = document.createElement('div')
-      dueHint.className = 'kbn-detail-current-parent'
-
-      // What this field means for THIS card, said only where it isn't obvious:
-      // a cycle's due is an edge rather than a deadline, and a resting card's
-      // due is its return ticket — including the "no date" case, which is the
-      // trap the editor repairs.
-      const hintFor = (due: string | null): string => {
-        if (card.isCycle) {
-          return "A cycle's due is the band's closing edge, not a deadline — the Chronicle's edge drag moves it too."
-        }
-        if (card.storedHorizon !== 'stashed') return ''
-        return due === null
-          ? 'Resting with no date rests forever — nothing brings it back. A future date makes this a snooze that returns.'
-          : 'Resting until this date, then back on the desk.'
-      }
-      const paintHint = (due: string | null): void => {
-        dueHint.textContent = hintFor(due)
-        dueHint.style.display = dueHint.textContent ? '' : 'none'
-      }
-      paintHint(baseline.due)
-
-      dueRow.append(dueInput, clearBtn)
-      dueSec.append(dueCurrentEl, dueRow, dueHint)
-
-      const commitDue = (next: string | null): void => {
-        if ((next ?? '') === (baseline.due ?? '')) return
-        livePatch({ due: next }, () => {
-          baseline.due = next
-          dueInput.value = next ?? ''
-          clearBtn.disabled = next === null
-          paintCurrent(next)
-          paintHint(next)
-        })
-      }
-      // `change` rather than `input`: a native date picker fires `input` for
-      // each keystroke of a half-typed year, and 0002-10-01 is not a date
-      // anyone meant to save.
-      //
-      // EMPTYING THE FIELD IS ITSELF THE CLEAR. Deleting the date — by keyboard,
-      // or through the browser's own ✕ on the picker — commits `due: null`, the
-      // same write the button makes. The button is the visible spelling of a
-      // state the field can always reach on its own, never the only way there.
-      dueInput.addEventListener('change', () => {
-        commitDue(dueInput.value || null)
-      })
-      clearBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        commitDue(null)
-      })
-    }
-
-    if (promoteBtn) {
-      promoteBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        const agent = agentSelect.value.trim()
-        if (!agent) {
-          promoteErr.textContent = 'Choose an agent to promote this card.'
-          promoteErr.style.display = ''
-          return
-        }
-        promoteBtn.disabled = true
-        promoteBtn.textContent = 'Promoting…'
-        promoteErr.style.display = 'none'
-        void this.promoteToShuttle(card, agent, promoteBtn, promoteErr)
-      })
-    }
-
-    // ── Footer: live-save status ──────────────────────────────────────────
-    const footer = document.createElement('div')
-    footer.className = 'kbn-detail-footer'
-
-    footer.append(errorEl, statusEl)
-
-    // Worker config on the left, card metadata (due, parent fiber) on the
-    // right — a shallow two-column cluster at comfortable widths, one
-    // column on narrow panels (container query in FiberDetailModal.css).
-    const grid = document.createElement('div')
-    grid.className = 'kbn-detail-controls-grid'
-    const metaCol = document.createElement('div')
-    metaCol.className = 'kbn-detail-controls-grid-col'
-    // Two sections stack in this column now. The grid's row-gap separates grid
-    // cells, not the sections inside one, so the column carries its own.
-    metaCol.style.display = 'flex'
-    metaCol.style.flexDirection = 'column'
-    metaCol.style.gap = '12px'
-    metaCol.append(dueSec, parentSec)
-    grid.append(dispatchSec, metaCol)
-
-    body.append(actionsSec, this.buildRule(), grid, footer)
+    wrap.append(shown, search, dropdown)
+    return wrap
   }
 
   // ── Sent files: launcher + two-column accordion ─────────────────────────
@@ -3374,43 +3368,6 @@ export class FiberDetailModal {
     return null
   }
 
-  private buildSection(label: string): HTMLElement {
-    const sec = document.createElement('div')
-    sec.className = 'kbn-detail-section'
-    const heading = document.createElement('div')
-    heading.className = 'kbn-detail-section-heading'
-    heading.textContent = label
-    sec.append(heading)
-    return sec
-  }
-
-  /**
-   * Hairline printer's rule used to separate clusters in the dropdown.
-   * Pure presentational element — no semantic role.
-   */
-  private buildRule(): HTMLElement {
-    const rule = document.createElement('div')
-    rule.className = 'kbn-detail-rule'
-    rule.setAttribute('aria-hidden', 'true')
-    return rule
-  }
-
-  /**
-   * Build a button for the action cluster. Variants tint the button to
-   * match the kanban grid's `kbn-action-*` palette (gold for primary
-   * requeue/resume, teal for tempered, muted gray for composted).
-   */
-  private buildActionBtn(
-    label: string,
-    variant: 'primary' | 'tempered' | 'composted',
-  ): HTMLButtonElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = `kbn-detail-action-btn kbn-detail-action-${variant}`
-    btn.textContent = label
-    return btn
-  }
-
   /** POST one JSON body to a daemon route; the daemon answers plain text, so
    *  a !ok body is the error message verbatim. */
   private async postJson(
@@ -3431,56 +3388,6 @@ export class FiberDetailModal {
 
   private async postLifecycle(body: Record<string, unknown>): Promise<void> {
     await this.postJson('/api/v1/lifecycle', body)
-  }
-
-  /**
-   * Meeting, for this constitution: pick Call or Room and start. The recording
-   * runs on this machine; the message above becomes the meeting's note, and
-   * the worker — live or not — receives the meeting as a joined constitution.
-   */
-  private buildMeetingRow(
-    card: KanbanCard,
-    noteTa: HTMLTextAreaElement,
-    swallowDrag: (el: HTMLElement) => void,
-  ): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'kbn-detail-meeting-row'
-    const label = document.createElement('span')
-    label.className = 'kbn-detail-meeting-label'
-    label.textContent = 'Meeting'
-    const mode = document.createElement('select')
-    mode.className = 'kbn-detail-select kbn-detail-meeting-mode'
-    mode.setAttribute('aria-label', 'Meeting mode')
-    for (const { value, label: text } of MEETING_MODES) mode.append(new Option(text, value))
-    swallowDrag(mode)
-    const start = this.buildActionBtn('Start meeting ▸', 'primary')
-    start.title = 'Record the meeting on this machine and join it to this constitution; its worker follows the transcript'
-    const err = document.createElement('div')
-    err.className = 'kbn-detail-error'
-    err.style.display = 'none'
-
-    start.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const original = start.textContent ?? ''
-      start.disabled = true
-      start.textContent = 'Starting…'
-      err.style.display = 'none'
-      void this.meeting!.join(card, mode.value as MeetingMode, noteTa.value).then((error) => {
-        start.disabled = false
-        start.textContent = original
-        if (error) {
-          err.textContent = error
-          err.style.display = ''
-        } else {
-          noteTa.value = ''
-        }
-      })
-    })
-
-    row.append(label, mode, start)
-    const wrap = document.createElement('div')
-    wrap.append(row, err)
-    return wrap
   }
 
   /**
@@ -3609,25 +3516,39 @@ export class FiberDetailModal {
 
   /**
    * Load the agent registry and wire the composing picker: base agent select
-   * (aliases filtered out), an effort select whose options come from the
-   * selected agent's `effort_levels`, and a chrome toggle gated on
-   * `chrome_capable`. Any axis change repopulates the dependent controls (a
-   * new agent resets effort to its default and may disable chrome) and fires
-   * `onCommit` with the current composition — which `commitAxes` writes
-   * through the daemon's `set-agent` lifecycle action.
+   * (aliases filtered out, grouped by harness, each named by its id — the
+   * word the board card prints), an effort select whose options come from the
+   * selected agent's `effort_levels`, a chrome toggle gated on
+   * `chrome_capable`, and the session choice, which only a Codex agent has.
+   * An axis the selected agent lacks is hidden rather than shown disabled.
+   * Any change repopulates the dependent controls (a new agent resets effort
+   * to its default and may drop chrome) and fires `onCommit` with the current
+   * composition — which `commitAxes` writes through `set-agent`. A refused
+   * write puts every control back on the last composition that landed.
+   *
+   * When the registry can't be read, the controls keep showing the card's own
+   * values, frozen: the fact stays legible even where it can't be edited.
    */
   private async loadAgentPicker(
     controls: {
       agentSelect: HTMLSelectElement
       effortSelect: HTMLSelectElement
       chromeToggle: HTMLInputElement
-      surfaceSelect: HTMLSelectElement
-      surfaceHint: HTMLElement
+      surface: Segmented<ExecutionSurface>
+      /** The session row; null where there is no block to carry the choice. */
+      surfaceRow: HTMLElement | null
     },
     current: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
-    onCommit: (axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }) => boolean | void,
+    onCommit: (axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }) => Promise<boolean>,
   ): Promise<void> {
-    const { agentSelect, effortSelect, chromeToggle, surfaceSelect, surfaceHint } = controls
+    const { agentSelect, effortSelect, chromeToggle, surface, surfaceRow } = controls
+    const chromeChip = chromeToggle.parentElement
+    const freeze = (why: string): void => {
+      for (const el of [agentSelect, effortSelect, chromeToggle]) el.disabled = true
+      surface.setDisabled(true)
+      effortSelect.hidden = effortSelect.options.length === 0
+      agentSelect.title = why
+    }
     let records: AgentRecord[]
     try {
       // The daemon's registry is a bare array (`felt shuttle agents --json`,
@@ -3638,40 +3559,27 @@ export class FiberDetailModal {
       const raw = (await res.json()) as AgentRecord[]
       records = Array.isArray(raw) ? raw : []
     } catch {
-      agentSelect.innerHTML = '<option value="">Failed to load agents</option>'
-      effortSelect.innerHTML = ''
-      effortSelect.disabled = true
-      chromeToggle.disabled = true
-      surfaceSelect.disabled = true
+      freeze('Agent registry unavailable')
       return
     }
 
     // Base agents only — alias records are a convenience that the composing
-    // picker supersedes; resolving one to its
-    // base + axes belongs to the registry, not this list.
+    // picker supersedes; resolving one to its base + axes belongs to the
+    // registry, not this list.
     const base = records.filter((a) => !a.alias_of)
-    agentSelect.innerHTML = ''
     if (base.length === 0) {
-      const opt = document.createElement('option')
-      opt.value = ''
-      opt.textContent = 'No agents available'
-      agentSelect.append(opt)
-      effortSelect.disabled = true
-      chromeToggle.disabled = true
-      surfaceSelect.disabled = true
+      freeze('No agents in the registry')
       return
     }
 
-    const defaultAgent = current.agent
-      ? undefined
-      : base.find((a) => a.default)?.id
+    const defaultAgent = current.agent ? undefined : base.find((a) => a.default)?.id
+    agentSelect.replaceChildren()
     for (const group of agentGroups(base)) {
       const optgroup = document.createElement('optgroup')
       optgroup.label = group.label
       for (const agent of group.agents) {
-        const opt = document.createElement('option')
-        opt.value = agent.id
-        opt.textContent = agent.model ? `${agent.id} (${agent.model})` : agent.id
+        const opt = new Option(agent.id, agent.id)
+        if (agent.model) opt.title = agent.model
         if (agent.id === current.agent || (!current.agent && agent.id === defaultAgent)) {
           opt.selected = true
         }
@@ -3682,79 +3590,83 @@ export class FiberDetailModal {
     // A current agent absent from the registry stays selectable as a custom
     // entry so an unknown id isn't silently rewritten on the next edit.
     if (current.agent && !base.some((a) => a.id === current.agent)) {
-      const opt = document.createElement('option')
-      opt.value = current.agent
-      opt.textContent = `${current.agent} (custom)`
-      opt.selected = true
+      const opt = new Option(`${current.agent} (custom)`, current.agent, true, true)
       agentSelect.prepend(opt)
     }
 
-    // Repopulate effort options + chrome availability from a given agent's
-    // metadata. The selected value is always concrete: an omitted/invalid
-    // fiber value resolves to the agent's registry default. An agent change
-    // therefore writes that new agent's explicit effective effort.
+    const recordFor = (id: string): AgentRecord | undefined => records.find((a) => a.id === id)
+    const selectedAgent = (): string => agentSelect.value
+
+    // Repopulate effort, chrome and session from an agent's metadata. The
+    // selected effort is always concrete: an omitted/invalid fiber value
+    // resolves to the agent's registry default, so an agent change writes the
+    // new agent's explicit effective effort.
     const syncDependents = (agentId: string, effort: string): void => {
-      const rec = records.find((a) => a.id === agentId)
+      const rec = recordFor(agentId)
       const levels = rec?.effort_levels ?? []
-      effortSelect.innerHTML = ''
-      for (const lvl of levels) {
-        const opt = document.createElement('option')
-        opt.value = lvl
-        opt.textContent = lvl
-        effortSelect.append(opt)
-      }
+      effortSelect.replaceChildren(...levels.map((lvl) => new Option(lvl, lvl)))
       effortSelect.disabled = levels.length === 0
-      const effectiveEffort = levels.includes(effort)
+      effortSelect.hidden = levels.length === 0
+      effortSelect.value = levels.includes(effort)
         ? effort
         : rec?.default_effort && levels.includes(rec.default_effort)
           ? rec.default_effort
           : ''
-      effortSelect.value = effectiveEffort
 
       const chromeOk = rec?.chrome_capable ?? false
       chromeToggle.disabled = !chromeOk
       if (!chromeOk) chromeToggle.checked = false
+      if (chromeChip) chromeChip.hidden = !chromeOk
+
       const supportsApp = isCodexAgent(rec)
-      if (rec && !supportsApp) surfaceSelect.value = 'cli'
-      surfaceSelect.disabled = !supportsApp
-      // The session choice only exists for Codex agents; others always run in a terminal.
-      surfaceSelect.parentElement?.classList.toggle('kbn-detail-session-hidden', !supportsApp)
+      if (rec && !supportsApp) surface.set('cli')
+      surface.setDisabled(!supportsApp)
+      if (surfaceRow) surfaceRow.hidden = !supportsApp
     }
 
-    const selectedAgent = (): string => agentSelect.value
     syncDependents(selectedAgent() || current.agent, current.effort)
     chromeToggle.checked = current.chrome && !chromeToggle.disabled
-    surfaceSelect.value = current.surface
-    const updateSurfaceHelp = (): void => {
-      surfaceHint.textContent = sessionHelp(records.find((a) => a.id === selectedAgent()), surfaceSelect.value as ExecutionSurface)
-    }
-    updateSurfaceHelp()
+    if (isCodexAgent(recordFor(selectedAgent()))) surface.set(current.surface)
 
-    const commit = (revertChromeTo?: boolean): void => {
-      updateSurfaceHelp()
-      const accepted = onCommit({
+    let landed = {
+      agent: selectedAgent(),
+      effort: effortSelect.value,
+      chrome: chromeToggle.checked,
+      surface: surface.value,
+    }
+    const commit = (): void => {
+      const axes = {
         agent: selectedAgent(),
         effort: effortSelect.value,
         chrome: chromeToggle.checked,
-        surface: surfaceSelect.value as ExecutionSurface,
-      })
-      if (accepted === false && revertChromeTo !== undefined) {
-        chromeToggle.checked = revertChromeTo
+        surface: surface.value,
       }
+      void onCommit(axes).then((ok) => {
+        if (ok) {
+          landed = axes
+          return
+        }
+        agentSelect.value = landed.agent
+        syncDependents(landed.agent, landed.effort)
+        chromeToggle.checked = landed.chrome && !chromeToggle.disabled
+        surface.set(landed.surface)
+      })
     }
 
     agentSelect.addEventListener('change', () => {
-      // New agent: select and persist its concrete default effort, then
-      // re-gate chrome and write the fresh composition.
+      // New agent: select and persist its concrete default effort, re-gate
+      // chrome, and pick the session a fresh task on that agent would get —
+      // unless the card was already Codex, whose choice carries over.
       syncDependents(selectedAgent(), '')
       chromeToggle.checked = chromeToggle.checked && !chromeToggle.disabled
-      if (surfaceSelect.disabled) surfaceSelect.value = 'cli'
-      else if (!isCodexAgent(records.find((a) => a.id === current.agent))) surfaceSelect.value = defaultSurface(records.find((a) => a.id === selectedAgent()))
+      const rec = recordFor(selectedAgent())
+      if (!isCodexAgent(rec)) surface.set('cli')
+      else if (!isCodexAgent(recordFor(current.agent))) surface.set(defaultSurface(rec))
       commit()
     })
     effortSelect.addEventListener('change', () => commit())
-    chromeToggle.addEventListener('change', () => commit(!chromeToggle.checked))
-    surfaceSelect.addEventListener('change', () => commit())
+    chromeToggle.addEventListener('change', () => commit())
+    surface.onPick(() => commit())
   }
 
   /**
@@ -3769,10 +3681,9 @@ export class FiberDetailModal {
     axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
     statusEl: HTMLElement,
     errorEl: HTMLElement,
-    onCommitted?: () => void,
-  ): Promise<void> {
-    if (!axes.agent) return
-    const ok = await this.withSaveStatus(statusEl, errorEl, () =>
+  ): Promise<boolean> {
+    if (!axes.agent) return false
+    return this.withSaveStatus(statusEl, errorEl, () =>
       this.postLifecycle({
         action: 'set-agent',
         origin: card.originId,
@@ -3783,7 +3694,6 @@ export class FiberDetailModal {
         surface: axes.surface,
       }),
     )
-    if (ok) onCommitted?.()
   }
 
   /**
@@ -3933,7 +3843,7 @@ export class FiberDetailModal {
       errorEl.textContent = msg
       errorEl.style.display = ''
       saveBtn.disabled = false
-      saveBtn.textContent = 'Promote to shuttle'
+      saveBtn.textContent = 'Promote'
     }
   }
 

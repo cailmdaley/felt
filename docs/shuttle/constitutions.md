@@ -238,8 +238,8 @@ card folds under the card it follows — and never gates dispatch.
 Every dispatch runs autonomously; shuttle offers no interactive mode. When work
 needs a human, that expectation rides one of two channels.
 
-**Per-dispatch.** The board's requeue/resume dialog carries a free-text "From
-User" directive, plus a one-click affordance that prepends a talk-first line.
+**Per-dispatch.** The card drawer's message box carries a free-text "From User"
+directive, and its Wait for me toggle puts a talk-first line at its head.
 The worker reads the directive at the top of its context. The directive applies
 to that moment only — the next dispatch starts clean.
 

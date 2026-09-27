@@ -281,7 +281,7 @@ export class LinkedFiberPanel {
     this.escapeHandler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (!this.win || !isTopPanel(this.win)) return
-      if (document.activeElement?.closest('.kbn-detail-parent-dropdown')) return
+      if (document.activeElement?.closest('.kbn-detail-parent-input, .kbn-detail-parent-dropdown')) return
       const active = this.state.active
       if (!active) return
       e.stopPropagation()

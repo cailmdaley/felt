@@ -1,5 +1,5 @@
-/** Real Capture form browser check against the offline board harness.
- * Run `npm run harness:board` then `node scripts/check-app-surface.mjs`.
+/** Real Capture form and card-drawer browser check against the offline board
+ * harness. Run `npm run harness:board` then `node scripts/check-app-surface.mjs`.
  * CHROME_PATH selects an installed Chromium; SCREENSHOT_DIR saves both sizes.
  */
 import assert from 'node:assert/strict'
@@ -40,16 +40,19 @@ try {
   await surface.selectOption('cli')
   assert.equal(await surface.inputValue(), 'cli')
   await agent.selectOption('claude-opus')
-  assert.equal(await surface.inputValue(), 'cli', 'Claude visibly uses Terminal')
-  assert.equal(await surface.isDisabled(), true, 'Claude cannot select app mode')
-  assert.ok(await page.getByText('Terminal session. Choose a Codex agent to use the ChatGPT app.').isVisible())
+  assert.equal(await page.getByRole('combobox', { name: 'Session', exact: true }).count(), 0, 'a Claude capture has no session choice')
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByText('App conversation continuity', { exact: true }).click()
-  await page.locator('.kbn-detail-controls-toggle').click()
-  const detailSurface = page.getByRole('combobox', { name: 'Session', exact: true })
+  const drawer = page.locator('.kbn-detail-controls-toggle')
+  const stripWho = () => page.locator('.kbn-ctl-who > span').allInnerTexts()
+  assert.equal((await stripWho())[0], 'codex-luna', 'the folded strip leads with the agent')
+  await drawer.click()
+  const detailSurface = page.getByRole('radiogroup', { name: 'Session', exact: true })
+  const appChoice = detailSurface.getByRole('radio', { name: 'App', exact: true })
+  const terminalChoice = detailSurface.getByRole('radio', { name: 'Terminal', exact: true })
   await detailSurface.scrollIntoViewIfNeeded()
-  assert.equal(await detailSurface.inputValue(), 'app', 'existing app conversation retains its mode')
+  assert.equal(await appChoice.getAttribute('aria-checked'), 'true', 'existing app conversation retains its mode')
   assert.ok(await detailSurface.isVisible(), 'existing task visibly identifies its session type')
   const detailBox = await detailSurface.boundingBox()
   assert.ok(detailBox && detailBox.x >= 0 && detailBox.x + detailBox.width <= 390, 'phone: detail session choice fits')
@@ -69,16 +72,22 @@ try {
   page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept() })
   const detailAgent = page.locator('#kbn-detail-agent')
   await detailAgent.selectOption('claude-opus')
+  assert.ok(!(await detailSurface.isVisible()), 'a Claude agent has no session choice to show')
   await page.locator('#kbn-detail-chrome').check()
   await detailAgent.selectOption('codex-luna')
+  assert.ok(!(await page.locator('#kbn-detail-chrome').isVisible()), 'chrome is not offered to a Codex agent')
   await page.locator('#kbn-detail-effort').selectOption('high')
-  await detailSurface.selectOption('cli')
+  // The detour through Claude left the session on Terminal.
+  assert.equal(await terminalChoice.getAttribute('aria-checked'), 'true')
+  await terminalChoice.click()
+  await appChoice.click()
   await page.waitForTimeout(200)
   const writes = await page.evaluate(() => window.settingWrites)
-  assert.equal(writes.length, 5)
+  assert.equal(writes.length, 5, 're-picking the current session writes nothing; every change writes once')
   assert.ok(writes.every(write => write.url.endsWith('/api/v1/lifecycle') && write.body.action === 'set-agent'), JSON.stringify(writes))
+  assert.equal(writes.at(-1).body.surface, 'app')
   assert.deepEqual(dialogs, [], 'settings do not ask to replace the live session')
-  assert.ok(await page.getByText('Settings are saved for the next launch. The current session keeps running unchanged.').isVisible())
+  assert.deepEqual(await stripWho(), ['codex-luna', 'high'], 'the strip follows the committed settings')
 
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
@@ -101,19 +110,68 @@ try {
   assert.ok(terminalWrites.every(write => write.url.endsWith('/api/v1/lifecycle') && write.body.action === 'set-agent'), JSON.stringify(terminalWrites))
   assert.deepEqual(dialogs, [], 'changing terminal model or Chrome must not trigger restart')
 
+  // Standing is a revealed form until its cron is confirmed: the click writes
+  // nothing, Enter in the cron writes the promotion once.
+  await page.evaluate(() => { window.settingWrites = [] })
+  await page.getByRole('radiogroup', { name: 'Kind', exact: true }).getByRole('radio', { name: 'Standing', exact: true }).click()
+  assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'choosing Standing alone writes nothing')
+  const cron = page.getByRole('textbox', { name: 'Cron', exact: true })
+  assert.equal(await cron.inputValue(), '0 9 * * 1-5')
+  await cron.press('Enter')
+  await page.waitForTimeout(200)
+  const promotion = await page.evaluate(() => window.settingWrites)
+  assert.equal(promotion.length, 1, JSON.stringify(promotion))
+  assert.deepEqual(
+    { action: promotion[0].body.action, kind: promotion[0].body.kind, schedule: promotion[0].body.schedule },
+    { action: 'reshape', kind: 'standing', schedule: '0 9 * * 1-5' },
+  )
+
+  // Escape in the parent search cancels the search, not the card.
+  await page.locator('.kbn-ctl-parent').click()
+  await page.getByRole('combobox', { name: 'Search parent fiber', exact: true }).press('Escape')
+  assert.equal(await page.locator('.kbn-detail-controls').count(), 1, 'Escape in the parent search keeps the card open')
+  assert.ok(await page.locator('.kbn-ctl-parent').isVisible(), 'Escape puts the parent id back')
+
+  // A refused kind write puts the control back on what the wire says.
+  await page.evaluate(() => {
+    const passthrough = window.fetch
+    window.restoreFetch = () => { window.fetch = passthrough }
+    window.fetch = (input, init) => {
+      if (init?.method === 'POST' && JSON.parse(init.body).action === 'reshape') {
+        return Promise.resolve(new Response('reshape refused', { status: 500 }))
+      }
+      return passthrough(input, init)
+    }
+  })
+  const kindGroup = page.getByRole('radiogroup', { name: 'Kind', exact: true })
+  await kindGroup.getByRole('radio', { name: 'Pinned', exact: true }).click()
+  await page.waitForTimeout(200)
+  assert.equal(await kindGroup.getByRole('radio', { name: 'Standing', exact: true }).getAttribute('aria-checked'), 'true', 'a refused reshape rolls the kind back')
+  assert.ok(await page.getByText('reshape refused').isVisible(), 'the refusal is shown')
+  await page.evaluate(() => window.restoreFetch())
+
+  // "Wait for me" rides the dispatch as the message's first line.
+  await page.evaluate(() => { window.settingWrites = [] })
+  await page.getByRole('textbox', { name: 'Message for the next worker', exact: true }).fill('rerun the null tests')
+  await page.getByRole('checkbox', { name: 'Wait for me', exact: true }).check()
+  await page.getByRole('button', { name: 'Resume', exact: true }).click()
+  await page.waitForTimeout(200)
+  const dispatch = (await page.evaluate(() => window.settingWrites)).find(write => write.url.endsWith('/api/v1/dispatch'))
+  assert.ok(dispatch, 'Resume dispatches')
+  assert.equal(dispatch.body.resume_mode, 'previous')
+  assert.match(dispatch.body.user_message, /^Wait for me before doing anything heavy[^\n]*\n\nrerun the null tests$/)
+
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
   const stashSurface = page.getByRole('combobox', { name: 'Session', exact: true })
-  await stashSurface.scrollIntoViewIfNeeded()
-  assert.equal(await stashSurface.inputValue(), 'cli', 'default stash visibly uses Terminal')
-  assert.equal(await stashSurface.isDisabled(), true)
+  assert.equal(await stashSurface.count(), 0, 'a default (Claude) stash has no session choice')
   const stashAgent = page.locator('select').filter({ has: page.locator('option[value="codex-luna"]') })
   await stashAgent.selectOption('codex-luna')
   assert.equal(await stashSurface.inputValue(), 'app', 'new Codex stash defaults to app')
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live app and terminal settings save without dispatch passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback and Wait-for-me passed')
 } finally {
   await browser.close()
 }

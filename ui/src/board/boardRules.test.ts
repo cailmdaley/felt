@@ -51,7 +51,7 @@ import {
   splitStashByReturn,
   boardDependents,
 } from './KanbanSurfaces.js'
-import { sessionWindow } from './FiberDetailModal.js'
+import { sessionWindow, stripFacts } from './FiberDetailModal.js'
 import { isoDayLocal } from './civilDay.js'
 import { humanizeIdleAge } from './utils.js'
 
@@ -1116,8 +1116,8 @@ describe('cycles — a named span of time, not work', () => {
 describe('sessionWindow', () => {
   // The rendered clock is the READER's local time, so these assert on shape,
   // not on digits — a fixed "12:01" would only ever be right in one zone.
-  const BARE = /^dispatched \d{2}:\d{2}/
-  const DATED = /^dispatched [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2}/
+  const BARE = /^\d{2}:\d{2} → \d{2}:\d{2} · /
+  const DATED = /^[A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2} → /
   const at = (offsetMs: number): string => new Date(NOW + offsetMs).toISOString()
 
   it('is nothing at all for a fiber that never ran', () => {
@@ -1131,8 +1131,8 @@ describe('sessionWindow', () => {
       NOW,
     )
     expect(w?.text).toMatch(BARE)
-    expect(w?.text).toContain('3h 30m')
-    expect(w?.clean).toBe(true)
+    expect(w?.text).toMatch(/· 3h 30m$/)
+    expect(w?.state).toBe('clean')
   })
 
   it('dates a run from another day, so it cannot read as today', () => {
@@ -1159,30 +1159,81 @@ describe('sessionWindow', () => {
       NOW,
     )
     expect(isoDayLocal(startMs + 4 * 3_600_000)).not.toBe(isoDayLocal(startMs))
-    expect(w?.text).toMatch(/handed off [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2}/)
-    expect(w?.text).toContain('4h 0m')
+    expect(w?.text).toMatch(/→ [A-Za-z]{3}\.? ?\d{1,2} \d{2}:\d{2} · 4h 0m$/)
   })
 
-  it('says aloft for a live worker, and claims no clean exit', () => {
+  it('says since when for a live worker, and claims no clean exit', () => {
     const w = sessionWindow(
       { dispatchedAt: at(-20 * 60_000), runningWorker: 'a-shuttle' },
       NOW,
     )
-    expect(w?.text).toMatch(/· aloft$/)
-    expect(w?.clean).toBe(false)
+    expect(w?.text).toMatch(/^since \d{2}:\d{2}$/)
+    expect(w?.state).toBe('running')
   })
 
   it('refuses a handoff stamp older than the dispatch — that is the PREVIOUS run', () => {
     // The real shape seen in the loom: a stale `handed_off_at` left over from an
     // earlier run. Reading it as this run's would print a negative span under a
-    // teal check.
+    // verdigris check.
     const w = sessionWindow(
       { dispatchedAt: at(-2 * 3_600_000), handedOffAt: at(-6 * 3_600_000) },
       NOW,
     )
-    expect(w?.text).toMatch(/· no clean handoff$/)
-    expect(w?.clean).toBe(false)
+    expect(w?.text).toMatch(/· no handoff$/)
+    expect(w?.state).toBe('unclean')
     expect(w?.text).not.toMatch(/-\d/)
+  })
+})
+
+describe('stripFacts — the drawer strip as a reading of the card', () => {
+  const card = (patch: Partial<KanbanCard>): KanbanCard => ({
+    id: 'work/spectra/null-tests', uid: 'U', name: 'Null tests', path: '', fiberDir: '', feltStore: '',
+    originId: 'h', status: 'active', outcome: '', tags: [], createdAt: at0,
+    effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
+    ...patch,
+  })
+
+  it('names the agent and its effort, and places the work as host:dir', () => {
+    const f = stripFacts(card({
+      shuttleKind: 'oneshot', shuttleAgent: 'claude-fable', shuttleEffort: 'medium',
+      shuttleHost: 'ada-workstation', shuttleProjectDir: '/home/ada/dev/spectra',
+    }), NOW)
+    expect(f.actor).toEqual({ text: 'claude-fable', agent: true })
+    expect(f.effort).toBe('medium')
+    expect(f.place?.text).toBe('ada-workstation:~/dev/spectra')
+    expect(f.place?.title).toBe('ada-workstation:/home/ada/dev/spectra')
+    // A one-shot is the default shape; saying so would be noise.
+    expect(f.cadence).toBeUndefined()
+  })
+
+  it("says `me` for a card with no shuttle block, as the board card does", () => {
+    const f = stripFacts(card({ due: dayFromNow(3) }), NOW)
+    expect(f.actor).toEqual({ text: 'me', agent: false })
+    expect(f.effort).toBeUndefined()
+    expect(f.due).toBeDefined()
+  })
+
+  it('speaks a standing cron and keeps the expression on the hover', () => {
+    const f = stripFacts(card({
+      shuttleKind: 'standing', shuttleAgent: 'claude-opus',
+      shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris', due: dayFromNow(2),
+    }), NOW)
+    expect(f.cadence).toEqual({ text: 'weekdays 9:00', title: 'cron: 0 9 * * 1-5 (Europe/Paris)' })
+    // A standing role is placed by its cron — its due is never read.
+    expect(f.due).toBeUndefined()
+  })
+
+  it('names a pinned role, and drops the due an active one never reads', () => {
+    const f = stripFacts(card({ shuttleKind: 'pinned', shuttleAgent: 'claude-opus', due: dayFromNow(2) }), NOW)
+    expect(f.cadence).toEqual({ text: 'pinned' })
+    expect(f.due).toBeUndefined()
+    const parked = stripFacts(card({ shuttleKind: 'pinned', shuttleAgent: 'claude-opus', status: 'closed', due: dayFromNow(2) }), NOW)
+    expect(parked.due).toBeDefined()
+  })
+
+  it('carries the chrome flag only when it is on', () => {
+    expect(stripFacts(card({ shuttleAgent: 'claude-opus', shuttleChrome: true }), NOW).chrome).toBe(true)
+    expect(stripFacts(card({ shuttleAgent: 'claude-opus' }), NOW).chrome).toBe(false)
   })
 })
 
