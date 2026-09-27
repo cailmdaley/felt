@@ -2893,10 +2893,20 @@ defmodule Shuttle.Poller do
             {state, {:error, :not_found}}
 
           {:ok, fiber} ->
-            if Map.get(fiber, "status") == "closed" do
-              {state, {:error, :closed}}
-            else
-              register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
+            cond do
+              Map.get(fiber, "status") == "closed" ->
+                {state, {:error, :closed}}
+
+              # The claim stamps `shuttle.runtime` (dispatched_at, session_uuid)
+              # through `felt shuttle mark-runtime`, which needs an installed
+              # block to nest under. Claiming an uninstalled fiber would
+              # register a worker whose runtime never lands — no Resume
+              # previous, no meeting-to-card link — so install comes first.
+              not is_map(Map.get(fiber, "shuttle")) ->
+                {state, {:error, :not_installed}}
+
+              true ->
+                register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
             end
         end
     end

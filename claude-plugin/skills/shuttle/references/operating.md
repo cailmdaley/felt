@@ -158,7 +158,7 @@ curl -s -X POST http://localhost:4000/api/v1/claim -H 'Content-Type: application
 felt edit <fiber> --status active
 ```
 
-The order is load-bearing: activating before the claim makes the fiber dispatch-eligible while the daemon can't yet see your session, and the poll loop spawns a duplicate worker in the gap. `session_uuid` is optional but wire it when you can — it writes the dispatch marker, so Resume-previous and transcript lineage work on claimed sessions too. The claim is idempotent; if the response is lost, retry with the same body. Errors are precise: `already_running` means kill/pause the live worker first, `closed` means `felt shuttle reopen` first, `session_not_found` means the tmux session name didn't resolve.
+The order is load-bearing: activating before the claim makes the fiber dispatch-eligible while the daemon can't yet see your session, and the poll loop spawns a duplicate worker in the gap. `session_uuid` is optional but wire it when you can — it writes the dispatch marker, so Resume-previous and transcript lineage work on claimed sessions too. The claim is idempotent; if the response is lost, retry with the same body. Errors are precise: `already_running` means kill/pause the live worker first, `closed` means `felt shuttle reopen` first, `not_installed` means `felt shuttle install` the fiber first (the claim stamps `shuttle.runtime` under the installed block), `session_not_found` means the tmux session name didn't resolve.
 
 From the claim on, you are the worker: the whole worker loop in SKILL.md applies, including its two-verb exit. Killing a live worker to claim loses whatever was typed in its input buffer — capture anything visible in the pane first (`tmux capture-pane`); the transcript itself survives and stays resumable.
 

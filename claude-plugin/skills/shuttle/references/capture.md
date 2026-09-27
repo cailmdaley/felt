@@ -25,8 +25,10 @@ transcript: read [meeting.md](meeting.md) too. It extends these steps.
    `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
    you created. When the endpoint names a unix socket, send the request through
    it exactly as given (`curl --unix-socket <path> http://localhost/...`). Encode JSON with a JSON library and pass it as a file or structured
-   request body; do not interpolate user input into shell quoting. Require a
-   successful claim before continuing. A lost response can be retried with the
+   request body; do not interpolate user input into shell quoting. Run it only
+   after the install succeeded — the daemon refuses an uninstalled fiber with
+   `not_installed` — and do not pipe setup commands through `tail` or similar,
+   which hides their failure. Require a successful claim before continuing. A lost response can be retried with the
    same body; a rejection must not be followed by activation.
 5. **Activate.** Set status `active` only after the successful claim. Activating
    sooner permits the poller to launch a duplicate worker.

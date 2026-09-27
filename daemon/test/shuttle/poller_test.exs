@@ -5440,6 +5440,41 @@ defmodule Shuttle.PollerTest do
     assert {:error, :closed} = Poller.claim_session(poller, id, "capture-closed1", [])
   end
 
+  test "claim refuses a fiber with no installed shuttle block" do
+    id = "tests/claim-uninstalled"
+    MockRunner.set_fiber(id, make_fiber(id, %{"status" => "open"}))
+    MockRunner.add_tmux_session("capture-uninstalled1")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_claim_uninstalled,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert {:error, :not_installed} =
+             Poller.claim_session(poller, id, "capture-uninstalled1", session_uuid: "uuid-early")
+
+    # Nothing registered, renamed, or stamped: a retry after install claims cleanly.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             (cmd == "tmux" and hd(args) == "rename-session") or
+               (cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args))
+           end)
+
+    assert Shuttle.SessionLedger.read_since(0) == []
+
+    MockRunner.set_shuttle(id, "enabled: true\nkind: oneshot\nhost: other-host\n", "open")
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, "capture-uninstalled1", session_uuid: "uuid-early")
+
+    assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               "uuid-early" in args
+           end)
+  end
+
   # ── Capture (spawn-without-constitution) ──
 
   test "capture spawns a tmux session from a free-text prompt" do
