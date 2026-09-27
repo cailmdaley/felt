@@ -1260,7 +1260,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:error, {:http_status, status}}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1272,6 +1272,26 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     # state — down with the request.
     :exit, reason -> {:error, {:exit, reason}}
   end
+
+  defp transport_error(reason, true, url) do
+    case URI.parse(url) do
+      %URI{host: host} = uri when is_binary(host) and host != "" ->
+        remote_name = Shuttle.TailnetDial.remote_for(String.downcase(host), uri.port || 443)
+
+        case {remote_name, remote_name && Shuttle.TailnetDial.last_error(remote_name)} do
+          {name, {:tailnet_dial, stage, bridge_reason}} when is_binary(name) ->
+            {:error, {:tailnet_dial, stage, %{httpc: reason, bridge: bridge_reason}}}
+
+          _ ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, reason}
+    end
+  end
+
+  defp transport_error(reason, false, _url), do: {:error, reason}
 
   # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
   # with the last etag) and return the raw status + response headers so the
@@ -1291,7 +1311,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:ok, status, normalize_headers(resp_headers), body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1325,7 +1345,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:ok, status, resp_body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1369,7 +1389,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue

@@ -78,7 +78,10 @@ defmodule Shuttle.TailnetDialTest do
     remote = start_bridge(base, localapi, @host, tls_port)
 
     url = "https://#{@host}:#{tls_port}/api/v1/version"
-    assert {:error, _reason} = Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+
+    assert {:error, {:tailnet_dial, :tls, %{httpc: _httpc_reason, bridge: _tls_reason}}} =
+             Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+
     assert_receive {:dial_request, rejected_request}, 5_000
     assert rejected_request =~ "Dial-Host: #{@host}\r\n"
 
@@ -245,6 +248,40 @@ defmodule Shuttle.TailnetDialTest do
            end)
 
     assert %{bridges: [%{status: "error", error_stage: "localapi_status"}]} = TailnetDial.status()
+  end
+
+  test "private dial transport errors retain the LocalAPI cause across request APIs", %{
+    base: base
+  } do
+    localapi = start_localapi(base, mode: {:reject, 403, "dial forbidden"}, parent: self())
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    remote = start_bridge(base, localapi, @host, 443)
+    url = "https://#{@host}/api/v1/version"
+
+    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get(url, 1_000))
+
+    assert_private_dial_error(
+      Shuttle.RemoteRegistry.Client.Default.get(url, [{"if-none-match", "etag"}], 1_000)
+    )
+
+    assert_private_dial_error(
+      Shuttle.RemoteRegistry.Client.Default.post(url, "{}", "application/json", 1_000)
+    )
+
+    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get_file(url, 1_000))
+    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get_file(url, [], 1_000))
+
+    assert TailnetDial.last_error(remote.name) ==
+             {:tailnet_dial, :localapi_status, {:http_status, 403, "dial forbidden"}}
   end
 
   test "a 101 without the ts-dial upgrade is refused", %{base: base} do
@@ -629,6 +666,17 @@ defmodule Shuttle.TailnetDialTest do
         raise "LocalAPI relay failed: #{inspect(reason)}"
     end
   end
+
+  defp assert_private_dial_error(
+         {:error,
+          {:tailnet_dial, :localapi_status,
+           %{httpc: httpc_reason, bridge: {:http_status, 403, "dial forbidden"}}}}
+       ) do
+    refute is_nil(httpc_reason)
+  end
+
+  defp assert_private_dial_error(result),
+    do: flunk("expected private LocalAPI transport cause, got: #{inspect(result)}")
 
   defp test_cacerts do
     [{:Certificate, der, :not_encrypted}] = :public_key.pem_decode(File.read!(@ca))
