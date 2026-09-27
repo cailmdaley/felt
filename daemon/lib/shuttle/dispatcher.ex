@@ -416,7 +416,7 @@ defmodule Shuttle.Dispatcher do
     * `:runner` — `Shuttle.Runner` impl (default `Shuttle.Runner.Default`)
     * `:work_dir` — project directory to spawn in (required)
     * `:felt_store` — felt store the worker should file into
-    * `:agent` — agent registry name (default `"claude-sonnet"`, the bare
+    * `:agent` — agent registry name (default `"claude-opus"`, the bare
       fallback; fable is disabled and is never a default)
     * `:effort` — reasoning-effort token, validated against the agent's
       `effort_levels` (same contract as `shuttle.effort` on a fiber)
@@ -430,7 +430,7 @@ defmodule Shuttle.Dispatcher do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     work_dir = Keyword.fetch!(opts, :work_dir)
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-    agent_name = Keyword.get(opts, :agent) || "claude-sonnet"
+    agent_name = Keyword.get(opts, :agent) || "claude-opus"
     effort = Keyword.get(opts, :effort)
     chrome = Keyword.get(opts, :chrome) == true
     host = Keyword.get(opts, :host)

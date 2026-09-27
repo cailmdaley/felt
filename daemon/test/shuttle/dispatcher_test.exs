@@ -301,12 +301,12 @@ defmodule Shuttle.DispatcherTest do
           {Jason.encode!(resolved), 0}
 
         true ->
-          # Default capture agent (claude-sonnet).
+          # Any other registered name resolves as a plain claude agent.
           {Jason.encode!(%{
-             "id" => "claude-sonnet",
+             "id" => name,
              "cli" => "claude",
              "wrapper" => "claude",
-             "model" => "sonnet"
+             "model" => "opus"
            }), 0}
       end
     end
@@ -1840,7 +1840,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "capture spawns a non-shuttle-suffixed session with the prompt in the run script" do
-    {:ok, %{session: session, session_uuid: uuid, agent_id: "claude-sonnet"}} =
+    {:ok, %{session: session, session_uuid: uuid, agent_id: "claude-opus"}} =
       Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp", felt_store: "/tmp")
 
     assert session =~ ~r/^capture-[0-9a-f]{8}$/

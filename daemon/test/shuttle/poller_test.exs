@@ -5486,7 +5486,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert {:ok, %{session: "capture-" <> _ = session, agent_id: "claude-sonnet"}} =
+    assert {:ok, %{session: "capture-" <> _ = session, agent_id: "claude-opus"}} =
              Poller.capture(poller, "build me a thing", work_dir: "/tmp")
 
     # Right tmux command: detached session under the capture name, rooted in

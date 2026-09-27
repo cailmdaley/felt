@@ -360,7 +360,7 @@ Install the `shuttle:` block. This is what turns the fiber into something the
 daemon will pick up:
 
 ```bash
-felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-sonnet
+felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus
 ```
 
 Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
