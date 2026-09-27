@@ -34,6 +34,9 @@ defmodule Shuttle.TailnetDialTest do
           send(parent, :redirect_followed)
           Plug.Conn.send_resp(conn, 200, "redirect-followed")
 
+        "/large" ->
+          Plug.Conn.send_resp(conn, 200, :binary.copy(<<0, 255, 0xC3, 0xA9>>, 524_288))
+
         _ ->
           Plug.Conn.send_resp(conn, 200, "tailnet-response")
       end
@@ -294,6 +297,39 @@ defmodule Shuttle.TailnetDialTest do
     assert_receive {:https_request, [host_header]}, 5_000
     assert host_header == "#{@host}:#{tls_port}"
     refute_receive :redirect_followed, 100
+  end
+
+  test "large binary HTTPS responses survive the private bridge relay", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    _remote = start_bridge(base, localapi, @host, tls_port)
+    expected = :binary.copy(<<0, 255, 0xC3, 0xA9>>, 524_288)
+
+    assert {:ok, body} =
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}:#{tls_port}/large",
+               10_000
+             )
+
+    assert byte_size(body) == byte_size(expected)
+    assert :crypto.hash(:sha256, body) == :crypto.hash(:sha256, expected)
+    assert_receive {:https_request, [host_header]}, 5_000
+    assert host_header == "#{@host}:#{tls_port}"
   end
 
   test "an invalid private socket configuration refuses HTTPS instead of dialing directly", %{
