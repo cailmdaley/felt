@@ -1,6 +1,5 @@
 import type { ExecutionSurface } from './executionSurface'
-
-export type CaptureMeetingMode = 'call' | 'room'
+import type { MeetingMode } from './meetingApi'
 
 export interface CaptureRequestInput {
   prompt: string
@@ -10,7 +9,7 @@ export interface CaptureRequestInput {
   effort?: string
   chrome?: boolean
   surface?: ExecutionSurface
-  meetingMode?: CaptureMeetingMode | null
+  meetingMode?: MeetingMode | null
 }
 
 export interface CaptureResponseData {
@@ -49,7 +48,7 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
 export function captureOutcome(
   response: Pick<Response, 'ok' | 'status'>,
   data: CaptureResponseData,
-  options: { projectDir: string; meetingMode?: CaptureMeetingMode | null; host: string },
+  options: { projectDir: string; meetingMode?: MeetingMode | null; host: string },
 ): CaptureOutcome {
   const spawned = response.ok && data.spawned === true
   const hasMeetingRow = !!data.meeting && typeof data.meeting === 'object' && !Array.isArray(data.meeting)

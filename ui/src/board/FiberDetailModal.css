@@ -328,6 +328,31 @@
   border-color: rgba(154, 123, 53, 0.45);
   color: #1B1611;
 }
+/* The Capture form's Meeting toggle, under the dispatch verbs: checking it
+   offers Call | Room and the start button. */
+.kbn-detail-meeting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.kbn-detail-meeting-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  color: #2E6862;
+  cursor: pointer;
+  user-select: none;
+}
+.kbn-detail-meeting-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #3F8278;
+}
+.kbn-detail-meeting-row .kbn-detail-meeting-mode { flex: 0 0 auto; width: 8rem; }
 .kbn-detail-actions-row {
   display: flex;
   flex-wrap: wrap;

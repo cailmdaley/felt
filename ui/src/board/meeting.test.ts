@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatMeetingDuration,
+  joinDeliveryPhrase,
+  meetingJoinable,
   meetingActions,
   meetingDuration,
   meetingPollDelay,
@@ -17,6 +19,7 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   last_line: null,
   transcript: null,
   mirror_host: null,
+  fiber: null,
   tmux_session: 'hark-meeting',
   error: null,
   ...overrides,
@@ -29,6 +32,28 @@ describe('meeting wire status', () => {
       meeting: { state: 'live', mirror_host: null },
     })
     expect(parseMeetingStatus({ available: true, meeting: { state: 'booting' } })).toBeNull()
+  })
+})
+
+describe('joining a meeting to a constitution', () => {
+  it('reads the joined fiber off the wire row', () => {
+    expect(parseMeetingStatus({ available: true, meeting: meeting({ fiber: 'loom/shear' }) })?.meeting?.fiber)
+      .toBe('loom/shear')
+    expect(parseMeetingStatus({ available: true, meeting: { state: 'live' } })?.meeting?.fiber).toBeNull()
+  })
+
+  it('offers a start only while hark is here and nothing records', () => {
+    expect(meetingJoinable({ available: true, meeting: null })).toBe(true)
+    expect(meetingJoinable({ available: true, meeting: meeting({ state: 'failed' }) })).toBe(true)
+    expect(meetingJoinable({ available: true, meeting: meeting() })).toBe(false)
+    expect(meetingJoinable({ available: true, meeting: meeting({ state: 'starting' }) })).toBe(false)
+    expect(meetingJoinable({ available: false, meeting: null })).toBe(false)
+  })
+
+  it('says how the worker received the meeting', () => {
+    expect(joinDeliveryPhrase('message')).toBe('its worker has the meeting')
+    expect(joinDeliveryPhrase('resume')).toBe('resumed with the meeting')
+    expect(joinDeliveryPhrase('dispatch')).toBe('started with the meeting')
   })
 })
 

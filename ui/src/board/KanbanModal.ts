@@ -63,8 +63,8 @@ import type { QueueRewrite } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
-import { meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
-import { stopMeeting as requestMeetingStop } from '../forms/meetingApi'
+import { joinDeliveryPhrase, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
+import { joinMeeting as requestMeetingJoin, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import {
   collectCards,
   createTemporalFetchers,
@@ -321,6 +321,12 @@ export class KanbanModal {
       (card, target) => this.transition(card, target),
       // Status-pill double-click → focus the running worker's kitty tab.
       this.openWorkerAfterGesture,
+      {
+        meeting: {
+          canJoin: () => this.canJoinMeeting(),
+          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
+        },
+      },
     )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
@@ -347,6 +353,8 @@ export class KanbanModal {
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
       onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
+      canJoinMeeting: () => this.meetingStatus.available,
+      onMeetingJoin: async (card, mode) => { await this.joinCardMeeting(card, mode) },
       onRefresh: () => void this.refreshFromSource(),
     })
   }
@@ -359,6 +367,37 @@ export class KanbanModal {
       await pending
     }
     await this.fetchMeetingStatus()
+  }
+
+  /** hark is available here and nothing is recording (a failed row can be replaced). */
+  private canJoinMeeting(): boolean {
+    return meetingJoinable(this.meetingStatus)
+  }
+
+  /**
+   * Record a meeting on this machine and join it to `card`'s constitution. The
+   * banner says how its worker received the meeting; the returned string is
+   * the error to show beside the control, or null once recording began.
+   */
+  private async joinCardMeeting(card: KanbanCard, mode: MeetingMode, note = ''): Promise<string | null> {
+    const outcome = await requestMeetingJoin(this.shuttleBase, {
+      fiberId: card.id,
+      origin: card.originId,
+      mode,
+      note,
+    })
+    if (outcome.kind === 'error') {
+      this.showBanner(`Couldn't start the meeting: ${outcome.message}`, 'error')
+      return outcome.message
+    }
+    if (outcome.kind === 'joined') {
+      this.showBanner(`Recording — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
+    } else {
+      this.showBanner(`Recording, but “${card.name}” didn't receive the meeting: ${outcome.error}`, 'error')
+    }
+    await this.refreshMeeting()
+    void this.fetchAndRender()
+    return null
   }
 
   private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {
@@ -1787,6 +1826,7 @@ export class KanbanModal {
         this.meetingStopGuard.observe(status.meeting)
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
+        this.container?.classList.toggle('kbn-meeting-active', !meetingJoinable(status))
         this.syncMeetingClock()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.surfaces.updateMeetingPresentation()

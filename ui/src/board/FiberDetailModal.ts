@@ -21,6 +21,7 @@ import {
 } from './attachments.js'
 import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agentGroups.js'
+import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { defaultSurface, isCodexAgent, persistedSurface, sessionHelp, type ExecutionSurface } from '../forms/executionSurface.js'
 import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
@@ -112,6 +113,15 @@ function clockTime(ms: number): string {
 function dayStamp(ms: number): string {
   const day = new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   return `${day} ${clockTime(ms)}`
+}
+
+/** The board's meeting control, lent to the detail panel. */
+export interface MeetingJoinControl {
+  /** hark is available on this machine and nothing is recording. */
+  canJoin(): boolean
+  /** Record a meeting and join it to the card's constitution with `note`;
+   *  resolves to the error to show, or null once recording began. */
+  join(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null>
 }
 
 export interface SessionWindow {
@@ -522,6 +532,9 @@ export class FiberDetailModal {
    * as another tab in the same panel rather than starting a second one.
    */
   private linkPanel: LinkedFiberPanel | null = null
+  /** Joins a meeting to the card's constitution; absent where the board has
+   *  no meeting control (a panel opened outside the Desk). */
+  private readonly meeting: MeetingJoinControl | null
   /** Unsubscribe from the mobile-threshold watch, live while the panel is open.
    *  Crossing 700px re-frames the panel between window and sheet in place. */
   private mobileWatch: (() => void) | null = null
@@ -535,6 +548,7 @@ export class FiberDetailModal {
       host?: HTMLElement
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
+      meeting?: MeetingJoinControl
     },
   ) {
     this.shuttleBase = shuttleBase
@@ -544,6 +558,7 @@ export class FiberDetailModal {
     this.host = opts?.host ?? null
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
+    this.meeting = opts?.meeting ?? null
   }
 
   /**
@@ -1731,7 +1746,7 @@ export class FiberDetailModal {
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { host, panel, onCloseRequest: requestClose },
+      { host, panel, onCloseRequest: requestClose, meeting: this.meeting ?? undefined },
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
@@ -2240,6 +2255,7 @@ export class FiberDetailModal {
     if (shuttleManaged) {
       actionsRow.prepend(waitBtn)
       actionsSec.append(messageTa, messageHelp, actionsRow, actionsErr)
+      if (this.meeting?.canJoin()) actionsSec.append(this.buildMeetingRow(card, messageTa, swallowDrag))
     } else {
       actionsSec.append(actionsRow, actionsErr)
     }
@@ -3395,6 +3411,75 @@ export class FiberDetailModal {
 
   private async postLifecycle(body: Record<string, unknown>): Promise<void> {
     await this.postJson('/api/v1/lifecycle', body)
+  }
+
+  /**
+   * The Capture form's Meeting toggle, for an existing constitution: checking
+   * it offers Call | Room and a start button. The recording runs on this
+   * machine; the message above becomes the meeting's note, and the worker —
+   * live or not — receives the meeting as a joined constitution.
+   */
+  private buildMeetingRow(
+    card: KanbanCard,
+    noteTa: HTMLTextAreaElement,
+    swallowDrag: (el: HTMLElement) => void,
+  ): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'kbn-detail-meeting-row'
+    const toggle = document.createElement('label')
+    toggle.className = 'kbn-detail-meeting-toggle'
+    const check = document.createElement('input')
+    check.type = 'checkbox'
+    const text = document.createElement('span')
+    text.textContent = 'Meeting'
+    toggle.append(check, text)
+
+    const mode = document.createElement('select')
+    mode.className = 'kbn-detail-select kbn-detail-meeting-mode'
+    mode.setAttribute('aria-label', 'Meeting mode')
+    for (const { value, label } of MEETING_MODES) {
+      const option = document.createElement('option')
+      option.value = value
+      option.textContent = label
+      mode.append(option)
+    }
+    const start = this.buildActionBtn('Start meeting ▸', 'primary')
+    start.title = 'Record the meeting on this machine and join it to this constitution; its worker follows the transcript'
+    const err = document.createElement('div')
+    err.className = 'kbn-detail-error'
+    err.style.display = 'none'
+    const sync = (): void => {
+      mode.style.display = check.checked ? '' : 'none'
+      start.style.display = check.checked ? '' : 'none'
+    }
+    check.addEventListener('change', sync)
+    sync()
+    for (const el of [toggle, mode]) swallowDrag(el)
+
+    start.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const original = start.textContent ?? ''
+      start.disabled = true
+      start.textContent = 'Starting…'
+      err.style.display = 'none'
+      void this.meeting!.join(card, mode.value as MeetingMode, noteTa.value).then((error) => {
+        start.disabled = false
+        start.textContent = original
+        if (error) {
+          err.textContent = error
+          err.style.display = ''
+          return
+        }
+        check.checked = false
+        noteTa.value = ''
+        sync()
+      })
+    })
+
+    row.append(toggle, mode, start)
+    const wrap = document.createElement('div')
+    wrap.append(row, err)
+    return wrap
   }
 
   /**

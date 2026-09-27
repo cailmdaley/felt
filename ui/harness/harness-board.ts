@@ -54,11 +54,12 @@ const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
-let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live'
+let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || meetingScenario === 'joined'
   ? {
       state: 'live',
       title: 'Shear telecon',
       mirror_host: 'project-host',
+      fiber: meetingScenario === 'joined' ? 'loom/shear-bmodes' : null,
       started_at: iso(-13 * 60_000 - 12_000),
       last_line: '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
       transcript: null,
@@ -70,6 +71,7 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live'
         state: 'failed',
         title: 'Shear telecon',
         mirror_host: null,
+        fiber: null,
         started_at: iso(-2 * 60_000),
         last_line: null,
         transcript: null,
@@ -1293,6 +1295,23 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ meeting: mockMeeting }, 202)
   }
   if (url.endsWith('/api/v1/meeting')) return json({ available: true, meeting: mockMeeting })
+  if (url.endsWith('/api/v1/meeting/join') && init?.method === 'POST') {
+    const request = body()
+    if (mockMeeting && mockMeeting.state !== 'failed') return json({ error: 'a meeting is already active', meeting: mockMeeting }, 409)
+    const fiber = String(request.fiber_id ?? '')
+    mockMeeting = {
+      state: 'starting',
+      title: String(request.note ?? '').split('\n')[0] || fiber.split('/').pop() || 'Meeting',
+      started_at: null,
+      last_line: null,
+      transcript: null,
+      mirror_host: request.origin === 'local' ? null : 'project-host',
+      fiber,
+      tmux_session: 'hark-meeting',
+      error: null,
+    }
+    return json({ meeting: mockMeeting, delivery: { delivered: true, delivery: 'message' } })
+  }
   if (url.endsWith('/api/v1/capture') && init?.method === 'POST') {
     const request = body()
     if (request.meeting && typeof request.meeting === 'object') {
@@ -1304,6 +1323,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         last_line: null,
         transcript: null,
         mirror_host: request.origin === 'local' ? null : 'project-host',
+        fiber: null,
         tmux_session: 'hark-meeting',
         error: null,
       }

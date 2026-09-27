@@ -31,7 +31,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
-import { captureOutcome, captureRequestBody, type CaptureMeetingMode, type CaptureResponseData } from './captureApi'
+import { captureOutcome, captureRequestBody, type CaptureResponseData } from './captureApi'
+import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import type { AgentEntry } from './StashForm'
 import { agentGroups } from './agentGroups'
 import { shuttleOrigin } from './projectModel'
@@ -122,7 +123,7 @@ export function CaptureForm({
   const [chrome, setChrome] = useState<boolean>(false)
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [meetingAvailable, setMeetingAvailable] = useState(false)
-  const [meetingMode, setMeetingMode] = useState<CaptureMeetingMode | null>(null)
+  const [meetingMode, setMeetingMode] = useState<MeetingMode | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -298,10 +299,11 @@ export function CaptureForm({
                   className="capture-select"
                   value={meetingMode}
                   disabled={submitting}
-                  onChange={(e) => setMeetingMode(e.target.value as CaptureMeetingMode)}
+                  onChange={(e) => setMeetingMode(e.target.value as MeetingMode)}
                 >
-                  <option value="call">Call</option>
-                  <option value="room">Room</option>
+                  {MEETING_MODES.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
               </label>
             )}

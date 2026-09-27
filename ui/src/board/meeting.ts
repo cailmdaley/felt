@@ -10,6 +10,8 @@ export interface MeetingRecord {
   last_line: string | null
   transcript: string | null
   mirror_host: string | null
+  /** The constitution this meeting joined; `null` for a capture meeting. */
+  fiber: string | null
   tmux_session: string | null
   error: string | null
 }
@@ -34,6 +36,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     last_line: nullableString('last_line'),
     transcript: nullableString('transcript'),
     mirror_host: nullableString('mirror_host'),
+    fiber: nullableString('fiber'),
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }
@@ -56,6 +59,21 @@ export function meetingStateWord(state: MeetingState): string {
     stopping: 'Stopping',
     failed: 'Failed',
   }[state]
+}
+
+/** A new meeting can start here: hark is available and nothing is recording
+ *  (a failed row is replaced by the next start). */
+export function meetingJoinable(status: MeetingStatus): boolean {
+  return status.available && (!status.meeting || status.meeting.state === 'failed')
+}
+
+/** How a joined constitution's worker received the meeting, for the banner. */
+export function joinDeliveryPhrase(delivery: string): string {
+  return {
+    message: 'its worker has the meeting',
+    resume: 'resumed with the meeting',
+    dispatch: 'started with the meeting',
+  }[delivery] ?? 'joined the meeting'
 }
 
 export interface MeetingActions {
