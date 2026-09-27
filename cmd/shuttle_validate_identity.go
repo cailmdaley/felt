@@ -77,17 +77,17 @@ type daemonFiberRow struct {
 
 var validateIdentityCmd = &cobra.Command{
 	Use:   "validate-identity",
-	Short: "Validate federated fiber UID readiness across daemon feeds",
+	Short: "Validate fiber UID invariants across daemon feeds",
 	Long: `Queries the shuttle daemon document surface and checks the
-intrinsic-identity migration invariants:
+intrinsic-identity invariants:
 
   - /api/v1/fibers rows carry ULID uid values
   - document id equals uid when uid is present
   - uid values do not describe multiple slug addresses in one daemon feed
   - open/active shuttle fibers have shuttle.host ownership
 
-By default it checks the local daemon (:4000) plus every configured remote's
-tunnel URL (see 'felt shuttle remotes list').
+By default it checks the local daemon (its listener per 'felt shuttle host')
+plus every configured remote's URL (see 'felt shuttle remotes list').
 Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

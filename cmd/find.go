@@ -27,37 +27,22 @@ const findOuterCap = 20
 
 var findCmd = &cobra.Command{
 	Use:   "find [query]",
-	Short: "Search the whole store, across the view boundary",
-	Long: `Searches every fiber in the store, not just this view.
+	Short: "Search the whole store, beyond this view",
+	Long: `find runs ls's matching over the whole store. When this .felt is mounted
+inside a larger store, local hits print first under their local ids, then the
+rest of the store under a separator, each by its full id there; those ids work
+as arguments to show, edit, nest, rm, and tree. In a top-level store find is a
+plain search.
 
-felt ls lists the view; felt find searches the store. When this project's
-.felt is mounted inside a larger store (a loom), find searches both: local
-hits print first under their local ids, then the rest of the store under a
-separator naming it, each by its full id there. Those outer ids work as
-arguments here — felt show, edit, rm, shuttle all act on the fiber where it
-lives. In a top-level store find is simply a search of that store.
+A query, -t, or --has-field is required. Every status is searched; closed
+matches are counted rather than printed unless -s asks for them. Matches under
+a matching ancestor fold into it (-v lists them flat), and --limit caps the
+enclosing store's block.
 
-Matching is ls's: name, outcome, additional YAML field text, and fiber id.
-
-  felt find kanban            substring search
-  felt find -r "rule:.*data"  regex search
-  felt find -e exact-slug     exact name or id match
-  felt find -t bug            tag filter (AND logic, trailing colon for prefix)
-  felt find --body leakage    also search fiber bodies
-
-A filter widens the search to every status except closed; closed matches are
-counted in a trailing hint instead of printed. Use -s to override: open,
-active, closed, or all.
-
-Matches collapse by containment — a hit whose ancestor also matched is folded
-into that ancestor, which carries a count of what it swallowed; -v lists every
-match flat. The outer block is capped at 20 entries, with an exact count of
-the remainder; --limit sets another cap, or 0 for all of them.
-
--j/--json emits one merged array, each fiber in the coordinates it was found
-in and carrying the "store" that holds it. Being a wire, it is uncapped and
-unsuppressed by default: every status the filter asked for, every match — pass
---limit explicitly to cap the outer half.`,
+--json is one array with a "store" field on each fiber, every match and status
+included; --limit caps it only when given.`,
+	Example: `  felt find covariance
+  felt find -t rule: -r "data|vector"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := requireStore()
@@ -241,13 +226,14 @@ func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) 
 }
 
 func init() {
+	findCmd.GroupID = groupSearch
 	rootCmd.AddCommand(findCmd)
 	findCmd.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
-	findCmd.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
-	findCmd.Flags().BoolVar(&findBody, "body", false, "Include fiber bodies in the search")
-	findCmd.Flags().BoolVarP(&findExact, "exact", "e", false, "Exact name or id match only")
-	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat query as regular expression")
-	findCmd.Flags().StringArrayVar(&findHasFields, "has-field", nil, "Filter to fibers with this top-level frontmatter field (repeatable or comma-separated)")
+	findCmd.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
+	findCmd.Flags().BoolVar(&findBody, "body", false, "Also search bodies")
+	findCmd.Flags().BoolVarP(&findExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
+	findCmd.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
+	findCmd.Flags().StringArrayVar(&findHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
 	findCmd.Flags().BoolVarP(&findVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	// Long-only on purpose: ls's -n is --recent, and one letter meaning two
 	// different things across two sibling search verbs is a trap.

@@ -25,8 +25,8 @@ collaboration:
 shuttle:
   kind: oneshot
   agent: claude-opus
-  host: candide
-  project_dir: /home/cail/unions-bmodes
+  host: cluster
+  project_dir: /home/me/bmodes
 ---
 
 :::{embed} report.html

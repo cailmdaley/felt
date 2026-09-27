@@ -58,36 +58,19 @@ type shuttleEntry struct {
 var statusCmd = &cobra.Command{
 	Use:   "status [fiber]",
 	Short: "Status overview, or a detailed report for one fiber",
-	Long: `With no argument, prints one line per fiber that carries a shuttle: facet,
-across the felt stores this machine dispatches (the -C / --felt-store store when
-set, otherwise the configured stores: FELT_STORES env, then the
-~/.config/felt/stores.json registry). Liveness is read from tmux.
+	Long: `With no argument, prints a table of every fiber with a shuttle: block in the
+stores this machine dispatches (-C when set, else FELT_STORES, else the
+~/.config/felt/stores.json registry). State is running (read from tmux), idle,
+scheduled (a standing role), paused (a draft), or closed. next_due_at comes
+from the daemon, so only the cross-host table (--all, --remote) fills it.
 
-Columns: fiber_id  kind  state  next_due_at  agent
-
-With a fiber argument, prints the detailed single-fiber report instead: the whole
-shuttle: block, plus whether the daemon will dispatch it and — when it won't —
-the verb that changes that. This is the way to check one role's state before
-reaching for a mutation verb.
+With a fiber, prints the block's key fields, any running worker, and whether
+its status arms it for dispatch, naming the verb that would when it does not.
+That verdict reads status alone; host ownership, project_dir, and the boot
+quarantine are the daemon's to judge.
 
   felt shuttle status                 # the table
-  felt shuttle status <fiber>         # one fiber, in full
-
-Cross-host (queries the local daemon's /api/v1/state/composite):
-  --all           local plus every configured remote (composite snapshot).
-  --remote NAME   only the named remote.
-
-The daemon's RemoteRegistry polls each remote over its SSH-tunnel-mapped port;
-the CLI just renders that response. Rows from a remote carry an "origin" column;
-stale remotes (the registry hasn't heard back recently) are flagged "[stale]".
-
-Other flags:
-  --closed           also list closed fibers. The table hides them by default
-                     (they are the bulk of any store that has been worked for a
-                     while) and says how many it hid; --json always emits them.
-  --include-orphans  also list live shuttle tmux sessions that no longer map to a
-                     shuttle: facet (rare; useful after manual cleanup).
-  --json             emit an array of objects instead.`,
+  felt shuttle status <fiber>         # one fiber`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The single-fiber report is a local read of one fiber, so the flags that

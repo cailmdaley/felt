@@ -128,6 +128,15 @@ func printPeerDirectory(directory messaging.Directory) {
 var shuttleMessageCmd = &cobra.Command{
 	Use:   "message <address> [text|-]",
 	Short: "Send a message and files to an existing session",
+	Long: `Delivers text (and --attach files) to a session address from
+'felt shuttle sessions', routed through the local daemon to the owning host.
+The text is the second argument, '-' for stdin, or --file; it is capped at
+64 KiB. At least one of text, --file, or --attach is required.
+
+By default the addressed session is woken; --context-only (or --wake=false)
+adds the message as context without starting or steering a model turn. Prints
+the receipt status and message id, and exits non-zero when delivery is
+rejected or unknown; reuse --message-id to retry safely.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if messageRequestJSON {
 			if !messageLocal {

@@ -35,16 +35,15 @@ handed_off_at, run_id) sitting directly under a shuttle: block into the nested
 shuttle.runtime sub-mapping, then drops the flat key. A nested value already
 present wins (the flat one is the older write and is dropped). Idempotent.
 
-Scoped to fibers this host owns (shuttle.host == own host) — nesting a fiber a
-not-yet-flipped remote owns and syncing it would blind that remote's flat-only
-daemon. Use --dir to point at a store, --host to target a different owner, and
---dry-run to print the plan without writing.
+Scoped to fibers this host owns (shuttle.host == own host), so it never
+rewrites a fiber another daemon owns. Use --dir to point at a store (default:
+the current store), --host to target a different owner, and --dry-run to print
+the plan without writing.
 
-A legacy one-time migration, retained deliberately as a fallback: every writer
-in the fleet emits nested keys, so a flat-only fiber can only surface from a
-store that has been offline since the cutover (an old checkout, an unpushed
-tree, a backup). The daemon no longer scans for them; this is the remedy if one
-turns up.`,
+Every writer emits nested keys, and the daemon reads only nested ones — a fiber
+with flat keys alone reads as having no continuation state. Such a fiber comes
+only from a store no current writer has touched (an old checkout, an unpushed
+tree, a backup); this verb is the remedy when one turns up.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ownHost, err := resolveOwnHost(migrateRuntimeHost)

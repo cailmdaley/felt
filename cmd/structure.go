@@ -20,29 +20,22 @@ var (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Normalize fibers into the current storage model",
-	Long: `Normalizes legacy felt storage details into the current model.
+	Short: "Convert legacy store layouts to the current model",
+	Long: `Converts legacy storage in place:
+  - two or more bare .felt/*.md files become <slug>/<slug>.md fibers, and
+    inputs.from references to their old ids are rewritten (a single bare .md
+    is the store's entry-point fiber and stays)
+  - stray fiber files, a bare <dir>/<slug>.md with fiber frontmatter below
+    the root, fold into <dir>/<slug>/<slug>.md (markdown without fiber
+    frontmatter is a companion file and stays)
+  - frontmatter title becomes name
+  - inert depends-on frontmatter is removed
+  - leading MyST anchor lines such as (slug)= are stripped from bodies
 
-This migration pass:
-- converts legacy top-level .felt/*.md files into directory-based fibers
-- folds stray fiber files (a bare <dir>/<slug>.md carrying fiber frontmatter)
-  into <dir>/<slug>/<slug>.md
-- rewrites frontmatter key title -> name
-- removes inert legacy depends-on frontmatter
-- strips leading MyST anchor lines like (slug)= from fiber bodies
-
-Each migrated flat fiber lands at <slug>/<slug>.md, and any inputs.from
-references to migrated hex IDs are rewritten.
-
-A single bare .md at .felt/ root is the entry-point fiber and is preserved —
-only multiple bare files are treated as orphaned legacy and migrated.
-
-Markdown below the root without fiber frontmatter is a companion file and is
-left alone. A stray fiber file that cannot be folded safely — its
-<slug>/<slug>.md already exists, its <slug> is a file or a symlink, or the
-stray is itself a symlink — is never moved: it is reported with the reason,
-the rest of the pass runs, and migrate exits non-zero until it is moved by
-hand.`,
+A stray that cannot fold safely (its target already exists, its <slug> is a
+file or symlink, or the stray is itself a symlink) is left in place with the
+reason; the rest of the pass runs and migrate exits non-zero until it is moved
+by hand.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -108,11 +101,10 @@ hand.`,
 
 var backfillIDsCmd = &cobra.Command{
 	Use:   "backfill-ids",
-	Short: "Assign intrinsic ULID ids to existing fibers",
-	Long: `Assigns a frontmatter id ULID to every fiber missing one.
-
-Run this only on the canonical owner of a store, then sync the resulting files.
-Replicas should inherit the committed ids rather than minting their own.`,
+	Short: "Assign ULID ids to fibers that lack one",
+	Long: `Writes a frontmatter id (a ULID) into every fiber missing one. Run it only in
+the store's canonical checkout, then commit and sync; other checkouts take the
+committed ids rather than minting their own.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, err := resolveMigrationStorage(backfillIDsDir)
@@ -147,19 +139,21 @@ Replicas should inherit the committed ids rather than minting their own.`,
 
 var nestCmd = &cobra.Command{
 	Use:   "nest <child> <parent>",
-	Short: "Move a fiber under another fiber",
-	Long: `Moves an existing fiber subtree under a parent. References whose path the move
-would point elsewhere — wikilinks, markdown links, inputs.from, whether they
-named the moved fibers or would be captured by them — are rewritten, across the enclosing store too when this store is
-a view into one, and each rewritten fiber is named.
+	Short: "Move a fiber subtree under a parent",
+	Long: `The child keeps its basename and brings its descendants: nesting covariance
+under analysis gives analysis/covariance. Every wikilink, markdown link, and
+inputs.from whose path the move would break is rewritten, whether it names a
+moved fiber or would be captured by one, across the enclosing store too when
+this is a view; each fiber rewritten is named.
 
-A parent spelled as a path that exists in the store is used exactly as
-spelled, including a directory that holds fibers without one of its own
-(roles/ is always the top-level roles namespace). Any other parent, and the
-child, resolve like a fiber reference, except that a guess — a stale path
-rescued by its last segment, or a prefix completion — is refused with the
-fiber it would have reached.`,
-	Args: cobra.ExactArgs(2),
+A <parent> that is an existing path in the store is used as spelled, even a
+directory with no fiber of its own (roles/ is always the top-level roles
+namespace); any other <parent>, and the child, resolve like a fiber id, except
+that an id resolving only by its last segment or as a prefix completion is
+refused, naming the fiber it would have reached. When either side lives
+outside this view, the move happens in the enclosing store.`,
+	Example: `  felt nest covariance analysis`,
+	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {
@@ -229,14 +223,13 @@ func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, er
 
 var unnestCmd = &cobra.Command{
 	Use:   "unnest <child>",
-	Short: "Promote a nested fiber to the top level",
-	Long: `Moves a nested fiber subtree to the top level, rewriting references it
-would break as nest does.
-
-The child resolves like a fiber reference, except that a guess — a stale path
-rescued by its last segment, or a prefix completion — is refused with the
-fiber it would have reached.`,
-	Args: cobra.ExactArgs(1),
+	Short: "Move a nested fiber subtree to the top level",
+	Long: `The fiber keeps its basename and brings its descendants: analysis/covariance
+becomes covariance. References the move would break are rewritten, and guessed
+ids refused, as nest does. A fiber in the enclosing store moves to that
+store's top level.`,
+	Example: `  felt unnest analysis/covariance`,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {
@@ -287,14 +280,18 @@ func printRewrittenRefs(storage *felt.Storage, result *felt.MoveResult) {
 }
 
 func init() {
+	migrateCmd.GroupID = groupStore
 	rootCmd.AddCommand(migrateCmd)
+	backfillIDsCmd.GroupID = groupStore
 	rootCmd.AddCommand(backfillIDsCmd)
+	nestCmd.GroupID = groupFibers
 	rootCmd.AddCommand(nestCmd)
+	unnestCmd.GroupID = groupFibers
 	rootCmd.AddCommand(unnestCmd)
 
-	migrateCmd.Flags().StringVar(&migrateDir, "dir", "", "Project root or .felt directory to migrate")
+	migrateCmd.Flags().StringVar(&migrateDir, "dir", "", "Project root or .felt directory to migrate (default: the current store)")
 	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Print planned migrations without writing files")
-	backfillIDsCmd.Flags().StringVar(&backfillIDsDir, "dir", "", "Project root or .felt directory to backfill")
+	backfillIDsCmd.Flags().StringVar(&backfillIDsDir, "dir", "", "Project root or .felt directory to backfill (default: the current store)")
 	backfillIDsCmd.Flags().BoolVar(&backfillIDsDryRun, "dry-run", false, "Print planned identity assignments without writing files")
 }
 

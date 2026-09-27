@@ -22,34 +22,34 @@ its commit and date, a local build the source revision it was built from
 | Command | Purpose |
 |---|---|
 | `felt init` | Create or repair the local `.felt/` directory and support files |
-| `felt add <slug> <name>` | Create a new fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level`) |
+| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name) |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
-| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
-| `felt rm <id>` | Permanently delete a fiber; refuses a guessed address (a stale path rescued by its last segment, a prefix completion) and names the fiber it would have reached |
-| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push |
+| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store) |
+| `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are. Refuses a guessed id (one resolving only by its last segment or as a prefix completion) and names the fiber it would have reached |
+| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and never stages, stashes, or force-pushes; a diverged upstream makes a merge commit |
 
 ## Search and reading
 
 | Command | Purpose |
 |---|---|
-| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
-| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `rm`, `shuttle`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `-v`, `--limit`, `-j`) |
+| `felt ls [query]` | List and search fibers (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact name, id, or basename, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
+| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `nest`, `rm`, `tree`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `-v`, `--limit`, `-j`) |
 | `felt session` | Print the SessionStart context as plain text |
-| `felt tree [id]` | Show the containment tree (`-L`/`--depth` caps depth; elided branches show how much is below) |
+| `felt tree [id]` | Show the containment tree, every status included (`-L`/`--depth` caps depth; elided branches show how much is below) |
 
 ## Structure
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references the move would break (store-wide from a view); refuses a guessed address |
-| `felt unnest <child>` | Promote a nested fiber subtree to the top level, rewriting references the same way; refuses a guessed address |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id |
+| `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting and refusing as `nest` does |
 
 ## Maintenance
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, stale reference paths, legacy keys, slug collisions, stray fiber files |
-| `felt migrate` | Normalize legacy storage into the current model, folding stray fiber files into their directories (`--dir`, `--dry-run`) |
+| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` and `depends_on` refs, stale link paths, legacy forms, slug collisions, stray fiber files; exits non-zero on errors |
+| `felt migrate` | Normalize legacy storage into the current model, folding stray fiber files into their directories; exits non-zero when a stray cannot fold safely (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
 ## Setup / update
@@ -58,11 +58,12 @@ its commit and date, a local build the source revision it was built from
 |---|---|
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
+| `felt setup pi` | Install the felt package for pi (`--uninstall`) |
 | `felt setup receipt` | Report the executable, promoted and actually loaded harness generations, hooks, pending promotion state, and live daemon contract (`--json` for the machine-readable receipt) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
 | `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate (`--executable` overrides the felt binary probed for contract compatibility) |
-| `felt uninstall` | Remove the felt plugin from Claude Code and Codex (inverse of `setup claude`/`setup codex`) |
-| `felt update` | Update felt to the latest version, refreshing plugin wiring too |
+| `felt uninstall` | Remove the felt plugin from Claude Code and Codex and the felt package from pi (inverse of `setup claude`/`codex`/`pi`) |
+| `felt update` | Update felt to the latest release, moving the Claude Code plugin and any installed Codex or pi integration to the matching tag |
 
 ## `felt hook` (agent-harness adapters)
 
@@ -75,12 +76,16 @@ people.
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
 | `felt hook event` | Append one harness hook event to the host-local shuttle activity stream (`~/.shuttle/events.jsonl`) |
+| `felt hook commit` | Record a commit a Bash call just made on the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
 
 ## `felt shuttle` (dispatch layer)
 
 These optional verbs apply once a fiber carries a `shuttle:` block. Write verbs
-work offline, and validate before they touch disk. A few read verbs talk to the
-local daemon at `:4000`; for what that daemon speaks directly, see the [HTTP
+work offline, and validate before they touch disk. `snapshot`, `dispatch`,
+`status --all`/`--remote`, `sessions`, `transcript`, `message`, and
+`validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
+per `felt shuttle host`); `accept` and `resume` go through the owning daemon
+when it answers. For what the daemon speaks directly, see the [HTTP
 API](api.md).
 
 ### Install / reshape the contract
@@ -91,14 +96,14 @@ API](api.md).
 | `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--host`) |
 | `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`) |
 | `felt shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
-| `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; fiber and felt status untouched |
+| `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
 `install`, `pin`, and `repeat` are create-only: each refuses a fiber that
 already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
 `set-model`/`set-agent` (agent), or `uninstall` (start over). A fresh create
-settles status (`install`/`repeat` arm to `active`, `pin` parks at `open`) and
-refuses a closed fiber — arming something already reviewed needs an explicit
-`reopen`. `reshape` touches only the block's shape — `kind`, and a standing
+settles status (`install`/`repeat` arm to `active`, `pin` and `install
+--disabled` park at `open`); an arming create refuses a closed fiber — arming
+something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
 role's schedule — and leaves status and verdict fields exactly as found, so a
 role in Awaiting review can be reshaped in place without being requeued; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
@@ -110,7 +115,7 @@ untouched by any of this.
 | Command | Purpose |
 |---|---|
 | `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `felt shuttle resume <fiber>` | Set status to `active`; the sole dispatch gate |
+| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`) |
 | `felt shuttle accept <fiber>` | Resolve a human verdict on a role awaiting review (kind-aware re-arm/re-park; `--keep-outcome`) |
 | `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead) |
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
@@ -124,7 +129,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including the daemon's dispatch assessment |
+| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including a status-based dispatch verdict |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
@@ -259,7 +264,7 @@ the existing owner-served file surface.
 | Command | Purpose |
 |---|---|
 | `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
-| `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
+| `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
 | `felt shuttle host class <class>` | Set this host's trust class in `~/.config/felt/host.json` (`single-user`, `shared-multi-user`, `exposed`) |

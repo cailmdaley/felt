@@ -115,7 +115,7 @@ worker tmux session if one is running. Clears tempered / closed-at so the card
 lands in Drafts rather than Awaiting review.
 
 Use --no-kill to stop scheduling only and let a live worker finish naturally.
-status:active is the sole dispatch gate; there is no enabled flag.`,
+status is the fiber's only dispatch switch; there is no enabled flag.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
@@ -165,15 +165,17 @@ status:active is the sole dispatch gate; there is no enabled flag.`,
 var resumeCmd = &cobra.Command{
 	Use:   "resume <fiber>",
 	Short: "Arm a paused fiber (status: active)",
-	Long: `Sets the felt-native status to "active" — the sole dispatch gate — so the
-daemon dispatches the fiber on its next poll.
+	Long: `Sets the felt-native status to "active" — the fiber's dispatch switch — so
+the owning daemon dispatches it on its next poll (after a daemon restart, once
+the boot quarantine is released).
 
 For a standing role awaiting review (status: closed + untempered), resume re-arms
 it for immediate dispatch and routes to the owning daemon (which clears the
 awaiting marker and recomputes due-ness from the schedule), falling back to a
 local document write when the daemon is unreachable. A draft (status: open) is
-armed straight to active. Refuses on a tempered/discarded close — use
-'felt shuttle reopen' to requeue a finished fiber.`,
+armed straight to active. Every other closed fiber — a oneshot or pinned role,
+or any accepted or discarded close — is refused; use 'felt shuttle reopen' to
+requeue it. Arming refuses an agent the registry cannot resolve.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
@@ -265,7 +267,8 @@ field is missing. Use:
   felt shuttle close <fiber> --tempered=false  # discarded
 
 The shuttle block stays installed; closed fibers are ignored by the daemon
-until they are reopened.`,
+until reopen or accept moves them (resume also re-arms a standing role
+awaiting review).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, _, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
@@ -308,8 +311,9 @@ var reopenAsDraft bool
 var reopenCmd = &cobra.Command{
 	Use:   "reopen <fiber>",
 	Short: "Requeue a closed or reviewed fiber back into active work",
-	Long: `Sets status = active and clears tempered / closed-at so a previously closed
-card re-enters the in-flight loop. status:active is the sole dispatch gate.
+	Long: `Sets status = active and clears tempered / closed-at so a closed card
+re-enters the in-flight loop. status is the fiber's only dispatch switch.
+Arming refuses an agent the registry cannot resolve.
 
 With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
@@ -528,11 +532,13 @@ falls back to a local document write when the daemon is down.`,
 
 var setModelCmd = &cobra.Command{
 	Use:   "set-model <fiber> <agent>",
-	Short: "Change the dispatch agent for a fiber",
+	Short: "Change only the dispatch agent for a fiber",
 	Long: `Updates shuttle.agent to the given agent ID, validated against the agent
 registry (together with the block's existing effort/chrome axes) before writing.
 The single field is set surgically so the daemon-owned runtime keys are
-preserved. This saves the next-launch agent without starting or replacing a worker.`,
+preserved; effort, chrome, and surface stay as they are — use set-agent to
+change them with the agent. This saves the next-launch agent without starting
+or replacing a worker.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -579,13 +585,15 @@ var (
 // delete for a cleared effort/agent) so the runtime keys are preserved.
 var setAgentCmd = &cobra.Command{
 	Use:   "set-agent <fiber> [agent]",
-	Short: "Set the dispatch agent and/or axes (effort, chrome) for a fiber",
-	Long: `Composes a fiber's dispatch axes — base agent, effort, chrome — and writes
-them to the shuttle: block after validating the combination against the agent
-registry's per-harness constraints. The base agent argument is optional: omit it
-to mutate only the axes of the current agent. Pass --effort "" to clear effort
-back to the harness default. Settings apply to the next launch; this command
-does not start, stop, resume, or replace a worker.`,
+	Short: "Set the dispatch agent and/or axes (effort, chrome, surface) for a fiber",
+	Long: `Composes a fiber's dispatch axes — base agent, effort, chrome, surface — and
+writes them to the shuttle: block after validating the combination against the
+agent registry's per-harness constraints. The base agent argument is optional:
+omit it to mutate only the axes of the current agent; an omitted flag keeps
+that axis as it is. Pass --effort "" to clear effort back to the harness
+default, --chrome=false to drop chrome. --surface app is Codex-only. Settings
+apply to the next launch; this command does not start, stop, resume, or replace
+a worker.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -715,8 +723,8 @@ outcome) untouched.
 The kind argument is optional: omit it to keep the current kind (a schedule-only
 edit). A standing target needs a schedule — from --schedule, or echoed from the
 block being reshaped. A oneshot or pinned target DROPS the schedule key, so a
-schedule-less kind never carries a stale recurrence; passing --schedule with one
-is an error.
+schedule-less kind never carries a stale recurrence; passing --schedule or --tz
+with one is an error.
 
 Requires an existing shuttle: block — use install / repeat / pin to create one.
 This is a config edit, not a lifecycle move: it never changes status, so use
@@ -840,7 +848,8 @@ var uninstallShuttleCmd = &cobra.Command{
 	Use:   "uninstall <fiber>",
 	Short: "Remove the shuttle: block from a fiber",
 	Long: `Removes the shuttle: block entirely. The fiber is left in place; the
-daemon will no longer dispatch it. The felt status and tags are not changed.`,
+daemon will no longer dispatch it. The fiber's status and tags are not changed,
+and a live worker is left running.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, ref, err := shuttleResolveFiberRef(args[0], true)
@@ -879,8 +888,8 @@ func registerShuttleLifecycleFlags() {
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
-	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears`)
-	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only)")
+	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
+	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
 	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "UTC", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")

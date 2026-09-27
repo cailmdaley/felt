@@ -9,23 +9,20 @@ import (
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Lint fibers for structural quality issues",
-	Long: `Runs felt's repository checks.
-
-Errors fail a plain-text run; warnings and notes print without failing it.
---json always exits zero and leaves the verdict to the reader. The checks cover:
-  - fibers that fail to parse (invisible to every other command)
-  - broken narrative wikilinks / body references
-  - broken inputs.from data-flow references
-  - stale path references that resolve only by their final segment
-  - legacy title frontmatter keys
-  - legacy depends-on frontmatter keys
-  - legacy MyST body anchors
-  - slug collisions between bare and nested fiber forms
-  - multiple bare .md files at .felt/ root
-  - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below
-    the root, which belongs at <dir>/<slug>/<slug>.md
-  - a shuttle host: that is this machine under a pre-normalization name`,
+	Short: "Report broken links and store layout problems",
+	Long: `Exits non-zero when it finds an error, under --json too. It reports:
+  - fibers that fail to parse, which every other command skips
+  - empty names
+  - wikilinks, inputs.from, and depends_on ids that resolve to no fiber
+  - a link whose path names no fiber but whose last segment does (a warning:
+    it resolves only by that guess, which rm, nest, and unnest refuse)
+  - legacy title, depends-on, and MyST anchor forms (felt migrate converts them)
+  - a slug in both bare and nested form, and more than one bare .md at the
+    .felt root
+  - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below the
+    root, which belongs at <dir>/<slug>/<slug>.md (felt migrate folds it)
+  - a shuttle host: naming this machine by a pre-normalization spelling
+    (a warning)`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,19 +66,21 @@ Errors fail a plain-text run; warnings and notes print without failing it.
 		}
 		issues = append(issues, legacyIssues...)
 		issues = append(issues, checkHostDrift(felts)...)
-		if jsonOutput {
-			return outputJSON(issues)
-		}
-		if len(issues) == 0 {
-			fmt.Println("Check OK")
-			return nil
-		}
-
 		errors := 0
 		for _, issue := range issues {
-			fmt.Println(issue.String())
 			if issue.Level == felt.CheckLevelError {
 				errors++
+			}
+		}
+		if jsonOutput {
+			if err := outputJSON(issues); err != nil {
+				return err
+			}
+		} else if len(issues) == 0 {
+			fmt.Println("Check OK")
+		} else {
+			for _, issue := range issues {
+				fmt.Println(issue.String())
 			}
 		}
 		if errors > 0 {
@@ -92,5 +91,6 @@ Errors fail a plain-text run; warnings and notes print without failing it.
 }
 
 func init() {
+	checkCmd.GroupID = groupStore
 	rootCmd.AddCommand(checkCmd)
 }

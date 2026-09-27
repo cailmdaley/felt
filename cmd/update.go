@@ -20,20 +20,17 @@ type ghRelease struct {
 }
 
 func init() {
+	updateCmd.GroupID = groupAgents
 	rootCmd.AddCommand(updateCmd)
 }
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update felt to the latest version",
-	Long: `Update felt to the latest version.
-
-Downloads the latest GitHub release.
-
-After the binary is updated, where the relevant CLI is present, the
-Claude Code plugin (and Codex / pi wiring, if previously installed) is
-refreshed in the same step so that hooks and skills stay in lockstep
-with the binary.`,
+	Short: "Update felt to the latest release",
+	Long: `Replaces this binary with the latest GitHub release (a dev build asks first),
+then moves the agent integrations to the matching tag so hooks and skills stay
+in step with the binary: the Claude Code plugin whenever the claude CLI is on
+PATH, and the Codex and pi integrations where felt is already installed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get latest release tag from GitHub
 		latest, err := latestVersion()

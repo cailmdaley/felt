@@ -25,20 +25,18 @@ var (
 
 var editCmd = &cobra.Command{
 	Use:   "edit <id>",
-	Short: "Modify a felt's native metadata via flags",
-	Long: `Modifies a felt's native metadata via flags.
+	Short: "Change a fiber's native fields or scalar frontmatter",
+	Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
+stamps closed-at; -s open or -s active clears it. Setting active on a fiber
+with a shuttle: block arms it for dispatch, so its agent must resolve. For a
+change smaller than the whole body, edit the file.
 
-Examples:
-  felt edit abc123 --name "New name" -s active
-  felt edit abc123 --tag decision --untag stale
-  felt edit abc123 --body "Full replacement body text"  # overwrites body
-  felt edit abc123 --outcome "What landed"
-  felt edit abc123 --set horizon=stashed --set cold=true  # opaque scalar frontmatter
-  felt edit abc123 --unset horizon --unset cold
-
---set/--unset write top-level scalar frontmatter felt does not parse natively
-(the value is read as a YAML scalar, so true/false/123 keep their type). Native
-keys have dedicated flags; use those.`,
+--set writes a top-level scalar to frontmatter felt does not own, read as
+YAML so true and 12 keep their types; native keys, empty values, and keys
+holding a mapping or list are refused. --unset removes any key felt does not
+own, structured ones included.`,
+	Example: `  felt edit analysis/covariance -s closed -o "jackknife, 200 patches"
+  felt edit analysis/covariance --set horizon=stashed`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
@@ -250,6 +248,7 @@ func unsetExtraField(f *felt.Felt, key string) error {
 }
 
 func init() {
+	editCmd.GroupID = groupFibers
 	rootCmd.AddCommand(editCmd)
 	initEditFlags()
 }
@@ -258,12 +257,12 @@ func init() {
 // can ResetFlags() between invocations to clear Changed state.
 func initEditFlags() {
 	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
-	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed)")
+	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed; empty clears)")
 	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
-	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s)")
-	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace full body text (destructive overwrite)")
+	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s) (repeatable; comma-separated accepted)")
+	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace the whole body")
 	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
-	editCmd.Flags().StringArrayVar(&editSet, "set", nil, "Set a non-native top-level scalar key (key=value; YAML-typed; repeatable)")
-	editCmd.Flags().StringArrayVar(&editUnset, "unset", nil, "Remove a non-native top-level key (repeatable)")
+	editCmd.Flags().StringArrayVar(&editSet, "set", nil, "Set a top-level scalar key felt does not own (key=value; repeatable)")
+	editCmd.Flags().StringArrayVar(&editUnset, "unset", nil, "Remove a top-level key felt does not own (repeatable)")
 }
