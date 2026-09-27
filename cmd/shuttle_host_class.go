@@ -447,7 +447,8 @@ var shuttleHostCmd = &cobra.Command{
 	Long: `Report the host id the daemon dispatches as, the host class, and the
 listener the daemon binds and the CLI dials.
 
-The class says who else can reach this machine:
+The class says who else can reach this machine and sets the default listener
+($SHUTTLE_LISTEN or the host file's "listen" overrides it):
   single-user          nobody else logs in; the daemon listens on 127.0.0.1
   shared-multi-user    other users log in; the daemon listens on a unix socket
   exposed              reachable from outside; the daemon listens on a unix socket

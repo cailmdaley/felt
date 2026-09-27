@@ -192,8 +192,8 @@ felt check
 felt check --json
 ```
 
-Errors make `felt check` exit non-zero; warnings and notes print without
-failing it. `--json` always exits zero and leaves the verdict to the reader.
+Errors make `felt check` exit non-zero, with or without `--json`; warnings and
+notes print without failing it.
 
 !!! note "Links across projects"
     From a project whose `.felt/` is a symlinked view into a larger store,

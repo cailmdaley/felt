@@ -20,19 +20,26 @@ const syncGitTimeout = 2 * time.Minute
 var syncPush bool
 
 func init() {
+	syncCmd.GroupID = groupStore
 	rootCmd.AddCommand(syncCmd)
-	syncCmd.Flags().BoolVar(&syncPush, "push", false, "push the current branch to its configured tracking branch after syncing")
+	syncCmd.Flags().BoolVar(&syncPush, "push", false, "Push the branch to its tracking branch after a successful merge")
 }
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Fetch and merge the felt store's configured upstream",
-	Long: `Fetch and merge the configured upstream for the Git repository containing
-the active felt store. A project .felt symlink syncs the repository it points
-to. Sync refuses staged changes and in-progress Git operations. Unstaged and
-untracked files stay in place; Git blocks a merge if it would overwrite them.
-Use --push to push this branch to its
-configured tracking branch after a successful merge.`,
+	Short: "Merge the store's Git upstream; --push publishes committed work",
+	Long: `Fetches the tracking branch of the repository that holds the store and merges
+it into the checked-out branch. A project .felt that is a symlink syncs the
+repository it points into.
+
+sync never stages, commits, stashes, or force-pushes. It refuses to start with
+staged changes, unresolved conflicts, or a merge, rebase, cherry-pick, revert,
+or bisect in progress. Unstaged and untracked files stay put unless the merge
+would overwrite them, in which case Git stops it. A merge that conflicts is
+left for you to resolve and commit. --push then pushes the branch to its
+tracking branch.`,
+	Example: `  felt sync          before substantive work
+  felt sync --push   after committing`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := requireStore()

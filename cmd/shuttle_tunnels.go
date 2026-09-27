@@ -128,7 +128,7 @@ var tunnelsCmd = &cobra.Command{
 	Short: "Install supervised autossh tunnels for shuttle remotes",
 	Long: `Manage the hub-side autossh tunnels that map remote shuttle daemons
 onto local ports. The generated jobs go to the host's own supervisor: launchd
-LaunchAgents in ~/Library/LaunchAgents on macOS, systemd --user units in
+LaunchAgents in ~/Library/LaunchAgents on macOS, systemd user units in
 ~/.config/systemd/user on Linux. Single-host use needs no tunnels at all.
 
 Run with no remote named, install is convergent: it writes and starts a job
@@ -140,8 +140,9 @@ forever once you re-run install. Naming a remote installs (or reinstalls)
 only that one and prunes nothing.
 
 A Linux host with no systemd user session cannot start a unit, so install says
-so and writes nothing; --write-only renders the units for you to supervise
-yourself (and skips pruning too, since both touch the supervisor).
+so and writes nothing; 'felt shuttle tunnels install --write-only' renders the
+units for you to supervise yourself (and skips pruning too, since both touch
+the supervisor).
 
 The remotes come from the fleet file (` + "`felt shuttle remotes path`" + `).
 

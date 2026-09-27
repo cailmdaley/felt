@@ -18,18 +18,14 @@ import (
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove the felt agent plugins (Claude Code, Codex, pi)",
-	Long: `Remove the felt integration from Claude Code, Codex, and pi.
+	Long: `The inverse of felt setup claude, codex, and pi: wherever felt is installed, it
+removes the plugin (or pi package) and the ` + marketplaceName + ` marketplace.
+For Claude Code it also unlinks skills that felt setup skills linked into
+~/.claude/skills from that marketplace, since removing it deletes their
+targets. Running it with nothing installed is a no-op.
 
-The inverse of ` + "`felt setup claude`, `felt setup codex`, and `felt setup pi`" + `: for each agent
-it removes the felt plugin (or pi package) and unregisters the ` + marketplaceName + `
-marketplace. For Claude Code it also unlinks any skills ` + "`felt setup skills`" + `
-linked out of that marketplace's clone, since removing the marketplace
-deletes what they point at; Codex skills are not linked that way and are
-left alone. Idempotent: running it when no plugins are installed is a
-no-op. Leaves the felt binary in place — to remove that:
-
-  brew uninstall felt        # if installed via brew
-  rm $(which felt)           # if installed via curl or go install`,
+The felt binary stays; remove it with brew uninstall felt, or by deleting
+$(which felt) for a curl or go install.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		runFeltUninstall()
@@ -38,6 +34,7 @@ no-op. Leaves the felt binary in place — to remove that:
 }
 
 func init() {
+	uninstallCmd.GroupID = groupAgents
 	rootCmd.AddCommand(uninstallCmd)
 }
 

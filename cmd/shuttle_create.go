@@ -79,16 +79,19 @@ var installCmd = &cobra.Command{
 	Use:   "install <fiber>",
 	Short: "Install a fiber as a one-shot dispatch role",
 	Long: `Install the fiber as a oneshot role: a one-time dispatch that the daemon
-picks up on its next poll.
+picks up on its next poll (after a daemon restart, once the boot quarantine is
+released).
 
   felt shuttle install <fiber> --project-dir "$PWD"                      # armed, default agent
   felt shuttle install <fiber> --project-dir "$PWD" --model claude-opus  # explicit agent
-  felt shuttle install <fiber> --disabled                                # land in drafts (status: open)
+  felt shuttle install <fiber> --project-dir "$PWD" --disabled           # land in drafts (status: open)
 
-Dispatch is gated solely by the felt-native status field: status:active is
-armed, status:open is a draft. An armed install requires --project-dir and sets
-status:active; --disabled sets status:open. An install on a closed fiber is
-refused — reopen it first.
+On the fiber, dispatch is switched by the felt-native status field alone (there
+is no enabled flag): status:active is armed, status:open is a draft. An armed
+install requires --project-dir and sets status:active; an armed install on a
+closed fiber is refused — reopen it first. --disabled sets status:open (from
+any prior status) and makes --project-dir optional, but 'felt shuttle resume'
+arms the block as it stands, so pass --project-dir if the draft will run.
 
 install creates; it never rewrites. A fiber that already has a shuttle: block is
 refused, with a pointer at the verb that edits in place (reshape for kind or
@@ -428,22 +431,22 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 // ResetFlags() + re-register to clear Changed state between runs.
 func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVarP(&installModel, "model", "m", "", "Agent ID (default: registry default)")
-	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd on the target host (required unless --disabled)")
-	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
-	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); use 'felt shuttle resume' to arm it")
+	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required unless --disabled")
+	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: this host's id, as 'felt shuttle host' reports it; set for a cross-host install)")
+	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); arm it later with 'felt shuttle resume'")
 	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 
 	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
-	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name (default: UTC)")
+	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name")
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
-	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
-	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
+	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: this host's id, as 'felt shuttle host' reports it; set for a cross-host install)")
 	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 
 	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
-	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd on the target host (required)")
-	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: local daemon's own_host_id; set for cross-host install)")
+	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
+	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: this host's id, as 'felt shuttle host' reports it; set for a cross-host install)")
 	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 }
 
