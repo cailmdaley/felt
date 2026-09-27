@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -647,6 +648,38 @@ func TestInspectTailnetSocketPrivateDirectoryBoundary(t *testing.T) {
 	}
 	if got := inspectTailnetSocket(path, os.Geteuid()); !got.Private {
 		t.Fatalf("private parent not recognized: %+v", got)
+	}
+}
+
+// Negative control: remove the ACL grant below; the receipt must then report the directory private.
+func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS ACLs can grant traversal without changing mode bits")
+	}
+
+	dir := shortPrivateTempDir(t)
+	path := filepath.Join(dir, "tailscaled.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	output, err := exec.Command("/bin/chmod", "+a", "everyone allow search", dir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("grant ACL search permission: %v: %s", err, output)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Fatalf("ACL changed the directory mode to %04o", mode)
+	}
+
+	got := inspectTailnetSocket(path, os.Geteuid())
+	if got.Private || !strings.Contains(got.BadAncestor, "ACL") {
+		t.Fatalf("ACL-accessible socket directory was reported private: %+v", got)
 	}
 }
 

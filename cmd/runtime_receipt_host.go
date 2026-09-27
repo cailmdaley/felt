@@ -1103,9 +1103,11 @@ func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
 		socket.BadAncestor = fmt.Sprintf("%s (unresolvable: %v)", filepath.Dir(path), err)
 		return socket
 	}
-	socket.PrivateDir = privateSocketDirectory(parent, euid)
+	socket.PrivateDir, socket.BadAncestor = privateSocketDirectory(parent, euid)
 	if socket.PrivateDir == "" {
-		socket.BadAncestor = "no ancestor directory owned by the daemon uid blocks traversal by other users"
+		if socket.BadAncestor == "" {
+			socket.BadAncestor = "no ancestor directory owned by the daemon uid blocks traversal by other users"
+		}
 		return socket
 	}
 	socket.BadAncestor = firstUnsafeAncestor(filepath.Dir(socket.PrivateDir), euid)
@@ -1113,20 +1115,52 @@ func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
 	return socket
 }
 
-func privateSocketDirectory(dir string, euid int) string {
+func privateSocketDirectory(dir string, euid int) (string, string) {
 	for current := dir; ; current = filepath.Dir(current) {
 		info, err := os.Stat(current)
 		if err == nil && info.IsDir() {
 			st, ok := info.Sys().(*syscall.Stat_t)
 			mode := info.Mode().Perm()
 			if ok && int(st.Uid) == euid && mode&0o100 != 0 && mode&0o011 == 0 {
-				return current
+				searchACL, err := directoryHasSearchACL(current)
+				if err != nil {
+					return "", fmt.Sprintf("%s (ACL inspection failed: %v)", current, err)
+				}
+				if searchACL {
+					return "", fmt.Sprintf("%s (ACL grants directory search access)", current)
+				}
+				return current, ""
 			}
 		}
 		if parent := filepath.Dir(current); parent == current {
-			return ""
+			return "", ""
 		}
 	}
+}
+
+// Darwin ACLs can grant directory traversal without changing FileMode.Perm.
+func directoryHasSearchACL(path string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, nil
+	}
+	output, err := exec.Command("/bin/ls", "-lde", path).CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("ls -lde: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	for _, line := range strings.Split(string(output), "\n")[1:] {
+		_, rights, found := strings.Cut(line, " allow ")
+		if !found {
+			continue
+		}
+		for _, right := range strings.Split(rights, ",") {
+			right = strings.TrimSpace(right)
+			if right == "search" || right == "execute" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // firstUnsafeAncestor walks from dir up to "/" — through the real path, as

@@ -982,8 +982,9 @@ closed without a matching bridge instead of falling back to direct or proxy
 routing.
 `felt shuttle remotes list` validates the socket path.
 `felt setup receipt` checks that it is a Unix socket and, on shared/exposed
-hosts, that an owner-private directory prevents co-tenants from traversing to
-it; it also compares the running daemon's effective socket with the fleet file.
+hosts, that ownership, mode bits, and macOS ACLs prevent co-tenants from
+traversing to it; it also compares the running daemon's effective socket with
+the fleet file.
 `defaults.tailscale_socket` and `defaults.https_proxy` are mutually exclusive.
 The daemon doesn't read `$TS_SOCKET` or `$HTTPS_PROXY`; configure the fleet file
 so its validator and supervised daemon agree.
