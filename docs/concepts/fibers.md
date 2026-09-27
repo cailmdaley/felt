@@ -136,10 +136,12 @@ felt check
 felt check --json
 ```
 
-!!! note "Cross-store links look broken"
-    A `[[wikilink]]` pointing into a different store reads as broken to
-    `felt check`. felt scopes to one store at a time. Expect that warning; it
-    marks no defect. See [Cross-project stores](cross-project.md).
+!!! note "Links across projects"
+    From a project whose `.felt/` is a symlinked view into a larger store,
+    links resolve against the whole store, so `[[other-project/slug]]` is sound.
+    A link into a store that is not joined to this one by any symlink cannot
+    resolve, and `felt check` is right to flag it. See
+    [Cross-project stores](cross-project.md#links-across-projects).
 
 ## Migrating a legacy store
 

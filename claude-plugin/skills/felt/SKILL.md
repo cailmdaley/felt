@@ -63,4 +63,4 @@ Everything above applies always; references go deeper for specific activities.
 | Helping fuzzy thought crystallize into a fiber — two diamonds, funnel, ambiguity check | [ideating.md](references/ideating.md) |
 | Processing an external transcript — meeting notes, voice note, dictation | [transcripts.md](references/transcripts.md) |
 | Gardening, composting, reshaping, acting on Attention | [maintenance.md](references/maintenance.md) |
-| Setting up a cross-project store, or linking a project store into one | [cross-project.md](references/cross-project.md) |
+| Linking a project into a cross-project store, or reasoning about views, find vs ls, and cross-project links | [cross-project.md](references/cross-project.md) |
