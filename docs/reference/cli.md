@@ -41,7 +41,7 @@ its commit and date, a local build the source revision it was built from
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references whose path points into it |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references the move would break (store-wide from a view) |
 | `felt unnest <child>` | Promote a nested fiber subtree to the top level, rewriting references the same way |
 
 ## Maintenance

@@ -125,9 +125,10 @@ Replicas should inherit the committed ids rather than minting their own.`,
 var nestCmd = &cobra.Command{
 	Use:   "nest <child> <parent>",
 	Short: "Move a fiber under another fiber",
-	Long: `Moves an existing fiber subtree under a parent. References whose path points
-into the moved subtree — wikilinks, markdown links, inputs.from — are rewritten
-to its new location, and each rewritten fiber is named.
+	Long: `Moves an existing fiber subtree under a parent. References whose path reached
+the moved fibers and would no longer reach them — wikilinks, markdown links,
+inputs.from — are rewritten, across the enclosing store too when this store is
+a view into one, and each rewritten fiber is named.
 
 A parent spelled as a path that exists in the store is used exactly as
 spelled, including a directory that holds fibers without one of its own
@@ -169,13 +170,13 @@ like a fiber reference.`,
 		if err := where.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		rewritten, err := where.storage.MoveSubtree(childID, targetID)
+		result, err := where.storage.MoveSubtree(childID, targetID)
 		if err != nil {
 			return err
 		}
 
 		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.location())
-		printRewrittenRefs(rewritten)
+		printRewrittenRefs(where.storage, result)
 		return nil
 	},
 }
@@ -199,8 +200,8 @@ func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, er
 var unnestCmd = &cobra.Command{
 	Use:   "unnest <child>",
 	Short: "Promote a nested fiber to the top level",
-	Long: `Moves a nested fiber subtree to the top level, rewriting references whose
-path points into it (as nest does).`,
+	Long: `Moves a nested fiber subtree to the top level, rewriting references it
+would break as nest does.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
@@ -223,21 +224,26 @@ path points into it (as nest does).`,
 		if err := child.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		rewritten, err := child.storage.MoveSubtree(child.id, targetID)
+		result, err := child.storage.MoveSubtree(child.id, targetID)
 		if err != nil {
 			return err
 		}
 
 		fmt.Printf("Promoted %s to %s%s\n", child.id, targetID, child.location())
-		printRewrittenRefs(rewritten)
+		printRewrittenRefs(child.storage, result)
 		return nil
 	},
 }
 
-// printRewrittenRefs names each fiber whose references a move rewrote.
-func printRewrittenRefs(ids []string) {
-	for _, id := range ids {
+// printRewrittenRefs names each fiber whose references a move rewrote: those
+// in the store that moved by their ids there, those elsewhere in its
+// enclosing store by their ids in it.
+func printRewrittenRefs(storage *felt.Storage, result *felt.MoveResult) {
+	for _, id := range result.Rewritten {
 		fmt.Printf("Rewrote references in %s\n", id)
+	}
+	for _, id := range result.Outside {
+		fmt.Printf("Rewrote references in %s (in %s)\n", id, storage.ExternalRefs().Root())
 	}
 }
 

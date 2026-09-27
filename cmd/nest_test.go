@@ -95,3 +95,27 @@ func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
 		t.Fatalf("citer body = %q, want %q", got, want)
 	}
 }
+
+// A move inside a view also rewrites the enclosing store's fibers outside it,
+// in that store's coordinates, keeping each link's shape; nest names them by
+// their ids there.
+func TestNestInViewRewritesEnclosingStore(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	body := "Full [[ai-futures/felt/notes/runbook]], suffix [[felt/notes/runbook]], bare [[runbook]]."
+	if err := loom.Write(&felt.Felt{ID: "commons/citer", Name: "Citer", Body: body}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCommand(t, subProj, "nest", "notes/runbook", "debug")
+	if err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	if want := "Rewrote references in commons/citer (in " + loomRoot(t, subProj) + ")\n"; !strings.HasSuffix(out, want) {
+		t.Fatalf("nest output = %q, want it to end %q", out, want)
+	}
+	want := "Full [[ai-futures/felt/debug/runbook]], suffix [[felt/debug/runbook]], bare [[runbook]]."
+	if got := readFiberBody(t, loom, "commons/citer"); got != want {
+		t.Fatalf("outer citer body = %q, want %q", got, want)
+	}
+}

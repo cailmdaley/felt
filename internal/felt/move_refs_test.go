@@ -61,12 +61,12 @@ func TestMoveSubtreeRewritesBodyLinks(t *testing.T) {
 		"```",
 	}, "\n")))
 
-	rewritten, err := s.MoveSubtree("a/x", "b/x")
+	result, err := s.MoveSubtree("a/x", "b/x")
 	if err != nil {
 		t.Fatalf("MoveSubtree: %v", err)
 	}
-	if want := []string{"c"}; !reflect.DeepEqual(rewritten, want) {
-		t.Fatalf("rewritten = %v, want %v", rewritten, want)
+	if want := []string{"c"}; !reflect.DeepEqual(result.Rewritten, want) || len(result.Outside) != 0 {
+		t.Fatalf("result = %+v, want Rewritten %v", result, want)
 	}
 
 	want := fiber("C", strings.Join([]string{
@@ -222,5 +222,38 @@ func TestCheckWarnsOnStalePathDataFlowRef(t *testing.T) {
 	issues := Check([]*Felt{{ID: "b", Name: "B"}, {ID: "b/x", Name: "X"}, consumer}, nil)
 	if len(issues) != 1 || issues[0].Level != CheckLevelWarning || issues[0].Path != "inputs.in.from" {
 		t.Fatalf("issues = %+v, want one stale-path warning on inputs.in.from", issues)
+	}
+}
+
+// A top-level fiber's bare slug is its full path, but nesting it leaves the
+// slug resolving by path (it is still unique), so the link stays as written.
+func TestMoveSubtreeLeavesTopLevelBareSlugThatStillResolves(t *testing.T) {
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "solo", fiber("Solo", ""))
+	citing := fiber("C", "See [[solo]] and [[solo#k|it]].")
+	writeFiberFile(t, s, "c", citing)
+
+	result, err := s.MoveSubtree("solo", "b/solo")
+	if err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if len(result.Rewritten) != 0 || readFiberFile(t, s, "c") != citing {
+		t.Fatalf("rewritten %v; c.md = %q", result.Rewritten, readFiberFile(t, s, "c"))
+	}
+}
+
+// A bare slug that resolved through its scope and that the move breaks — the
+// slug is not unique, so nothing carries it to the new place — is rewritten
+// to the fiber's full new id.
+func TestMoveSubtreeRewritesBareSlugTheMoveBreaks(t *testing.T) {
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "q/x", fiber("Another x", ""))
+	writeFiberFile(t, s, "a/c", fiber("C", "See [[x]]."))
+
+	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if got, want := readFiberFile(t, s, "a/c"), fiber("C", "See [[b/x]]."); got != want {
+		t.Fatalf("c.md = %q, want %q", got, want)
 	}
 }

@@ -49,21 +49,23 @@ felt tree
 felt tree bao-analysis --depth 2
 ```
 
-Reshape with `nest` and `unnest`. Both move the whole subtree and rewrite the
-references whose path points into it. Nesting `damping-prior` turns
-`[[damping-prior/contour-plot#fit|the fit]]` into
-`[[bao-analysis/damping-prior/contour-plot#fit|the fit]]`, keeping fragment and
-label, and `inputs.from` follows the same rule. The bare slug of a fiber that
-was already nested stays as written, since the slug moves with the fiber;
-links inside code are left alone. Only files whose content changes are written, and each is
-named in the output. In a view, links spelled with the view's ids and with the
-enclosing store's ids are both rewritten; fibers outside the store felt is
-reading are not, and `felt check` flags their stale paths.
+Reshape with `nest` and `unnest`. Both move the whole subtree.
 
 ```bash
 felt nest damping-prior bao-analysis     # → bao-analysis/damping-prior
 felt unnest bao-analysis/damping-prior   # → damping-prior
 ```
+
+A move rewrites every reference, body link or `inputs.from`, whose path
+reached the moved fiber before and would not reach it after. The `unnest` above
+turns `[[bao-analysis/damping-prior/contour-plot#fit|the fit]]` into
+`[[damping-prior/contour-plot#fit|the fit]]`, keeping fragment and label.
+Spellings the move leaves working are not touched: a bare slug or a suffix
+such as `[[damping-prior/contour-plot]]` still names the fiber uniquely. Links
+inside code are left alone. Only files whose content changes are written, and
+nest names each one. In a view, the rewrite covers links spelled with the
+view's ids or the enclosing store's, and the enclosing store's fibers outside
+the view as well.
 
 `felt add` also resolves the leading segment of a slug against existing fibers.
 If `project/launch` exists, then:

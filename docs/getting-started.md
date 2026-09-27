@@ -129,8 +129,8 @@ felt unnest jackknife-patches                       # promote back to the top
 ```
 
 `felt nest` moves the whole subtree on disk and rewrites the addresses that
-point at it — wikilinks and `inputs.from` written as its old path — naming
-each fiber it rewrote. The directory tree carries containment on its own, so
+would no longer reach it, wikilinks and `inputs.from` alike, naming each fiber
+it rewrote. The directory tree carries containment on its own, so
 no parent field can drift.
 
 ## Look at the store

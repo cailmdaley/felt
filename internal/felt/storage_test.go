@@ -1104,7 +1104,12 @@ func TestFindProjectRootNotFound(t *testing.T) {
 	}
 }
 
-func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
+// TestStorageMoveSubtreeLeavesInputRefsThatStillResolve pins the rule for
+// inputs.from: a top-level fiber nested under a parent keeps every spelling
+// that still reaches it by path — its bare slug from inside its own subtree,
+// a suffix path from outside — so none of them is rewritten, and a reference
+// to an unmoved fiber is untouched.
+func TestStorageMoveSubtreeLeavesInputRefsThatStillResolve(t *testing.T) {
 	_, s := newStore(t)
 
 	parent := &Felt{
@@ -1125,35 +1130,61 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		}
 	}
 
-	if _, err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
+	result, err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior")
+	if err != nil {
 		t.Fatalf("MoveSubtree() error: %v", err)
+	}
+	if len(result.Rewritten) != 0 {
+		t.Fatalf("rewritten = %v, want none", result.Rewritten)
 	}
 
 	if _, err := s.Read("damping-prior"); err == nil {
 		t.Fatal("old child ID should no longer exist")
 	}
-	moved, err := s.Read("bao-analysis/damping-prior")
-	if err != nil {
-		t.Fatalf("Read moved child: %v", err)
+	for id, want := range map[string]string{
+		"bao-analysis/damping-prior":              "bao-analysis.posterior",
+		"bao-analysis/damping-prior/contour-plot": "damping-prior.fit",
+		"consumer": "damping-prior/contour-plot.figure",
+	} {
+		f, err := s.Read(id)
+		if err != nil {
+			t.Fatalf("Read %s: %v", id, err)
+		}
+		if got := f.DataFlowInputs()[0].From; got != want {
+			t.Fatalf("%s input = %q, want %q", id, got, want)
+		}
 	}
-	if got := moved.DataFlowInputs()[0].From; got != "bao-analysis.posterior" {
-		t.Fatalf("moved child input = %q, want %q", got, "bao-analysis.posterior")
+}
+
+// TestStorageMoveSubtreeRewritesInputRefsItBreaks: inputs.from follows the
+// body-link rule, so a reference spelled through the old parent is rewritten,
+// its output fragment kept.
+func TestStorageMoveSubtreeRewritesInputRefsItBreaks(t *testing.T) {
+	_, s := newStore(t)
+	for _, id := range []string{"a", "b", "a/x", "a/x/y"} {
+		if err := s.Write(&Felt{ID: id, Name: id, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	consumer := &Felt{ID: "consumer", Name: "Consumer", CreatedAt: time.Now()}
+	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "in", "from": "a/x/y.figure"}})
+	if err := s.Write(consumer); err != nil {
+		t.Fatal(err)
 	}
 
-	descendant, err := s.Read("bao-analysis/damping-prior/contour-plot")
+	result, err := s.MoveSubtree("a/x", "b/x")
 	if err != nil {
-		t.Fatalf("Read moved descendant: %v", err)
+		t.Fatalf("MoveSubtree() error: %v", err)
 	}
-	if got := descendant.DataFlowInputs()[0].From; got != "bao-analysis/damping-prior.fit" {
-		t.Fatalf("moved descendant input = %q, want %q", got, "bao-analysis/damping-prior.fit")
+	if !reflect.DeepEqual(result.Rewritten, []string{"consumer"}) {
+		t.Fatalf("rewritten = %v, want [consumer]", result.Rewritten)
 	}
-
-	updatedConsumer, err := s.Read("consumer")
+	f, err := s.Read("consumer")
 	if err != nil {
-		t.Fatalf("Read consumer: %v", err)
+		t.Fatal(err)
 	}
-	if got := updatedConsumer.DataFlowInputs()[0].From; got != "bao-analysis/damping-prior/contour-plot.figure" {
-		t.Fatalf("consumer input = %q, want rewritten descendant ref", got)
+	if got := f.DataFlowInputs()[0].From; got != "b/x/y.figure" {
+		t.Fatalf("consumer input = %q, want b/x/y.figure", got)
 	}
 }
 

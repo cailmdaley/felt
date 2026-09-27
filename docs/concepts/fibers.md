@@ -123,8 +123,8 @@ tracks how the thinking moved.
 - broken `inputs.from` data-flow references
 - stale paths: a multi-segment reference such as `[[a/x]]` where no fiber
   lives at that path, which still resolves because its final segment names
-  exactly one fiber (a warning — typically a link left behind by a move felt
-  could not see)
+  exactly one fiber (a warning: typically a link left behind by an older move,
+  or by a move made outside felt)
 - legacy `title` frontmatter keys
 - legacy `depends-on` frontmatter keys
 - legacy body anchors
