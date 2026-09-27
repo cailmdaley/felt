@@ -1,151 +1,100 @@
 ---
 name: shuttle
 description: >
-  Use when Shuttle dispatches, resumes, or captures you as a worker; when
-  authoring a constitution or asked to "shuttle" work with a named agent;
-  and for operating Shuttle, its kanban, agent selection, or dispatch.
-  Also covers assigning persistent collaborators and roles, maintaining
-  continuity across sessions, discovering conversations, and sending
-  messages or files between sessions across hosts and harnesses, and
-  turning a meeting or any transcript into notes and fibers: "process
-  this transcript", "here's a transcript, make notes", "meeting notes",
-  a voice note or dictation to write up.
+  Use when Shuttle dispatches, resumes, or captures you as a worker; when authoring a
+  constitution or asked to "shuttle" work to a named agent; and for operating Shuttle — its
+  board, agents, dispatch, roles and collaborators. Also covers messaging other sessions across
+  hosts and harnesses, sending files to the human, and turning a meeting or any transcript into
+  notes and fibers: "process this transcript", "meeting notes", a voice note or dictation to
+  write up.
 ---
 
 # shuttle
 
-**Activate the `felt` skill too if it isn't already active.** shuttle operates *on* fibers — every move below (read the constitution, update outcome, file findings) goes through felt.
+Shuttle turns fibers into work that agents carry across sessions. A daemon watches the felt store, launches an agent session — a *worker* — for each fiber that is ready, and shows it all on a board. The fiber a worker serves is a *constitution*: a description of how things should be, which one worker after another moves the world toward, each picking up where the last left off.
 
-**The doctrine: anything that needs to be done gets a shuttle block.** The board admits exactly two kinds of row: fibers carrying a `shuttle:` block, and cycle fibers. A task-shaped fiber without a block is invisible to the board by design; a bare `due:` is a date, not a commitment the board can act on, so such a fiber gets *promoted* — install the block — rather than shown. Installing a block on an `open` fiber costs nothing: it makes a Drafts card and dispatches nothing until launched.
+A capture or meeting worker, or one handed a transcript, can go straight to its reference under [Where to go next](#where-to-go-next).
 
-A fiber carrying a `shuttle:` block is a **constitution** — a spec whose body describes a desired state, not a plan. The daemon polls the fiber tree and keeps one **worker** per eligible fiber (carries the block, felt `status: active`), in a terminal session (`surface: cli`) or a managed Codex app conversation (`surface: app`). A worker drives toward the desired state, exits at a clean checkpoint with a handoff, and the daemon dispatches fresh workers while the gap remains. Realization is asymptotic, not a checklist emptied; the constitution itself is amended as the world changes.
+## Anatomy of a constitution
 
-The human's surface is the **board**, served by the daemon at `:4000`: a pure view whose **Desk** tab is the kanban (stash, launch, steer, review), whose **Day**, **Week** and **Chronicle** tabs show where time went, and whose **Board** tab lays out every file workers sent with `felt shuttle send-file`. `felt shuttle agents` lists the agent registry that maps `shuttle.agent` to the CLI and model a dispatch runs. The operator guide lives at <https://cailmdaley.github.io/felt/>.
+```markdown
+---
+name: Jackknife covariance for the B-mode paper
+status: active
+outcome: Jackknife covariance runs by default and matches the mocks to 3% on the diagonal; next is the off-diagonal comparison below ℓ=300.
+collaboration:
+  analyst: [opus]
+shuttle:
+  kind: oneshot
+  agent: claude-opus
+  host: candide
+  project_dir: /home/cail/unions-bmodes
+---
 
-## Reading by situation
+:::{embed} report.html
+:::
 
-| You are | Read |
-|---|---|
-| Capturing a new idea | [references/capture.md](references/capture.md), then the worker loop below. |
-| A meeting capture (`From User` opens with `Meeting mode`) | [references/capture.md](references/capture.md), then [references/meeting.md](references/meeting.md). |
-| Handed a transcript to write up — meeting notes, a voice note, dictation | [references/meeting.md](references/meeting.md), "From transcript to notes". |
-| A worker whose constitution a meeting joins (a message opening with `Meeting mode` that says so) | [references/meeting.md](references/meeting.md), "Joined to a constitution". |
-| A dispatched worker | This file, top to bottom. |
-| Authoring a constitution | [references/authoring.md](references/authoring.md) — the desired-state craft, install flow, drafts vs dispatch, agent selection, human gates. |
-| Operating or debugging the system | [references/operating.md](references/operating.md) — eligibility, kanban columns, gestures, lifecycle verbs, remote hosts, uninstall. |
-| Claiming a fiber into the current interactive session | [references/operating.md](references/operating.md), "Claiming a fiber into your session" — from the claim on you are the worker. |
-| Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) |
-| A dispatch carrying a collaboration roster, a task without one, or creating a role or collaborator | [references/collaboration.md](references/collaboration.md) |
-| Touching a standing role | [references/standing-roles.md](references/standing-roles.md) |
-| Writing a fiber's `report.html` | [references/report.md](references/report.md) |
+The B-mode null test in [[bmodes/paper]] needs a covariance we trust at large scales, where the analytic model underestimates the diagonal. This replaces it with a jackknife estimate over sky patches, validated against the mock suite.
 
-## The fiber's surfaces
+## Desired State
 
-- **Spec (markdown body)** — a standalone, heading-less **lede** (what this is, why it matters, where it sits, `[[wikilinks]]` woven in), then `## Desired State` — the one fixed heading: done-conditions in checkable terms, what you and your verifiers measure against — then only sections the fiber has *earned*, named for what they contain. The spec accretes by correction; depth lives in linked sub-fibers.
-- **`outcome:`** — the kanban headline. One or two sentences: where the work is, what the reader does next. Rewritten every session, not appended. When blocked, lead with "Blocked: …".
-- **`## Status`** (a section in the body) — the handoff to the next session: what landed, where you got stuck, what to know on arrival. Rewritten, never appended.
-- **`report.html`** (companion file in the fiber directory) — the human-facing report: current-state, rewritten whole, self-contained. Create it when the constitution asks, or when the product is something a human *reads* — findings, figures, analysis — that outgrows the outcome line; code-shaped work whose story is commits + outcome needs none. Before writing one, read [references/report.md](references/report.md).
-- **Embeds** — the body can inline any artifact where it helps the reader; `report.html` is rendered this way, with an explicit embed line placed where the reader should meet it (usually the top):
+- `pipeline/covariance.py` produces the jackknife covariance by default; the analytic path stays behind a flag.
+- Diagonal and off-diagonal agree with the 400-mock covariance to within 5% below ℓ=300, shown in the report.
+- The paper's covariance section describes the estimator and cites the validation.
 
-  ```markdown
-  :::{embed} build/paper.pdf
-  :height: 600        (optional)
-  :title: Latest build (optional)
-  :::
-  ```
+## Status
 
-  Paths resolve relative to the fiber directory, or absolute on the fiber's owning host (`shuttle.host`). Renderer by extension: PDF, HTML iframe, images, audio.
-
-None of these is a status flag; all are always-current. Outcome and `## Status` stay plain text (agents chain sessions on them); the report is where humans read, with full visual freedom.
-
-## Finding your fiber
-
-The dispatch prompt names the fiber and the felt store, not the fiber content — read it fresh from disk so mid-session edits to the constitution are picked up:
-
-```bash
-felt show <fiber-id>                      # from the project dir
-felt -C <felt-store> show <fiber-id>      # when the cwd's .felt view misses it
+The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validate/offdiag.py`: the mock loader works, the plotting doesn't. The patch count is settled at 150 ([[jackknife-patches]]); don't reopen it.
 ```
 
-## Loop
+- **`shuttle:`** — the block that makes a fiber a constitution. `kind` is `oneshot` (runs until done), `standing` (fires on a cron `schedule`), or `pinned` (a standing interface a human starts). `agent` names what runs — `felt shuttle agents` lists them — `host` is the machine whose daemon dispatches it, and `project_dir` is where the worker starts. `felt shuttle install` writes and validates the block.
+- **status** — the dispatch gate. `active` means a worker should be running, `open` is a draft, and `closed` parks the card for the human.
+- **outcome** — the card's headline: where the work is and what the reader does next, rewritten every session. When blocked, it leads with "Blocked: …".
+- **the lede** — the unheaded first paragraph, saying what this is and why, for a human skimming the card and a worker arriving cold alike.
+- **`## Desired State`** — the one fixed heading, and the contract: done-conditions in checkable terms, plus a fence around what to leave alone. It says what the world looks like when the work is right, never the steps; each worker surveys the gap and picks the most valuable slice itself. Any later section is one the fiber has earned, named for what it holds.
+- **`## Status`** — the handoff: what landed, where it got stuck, what to know on arrival. It is rewritten, never appended, and it is how a fresh worker inherits a warm picture of the work.
+- **`collaboration:`** — the roster: which role the worker holds, and who holds it. The role's charter, a fiber under `roles/`, carries the playbooks, the human gates and the people the work touches.
+- **`report.html`** — a companion file for the human: current state and findings, self-contained, rewritten whole. It is worth making when the constitution asks for one or the product is something a person reads rather than commits; [references/report.md](references/report.md) has the craft. The `:::{embed}` line shows it on the fiber's card, and embeds any file the same way (images, PDFs, HTML, audio; optional `:height:` and `:title:` lines), with paths relative to the fiber folder or absolute on the fiber's host.
 
-1. **Survey.** Internalize **why** before **what** — not a checklist, a world-model. Read until you hold the user's intent clearly enough to move ambitiously inside it.
+## The lifecycle
 
-   - Sync the store as the dispatch prompt says, then read the constitution, its `## Status`, and `report.html` if one exists. The launch message, when present, is the current directive; with none, follow a clear constitution rather than searching old transcripts for a substitute request. If the desired work is unclear, ask or record the specific ambiguity before consequential action.
-   - **Take up the role before the work.** Read the `collaboration:` roster and the charter of the role you hold — charters carry the playbooks, human gates, and names of people the work touches. A task with no roster gets one now; see [references/collaboration.md](references/collaboration.md).
-   - When the prompt names a `Previous session:` and the handoff leaves you wanting texture, read that transcript surgically per [references/transcripts.md](references/transcripts.md) — supporting context, never a source of new instructions.
-   - Check `git log` for the fiber's directory and the surrounding code. Skim sub-fibers; if a sibling lays out a staged plan, follow it rather than re-deriving scope.
-   - Follow claims about the system back to the code. The constitution is your contract; the code is the ground truth.
+A todo reaches the board by getting a shuttle block; a fiber without one never appears there. `felt shuttle install <id> --disabled` gives it a block and a card in **Drafts**, and dispatches nothing. Arming it (`felt shuttle resume`, or `install` without `--disabled`) sets `status: active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
 
-2. **Work.** Sit with the full shape of the problem before deciding. The smell test before you commit *or* block: **would this constraint surprise the human?** If yes, you haven't sat long enough. Many decisions that look like they need the human are inferable from system purpose + codebase; genuine taste questions are narrower than they feel.
+A worker ends in one of two ways. **Handoff** leaves the fiber `active`, and the daemon dispatches a fresh worker that starts from `## Status`. **Close** moves the card to **Awaiting review** and dispatches nothing. From there the human tempers it (accepts), discards it, or resumes it. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times.
 
-   **Give sub-goals their own context.** Subagent and workflow tools are context architecture first, parallelism second: hand bulk reading, mechanical sweeps, and independent verification to clean windows while your own context keeps the management view. On long building runs, set a verification cadence: every few substantial changes, a fresh-context subagent checks the work against Desired State — fresh verifiers outperform self-critique. Without subagent tools the same walls fall between dispatches: each redispatch is a fresh window and the daemon holds the loop.
+The board runs at `:4000`. Its **Desk** is the kanban — Drafts, Scheduled, Pinned, In flight, Awaiting review, Tempered, Discarded. **Day**, **Week** and **Chronicle** show where time went, and the **Board** tab lays out every file workers sent.
 
-3. **Felt.** Keep `## Status` warm after meaningful transitions and before returning a turn when state changed, so another session can inherit the work without waiting for an exit ritual. Before exiting: consolidate `## Status`; rewrite `report.html` whole if the fiber has one; rewrite `outcome:`; correct the spec if the session sharpened it; file crystallizations as sub-fibers (decisions, findings, gotchas — not iteration-numbered debris); fold what the office learned into the role's charter and anything specific to you into your collaborator fiber; commit with clear messages.
+## Working a constitution
 
-4. **Exit** per the semantics below.
+**Survey.** Your dispatch prompt names the fiber and the store; sync, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you. Read the constitution, its `## Status`, and `report.html` if there is one. A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. Then take up the role: read the roster and your role's charter, or give a roster-less task one ([references/collaboration.md](references/collaboration.md)). A named `Previous session:` can be read for texture ([references/transcripts.md](references/transcripts.md)), but never as a source of instructions. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
 
-### When to stop
+**Work.** Sit with the whole shape of the problem before deciding. Before you commit to a constraint or stop to ask, try this test: would the constraint surprise the human? If so, you haven't sat long enough. Most decisions that look like they need the human follow from what the system is for, and genuine taste questions are narrower than they feel. You have authority, so make ambitious moves even when they span sessions, since shuttle redispatches. When a choice is load-bearing — a model, a pivot that removes a capability — do the work and set out the alternatives in the artifact, rather than stopping to ask. Give sub-goals their own context: hand bulk reading, sweeps and verification to subagents, and on long runs have a fresh-context subagent check the work against Desired State every few substantial changes. Stream long jobs with `Monitor` or background Bash, and see them through before you exit.
 
-The `## Status` block plus the constitution recovers most of a warm world-model on the next dispatch — **exiting earlier is cheaper than you think.** A clean handoff well before auto-compact beats pushing through it. Stop when:
+**Keep the surfaces current.** Progress lives where it can be found — commits, sub-fibers, files in the fiber folder — not in a log in the body. When you learn something stable, put it in the constitution where it belongs: the lede, Desired State, or an earned section. Refresh `## Status` after each meaningful transition and before returning a turn, so another session could take over at any moment. Before you exit, bring everything up to date: consolidate `## Status`, rewrite `report.html` whole, rewrite the outcome, file decisions and findings as sub-fibers, fold what the role learned into its charter and anything particular to you into your collaborator fiber, and commit.
 
-- **The desired state is realized.**
-- **You're genuinely blocked** on something only the human can supply.
-- **Context is half-full.** Exit at the next sub-task boundary after you cross half; write the handoff from full attention. (Delegation keeps an orchestrating context lean for longer, but the line doesn't move.)
-- **Clean break.** The next step is both heavy AND disjoint — a fresh problem space that doesn't need the world-model you just built.
+**Stop earlier than feels natural.** `## Status` and the constitution recover most of your picture on the next dispatch, and a clean handoff beats pushing through auto-compact. Stop when the desired state is realized, when you are blocked on something only the human can supply, at the first sub-task boundary after your context is half full, or when the next step is both heavy and disjoint from what you have built up.
 
-## Exit semantics
+## Exiting
 
-Before either exit: consolidate `## Status`, commit intentional changes, run `felt -C <felt-store> sync --push`, and resolve relevant conflicts. Then exit with exactly one verb:
+First commit, run `felt -C <store> sync --push`, and resolve any conflicts. Then exit with exactly one verb, and choose it by asking in order:
 
-- **Continue — `handoff`.** Status stays `active`; your FINAL tool action is `felt shuttle handoff <fiber-id>` (app workers: `env -u TMUX felt -C <felt-store> shuttle handoff <fiber-id>`, then end your turn). It stamps the clean-exit marker and ends your session; the daemon dispatches a fresh worker that reads your `## Status`.
-- **Stop — `closed`.** `felt edit <fiber-id> --status closed` is your FINAL write; do nothing after it. The daemon reaps your session and stamps the marker; the card lands in Awaiting review and no worker is dispatched. Anything still running after the close is killed with the session.
+1. **Is the desired state realized?** Close: `felt edit <id> --status closed` as your final write, then do nothing more; the daemon reaps the session. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews.
+2. **Blocked on something only the human can answer?** Close, with the outcome leading "Blocked: …" so the card reads as a question rather than a review. Questions belong in the outcome and `## Status`, where they are seen; a `question` fiber sediments.
+3. **More to do?** Hand off: `felt shuttle handoff <id>` as your final action. In an app conversation, run `env -u TMUX felt -C <store> shuttle handoff <id>` and end your turn.
 
-Never both. A chat final response, an idle turn, or a dropped connection is not an exit: an app conversation waiting for the human's next message stays owned and resumable, and "resumed" means "same transcript", not a license to idle.
+If the work is already done when you arrive, update the outcome and close. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays owned and resumable.
 
-Choose by asking, in order:
+**When the human names the exit, take it literally.** "Hand off" means handoff. "Close out", "wrap it up" or "I'm done for now" means close, even when you can see more to do — unfinished is often exactly why they want it back on their desk.
 
-1. **Desired state realized?** → `closed`. The human accepts (`tempered: true`) or flips it back to `active`.
+**Stay interactive** instead, still `active`, when the direction isn't settled: the directive or constitution says a human will attach (a "stay interactive", a 2FA step, a message to send in their voice), or open taste calls make their input the clear next move. **Headless** runs (`headless: true` in the launch metadata) have no one to attach, so they record the question and take case 2.
 
-   **Fresh eyes before close.** Substantive work (code, configs, the product — not the fiber's own surfaces) needs an independent review before the session that produced it may close. With subagent tools: spawn a fresh reviewer over the diff against the constitution and close once it comes back clean. Without: `handoff`, and the next dispatch reviews with fresh eyes and closes. Editing only the constitution, `report.html`, `outcome`, or `## Status` never blocks close.
+**Pinned roles** are interfaces a human drives: while they are present, wait for the next message rather than exiting; close when they leave; hand off only on a long autonomous arc. **Standing roles** always hand off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 
-2. **Blocked on something only the human can answer?** → `closed`, with the outcome leading "Blocked: …" so the action reads "answer", not "review". Most apparent blocks resolve into "I haven't sat with the problem long enough."
+`tempered` is the human's verdict, never set it yourself; and leave the shuttle block in place on close, since it is the record.
 
-3. **More work, not blocked?** → `handoff`.
+## Other sessions and the human
 
-If you arrive and the work is plainly already done, update the outcome, close, and exit — don't invent further work.
-
-**When the human names the exit, obey it literally.** "Hand off" means `handoff`. "Close out" / "wrap it up" / "I'm done with this for now" means `closed` — even when you can see more to do. Closing is the human parking the work, not a claim it is finished: **Awaiting review means "paused for the human", never "done forever"**, and a long-lived fiber cycles closed → resumed → active many times. Don't upgrade a close-out into a continuation because the work looks unfinished; unfinished is often exactly why the human wants it back on their desk.
-
-**When to stay interactive.** Hand off when the direction is settled. When it isn't, stay alive at a clean checkpoint instead, `active`: the directive or constitution says a human will attach (a "stay interactive" in the directive, a 2FA gate, a send-in-their-voice step), or open taste calls make the human's input the clear next move.
-
-**Headless runs** (`headless: true` in the launch metadata) have no human to attach. Record any question in the outcome and `## Status` and take case 2 rather than waiting.
-
-**Pinned roles** (`kind: pinned` — a status hub, a debug intake) are standing interfaces a human drives. While the human is driving, don't exit on idle; wait for the next message. A session that ends without a handoff parks the role back to the strip. On a long autonomous arc, a deliberate `handoff` relaunches a fresh successor, as for a oneshot. `closed` is the normal end-of-sitting move ("close out for tonight"): parked in Awaiting review until the human resumes it. A human leaving means close out.
-
-**Standing roles** always exit by `handoff`; the daemon marks the run awaiting review itself (see [references/standing-roles.md](references/standing-roles.md)).
-
-**`tempered` is human-only — never self-temper.** Don't uninstall the shuttle block on close; it stays as the record (operating.md, "When to uninstall").
-
-## Rules
-
-**State, not checklist.** Each dispatch surveys reality against the desired state and picks the highest-value slice itself; sequencing is emergent.
-
-**Discoverable updates.** Commits, fibers, test results, files in the fiber dir — not progress logs in the body. `## Status` is the one handoff exception.
-
-**Pointers, not snapshots.** When you learn something stable, update the constitution — the lede, Desired State, or the earned section where it belongs.
-
-**Prefer doing the work.** You have authority. Trust the constitution, don't ask permission, and don't avoid ambitious moves because they span sessions — shuttle redispatches. When the work involves a load-bearing model choice or a capability-removing pivot, surface the alternatives in the artifact rather than withholding the work to ask. The failure mode to guard against is using "the human knows things I don't" as cover for not thinking hard enough.
-
-**Questions go where they'll be seen** — `outcome:` or `## Status`. Open `-t question` fibers sediment unanswered.
-
-**Write to the commons.** When the store carries a root `commons` fiber, it is the ecology's own surface: capability and calibration observations, cross-session patterns no single fiber owns, proposals for how the swarm works. Not a report surface, not a task surface, and not graded. If a session taught you something about the *ecology* rather than the project, leave it there.
-
-**Long-running jobs:** stream background processes with the `Monitor` tool, or `run_in_background` Bash for one-shot waits. Shepherd them to completion before exiting.
-
-## Messaging and delivering files
-
-`felt shuttle sessions --json` lists conversations across configured hosts and harnesses (`--host`, `--harness` narrow it). Use a returned address:
+`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about. Message one by its address:
 
 ```bash
 felt shuttle message <address> "Please investigate this"
@@ -153,6 +102,19 @@ felt shuttle message <address> "Background for later" --context-only
 felt shuttle message <address> "Results attached" --attach results.csv
 ```
 
-An ordinary message starts an idle turn or steers ongoing work; `--context-only` delivers at the next natural boundary without requesting a turn, for nonurgent updates and acknowledgments. Use `--file <path>` or `-` for multiline text. Sending does not prove reading: if the result is uncertain, retry with the printed `--message-id`, since a new ID could repeat the work. Reach is per host and one-directional — `sessions` and `message` see only the hosts in *this* host's fleet file, so a hub that dispatched you may be invisible to you. Before concluding a peer is unreachable, check `felt shuttle remotes list` (operating.md, "Remote hosts"); where no route exists, the shared store is the channel: `felt sync --push` and a note in the fiber.
+A plain message starts a turn or steers one in progress; `--context-only` arrives at the next natural pause without asking for a turn. `--file <path>` sends multiline text. Delivery doesn't prove reading: to retry, reuse the printed `--message-id`, since a new one could repeat the work. Reach runs one way — this host sees only the hosts in its own fleet file (`felt shuttle remotes list`), so the hub that dispatched you may be out of sight. Where no route exists, the store is the channel: a note in the fiber and `felt sync --push`.
 
-To put finished artifacts in front of the human, use the harness's native user-file tool when it has one (Claude Code's `SendUserFile`, which also surfaces in claude.ai chats); otherwise `felt shuttle send-file <path> [path...]` records them on the Board tab. Keep the files on their owning host. Session identity is detected from the environment; if detection fails, pass `--session <native-session-id>` — never invent one.
+To put a finished file in front of the human, use the harness's own file tool when it has one (Claude Code's `SendUserFile`); otherwise `felt shuttle send-file <path>...` records it on the Board tab. Session identity is detected automatically; if that fails, pass `--session <native-id>`, and never invent one.
+
+## Where to go next
+
+| When | Read |
+|---|---|
+| Capturing a new idea into a fiber | [references/capture.md](references/capture.md) |
+| A meeting: capturing one (`Meeting mode`), joined to your constitution, or writing up any transcript | [references/meeting.md](references/meeting.md) |
+| Writing a constitution — the spec craft, install, drafts vs dispatch, agent choice, human gates | [references/authoring.md](references/authoring.md) |
+| Rosters, roles and collaborators | [references/collaboration.md](references/collaboration.md) |
+| A standing role's runs, schedule and accept | [references/standing-roles.md](references/standing-roles.md) |
+| Operating the system — eligibility, columns, lifecycle verbs, claiming a fiber into your session, remote hosts | [references/operating.md](references/operating.md) |
+| Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) |
+| Writing `report.html` | [references/report.md](references/report.md) |
