@@ -22,10 +22,12 @@ dead transcript.
 
 A worker calls this as its FINAL action, after rewriting the constitution's
 '## Status' block: it stamps the field and then ends its own tmux session — so
-the exit is one command, no separate 'kill $PPID'. The target fiber is the file
-at SHUTTLE_FIBER_PATH, which the daemon exports at dispatch (the path it already
-resolved); outside a daemon-launched worker the <fiber> argument is resolved
-instead.`,
+the exit is one command, no separate 'kill $PPID'. For its own fiber the file
+stamped is SHUTTLE_FIBER_PATH, which the daemon exports at dispatch (the path it
+already resolved); outside a daemon-launched worker the <fiber> argument is
+resolved instead, and the current tmux session (if any) still ends. An exact id
+or UID naming a different fiber stamps that fiber and leaves the caller's
+session running.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, self, err := resolveHandoffPath(args[0])

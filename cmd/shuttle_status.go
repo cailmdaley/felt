@@ -64,11 +64,14 @@ set, otherwise the configured stores: FELT_STORES env, then the
 ~/.config/felt/stores.json registry). Liveness is read from tmux.
 
 Columns: fiber_id  kind  state  next_due_at  agent
+(next_due_at comes from the daemon, so it is filled only on --all / --remote
+rows; the local table shows -.)
 
 With a fiber argument, prints the detailed single-fiber report instead: the whole
-shuttle: block, plus whether the daemon will dispatch it and — when it won't —
-the verb that changes that. This is the way to check one role's state before
-reaching for a mutation verb.
+shuttle: block, plus whether its status arms it for dispatch and — when it
+doesn't — the verb that changes that. The verdict reads status alone; host
+ownership, project_dir and the boot quarantine are the daemon's to judge. This
+is the way to check one role's state before reaching for a mutation verb.
 
   felt shuttle status                 # the table
   felt shuttle status <fiber>         # one fiber, in full
@@ -77,9 +80,10 @@ Cross-host (queries the local daemon's /api/v1/state/composite):
   --all           local plus every configured remote (composite snapshot).
   --remote NAME   only the named remote.
 
-The daemon's RemoteRegistry polls each remote over its SSH-tunnel-mapped port;
-the CLI just renders that response. Rows from a remote carry an "origin" column;
-stale remotes (the registry hasn't heard back recently) are flagged "[stale]".
+The daemon's RemoteRegistry polls each remote at its configured URL (a local
+tunnel port or a direct URL); the CLI just renders that response. Rows from a
+remote carry an "origin" column; stale remotes (the registry hasn't heard back
+recently) are flagged "[stale]".
 
 Other flags:
   --closed           also list closed fibers. The table hides them by default
@@ -87,7 +91,8 @@ Other flags:
                      while) and says how many it hid; --json always emits them.
   --include-orphans  also list live shuttle tmux sessions that no longer map to a
                      shuttle: facet (rare; useful after manual cleanup).
-  --json             emit an array of objects instead.`,
+  --json             emit JSON instead (an array for the table, an object for
+                     one fiber).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The single-fiber report is a local read of one fiber, so the flags that

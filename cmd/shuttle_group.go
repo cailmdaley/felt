@@ -30,8 +30,11 @@ install, schedule, pause, and hand off the agent-scheduled facet of a fiber.
 A fiber carries the shuttle: facet or it does not — with it, the fiber is a
 task/role the daemon can dispatch; without it, a pure note. These verbs write
 and read that facet. Write verbs validate the block before touching disk and
-work offline; the daemon-coupled read verbs (snapshot, dispatch, status --all)
-talk to the local daemon's :4000 API.`,
+work offline (accept, and resume on a standing role awaiting review, go through
+the owning daemon when it answers and write locally when it does not).
+snapshot, dispatch, status --all/--remote, sessions, transcript, message and
+validate-identity talk to the local daemon's HTTP API — 127.0.0.1:4000 or a
+unix socket, per 'felt shuttle host'.`,
 	// Map --felt-store onto felt's -C store selector before any verb runs, so the
 	// daemon's `--felt-store <store>` invocations resolve through felt's existing
 	// store-resolution path unchanged.

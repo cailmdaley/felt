@@ -584,8 +584,9 @@ var (
 var remotesCmd = &cobra.Command{
 	Use:   "remotes",
 	Short: "Inspect and edit the remote shuttle daemon fleet",
-	Long: `The fleet file lists the other shuttle daemons this host aggregates:
-one name, one local tunnel port, and how to reach each.
+	Long: `The fleet file lists the other shuttle daemons this host aggregates: a name
+for each, and either a local tunnel port (forwarded over ssh) or a URL that
+reaches the daemon directly.
 
 The daemon reads the same file directly — this command edits and validates it,
 it is not the transport. ` + "`list`" + ` is also the validator: it reports parse
@@ -768,9 +769,9 @@ func remoteNameList(remotes []remoteSpec) string {
 }
 
 func init() {
-	remotesAddCmd.Flags().StringVar(&remotesAddSSH, "ssh", "", "SSH destination (default: the remote name)")
+	remotesAddCmd.Flags().StringVar(&remotesAddSSH, "ssh", "", "SSH destination (default: the remote name when --port is set; none for a --url entry)")
 	remotesAddCmd.Flags().StringVar(&remotesAddDisplay, "display", "", "Presentation label (default: the remote name)")
-	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required)")
+	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required unless --url is given)")
 	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
 	remotesAddCmd.Flags().StringVar(&remotesAddRemoteSock, "remote-socket", "", "Daemon unix socket on the remote host, forwarded instead of --remote-port")
 	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
