@@ -133,7 +133,7 @@ func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 
 func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	dir := t.TempDir()
+	dir := socketTempDir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}

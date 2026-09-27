@@ -94,9 +94,21 @@ func TestDedupReleasesPreflightFailure(t *testing.T) {
 	}
 }
 
+// socketTempDir is a private temp dir short enough for Unix socket paths:
+// t.TempDir() under macOS's $TMPDIR, plus a test name, overruns sun_path.
+func socketTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "felt-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 func piFixture(t *testing.T, reply string) (string, string) {
 	t.Helper()
-	root := t.TempDir()
+	root := socketTempDir(t)
 	sock := filepath.Join(root, "worker.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {

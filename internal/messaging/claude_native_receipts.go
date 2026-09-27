@@ -5,24 +5,29 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
 type claudeNativeVerdict struct{ Status string }
 
-// Claude returns inbox policy decisions to a sender-owned socket. Peer PID and
-// the native correlation id are checked before accepting any receipt.
+// maxUnixSocketPath is the longest socket path that binds on both macOS
+// (sun_path 104 bytes with its NUL) and Linux (108).
+const maxUnixSocketPath = 103
+
+// Claude returns inbox policy decisions to a sender-owned socket. Claude only
+// replies to an address beside its own socket (its private cc-socks dir), and
+// on macOS that dir sits under a long $TMPDIR, so the receipt name is sized to
+// the remaining sun_path budget: "<hex>.sock", the shape Claude itself uses
+// for peer sockets. Peer PID and the native correlation id are checked before
+// accepting any receipt.
 func listenClaudeNativeReceipts(ctx context.Context, r claudeNativeRegistration, uuid string) (string, <-chan claudeNativeVerdict, func(), error) {
-	var nonce [6]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return "", nil, nil, err
-	}
-	path := filepath.Join(filepath.Dir(r.Socket), fmt.Sprintf("shuttle-%d-%x.sock", os.Getpid(), nonce))
-	listener, err := net.Listen("unix", path)
+	listener, path, err := listenBesideSocket(r.Socket)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -70,4 +75,25 @@ func listenClaudeNativeReceipts(ctx context.Context, r claudeNativeRegistration,
 		}
 	}()
 	return "uds:" + path, verdicts, func() { listener.Close() }, nil
+}
+
+// listenBesideSocket binds a fresh random "<hex>.sock" in socket's directory,
+// with as many hex digits (up to 16) as the path limit allows.
+func listenBesideSocket(socket string) (net.Listener, string, error) {
+	dir := filepath.Dir(socket)
+	digits := min(16, maxUnixSocketPath-len(dir)-len("/.sock"))
+	if digits < 6 {
+		return nil, "", fmt.Errorf("socket directory %q leaves no room for a receipt socket within %d bytes", dir, maxUnixSocketPath)
+	}
+	for attempt := 0; ; attempt++ {
+		var nonce [8]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return nil, "", err
+		}
+		path := filepath.Join(dir, fmt.Sprintf("%x", nonce)[:digits]+".sock")
+		listener, err := net.Listen("unix", path)
+		if err == nil || !errors.Is(err, syscall.EADDRINUSE) || attempt == 3 {
+			return listener, path, err
+		}
+	}
 }

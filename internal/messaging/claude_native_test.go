@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -232,6 +235,7 @@ func TestClaudeNativePolicyReceipts(t *testing.T) {
 					payload["status_detail"] = "refused"
 				}
 				json.NewEncoder(c).Encode(payload)
+				io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 			})
 			r, err := Send(context.Background(), "host", req)
 			expected := StatusRejected
@@ -249,6 +253,40 @@ func TestClaudeNativePolicyReceipts(t *testing.T) {
 	}
 }
 
+// macOS puts Claude's cc-socks dir under a long $TMPDIR; the receipt socket
+// must still bind beside the receiver's socket, in the name shape Claude
+// accepts for peers.
+func TestClaudeNativePolicyReceiptUnderLongTMPDIR(t *testing.T) {
+	long := filepath.Join(socketTempDir(t), strings.Repeat("d", 45))
+	if err := os.Mkdir(long, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", long)
+	var from string
+	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) {
+		reg, _ := readClaudeNative("session")
+		from = strings.TrimPrefix(frame["from"].(string), "uds:")
+		c, err := net.Dial("unix", from)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": "denied", "from": "uds:" + reg.Socket, "orig_msg_id": frame["msg_id"]})
+		io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
+	})
+	reg, _ := readClaudeNative("session")
+	if old := filepath.Join(filepath.Dir(reg.Socket), fmt.Sprintf("shuttle-%d-%012x.sock", os.Getpid(), 0)); len(old) <= maxUnixSocketPath {
+		t.Fatalf("fixture dir too short to exercise the limit: %d bytes", len(old))
+	}
+	r, err := Send(context.Background(), "host", req)
+	if err == nil || r.Status != StatusRejected || !strings.Contains(r.Detail, "denied") {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if filepath.Dir(from) != filepath.Dir(reg.Socket) || !regexp.MustCompile(`^[0-9a-f]{6,16}\.sock$`).MatchString(filepath.Base(from)) || len(from) > maxUnixSocketPath {
+		t.Fatalf("receipt socket %q", from)
+	}
+}
+
 func TestClaudeNativeRejectsUncorrelatedPolicyReceipt(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) {
 		reg, _ := readClaudeNative("session")
@@ -258,6 +296,7 @@ func TestClaudeNativeRejectsUncorrelatedPolicyReceipt(t *testing.T) {
 		}
 		defer c.Close()
 		json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": "denied", "from": "uds:" + reg.Socket, "orig_msg_id": "wrong-id"})
+		io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
@@ -320,6 +359,7 @@ func TestClaudeNativeReceivesPolicyWithoutTranscript(t *testing.T) {
 		}
 		defer c.Close()
 		json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": "expired", "status_detail": "refused", "from": "uds:" + reg.Socket, "orig_msg_id": frame["msg_id"]})
+		io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 	})
 	reg, _ := readClaudeNative("session")
 	if err := os.Remove(reg.Transcript); err != nil {
