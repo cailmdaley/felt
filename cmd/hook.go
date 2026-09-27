@@ -106,7 +106,9 @@ pass-through for non-edit tools, non-felt files, and any error.`,
 }
 
 func init() {
+	sessionCmd.GroupID = groupStore
 	rootCmd.AddCommand(sessionCmd)
+	hookCmd.GroupID = groupAgents
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionCmd)
 	hookCmd.AddCommand(hookPreToolCmd)

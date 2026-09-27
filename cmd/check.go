@@ -82,5 +82,6 @@ Current checks cover:
 }
 
 func init() {
+	checkCmd.GroupID = groupStore
 	rootCmd.AddCommand(checkCmd)
 }

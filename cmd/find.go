@@ -241,6 +241,7 @@ func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) 
 }
 
 func init() {
+	findCmd.GroupID = groupSearch
 	rootCmd.AddCommand(findCmd)
 	findCmd.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	findCmd.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")

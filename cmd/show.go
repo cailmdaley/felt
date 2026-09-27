@@ -177,6 +177,7 @@ func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 }
 
 func init() {
+	showCmd.GroupID = groupFibers
 	rootCmd.AddCommand(showCmd)
 	showCmd.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Output the body plus its start line")
 	showCmd.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")

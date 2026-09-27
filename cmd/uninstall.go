@@ -38,6 +38,7 @@ no-op. Leaves the felt binary in place — to remove that:
 }
 
 func init() {
+	uninstallCmd.GroupID = groupAgents
 	rootCmd.AddCommand(uninstallCmd)
 }
 

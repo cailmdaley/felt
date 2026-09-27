@@ -228,9 +228,13 @@ var unnestCmd = &cobra.Command{
 }
 
 func init() {
+	migrateCmd.GroupID = groupStore
 	rootCmd.AddCommand(migrateCmd)
+	backfillIDsCmd.GroupID = groupStore
 	rootCmd.AddCommand(backfillIDsCmd)
+	nestCmd.GroupID = groupFibers
 	rootCmd.AddCommand(nestCmd)
+	unnestCmd.GroupID = groupFibers
 	rootCmd.AddCommand(unnestCmd)
 
 	migrateCmd.Flags().StringVar(&migrateDir, "dir", "", "Project root or .felt directory to migrate")

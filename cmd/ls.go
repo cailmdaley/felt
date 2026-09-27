@@ -218,6 +218,7 @@ list every match flat. --json is always uncollapsed.`,
 }
 
 func init() {
+	lsCmd.GroupID = groupSearch
 	rootCmd.AddCommand(lsCmd)
 	lsCmd.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	lsCmd.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND logic; trailing colon for prefix match)")
@@ -812,6 +813,7 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 }
 
 func init() {
+	treeCmd.GroupID = groupSearch
 	rootCmd.AddCommand(treeCmd)
 	treeCmd.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
 }

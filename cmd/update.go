@@ -20,6 +20,7 @@ type ghRelease struct {
 }
 
 func init() {
+	updateCmd.GroupID = groupAgents
 	rootCmd.AddCommand(updateCmd)
 }
 

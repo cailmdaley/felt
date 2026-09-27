@@ -39,5 +39,6 @@ var rmCmd = &cobra.Command{
 }
 
 func init() {
+	rmCmd.GroupID = groupFibers
 	rootCmd.AddCommand(rmCmd)
 }

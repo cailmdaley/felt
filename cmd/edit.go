@@ -250,6 +250,7 @@ func unsetExtraField(f *felt.Felt, key string) error {
 }
 
 func init() {
+	editCmd.GroupID = groupFibers
 	rootCmd.AddCommand(editCmd)
 	initEditFlags()
 }

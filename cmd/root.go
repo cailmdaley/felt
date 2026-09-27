@@ -73,14 +73,60 @@ func vcsRevision() string {
 	return revision
 }
 
+// Command groups order the Available Commands list by what an agent is doing.
+const (
+	groupFibers = "fibers"
+	groupSearch = "search"
+	groupStore  = "store"
+	groupAgents = "agents"
+)
+
+// rootLong is the page an agent reads once and works from. Every command line
+// in it is checked against the command tree by TestHelpCommandLinesResolve.
+const rootLong = `felt keeps fibers (tasks, decisions, findings, specs) as markdown files at
+.felt/<id>/<slug>.md; the id is the nested path, e.g. analysis/damping-prior.
+Relationships come from containment, [[wikilinks]] in bodies, and project-owned
+conventions such as inputs.from. Extra top-level YAML is preserved untouched.
+
+Status is opt-in:   · none (default)   ○ open   ◐ active   ● closed
+open and active mean someone should act; a note, decision, or finding stays
+statusless. Close a todo with an outcome that says what was learned.
+
+Views and stores: a project .felt that symlinks into a larger store is a view.
+ls lists the view, find searches the whole store, and an id reaches anywhere:
+show, edit, nest, and rm act on the fiber where it lives.
+
+Common paths:
+  felt add analysis/covariance "Covariance method" -o "one-line outcome"
+  felt edit analysis/covariance -o "what was learned" -s closed
+  felt ls                           open and active fibers in this view
+  felt ls "query"                   search; closed matches are counted, not shown
+  felt ls "query" --body -r         regex, including bodies
+  felt find "query"                 search the whole store
+  felt show <id> -d summary         metadata, outcome, lede, back-references
+  felt show <id> --field shuttle    one frontmatter key, shell-friendly
+  felt show <id> --citations        fibers that link here
+  felt tree <id> -L 2               containment around a fiber
+  felt edit <id> --set key=value    a scalar project field (--unset key)
+  felt nest <child> <parent>        move a subtree under a parent
+
+Editing: write bodies, outcomes longer than a sentence (outcome: |-), and
+structured YAML in the file directly. Never hand-edit created-at or updated-at;
+felt stamps them on every write.
+
+Sync: felt sync merges the store's Git upstream, following a symlinked view to
+the real store. Commit intentional changes, then felt sync --push. Resolve
+conflicts in context; never take ours or theirs mechanically.
+
+Hygiene: felt check reports broken links and layout problems; felt session
+prints the start-of-session context, including its Attention list.
+
+Dispatch: fibers with a shuttle: block are agent work; see felt shuttle --help.`
+
 var rootCmd = &cobra.Command{
 	Use:   "felt",
 	Short: "Markdown fiber tracker with containment, wikilinks, and extra YAML",
-	Long: `felt stores work as a directory tree
-under .felt/, with each fiber in <slug>/<slug>.md using YAML frontmatter and
-plain markdown. Containment comes from directories, narrative connections come
-from wikilinks in bodies, and non-native frontmatter is preserved opaquely for
-downstream tools.`,
+	Long:  rootLong,
 	CompletionOptions: cobra.CompletionOptions{
 		HiddenDefaultCmd: true,
 	},
@@ -100,6 +146,13 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddGroup(
+		&cobra.Group{ID: groupFibers, Title: "Fibers:"},
+		&cobra.Group{ID: groupSearch, Title: "Finding:"},
+		&cobra.Group{ID: groupStore, Title: "Store:"},
+		&cobra.Group{ID: groupAgents, Title: "Dispatch and integration:"},
+	)
+	rootCmd.SetHelpCommandGroupID(groupAgents)
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "Output in JSON format")
 	rootCmd.PersistentFlags().StringVarP(&changeDir, "directory", "C", "", "Run as if felt was started in `dir`")
 }

@@ -275,6 +275,7 @@ func init() {
 	setupCmd.AddCommand(setupPiCmd)
 	setupCmd.AddCommand(setupSkillsCmd)
 	setupCmd.AddCommand(setupValidateCmd)
+	setupCmd.GroupID = groupAgents
 	rootCmd.AddCommand(setupCmd)
 }
 

@@ -54,6 +54,7 @@ talk to the local daemon's :4000 API.`,
 func init() {
 	shuttleCmd.PersistentFlags().StringVar(&shuttleFeltStore, "felt-store", "",
 		"Felt store root (directory containing .felt/); alias for -C")
+	shuttleCmd.GroupID = groupAgents
 	rootCmd.AddCommand(shuttleCmd)
 }
 

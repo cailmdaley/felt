@@ -20,6 +20,7 @@ const syncGitTimeout = 2 * time.Minute
 var syncPush bool
 
 func init() {
+	syncCmd.GroupID = groupStore
 	rootCmd.AddCommand(syncCmd)
 	syncCmd.Flags().BoolVar(&syncPush, "push", false, "push the current branch to its configured tracking branch after syncing")
 }

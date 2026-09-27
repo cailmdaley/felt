@@ -59,5 +59,6 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
+	initCmd.GroupID = groupStore
 	rootCmd.AddCommand(initCmd)
 }

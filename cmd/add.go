@@ -123,6 +123,7 @@ Examples:
 }
 
 func init() {
+	addCmd.GroupID = groupFibers
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Body text")
 	addCmd.Flags().StringVarP(&addStatus, "status", "s", "", "Status (open, active, closed)")
