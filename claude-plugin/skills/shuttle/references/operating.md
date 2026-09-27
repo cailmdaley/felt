@@ -1,101 +1,59 @@
 # Operating shuttle
 
-Lifecycle verbs, kanban semantics, and the triage paths for "why isn't my card doing what I expect."
+Lifecycle verbs, kanban semantics, and the triage paths for "why isn't my card doing what I expect." The operator guide at <https://cailmdaley.github.io/felt/> carries the full board, cycle, and telemetry documentation; this page holds what an agent needs to act.
 
 ## Dispatch eligibility
 
 The daemon dispatches a fiber when all of these hold:
 
-1. The fiber lives in a felt store the daemon polls. Configured stores come from `FELT_STORES` → the persisted registry at `~/.config/felt/stores.json` (no implicit default); a cross-project store (the running example in these docs is `~/loom`; see the felt skill's cross-project reference) also exposes the project substores symlinked under its `.felt/`.
-2. **The fiber carries a `shuttle:` block.** A fiber is shuttle-managed iff it has this block — installed via `felt shuttle install` (oneshot) or `felt shuttle repeat` (standing). The daemon reads the block directly; no tag predicate, no CLI spawn during the poll.
-3. **Felt-native `status:` is `active`** — the sole dispatch gate (`eligible?/2` in `lib/shuttle/poller.ex`). `active` is armed, `open` is a draft, `closed` is a terminus / awaiting review.
+1. The fiber lives in a felt store the daemon polls. Stores come from `FELT_STORES`, else the registry at `~/.config/felt/stores.json` (no implicit default); a cross-project store such as `~/loom` also exposes the project stores symlinked under its `.felt/`.
+2. **The fiber carries a `shuttle:` block**, written by `felt shuttle install` (oneshot), `repeat` (standing), or `pin` (pinned).
+3. **Felt-native `status:` is `active`** — the sole dispatch gate. `active` is armed, `open` is a draft, `closed` is awaiting review or a terminus.
 
-Agent comes from `shuttle.agent`, resolved against felt's registry — the built-in set embedded into the CLI (`internal/shuttle/agents.builtin.json`) with the operator's `~/.config/felt/agents.json` layered on top; `felt shuttle agents` lists the effective registry, and the daemon consumes the resolved record off `felt show -j`. When a fiber carries no `shuttle.agent`, felt uses the registry default, currently `claude-opus` (see authoring.md, Agent selection).
+The agent comes from `shuttle.agent`, resolved against the registry (`felt shuttle agents`); a fiber without one gets the registry default (authoring.md, "Agent selection").
 
-**A card can sit `active` and still not dispatch.** Eligibility above is
-necessary, not sufficient — the dispatch action itself can still refuse, and
-a refusal parks the fiber (visible on the board as a blocked row with its
-reason, not a silent no-op) rather than retrying every tick. On macOS, one
-such reason is `tmux_server_unavailable`: no tmux server is running and the
-daemon couldn't reach kitty to start one. This is deliberate, not a bug — the
-daemon starting a tmux server itself would make every worker's file access get
-charged to the daemon's own binary under macOS TCC (see dispatch.md, "tmux
-server ownership"), so it refuses instead of quietly producing workers that
-can't touch their own files. The fix is a human restarting tmux from their
-terminal, not re-dispatching.
+**Tags never gate dispatch or the view.** The `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares management; `status` and `tempered` drive dispatch and the columns; `depends_on` only orders the view (a queued card folds under its head). Tags are free-form.
 
-**Tags never gate dispatch — or the view.** Three layers feed the system: the `shuttle:` block (`kind`, `schedule`, `agent`, `host`, `project_dir`) declares shuttle-management; universal lifecycle scalars (`status`, `tempered`) drive dispatch and view, and `depends_on` orders the view only (a queued card folds under its head; the daemon never reads it); tags are free-form noticings read by neither the daemon nor the kanban classifier.
+**A card can sit `active` and still not dispatch.** The dispatch itself can refuse, and a refusal parks the fiber as a blocked row showing its reason rather than retrying every tick. On macOS one such reason is `tmux_server_unavailable`: no tmux server is running and the daemon couldn't reach the terminal to start one. The daemon refuses to start tmux itself, because macOS would then charge every worker's file access to the daemon's binary. The fix is a human restarting tmux from their terminal, not re-dispatching.
 
-## What the board admits
-
-Two kinds of row, and nothing else (`shouldIncludeInKanban` in `ui/src/board/KanbanReadModel.ts`): a fiber with a `shuttle:` block, and a **cycle** fiber. Everything the human means to do carries a block — a bare `due:` is a date the Desk cannot act on, so such a fiber is promoted, not shown. The daemon's feed is deliberately wider (one of its three admission walks is `--has-field due`, `lib/shuttle/fiber_documents.ex`); the board is where the narrowing happens. Cycles are the exception because they are not work: admitted on the tag alone, routed straight to the `cycles` surface, never in a Desk column.
-
-## Board tabs
-
-The board at `:4000` is five hotkey-switchable tabs — four windows over the same fibers and sessions, plus the Board, which is a different kind of surface. **Desk** is the kanban (below). **Day** lays fibers as lanes over a 6am→6am axis, with the rail zoomed to first-action→now rather than the full 24 hours. **Week** rows past days as ink rasters, today's row carries a gold seam, future rows are hollow. **Chronicle** draws fibers as multi-day lifelines across calendar days, under a strip of cycle bands.
-
-**Board** (hotkey `5`; `shelf` internally — the id, the storage keys and the module names all say shelf, and `?view=shelf` deep-links it) is not a window over time at all. It is the fleet's sent work on a canvas: everything a worker pushed with `felt shuttle send-file <path> [path...]` in the last month (`/api/v1/sent-files/all/composite`), each file a card that renders its own contents. A card is two layers — the FACE (name, fiber, age, kind) is synchronous and is the card's resting state, never a skeleton; the BODY (iframe, image, page) mounts when the card nears the viewport and is evicted when the board carries more live bodies than it can afford (`shelfLoad`, 16 live with hysteretic cutback). CARDS ARE HANDLES, NEVER FACTORIES: every gesture rearranges the canvas, nothing on a card makes another card. Nothing overlaps except a pile, which is one fiber's work gathered by the fiber lens. Reading happens in the Reader — the ↗ sends a file to one overlay window with its own tab strip, because shuttle runs as a Safari dock web-app where every `window.open` would otherwise become a separate window.
-
-**Two-state activity grammar.** Every raster spends exactly two pigments: solid for human steering, wash for agent work. There is no third "attention called" state — an idle nudge is not a state of the work, and an agent blocked on you reads as the **gap** on a live lane, which no pigment improves on. Effort is counted in the unit each side actually spends: human effort in messages sent and received (`you 14 · 9 back`), agent effort in minutes. Hover any mark for the actual words — transcript excerpts fetched from `/api/v1/moment`.
-
-The temporal tabs read from the same substrate the daemon already tracks, not a separate store: activity from `events.jsonl`, session identity from the session ledger `sessions.jsonl`, and the prose ("what this fiber did today") from the commit ledger `commits.jsonl`, which a hook writes at commit time. **Everything on these pages is joined by those two ledgers**: a minute or a commit that does not resolve to a fiber the board carries is not drawn at all, so work started outside shuttle is invisible here — and nothing is ever attributed by reading a commit's `slug:` prefix or a working directory's name. **Cross-host:** the hub caches each remote's activity, sessions, commits, and spend, so one board shows the whole fleet's time; an origin that goes unreachable grays out and says "waiting on `<host>`" rather than silently drawing an empty day.
-
-## Cycles and eras
-
-A **cycle** is a fiber tagged `cycle` with `start:` and `due:` as civil days, and a body whose first paragraph is the *intention* — what this stretch of time is for. The Chronicle draws it as a named band over the day grid.
-
-- **Make one** by dragging across days in the cycle strip and naming the span, or press `+` to *speak* an era: dictate the intention, which starts today and runs open-ended (a start with no end runs to the horizon; an end with no start is a single day).
-- **Membership is always derived**, never a list: a fiber belongs to an era if it was worked during the span or is due inside it. Nothing to maintain, nothing to fall out of sync.
-- **Click the band** for the era face — span, intention, derived figures, and "the look back", a memoir composed from the commit trail. **Inscribe this review** writes that memoir back into the cycle fiber. **Double-click the name** to rename; **drag an edge** to respan.
-
-## Snooze
-
-Dragging a card reveals the **drag horizon** — a slim row of upcoming days under the tab strip, plus a chip per upcoming cycle.
-
-- **Onto a day**: a desk or resting card gets `due:` + `horizon: stashed` — it leaves the Now board for **Resting** and returns on its due day. A card that already lives elsewhere just gets the `due:`.
-- **Onto a cycle chip**: due lands on that cycle's start day, clamped to tomorrow when the cycle is already running ("rest until tomorrow, later this cycle").
-- **Onto today** puts it back on the desk (due cleared); **into Resting** stashes it dateless; **back up to the now-board** clears horizon and cold.
-
-## Token spend
-
-`GET /api/v1/spend?since_ms=…` folds transcript usage into per-session and per-fiber token rollups, joining the session ledger (which fiber a session belonged to) to the transcript record (what it cost). Neither join estimates: a session whose transcript this host cannot read is reported `found: false` with zeroed counters and still counts in its fiber's session tally. `/api/v1/spend/composite` merges every host's spend into one view.
+**Ghost workers.** If the daemon believes a fiber is running with no live tmux session, `felt shuttle dispatch <fiber>` reconciles the stale entry. **Daemon restarts never end worker sessions** — tmux owns the worker; the daemon re-adopts live sessions on boot. Start or restart the daemon only with bare `shuttle-launch`; never run `shuttle-launch --loop` by hand (that is the respawn loop meant to run inside the `shuttle-daemon` session).
 
 ## Kanban columns
 
-Column membership derives from felt `status` + `tempered` + `shuttle.kind` + worker ownership (`classifyFiber` in `ui/src/board/KanbanRules.ts` — the single source of truth):
+The Desk admits fibers with a `shuttle:` block and cycle fibers, nothing else. Column membership derives from `status` + `tempered` + `shuttle.kind` + worker ownership:
 
-- **Drafts**: `status: open` — a stash awaiting refinement, dispatching nothing until launched (`felt shuttle pause` lands a card here). A fiber with no block at all is not a draft; it is not on the board.
-- **Scheduled**: an armed standing role between firings (`status: active`, no live worker) — it fires on its own cron, so it sits on the timeline at its next launch rather than in the Now lane.
-- **Pinned**: a resting `kind: pinned` role — the strip of perennial interfaces. A human starts it (Resume / strip → In-flight); once running it joins the unified lifecycle: a worker that deliberately hands off is relaunched fresh next tick (a long autonomous arc), a dirty death or idle exit parks it back to the strip, and a close-out lands in Awaiting review.
-- **In flight**: a live terminal worker or owned app conversation (any kind), or an armed oneshot (`status: active` — even when blocked by deps; it flies when the dep clears).
-- **Awaiting review**: `status: closed`, `tempered` absent. Worker exited; shuttle ignores it pending human verdict.
-- **Tempered**: `status: closed`, `tempered: true`. Human-accepted (oneshot terminus).
-- **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block is preserved as historical record.
+- **Drafts**: `status: open` — dispatching nothing until launched (`felt shuttle pause` lands a card here).
+- **Scheduled**: an armed standing role between firings, shown on the timeline at its next launch.
+- **Pinned**: a resting `kind: pinned` role on the strip of perennial interfaces. A human starts it; the SKILL.md exit semantics govern it once running.
+- **In flight**: a live worker or owned app conversation (any kind), or an armed oneshot — even one waiting on its dependencies.
+- **Awaiting review**: `status: closed`, `tempered` absent. Parked for the human's verdict.
+- **Tempered**: `status: closed`, `tempered: true`. Human-accepted.
+- **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block stays as the record.
 
-The drag-to-tempered gesture is **kind-aware**: on a standing role awaiting review it invokes `felt shuttle accept` (re-arms the role, `next_due` recomputed from cron); on a pinned role awaiting review it also invokes accept, which **re-parks it to the strip** (`status: open`, verdict cleared) — dragging the card back to the strip/drafts is the same accept; on a oneshot it sets `tempered: true` (terminus). Same gesture, kind-aware semantics — the classifier reads `shuttle.kind`.
+A **cycle** is not work: a fiber tagged `cycle` with `start:` and `due:` civil days and a body whose first paragraph is the intention for that stretch of time. The Chronicle draws it as a band; membership is derived (worked during the span or due inside it), never listed.
+
+**Snooze** writes frontmatter: dropping a card on a future day sets `due:` + `horizon: stashed` (it moves to Resting and returns on its due day); dropping it on today clears `due:`.
 
 ## Gestures by card state
 
-**Two interaction modes** route to different verbs even for the same card. **Drag-and-drop** is "advance the card's state" intent: drag-to-tempered = "I'm done, accept"; drag-to-drafts = "park it"; drag-to-inFlight on a dormant role = "fire it now." **Modal buttons** (Resume, New session) are "I'm NOT done — give me another worker on this same run": they preserve outcome and don't advance the cycle.
+Drag-and-drop advances a card's state; the modal buttons (Resume, New session) mean "not done — another worker on this same run" and preserve the outcome.
 
 | Card state | Interaction | Verb fired | Effect |
 |---|---|---|---|
-| standing, **awaiting** (status:closed + untempered) | drag → tempered or inFlight | `felt shuttle accept` | Re-arms (`status: active`; next occurrence computed `cron.next(now)`). Outcome cleared. |
-| standing, **awaiting** | modal **Resume** | `felt shuttle resume` + dispatch (resume_mode=previous) | Re-arms; continues the prior session with the user's directive (session id from `shuttle.runtime.session_uuid`). Outcome preserved. |
-| standing, **awaiting** | modal **New session** | `felt shuttle resume` + dispatch (resume_mode=fresh) | Re-arms; brand-new session on the same fiber. Outcome preserved. |
-| standing, **armed** (status:active) | drag → inFlight | `felt shuttle dispatch --ad-hoc` | Manual ad-hoc run, synthetic `adhoc-*` id; schedule untouched. |
-| standing, **draft** (status:open) | drag → inFlight | `felt shuttle reopen` | Arms it; daemon picks up the schedule next poll. |
-| any, **running worker** | (any) | dispatch returns `already_running` | Card promotes to inFlight; attach via tmux. |
-| any | drag → drafts | `felt shuttle pause` | `status: open` + kills the live worker. Schedule preserved. |
+| standing, **awaiting** | drag → tempered or inFlight | `felt shuttle accept` | Re-arms (`status: active`, next occurrence from cron). Outcome cleared. |
+| pinned, **awaiting** | drag → tempered, strip, or drafts | `felt shuttle accept` | Re-parks to the strip (`status: open`, verdict cleared). |
+| standing, **awaiting** | modal **Resume** / **New session** | `felt shuttle resume` + dispatch | Re-arms; continues the prior session with the directive, or starts a fresh one. Outcome preserved. |
+| standing, **armed** | drag → inFlight | `felt shuttle dispatch --ad-hoc` | Ad-hoc run (`adhoc-*` id); schedule untouched. |
+| standing, **draft** | drag → inFlight | `felt shuttle reopen` | Arms it; the schedule applies from the next poll. |
 | oneshot, **awaiting** | drag → tempered / composted | `felt shuttle close --tempered=true/false` | Terminus / discarded. |
+| any, **running worker** | any | dispatch returns `already_running` | Attach via tmux. |
+| any | drag → drafts | `felt shuttle pause` | `status: open`, live worker killed, schedule preserved. |
 
-**Outcome-clearing rule.** Only `felt shuttle accept` clears the outcome — the cycle-advance verb, and a fresh outcome is the right precondition for the next run. Resume and New session preserve it because the run is *not* finalized.
-
-**Ghost workers.** If `state.running` shows a fiber with no live tmux session, eligibility blocks re-dispatch; `felt shuttle dispatch <fiber>` triggers a `reconcile_running_fiber` pass that clears stale entries. And **daemon restarts never end worker sessions** — tmux owns the worker process, the daemon only watches it; bouncing the daemon cycles the watcher and re-adopts live sessions on boot. Start or restart the daemon only with bare `shuttle-launch` — the singleton that (re)creates the `shuttle-daemon` tmux session; never run `shuttle-launch --loop` by hand, that's the respawn loop itself, meant to run inside that session.
+Only `accept` clears the outcome (unless `--keep-outcome`): it is the cycle-advance verb, and a fresh outcome is the right precondition for the next run.
 
 ## Lifecycle verbs
 
-The daemon picks up any of these on its next poll:
+The daemon picks these up on its next poll:
 
 ```bash
 felt shuttle install <fiber>                # fresh oneshot, armed (status: active)
@@ -105,51 +63,36 @@ felt shuttle pin     <fiber>                # pinned, schedule-less perennial ro
 felt shuttle reshape <fiber> [kind]         # change kind/schedule on an existing block, in place
 felt shuttle pause   <fiber>                # status: open; kills live worker unless --no-kill
 felt shuttle resume  <fiber>                # status: active
-felt shuttle accept  <fiber>                # standing roles only: accept pending run, re-arm
+felt shuttle accept  <fiber>                # standing/pinned: accept the pending run
 felt shuttle close   <fiber> [--tempered=…] # status: closed; verdict via --tempered
-felt shuttle reopen  <fiber>                # requeue a closed/reviewed fiber into active work
+felt shuttle reopen  <fiber> [--as-draft]   # requeue a closed/reviewed fiber
 felt shuttle set-agent <fiber> <agent-id>   # change shuttle.agent (axes: --effort, --chrome)
-felt shuttle uninstall <fiber>              # archive from kanban — see below
+felt shuttle uninstall <fiber>              # remove the block — see below
 ```
 
-Read-side checks:
+Read-side:
 
 ```bash
-felt shuttle status                         # one line per fiber with a block
-felt shuttle status <fiber>                 # detailed report on one block + dispatch assessment
-felt shuttle ps                             # live tmux workers only
-felt shuttle snapshot                       # daemon's view (:4000)
-curl -s http://127.0.0.1:4000/api/v1/agents | jq    # agent registry over HTTP
+felt shuttle status [<fiber>]               # table, or one block + dispatch assessment
+felt shuttle status --all                   # local plus every configured remote
+felt shuttle ps                             # live tmux workers
+felt shuttle snapshot                       # the daemon's state
 ```
 
 ## Claiming a fiber into your session
 
-The examples below use the single-user default, `http://localhost:4000`. On a
-shared or exposed host the daemon listens on a unix socket instead; `felt
-shuttle host` prints the address. There, pass the socket to curl and keep the
-`localhost` host, which the daemon's loopback check requires:
-`curl --unix-socket <path> http://localhost/api/v1/claim ...`.
+An interactive session can become a fiber's worker through `POST /api/v1/claim`. The daemon registers it exactly as if it had dispatched it — liveness watcher, In-flight card, the same two-verb exit. This is how capture sessions adopt the fiber they just authored, and it serves any fiber a human wants to drive from a session shuttle didn't spawn: a draft to start on now, an Awaiting-review card reopened interactively, or a running worker whose cache has gone cold.
 
-For a Shuttle-launched **app capture**, use the exact conversation id supplied in its prompt:
+The examples use the single-user default, `http://localhost:4000`. On a shared or exposed host the daemon listens on a unix socket (`felt shuttle host` prints the address); pass it to curl and keep the `localhost` host, which the loopback check requires: `curl --unix-socket <path> http://localhost/api/v1/claim ...`.
 
-```bash
-curl --fail -sS -X POST http://localhost:4000/api/v1/claim \
-  -H 'Content-Type: application/json' \
-  -d '{"fiber_id":"<fiber>","surface":"app","session_uuid":"<conversation id>","agent":"<registry id>"}'
-```
-
-Create the fiber and install its app block as a draft first. Claim it, check success, then set `status: active`. A capture recorded by this daemon claims directly. An existing native Codex conversation may also be adopted when its exact id is readable from this daemon's connected App Server; Shuttle verifies that identity before atomically recording ownership. The claim does not resume the conversation or start a turn, so an active turn continues untouched. An unreadable, missing, or already-owned id is refused. An app claim does not rename a terminal. App stop interrupts its turn and releases ownership; resume reuses the saved conversation. A connection failure retains ownership and must never cause an automatic replacement conversation.
-
-For a **terminal session**, use the flow below.
-
-An interactive session can become a fiber's worker — first-class, via `POST /api/v1/claim`. The daemon registers the claiming tmux session exactly as if it had dispatched it: liveness watcher, kanban in-flight, and the same two-verb exit — `felt shuttle handoff` for a clean-exit stamp and fresh dispatch while `active`, or `status: closed` for Awaiting review, never both. This is how capture sessions adopt the fiber they just authored, and it generalizes to any fiber a human wants to drive from a session shuttle didn't spawn: a draft they want to start on now, an Awaiting-review card being reopened interactively, or a running worker whose cache has gone cold and isn't worth reheating just to continue.
+**Terminal session:**
 
 ```bash
 # 1. only if a worker is live: kill it and park safely (no dispatch gap)
 felt shuttle pause <fiber>
 
-# 2. claim — from inside the claiming session (requires tmux; renames the
-#    session to the canonical <leaf>-<uid>-shuttle worker name — expected)
+# 2. claim — from inside the claiming tmux session (renames it to the
+#    canonical <leaf>-<uid>-shuttle worker name)
 curl -s -X POST http://localhost:4000/api/v1/claim -H 'Content-Type: application/json' \
   -d '{"fiber_id": "<fiber>", "tmux_session": "'"$(tmux display-message -p '#S')"'",
        "session_uuid": "<your transcript uuid>", "agent": "<registry id>"}'
@@ -158,25 +101,40 @@ curl -s -X POST http://localhost:4000/api/v1/claim -H 'Content-Type: application
 felt edit <fiber> --status active
 ```
 
-The order is load-bearing: activating before the claim makes the fiber dispatch-eligible while the daemon can't yet see your session, and the poll loop spawns a duplicate worker in the gap. `session_uuid` is optional but wire it when you can — it writes the dispatch marker, so Resume-previous and transcript lineage work on claimed sessions too. The claim is idempotent; if the response is lost, retry with the same body. Errors are precise: `already_running` means kill/pause the live worker first, `closed` means `felt shuttle reopen` first, `not_installed` means `felt shuttle install` the fiber first (the claim stamps `shuttle.runtime` under the installed block), `session_not_found` means the tmux session name didn't resolve.
+**App capture** (Shuttle-launched Codex app conversation): claim with `"surface":"app"` and the exact conversation id from the prompt as `session_uuid`, then arm. An existing native Codex conversation can also be adopted when this daemon's connected App Server can read its id; Shuttle verifies the identity before recording ownership. The claim does not start a turn or rename anything. An unreadable, missing, or already-owned id is refused; a connection failure keeps ownership and never triggers a replacement conversation.
 
-From the claim on, you are the worker: the whole worker loop in SKILL.md applies, including its two-verb exit. Killing a live worker to claim loses whatever was typed in its input buffer — capture anything visible in the pane first (`tmux capture-pane`); the transcript itself survives and stays resumable.
+The order is load-bearing: arming before the claim makes the fiber dispatch-eligible while the daemon can't yet see your session, and the poller spawns a duplicate worker. `session_uuid` is optional but worth wiring — it enables Resume-previous and transcript lineage. The claim is idempotent; retry a lost response with the same body. Errors: `already_running` (pause the live worker first), `closed` (`felt shuttle reopen` first), `not_installed` (`felt shuttle install` first), `session_not_found` (the tmux name didn't resolve).
+
+Killing a live worker to claim loses whatever sat in its input buffer — `tmux capture-pane` anything visible first; the transcript survives. From the claim on, you are the worker and SKILL.md's loop and exit apply.
+
+## Remote hosts
+
+The fleet lives in `~/.config/felt/remotes.json`; each entry names a host and how to dial it — an SSH target plus a local tunnel port, or a Tailscale `url`. `felt shuttle remotes list|add|rm|path` inspects and edits it. The file is per host and reach is directional: a hub listing a spoke sees the spoke's cards and sessions; the spoke sees nothing of the hub until its own file names it. To talk back from a spoke, register the hub (`felt shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`). On a userspace-`tailscaled` host that also needs the outbound proxy, which is an unauthenticated gateway into the whole tailnet — it belongs on a single-user hub, **never on a shared login node**; the installation guide's "Tailscale as fleet transport" has the recipe.
+
+`felt shuttle message` needs a live, supported integration on the receiver; unavailable receivers and pending native approvals are not bypassed. `--from` labels the sender when detection fails.
 
 ## Card missing?
 
-First check where the fiber was filed (a local repo `.felt/` that's not a pinned city is invisible to the global kanban), then confirm `felt shuttle status` shows the block. Most "card missing" symptoms reduce to "no block installed yet."
+First check where the fiber was filed (a repo-local `.felt/` the daemon doesn't poll is invisible to the kanban), then that `felt shuttle status` shows the block. Most "card missing" symptoms reduce to "no block installed yet."
 
-**Remote-host fibers reach the kanban over the fleet transport (an SSH tunnel or a Tailscale URL), NOT via store git-sync.** This confusion recurs: a constitution authored on a remote host — where the cross-project store (e.g. `~/loom`) is a *different* checkout than the local one — does **not** need `git commit` + `git push` of the store to show up. The fleet lives in `~/.config/felt/remotes.json`; each entry names a host and how to dial it — an SSH target plus the local port its tunnel binds, or a Tailscale `url`. The file is per host and reach is directional: a hub listing a spoke sees the spoke's cards and sessions; the spoke sees nothing of the hub until its own file names it (see the installation guide, "Tailscale as fleet transport", for the userspace-`tailscaled` proxy a login node needs to dial out). Run `felt shuttle remotes list` to see the effective map (`felt shuttle remotes add|rm` edits it, `felt shuttle remotes path` prints the file). The local daemon reads each remote's *live* view over that tunnel with owner-routed reads, so a fresh `shuttle:` block on the remote surfaces directly. **Do not push the store just to make a remote card appear** — store git-sync moves fiber content across machines; the SSH tunnel is the kanban's live view. If a remote card is missing, debug the tunnel / store registration, not the git state.
+**Remote-host cards arrive over the fleet transport, not store git-sync.** A constitution authored on a remote host — where `~/loom` is a different checkout — surfaces on the hub's board through the daemon's live read over the tunnel. **Don't push the store to make a remote card appear**; if one is missing, debug the tunnel and store registration, not the git state.
+
+## Runtime truth
+
+```bash
+felt setup receipt --json                  # loaded bundles, felt binary, hooks, daemon contract
+felt setup validate --source <checkout>    # non-mutating check of a local plugin candidate
+```
+
+The receipt reports what the harnesses actually loaded, which felt executable resolves (flagging a different felt build elsewhere on PATH), hook compatibility, and the live daemon's expected and observed contract; it rejects interrupted promotions and identity disagreements. A cache directory existing is not proof a bundle is loaded. Daemon snapshots carry `poll_health`: a stalled world read is reaped at its bound and rising `stalls` marks a degraded input even while the daemon stays responsive.
 
 ## When to uninstall — and when not to
 
-The shuttle block is the dispatch contract: agent, kind, schedule, host. Closing a fiber doesn't remove it; the daemon ignores closed fibers via felt status and the block stays as historical record. **Closing and uninstalling are separate decisions.**
-
-`felt shuttle uninstall` earns its keep in four cases:
+The shuttle block is the dispatch contract: agent, kind, schedule, host. Closing a fiber doesn't remove it; the block stays as the record. **Closing and uninstalling are separate decisions.** `felt shuttle uninstall` earns its keep for:
 
 1. **Mistake recovery** — wrong slug, immediate undo.
-2. **Full rebuild** — converting oneshot ↔ standing is normally `felt shuttle reshape`; reach for `uninstall` + `install`/`repeat` only when you actually want project_dir/host re-resolved and status re-settled from scratch.
-3. **Archive from kanban** — a closed fiber's place is the tempered or composted column; uninstall makes it *leave the board entirely* (lesson captured elsewhere, kanban noise costs more than the record).
-4. **Tool boundary** — a different dispatcher takes ownership. (Theoretical today.)
+2. **Full rebuild** — converting kinds is normally `reshape`; uninstall + install only when project_dir, host, and status should be re-resolved from scratch.
+3. **Archive from kanban** — the fiber should leave the board entirely rather than rest in Tempered or Composted.
+4. **Tool boundary** — a different dispatcher takes ownership.
 
-What uninstall is **not** for: closing your own session. A worker exiting sets `status: closed` and leaves the block alone.
+It is never how a worker closes its own session.
