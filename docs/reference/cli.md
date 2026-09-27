@@ -81,8 +81,11 @@ people.
 ## `felt shuttle` (dispatch layer)
 
 These optional verbs apply once a fiber carries a `shuttle:` block. Write verbs
-work offline, and validate before they touch disk. A few read verbs talk to the
-local daemon at `:4000`; for what that daemon speaks directly, see the [HTTP
+work offline, and validate before they touch disk. `snapshot`, `dispatch`,
+`status --all`/`--remote`, `sessions`, `transcript`, `message`, and
+`validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
+per `felt shuttle host`); `accept` and `resume` go through the owning daemon
+when it answers. For what the daemon speaks directly, see the [HTTP
 API](api.md).
 
 ### Install / reshape the contract
@@ -93,14 +96,14 @@ API](api.md).
 | `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--host`) |
 | `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`) |
 | `felt shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
-| `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; fiber and felt status untouched |
+| `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
 `install`, `pin`, and `repeat` are create-only: each refuses a fiber that
 already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
 `set-model`/`set-agent` (agent), or `uninstall` (start over). A fresh create
-settles status (`install`/`repeat` arm to `active`, `pin` parks at `open`) and
-refuses a closed fiber — arming something already reviewed needs an explicit
-`reopen`. `reshape` touches only the block's shape — `kind`, and a standing
+settles status (`install`/`repeat` arm to `active`, `pin` and `install
+--disabled` park at `open`); an arming create refuses a closed fiber — arming
+something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
 role's schedule — and leaves status and verdict fields exactly as found, so a
 role in Awaiting review can be reshaped in place without being requeued; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
@@ -112,7 +115,7 @@ untouched by any of this.
 | Command | Purpose |
 |---|---|
 | `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `felt shuttle resume <fiber>` | Set status to `active`; the sole dispatch gate |
+| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`) |
 | `felt shuttle accept <fiber>` | Resolve a human verdict on a role awaiting review (kind-aware re-arm/re-park; `--keep-outcome`) |
 | `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead) |
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
@@ -126,7 +129,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including the daemon's dispatch assessment |
+| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including a status-based dispatch verdict |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
@@ -261,7 +264,7 @@ the existing owner-served file surface.
 | Command | Purpose |
 |---|---|
 | `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
-| `felt shuttle remotes add <name>` | Add or replace a remote (`--port`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
+| `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
 | `felt shuttle host class <class>` | Set this host's trust class in `~/.config/felt/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
