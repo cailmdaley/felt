@@ -9,8 +9,13 @@ import (
 var rmCmd = &cobra.Command{
 	Use:   "rm <id>",
 	Short: "Delete a felt",
-	Long:  `Permanently removes a felt from the repository.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Permanently removes a felt from the repository.
+
+rm never acts on a guess: a path that matches nothing but whose last segment
+names one fiber, or a prefix completion. It refuses and names the fiber the
+guess would have reached. Exact ids, scope-relative paths, unique bare slugs
+and correct partial paths are not guesses.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {
@@ -20,7 +25,7 @@ var rmCmd = &cobra.Command{
 
 		// An id that names a fiber in the enclosing store is deleted there,
 		// and the output says where — a cross-store deletion is never silent.
-		target, err := resolveFiberRef(storage, scopeID, args[0])
+		target, err := resolveExactFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}

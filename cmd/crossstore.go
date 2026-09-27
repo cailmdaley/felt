@@ -21,13 +21,15 @@ import (
 // the query to, no more and no less. THIS store's basename rescue — the "your
 // path went stale, but the slug is unique" guess — never crosses the boundary:
 // the external probe sits above it and a hit there returns before the guess
-// runs (see scopedIDResolver.resolve). But the enclosing store's own resolver
-// does run, rescue included, so `felt rm portolan` from in here reaches
-// whatever `felt -C ~/loom rm portolan` would reach. That is the model working
-// as designed — one store, addressed from a view — and it means a fuzzy id is
-// as fuzzy here as it is there, no more forgiving and no more dangerous.
-// Anything that widens what counts as an external hit widens what `rm`
-// deletes; widen it only as far as the enclosing store's own answer.
+// runs (see scopedIDResolver.resolve).
+//
+// Reading and editing are forgiving: `show` and `edit` accept whatever the
+// resolver answers, the enclosing store's slug and suffix inference included.
+// Deleting and moving never act on a guess. `rm`, `nest` and `unnest` resolve
+// through resolveExactFiberRef, which accepts what `felt check` accepts
+// silently and answers a guess — a stale path rescued by its last segment, a
+// prefix completion, or the enclosing store inferring by tail, prefix or
+// last segment — with "did you mean …?" instead of acting on it.
 
 // fiberRef is a resolved command argument: which store holds the fiber, and
 // the id it has THERE. For a local fiber that is the store the user is
@@ -53,13 +55,23 @@ func (r fiberRef) location() string {
 // store when the local view cannot see the fiber. Metadata-only: callers that
 // need the body read it from the store the ref names.
 func resolveFiberRef(storage *felt.Storage, scopeID, arg string) (fiberRef, error) {
+	return resolveFiberRefWith(storage, scopeID, arg, storage.FindMetadataInScope)
+}
+
+// resolveExactFiberRef is resolveFiberRef for commands that delete or move:
+// it refuses a guess (see felt.Storage.FindMetadataWithoutGuessing).
+func resolveExactFiberRef(storage *felt.Storage, scopeID, arg string) (fiberRef, error) {
+	return resolveFiberRefWith(storage, scopeID, arg, storage.FindMetadataWithoutGuessing)
+}
+
+func resolveFiberRefWith(storage *felt.Storage, scopeID, arg string, find func(scopeID, query string) (*felt.Felt, error)) (fiberRef, error) {
 	if felt.LooksLikeUID(arg) {
 		ref, err := resolveUIDFiberRef(storage, arg)
 		if err == nil || !errors.Is(err, errNoFiberUID) {
 			return ref, err
 		}
 	}
-	f, err := storage.FindMetadataInScope(scopeID, arg)
+	f, err := find(scopeID, arg)
 	if err == nil {
 		return fiberRef{storage: storage, id: f.ID}, nil
 	}

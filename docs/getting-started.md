@@ -124,8 +124,8 @@ Structure that was right when you filed it often stops being right later, so
 containment is movable:
 
 ```bash
-felt nest jackknife-patches covariance-estimation   # move under a new parent
-felt unnest jackknife-patches                       # promote back to the top
+felt unnest jackknife-patches                       # promote to the top level
+felt nest jackknife-patches covariance-estimation   # move back under a parent
 ```
 
 `felt nest` moves the whole subtree on disk and rewrites the addresses whose

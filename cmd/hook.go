@@ -185,6 +185,8 @@ func buildSessionContext() string {
 	}
 
 	storage := felt.NewStorage(root)
+	// The listing and the layout inspection below share one walk.
+	storage.MemoizeWalk()
 	felts, err := storage.ListMetadata()
 	if err != nil {
 		// Storage error: surface it in-band rather than crashing the hook.
@@ -196,13 +198,7 @@ func buildSessionContext() string {
 		fmt.Fprintf(&sb, "*felt layout inspection failed: %s*\n", err)
 		return sb.String()
 	}
-	legacyFlat := false
-	for _, issue := range structureIssues {
-		if issue.FiberID == "." {
-			legacyFlat = true
-			break
-		}
-	}
+	layoutNote := sessionLayoutNote(structureIssues)
 
 	// Recency signal is the git-durable frontmatter anchor — updated-at when
 	// present, else created-at (RecencyAnchor) — never file mtime. felt is
@@ -258,7 +254,7 @@ func buildSessionContext() string {
 		sb.WriteString("\n")
 	}
 
-	if attention := buildSessionAttention(felts, time.Now(), legacyFlat); attention != "" {
+	if attention := buildSessionAttention(felts, time.Now(), layoutNote); attention != "" {
 		sb.WriteString(attention)
 		sb.WriteString("\n")
 	}
@@ -304,7 +300,35 @@ func hookEntryHead(f *felt.Felt, recency time.Time) string {
 	return recency.Local().Format("2006-01-02 15:04") + " — " + f.ID
 }
 
-func buildSessionAttention(felts []*felt.Felt, now time.Time, legacyFlat bool) string {
+// sessionLayoutNote is the Attention note for fibers `felt migrate` would move
+// into the directory layout — legacy flat files at the root, stray fiber files
+// inside fiber folders — or "" when there are none.
+func sessionLayoutNote(issues []felt.CheckIssue) string {
+	rootFlat, strays := false, 0
+	for _, issue := range issues {
+		if !issue.FixedByMigrate() {
+			continue
+		}
+		if issue.FiberID == "." {
+			rootFlat = true
+		} else {
+			strays++
+		}
+	}
+	var where []string
+	if rootFlat {
+		where = append(where, "legacy flat fibers at .felt/ root")
+	}
+	if strays > 0 {
+		where = append(where, fmt.Sprintf("%d stray fiber file(s) sitting bare inside fiber folders (`felt check` lists them)", strays))
+	}
+	if len(where) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Fibers outside the directory layout, invisible to felt: %s; %s.", strings.Join(where, " and "), felt.LegacyFlatMigrationHint)
+}
+
+func buildSessionAttention(felts []*felt.Felt, now time.Time, layoutNote string) string {
 	childrenByParent := make(map[string]int)
 	for _, f := range felts {
 		parts := strings.Split(f.ID, "/")
@@ -349,8 +373,8 @@ func buildSessionAttention(felts []*felt.Felt, now time.Time, legacyFlat bool) s
 	sortFibersByCreatedAt(topLevelLeaves)
 
 	var notes []string
-	if legacyFlat {
-		notes = append(notes, fmt.Sprintf("Legacy flat fibers are present at .felt/ root; %s.", felt.LegacyFlatMigrationHint))
+	if layoutNote != "" {
+		notes = append(notes, layoutNote)
 	}
 	if len(topLevel) > sessionTopLevelLimit {
 		notes = append(notes, fmt.Sprintf(

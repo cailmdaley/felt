@@ -2,6 +2,7 @@ package felt
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2227,5 +2228,507 @@ func writeRawFiber(t *testing.T, root, id string) {
 	file := filepath.Join(dir, filepath.Base(id)+FileExt)
 	if err := os.WriteFile(file, []byte("---\nname: "+filepath.Base(id)+"\n---\n"), 0644); err != nil {
 		t.Fatalf("write %s: %v", id, err)
+	}
+}
+
+// TestStrayFiberFileIsNotAFiber: the directory model is the only one. A bare
+// `<dir>/<slug>.md` below the root — stray fiber or companion alike — is not
+// listed, not addressable by the id its path suggests, and not claimed by
+// CheckAvailableID; a lookup that misses because of a stray says why.
+func TestStrayFiberFileIsNotAFiber(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\n")
+	writeFile(t, s.root, "parent/survey.md", "# survey\n\nplain companion\n")
+
+	felts, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(felts) != 1 || felts[0].ID != "parent" {
+		t.Fatalf("List = %v, want only parent", feltIDs(felts))
+	}
+	if got, want := s.Path("parent/leaf"), filepath.Join(s.root, "parent", "leaf", "leaf.md"); got != want {
+		t.Errorf("Path(parent/leaf) = %q, want the directory form %q", got, want)
+	}
+	if err := s.CheckAvailableID("parent/survey"); err != nil {
+		t.Errorf("a companion file must not claim its id: %v", err)
+	}
+	_, err = s.FindInScope("", "parent/leaf")
+	if err == nil || !strings.Contains(err.Error(), ".felt/parent/leaf.md") || !strings.Contains(err.Error(), LegacyFlatMigrationHint) {
+		t.Errorf("FindInScope(parent/leaf) error = %v, want a pointer at the stray file and migrate", err)
+	}
+	if _, err := s.FindInScope("", "parent/survey"); err == nil || strings.Contains(err.Error(), "migrate") {
+		t.Errorf("FindInScope(parent/survey) error = %v, want a plain miss", err)
+	}
+}
+
+// TestStorageMountedEntryPointIsNotStray: the bare form below the root is
+// legitimate in exactly one place — the entry-point fiber of a store mounted
+// through a symlinked subdirectory. It stays listed and addressable, and is
+// not reported as stray; a bare file one level inside that mount is.
+func TestStorageMountedEntryPointIsNotStray(t *testing.T) {
+	tmp := t.TempDir()
+	outer := NewStorage(filepath.Join(tmp, "outer"))
+	if err := outer.Init(); err != nil {
+		t.Fatalf("outer init: %v", err)
+	}
+	inner := NewStorage(filepath.Join(tmp, "inner"))
+	if err := inner.Init(); err != nil {
+		t.Fatalf("inner init: %v", err)
+	}
+	writeFile(t, inner.root, "guest.md", "---\nname: guest\ntags: [x]\n---\n")
+	writeRawFiber(t, inner.root, "section")
+	writeFile(t, inner.root, "section/loose.md", "---\nname: loose\ntags: [x]\n---\n")
+	if err := os.MkdirAll(filepath.Join(outer.root, "mounts"), 0755); err != nil {
+		t.Fatalf("mkdir mounts: %v", err)
+	}
+	if err := os.Symlink(inner.root, filepath.Join(outer.root, "mounts", "guest")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	f, err := outer.FindInScope("", "mounts/guest/guest")
+	if err != nil || f.Name != "guest" {
+		t.Fatalf("FindInScope(mounts/guest/guest) = %v, %v; want the mounted entry point", f, err)
+	}
+	strays, err := outer.StrayFibers()
+	if err != nil {
+		t.Fatalf("StrayFibers: %v", err)
+	}
+	if len(strays) != 1 || strays[0].Rel != "mounts/guest/section/loose.md" || strays[0].TargetRel != "mounts/guest/section/loose/loose.md" {
+		t.Fatalf("strays = %+v, want only the loose file inside the mount", strays)
+	}
+}
+
+// TestStorageMigrateFoldsStrayFiber: migrate folds a stray fiber file into
+// `<slug>/<slug>.md` (dry run only reports it), after which it is an ordinary
+// fiber and a link spelling its path resolves. Companion markdown is untouched.
+func TestStorageMigrateFoldsStrayFiber(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	stray := writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\nleaf body\n")
+	companion := writeFile(t, s.root, "parent/survey.md", "# survey\n")
+
+	dry, err := s.Migrate(true)
+	if err != nil {
+		t.Fatalf("Migrate(dry): %v", err)
+	}
+	if len(dry.Strays) != 1 || dry.Strays[0].Rel != "parent/leaf.md" || dry.Strays[0].TargetRel != "parent/leaf/leaf.md" || dry.Strays[0].Blocked != "" {
+		t.Fatalf("dry-run strays = %+v, want parent/leaf.md -> parent/leaf/leaf.md", dry.Strays)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Fatalf("dry run moved the stray: %v", err)
+	}
+
+	if _, err := s.Migrate(false); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("stray still at its old path: %v", err)
+	}
+	f, err := s.FindInScope("", "parent/leaf")
+	if err != nil || strings.TrimSpace(f.Body) != "leaf body" {
+		t.Fatalf("FindInScope(parent/leaf) = %+v, %v; want the folded fiber", f, err)
+	}
+	if _, err := os.Stat(companion); err != nil {
+		t.Errorf("companion was moved: %v", err)
+	}
+	again, err := s.Migrate(true)
+	if err != nil || len(again.Strays) != 0 {
+		t.Fatalf("second dry run = %+v, %v; want nothing left", again, err)
+	}
+}
+
+// TestStorageMigrateRefusesStrayCollision: a stray whose directory-form home
+// already holds a fiber is reported Blocked and left where it is; the fiber
+// already there is untouched and the rest of the pass still runs.
+func TestStorageMigrateRefusesStrayCollision(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent/leaf")
+	stray := writeFile(t, s.root, "parent/leaf.md", "---\nname: other leaf\ntags: [x]\n---\n")
+	writeFile(t, s.root, "parent/twig.md", "---\nname: twig\ntags: [x]\n---\n")
+	home := filepath.Join(s.root, "parent", "leaf", "leaf.md")
+	before, _ := os.ReadFile(home)
+
+	result, err := s.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	blocked := map[string]bool{}
+	for _, sf := range result.Strays {
+		blocked[sf.Rel] = sf.Blocked != ""
+	}
+	if !blocked["parent/leaf.md"] || blocked["parent/twig.md"] || len(blocked) != 2 {
+		t.Fatalf("strays = %+v, want leaf blocked and twig folded", result.Strays)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Errorf("blocked stray was moved: %v", err)
+	}
+	if after, _ := os.ReadFile(home); string(after) != string(before) {
+		t.Errorf("existing fiber overwritten:\n%s", after)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "parent", "twig", "twig.md")); err != nil {
+		t.Errorf("unblocked stray not folded: %v", err)
+	}
+}
+
+func feltIDs(felts []*Felt) []string {
+	ids := make([]string, 0, len(felts))
+	for _, f := range felts {
+		ids = append(ids, f.ID)
+	}
+	return ids
+}
+
+const strayFrontmatter = "---\nname: %s\nstatus: open\n---\n"
+
+func writeStray(t *testing.T, root, rel string) string {
+	t.Helper()
+	return writeFile(t, root, rel, fmt.Sprintf(strayFrontmatter, strings.TrimSuffix(filepath.Base(rel), ".md")))
+}
+
+// TestLookupOfStrayIDRefusesSlugTwin: a query naming a stray's exact id —
+// directly, or through the citing scope — must not fall through to the slug
+// rescue and answer with a same-named fiber elsewhere, which `rm` would then
+// delete.
+func TestLookupOfStrayIDRefusesSlugTwin(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "proj/a/citer")
+	writeRawFiber(t, s.root, "x/leaf2")
+	writeStray(t, s.root, "proj/a/leaf2.md")
+
+	for _, tc := range []struct{ scope, query string }{
+		{"", "proj/a/leaf2"},
+		{"proj/a/citer", "leaf2"},
+		{"proj/a", "leaf2"},
+	} {
+		f, err := s.FindMetadataInScope(tc.scope, tc.query)
+		if err == nil {
+			t.Errorf("Find(%q in %q) = %s, want a refusal naming the stray", tc.query, tc.scope, f.ID)
+			continue
+		}
+		if !strings.Contains(err.Error(), ".felt/proj/a/leaf2.md") || !strings.Contains(err.Error(), LegacyFlatMigrationHint) {
+			t.Errorf("Find(%q in %q) error = %v", tc.query, tc.scope, err)
+		}
+	}
+	// A bare slug from elsewhere names no stray path, and still finds the
+	// one fiber of that name.
+	if f, err := s.FindMetadataInScope("", "leaf2"); err != nil || f.ID != "x/leaf2" {
+		t.Errorf("Find(leaf2) = %v, %v; want x/leaf2", f, err)
+	}
+}
+
+// TestCheckAvailableIDRefusesStray: creating a fiber at a stray's id would
+// manufacture the collision migrate cannot resolve.
+func TestCheckAvailableIDRefusesStray(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "proj/a")
+	writeStray(t, s.root, "proj/a/leaf3.md")
+
+	err := s.CheckAvailableID("proj/a/leaf3")
+	if err == nil || !strings.Contains(err.Error(), ".felt/proj/a/leaf3.md") || !strings.Contains(err.Error(), LegacyFlatMigrationHint) {
+		t.Fatalf("CheckAvailableID = %v, want a stray refusal", err)
+	}
+}
+
+// TestStorageMigrateBlocksFoldThroughSymlink: a stray whose directory-form
+// home is a symlinked mount would be written into the mounted store's root.
+// It is reported blocked and nothing moves.
+func TestStorageMigrateBlocksFoldThroughSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	outer := NewStorage(filepath.Join(tmp, "outer"))
+	inner := NewStorage(filepath.Join(tmp, "inner"))
+	for _, st := range []*Storage{outer, inner} {
+		if err := st.Init(); err != nil {
+			t.Fatalf("init: %v", err)
+		}
+	}
+	writeRawFiber(t, inner.root, "section")
+	if err := os.MkdirAll(filepath.Join(outer.root, "mounts"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(inner.root, filepath.Join(outer.root, "mounts", "guest")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	stray := writeStray(t, outer.root, "mounts/guest.md")
+
+	result, err := outer.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if len(result.Strays) != 1 || !strings.Contains(result.Strays[0].Blocked, "symlink") {
+		t.Fatalf("strays = %+v, want mounts/guest.md blocked by the symlink", result.Strays)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Errorf("blocked stray moved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(inner.root, "guest.md")); !os.IsNotExist(err) {
+		t.Errorf("fold wrote into the mounted store: %v", err)
+	}
+}
+
+// TestStraySymlinkIsReportedNotFolded: a symlinked loose file is reported
+// under its own path and never moved, and the stray it points to is held back
+// too, since folding it would leave the link dangling.
+func TestStraySymlinkIsReportedNotFolded(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	writeRawFiber(t, s.root, "notes")
+	draft := writeStray(t, s.root, "notes/draft.md")
+	alias := filepath.Join(s.root, "parent", "alias.md")
+	if err := os.Symlink(filepath.Join("..", "notes", "draft.md"), alias); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	result, err := s.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	blocked := map[string]string{}
+	for _, sf := range result.Strays {
+		blocked[sf.Rel] = sf.Blocked
+	}
+	if len(blocked) != 2 || !strings.Contains(blocked["parent/alias.md"], "is a symlink") || !strings.Contains(blocked["notes/draft.md"], ".felt/parent/alias.md") {
+		t.Fatalf("strays = %+v, want the alias and its target both blocked", result.Strays)
+	}
+	if _, err := os.Stat(alias); err != nil {
+		t.Errorf("alias dangles or moved: %v", err)
+	}
+	if _, err := os.Stat(draft); err != nil {
+		t.Errorf("linked stray moved: %v", err)
+	}
+}
+
+// TestStorageMigrateStrayBlockersAndFailures: every obstacle is found before
+// anything moves — a plain file where the directory would go — and a fold
+// that fails anyway is reported as blocked while the pass carries on: the
+// other stray folds and the normalization still runs.
+func TestStorageMigrateStrayBlockersAndFailures(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission bits do not bind root")
+	}
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	writeFile(t, s.root, "parent/blk", "not a directory\n")
+	writeStray(t, s.root, "parent/blk.md")
+	writeStray(t, s.root, "parent/ok.md")
+	writeRawFiber(t, s.root, "locked")
+	writeStray(t, s.root, "locked/stuck.md")
+	writeFile(t, s.root, "legacy/legacy.md", "---\ntitle: Legacy\n---\n")
+	lockedDir := filepath.Join(s.root, "locked")
+	if err := os.Chmod(lockedDir, 0555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(lockedDir, 0755) })
+
+	result, err := s.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate aborted: %v", err)
+	}
+	blocked := map[string]string{}
+	for _, sf := range result.Strays {
+		blocked[sf.Rel] = sf.Blocked
+	}
+	if !strings.Contains(blocked["parent/blk.md"], "a file already sits") {
+		t.Errorf("parent/blk.md blocker = %q", blocked["parent/blk.md"])
+	}
+	if blocked["locked/stuck.md"] == "" {
+		t.Errorf("failed fold not reported: %+v", result.Strays)
+	}
+	if blocked["parent/ok.md"] != "" {
+		t.Errorf("parent/ok.md blocked: %q", blocked["parent/ok.md"])
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "parent", "ok", "ok.md")); err != nil {
+		t.Errorf("unblocked stray not folded: %v", err)
+	}
+	if len(result.TitleToNameIDs) != 1 || result.TitleToNameIDs[0] != "legacy" {
+		t.Errorf("normalization skipped: %+v", result.TitleToNameIDs)
+	}
+}
+
+// TestStrayHiddenPathIsStoreLevel: a hidden segment anywhere in the store
+// path — here, a store mounted under `.archive/` — keeps loose files out.
+func TestStrayHiddenPathIsStoreLevel(t *testing.T) {
+	tmp := t.TempDir()
+	outer := NewStorage(filepath.Join(tmp, "outer"))
+	other := NewStorage(filepath.Join(tmp, "other"))
+	for _, st := range []*Storage{outer, other} {
+		if err := st.Init(); err != nil {
+			t.Fatalf("init: %v", err)
+		}
+	}
+	writeRawFiber(t, other.root, "sec")
+	writeStray(t, other.root, "sec/loose.md")
+	if err := os.MkdirAll(filepath.Join(outer.root, ".archive"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(other.root, filepath.Join(outer.root, ".archive", "mnt")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	strays, err := outer.StrayFibers()
+	if err != nil {
+		t.Fatalf("StrayFibers: %v", err)
+	}
+	if len(strays) != 0 {
+		t.Fatalf("strays = %+v, want none under a hidden path", strays)
+	}
+	if strays, _ := other.StrayFibers(); len(strays) != 1 {
+		t.Fatalf("the mounted store's own view should still see its stray: %+v", strays)
+	}
+}
+
+// TestStrayTitleDocumentIsACompanion: a `title:` document is a companion
+// even when it carries a fiber-shaped key — validation reports record their
+// own `status:` and `date:`.
+func TestStrayTitleDocumentIsACompanion(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	writeFile(t, s.root, "parent/report.md", "---\ntitle: Validation\ndate: 2026-07-16\nstatus: closed\nverdict: equivalent\n---\n")
+
+	strays, err := s.StrayFibers()
+	if err != nil {
+		t.Fatalf("StrayFibers: %v", err)
+	}
+	if len(strays) != 0 {
+		t.Fatalf("strays = %+v, want none", strays)
+	}
+}
+
+// TestReadFrontmatterFileMatchesSplit: the bounded reader returns exactly
+// what SplitFrontmatter finds in the whole file, errors included.
+func TestReadFrontmatterFileMatchesSplit(t *testing.T) {
+	dir := t.TempDir()
+	for i, content := range []string{
+		"---\nname: a\n---\nbody\n",
+		"---\r\nname: a\r\n---\r\nbody\r\n",
+		"---\nname: a\n---",
+		"---\nname: a\n----\nstill: frontmatter\n---\n",
+		"---\nname: a\n",
+		"---",
+		"# no frontmatter\n---\n",
+		"",
+	} {
+		p := filepath.Join(dir, fmt.Sprintf("f%d.md", i))
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		got, gotErr := readFrontmatterFile(p)
+		want, _, wantErr := SplitFrontmatter([]byte(content), false)
+		if string(got) != string(want) || (gotErr == nil) != (wantErr == nil) || (gotErr != nil && gotErr.Error() != wantErr.Error()) {
+			t.Errorf("%q: got (%q, %v), want (%q, %v)", content, got, gotErr, want, wantErr)
+		}
+	}
+}
+
+// TestMemoizeWalkForgetsOnWrite: a memoized walk serves repeat listings, and
+// a write through the same Storage drops it.
+func TestMemoizeWalkForgetsOnWrite(t *testing.T) {
+	_, s := newStore(t)
+	s.MemoizeWalk()
+	writeRawFiber(t, s.root, "one")
+	if felts, _ := s.ListMetadata(); len(felts) != 1 {
+		t.Fatalf("first listing = %v", feltIDs(felts))
+	}
+	writeRawFiber(t, s.root, "behind-its-back")
+	if felts, _ := s.ListMetadata(); len(felts) != 1 {
+		t.Fatalf("memoized listing should not re-walk: %v", feltIDs(felts))
+	}
+	if err := s.Write(&Felt{ID: "two", Name: "Two"}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if felts, _ := s.ListMetadata(); len(felts) != 3 {
+		t.Fatalf("listing after a write = %v, want all three", feltIDs(felts))
+	}
+}
+
+// TestSymlinkedFiberFileIsNamedByItsOwnPath: a fiber file symlinked in from
+// outside the store is named by where the link sits, as a symlinked directory
+// is. `a/a.md` is directory form by its own path, so it is the fiber `a`, not
+// a stray; its target's path never leaks into the id.
+func TestSymlinkedFiberFileIsNamedByItsOwnPath(t *testing.T) {
+	tmp := t.TempDir()
+	s := NewStorage(filepath.Join(tmp, "p"))
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeStray(t, filepath.Join(tmp, "ext"), "notes/thing.md")
+	writeRawFiber(t, filepath.Join(tmp, "ext"), "y")
+	for link, target := range map[string]string{"a/a.md": "notes/thing.md", "yy/yy.md": "y/y.md"} {
+		p := filepath.Join(s.root, filepath.FromSlash(link))
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.Symlink(filepath.Join(tmp, "ext", filepath.FromSlash(target)), p); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+	}
+
+	felts, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got := strings.Join(feltIDs(felts), ","); got != "a,yy" {
+		t.Fatalf("ids = %s, want a,yy", got)
+	}
+	if strays, _ := s.StrayFibers(); len(strays) != 0 {
+		t.Fatalf("strays = %+v, want none", strays)
+	}
+}
+
+// TestStrayDifferingOnlyInCaseIsBlocked: `Notes/notes.md` is its directory's
+// own file spelled in another case — on a case-insensitive filesystem it even
+// opens as `Notes`. Folding it to `Notes/notes/notes.md` would change its id,
+// so it is reported with a rename instead.
+func TestStrayDifferingOnlyInCaseIsBlocked(t *testing.T) {
+	_, s := newStore(t)
+	stray := writeStray(t, s.root, "Notes/notes.md")
+
+	result, err := s.Migrate(false)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if len(result.Strays) != 1 || !strings.Contains(result.Strays[0].Blocked, "rename it to Notes/Notes.md") {
+		t.Fatalf("strays = %+v, want Notes/notes.md blocked with a rename", result.Strays)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Fatalf("stray moved: %v", err)
+	}
+}
+
+// TestCheckFromViewLocalizedLinkToStrayIsBroken: from a project view, a link
+// spelled with the view's own prefix (`[[ai-futures/felt/a/bar]]`) localizes
+// to the stray `a/bar` and is broken — not rescued to the twin `b/bar` — and a
+// link naming a stray in the enclosing store reports that store's file.
+func TestCheckFromViewLocalizedLinkToStrayIsBroken(t *testing.T) {
+	loomProj, subProj := newSubstoreFixture(t)
+	loom := NewStorage(loomProj)
+	sub := NewStorage(subProj)
+	writeRawFiber(t, sub.root, "a")
+	writeRawFiber(t, sub.root, "b/bar")
+	writeStray(t, sub.root, "a/bar.md")
+	writeRawFiber(t, loom.root, "commons/x")
+	writeRawFiber(t, loom.root, "commons/y/foo")
+	writeStray(t, loom.root, "commons/x/foo.md")
+
+	felts, err := sub.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	felts = append(felts, &Felt{ID: "citer", Name: "Citer", Body: "[[ai-futures/felt/a/bar]] [[commons/x/foo]]"})
+	strays, err := sub.StrayFibers()
+	if err != nil {
+		t.Fatalf("StrayFibers: %v", err)
+	}
+	var messages []string
+	for _, issue := range Check(felts, sub.ExternalRefs(), strays...) {
+		if issue.FiberID == "citer" {
+			messages = append(messages, issue.Message)
+		}
+	}
+	if len(messages) != 2 ||
+		!strings.Contains(messages[0], `"ai-futures/felt/a/bar": .felt/a/bar.md is a stray fiber file`) ||
+		!strings.Contains(messages[1], filepath.Join("commons", "x", "foo.md")+" is a stray fiber file") {
+		t.Fatalf("citer issues = %q", messages)
 	}
 }

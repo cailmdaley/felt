@@ -520,3 +520,164 @@ func TestCheckDependsOnNullIsAbsent(t *testing.T) {
 		t.Fatalf("Check() issues = %+v, want none — an empty depends_on is not a dependency", issues)
 	}
 }
+
+// writeFile plants raw bytes at a path under root, creating parents.
+func writeFile(t *testing.T, root, rel, content string) string {
+	t.Helper()
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", rel, err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+	return p
+}
+
+// TestCheckStructureFlagsStrayFiberFile: a bare `<dir>/<slug>.md` carrying
+// fiber frontmatter below the root is a layout error naming the file and its
+// directory-form home, and it ends with the migrate hint so the session hook
+// can tell it apart. Markdown companions beside it — no frontmatter at all, or
+// frontmatter that names nothing — are not fibers and draw no issue, and
+// nothing under a hidden directory is inspected.
+func TestCheckStructureFlagsStrayFiberFile(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent")
+	writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\n")
+	writeFile(t, s.root, "parent/survey.md", "# `cosmo_val` design-check survey\n\nA plain companion report.\n")
+	writeFile(t, s.root, "parent/talk.md", "---\ndate: 2026-01-01\n---\nslides\n")
+	writeFile(t, s.root, "parent/SKILL.md", "---\nname: parent-skill\ndescription: A skill kept beside its fiber.\n---\n")
+	writeFile(t, s.root, ".trash/binned.md", "---\nname: binned\n---\n")
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly the stray leaf", issues)
+	}
+	got := issues[0]
+	if got.Level != CheckLevelError || got.FiberID != "parent/leaf" {
+		t.Fatalf("issue = %+v, want error on parent/leaf", got)
+	}
+	for _, want := range []string{".felt/parent/leaf.md", ".felt/parent/leaf/leaf.md"} {
+		if !strings.Contains(got.Message, want) {
+			t.Errorf("message %q does not name %s", got.Message, want)
+		}
+	}
+	if !strings.HasSuffix(got.Message, LegacyFlatMigrationHint) || !got.FixedByMigrate() {
+		t.Errorf("message %q should end with the migrate hint", got.Message)
+	}
+}
+
+// TestCheckStructureStrayFiberCollision: when the directory-form home is
+// already taken, migrate cannot fold the file, so check says so instead of
+// recommending it.
+func TestCheckStructureStrayFiberCollision(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "parent/leaf")
+	writeFile(t, s.root, "parent/leaf.md", "---\nname: other leaf\ntags: [x]\n---\n")
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "slug collision") {
+		t.Fatalf("issues = %+v, want one slug collision", issues)
+	}
+	if issues[0].FixedByMigrate() {
+		t.Errorf("a collision is not something migrate fixes: %q", issues[0].Message)
+	}
+}
+
+// TestCheckRootFlatFilesRecommendMigrate: the root-level flat-file error and
+// the nested stray error share the migrate hint.
+func TestCheckRootFlatFilesRecommendMigrate(t *testing.T) {
+	_, s := newStore(t)
+	writeFile(t, s.root, "alpha.md", "---\nname: alpha\n---\n")
+	writeFile(t, s.root, "beta.md", "---\nname: beta\n---\n")
+
+	issues, err := CheckStructure(s)
+	if err != nil {
+		t.Fatalf("CheckStructure: %v", err)
+	}
+	if len(issues) != 1 || issues[0].FiberID != "." || !issues[0].FixedByMigrate() {
+		t.Fatalf("issues = %+v, want one root flat-file error recommending migrate", issues)
+	}
+}
+
+// TestCheckWarnsOnSlugRescuedReference: a link whose written path matches
+// nothing still resolves through the basename rescue, but check warns and
+// names the fiber's real path. Every other way a link resolves — exact id,
+// relative to the citing fiber's scope, a bare slug, a correct partial tail —
+// is how links are meant to be written and stays silent.
+func TestCheckWarnsOnSlugRescuedReference(t *testing.T) {
+	consumer := &Felt{ID: "notes", Name: "Notes"}
+	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "cov", "from": "old/jackknife.matrix"}})
+	target := &Felt{ID: "proj1/a2/jackknife", Name: "Jackknife"}
+	mustExtra(t, target, "outputs", []map[string]any{{"id": "matrix"}})
+
+	issues := Check([]*Felt{
+		{ID: "proj1", Name: "P"},
+		{ID: "proj1/a2", Name: "A2"},
+		target,
+		{ID: "proj1/a2/sibling", Name: "Sibling", Body: "[[jackknife]] and [[a2/jackknife]] and [[proj1/a2/jackknife]]"},
+		{ID: "proj1/other", Name: "Other", Body: "[[a2/jackknife]] relative to proj1"},
+		{ID: "elsewhere", Name: "Elsewhere", Body: "[[jackknife]] [[a2/jackknife]] [[bogus/jackknife|the estimate]]"},
+		consumer,
+	}, nil)
+
+	var warnings []CheckIssue
+	for _, issue := range issues {
+		if issue.Level != CheckLevelWarning {
+			t.Errorf("unexpected issue: %s", issue)
+			continue
+		}
+		warnings = append(warnings, issue)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %+v, want the two stale paths", warnings)
+	}
+	body, flow := warnings[0], warnings[1]
+	if body.FiberID != "elsewhere" || body.Path != "body" ||
+		body.Message != `stale path in reference "bogus/jackknife": no fiber lives there; it resolves to proj1/a2/jackknife only by its final segment` {
+		t.Errorf("body warning = %+v", body)
+	}
+	if flow.FiberID != "notes" || flow.Path != "inputs.cov.from" ||
+		flow.Message != `stale path in reference "old/jackknife.matrix": no fiber lives there; it resolves to proj1/a2/jackknife only by its final segment` {
+		t.Errorf("data-flow warning = %+v", flow)
+	}
+}
+
+// TestCheckLinkToStrayIsBrokenNotRescued: a link naming a stray fiber file's
+// id is broken until migrate folds the file. The slug rescue must not answer
+// it with a same-named fiber elsewhere, and check must not advise rewriting
+// the link toward that twin.
+func TestCheckLinkToStrayIsBrokenNotRescued(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "proj/a")
+	writeRawFiber(t, s.root, "x/leaf2")
+	writeStray(t, s.root, "proj/a/leaf2.md")
+	strays, err := s.StrayFibers()
+	if err != nil {
+		t.Fatalf("StrayFibers: %v", err)
+	}
+
+	issues := Check([]*Felt{
+		{ID: "proj", Name: "P"},
+		{ID: "proj/a", Name: "A", Body: "[[leaf2]]"},
+		{ID: "x", Name: "X"},
+		{ID: "x/leaf2", Name: "Twin"},
+		{ID: "citer", Name: "Citer", Body: "[[proj/a/leaf2]]"},
+	}, nil, strays...)
+
+	if len(issues) != 2 {
+		t.Fatalf("issues = %+v, want both links broken", issues)
+	}
+	for _, issue := range issues {
+		if issue.Level != CheckLevelError || !strings.Contains(issue.Message, "broken body reference") ||
+			!strings.Contains(issue.Message, ".felt/proj/a/leaf2.md is a stray fiber file") || !issue.FixedByMigrate() {
+			t.Errorf("issue = %s", issue)
+		}
+	}
+}

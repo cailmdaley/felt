@@ -251,6 +251,50 @@ func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
 	}
 }
 
+// TestSessionWarnsOnStrayFiberFiles: a stray fiber file inside a fiber's
+// folder raises the same Attention note, named for what it is; a blocked one,
+// which migrate cannot fold, does not recommend migrate.
+func TestSessionWarnsOnStrayFiberFiles(t *testing.T) {
+	dir, storage := newStore(t)
+	parent := &felt.Felt{ID: "parent", Name: "Parent", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
+	if err := storage.Write(parent); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(storage.Root(), "parent", "leaf.md"), []byte("---\nname: leaf\nstatus: open\n---\n"), 0644); err != nil {
+		t.Fatalf("write stray: %v", err)
+	}
+
+	ctx := sessionContextFor(t, dir)
+	for _, want := range []string{
+		"## Attention",
+		"1 stray fiber file(s) sitting bare inside fiber folders",
+		"run `felt migrate --dry-run`, then `felt migrate`",
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("session context missing %q:\n%s", want, ctx)
+		}
+	}
+	if strings.Contains(ctx, ".felt/ root") {
+		t.Fatalf("session context blames the root for a nested stray:\n%s", ctx)
+	}
+}
+
+func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
+	hint := "; " + felt.LegacyFlatMigrationHint
+	note := sessionLayoutNote([]felt.CheckIssue{
+		{Level: felt.CheckLevelError, FiberID: ".", Message: "multiple bare fiber files at .felt/ root: a, b" + hint},
+		{Level: felt.CheckLevelError, FiberID: "p/leaf", Message: "bare fiber file .felt/p/leaf.md … — " + felt.LegacyFlatMigrationHint},
+		{Level: felt.CheckLevelError, FiberID: "p/twig", Message: "bare fiber file .felt/p/twig.md … cannot be folded"},
+	})
+	want := "Fibers outside the directory layout, invisible to felt: legacy flat fibers at .felt/ root and 1 stray fiber file(s) sitting bare inside fiber folders (`felt check` lists them); " + felt.LegacyFlatMigrationHint + "."
+	if note != want {
+		t.Fatalf("note = %q\nwant %q", note, want)
+	}
+	if got := sessionLayoutNote(nil); got != "" {
+		t.Fatalf("clean store note = %q, want empty", got)
+	}
+}
+
 func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	var felts []*felt.Felt
@@ -263,7 +307,7 @@ func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 		})
 	}
 
-	attention := buildSessionAttention(felts, now, false)
+	attention := buildSessionAttention(felts, now, "")
 	for _, want := range []string{
 		"## Attention",
 		"Top-level sprawl: 21 root-level fibers (21 without children)",
@@ -296,7 +340,7 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 		},
 	}
 
-	attention := buildSessionAttention(felts, now, false)
+	attention := buildSessionAttention(felts, now, "")
 	for _, want := range []string{
 		"Fix tracked containers: 1 open/active fiber has children",
 		"Open/active should mean todo, not documentation or importance",

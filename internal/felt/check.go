@@ -36,15 +36,26 @@ func (i CheckIssue) String() string {
 	return fmt.Sprintf("%s: %s: %s", strings.ToUpper(i.Level), location, i.Message)
 }
 
+// FixedByMigrate reports whether `felt migrate` resolves the issue: the layout
+// errors — flat files at the root, stray fiber files below it — whose message
+// ends by recommending it.
+func (i CheckIssue) FixedByMigrate() bool {
+	return strings.HasSuffix(i.Message, LegacyFlatMigrationHint)
+}
+
 // Check inspects fibers for substrate problems in the relationship model:
 // broken narrative/data-flow references plus repository layout/legacy issues.
 //
 // external comes from Storage.ExternalRefs and is nil for a top-level store.
 // It is what keeps a link into the enclosing store — healthy, just outside
 // this view — from being reported as broken.
-func Check(felts []*Felt, external *ExternalRefs) []CheckIssue {
+//
+// strays are the store's stray fiber files (Storage.StrayFibers). A reference
+// that names one is broken — the file is not a fiber yet — rather than
+// rescued into a same-named fiber elsewhere.
+func Check(felts []*Felt, external *ExternalRefs, strays ...StrayFiber) []CheckIssue {
 	issues := checkNativeMetadata(felts)
-	issues = append(issues, checkRelationshipIntegrity(felts, external)...)
+	issues = append(issues, checkRelationshipIntegrity(felts, external, strays)...)
 	issues = append(issues, checkDependsOn(felts, external)...)
 
 	sortIssues(issues)
@@ -70,8 +81,9 @@ func checkNativeMetadata(felts []*Felt) []CheckIssue {
 
 // CheckStructure inspects the .felt/ layout for structural problems:
 // slug collisions between bare (<slug>.md) and nested (<slug>/<slug>.md)
-// fiber forms, and multiple bare .md files at .felt/ root (which would mean
-// .felt/ itself does not have a single entry-point fiber).
+// fiber forms, multiple bare .md files at .felt/ root (which would mean
+// .felt/ itself does not have a single entry-point fiber), and stray fiber
+// files below the root (see StrayFiber).
 func CheckStructure(s *Storage) ([]CheckIssue, error) {
 	root, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
@@ -120,6 +132,12 @@ func CheckStructure(s *Storage) ([]CheckIssue, error) {
 			})
 		}
 	}
+
+	strays, err := s.StrayFibers()
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, checkStrayFibers(strays)...)
 
 	sortIssues(issues)
 	return issues, nil
@@ -177,7 +195,7 @@ func CheckLegacyFormat(s *Storage) ([]CheckIssue, error) {
 	return issues, nil
 }
 
-func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIssue {
+func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []StrayFiber) []CheckIssue {
 	ids := make([]string, 0, len(felts))
 	byID := make(map[string]*Felt, len(felts))
 	for _, f := range felts {
@@ -188,6 +206,16 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 
 	var issues []CheckIssue
 	resolver := newScopedIDResolverIn(ids, external)
+	if len(strays) > 0 {
+		byID := make(map[string]string, len(strays))
+		for _, sf := range strays {
+			byID[sf.ID] = sf.Rel
+		}
+		resolver.strayAt = func(id string) (string, bool) {
+			rel, ok := byID[id]
+			return rel, ok
+		}
+	}
 	_ = iterRefsResolved(felts, resolver, func(r resolvedRef) error {
 		// A reference that resolves to a fiber in the enclosing store is not
 		// broken — this store simply cannot see it. Silence, not an issue,
@@ -210,22 +238,21 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 			}
 			return nil
 		}
-		if r.ResolveErr == nil && strings.Contains(cleanLookupQuery(r.RawTarget), "/") {
+		if r.ResolveErr == nil && r.Via == resolvedBySlug {
 			// Resolution keeps a stale path working through its final
 			// segment; check is where that repair becomes visible, before a
 			// second fiber with the same slug quietly redirects the link.
-			if _, ok := resolver.ResolvePath(r.Source.ID, r.RawTarget); !ok {
-				where := "body"
-				if r.Kind == refKindDataFlow {
-					where = "inputs." + r.InputID + ".from"
-				}
-				issues = append(issues, CheckIssue{
-					Level:   CheckLevelWarning,
-					FiberID: r.Source.ID,
-					Path:    where,
-					Message: fmt.Sprintf("stale path in reference %q: no fiber lives there; it resolves to %s only by its final segment", r.Label, r.ResolvedID),
-				})
+			// The same classification is what rm, nest and unnest refuse.
+			where := "body"
+			if r.Kind == refKindDataFlow {
+				where = "inputs." + r.InputID + ".from"
 			}
+			issues = append(issues, CheckIssue{
+				Level:   CheckLevelWarning,
+				FiberID: r.Source.ID,
+				Path:    where,
+				Message: fmt.Sprintf("stale path in reference %q: no fiber lives there; it resolves to %s only by its final segment", r.Label, r.ResolvedID),
+			})
 		}
 		if r.Kind == refKindReference {
 			path := "body"
@@ -234,7 +261,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 					Level:   CheckLevelError,
 					FiberID: r.Source.ID,
 					Path:    path,
-					Message: fmt.Sprintf("broken body reference %q", r.Label),
+					Message: fmt.Sprintf("broken body reference %q", r.Label) + strayReason(r.ResolveErr),
 				})
 				return nil
 			}
@@ -255,7 +282,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 				Level:   CheckLevelError,
 				FiberID: r.Source.ID,
 				Path:    path,
-				Message: fmt.Sprintf("broken data-flow reference %q", r.Label),
+				Message: fmt.Sprintf("broken data-flow reference %q", r.Label) + strayReason(r.ResolveErr),
 			})
 			return nil
 		}

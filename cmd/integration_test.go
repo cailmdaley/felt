@@ -563,7 +563,22 @@ Session body.
 		t.Fatalf("write legacy session hub: %v", err)
 	}
 
+	// A stray fiber file inside a fiber's folder folds into the layout; the
+	// frontmatter-less companion beside it stays put.
+	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "session-hub", "hub-leaf.md"), []byte("---\nname: Hub leaf\nstatus: open\n---\n"), 0644); err != nil {
+		t.Fatalf("write stray fiber: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(migrateDir, ".felt", "session-hub", "transcript.md"), []byte("# transcript\n"), 0644); err != nil {
+		t.Fatalf("write companion: %v", err)
+	}
+
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir, "--dry-run")
+	if !strings.Contains(out, "Would fold .felt/session-hub/hub-leaf.md -> .felt/session-hub/hub-leaf/hub-leaf.md") {
+		t.Fatalf("migrate dry-run: expected stray fold, got: %s", out)
+	}
+	if strings.Contains(out, "transcript") {
+		t.Fatalf("migrate dry-run: companion file listed: %s", out)
+	}
 	if !strings.Contains(out, "Would migrate legacy-child-deadbeef -> legacy-child") {
 		t.Fatalf("migrate dry-run: expected mapping, got: %s", out)
 	}
@@ -581,7 +596,7 @@ Session body.
 	}
 
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir)
-	if !strings.Contains(out, "Migrated 2 flat fibers, 1 legacy title fields, 1 legacy depends-on keys, 1 legacy MyST anchors") {
+	if !strings.Contains(out, "Migrated 2 flat fibers, 1 stray fiber files, 1 legacy title fields, 1 legacy depends-on keys, 1 legacy MyST anchors") {
 		t.Fatalf("migrate: expected summary, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", ".gitignore")); err != nil {
@@ -592,6 +607,12 @@ Session body.
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "legacy-child-deadbeef.md")); !os.IsNotExist(err) {
 		t.Fatalf("migrate: expected flat file removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "session-hub", "hub-leaf", "hub-leaf.md")); err != nil {
+		t.Fatalf("migrate: expected folded stray, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", "session-hub", "transcript.md")); err != nil {
+		t.Fatalf("migrate: companion moved: %v", err)
 	}
 	out = mustFelt(t, migrateDir, "show", "-j", "legacy-child")
 	var migratedShown map[string]any

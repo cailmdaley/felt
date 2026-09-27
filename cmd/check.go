@@ -12,7 +12,8 @@ var checkCmd = &cobra.Command{
 	Short: "Lint fibers for structural quality issues",
 	Long: `Runs felt's repository checks.
 
-Current checks cover:
+Errors fail a plain-text run; warnings and notes print without failing it.
+--json always exits zero and leaves the verdict to the reader. The checks cover:
   - fibers that fail to parse (invisible to every other command)
   - broken narrative wikilinks / body references
   - broken inputs.from data-flow references
@@ -22,6 +23,8 @@ Current checks cover:
   - legacy MyST body anchors
   - slug collisions between bare and nested fiber forms
   - multiple bare .md files at .felt/ root
+  - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below
+    the root, which belongs at <dir>/<slug>/<slug>.md
   - a shuttle host: that is this machine under a pre-normalization name`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
@@ -34,6 +37,8 @@ Current checks cover:
 		// the issue CheckParseability raises below, and only one of the two
 		// carries an exit code.
 		storage.SilenceWalkWarnings()
+		// Every check below walks the store; they share one walk.
+		storage.MemoizeWalk()
 		felts, err := storage.List()
 		if err != nil {
 			return err
@@ -48,7 +53,11 @@ Current checks cover:
 		if err != nil {
 			return err
 		}
-		issues = append(issues, felt.Check(felts, storage.ExternalRefs())...)
+		strays, err := storage.StrayFibers()
+		if err != nil {
+			return err
+		}
+		issues = append(issues, felt.Check(felts, storage.ExternalRefs(), strays...)...)
 		structureIssues, err := felt.CheckStructure(storage)
 		if err != nil {
 			return err

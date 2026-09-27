@@ -25,6 +25,8 @@ var migrateCmd = &cobra.Command{
 
 This migration pass:
 - converts legacy top-level .felt/*.md files into directory-based fibers
+- folds stray fiber files (a bare <dir>/<slug>.md carrying fiber frontmatter)
+  into <dir>/<slug>/<slug>.md
 - rewrites frontmatter key title -> name
 - removes inert legacy depends-on frontmatter
 - strips leading MyST anchor lines like (slug)= from fiber bodies
@@ -33,8 +35,16 @@ Each migrated flat fiber lands at <slug>/<slug>.md, and any inputs.from
 references to migrated hex IDs are rewritten.
 
 A single bare .md at .felt/ root is the entry-point fiber and is preserved —
-only multiple bare files are treated as orphaned legacy and migrated.`,
-	Args: cobra.NoArgs,
+only multiple bare files are treated as orphaned legacy and migrated.
+
+Markdown below the root without fiber frontmatter is a companion file and is
+left alone. A stray fiber file that cannot be folded safely — its
+<slug>/<slug>.md already exists, its <slug> is a file or a symlink, or the
+stray is itself a symlink — is never moved: it is reported with the reason,
+the rest of the pass runs, and migrate exits non-zero until it is moved by
+hand.`,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, err := resolveMigrationStorage(migrateDir)
 		if err != nil {
@@ -45,25 +55,35 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 		if err != nil {
 			return err
 		}
-		if len(result.Entries) == 0 && len(result.TitleToNameIDs) == 0 && len(result.RemovedDependsOnIDs) == 0 && len(result.StrippedMystAnchorIDs) == 0 {
+		if len(result.Entries) == 0 && len(result.Strays) == 0 && len(result.TitleToNameIDs) == 0 && len(result.RemovedDependsOnIDs) == 0 && len(result.StrippedMystAnchorIDs) == 0 {
 			fmt.Println("No migrations needed")
 			return nil
 		}
 
-		// One verb-parameterized pass over the four result slices; dry-run vs.
+		// One verb-parameterized pass over the result slices; dry-run vs.
 		// applied differs only in the verbs and summary line.
-		var migrateVerb, renameVerb, removeVerb, stripVerb string
+		var migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb string
 		var summary string
 		if migrateDryRun {
-			migrateVerb, renameVerb, removeVerb, stripVerb = "Would migrate", "Would rename", "Would remove", "Would strip"
-			summary = "Dry run: %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors would migrate\n"
+			migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb = "Would migrate", "Would fold", "Would rename", "Would remove", "Would strip"
+			summary = "Dry run: %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors would migrate\n"
 		} else {
-			migrateVerb, renameVerb, removeVerb, stripVerb = "Migrated", "Renamed", "Removed", "Stripped"
-			summary = "Migrated %d flat fibers, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n"
+			migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb = "Migrated", "Folded", "Renamed", "Removed", "Stripped"
+			summary = "Migrated %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n"
 		}
 
 		for _, entry := range result.Entries {
 			fmt.Printf("%s %s -> %s\n", migrateVerb, entry.OldID, entry.NewID)
+		}
+		folded, blocked := 0, 0
+		for _, sf := range result.Strays {
+			if sf.Blocked != "" {
+				blocked++
+				fmt.Printf("Cannot fold .felt/%s -> .felt/%s: %s\n", sf.Rel, sf.TargetRel, sf.Blocked)
+				continue
+			}
+			folded++
+			fmt.Printf("%s .felt/%s -> .felt/%s\n", foldVerb, sf.Rel, sf.TargetRel)
 		}
 		for _, id := range result.TitleToNameIDs {
 			fmt.Printf("%s title -> name in %s\n", renameVerb, id)
@@ -76,9 +96,12 @@ only multiple bare files are treated as orphaned legacy and migrated.`,
 		}
 		fmt.Printf(
 			summary,
-			len(result.Entries), len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
+			len(result.Entries), folded, len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
 		)
 
+		if blocked > 0 {
+			return fmt.Errorf("%d stray fiber file(s) could not be folded and need moving by hand", blocked)
+		}
 		return nil
 	},
 }
@@ -132,8 +155,10 @@ a view into one, and each rewritten fiber is named.
 
 A parent spelled as a path that exists in the store is used exactly as
 spelled, including a directory that holds fibers without one of its own
-(roles/ is always the top-level roles namespace). Any other parent resolves
-like a fiber reference.`,
+(roles/ is always the top-level roles namespace). Any other parent, and the
+child, resolve like a fiber reference, except that a guess — a stale path
+rescued by its last segment, or a prefix completion — is refused with the
+fiber it would have reached.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
@@ -142,7 +167,7 @@ like a fiber reference.`,
 		}
 		scopeID := resolveCommandScope(root)
 
-		childRef, err := resolveFiberRef(storage, scopeID, args[0])
+		childRef, err := resolveExactFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
@@ -199,14 +224,18 @@ func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, er
 	if info, err := os.Stat(filepath.Join(storage.Root(), filepath.FromSlash(dir))); err == nil && info.IsDir() && !strings.HasPrefix(dir, "..") {
 		return fiberRef{storage: storage, id: dir}, nil
 	}
-	return resolveFiberRef(storage, scopeID, arg)
+	return resolveExactFiberRef(storage, scopeID, arg)
 }
 
 var unnestCmd = &cobra.Command{
 	Use:   "unnest <child>",
 	Short: "Promote a nested fiber to the top level",
 	Long: `Moves a nested fiber subtree to the top level, rewriting references it
-would break as nest does.`,
+would break as nest does.
+
+The child resolves like a fiber reference, except that a guess — a stale path
+rescued by its last segment, or a prefix completion — is refused with the
+fiber it would have reached.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
@@ -215,7 +244,7 @@ would break as nest does.`,
 		}
 		scopeID := resolveCommandScope(root)
 
-		child, err := resolveFiberRef(storage, scopeID, args[0])
+		child, err := resolveExactFiberRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}

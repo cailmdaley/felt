@@ -60,6 +60,32 @@ felt show bao-analysis/damping-prior
 A bare slug resolves as long as it is unique across the store. Ambiguity raises
 an error rather than a guess.
 
+### Commands that delete or move never act on a guess
+
+An address resolves in one of these ways:
+
+- the exact id;
+- a path relative to the current fiber's scope or one of its ancestors;
+- a unique bare slug (`jackknife-patches`), or a correct partial path whose
+  every segment matches the end of exactly one id (`a2/jackknife`).
+
+`felt check` accepts all of these silently, and so does every command. Two
+looser matches are **guesses**:
+
+- a path that matches nothing, rescued by its last segment when that names
+  exactly one fiber — the stale path `felt check` warns about;
+- a prefix completion (`proj/a/lea` for `proj/a/leaf2`).
+
+From a project view, the enclosing store's answer is also a guess when it
+comes by tail, prefix or last segment rather than by the path itself.
+
+`show` and `edit` accept a guess. `rm`, `nest` and `unnest` refuse it and name
+the fiber it would have reached:
+
+```
+"a/zzz" only reaches a fiber by guessing, and this command does not act on a guess; did you mean b/zzz?
+```
+
 ## Store layout
 
 A store lives in a `.felt/` directory at a project root. It follows the shape
@@ -91,6 +117,30 @@ preserves it as-is and never migrates it.
 Two or more bare `.md` files at the root create ambiguity. felt cannot tell the
 entry point from stray legacy files, so `felt check` flags it and
 `felt migrate` converts them all to directory form.
+
+### Stray fiber files
+
+Below the root, a fiber is only ever `<path>/<slug>/<slug>.md`. A bare
+`.felt/bao-analysis/damping-prior.md` that carries fiber frontmatter — `name:`
+plus a key only fibers carry, such as `status`, `tags`, `outcome` or a
+timestamp — is a **stray fiber file**. It is not a fiber until it moves: `ls`
+does not list it, and `show`, `edit`, `rm`, `nest` and `add` refuse its id
+with a pointer to the file rather than acting on some other fiber of the same
+name, from a project view as well. A link to it is reported broken. `felt
+check` reports the file as an error naming its directory-form home, and `felt
+migrate` folds it there. The id it gains is the one its path already spelled,
+so links written to it resolve without edits once it moves.
+
+Migrate never moves a stray it cannot fold safely: when its home already holds
+a fiber, when a file or a symlink sits where its directory would go, when the
+stray is a symlink or the target of one, or when its name differs from its
+directory's only in case (`Notes/notes.md`, which wants renaming to
+`Notes/Notes.md` instead). Those are reported with the reason, for a move by
+hand.
+
+Markdown without fiber frontmatter — a transcript, a survey, notes kept beside
+a fiber, a skill's `SKILL.md` — is a companion file, and felt leaves it alone,
+as it does anything under a hidden directory.
 
 ## Creating a store
 
@@ -130,6 +180,8 @@ tracks how the thinking moved.
 - legacy body anchors
 - slug collisions between bare and nested fiber forms
 - multiple bare `.md` files at the `.felt/` root
+- stray fiber files below the root (see
+  [Stray fiber files](#stray-fiber-files))
 - fibers with a blank `name`
 - a shuttle `host:` that is this machine under a pre-normalization name
   (differing only by case or a DNS suffix), which the daemon's exact-match
@@ -139,6 +191,9 @@ tracks how the thinking moved.
 felt check
 felt check --json
 ```
+
+Errors make `felt check` exit non-zero; warnings and notes print without
+failing it. `--json` always exits zero and leaves the verdict to the reader.
 
 !!! note "Links across projects"
     From a project whose `.felt/` is a symlinked view into a larger store,
@@ -152,6 +207,7 @@ felt check --json
 `felt migrate` normalizes an older store into the current model:
 
 - flat `.felt/<slug>.md` files become `<slug>/<slug>.md`
+- stray fiber files below the root fold into `<path>/<slug>/<slug>.md`
 - `title` frontmatter becomes `name`
 - inert `depends-on` keys are dropped
 - leading anchor lines like `(slug)=` are stripped from bodies

@@ -25,7 +25,7 @@ its commit and date, a local build the source revision it was built from
 | `felt add <slug> <name>` | Create a new fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level`) |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`) |
-| `felt rm <id>` | Permanently delete a fiber |
+| `felt rm <id>` | Permanently delete a fiber; refuses a guessed address (a stale path rescued by its last segment, a prefix completion) and names the fiber it would have reached |
 | `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and does not stage, commit, stash, or force-push |
 
 ## Search and reading
@@ -41,15 +41,15 @@ its commit and date, a local build the source revision it was built from
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references the move would break (store-wide from a view) |
-| `felt unnest <child>` | Promote a nested fiber subtree to the top level, rewriting references the same way |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references the move would break (store-wide from a view); refuses a guessed address |
+| `felt unnest <child>` | Promote a nested fiber subtree to the top level, rewriting references the same way; refuses a guessed address |
 
 ## Maintenance
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, stale reference paths, legacy keys, slug collisions |
-| `felt migrate` | Normalize legacy storage into the current model (`--dir`, `--dry-run`) |
+| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, stale reference paths, legacy keys, slug collisions, stray fiber files |
+| `felt migrate` | Normalize legacy storage into the current model, folding stray fiber files into their directories (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
 ## Setup / update

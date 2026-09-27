@@ -162,6 +162,9 @@ type resolvedRef struct {
 	// target fiber) for data-flow refs.
 	Label      string
 	ResolvedID string
+	// Via is the rule that resolved the reference; meaningful only when
+	// ResolveErr is nil.
+	Via        resolution
 	ResolveErr error
 }
 
@@ -177,7 +180,7 @@ type resolvedRef struct {
 func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
 	for _, f := range felts {
 		for _, ref := range ExtractBodyRefs(f.Body) {
-			resolved, err := resolver.Resolve(f.ID, ref.Target)
+			resolved, via, err := resolver.resolve(f.ID, ref.Target)
 			if err := yield(resolvedRef{
 				Source:     f,
 				Kind:       refKindReference,
@@ -185,6 +188,7 @@ func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(reso
 				Fragment:   ref.Fragment,
 				Label:      ref.String(),
 				ResolvedID: resolved,
+				Via:        via,
 				ResolveErr: err,
 			}); err != nil {
 				return err
@@ -199,7 +203,7 @@ func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(reso
 			if strings.TrimSpace(fragment) != "" {
 				label = input.From
 			}
-			resolved, err := resolver.Resolve(f.ID, targetFiber)
+			resolved, via, err := resolver.resolve(f.ID, targetFiber)
 			if err := yield(resolvedRef{
 				Source:     f,
 				Kind:       refKindDataFlow,
@@ -208,6 +212,7 @@ func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(reso
 				InputID:    input.InputID,
 				Label:      label,
 				ResolvedID: resolved,
+				Via:        via,
 				ResolveErr: err,
 			}); err != nil {
 				return err

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,5 +312,144 @@ func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 	}
 	if mustRead(t, felt.NewStorage(subProj), "debug").HasShuttleFacet() {
 		t.Fatalf("the local same-slug fiber was acted on")
+	}
+}
+
+// TestRmAndMovesActOnlyOnExactIDs: deleting and moving never act on a guess.
+// A path that names nothing here — a stale path, a companion file's name —
+// but whose slug a forgiving rule would answer is refused with the answer as
+// a suggestion; the same-named fiber survives. `show` stays forgiving.
+func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
+	dir, storage := newStore(t)
+	defer saveShowGlobals()()
+	for _, id := range []string{"a", "b", "b/zzz", "b/notes"} {
+		writeFixtureFelt(t, storage, id, id)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".felt", "a", "notes.md"), []byte("plain notes\n"), 0644); err != nil {
+		t.Fatalf("write companion: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"rm", "a/zzz"},
+		{"rm", "a/notes"},
+		{"nest", "a/zzz", "a"},
+		{"nest", "a", "c/zzz"},
+		{"unnest", "a/zzz"},
+	} {
+		out, err := runCommand(t, dir, args...)
+		if err == nil {
+			t.Errorf("felt %v acted on a guess:\n%s", args, out)
+			continue
+		}
+		var guess *felt.GuessError
+		if !errors.As(err, &guess) || !strings.Contains(err.Error(), "did you mean b/") {
+			t.Errorf("felt %v error = %v, want a did-you-mean refusal", args, err)
+		}
+	}
+	for _, id := range []string{"b/zzz", "b/notes"} {
+		if _, err := storage.Read(id); err != nil {
+			t.Fatalf("%s was touched: %v", id, err)
+		}
+	}
+
+	// What check accepts silently is not a guess: the lexical scope (from
+	// inside b, `zzz` is b/zzz), a unique bare slug, a correct partial tail.
+	// A prefix completion is.
+	writeFixtureFelt(t, storage, "b/zzz/deep", "Deep")
+	for _, tc := range []struct{ scope, query, want string }{
+		{"b", "zzz", "b/zzz"},
+		{"", "deep", "b/zzz/deep"},
+		{"", "zzz/deep", "b/zzz/deep"},
+	} {
+		if f, err := storage.FindMetadataWithoutGuessing(tc.scope, tc.query); err != nil || f.ID != tc.want {
+			t.Errorf("FindMetadataWithoutGuessing(%q, %q) = %v, %v; want %s", tc.scope, tc.query, f, err, tc.want)
+		}
+	}
+	var prefix *felt.GuessError
+	if _, err := storage.FindMetadataWithoutGuessing("b", "zz"); !errors.As(err, &prefix) || prefix.Guess != "b/zzz" {
+		t.Errorf("prefix completion = %v, want a guess naming b/zzz", err)
+	}
+	out, err := runCommand(t, dir, "show", "a/zzz", "--detail", "name")
+	if err != nil || !strings.Contains(out, "b/zzz") {
+		t.Fatalf("show should stay forgiving: %v\n%s", err, out)
+	}
+}
+
+// TestRmThroughViewRefusesEnclosingStoreGuesses: from a project view, a path
+// the enclosing store only infers — by slug or suffix — is not deleted there;
+// and a path naming a stray fiber file out there reports the stray, in show
+// as in rm, rather than resolving to its same-named twin.
+func TestRmThroughViewRefusesEnclosingStoreGuesses(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	defer saveShowGlobals()()
+	loom := felt.NewStorage(loomProj)
+	writeFixtureFelt(t, loom, "commons/x", "X")
+	writeFixtureFelt(t, loom, "commons/y/foo", "Twin foo")
+	if err := os.WriteFile(filepath.Join(loom.Root(), "commons", "x", "foo.md"), []byte("---\nname: foo\nstatus: open\n---\n"), 0644); err != nil {
+		t.Fatalf("write stray: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"rm", "commons/x/foo"},
+		{"show", "commons/x/foo", "--detail", "name"},
+		{"edit", "commons/x/foo", "--status", "closed"},
+	} {
+		out, err := runCommand(t, subProj, args...)
+		if err == nil || !strings.Contains(err.Error(), filepath.Join("commons", "x", "foo.md")+" holds fiber frontmatter") {
+			t.Errorf("felt %v = %v\n%s; want the stray reported", args, err, out)
+		}
+	}
+
+	// `charted` lives at ai-futures/portolan/charted: the enclosing store
+	// reaches it from here only by its tail, which show accepts and rm does
+	// not.
+	out, err := runCommand(t, subProj, "rm", "charted")
+	var guess *felt.GuessError
+	if err == nil || !errors.As(err, &guess) || !strings.Contains(err.Error(), "did you mean ai-futures/portolan/charted (in ") {
+		t.Fatalf("rm of an inferred external id = %v\n%s; want a did-you-mean refusal", err, out)
+	}
+	if out, err := runCommand(t, subProj, "show", "charted", "--detail", "name"); err != nil || !strings.Contains(out, "Charted") {
+		t.Fatalf("show charted = %v\n%s; want the fiber", err, out)
+	}
+	for _, id := range []string{"commons/y/foo", "ai-futures/portolan/charted", "ai-futures/portolan/debug"} {
+		if _, err := loom.Read(id); err != nil {
+			t.Fatalf("%s was deleted: %v", id, err)
+		}
+	}
+}
+
+// TestRmThroughViewAcceptsLexicalPathOutThere: from a project view, a path
+// that the enclosing store resolves by the lexical scope of the view's
+// position — `portolan/debug` from ai-futures/felt is ai-futures/portolan/debug
+// — is not a guess, so rm acts on it there.
+func TestRmThroughViewAcceptsLexicalPathOutThere(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	out, err := runCommand(t, subProj, "rm", "portolan/debug")
+	if err != nil || !strings.Contains(out, "Deleted ai-futures/portolan/debug") {
+		t.Fatalf("rm portolan/debug = %v\n%s", err, out)
+	}
+	if _, err := felt.NewStorage(loomProj).Read("ai-futures/portolan/debug"); err == nil {
+		t.Fatalf("outer fiber survived")
+	}
+}
+
+// TestGettingStartedNestSequence runs the containment example from
+// docs/getting-started.md: bare unique slugs are not guesses, so unnest and
+// nest take them.
+func TestGettingStartedNestSequence(t *testing.T) {
+	dir, _ := newStore(t)
+	for _, args := range [][]string{
+		{"add", "covariance-estimation", "Covariance estimation", "-s", "open"},
+		{"add", "covariance-estimation/jackknife-patches", "Jackknife patch count", "-s", "active"},
+		{"add", "jackknife-patches/binning", "Binning choice"},
+		{"unnest", "jackknife-patches"},
+		{"nest", "jackknife-patches", "covariance-estimation"},
+	} {
+		if out, err := runCommand(t, dir, args...); err != nil {
+			t.Fatalf("felt %v: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := felt.NewStorage(dir).Read("covariance-estimation/jackknife-patches/binning"); err != nil {
+		t.Fatalf("subtree did not come back under its parent: %v", err)
 	}
 }

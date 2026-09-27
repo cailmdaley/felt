@@ -1,9 +1,11 @@
 package felt
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -45,6 +47,12 @@ type Storage struct {
 	// rather than printing each one twice.
 	quietWalk bool
 
+	// memoWalk keeps the first store walk and reuses it (see MemoizeWalk);
+	// walk is that snapshot, dropped by every write through this Storage.
+	memoWalk bool
+	walkMu   sync.Mutex
+	walk     *storeWalk
+
 	enclosingOnce sync.Once
 	external      *ExternalRefs
 }
@@ -71,12 +79,18 @@ var ErrExternalReference = errors.New("lives in the enclosing felt store")
 // remark on. True means the enclosing store's own resolver INFERRED the
 // target by its scope, suffix, and basename rules; that is the case that can
 // quietly outrank a local rescue, and the only one worth reporting.
+//
+// Guessed narrows Inferred to the inferences that are guesses: the enclosing
+// store matched only a tail, a prefix or a last segment of the query, not the
+// query itself from the citing fiber's position out there. Commands that
+// delete or move refuse a guessed target (see FindMetadataWithoutGuessing).
 type ExternalReference struct {
 	Query      string
 	ID         string
 	Root       string // the enclosing .felt directory
 	ProjectDir string // its project root — what `felt -C` takes
 	Inferred   bool
+	Guessed    bool
 }
 
 func (e *ExternalReference) Error() string {
@@ -118,7 +132,7 @@ func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 				if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 					return
 				}
-				s.external = &ExternalRefs{root: dir, prefix: filepath.ToSlash(rel), cache: map[string]string{}}
+				s.external = &ExternalRefs{root: dir, prefix: filepath.ToSlash(rel), cache: map[string]string{}, via: map[string]resolution{}}
 				return
 			}
 			if parent := filepath.Dir(dir); parent == dir {
@@ -182,7 +196,8 @@ type ExternalRefs struct {
 	resolver *scopedIDResolver
 
 	mu    sync.Mutex
-	cache map[string]string // query -> its id out there, "" for "not out there"
+	cache map[string]string     // query -> its id out there, "" for "not out there"
+	via   map[string]resolution // query -> the rule that found it out there
 }
 
 // Root is the enclosing `.felt/` directory.
@@ -274,16 +289,17 @@ func (x *ExternalRefs) LookupPath(query string) (string, bool) {
 // The enclosing store's id list is walked once, lazily: nothing here runs
 // until a query has already failed to resolve locally, so a top-level store
 // or a substore with clean links never pays for it.
-func (x *ExternalRefs) Lookup(scopeID, query string) (string, bool) {
+func (x *ExternalRefs) Lookup(scopeID, query string) (string, resolution, bool) {
 	if x == nil || query == "" {
-		return "", false
+		return "", resolvedExact, false
 	}
 	key := scopeID + "\x00" + query
 	x.mu.Lock()
 	found, seen := x.cache[key]
+	via := x.via[key]
 	x.mu.Unlock()
 	if seen {
-		return found, found != ""
+		return found, via, found != ""
 	}
 
 	x.once.Do(func() {
@@ -302,22 +318,44 @@ func (x *ExternalRefs) Lookup(scopeID, query string) (string, bool) {
 
 	// The citing fiber sits at <prefix>/<scopeID> in the outer namespace;
 	// resolving from there is the same lexical walk the enclosing store runs.
-	id, err := x.resolver.Resolve(path.Join(x.prefix, scopeID), query)
+	id, via, err := x.resolver.resolve(path.Join(x.prefix, scopeID), query)
 	if err != nil || id == x.prefix || strings.HasPrefix(id, x.prefix+"/") {
 		id = ""
 	}
 
 	x.mu.Lock()
 	x.cache[key] = id
+	x.via[key] = via
 	x.mu.Unlock()
-	return id, id != ""
+	return id, via, id != ""
+}
+
+// strayAt reports whether query, spelled from the enclosing store's root or
+// from the citing fiber's position out there, names a stray fiber file in the
+// enclosing store. The returned location is absolute: `.felt/` alone would
+// read as this store's.
+func (x *ExternalRefs) strayAt(scopeID, query string) (string, bool) {
+	if x == nil {
+		return "", false
+	}
+	outer := &Storage{root: x.root}
+	candidates := []string{query}
+	for _, scope := range scopeChain(path.Join(x.prefix, scopeID)) {
+		candidates = append(candidates, scopedQuery(scope, query))
+	}
+	for _, candidate := range candidates {
+		if rel, ok := outer.strayAt(candidate); ok {
+			return filepath.Join(x.root, filepath.FromSlash(rel)), true
+		}
+	}
+	return "", false
 }
 
 // err builds the resolution failure for an external target: the sentinel, the
 // query, and the id it has out there — everything a caller needs to act on
 // the fiber where it lives.
-func (x *ExternalRefs) err(query, id string, inferred bool) error {
-	return &ExternalReference{Query: query, ID: id, Root: x.root, ProjectDir: x.ProjectDir(), Inferred: inferred}
+func (x *ExternalRefs) err(query, id string, inferred, guessed bool) error {
+	return &ExternalReference{Query: query, ID: id, Root: x.root, ProjectDir: x.ProjectDir(), Inferred: inferred, Guessed: guessed}
 }
 
 type fiberFile struct {
@@ -333,7 +371,10 @@ type MigrationEntry struct {
 }
 
 type MigrationResult struct {
-	Entries               []MigrationEntry
+	Entries []MigrationEntry
+	// Strays are the stray fiber files found below the root; each is folded
+	// into the directory layout unless Blocked.
+	Strays                []StrayFiber
 	TitleToNameIDs        []string
 	RemovedDependsOnIDs   []string
 	StrippedMystAnchorIDs []string
@@ -379,6 +420,23 @@ func (s *Storage) SilenceWalkWarnings() {
 	s.quietWalk = true
 }
 
+// MemoizeWalk makes the store walk run once and serve every later listing,
+// check and layout inspection through this Storage, so a read-only command
+// that lists fibers and then inspects the layout — `felt check`, the session
+// hook — pays for one walk. A write through this Storage drops the snapshot;
+// files changed behind its back are not seen, which is why only read-only
+// commands turn it on.
+func (s *Storage) MemoizeWalk() {
+	s.memoWalk = true
+}
+
+// forgetWalk drops the memoized walk after a write.
+func (s *Storage) forgetWalk() {
+	s.walkMu.Lock()
+	s.walk = nil
+	s.walkMu.Unlock()
+}
+
 // Exists returns true if the .felt directory exists.
 func (s *Storage) Exists() bool {
 	info, err := os.Stat(s.root)
@@ -391,18 +449,15 @@ func (s *Storage) Exists() bool {
 //   - directory form  `<.felt>/<id>/<slug>.md`   (the standard layout)
 //   - bare form       `<.felt>/<dir>/<slug>.md`  (no `<slug>/` nesting)
 //
-// The bare form occurs at namespace-root boundaries: the file sits directly
+// The bare form belongs to namespace roots only: the file sits directly
 // inside a `.felt/` rather than in a `<slug>/` subdirectory. At depth zero
-// it is the project-root fiber. At depth greater than zero it appears when
-// another felt store is mounted via a symlinked subdirectory — its
-// inner-root fiber surfaces in the outer namespace one tier deeper than the
-// outer root.
-//
-// Path prefers the directory form for nested ids. Bare-form `.md` files at
-// depth > 0 are usually sidecars (transcripts, notes adjacent to a real
-// fiber) and don't carry frontmatter; preferring them would resolve to the
-// wrong file. The bare fallback fires only when the directory form is
-// missing, which is exactly the symlinked-substore case.
+// it is the project-root fiber. At depth greater than zero it is the
+// entry-point fiber of another store mounted through a symlinked
+// subdirectory, which surfaces in the outer namespace one tier deeper than
+// the outer root — so for a nested id the bare form is honoured only when
+// `<dir>` is that symlink. Anywhere else a bare `.md` is either a companion
+// file or a stray fiber (see StrayFibers), and neither is addressable as a
+// fiber.
 func (s *Storage) Path(id string) string {
 	id = filepath.ToSlash(filepath.Clean(id))
 	slug := path.Base(id)
@@ -419,16 +474,17 @@ func (s *Storage) Path(id string) string {
 		}
 		return dirForm
 	}
-	// Nested ids: directory form first. The bare-at-parent shape only
-	// appears at a symlink boundary into another store; fall through to it
-	// when (and only when) the directory form doesn't resolve, so a
-	// sidecar `.md` next to a directory-form fiber can't shadow the fiber.
+	// Nested ids: directory form first, so a companion `.md` beside a
+	// directory-form fiber can never shadow it.
 	if _, err := os.Stat(dirForm); err == nil {
 		return dirForm
 	}
-	bare := filepath.Join(s.root, filepath.FromSlash(dir), slug+FileExt)
-	if _, err := os.Stat(bare); err == nil {
-		return bare
+	mount := filepath.Join(s.root, filepath.FromSlash(dir))
+	if info, err := os.Lstat(mount); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		bare := filepath.Join(mount, slug+FileExt)
+		if _, err := os.Stat(bare); err == nil {
+			return bare
+		}
 	}
 	return dirForm
 }
@@ -444,6 +500,9 @@ func (s *Storage) CheckAvailableID(id string) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("checking existing fiber %q: %w", id, err)
 	}
+	if rel, ok := s.strayAt(id); ok {
+		return strayHintError(fmt.Errorf("fiber %q would collide with a stray fiber file", id), rel)
+	}
 	return nil
 }
 
@@ -457,6 +516,7 @@ func (s *Storage) Write(f *Felt) error {
 		return err
 	}
 
+	s.forgetWalk()
 	path := s.Path(f.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", filepath.Dir(path), err)
@@ -476,6 +536,45 @@ func (s *Storage) Read(id string) (*Felt, error) {
 // scoped resolution rooted at scopeID.
 func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
 	return s.findWithModeAndScope(scopeID, query, ParseMetadataOnly)
+}
+
+// FindMetadataWithoutGuessing is FindMetadataInScope for commands that delete
+// or move a fiber: it refuses a guess, returning a *GuessError that names the
+// fiber the guess would have reached. A guess is what `felt check` warns on —
+// a multi-segment path whose written prefix matched nothing, rescued by its
+// last segment — plus an in-scope prefix completion, and, from a substore, any
+// answer the enclosing store infers by tail, prefix or last segment rather
+// than by the query itself. Everything check accepts silently is accepted: an
+// exact id, the lexical scope chain, the view's own prefix, a unique bare slug
+// and a correct partial tail.
+func (s *Storage) FindMetadataWithoutGuessing(scopeID, query string) (*Felt, error) {
+	f, via, err := s.find(scopeID, query, ParseMetadataOnly)
+	if ref, ok := AsExternalReference(err); ok && ref.Guessed {
+		return nil, &GuessError{Query: query, Guess: ref.ID, Root: ref.Root}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if via.guess() {
+		return nil, &GuessError{Query: query, Guess: f.ID}
+	}
+	return f, nil
+}
+
+// GuessError is a query that only a guess resolves — to Guess, in the
+// enclosing store at Root when set (see FindMetadataWithoutGuessing).
+type GuessError struct {
+	Query string
+	Guess string
+	Root  string
+}
+
+func (e *GuessError) Error() string {
+	where := ""
+	if e.Root != "" {
+		where = fmt.Sprintf(" (in %s)", e.Root)
+	}
+	return fmt.Sprintf("%q only reaches a fiber by guessing, and this command does not act on a guess; did you mean %s%s?", e.Query, e.Guess, where)
 }
 
 // FindExistingMetadataInScope resolves only direct on-disk candidates in the
@@ -528,6 +627,7 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 
 // Delete removes a felt from disk.
 func (s *Storage) Delete(id string) error {
+	s.forgetWalk()
 	path := s.Path(id)
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting file %s: %w", path, err)
@@ -628,6 +728,7 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 	if err := os.MkdirAll(filepath.Dir(newRoot), 0755); err != nil {
 		return nil, fmt.Errorf("creating destination parent %s: %w", filepath.Dir(newRoot), err)
 	}
+	s.forgetWalk()
 	if err := os.Rename(oldRoot, newRoot); err != nil {
 		return nil, fmt.Errorf("moving subtree %s -> %s: %w", oldRoot, newRoot, err)
 	}
@@ -815,12 +916,32 @@ func rewriteFileBody(path string, rewrite func(string) (string, bool)) ([]byte, 
 }
 
 // Migrate performs the storage-model normalization pass:
-// flat-file fibers become directory fibers, legacy frontmatter `title` fields
-// become `name`, and leading MyST anchor lines are stripped from bodies.
+// flat-file fibers become directory fibers, stray fiber files fold into the
+// directory layout, legacy frontmatter `title` fields become `name`, and
+// leading MyST anchor lines are stripped from bodies.
 func (s *Storage) Migrate(dryRun bool) (*MigrationResult, error) {
 	result, err := s.MigrateFlatFiles(dryRun)
 	if err != nil {
 		return nil, err
+	}
+
+	if result.Strays, err = s.StrayFibers(); err != nil {
+		return nil, err
+	}
+	if !dryRun {
+		// A fold that fails is reported like a blocked one and the pass goes
+		// on: the folds before it are done, and stopping here would hide them
+		// and skip the normalization below.
+		for i := range result.Strays {
+			sf := &result.Strays[i]
+			if sf.Blocked != "" {
+				continue
+			}
+			if err := sf.fold(); err != nil {
+				sf.Blocked = err.Error()
+			}
+		}
+		s.forgetWalk()
 	}
 
 	if err := s.normalizeFiberFiles(dryRun, result); err != nil {
@@ -1228,13 +1349,19 @@ func (s *Storage) FindInScope(scopeID, query string) (*Felt, error) {
 // direct on-disk scope-chain candidates first, then falls back to a full-store
 // scan with slug and (UID-shaped) exact-UID matching.
 func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, error) {
+	f, _, err := s.find(scopeID, query, mode)
+	return f, err
+}
+
+// find is findWithModeAndScope, also reporting which rule answered.
+func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution, error) {
 	if f, ok, err := s.findExistingPathWithModeAndScope(scopeID, query, mode); ok || err != nil {
-		return f, err
+		return f, resolvedExact, err
 	}
 
-	files, err := s.listFiberFiles()
+	files, loose, err := s.walkStore()
 	if err != nil {
-		return nil, err
+		return nil, resolvedExact, err
 	}
 
 	query = cleanLookupQuery(query)
@@ -1247,7 +1374,7 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 		ids = append(ids, file.id)
 	}
 
-	matchID, err := ResolveScopedIDIn(ids, scopeID, query, s.ExternalRefs())
+	matchID, via, err := newScopedIDResolverIn(ids, s.ExternalRefs()).resolve(scopeID, query)
 	if err != nil {
 		// Slug resolution missed. If the query is UID-shaped, fall back to an
 		// exact-UID walk: the UID lives in frontmatter (not the path-derived
@@ -1255,19 +1382,19 @@ func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*
 		// purely additive — it only runs when slug resolution already failed.
 		if LooksLikeUID(query) {
 			if f, ok, uidErr := s.findByUIDWithMode(files, query, mode); ok || uidErr != nil {
-				return f, uidErr
+				return f, resolvedExact, uidErr
 			}
 		}
-		return nil, err
+		return nil, via, withStrayHint(err, query, loose)
 	}
 	f, err := s.readPathWithMode(pathByID[matchID], matchID, mode)
 	if err != nil {
-		return nil, err
+		return nil, via, err
 	}
 	if info, err := os.Stat(pathByID[matchID]); err == nil {
 		f.ModifiedAt = info.ModTime()
 	}
-	return f, nil
+	return f, via, nil
 }
 
 // findByUIDWithMode resolves a fiber by an exact (case-insensitive) UID match.
@@ -1336,6 +1463,13 @@ func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode P
 		if ok || err != nil {
 			return f, ok, err
 		}
+		// A candidate that names a stray fiber file stops the lookup: the
+		// query means that file, and every later rule — a farther scope, the
+		// slug rescue — would answer with a different fiber that `rm` or
+		// `nest` then acts on.
+		if rel, stray := s.strayAt(candidate); stray {
+			return nil, false, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
+		}
 	}
 	return nil, false, nil
 }
@@ -1376,12 +1510,59 @@ func (s *Storage) pathInStore(filePath string) bool {
 }
 
 func (s *Storage) listFiberFiles() ([]fiberFile, error) {
+	files, _, err := s.walkStore()
+	return files, err
+}
+
+// looseFile is a markdown file the walk passed over: it sits below a walk
+// tier's root and its stem differs from its directory's name, so it is not
+// any fiber's own `<slug>.md`. Companion notes and stray fibers both take this
+// shape; strayFibersIn tells them apart by content. A file whose path in the
+// store — mount points included — has a hidden segment (an editor's
+// `.trash/`, say) is never collected.
+type looseFile struct {
+	path    string // on-disk path
+	rel     string // slash-separated path in the store's logical namespace
+	symlink bool   // the file itself is a symlink
+}
+
+// hiddenPath reports whether any segment of a slash-separated store path is
+// hidden.
+func hiddenPath(rel string) bool {
+	return strings.HasPrefix(rel, ".") || strings.Contains(rel, "/.")
+}
+
+// walkStore walks the store once, returning the fiber files and the loose
+// markdown files beside them.
+func (s *Storage) walkStore() ([]fiberFile, []looseFile, error) {
+	if !s.memoWalk {
+		return s.walkStoreOnce()
+	}
+	s.walkMu.Lock()
+	defer s.walkMu.Unlock()
+	if s.walk == nil {
+		files, loose, err := s.walkStoreOnce()
+		if err != nil {
+			return nil, nil, err
+		}
+		s.walk = &storeWalk{files: files, loose: loose}
+	}
+	return s.walk.files, s.walk.loose, nil
+}
+
+type storeWalk struct {
+	files []fiberFile
+	loose []looseFile
+}
+
+func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 	// Resolve symlinks on the root so WalkDir descends into symlinked .felt/ dirs.
 	rootResolved, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
-		return nil, fmt.Errorf("resolving .felt path: %w", err)
+		return nil, nil, fmt.Errorf("resolving .felt path: %w", err)
 	}
 	var files []fiberFile
+	var loose []looseFile
 	visited := map[string]struct{}{}
 
 	// walkFn walks one tier of the felt tree, recursing through any symlinked
@@ -1457,23 +1638,20 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 			if !strings.HasSuffix(d.Name(), FileExt) {
 				continue
 			}
-			// Compute rel within this tier (clean inner namespace), then prepend
-			// the accumulated outer prefix to lift the id back into the parent
-			// tree. Resolved-then-fullPath fallback preserves the prior
-			// best-effort behaviour for pathological symlinks.
-			resolved, err := filepath.EvalSymlinks(fullPath)
+			// A file is named by where it sits in this tier — a symlinked file
+			// included, exactly as a symlinked directory is named by where it is
+			// placed — then lifted into the outer namespace by the tier's
+			// prefix. The walk only descends real directories under the
+			// resolved tier root, so the relative path is always clean.
+			rel, err := filepath.Rel(walkBaseResolved, fullPath)
 			if err != nil {
-				resolved = fullPath
-			}
-			rel, err := filepath.Rel(walkBaseResolved, resolved)
-			if err != nil {
-				rel, err = filepath.Rel(walkBaseResolved, fullPath)
-				if err != nil {
-					return err
-				}
+				return err
 			}
 			id, entryPoint, ok := fiberIDFromRelativePath(rel)
 			if !ok {
+				if logical := path.Join(idPrefix, filepath.ToSlash(rel)); !hiddenPath(logical) {
+					loose = append(loose, looseFile{path: fullPath, rel: logical, symlink: d.Type()&os.ModeSymlink != 0})
+				}
 				continue
 			}
 			if idPrefix != "" {
@@ -1503,9 +1681,9 @@ func (s *Storage) listFiberFiles() ([]fiberFile, error) {
 		return walkDirFn(walkBaseResolved, walkBaseResolved, idPrefix)
 	}
 	if err := walkFn(rootResolved, ""); err != nil {
-		return nil, fmt.Errorf("walking .felt directory: %w", err)
+		return nil, nil, fmt.Errorf("walking .felt directory: %w", err)
 	}
-	return files, nil
+	return files, loose, nil
 }
 
 // fiberIDFromRelativePath returns (id, entryPoint, ok). entryPoint is true
@@ -1644,7 +1822,10 @@ func ResolveScopedIDIn(ids []string, scopeID, query string, external *ExternalRe
 }
 
 type scopedIDResolver struct {
-	external     *ExternalRefs
+	external *ExternalRefs
+	// strayAt, when set, names the stray fiber file an id would be (see
+	// Storage.strayAt), so a query naming one stops there.
+	strayAt      func(id string) (rel string, ok bool)
 	ids          []string
 	exact        map[string]struct{}
 	parentSorted map[string][]scopedIDEntry
@@ -1687,15 +1868,47 @@ func newScopedIDResolverIn(ids []string, external *ExternalRefs) *scopedIDResolv
 	return resolver
 }
 
+// resolution names the rule that answered a lookup.
+type resolution int
+
+const (
+	// resolvedExact: the exact id, or the query joined to the citing fiber's
+	// scope or one of its ancestors — spelled locally or with this view's
+	// prefix in the enclosing store's namespace.
+	resolvedExact resolution = iota
+	// resolvedByTail: the query is the whole-segment tail of exactly one id
+	// — a unique bare slug, or a correct partial path.
+	resolvedByTail
+	// resolvedByPrefix: the query is a string prefix of exactly one id in
+	// scope, not a whole segment of it.
+	resolvedByPrefix
+	// resolvedBySlug: the stale-path rescue. The query's path matched
+	// nothing and only its final segment was kept, so the rest of what it
+	// wrote is contradicted by where the fiber actually lives.
+	resolvedBySlug
+)
+
+// guess reports whether the rule guessed: kept less of the query than it
+// wrote. A command that deletes or moves never acts on a guess.
+func (v resolution) guess() bool {
+	return v == resolvedByPrefix || v == resolvedBySlug
+}
+
 func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
+	id, _, err := r.resolve(scopeID, query)
+	return id, err
+}
+
+// resolve is Resolve, also reporting which rule answered.
+func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, error) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", fmt.Errorf("no felt found matching %q", query)
+		return "", resolvedExact, fmt.Errorf("no felt found matching %q", query)
 	}
 
-	if id, ok, err := r.resolveInStore(scopeID, query); ok || err != nil {
-		return id, err
+	if id, via, ok, err := r.resolveInStore(scopeID, query); ok || err != nil {
+		return id, via, err
 	}
 
 	// A target spelled from the enclosing store's namespace but pointing back
@@ -1704,9 +1917,20 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 	// genuinely begins with this store's own prefix still answers to its own
 	// spelling — and a miss keeps the query the caller typed in its error.
 	if local, stripped := r.external.Localize(query); stripped {
-		if id, ok, _ := r.resolveInStore(scopeID, local); ok {
-			return id, nil
+		id, via, ok, err := r.resolveInStore(scopeID, local)
+		if ok {
+			return id, via, nil
 		}
+		if isStrayError(err) {
+			return "", resolvedExact, err
+		}
+	}
+
+	// A path naming a stray fiber file in the enclosing store means that
+	// file; the enclosing store's own slug and suffix rules must not answer
+	// it with a same-named fiber elsewhere.
+	if rel, ok := r.external.strayAt(scopeID, query); ok {
+		return "", resolvedExact, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
 	}
 
 	// Nothing in this store answers to the query. Before the basename rescue
@@ -1723,8 +1947,8 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 	// is deliberate: a wrong redirect sends a reader one command away
 	// (`felt -C ...`), while the misresolution it replaces silently answered
 	// with the wrong fiber — and `felt rm` and `felt nest` act on that answer.
-	if id, inferred, ok := r.externalHit(scopeID, query); ok {
-		return "", r.external.err(query, id, inferred)
+	if id, inferred, guessed, ok := r.externalHit(scopeID, query); ok {
+		return "", resolvedExact, r.external.err(query, id, inferred, guessed)
 	}
 
 	// Last resort: the query's final segment names exactly one fiber. This is
@@ -1734,32 +1958,36 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 	// five hundred healthy loom links into broken ones). It is also the step
 	// that misreads a foreign path as a local slug, which is why an id known to
 	// the enclosing store is refused above before ever reaching here.
+	//
+	// A one-segment query never lands here — it is its own tail, so the
+	// unique-tail fallback already answered it — which makes every rescue a
+	// written path that turned out wrong. `felt check` warns on each one.
 	if ids := r.byBase[path.Base(query)]; len(ids) == 1 {
-		return ids[0], nil
+		return ids[0], resolvedBySlug, nil
 	}
 
-	return "", fmt.Errorf("no felt found matching %q", query)
+	return "", resolvedExact, fmt.Errorf("no felt found matching %q", query)
 }
 
 // ResolvePath is the answer a reference's PATH gives, as opposed to the one
 // its slug gives: exact id, lexical scope, unique suffix, and the local reading
-// of a spelling from the enclosing store's namespace — everything Resolve tries
-// except asking the enclosing store and the basename rescue. A multi-segment
-// query that Resolve answers and ResolvePath does not is a stale path held up
-// only by its final segment.
+// of a spelling from the enclosing store's namespace — the steps resolve takes
+// before it asks the enclosing store or falls back to the basename rescue. A
+// query resolve answers with resolvedBySlug is exactly one ResolvePath does not
+// answer: a stale path held up only by its final segment.
 func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
 		return "", false
 	}
-	if id, ok, err := r.resolveInStore(scopeID, query); err != nil {
+	if id, _, ok, err := r.resolveInStore(scopeID, query); err != nil {
 		return "", false
 	} else if ok {
 		return id, true
 	}
 	if local, stripped := r.external.Localize(query); stripped {
-		if id, ok, _ := r.resolveInStore(scopeID, local); ok {
+		if id, _, ok, _ := r.resolveInStore(scopeID, local); ok {
 			return id, true
 		}
 	}
@@ -1786,35 +2014,35 @@ func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
 // It reports which of the two answered: an exact path stat is not inferred,
 // the resolver walk is. Only the second can outrank a local rescue the reader
 // was relying on, so only the second is worth remarking on (see check).
-func (r *scopedIDResolver) externalHit(scopeID, query string) (id string, inferred, ok bool) {
+func (r *scopedIDResolver) externalHit(scopeID, query string) (id string, inferred, guessed, ok bool) {
 	if r.external == nil {
-		return "", false, false
+		return "", false, false, false
 	}
 	if id, ok := r.external.LookupPath(query); ok {
-		return id, false, true
+		return id, false, false, true
 	}
-	id, ok = r.external.Lookup(scopeID, query)
-	return id, ok, ok
+	id, via, ok := r.external.Lookup(scopeID, query)
+	return id, ok, ok && via != resolvedExact, ok
 }
 
 // resolveInStore is resolution against this store alone: exact id, then the
 // lexical scope chain, then the unique-suffix fallback. ok is false with a nil
 // error when nothing matched; a non-nil error is a hard stop (ambiguity), not
 // an invitation to try the fallbacks in resolve.
-func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, error) {
+func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, resolution, bool, error) {
 	if _, ok := r.exact[query]; ok {
-		return query, true, nil
+		return query, resolvedExact, true, nil
 	}
 
 	segmented := strings.Contains(query, "/")
 	for _, scope := range scopeChain(scopeID) {
 		var matches []string
+		candidate := scopedQuery(scope, query)
 		if segmented {
-			candidate := scopedQuery(scope, query)
 			// An exact id match wins over descendant prefix matches: resolving
 			// [[a/parent]] must not be defeated into ambiguity by a/parent/child.
 			if _, ok := r.exact[candidate]; ok {
-				return candidate, true, nil
+				return candidate, resolvedExact, true, nil
 			}
 			matches = r.prefixMatches(candidate)
 		} else {
@@ -1823,16 +2051,23 @@ func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, 
 			// are sorted by (base, id), so an exact base sorts strictly before
 			// any entry that merely has query as a prefix.
 			if len(matches) > 0 && path.Base(matches[0]) == query {
-				return matches[0], true, nil
+				return matches[0], resolvedExact, true, nil
+			}
+		}
+		// A query that names a stray fiber file means that file. No looser
+		// rule may answer it with some other fiber.
+		if r.strayAt != nil {
+			if rel, ok := r.strayAt(candidate); ok {
+				return "", resolvedExact, false, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
 			}
 		}
 		switch len(matches) {
 		case 0:
 			continue
 		case 1:
-			return matches[0], true, nil
+			return matches[0], resolvedByPrefix, true, nil
 		default:
-			return "", false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
+			return "", resolvedExact, false, fmt.Errorf("ambiguous ID %q in scope %q matches: %s", query, displayScope(scope), strings.Join(matches, ", "))
 		}
 	}
 
@@ -1842,10 +2077,10 @@ func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, bool, 
 	// (including across projects) without a full path, and is scope-independent
 	// so the same link resolves from the monorepo and a substore.
 	if match, ok := r.uniqueSuffixMatch(query); ok {
-		return match, true, nil
+		return match, resolvedByTail, true, nil
 	}
 
-	return "", false, nil
+	return "", resolvedExact, false, nil
 }
 
 // uniqueSuffixMatch resolves a query naming the tail of exactly one id.
@@ -1990,13 +2225,41 @@ func readMetadataFile(path, id string) (*Felt, error) {
 	return parseFrontmatter(id, frontmatter)
 }
 
+// readFrontmatterFile returns the frontmatter SplitFrontmatter would, reading
+// only as far as the closing delimiter: a fiber's metadata costs its
+// frontmatter, not its body, and a large markdown file costs one line when it
+// has no frontmatter at all.
 func readFrontmatterFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	frontmatter, _, err := SplitFrontmatter(data, false)
-	return frontmatter, err
+	defer file.Close()
+	r := bufio.NewReader(file)
+
+	first, err := r.ReadBytes('\n')
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if len(first) == 0 {
+		return nil, fmt.Errorf("empty file")
+	}
+	if !isDocumentDelimiterLine(bytes.TrimSuffix(first, []byte("\n"))) {
+		return nil, fmt.Errorf("file must start with ---")
+	}
+	var frontmatter []byte
+	for err == nil {
+		var line []byte
+		line, err = r.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if len(line) > 0 && isDocumentDelimiterLine(bytes.TrimSuffix(line, []byte("\n"))) {
+			return frontmatter, nil
+		}
+		frontmatter = append(frontmatter, line...)
+	}
+	return nil, fmt.Errorf("unclosed frontmatter (missing closing ---)")
 }
 
 func fileFrontmatterHasTopLevelFields(path string, fields []string) (bool, error) {
