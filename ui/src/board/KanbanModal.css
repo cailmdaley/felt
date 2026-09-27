@@ -1337,6 +1337,9 @@
   display: flex; flex-direction: column;
   gap: 8px;
 }
+/* A live meeting. It folds into the card of the fiber it belongs to
+   (`.kbn-card--meeting`), or draws its own card (`.kbn-meeting-card`) while
+   none is on the desk. Either way it wears the recording tint. */
 .kbn-meeting-card {
   display: flex;
   flex-direction: column;
@@ -1349,17 +1352,58 @@
   color: #2E2A26;
   box-shadow: 0 1px 2px rgba(27, 22, 17, 0.08);
 }
-.kbn-meeting-card-failed { border-color: rgba(178, 78, 60, 0.48); background: #F6ECE5; }
-.kbn-meeting-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.kbn-card.kbn-card--meeting {
+  flex: 0 0 auto;
+  border-color: rgba(63, 130, 120, 0.46);
+  background: #EEF2E8;
+  box-shadow: 0 0 0 1px rgba(63, 130, 120, 0.18), 0 1px 3px rgba(27, 22, 17, 0.10);
+}
+.kbn-meeting-card.kbn-meeting-failed,
+.kbn-card.kbn-card--meeting.kbn-meeting-failed { border-color: rgba(178, 78, 60, 0.48); background: #F6ECE5; }
 .kbn-meeting-title {
-  flex: 1 1 auto;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: calc(15px * var(--kbn-type-scale, 1));
   font-weight: 600;
 }
+.kbn-meeting-fiber {
+  overflow: hidden;
+  color: #2E6862;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-meeting { display: flex; flex-direction: column; gap: 7px; min-width: 0; cursor: default; }
+.kbn-card--meeting .kbn-meeting { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(63, 130, 120, 0.22); }
+.kbn-meeting-meta { display: flex; align-items: center; gap: 7px; min-width: 0; color: #756B60; font-size: calc(12px * var(--kbn-type-scale, 1)); }
+.kbn-meeting-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8E877E;
+}
+.kbn-meeting-live .kbn-meeting-dot { background: #3F8278; animation: kbn-meeting-pulse 1.6s ease-in-out infinite; }
+.kbn-meeting-loading .kbn-meeting-dot,
+.kbn-meeting-starting .kbn-meeting-dot { background: #A89A6A; }
+.kbn-meeting-failed .kbn-meeting-dot { background: #B24E3C; }
+@keyframes kbn-meeting-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 130, 120, 0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(63, 130, 120, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-meeting-live .kbn-meeting-dot { animation: none; }
+}
+.kbn-meeting-state {
+  flex: 0 0 auto;
+  color: #2E6862;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.kbn-meeting-failed .kbn-meeting-state { color: #8B3A28; }
 .kbn-meeting-duration {
   flex: 0 0 auto;
   color: #5C544D;
@@ -1367,30 +1411,33 @@
   font-size: calc(11px * var(--kbn-type-scale, 1));
   font-variant-numeric: tabular-nums;
 }
-.kbn-meeting-meta { display: flex; align-items: center; gap: 7px; color: #756B60; font-size: calc(12px * var(--kbn-type-scale, 1)); }
-.kbn-meeting-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kbn-meeting-state {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border: 1px solid rgba(63, 130, 120, 0.32);
-  border-radius: 9px;
-  background: rgba(63, 130, 120, 0.10);
-  color: #2E6862;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  line-height: 1.4;
-}
-.kbn-meeting-card-failed .kbn-meeting-state { border-color: rgba(178, 78, 60, 0.34); background: rgba(178, 78, 60, 0.10); color: #8B3A28; }
-.kbn-meeting-last-line {
-  display: -webkit-box;
-  overflow: hidden;
+.kbn-meeting-host { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The transcript tail: a few lines tall, scrollable back through the last
+   thirty, following the newest line until the reader scrolls away. */
+.kbn-meeting-tail {
+  margin: 0;
+  padding: 5px 7px;
+  list-style: none;
+  max-height: calc(6 * 1.35em + 10px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
   color: #4C453F;
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: calc(12.5px * var(--kbn-type-scale, 1));
   line-height: 1.35;
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  user-select: text;
 }
-.kbn-meeting-last-line[hidden], .kbn-meeting-error[hidden], .kbn-meeting-duration[hidden] { display: none; }
+.kbn-meeting-tail:focus-visible { outline: 1px dashed #3F8278; outline-offset: 1px; }
+.kbn-meeting-line + .kbn-meeting-line { margin-top: 2px; }
+.kbn-meeting-speaker {
+  color: #2E6862;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.kbn-meeting-tail[hidden], .kbn-meeting-error[hidden], .kbn-meeting-duration[hidden], .kbn-meeting-fiber[hidden] { display: none; }
 .kbn-meeting-error { color: #8B3A28; font-size: calc(12px * var(--kbn-type-scale, 1)); overflow-wrap: anywhere; }
 .kbn-meeting-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
 .kbn-meeting-action {
@@ -1407,15 +1454,6 @@
 .kbn-meeting-action:focus-visible { outline: 1px dashed #3F8278; outline-offset: 2px; }
 .kbn-meeting-action:disabled { opacity: 0.5; cursor: not-allowed; }
 .kbn-meeting-stop { border-color: rgba(178, 78, 60, 0.30); color: #8B3A28; }
-.kbn-meeting-fiber {
-  overflow: hidden;
-  color: #2E6862;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kbn-meeting-fiber[hidden] { display: none; }
 /* Empty column — a quiet marginal line, set in italic with a small
    fleuron to make absence feel intentional rather than missing. */
 .kbn-empty {

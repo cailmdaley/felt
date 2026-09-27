@@ -5,7 +5,9 @@
  * against mocked daemon routes, then opens from `file://`. The feed still runs
  * through the board's real classifier (`parseCompositeFeed` →
  * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
- * Query `?meeting=live` or `?meeting=failed` to stage those meeting states;
+ * Query `?meeting=` to stage a meeting: `joined` (folded into the constitution
+ * it joined), `scribe` (a capture whose scribe has claimed, found by its
+ * session), `live` (a capture not yet claimed, on its own card) or `failed`;
  * leave it unset to exercise the idle board. Add `?capture=meeting` to open
  * Capture with the daemon reporting meeting support.
  *
@@ -54,14 +56,27 @@ const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
-let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || meetingScenario === 'joined'
+const MOCK_TAIL = [
+  '14:02:51 me  okay, I think everyone is here, let us start with the null tests',
+  '14:03:12 S1  so the chi-squared for the B-modes came back at forty-one for thirty-six bins',
+  '14:03:30 S2  that is a PTE of about a quarter, which is fine',
+  '14:03:44 me  and the Hartlap factor is in there?',
+  '14:03:49 S1  yes, with the three hundred simulations',
+  '14:04:10 S2  what worries me more is the mask split, the north patch looks a bit high',
+  '14:04:31 me  Claude, can you pull up the per-patch PTEs from last week?',
+  '14:04:58 S1  I would not over-read one patch out of six',
+  '14:05:20 me  fair, but let us rerun it with the updated mask before we call it',
+  '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
+]
+let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || meetingScenario === 'joined' || meetingScenario === 'scribe'
   ? {
       state: 'live',
       title: 'Shear telecon',
       mirror_host: 'project-host',
-      fiber: meetingScenario === 'joined' ? 'loom/shear-bmodes' : null,
+      fiber: meetingScenario === 'joined' ? 'work/spt3g_papers/bmodes-2d/run' : null,
+      scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
       started_at: iso(-13 * 60_000 - 12_000),
-      last_line: '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
+      tail: MOCK_TAIL,
       transcript: null,
       tmux_session: 'hark-meeting',
       error: null,
@@ -72,8 +87,9 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
         title: 'Shear telecon',
         mirror_host: null,
         fiber: null,
+        scribe_session_uuid: null,
         started_at: iso(-2 * 60_000),
-        last_line: null,
+        tail: [],
         transcript: null,
         tmux_session: 'hark-meeting',
         error: 'Could not connect to the selected scribe host.',
@@ -1303,7 +1319,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       state: 'starting',
       title: String(request.note ?? '').split('\n')[0] || fiber.split('/').pop() || 'Meeting',
       started_at: null,
-      last_line: null,
+      tail: [],
+      scribe_session_uuid: null,
       transcript: null,
       mirror_host: request.origin === 'local' ? null : 'project-host',
       fiber,
@@ -1320,7 +1337,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         state: 'starting',
         title: prompt.split('\n')[0] || 'Meeting',
         started_at: null,
-        last_line: null,
+        tail: [],
+        scribe_session_uuid: null,
         transcript: null,
         mirror_host: request.origin === 'local' ? null : 'project-host',
         fiber: null,

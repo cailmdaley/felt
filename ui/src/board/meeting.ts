@@ -1,3 +1,5 @@
+import type { KanbanCard } from './KanbanTypes.js'
+
 export const MEETING_POLL_IDLE_MS = 15_000
 export const MEETING_POLL_ACTIVE_MS = 2_000
 
@@ -7,11 +9,14 @@ export interface MeetingRecord {
   state: MeetingState
   title: string | null
   started_at: string | null
-  last_line: string | null
+  /** The transcript's last spoken lines, oldest first. */
+  tail: string[]
   transcript: string | null
   mirror_host: string | null
   /** The constitution this meeting joined; `null` for a capture meeting. */
   fiber: string | null
+  /** A capture meeting's scribe session, once its launch reported one. */
+  scribe_session_uuid: string | null
   tmux_session: string | null
   error: string | null
 }
@@ -33,10 +38,11 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     state: raw.state as MeetingState,
     title: nullableString('title'),
     started_at: nullableString('started_at'),
-    last_line: nullableString('last_line'),
+    tail: Array.isArray(raw.tail) ? raw.tail.filter((line): line is string => typeof line === 'string') : [],
     transcript: nullableString('transcript'),
     mirror_host: nullableString('mirror_host'),
     fiber: nullableString('fiber'),
+    scribe_session_uuid: nullableString('scribe_session_uuid'),
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }
@@ -165,4 +171,63 @@ export function formatMeetingDuration(startedAt: string | null, nowMs = Date.now
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+/**
+ * The card a meeting lives on: the constitution it joined, or the fiber its
+ * capture scribe claimed (matched by the scribe's harness session). `null`
+ * when neither is on the desk, and the meeting draws its own card.
+ */
+export function meetingHostCard(meeting: MeetingRecord | null, cards: Iterable<KanbanCard>): KanbanCard | null {
+  if (!meeting) return null
+  const matches = meeting.fiber
+    ? (card: KanbanCard) => card.id === meeting.fiber
+    : meeting.scribe_session_uuid
+      ? (card: KanbanCard) => card.sessionUuid === meeting.scribe_session_uuid
+      : null
+  if (!matches) return null
+  for (const card of cards) if (matches(card)) return card
+  return null
+}
+
+export interface TranscriptLine {
+  time: string | null
+  speaker: string | null
+  text: string
+}
+
+/** Split `14:03:12 S2  words` into its stamp, speaker and words. */
+export function parseTranscriptLine(line: string): TranscriptLine {
+  const match = /^(\d{1,2}:\d{2}:\d{2})\s+(\S+)\s+(.*)$/.exec(line)
+  return match
+    ? { time: match[1], speaker: match[2], text: match[3] }
+    : { time: null, speaker: null, text: line }
+}
+
+export interface DeskColumns {
+  drafts: KanbanCard[]
+  inFlight: KanbanCard[]
+  awaitingReview: KanbanCard[]
+}
+
+/**
+ * Seat a meeting's host card at the top of In flight, lifted out of whichever
+ * desk column holds it: a recording is live work, and only one runs at a time.
+ * Without a host on the desk the columns are returned as they are.
+ */
+export function seatMeetingHost(
+  now: DeskColumns,
+  meeting: MeetingRecord | null,
+): { now: DeskColumns; host: KanbanCard | null } {
+  const host = meetingHostCard(meeting, [...now.drafts, ...now.inFlight, ...now.awaitingReview])
+  if (!host) return { now, host: null }
+  const without = (cards: KanbanCard[]) => cards.filter((card) => card !== host)
+  return {
+    host,
+    now: {
+      drafts: without(now.drafts),
+      inFlight: [host, ...without(now.inFlight)],
+      awaitingReview: without(now.awaitingReview),
+    },
+  }
 }

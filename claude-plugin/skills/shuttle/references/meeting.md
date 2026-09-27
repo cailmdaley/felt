@@ -24,9 +24,13 @@ participants from the call audio. In room mode, everyone is diarized as
 appears. The last line is `# ended HH:MM:SS`.
 
 The file may not exist for the first half-minute while hark loads its models,
-and the meeting will usually have begun before you arrive. Follow it from the
-first line: in Claude Code, `Monitor` on `tail -n +1 -F <path>`; elsewhere,
-poll by line count. The transcript is a conversation between colleagues, so
+and the meeting will usually have begun before you arrive. Follow it with
+`hark follow <path>`. It prints the lines already written, then the rest in
+batches: a batch flushes at once when a line addresses you by name (or a
+mishearing of it), at 150 words, 15 seconds after its first line, or at
+`# ended`, after which the command exits. In Claude Code, run it under
+`Monitor`, so each batch arrives as an event; elsewhere, run it and read its
+stdout as it comes. The transcript is a conversation between colleagues, so
 keep it out of git. Reference its path, and quote only what the notes need.
 
 ## Steps

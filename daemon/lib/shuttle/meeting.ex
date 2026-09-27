@@ -32,7 +32,10 @@ defmodule Shuttle.Meeting do
   A meeting starts for a target: `{:capture, surface}` hands it to a new
   capture agent, `{:fiber, id}` joins it to an existing constitution. The
   recording is the same either way; the target shapes the name, the message
-  its agent receives, and the `fiber` the live row names.
+  its agent receives, and the `fiber` the live row names. A capture meeting
+  learns its scribe's harness session once the capture launches
+  (`bind_scribe/3`), which is how the board finds the scribe's card after it
+  claims a fiber.
   """
 
   alias Shuttle.{Remote, Remotes, Runner, Tmux}
@@ -40,12 +43,14 @@ defmodule Shuttle.Meeting do
   @session "hark-meeting"
   @launch_option "@hark_launch"
   @fiber_option "@hark_fiber"
+  @scribe_option "@hark_scribe"
   @active_phases ~w(loading live stopping)
-  @tail_bytes 8_192
+  @tail_bytes 16_384
+  @tail_lines 30
   @command_timeout_ms 5_000
   @launch_wait_ms 5_000
   @launch_poll_ms 100
-  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
+  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}|\#{@hark_scribe}"
 
   @type tmux_status ::
           :absent
@@ -53,7 +58,8 @@ defmodule Shuttle.Meeting do
               state: :alive | {:dead, integer()},
               session_created: integer(),
               launch: String.t() | nil,
-              fiber: String.t() | nil
+              fiber: String.t() | nil,
+              scribe: String.t() | nil
             }
   @type target :: {:capture, String.t() | nil} | {:fiber, String.t()}
   @type meeting :: map() | nil
@@ -95,12 +101,44 @@ defmodule Shuttle.Meeting do
   @doc """
   Start hark locally, mirrored toward `origin`, for `target`, and prepare the
   message its agent receives: the meeting header followed by the user's note.
+  `launch` identifies this recording for `bind_scribe/3`.
   """
   @spec start(map(), target(), String.t() | nil, String.t() | nil, keyword()) ::
-          {:ok, %{meeting: map(), prompt: String.t()}} | {:error, term()}
+          {:ok, %{meeting: map(), prompt: String.t(), launch: String.t()}} | {:error, term()}
   def start(meeting, target, note, origin, opts \\ []) do
     with_meeting_lock(fn -> do_start(meeting, target, note, origin, opts) end)
   end
+
+  @doc """
+  Record the capture scribe's harness session on the recording `launch`, so
+  the live row can name it. A launch that is no longer current is left alone.
+  """
+  @spec bind_scribe(String.t(), String.t() | nil, keyword()) :: :ok
+  def bind_scribe(launch, session_uuid, opts \\ [])
+
+  def bind_scribe(launch, session_uuid, opts)
+      when is_binary(launch) and is_binary(session_uuid) and session_uuid != "" do
+    with_meeting_lock(fn ->
+      case tmux_status(opts) do
+        {:ok, %{launch: ^launch}} ->
+          _ =
+            run(opts, "tmux", [
+              "set-option",
+              "-t",
+              "=" <> @session <> ":",
+              @scribe_option,
+              session_uuid
+            ])
+
+          :ok
+
+        _ ->
+          :ok
+      end
+    end)
+  end
+
+  def bind_scribe(_launch, _session_uuid, _opts), do: :ok
 
   @doc "Stop the local meeting once, or dismiss a dead tmux pane."
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
@@ -194,7 +232,7 @@ defmodule Shuttle.Meeting do
           {:ok, tmux_status()} | {:error, term()}
   def parse_tmux_result(output, 0) do
     case output |> String.trim() |> String.split("|", trim: false) do
-      [dead, exit_status, created, launch, fiber] ->
+      [dead, exit_status, created, launch, fiber, scribe] ->
         with {:ok, session_created} <- parse_integer(created),
              {:ok, state} <- parse_dead(dead, exit_status) do
           {:ok,
@@ -202,7 +240,8 @@ defmodule Shuttle.Meeting do
              state: state,
              session_created: session_created,
              launch: blank_to_nil(launch),
-             fiber: blank_to_nil(fiber)
+             fiber: blank_to_nil(fiber),
+             scribe: blank_to_nil(scribe)
            }}
         else
           _ -> {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
@@ -243,7 +282,7 @@ defmodule Shuttle.Meeting do
          :ok <- create_session(argv, launch_id, fiber, opts),
          {:ok, row} <- await_launch(launch_id, paths, title, fiber, opts) do
       message = meeting_message(mode, paths.transcript, target)
-      {:ok, %{meeting: row, prompt: message <> "\n\n" <> note}}
+      {:ok, %{meeting: row, prompt: message <> "\n\n" <> note, launch: launch_id}}
     else
       nil -> {:error, :unavailable}
       {:error, _reason} = error -> error
@@ -426,10 +465,11 @@ defmodule Shuttle.Meeting do
       state: "starting",
       title: title,
       started_at: nil,
-      last_line: nil,
+      tail: [],
       transcript: paths.local_transcript,
       mirror_host: paths.mirror_host,
       fiber: fiber,
+      scribe_session_uuid: nil,
       tmux_session: @session,
       error: nil
     }
@@ -470,7 +510,7 @@ defmodule Shuttle.Meeting do
       with :ok <- if(reap?, do: with_meeting_lock(fn -> kill_launch(tmux, opts) end), else: :ok) do
         meeting =
           if is_map(meeting) do
-            Map.put(meeting, :last_line, last_transcript_line(meeting.transcript))
+            Map.put(meeting, :tail, transcript_tail(meeting.transcript))
           else
             nil
           end
@@ -645,21 +685,25 @@ defmodule Shuttle.Meeting do
 
   defp kill_launch(_tmux, _opts), do: :ok
 
-  defp last_transcript_line(path) when is_binary(path) and path != "" do
+  # The last spoken lines, oldest first. The first line of a clipped read may
+  # be partial, so it is dropped unless the read began at the file's start.
+  defp transcript_tail(path) when is_binary(path) and path != "" do
     case read_file_tail(path, @tail_bytes) do
       nil ->
-        nil
+        []
 
-      content ->
-        content
-        |> String.split("\n")
+      {content, whole?} ->
+        lines = String.split(content, "\n")
+        whole_lines = if whole?, do: lines, else: Enum.drop(lines, 1)
+
+        whole_lines
         |> Enum.map(&String.trim/1)
         |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
-        |> List.last()
+        |> Enum.take(-@tail_lines)
     end
   end
 
-  defp last_transcript_line(_), do: nil
+  defp transcript_tail(_), do: []
 
   defp read_file_tail(path, limit) do
     case :file.open(String.to_charlist(path), [:read, :binary]) do
@@ -668,7 +712,7 @@ defmodule Shuttle.Meeting do
           with {:ok, size} <- :file.position(file, :eof),
                {:ok, _} <- :file.position(file, max(size - limit, 0)),
                {:ok, data} <- :file.read(file, min(size, limit)) do
-            data
+            {data, size <= limit}
           else
             _ -> nil
           end
@@ -689,10 +733,11 @@ defmodule Shuttle.Meeting do
       state: state,
       title: data["title"],
       started_at: data["started"],
-      last_line: nil,
+      tail: [],
       transcript: data["transcript"],
       mirror_host: mirror_host(data["mirror"]),
       fiber: if(tmux_exists?, do: Map.get(tmux, :fiber), else: nil),
+      scribe_session_uuid: if(tmux_exists?, do: Map.get(tmux, :scribe), else: nil),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]
     }

@@ -80,7 +80,9 @@ allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
 `references/meeting.md`) followed by the user's note. It removes `meeting` before forwarding, so the
 owner handles an ordinary terminal capture. The transcript is mirrored to the
 remote project host when `origin` names a configured remote with an SSH alias.
-A successful capture response adds `meeting`; if capture fails after recording
+A successful terminal capture answers with `session_uuid` when the launch
+assigned the harness session. A successful meeting capture adds `meeting`, and
+that `session_uuid` is bound to the recording as its `scribe_session_uuid`; if capture fails after recording
 starts, its status and error body also include `meeting` and `recording: true`.
 Each meeting gets a transcript name no earlier recording used. The daemon watches
 the new recording for a few seconds: if hark exits before it starts recording, the
@@ -182,9 +184,16 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 `GET /meeting` returns `{available, meeting}`. The row is `null` when this
 daemon has no local meeting capture to report. Otherwise it carries
-`state`, `title`, `started_at`, `last_line`, `transcript`, `mirror_host`,
-`fiber`, `tmux_session`, and `error`. `fiber` names the constitution a joined
-meeting belongs to and is `null` for a capture meeting. `mirror_host` is the configured remote name when
+`state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
+`fiber`, `scribe_session_uuid`, `tmux_session`, and `error`. `tail` is the
+transcript's last spoken lines (at most 30, oldest first, `#` lines left out),
+read from the end of the file on each request, so the route stays cheap to
+poll. `fiber` names the constitution a joined meeting belongs to and is `null`
+for a capture meeting. `scribe_session_uuid` is a capture meeting's scribe
+harness session once the capture's launch reported one (a Claude scribe's is
+assigned at launch); after the scribe claims, the claimed fiber's
+`shuttle.runtime.session_uuid` carries the same value, which is how the board
+finds the scribe's card. `mirror_host` is the configured remote name when
 the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
 A `null` mirror host means the transcript is local.
 

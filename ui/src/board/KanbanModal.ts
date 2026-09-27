@@ -395,7 +395,7 @@ export class KanbanModal {
 
   private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {
     if (!this.meetingStopGuard.request(meeting)) return
-    this.surfaces.updateMeetingPresentation()
+    this.presentMeeting()
     try {
       await requestMeetingStop(this.shuttleBase)
     } catch (error) {
@@ -1821,7 +1821,7 @@ export class KanbanModal {
         this.meetingStatus = status
         this.syncMeetingClock()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
-        else this.surfaces.updateMeetingPresentation()
+        else this.presentMeeting()
       } catch {
         // Older daemons, unavailable services, and timed-out reads back off to the board cadence.
       } finally {
@@ -1833,6 +1833,12 @@ export class KanbanModal {
     })()
     this.meetingFetchPromise = pending
     return pending
+  }
+
+  /** Update the drawn meeting in place, or redraw the desk when it moved
+   *  onto or off its card. */
+  private presentMeeting(): void {
+    if (!this.surfaces.updateMeetingPresentation() && this.lastResponse) this.render(this.lastResponse)
   }
 
   private scheduleMeetingPoll(succeeded = true): void {

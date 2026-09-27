@@ -9,17 +9,21 @@ import {
   meetingStateWord,
   MeetingStopGuard,
   parseMeetingStatus,
+  parseTranscriptLine,
+  seatMeetingHost,
   type MeetingRecord,
 } from './meeting'
+import type { KanbanCard } from './KanbanTypes'
 
 const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   state: 'live',
   title: 'Shear telecon',
   started_at: '2026-09-25T12:00:00Z',
-  last_line: null,
+  tail: [],
   transcript: null,
   mirror_host: null,
   fiber: null,
+  scribe_session_uuid: null,
   tmux_session: 'hark-meeting',
   error: null,
   ...overrides,
@@ -136,5 +140,59 @@ describe('meeting duration', () => {
     expect(meetingDuration(meeting({ state: 'loading', started_at: null }), now)).toBeNull()
     expect(meetingDuration(meeting(), now)).toBe('2:03:12')
     expect(meetingDuration(meeting({ started_at: 'not a date' }), now)).toBeNull()
+  })
+})
+
+describe('a meeting on its card', () => {
+  const card = (id: string, extra: Partial<KanbanCard> = {}): KanbanCard =>
+    ({ id, name: id, path: `${id}.md`, originId: 'local', status: 'active', createdAt: '2026-09-25', ...extra }) as KanbanCard
+  const desk = () => ({
+    drafts: [card('loom/draft')],
+    inFlight: [card('loom/running'), card('loom/other')],
+    awaitingReview: [card('loom/review'), card('loom/scribe', { sessionUuid: 'scribe-uuid' })],
+  })
+
+  it('reads the tail and scribe session off the wire row', () => {
+    const row = parseMeetingStatus({
+      available: true,
+      meeting: { ...meeting(), tail: ['14:03:12 S2  hello', 7], scribe_session_uuid: 'scribe-uuid' },
+    })?.meeting
+    expect(row?.tail).toEqual(['14:03:12 S2  hello'])
+    expect(row?.scribe_session_uuid).toBe('scribe-uuid')
+    expect(parseMeetingStatus({ available: true, meeting: { state: 'live' } })?.meeting?.tail).toEqual([])
+  })
+
+  it('seats a joined constitution at the top of In flight, lifted from its column', () => {
+    const { now, host } = seatMeetingHost(desk(), meeting({ fiber: 'loom/draft' }))
+    expect(host?.id).toBe('loom/draft')
+    expect(now.drafts).toEqual([])
+    expect(now.inFlight.map((c) => c.id)).toEqual(['loom/draft', 'loom/running', 'loom/other'])
+  })
+
+  it('moves a running host to the top rather than duplicating it', () => {
+    const { now } = seatMeetingHost(desk(), meeting({ fiber: 'loom/other' }))
+    expect(now.inFlight.map((c) => c.id)).toEqual(['loom/other', 'loom/running'])
+  })
+
+  it('finds a capture scribe by its harness session once it has claimed', () => {
+    const { now, host } = seatMeetingHost(desk(), meeting({ scribe_session_uuid: 'scribe-uuid' }))
+    expect(host?.id).toBe('loom/scribe')
+    expect(now.awaitingReview.map((c) => c.id)).toEqual(['loom/review'])
+  })
+
+  it('leaves the desk alone when the meeting has no card on it', () => {
+    const columns = desk()
+    for (const row of [null, meeting(), meeting({ fiber: 'loom/elsewhere' }), meeting({ scribe_session_uuid: 'unclaimed' })]) {
+      const seated = seatMeetingHost(columns, row)
+      expect(seated.host).toBeNull()
+      expect(seated.now).toBe(columns)
+    }
+  })
+
+  it('splits a transcript line into stamp, speaker and words', () => {
+    expect(parseTranscriptLine('14:03:12 S2  so the covariance looks fine')).toEqual({
+      time: '14:03:12', speaker: 'S2', text: 'so the covariance looks fine',
+    })
+    expect(parseTranscriptLine('unstamped words')).toEqual({ time: null, speaker: null, text: 'unstamped words' })
   })
 })

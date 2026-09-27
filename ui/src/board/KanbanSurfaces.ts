@@ -53,7 +53,7 @@ import {
   type BandId,
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
-import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, type MeetingRecord } from './meeting.js'
+import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, parseTranscriptLine, seatMeetingHost, type MeetingRecord } from './meeting.js'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -289,6 +289,8 @@ export class KanbanSurfaceRenderer {
 
   private readonly o: KanbanSurfaceRendererOptions
   private currentMeetingList: HTMLElement | null = null
+  /** The card the live meeting was last drawn on; `null` while it draws its own. */
+  private meetingHostId: string | null = null
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
@@ -309,6 +311,11 @@ export class KanbanSurfaceRenderer {
     section.setAttribute('aria-label', lens
       ? `Now — the desk, seen through ${lens.name}`
       : 'Now — the desk')
+
+    // A meeting's host card rides at the top of In flight while it records.
+    const seated = seatMeetingHost(now, this.o.getMeeting?.() ?? null)
+    now = seated.now
+    this.meetingHostId = seated.host?.id ?? null
 
     const board = document.createElement('div')
     board.className = 'kbn-now-board'
@@ -1415,7 +1422,7 @@ export class KanbanSurfaceRenderer {
     this.installVerticalEdgeScroll(list)
     const meeting = kind === 'inFlight' ? this.o.getMeeting?.() ?? null : null
     if (kind === 'inFlight') this.currentMeetingList = list
-    if (meeting) list.append(this.renderMeetingCard(meeting))
+    if (meeting && !this.meetingHostId) list.append(this.renderMeetingCard(meeting))
 
     if (cards.length === 0 && ghosts.length === 0 && !meeting) {
       const empty = document.createElement('div')
@@ -1429,12 +1436,15 @@ export class KanbanSurfaceRenderer {
       list.append(empty)
     } else {
       for (const card of cards) {
-        list.append(this.renderCard(card, kind, staleness[card.originId], {
+        const hostsMeeting = meeting !== null && card.id === this.meetingHostId
+        const el = this.renderCard(card, kind, staleness[card.originId], {
           // A lensed column recedes what the cycle does not claim. The card
           // stays live — clickable, draggable — because a lens is a way of
           // looking, not a filter that takes the board away from you.
-          dim: lens !== null && !lens.memberIds.has(card.id),
-        }))
+          dim: !hostsMeeting && lens !== null && !lens.memberIds.has(card.id),
+        })
+        if (hostsMeeting) this.hostMeeting(el, meeting)
+        list.append(el)
       }
       // Ghosts sit AFTER the real cards: they are not on this column, they are
       // being shown as belonging to the chapter you are looking at.
@@ -1501,10 +1511,23 @@ export class KanbanSurfaceRenderer {
     return btn
   }
 
-  updateMeetingPresentation(): void {
+  /**
+   * Bring the drawn meeting up to date in place. Returns false when the
+   * meeting has moved onto or off a card, which only a desk render can draw.
+   */
+  updateMeetingPresentation(): boolean {
     const list = this.currentMeetingList
-    if (!list) return
+    if (!list) return true
     const meeting = this.o.getMeeting?.() ?? null
+    const response = this.o.getLastResponse()
+    const hostId = response ? seatMeetingHost(response.now, meeting).host?.id ?? null : null
+    if (hostId !== this.meetingHostId) return false
+    if (meeting && hostId) {
+      const host = list.querySelector<HTMLElement>('.kbn-card--meeting')
+      if (!host) return false
+      this.updateMeetingBlock(host, meeting)
+      return true
+    }
     const current = list.querySelector<HTMLElement>('.kbn-meeting-card')
     if (!meeting) {
       current?.remove()
@@ -1515,11 +1538,12 @@ export class KanbanSurfaceRenderer {
         empty.textContent = 'Drag a draft here to start its agent.'
         list.append(empty)
       }
-      return
+      return true
     }
     list.querySelector('.kbn-empty')?.remove()
-    if (current) this.updateMeetingCard(current, meeting)
+    if (current) this.updateMeetingBlock(current, meeting)
     else list.prepend(this.renderMeetingCard(meeting))
+    return true
   }
 
   updateMeetingDuration(nowMs = Date.now()): void {
@@ -1529,68 +1553,99 @@ export class KanbanSurfaceRenderer {
     }
   }
 
+  /** A meeting with no card on the desk: a capture whose scribe has not
+   *  claimed yet, or a constitution that is not drawn here. */
   private renderMeetingCard(meeting: MeetingRecord): HTMLElement {
     const card = document.createElement('article')
     card.className = 'kbn-meeting-card'
     card.setAttribute('role', 'region')
     const title = document.createElement('strong')
     title.className = 'kbn-meeting-title'
-    const duration = document.createElement('time')
-    duration.className = 'kbn-meeting-duration'
-    const heading = document.createElement('div')
-    heading.className = 'kbn-meeting-heading'
-    heading.append(title, duration)
-
-    const metadata = document.createElement('div')
-    metadata.className = 'kbn-meeting-meta'
-    const host = document.createElement('span')
-    host.className = 'kbn-meeting-host'
-    const state = document.createElement('span')
-    state.className = 'kbn-meeting-state'
-    metadata.append(host, state)
-
     const fiber = document.createElement('div')
     fiber.className = 'kbn-meeting-fiber'
-    const lastLine = document.createElement('div')
-    lastLine.className = 'kbn-meeting-last-line'
+    card.append(title, fiber, this.buildMeetingBlock())
+    this.updateMeetingBlock(card, meeting)
+    return card
+  }
+
+  /** Fold the live meeting into the card of the fiber it belongs to. */
+  private hostMeeting(el: HTMLElement, meeting: MeetingRecord): void {
+    el.classList.add('kbn-card--meeting')
+    el.append(this.buildMeetingBlock())
+    this.updateMeetingBlock(el, meeting)
+  }
+
+  /** The recording's state, clock, transcript tail, error and controls. */
+  private buildMeetingBlock(): HTMLElement {
+    const block = document.createElement('div')
+    block.className = 'kbn-meeting'
+    // The block is the meeting's, not the card's: a click or a scroll-drag in
+    // it must not open the fiber or pick the card up.
+    block.addEventListener('click', (event) => event.stopPropagation())
+    block.addEventListener('pointerdown', (event) => event.stopPropagation())
+
+    const status = document.createElement('div')
+    status.className = 'kbn-meeting-meta'
+    const dot = document.createElement('span')
+    dot.className = 'kbn-meeting-dot'
+    dot.setAttribute('aria-hidden', 'true')
+    const state = document.createElement('span')
+    state.className = 'kbn-meeting-state'
+    const duration = document.createElement('time')
+    duration.className = 'kbn-meeting-duration'
+    const host = document.createElement('span')
+    host.className = 'kbn-meeting-host'
+    status.append(dot, state, duration, host)
+
+    const tail = document.createElement('ol')
+    tail.className = 'kbn-meeting-tail'
+    tail.setAttribute('aria-label', 'Live transcript')
+    tail.tabIndex = 0
+    tail.draggable = false
+    tail.addEventListener('dragstart', (event) => { event.preventDefault(); event.stopPropagation() })
+
     const error = document.createElement('div')
     error.className = 'kbn-meeting-error'
     error.setAttribute('role', 'alert')
     const actions = document.createElement('div')
     actions.className = 'kbn-meeting-actions'
-    card.append(heading, fiber, metadata, lastLine, error, actions)
-    this.updateMeetingCard(card, meeting)
-    return card
+    block.append(status, tail, error, actions)
+    return block
   }
 
-  private updateMeetingCard(card: HTMLElement, meeting: MeetingRecord): void {
+  private updateMeetingBlock(root: HTMLElement, meeting: MeetingRecord): void {
     const actions = meetingActions(meeting, this.o.isMeetingStopRequested?.(meeting) ?? false)
     const title = meeting.title?.trim() || 'Untitled meeting'
-    card.className = `kbn-meeting-card kbn-meeting-card-${meeting.state}`
-    card.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
-    card.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
-    card.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent = meeting.mirror_host
+    const hosted = root.classList.contains('kbn-card--meeting')
+    for (const state of ['starting', 'loading', 'live', 'stopping', 'failed']) {
+      root.classList.toggle(`kbn-meeting-${state}`, meeting.state === state)
+    }
+    if (!hosted) {
+      root.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
+      root.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
+      const fiber = root.querySelector<HTMLElement>('.kbn-meeting-fiber')!
+      fiber.textContent = meeting.fiber ? `joins ${meeting.fiber}` : ''
+      fiber.title = meeting.fiber ? `This meeting joins the constitution ${meeting.fiber}` : ''
+      fiber.hidden = !meeting.fiber
+    }
+    const block = root.querySelector<HTMLElement>('.kbn-meeting')!
+    block.setAttribute('aria-label', `Meeting ${meetingStateWord(meeting.state).toLowerCase()}: ${title}`)
+    block.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent = meeting.mirror_host
       ? `→ ${meeting.mirror_host}`
       : 'this Mac'
-    card.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
-    const fiber = card.querySelector<HTMLElement>('.kbn-meeting-fiber')!
-    fiber.textContent = meeting.fiber ? `joins ${meeting.fiber}` : ''
-    fiber.title = meeting.fiber ? `This meeting joins the constitution ${meeting.fiber}` : ''
-    fiber.hidden = !meeting.fiber
-    const duration = card.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
+    block.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
+    const duration = block.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
     const value = meetingDuration(meeting)
     duration.dataset.startedAt = meeting.started_at ?? ''
     duration.textContent = value ?? ''
     duration.dateTime = meeting.started_at ?? ''
     duration.hidden = value === null
-    const lastLine = card.querySelector<HTMLElement>('.kbn-meeting-last-line')!
-    lastLine.textContent = meeting.last_line ?? ''
-    lastLine.hidden = !meeting.last_line
-    const error = card.querySelector<HTMLElement>('.kbn-meeting-error')!
+    this.updateMeetingTail(block.querySelector<HTMLOListElement>('.kbn-meeting-tail')!, meeting.tail)
+    const error = block.querySelector<HTMLElement>('.kbn-meeting-error')!
     error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
     error.hidden = meeting.state !== 'failed'
 
-    const actionGroup = card.querySelector<HTMLElement>('.kbn-meeting-actions')!
+    const actionGroup = block.querySelector<HTMLElement>('.kbn-meeting-actions')!
     const actionSignature = [meeting.state, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
     if (actionGroup.dataset.signature === actionSignature) return
     actionGroup.dataset.signature = actionSignature
@@ -1608,12 +1663,6 @@ export class KanbanSurfaceRenderer {
       actionGroup.append(button)
     }
 
-    if (actions.terminal && this.o.onMeetingTerminal) {
-      addAction('Terminal', 'kbn-meeting-terminal', false, () => {
-        const session = this.o.getMeeting?.()?.tmux_session
-        if (session) this.o.onMeetingTerminal?.(session)
-      })
-    }
     if ((actions.stop || actions.dismiss) && this.o.onMeetingStop) {
       addAction(actions.dismiss ? 'Dismiss' : 'Stop', 'kbn-meeting-stop', actions.stopDisabled, () => {
         const current = this.o.getMeeting?.()
@@ -1621,6 +1670,41 @@ export class KanbanSurfaceRenderer {
         void this.o.onMeetingStop?.(current)
       })
     }
+    if (actions.terminal && this.o.onMeetingTerminal) {
+      addAction('Terminal', 'kbn-meeting-terminal', false, () => {
+        const session = this.o.getMeeting?.()?.tmux_session
+        if (session) this.o.onMeetingTerminal?.(session)
+      })
+    }
+  }
+
+  /** Redraw the transcript tail when it changes, staying pinned to the newest
+   *  line unless the reader has scrolled back. */
+  private updateMeetingTail(tail: HTMLOListElement, lines: string[]): void {
+    const signature = lines.join('\n')
+    if (tail.dataset.signature === signature) return
+    const following = !tail.dataset.signature ||
+      tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 4
+    tail.dataset.signature = signature
+    tail.hidden = lines.length === 0
+    tail.replaceChildren(...lines.map((raw) => {
+      const line = parseTranscriptLine(raw)
+      const item = document.createElement('li')
+      item.className = 'kbn-meeting-line'
+      if (line.time) item.title = line.time
+      if (line.speaker) {
+        const speaker = document.createElement('span')
+        speaker.className = 'kbn-meeting-speaker'
+        speaker.textContent = line.speaker
+        item.append(speaker, ' ')
+      }
+      item.append(line.text)
+      return item
+    }))
+    if (!following) return
+    // A freshly built tail has no layout until the desk mounts it.
+    tail.scrollTop = tail.scrollHeight
+    if (!tail.isConnected) requestAnimationFrame(() => { tail.scrollTop = tail.scrollHeight })
   }
 
   /**
