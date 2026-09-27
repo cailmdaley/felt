@@ -26,7 +26,7 @@
  * so a reader retraces the path they walked one fiber per press.
  */
 
-import { buildReaderWindow, buildTabButton, buildViewCell } from './ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell, showCell } from './ReaderChrome.js'
 import { activateTab, emptyTabState, type TabState } from './ReaderTabs.js'
 import { closeLinkedTab, insertTab, routeWikilink } from './linkedTabs.js'
 import { isMobileViewport } from './mobile.js'
@@ -220,7 +220,7 @@ export class LinkedFiberPanel {
   private render(): void {
     for (const entry of this.state.tabs) {
       const on = entry.path === this.state.active
-      entry.cell.hidden = !on
+      showCell(entry.cell, on)
       entry.tab.classList.toggle('kbn-detail-tab-active', on)
       entry.tab.setAttribute('aria-selected', String(on))
     }

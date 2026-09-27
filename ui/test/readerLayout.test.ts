@@ -7,11 +7,12 @@ import { describe, expect, it } from 'vitest'
  * Two layout contracts the reader and the card panel keep in CSS, where a
  * DOM test in jsdom cannot see them (it computes no layout).
  *
- * 1. An inactive reader tab stays LAID OUT. A browser's PDF viewer lives in
- *    its frame; under `display: none` the frame collapses to nothing and
- *    WebKit's viewer re-fits the document to that zero-size box, so flipping
- *    back to a PDF tab found it at another scale and position. The hidden cell
- *    must be invisible and stacked, never removed from layout.
+ * 1. An inactive reader tab is COVERED, never hidden. A browser's PDF viewer
+ *    lives in its frame and scrolls itself, out of the page's reach. In
+ *    WebKit, `display: none` re-fits the document to a zero-size frame and
+ *    `visibility: hidden` drops its scroll and paint, so flipping back to a
+ *    PDF tab found it blank, then at page 1. The inactive cell must stay
+ *    rendered at full size beneath the active one.
  *    A linked-fiber tab is the exception: it holds no PDF viewer, and keeping
  *    it laid out would wake its deferred attachment previews.
  * 2. Attachments and the sent-files trail share one band, side by side on a
@@ -43,18 +44,24 @@ function declarations(selector: string): string {
 describe('an inactive reader tab', () => {
   const hidden = declarations('.kbn-detail-view-cell[hidden]')
 
-  it('is never taken out of layout', () => {
+  it('is never hidden from the browser', () => {
     expect(hidden, 'the [hidden] cell rule must exist').not.toBe('')
     expect(hidden).not.toMatch(/display:\s*none/)
     expect(hidden).toMatch(/display:\s*block/)
+    expect(hidden).not.toMatch(/visibility:\s*hidden/)
+    expect(hidden).not.toMatch(/opacity:\s*0/)
+    expect(hidden).not.toMatch(/content-visibility/)
   })
 
-  it('is invisible, inert to the pointer, and stacked over the view area', () => {
-    expect(hidden).toMatch(/visibility:\s*hidden/)
-    expect(hidden).toMatch(/pointer-events:\s*none/)
+  it('fills the view area beneath the active cell', () => {
     expect(hidden).toMatch(/position:\s*absolute/)
     expect(hidden).toMatch(/inset:\s*0/)
+    expect(hidden).toMatch(/pointer-events:\s*none/)
+    expect(hidden).toMatch(/z-index:\s*0/)
+    expect(declarations('.kbn-detail-view-cell:not([hidden])')).toMatch(/z-index:\s*1/)
     expect(declarations('.kbn-detail-views')).toMatch(/position:\s*relative/)
+    // The covering cell must be opaque, or the tabs beneath show through.
+    expect(declarations('.kbn-detail-view-cell')).toMatch(/background:\s*var\(--porch-rag/)
   })
 })
 

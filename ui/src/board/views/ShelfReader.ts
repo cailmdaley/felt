@@ -69,7 +69,7 @@ import {
   type TabState,
 } from '../ReaderTabs.js'
 import { coarsePointer } from '../mobile.js'
-import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar } from '../ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar, showCell } from '../ReaderChrome.js'
 import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
 import { readJSON, writeJSON } from './shelfLayout.js'
@@ -500,7 +500,7 @@ export class ShelfReader {
     this.state = { tabs: this.state.tabs, active: entry.path }
     for (const t of this.state.tabs) {
       const on = t === entry
-      t.cell.hidden = !on
+      showCell(t.cell, on)
       t.tab.classList.toggle('kbn-detail-tab-active', on)
       t.tab.setAttribute('aria-selected', String(on))
       if (on) resumeFileViewer(t.viewer)

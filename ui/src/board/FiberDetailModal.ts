@@ -62,7 +62,7 @@ import {
   sentFilesRevision,
   type SentFile,
 } from './sentFiles.js'
-import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar } from './ReaderChrome.js'
+import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar, showCell } from './ReaderChrome.js'
 import { closeTab, openTab } from './ReaderTabs.js'
 import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from './ReaderZoom.js'
 import { humanizeCron } from './KanbanRules.js'
@@ -3163,7 +3163,7 @@ export class FiberDetailModal {
     // can measure the (now visible) cell width for its fit-to-width base.
     for (const e of this.openFiles) {
       const on = e === entry
-      e.cell.hidden = !on
+      showCell(e.cell, on)
       e.tab.classList.toggle('kbn-detail-tab-active', on)
       e.tab.setAttribute('aria-selected', String(on))
       if (on) resumeFileViewer(e.viewer)

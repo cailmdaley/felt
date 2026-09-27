@@ -41,13 +41,29 @@ export function buildTabButton(
   return { tab, closeBtn }
 }
 
-/** The cell one file is drawn in. Hidden on birth: only the active tab's cell
- *  is shown, and a tab is not active until `setActive` says so. */
+/** The cell one file is drawn in. Inactive on birth: only the active tab's
+ *  cell is shown, and a tab is not active until `setActive` says so. */
 export function buildViewCell(): HTMLElement {
   const cell = document.createElement('div')
   cell.className = 'kbn-detail-view-cell'
-  cell.hidden = true
+  showCell(cell, false)
   return cell
+}
+
+/**
+ * Make a view cell the shown one, or put it away.
+ *
+ * `hidden` marks an inactive cell, but the stylesheet does not take it out of
+ * view: it stays rendered underneath the active cell, which covers it. A PDF
+ * viewer that the browser is told is hidden — by `display` or `visibility`
+ * alike — drops its scroll position and paint in WebKit, and the page cannot
+ * read or restore a PDF's position itself. Since the covered cell is still
+ * rendered, `inert` is what keeps focus, clicks and assistive technology out
+ * of it.
+ */
+export function showCell(cell: HTMLElement, on: boolean): void {
+  cell.hidden = !on
+  cell.inert = !on
 }
 
 /**

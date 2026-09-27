@@ -748,8 +748,8 @@
 }
 
 /* ── The full-view area ───────────────────────────────────────────────────
-   One file fills the column. Only the active tab's cell is shown; the rest
-   stay built, laid out and invisible so switching tabs keeps each file's
+   One file fills the column. Only the active tab's cell is seen; the rest
+   stay built and rendered beneath it so switching tabs keeps each file's
    scroll + zoom. The cell is the pan surface: Cmd-scroll sets `zoom` on the
    viewer, which grows its layout box, and the cell (overflow:auto) scrolls to
    pan. */
@@ -770,17 +770,20 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(154, 123, 53, 0.35) transparent;
 }
-/* An inactive tab keeps its full size, stacked under the active one and
-   invisible, rather than leaving layout. The browser's PDF viewer lives inside
-   its frame: under `display: none` the frame collapses to nothing, and WebKit's
-   viewer re-fits the document to that zero-size box — so returning to the tab
-   found the PDF at a different scale and position than it was left at. Laid
-   out at full size, the hidden viewer never learns it was hidden. */
+/* An inactive tab is COVERED, not hidden: it keeps its full size and stays
+   rendered, stacked beneath the active cell, whose opaque background hides it.
+   A browser's PDF viewer lives inside its frame and scrolls itself, out of the
+   page's reach. In WebKit, `display: none` collapses the frame and the viewer
+   re-fits the document to the empty box; `visibility: hidden` keeps the size
+   but drops the viewer's scroll and paint, so the tab came back blank and then
+   at page 1. Covered, the viewer is never told it was hidden. `showCell` makes
+   the covered cell `inert`, which keeps focus and assistive tech out. */
+.kbn-detail-view-cell:not([hidden]) { z-index: 1; }
 .kbn-detail-view-cell[hidden] {
   display: block;
   position: absolute;
   inset: 0;
-  visibility: hidden;
+  z-index: 0;
   pointer-events: none;
 }
 .kbn-detail-view-cell::-webkit-scrollbar { width: 9px; height: 9px; }
