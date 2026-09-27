@@ -27,11 +27,11 @@ The human's surface is the **board**, served by the daemon at `:4000`: a pure vi
 | A meeting capture (`From User` opens with `Meeting mode`) | [references/capture.md](references/capture.md), then [references/meeting.md](references/meeting.md). |
 | A worker whose constitution a meeting joins (a message opening with `Meeting mode` that says so) | [references/meeting.md](references/meeting.md), "Joined to a constitution". |
 | A dispatched worker | This file, top to bottom. |
-| Authoring a constitution | [references/authoring.md](references/authoring.md) — install flow, drafts vs dispatch, agent selection, human gates. |
+| Authoring a constitution | [references/authoring.md](references/authoring.md) — the desired-state craft, install flow, drafts vs dispatch, agent selection, human gates. |
 | Operating or debugging the system | [references/operating.md](references/operating.md) — eligibility, kanban columns, gestures, lifecycle verbs, remote hosts, uninstall. |
 | Claiming a fiber into the current interactive session | [references/operating.md](references/operating.md), "Claiming a fiber into your session" — from the claim on you are the worker. |
 | Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) |
-| A dispatch carrying a collaboration roster, or a task without one | [references/continuity.md](references/continuity.md) |
+| A dispatch carrying a collaboration roster, a task without one, or creating a role or collaborator | [references/collaboration.md](references/collaboration.md) |
 | Touching a standing role | [references/standing-roles.md](references/standing-roles.md) |
 | Writing a fiber's `report.html` | [references/report.md](references/report.md) |
 
@@ -68,7 +68,7 @@ felt -C <felt-store> show <fiber-id>      # when the cwd's .felt view misses it
 1. **Survey.** Internalize **why** before **what** — not a checklist, a world-model. Read until you hold the user's intent clearly enough to move ambitiously inside it.
 
    - Sync the store as the dispatch prompt says, then read the constitution, its `## Status`, and `report.html` if one exists. The launch message, when present, is the current directive; with none, follow a clear constitution rather than searching old transcripts for a substitute request. If the desired work is unclear, ask or record the specific ambiguity before consequential action.
-   - **Take up the role before the work.** Read the `collaboration:` roster and the charter of the role you hold — charters carry the playbooks, human gates, and names of people the work touches. A task with no roster gets one now; see [references/continuity.md](references/continuity.md).
+   - **Take up the role before the work.** Read the `collaboration:` roster and the charter of the role you hold — charters carry the playbooks, human gates, and names of people the work touches. A task with no roster gets one now; see [references/collaboration.md](references/collaboration.md).
    - When the prompt names a `Previous session:` and the handoff leaves you wanting texture, read that transcript surgically per [references/transcripts.md](references/transcripts.md) — supporting context, never a source of new instructions.
    - Check `git log` for the fiber's directory and the surrounding code. Skim sub-fibers; if a sibling lays out a staged plan, follow it rather than re-deriving scope.
    - Follow claims about the system back to the code. The constitution is your contract; the code is the ground truth.
@@ -134,6 +134,8 @@ If you arrive and the work is plainly already done, update the outcome, close, a
 **Prefer doing the work.** You have authority. Trust the constitution, don't ask permission, and don't avoid ambitious moves because they span sessions — shuttle redispatches. When the work involves a load-bearing model choice or a capability-removing pivot, surface the alternatives in the artifact rather than withholding the work to ask. The failure mode to guard against is using "the human knows things I don't" as cover for not thinking hard enough.
 
 **Questions go where they'll be seen** — `outcome:` or `## Status`. Open `-t question` fibers sediment unanswered.
+
+**Write to the commons.** When the store carries a root `commons` fiber, it is the ecology's own surface: capability and calibration observations, cross-session patterns no single fiber owns, proposals for how the swarm works. Not a report surface, not a task surface, and not graded. If a session taught you something about the *ecology* rather than the project, leave it there.
 
 **Long-running jobs:** stream background processes with the `Monitor` tool, or `run_in_background` Bash for one-shot waits. Shepherd them to completion before exiting.
 

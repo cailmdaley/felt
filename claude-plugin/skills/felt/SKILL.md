@@ -3,7 +3,7 @@ name: felt
 description: >
   This skill should be used whenever working in a project that contains a `.felt/` directory, and
   when the user mentions fibers or asks to "file this", "record a decision", "add structure",
-  "close this fiber", "sketch a fiber", "think through", "draft a constitution",
+  "close this fiber", "sketch a fiber", "think through",
   "clean up fibers", "consolidate", "archive", "sweep", "maintenance pass", or "extract from the
   session". It covers filing fibers, updating outcomes and bodies, using additional YAML fields
   beyond what felt owns natively, session mining, maintenance passes, and transcript processing.
@@ -11,162 +11,58 @@ description: >
 
 # felt — Working with Fibers
 
-Fibers are concerns (tasks, decisions, questions, specs) stored as directory-contained markdown. Their relationships come from three surfaces: containment by path, `[[wikilinks]]` in the body for narrative connection, and optional project-owned conventions such as `inputs.from` when a project wants data-flow edges. felt owns the substrate — files, native metadata, search, links, and round-tripping of any extra top-level YAML fields — not the semantics of every YAML block a project might store.
-
-The practical rule: **felt owns the fiber; projects own any additional YAML fields beyond felt's native metadata.** If a fiber needs more structure than felt owns natively, add those fields directly in the markdown file or use the project's own tool. felt will preserve them and surface them in `--field` / `--json`, but it will not validate the domain semantics for you.
+Fibers are concerns (tasks, decisions, questions, findings, specs) stored as directory-contained markdown — YAML frontmatter plus a body at `.felt/<id>/<slug>.md`, where the id is the nested path (`bao-analysis/damping-prior`). Their relationships come from containment by path, `[[wikilinks]]` in the body, and optional project-owned conventions such as `inputs.from` for data-flow edges. felt owns the substrate — files, native metadata, search, links — and preserves any extra top-level YAML fields a project adds without interpreting them.
 
 Proactive filing. Retroactive extraction. Consolidation over time. Coherence when needed.
 
----
+## Working paths
 
-## CLI
-
-```
-Something came into focus. Start:
-    felt add <slug> "name" -t tag -o "one-line outcome"
-
-Understanding crystallized. Accrete:
-    felt edit <id> --outcome "what changed"
-    felt edit <id> --tag X
-    Read then Edit .felt/<path>/<slug>.md          # body + non-native frontmatter
-
-Search and read:
-    felt ls                                        # tracked (open and active) IN THIS VIEW
-    felt ls "query" [-t tag] [-s closed] [-v]     # filters this view's listing: substring over name, outcome, YAML, slug; widens to every status but closed (a trailing hint counts those); matches under a matching ancestor collapse into it, -v expands
-    felt ls --body "query"                         # adds body search — plain substring; use -r --body for regex
-    felt find "query" [-t tag] [-s closed] [-v]   # searches the WHOLE store: local hits, then the rest of the loom by full id (outer block capped at 20; --limit 0 for all; -j emits one merged array, uncapped, each entry naming its `store`)
-    felt session                                   # SessionStart context as plain text
-felt tree [<id>] [-L depth]                    # containment hierarchy; -L caps depth (1 = direct children)
-    felt show <id>                                 # full
-    felt show <id> -d compact | -d summary         # metadata/outcome/body size/extra keys | + lede + back-refs
-    felt show <id> --body                          # body with start line
-    felt show <id> --citations|--consumers         # narrative back-refs | data-flow consumers
-    felt show <id> --field <key>                   # one raw frontmatter key, shell-friendly
-
-A thread resolved. Close:
-    felt edit <id> --outcome "what was learned" --status closed
-
-Reshape:
-    felt nest <child> <parent>
-    felt unnest <id>
-
-Maintain:
-    felt check                                     # broken refs, broken data-flow refs, layout issues
-    felt migrate [--dry-run]                       # normalize legacy layout
-```
-
-Before substantive work, run `felt sync` to fetch and merge the actual store's
-Git upstream, including through a symlinked project view. Edit ordinary local
-files, commit intentional changes, then `felt sync --push` at useful checkpoints.
-Resolve relevant conflicts with context and retry; do not automatically choose
-ours/theirs or discard another worker's edits. Report failed synchronization.
-Roles and collaborators are ordinary local fibers; see
-[references/collaborators.md](references/collaborators.md) for their layout.
-
-Runtime and installation truth:
+`felt --help` and `felt <verb> --help` carry the full reference. The paths worth knowing without looking:
 
 ```
-felt setup receipt --json                  # actually loaded bundles, felt binary, hooks, daemon contract
-felt setup validate --source <checkout>    # non-mutating complete local candidate check
+felt add <slug> "name" -t tag -o "one-line outcome"   # file; nests under an existing parent by slug path
+felt edit <id> -o "what was learned" -s closed        # conclude a thread
+felt ls                                               # open/active work in this view
+felt ls "query"                                       # search this view (closed matches counted, not shown)
+felt find "query"                                     # search the whole store, across views
+felt show <id> -d summary                             # metadata, outcome, lede, back-refs
+felt tree <id> -L 2                                   # containment around a fiber
+felt nest <child> <parent>                            # reshape
+felt check                                            # broken links, layout issues
+felt sync  /  felt sync --push                        # merge the store's upstream / publish
 ```
 
-Local paths and remote GitHub refs for Claude/Codex setup are validated, staged,
-and promoted as one recoverable local generation before the native harness CLI
-activates them. Remote acquisition is disposable; the harness still owns its
-cache and configuration. Interrupted native activation is reconciled from the
-restored last-known-good generation before setup continues. Each promoted
-payload carries source/ref/commit/build/digest identity into the harness cache,
-and a promotion only commits after the cache the native CLI reports as loaded
-proves it holds that generation — a zero exit status alone is rolled back.
-`setup receipt` queries the harness CLIs, recomputes both payload digests,
-binds the marker's felt build to the resolved executable, flags any other
-felt on PATH with a different build (a stale copy shadowing or shadowed by
-the install), and rejects a pending journal or identity disagreement. An incidental cache directory is
-not proof that a bundle is loaded.
+Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<slug>.md` directly. Use a `|-` block scalar for an outcome longer than a sentence — `-o "…"` mangles quotes and newlines. Never hand-edit `created-at` / `updated-at`; felt stamps them on every write. Scalar project fields can be set with `felt edit <id> --set key=value` / `--unset key`.
 
-Statuses: · none (the default — most fibers stay here)  ○ open (todo)  ◐ active (in flight)  ● closed (resolved todo). Status is opt-in: never pass `-s` on `felt add` unless someone should do something.
-Detail: name < compact < summary < full. Summary adds the lede (first paragraph of the body; write it to stand alone).
-Relationships: directory containment, `[[wikilinks]]` in bodies, and optional project-owned data-flow conventions. Nested IDs use paths (bao-analysis/damping-prior).
+**Statuses:** · none (the default — most fibers stay here) ○ open (todo) ◐ active (in flight) ● closed (resolved). `open`/`active` mean *someone should do something*; a finding, decision, recipe, or note exists by being filed and stays statusless. Never pass `-s` on `felt add` unless someone should act, and close in the same motion when an outcome reads complete.
 
-Stores and views: a project whose `.felt` symlinks into the loom is a *view* on that store, not a fence around it. `felt ls` lists the view; `felt find` searches the whole store; an id reaches anywhere — `show`, `edit`, `rm`, `nest`, `felt shuttle <verb>` all act on the fiber where it lives and say `(in <root>)` when that is elsewhere. So: looking for something you know is in the loom somewhere, use `find`; asking what am I working on here, use `ls`.
+**Stores and views.** A project whose `.felt` symlinks into a larger store (the loom) is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere.
 
-**Outcomes longer than a sentence:** edit `.felt/<path>/<slug>.md` directly using a `|-` block scalar (`outcome: |-`). `felt edit -o "…"` shell-escapes quotes and mangles multiline content; block scalar takes content literally so paragraphs, lists, and image embeds round-trip cleanly.
+**Sync.** Before substantive work, run `felt sync` to merge the store's Git upstream (it follows a symlinked view to the real store). Edit local files, commit intentional changes, and `felt sync --push` at useful checkpoints. Resolve relevant conflicts with context and retry; never pick ours/theirs mechanically or discard another worker's edits. Report a failed sync rather than treating local content as current.
+
+**Companion files** (plots, recordings, a `report.html`) live in the fiber's directory beside `<slug>.md`; the body inlines any of them with a `:::{embed} <path>` line (syntax in the shuttle skill).
 
 ---
 
-## Philosophy
+## Practice
 
-**File while working.** The moment to update a fiber is right after something crystallizes, while the user reads and the understanding still has edges.
+**File while working.** The moment to update a fiber is right after something crystallizes, while the understanding still has edges. Don't ask permission to file: the user's corrections and opinions are the primary trigger, and when the direction shifts, the fiber shifts too. Don't file empty stubs "for later" — file when the work is real.
 
-**Follow the understanding.** Don't ask permission to file. The user's corrections and opinions are the primary trigger; when the direction shifts, the fiber should shift too.
+**Extract what slipped through, and make outcomes teach.** Continuous filing catches most things. At session end, mine the decisions, patterns, and findings that stayed implicit, write them down, and bring outcomes and statuses up to date ([mining.md](references/mining.md)). An outcome that says "done" has failed: put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone, because it is what `felt ls` shows. Names are concise labels; body and outcome carry the content.
 
-**Status is opt-in.** Most fibers never get one. A finding, a decision, a recipe, a note — those exist by being filed. `open`/`active` means *someone should do something*; if nobody should, leave it statusless. Don't file empty stubs "for later" — file when the work is real. When an outcome reads complete ("landed", "CONVERGED", "decisions closed"), close in the same motion, or the fiber shouldn't have been open.
-
-**Use the substrate cleanly.** Names are concise labels — body and outcome carry the content. Nest for containment, `[[wikilinks]]` for narrative, project-owned conventions for anything more specific. Never hand-edit `created-at` / `updated-at`: felt stamps them on every write (a manual value is silently overwritten); edit only content fields.
-
-**Links in prose, not in piles.** A `[[wikilink]]` earns its place by doing work in a sentence — naming what the other fiber is, why it's relevant here, where to head next. Related-things lists at the bottom of a fiber are a smell that the relationships haven't been thought through; fold them into the body where they belong, or drop the ones that aren't earning the link.
-
-**Bodies describe the now.** A fiber's body says what's true currently — not how it got that way. Edit the body by correction; chronology lives in the git log of the fiber file (fibers are git-synced), not in the prose. Version markers ("v1", "v2"), dated update notes ("✓ Updated 2026-05-18"), and repurposing framings ("originally added for X, now Y") are signs that history-shaped content is sedimenting where a correction belongs. The exception is fibers whose subject *is* chronology (postmortems, decision logs, change histories) — those genuinely belong in the body.
-
-**Collaboration rosters name durable identities and roles.** Keep specific notes in the collaborator's fiber; put shared information in the task or global role/project fibers. Read [collaborators.md](references/collaborators.md) when creating or updating collaboration context.
-
-**Extract what slipped through.** Continuous filing catches most things. At session end, mine decisions, patterns, and findings that were left implicit.
-
-**Outcomes teach.** An outcome that says "done" has failed. Put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone: it's what `felt ls` and `-d compact` show.
-
-**Act on Session Attention.** When `felt session` shows `## Attention`, treat it as standing authority to do obvious gardening without asking: nest top-level leaves under root buckets, demote open/active container fibers, close stale todos, consolidate clutter. Surface it to the user only when cleanup needs judgment or would distract from the current task.
-
-**Consolidate over time.** Quick fibers become noise. Read the assemblage periodically and compost stale fibers into doc fibers, fix coherence across siblings, reshape branching. When closing, ask whether the lesson belongs in a doc fiber or the root fiber — compose upward.
-
-**Write to the commons.** When the store carries a root `commons` fiber, that is the ecology's own surface — where sessions spread across machines and months accrete what the swarm learns about itself: capability and calibration observations ("each task is a data point about resources and capabilities"), cross-session patterns no single fiber owns, proposals for how we work, letters to workers who don't exist yet. It is not a report surface (reports reach the human) and not a task surface (that's the kanban); it is the third thing, and it is not graded. If a session taught you something about the *ecology* — not the project — leave it there, and leave the commons more coherent than you found it.
-
-**CLAUDE.md stays lean.** Commands, paths, context pointers. Documentation fibers carry the depth.
-
-**Cross-project stores are useful.** A `.felt/` store can be symlinked into a cross-project store so `felt -C <store> ls` searches every linked project; see [cross-project.md](references/cross-project.md) for direction choice and safe setup.
-
----
-
-## What to Extract
-
-### Quick fibers
-
-| Category | What to capture |
-|----------|-----------------|
-| **Decision** | Choice made, alternatives, reasoning. Include "decided NOT to." |
-| **Question answered** | What was figured out. Mechanism, cause, how. |
-| **Pattern** | Architectural insight, convention, workflow. |
-| **Finding** | What was built, measured, produced. |
-
-These land statusless (`felt add` default). Only unanswered questions and real todos get `-s open`.
-
-### Documentation fibers
-
-| Category | What to capture |
-|----------|-----------------|
-| **Reference doc** | Accumulated understanding. Architecture, philosophy, decision trees. |
-| **How-to** | Procedures that get reused. More depth than CLAUDE.md. |
-
-### Additional YAML fields
-
-Fibers may carry project-owned top-level YAML fields beyond what felt parses natively. Scalar keys can be set from the CLI (`felt edit <id> --set key=value` / `--unset key`); structured blocks are edited in the fiber file directly. Either way, keep the ordinary felt surfaces current alongside them: `outcome` for latest state, sub-fibers for durable findings.
-
-### Companion files (`report.html`, plots, recordings)
-
-Fibers can carry arbitrary companion files in their directory alongside `<slug>.md`, and the body can inline any of them where it helps the reader with a `:::{embed} <path>` directive (renderer by extension: PDF, HTML iframe, images, audio). The one named convention: a fiber's rich human-facing report lives in a companion `report.html`, rendered by an explicit `:::{embed} report.html` line placed where the reader should meet it. Embed syntax and worker-side `report.html` conventions live in the shuttle skill.
+**Tend the store as you go.** Tidying is part of every session, not a separate chore, and you have full standing permission for it: whenever you touch a region of the store and see mess, fix it in the same motion — nest stray top-level leaves under root buckets, demote open/active containers, close stale todos with real outcomes, compost clusters of quick fibers into a doc fiber, repair coherence across siblings, reshape wide branches. When `felt session` shows `## Attention`, clear it this session. Don't wait to be asked and don't ask first; mention a cleanup to the user only when it needs judgment or would derail the current task. When closing a fiber, ask whether its lesson belongs higher up — a doc fiber or the root fiber — and compose upward. [maintenance.md](references/maintenance.md) carries the moves and the authority boundary.
 
 ---
 
 ## References
 
-Read the reference that matches the situation. Everything above applies always; references go deeper for specific activities.
+Everything above applies always; references go deeper for specific activities.
 
 | When | Reference |
 |------|-----------|
-| Helping fuzzy thought crystallize into a fiber — two diamonds, stances, funnel, ambiguity check | [ideating.md](references/ideating.md) |
-| Drafting a constitution — pointers not snapshots, desired state, launch | [constitution.md](references/constitution.md) |
+| Helping fuzzy thought crystallize into a fiber — two diamonds, funnel, ambiguity check | [ideating.md](references/ideating.md) |
 | At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
-| Processing an external transcript — meeting notes, voice note, dictation file | [transcripts.md](references/transcripts.md) |
-| Acting on `felt session` Attention or reading across the assemblage for mess — gardening, composting, coherence, reshaping | [maintenance.md](references/maintenance.md) |
+| Processing an external transcript — meeting notes, voice note, dictation | [transcripts.md](references/transcripts.md) |
+| Gardening, composting, reshaping, acting on Attention | [maintenance.md](references/maintenance.md) |
 | Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |
-| Setting up a cross-project felt store, or linking a per-project store into one | [cross-project.md](references/cross-project.md) |
-| Creating or assigning a durable collaborator identity or role | [collaborators.md](references/collaborators.md) |
+| Setting up a cross-project store, or linking a project store into one | [cross-project.md](references/cross-project.md) |

@@ -1,6 +1,6 @@
 # Ideating
 
-How to help the user think through something that hasn't crystallized, and turn the result into a clear fiber. Use it when the user is deciding something non-trivial, scoping a sub-analysis, drafting a living spec, or talking through an open question — any time careful interactive thinking is happening and the output should land in a fiber body, outcome, or project-owned YAML fields.
+How to help the user think through something that hasn't crystallized, and turn the result into a clear fiber. Use it when the user is deciding something non-trivial, scoping a sub-analysis, drafting a living spec (for a constitution, the shuttle skill's authoring reference applies on top), or talking through an open question — any time careful interactive thinking is happening and the output should land in a fiber body, outcome, or project-owned YAML fields.
 
 The rhythm is two diamonds: first understand what the thing IS, then decide what to DO about it. Each diamond diverges to explore and converges to commit. The ontological question — *what IS this, really?* — is the convergence point of the first diamond, and it is the most practical question you can ask.
 
@@ -53,7 +53,7 @@ When the conversation is exploratory — no single topic, things are accumulatin
 | **Finding** | A claim with at least the start of evidence | Finding fiber, statusless; capture claim + evidence clearly |
 | **Sub-analysis** | "Compute X from Y" with identifiable inputs/outputs | New fiber, statusless unless it is itself a todo |
 | **Question** | An open thread worth tracking, not yet answered | New fiber, `status: open` |
-| **Root-fiber change** | A pattern or gotcha that belongs in CLAUDE.md | Edit the root fiber |
+| **Root-fiber change** | A process lesson or gotcha that generalizes | Edit the root fiber / CLAUDE.md |
 
 The ledger is your own working memory. **Do not surface it mid-conversation** unless the user asks or a flush cue fires.
 
@@ -80,29 +80,9 @@ This is a mirror, not a gate. If the user wants to file anyway with one dimensio
 
 ---
 
-## Mapping outputs to fibers
-
-What comes out of the diamonds maps onto fibers like this:
-
-| Diamond output | Fiber destination |
-|----------------|-------------------|
-| Wonder questions left open | New fiber, `status: open` |
-| Ontology convergence — "this IS a decision about X" | New or updated decision fiber, statusless |
-| Design alternatives with trade-offs | Body/outcome text, or project-owned YAML when that project uses it |
-| Delivery — the commit | Outcome + body that make the choice legible |
-| Finding at end of Delivery | Finding fiber, statusless, with claim + evidence |
-| Sub-analysis scope | New fiber describing inputs, outputs, and method — statusless unless the sub-analysis is itself a todo |
-| Process-level lesson that generalizes | Edit to root fiber / CLAUDE.md |
-
----
-
 ## Anti-patterns
 
-- **Ambiguity gates.** Do not withhold help until the user clarifies N dimensions. The self-check is a mirror, not a door.
-- **Numerical scoring.** Do not introduce 0–1 clarity scores with thresholds. The underlying signal is qualitative and the number adds false precision.
 - **Mandatory interview.** No prepared question list; questions are responsive to the actual conversation.
-- **Surfacing the ledger too early.** A single item is not a flush. Wait for accumulation or a pause.
 - **Immutable outputs.** Nothing filed here is locked. Everything is editable; reversals are normal.
 - **Interrogation without a ceiling.** Three questions is usually enough. If the user is getting irritated, stop asking and file what you have.
 - **Inventing YAML because a field exists.** Extra structure should earn its keep; otherwise let the body and outcome carry the meaning.
-- **Converging before the name is clear.** If Diamond 2 feels forced, Diamond 1 has not finished. Back up.

@@ -1,67 +1,76 @@
 # Authoring a constitution
 
-You're writing a constitution, not realizing one.
+You're writing a constitution, not realizing one. If you ideate it, you don't do the work yourself: the constitution is designed in one context and realized in fresh ones.
 
-**Anything that needs to be done gets a shuttle block.** The block is not a claim that the work is ready to fly — it is what makes the fiber *a thing the board can hold*. Without one, the fiber is invisible to Desk and Chronicle alike, and no lifecycle verb will take it. With one, an `open` fiber is a Drafts card that dispatches nothing until launched. So don't hoard task-shaped fibers as bare bodies with a `due:`: install the block, leave it disabled, decide later.
+## What a constitution is
 
-The flow has three steps:
+A constitution is a design document with trust built in. Like a governmental one, it lays out principles and aspirations — not specific laws, not the current state of affairs — and is meant to outlast any single iteration. It describes what the system looks like when it is right, never the steps to get there; each worker surveys reality, reasons about the gap, and picks the highest-value slice with fresh context. Plans assume you know the path; constitutions trust the agent to find it, which matters most in science and exploratory work, where each decision is informed by the result just before it.
 
-1. **Create the fiber.** `felt add <slug> "<name>" -t constitution [-t <project> ...]` — creates the directory and a markdown skeleton. Path the slug under the right parent so containment carries the relationship (`<root>/<branch>/<deliverable>-<purpose>`); felt resolves the leading segment against existing fibers when nesting is implied.
-2. **Write the spec.** Open with a standalone **lede** — a heading-less paragraph that orients both readers (human skimming the card, worker landing cold): what this is, why now, where it sits, `[[wikilinks]]` woven in. Then `## Desired State` — the one fixed heading: the contract, including any specifically-NOT-doing and any quality bar that earns naming, with done-conditions in checkable terms where the work allows (a desired state phrased checkably is its own evidence). Any further sections are *earned* and named for what they contain — "Touch points", "Why X", "Considered alternatives" — never a default "Context": background that matters gets linked where it's used; a section named for nothing in particular fills like a junk drawer. Keep the body small and the network rich; the felt skill's `constitution.md` reference carries the craft. Don't write worker mechanics (verification cadence, exit discipline, subagent use) into the spec — this skill carries those for every worker, and prescription dated to one model generation degrades the next.
-3. **Install the dispatch contract.** `felt shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` — writes the `shuttle:` block, validates the agent against the registry, sets felt status to `active`, including for an existing open draft. Add `--disabled` to install with status `open` for kanban review or capture claiming.
-4. **Assign a role.** `felt shuttle assign <fiber-id> --role <role> [--collaborator <model>]` with the charter under `roles/` that fits (create one when none does). Workers read the role's playbooks and gates on arrival; a roster left empty makes each worker rediscover them.
+Write one when the desired state is clear (or can be made clear) but the path is not, and a checklist would either be wrong after one step or race through without judgment. A clearly-scoped atomic task still gets a shuttle block (SKILL.md, the doctrine) but needs only a few lines of spec.
 
-A good constitution makes worker decisions inferable from system purpose + codebase rather than gating on the human; spend the authoring time on the lede and Desired State. If the work should surface a human-readable report — findings, figures, comparisons rather than commits — say so in the constitution; workers create `report.html` when asked or when the product is read rather than run (see SKILL.md, "The fiber's surfaces").
+## Flow
 
-**Tag the fiber `constitution`** when you stash one — it's how `felt ls -t constitution` pulls these into a single browse. (Tags never gate dispatch; see operating.md.)
+1. **Study.** Read the relevant code and fibers. This informs the constitution — pointers the workers will follow — not a head start on the work.
+2. **Create the fiber.** `felt add <slug> "<name>" -t constitution [-t <project>]`, pathed under the right parent so containment carries the relationship (`<root>/<branch>/<deliverable>-<purpose>`). The `constitution` tag is a browse handle (`felt ls -t constitution`), never a dispatch gate.
+3. **Write the spec** (below). The felt skill's `ideating.md` carries the thinking process: name what "done" *is* before designing how to reach it, fence what is being left alone, and pressure-test whether the framing is right at all.
+4. **Refine with the user.** Show the draft, revise, and run the goal / constraints / success self-check before launch. It need not be complete: a live uncertainty can hold an "Open questions" section until resolved, then that section is deleted.
+5. **Install the dispatch contract.** `felt shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes the `shuttle:` block, validates the agent, and arms the fiber (`status: active`), including an existing open draft. `--disabled` installs as a draft instead.
+6. **Assign a role.** `felt shuttle assign <fiber-id> --role <role> [--collaborator <model>]` with the charter under `roles/` that fits, creating one when none does ([collaboration.md](collaboration.md)). A roster left empty makes each worker rediscover the playbooks and gates.
+
+The constitution stays editable while workers run; each dispatch re-reads it, so refinements between iterations are normal.
+
+## The spec
+
+**The lede comes first, with no heading.** The opening paragraph orients both readers — the human skimming the card and the worker landing cold: what this is, why it matters now, where it sits, with `[[wikilinks]]` woven in. Write it to stand alone (felt surfaces it in `-d summary`). The test: someone who knows nothing reads the lede, then Desired State, and never wonders "what *is* this thing?"
+
+**`## Desired State` is the one fixed heading** — the contract: invariants, quality bar, and scope fence (what to aim for AND what to leave alone). Write done-conditions in checkable terms wherever the work allows — grep patterns, test commands, "a reviewer can follow the narrative cold" — because a desired state phrased checkably is its own evidence, and it is what workers and their verifiers measure against. A separate `## Evidence` section is earned only when verification needs its own room (a harness, a measurement procedure).
+
+**Everything after that is earned, and named for what it contains** — "Touch points", "Why directives over modes", "Considered alternatives". If a section's honest name would be "Context" or "Notes", its contents belong elsewhere: background gets linked where it is used, and chronology stays in the git log.
+
+If the work should surface a human-readable report — findings, figures, comparisons rather than commits — say so in the spec.
+
+## Principles
+
+**Pointers, not snapshots.** `grep -r 'old_pattern'` returns nothing, not "50 files remain". Nothing in the constitution should become stale or confusing as the desired state is approached.
+
+**Small body, rich network.** A constitution that repeats a linked fiber will drift from it. Push depth outward — findings into sub-fibers, background into doc fibers — and link it where it does work.
+
+**Leave worker mechanics to this skill.** Verification cadence, subagent use, exit discipline, and handoff surfaces reach every worker through SKILL.md; writing them into a spec duplicates it and dates the fiber as models change. The constitution carries only what is specific to *this* work.
+
+**Reshape, don't accrete.** When the desired state evolves, rewrite the affected sections so the body still reads as one description of now. No "Round 2" sections, amendment appendices, "Decisions made" logs, or resolved "Open questions" left as a victory log; fold each answer into the lede, Desired State, or the earned section where it belongs. The git log carries the chronology; the outcome carries the kanban summary.
+
+**Constraints need reasons.** Bare constraints get creatively circumvented; include enough *why* that a worker knows when one applies.
+
+**Scope is a gift.** A clear fence — "only rename, don't refactor" — frees the worker to move confidently inside it.
+
+**Prefer existing systems.** Before designing anything new, ask whether what is there can handle it.
+
+**Trust the agent's taste.** Prescribing *how* instead of *what* degrades output that defaults would have gotten right; instructions written for weaker models are usually too prescriptive for current ones. When in doubt, delete the instruction.
+
+Some constitutions shape artifacts rather than code — documentation, a research narrative. Their desired state is comprehension, not correctness, and the artifact may keep growing; the constitution shapes how growth presents itself, not when it stops.
 
 ## Drafts vs immediate dispatch
 
-`status: active` (armed) → daemon picks up on next poll. `--disabled` / `status: open` → lands in drafts for human review on the kanban; `felt shuttle resume` arms it.
+`status: active` is armed: the daemon picks it up on the next poll. `--disabled` / `status: open` lands in Drafts; `felt shuttle resume` arms it.
 
-**Default to drafts.** Most authored constitutions are stash-now-decide-later. Switch to immediate dispatch when context plainly signals it:
+**Default to drafts.** Most constitutions are stash-now-decide-later. Dispatch immediately when context plainly signals it: the user is mid-iteration and pushing toward action, names the agent in an action-shaped sentence, says "launch" / "go" / "dispatch now", or a sibling in the same arc just went straight to dispatch. When signals are mixed, write the constitution first, then ask — drafts vs immediate is the one bit worth confirming.
 
-- The user is mid-iteration on the topic and pushing toward action.
-- The user names the agent in an action-shaped sentence ("write this up as a constitution that uses claude-sonnet").
-- The user says "launch" / "go" / "dispatch now" / "shuttle this and start it."
-- A just-shipped sibling fiber went straight to dispatch — same arc, same posture.
-
-When signals are mixed, ask via AskUserQuestion — drafts vs immediate is the one bit worth confirming. Don't withhold the writing to ask; write the constitution, then ask about dispatch.
-
-## Writing the shuttle: block by hand
-
-The mechanical alternative — write the `shuttle:` block directly into the frontmatter while drafting — also lands somewhere useful. `install` adds schema validation on top, which is why step 3 above is the canonical flow. But `install` is create-only: run it against a fiber that already has a block and it refuses, pointing at `felt shuttle status <fiber>` to inspect the block's state and the daemon's dispatch assessment, `reshape` to change kind or schedule, `set-model`/`set-agent` to change the agent, or `uninstall` to start over. A hand-written block with no `status` is reported as undispatchable (set `status: active` or run `resume`); install does not auto-arm it.
+`install` is create-only. On a fiber that already has a block it refuses and points at `felt shuttle status <fiber>` (inspect), `reshape` (kind or schedule), `set-agent` (agent and axes), or `uninstall` (start over). A hand-written `shuttle:` block works too but skips validation, and one with no `status` is reported undispatchable until armed.
 
 ## Human in the loop — directives and gates, not a mode
 
-Every dispatch is autonomous: the worker drives to a clean checkpoint and exits — via `felt shuttle handoff` if the work continues, via `status: closed` if it stops; the record lives in `outcome` / the `## Status` block / commits, and the human reads the result later off the kanban. There is **no separate "interactive" dispatch mode**. When work needs a human in the loop, that expectation rides one of two channels the worker already reads. (Workers also carry standing judgment to stay alive at a checkpoint when open taste calls make human input the clear next move — see the skill's exit semantics; the channels below are how *authors* set the expectation up front.)
+Every dispatch is autonomous; there is no separate "interactive" dispatch mode. When work needs a human, the expectation rides one of two channels the worker already reads. (Workers also carry standing judgment to stay alive when open taste calls make human input the clear next move — SKILL.md, "When to stay interactive".)
 
-**Per-dispatch "talk to me first."** When *this* run should pause for the user before doing anything heavy — they want to steer, or the autonomous scope is unclear — put it in the **From User directive** — a line in the card drawer's message box asking it to talk first. The worker reads the From User block at the top of context: talk-first signal → light survey (constitution + last handoff), greet, wait; no signal → ordinary autonomous run. This is a property of the *moment*, not the fiber — the next dispatch starts clean unless its directive says otherwise.
+**Per-dispatch "talk to me first"** goes in the From User directive, as a line in the card drawer's message box. A talk-first signal gets a light survey, a greeting, and a wait; it belongs to the moment, and the next dispatch starts clean.
 
-**Structural human-gates.** When the work *structurally* can't one-shot — a final **send** in the user's voice, a **2FA** step only they can complete, any "draft-and-stage, human commits" shape — write the gate into the **constitution text** (Desired State or Context): *"The user will be present; drive to the send and wait for them."* The worker reads the spec as its contract and stays alive at that gate because the spec says so. Portal work on the chrome axis (`set-agent … --chrome`, driving a logged-in browser) almost always carries such a gate. Genuinely headless work — a refactor, a research sweep, a triage pass producing a report — writes no gate and runs to exit.
+**Structural gates** go in the constitution text: a final **send** in the user's voice, a **2FA** step only they can complete, any "draft-and-stage, human commits" shape — *"The user will be present; drive to the send and wait for them."* Portal work on the chrome axis almost always carries one. Genuinely headless work writes no gate and runs to exit.
 
-**Talking to a worker, finished or not.** Resume from the kanban — on an awaiting-review, composted, or still-in-flight card — drops you into the stored session as a live tmux you can attach to, with the drawer's message box for steering text. This is the replacement for "leave it running so I can chat": autonomous workers close normally, and you resume when you want the conversation. A missing/expired session id degrades to a fresh dispatch carrying the directive.
-
-So when authoring: if a flow has a human-gated step, **write the gate into the spec** — don't reach for a flag. Standing roles are autonomous too (the morning-post pattern: the run closes to awaiting-review, the user resumes over coffee).
+**Talking to a worker later** is Resume from the kanban: on an awaiting-review, composted, or in-flight card it reopens the stored session as a live tmux you can attach to, with the drawer's message box for steering. Autonomous workers close normally, and the human resumes when they want the conversation; a missing session id degrades to a fresh dispatch carrying the directive. Standing roles work the same way — the morning run closes to awaiting-review and the user resumes over coffee.
 
 ## Agent selection
 
-Felt ships a small built-in registry for the Claude, Codex, and pi CLIs. There
-is no reserved `human` agent; write a human gate into the constitution when a
-step needs the person.
+When the user or the constitution names an agent, use it. Otherwise route by the work: a Luna (`codex-luna`, `pi-luna`) for well-scoped implementation and search, `claude-opus` (the registry default) for complex work, and Fable or Astra (`claude-fable`, `codex-astra`) for open-ended judgment and consults. Don't route to Sonnet.
 
-| Family | Built-in ids |
-|---|---|
-| Claude | `claude-opus` (registry default, `medium` effort), `claude-fable`, `claude-sonnet`, `claude-haiku` |
-| Codex | `codex-astra`, `codex-sol`, `codex-luna` |
-| Pi | `pi-luna`, `pi-openai-luna`, `pi-grok`, `pi-gemini-flash`, `pi-kimi`, `pi-deepseek-flash`, `pi-glm-flash`, `pi-union-alpha` |
+`felt shuttle agents` lists the effective registry on this machine: the built-ins (Claude, Codex, and pi CLIs) with the user's `~/.config/felt/agents.json` layered on top — other CLIs, models, cost classes, aliases. Prefer an agent the listing shows; when the user names one you don't recognize, check the listing before assuming it exists. `felt shuttle agents init` seeds the user file from the built-ins; `felt shuttle agents effort <id> <level>` changes one agent's default effort. Edits take effect on the next read, and each remote host reads its own copy. There is no `human` agent — write a human gate into the spec instead.
 
-The registry records what each agent runs, not what it is for. Models change
-faster than advice about them; pick per task, and when the user or the
-constitution names an agent, use it.
-
-`claude-sonnet-headless` and `claude-opus-headless` are aliases that pin the headless axis. All claude agents dispatch with `--permission-mode auto`.
-
-**Your registry may be larger.** Run `felt shuttle agents` to list the effective set on this machine. Users layer their own records on top of the builtins in `~/.config/felt/agents.json` — other CLIs, other models, cost classes, aliases. `felt shuttle agents init` seeds that file from the built-ins, working every field; `felt shuttle agents effort <id> <level>` changes one agent's default effort without copying its record. Prefer an agent the listing actually shows; when the user names one you don't recognize, check the listing before assuming it exists.
-
-Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]` (`set-model` is the agent-only shorthand). Edits to `~/.config/felt/agents.json` take effect on the next read — no rebuild — but each remote host reads its own copy.
+Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents dispatch with `--permission-mode auto`. Headless (`claude -p`) runs come from a user alias record — `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}` — since no built-in agent is headless.
