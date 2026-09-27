@@ -10,9 +10,23 @@ description: >
 
 # felt — Working with Fibers
 
-Fibers are concerns (tasks, decisions, questions, findings, specs) stored as directory-contained markdown — YAML frontmatter plus a body at `.felt/<id>/<slug>.md`, where the id is the nested path (`bao-analysis/damping-prior`). Their relationships come from containment by path, `[[wikilinks]]` in the body, and optional project-owned conventions such as `inputs.from` for data-flow edges. felt owns the substrate — files, native metadata, search, links — and preserves any extra top-level YAML fields a project adds without interpreting them.
+Fibers are concerns — tasks, decisions, questions, findings, specs — each a markdown file with YAML frontmatter at `.felt/<id>/<slug>.md`, where the id is the nested path (`bao-analysis/damping-prior`). They relate by containment (the path), by `[[wikilinks]]` in the body, and by any conventions a project adds; add whatever extra frontmatter fields your project needs and felt keeps them intact.
 
-Proactive filing. Retroactive extraction. Consolidation over time. Coherence when needed.
+A representative fiber, `bao-analysis/damping-prior`:
+
+```markdown
+---
+name: Fix the BAO damping scale in the fiducial fit
+tags: [decision]
+outcome: Fixed Σ_nl at the simulation-calibrated 5.5 Mpc/h — freeing it widens the α error by ~30% with no shift in the mean, so the fixed value buys precision without bias.
+---
+
+The fiducial fit in [[bao-analysis]] needs a value for the nonlinear damping scale Σ_nl, which is degenerate with the peak amplitude at our signal-to-noise.
+
+Freed under a flat prior, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock-validation]]) and α's error grows by ~30%, while the mean α moves by less than 0.1σ. Decided *not* to use a Gaussian prior instead: it reproduces the fixed-value result at extra sampler cost.
+```
+
+It has no status because nobody needs to act on it. The outcome reads on its own in `felt ls`, the first paragraph says what this is and where it sits before any detail, and the links do work inside sentences.
 
 ## Working paths
 
@@ -35,7 +49,7 @@ Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<s
 
 **Statuses:** · none (the default — most fibers stay here) ○ open (todo) ◐ active (in flight) ● closed (resolved). `open`/`active` mean *someone should do something*; a finding, decision, recipe, or note exists by being filed and stays statusless. Never pass `-s` on `felt add` unless someone should act, and close in the same motion when an outcome reads complete.
 
-**Stores and views.** A project whose `.felt` symlinks into a larger store (the loom) is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere. Linking a new project into a store is a one-time setup with a data-loss trap; follow https://cailmdaley.github.io/felt/concepts/cross-project/.
+**Stores and views.** A project whose `.felt` symlinks into a larger store is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere. Linking a new project into a store is a one-time setup with a data-loss trap; follow https://cailmdaley.github.io/felt/concepts/cross-project/.
 
 **Sync.** Before substantive work, run `felt sync` to merge the store's Git upstream (it follows a symlinked view to the real store). Edit local files, commit intentional changes, and `felt sync --push` at useful checkpoints. Resolve relevant conflicts with context and retry; never pick ours/theirs mechanically or discard another worker's edits. Report a failed sync rather than treating local content as current.
 
