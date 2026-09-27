@@ -25,7 +25,9 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   test "selects an explicit socket or the configured Codex home" do
     previous = Map.new(["CODEX_HOME", "SHUTTLE_CODEX_SOCKET"], &{&1, System.get_env(&1)})
-    home = Path.join(System.tmp_dir!(), "felt-endpoint-#{System.unique_integer([:positive])}")
+    # Rooted at /tmp, not System.tmp_dir!(): macOS's per-user TMPDIR pushes the
+    # socket path past the 104-byte sun_path limit.
+    home = Path.join("/tmp", "felt-endpoint-#{System.unique_integer([:positive])}")
 
     on_exit(fn ->
       Enum.each(previous, fn
