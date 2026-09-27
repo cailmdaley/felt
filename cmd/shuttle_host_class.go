@@ -23,7 +23,7 @@ import (
 //     reach a loopback port, so the daemon binds a unix socket inside a 0700
 //     directory instead, and filesystem permissions are the access control.
 //   - exposed: a host reachable from outside (a mesh-VPN node serving the
-//     board). Same listener rule as shared-multi-user.
+//     board). The daemon must use a unix socket; its front proxy dials it.
 //
 // This is the Go half of a two-reader contract, like the fleet file: the
 // daemon resolves the same class and listener from the same file, and
@@ -480,6 +480,23 @@ Examples:
 	},
 }
 
+var shuttleHostCheckOwnerCmd = &cobra.Command{
+	Use:   "check-owner",
+	Short: "Verify ownership of the resolved daemon TCP listener",
+	Long: `Check a socket-class TCP listener by connecting and matching the server-side
+established row in /proc/net/tcp{,6}. A refused connection means no listener
+is running yet. Unix listeners, non-socket classes, and platforms without
+Linux /proc need no check.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		settings, err := resolveHostSettings()
+		if err != nil {
+			return err
+		}
+		return checkResolvedDaemonPortOwner(settings)
+	},
+}
+
 var shuttleHostClassCmd = &cobra.Command{
 	Use:       "class <single-user|shared-multi-user|exposed>",
 	Short:     "Declare this host's class in the host file",
@@ -520,5 +537,6 @@ func isHostConfigError(err error, kind string) bool {
 
 func init() {
 	shuttleHostCmd.AddCommand(shuttleHostClassCmd)
+	shuttleHostCmd.AddCommand(shuttleHostCheckOwnerCmd)
 	shuttleCmd.AddCommand(shuttleHostCmd)
 }

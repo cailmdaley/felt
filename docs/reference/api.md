@@ -352,11 +352,25 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address) and `host_class` (the declared trust class) |
+| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen` (the resolved listen address), `host_class` (the declared trust class), `peer_gate` (`"uid"` for a shared-multi-user TCP listener, otherwise `"none"`), `peer_gate_uid` (the admitted integer uid or `null`), and `peer_gate_uid_source` (`"euid"`, `"env"`, or `null`) |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+
+A TCP peer refused by the uid gate receives HTTP 403 before static assets
+are served or a request body is parsed. Exposed hosts refuse TCP listeners at
+boot; this response also describes the gate's defense-in-depth behavior if an
+exposed TCP request reaches the plug:
+
+```json
+{"error":"peer_refused","reason":"uid 2000 is not the daemon's uid 1000"}
+```
+
+When `/proc` cannot resolve the peer, `reason` is
+`"peer uid unresolved: no matching /proc TCP row"`. The `peer_gate` field on
+`GET /version` reports whether this admission check is active for the daemon's
+bound class and listener.
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/version | jq

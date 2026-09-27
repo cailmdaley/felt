@@ -749,9 +749,9 @@ shuttle host --json` or the board's settings sheet. Three classes exist.
 `single-user` is a laptop, a workstation, a single-user VM — loopback is
 yours alone. `shared-multi-user` is an HPC login node: loopback is shared
 with every logged-in user, `/proc/net/tcp` is world-readable, and any
-`127.0.0.1` listener is theirs to reach as freely as yours. `exposed` is
-reachable beyond your tailnet; felt does not support that class today and
-treats it like `shared-multi-user`.
+`127.0.0.1` listener is theirs to connect to. `exposed` is reachable beyond
+your tailnet; the daemon serves only on its Unix socket, and the front proxy
+must dial that socket.
 
 The class changes where the daemon listens. `single-user` listens on
 `tcp://127.0.0.1:4000` (override the port with `SHUTTLE_PORT`).
@@ -759,35 +759,66 @@ The class changes where the daemon listens. `single-user` listens on
 `~/.shuttle/sock/daemon.sock`, inside a `0700` directory the daemon creates
 and verifies before it binds — it refuses to bind if the directory is missing
 that mode. `host.json`'s `listen` key, or `SHUTTLE_LISTEN`, overrides either
-default, and the CLI resolves the same address to reach it. A remote entry's
+default, and the CLI resolves the same address to reach it. A shared host can
+use an explicit loopback TCP listener only when `/proc/net/tcp` is readable;
+an exposed host refuses every TCP override at boot. A remote entry's
 `remote_socket` key points an SSH tunnel's far end at the socket instead of a
 port — verified end to end as `ssh -L 127.0.0.1:<port>:~/.shuttle/sock/daemon.sock
 <host>` against an OpenSSH 8.0 login node — and the local `felt` CLI on that
 host dials the same socket directly. A host whose only inbound is SSH
 tunnels can run entirely off the socket, with no TCP listener at all.
 
-The socket is not a `tailscale serve` target, on any class. `tailscale
-serve … unix:<sock>` against a userspace `tailscaled` run unprivileged — the
-case on an HPC login node — is refused outright: "must be root, or be an
-operator and able to run sudo tailscale to serve a path or Unix socket." The
-macOS system `tailscaled` cannot reach a filesystem socket at all and answers
-502. So a host fronted with `tailscale serve`, whatever its class, serves the
-TCP loopback port — both "The board on your phone" below and "Tailscale as
-fleet transport" target `4000`, never the socket path.
+An unprivileged userspace `tailscaled` cannot target a Unix socket with
+`tailscale serve`; the command refuses with "must be root, or be an operator
+and able to run sudo tailscale to serve a path or Unix socket." The macOS
+system `tailscaled` cannot reach a filesystem socket and answers 502. A shared host fronted by either arrangement therefore needs a loopback TCP
+listener. An exposed host must put a front proxy in front of the daemon; the
+proxy connects to the Unix socket, while the published proxy endpoint handles
+external traffic. "The board on your phone" and "Tailscale as fleet
+transport" describe direct TCP access for classes that permit it.
 
-That leaves a gap on a shared host that is also reached through `tailscale
-serve`: it needs a loopback TCP listener, and that listener is
-unauthenticated today — `felt setup receipt` flags it as the residual risk on
-a `shared-multi-user` host that serves. The socket half of the story is
-already sound: a co-tenant cannot reach a socket they cannot traverse to —
-`namei -m ~/.shuttle/sock/daemon.sock` shows the permissions along the whole
-path as the evidence — and every request that arrives over it was delivered
-by `sshd` running as you, which is what makes an identity attached to it
-trustworthy where a bare loopback caller could forge one. The design's answer
-for the TCP listener, not yet built, is the same idea applied there: admit
-only loopback peers owned by the daemon's own uid, read from
-`/proc/net/tcp`, so `tailscaled` and `sshd`-as-you pass and a co-tenant
-connecting directly is refused.
+On a `shared-multi-user` host that uses TCP, `PeerGatePlug` protects the
+listener before static assets or request-body parsing. It resolves the
+client-side established connection row in `/proc/net/tcp` or `/proc/net/tcp6`
+by matching the peer address and ephemeral port as the local endpoint and the
+daemon's address and port as the remote endpoint. A peer is admitted only
+when the row's uid is the daemon's effective uid. A foreign uid or an
+unresolved row receives HTTP 403 with `error: "peer_refused"`; request headers
+cannot bypass the gate. This admits a same-user userspace `tailscaled` and
+refuses a co-tenant connecting directly. The `tailscale_login` header is
+retained on TCP only after uid admission; the header itself is still an
+assertion. `PeerGatePlug` also refuses exposed TCP requests that reach it, but
+the daemon refuses to boot an exposed TCP listener.
+
+The gate admits the daemon's effective uid by default. `SHUTTLE_PEER_UID` is
+an explicit override; the daemon logs a warning when it is set, and
+`GET /api/v1/version` reports the admitted uid and whether it came from the
+environment. `felt setup receipt` flags an environment override or a uid that
+differs from the CLI user's uid. Leave the variable unset for normal use.
+
+The gate identifies the last local process, not the original client. A relay
+running as the daemon's owner can pass a co-tenant's traffic with that owner's
+uid. Examples include a userspace Tailscale SOCKS/HTTP proxy, `ssh -D` or
+`ssh -L`, socat, and code-server or Jupyter `/proxy/` routes. Operators must
+not run relays as themselves. Root has no separate admission exception; it is
+denied unless the daemon itself runs as uid 0, and root can already inspect or
+control that daemon process.
+
+The TCP uid gate does not cover port squatting on a shared host: the port is a shared resource, and another user can bind it while the daemon is down.
+Because that listener runs as the other user, its HTTP response could claim `peer_gate: "uid"` and imitate the daemon.
+On Linux, each felt CLI connection to the local TCP daemon checks the server-side established row in `/proc/net/tcp{,6}` after connecting and refuses a foreign or unverified owner.
+`bin/shuttle` runs `felt shuttle host check-owner` on its own connection before each TCP `curl`; the ownership check and the later `curl` are separate connections.
+`felt setup receipt` reports the uid from matching LISTEN rows when available.
+These checks do not protect a browser request that `tailscale serve` forwards while the daemon is down: Serve does not check the listener owner, and the browser cannot distinguish a squat listener from the daemon.
+A Unix socket in the protected `0700` directory has no equivalent TCP-port squatting window: a co-tenant cannot claim the path or connect through it.
+
+`namei -m ~/.shuttle/sock/daemon.sock` shows the Unix socket's permissions
+along the whole path. A shared host refuses to boot TCP when
+`/proc/net/tcp` is unreadable, as on macOS; an exposed host refuses TCP
+regardless. Use the class's Unix socket, or declare `single-user` when
+loopback is private to the operator. `felt setup receipt` reports
+`peer_gate: uid` when the daemon gates its shared-class TCP listener and
+treats an ungated TCP listener as a mismatch.
 
 The same class gates dial-out. The daemon refuses `defaults.https_proxy`
 (configured below, under `defaults.https_proxy`) unless the host is

@@ -9,6 +9,7 @@ package cmd
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -98,10 +100,13 @@ type ReceiptDaemon struct {
 	Expected any           `json:"expected,omitempty"`
 	Observed any           `json:"observed,omitempty"`
 	Contract bool          `json:"contract_ok"`
-	// Listen and HostClass are what the running daemon says it bound at boot,
+	// Listen, HostClass, and PeerGate are the daemon's bound listener policy,
 	// from /api/v1/version; empty when unreachable or not reported.
-	Listen    string `json:"listen,omitempty"`
-	HostClass string `json:"host_class,omitempty"`
+	Listen            string `json:"listen,omitempty"`
+	HostClass         string `json:"host_class,omitempty"`
+	PeerGate          string `json:"peer_gate,omitempty"`
+	PeerGateUID       *int   `json:"peer_gate_uid,omitempty"`
+	PeerGateUIDSource string `json:"peer_gate_uid_source,omitempty"`
 }
 
 // ReceiptGenerationReceipt is the receipt-side view of the promoted source
@@ -695,27 +700,28 @@ func codexHooksTrusted() bool {
 func collectDaemonReceipt() ReceiptDaemon {
 	base, err := daemonURL()
 	if err != nil {
-		// Only the listener resolution can fail here; its own error words the
-		// repair exactly as the host component does, so the two fold into one.
-		_, hostErr := resolveHostSettings()
-		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(hostErr)}
+		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(err)}
 	}
 	d := ReceiptDaemon{URL: base, Status: receiptMissing, Repair: "start the Shuttle daemon, then rerun `felt setup receipt --json`"}
 	data, err := getDaemon(strings.TrimRight(base, "/")+"/api/v1/version", daemonReadTimeout)
 	if err != nil {
-		return d
+		return daemonReceiptOnTransportError(d, err)
 	}
 	var response struct {
-		Listen    string `json:"listen"`
-		HostClass string `json:"host_class"`
-		Contract  struct {
+		Listen            string `json:"listen"`
+		HostClass         string `json:"host_class"`
+		PeerGate          string `json:"peer_gate"`
+		PeerGateUID       *int   `json:"peer_gate_uid"`
+		PeerGateUIDSource string `json:"peer_gate_uid_source"`
+		Contract          struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
 			OK       *bool           `json:"ok"`
 		} `json:"contract"`
 	}
 	decodeErr := json.Unmarshal(data, &response)
-	d.Listen, d.HostClass = response.Listen, response.HostClass
+	d.Listen, d.HostClass, d.PeerGate = response.Listen, response.HostClass, response.PeerGate
+	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
 	if decodeErr != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d
@@ -729,6 +735,22 @@ func collectDaemonReceipt() ReceiptDaemon {
 		d.Status, d.Repair = receiptHealthy, ""
 	} else {
 		d.Status, d.Repair = receiptMismatch, "restart or upgrade the daemon and felt together so their Shuttle contract levels match"
+	}
+	return d
+}
+
+func daemonReceiptOnTransportError(d ReceiptDaemon, err error) ReceiptDaemon {
+	var ownerErr *daemonTCPOwnerCheckError
+	if errors.As(err, &ownerErr) {
+		switch {
+		case ownerErr.foreign:
+			d.Repair = fmt.Sprintf("stop the process holding %s (uid %d), then restart the daemon", ownerErr.address, ownerErr.uid)
+		case ownerErr.pending:
+			d.Repair = fmt.Sprintf("the listener did not accept within %d s; retry, and if it persists inspect what holds %s", int(acceptWait/time.Second), ownerErr.address)
+		default:
+			d.Repair = ownerErr.Error()
+		}
+		d.Status = receiptMismatch
 	}
 	return d
 }

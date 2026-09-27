@@ -1,11 +1,12 @@
 defmodule Shuttle.HostTest do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Host
 
   @fixture_dir Path.expand("../fixtures/host", __DIR__)
-  @env_vars ~w(FELT_HOST_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR)
+  @env_vars ~w(FELT_HOST_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR SHUTTLE_PEER_UID)
 
   setup do
     previous = Map.new(@env_vars, &{&1, System.get_env(&1)})
@@ -89,6 +90,8 @@ defmodule Shuttle.HostTest do
     setup do
       base = "/tmp/shuttle-host-#{System.unique_integer([:positive])}"
       File.mkdir_p!(base)
+      # Explicit mode: under a 002 umask mkdir yields 0775 and the ancestry check refuses it.
+      File.chmod!(base, 0o755)
       on_exit(fn -> File.rm_rf(base) end)
       {:ok, base: base, sock: Path.join([base, "sock", "daemon.sock"])}
     end
@@ -241,19 +244,30 @@ defmodule Shuttle.HostTest do
       previous_endpoint = Application.get_env(:shuttle, ShuttleWeb.Endpoint)
       previous_listen = Application.get_env(:shuttle, :listen)
       previous_class = Application.get_env(:shuttle, :host_class)
+      previous_peer_gate = Application.get_env(:shuttle, :peer_gate)
+      previous_peer_gate_uid = Application.get_env(:shuttle, :peer_gate_expected_uid)
+      previous_peer_gate_uid_source = Application.get_env(:shuttle, :peer_gate_uid_source)
+      previous_proc_root = Application.get_env(:shuttle, :proc_net_root)
 
       on_exit(fn ->
         Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous_endpoint)
         restore_app_env(:listen, previous_listen)
         restore_app_env(:host_class, previous_class)
+        restore_app_env(:peer_gate, previous_peer_gate)
+        restore_app_env(:peer_gate_expected_uid, previous_peer_gate_uid)
+        restore_app_env(:peer_gate_uid_source, previous_peer_gate_uid_source)
+        restore_app_env(:proc_net_root, previous_proc_root)
       end)
 
       base = "/tmp/shuttle-cfg-#{System.unique_integer([:positive])}"
       File.mkdir_p!(base)
+      # Explicit mode: under a 002 umask mkdir yields 0775 and the ancestry check refuses it.
+      File.chmod!(base, 0o755)
       on_exit(fn -> File.rm_rf(base) end)
 
       System.delete_env("SHUTTLE_LISTEN")
       System.delete_env("SHUTTLE_PORT")
+      System.delete_env("SHUTTLE_PEER_UID")
       System.put_env("SHUTTLE_DATA_DIR", base)
 
       {:ok, base: base, endpoint: previous_endpoint}
@@ -308,7 +322,15 @@ defmodule Shuttle.HostTest do
 
       [head, body] = socket |> recv_all("") |> String.split("\r\n\r\n", parts: 2)
       assert head =~ "HTTP/1.1 200"
-      assert %{"listen" => listen, "host_class" => "shared-multi-user"} = Jason.decode!(body)
+
+      assert %{
+               "listen" => listen,
+               "host_class" => "shared-multi-user",
+               "peer_gate" => "none",
+               "peer_gate_uid" => nil,
+               "peer_gate_uid_source" => nil
+             } = Jason.decode!(body)
+
       assert listen == "unix://" <> sock
     end
 
@@ -321,6 +343,97 @@ defmodule Shuttle.HostTest do
 
       assert Shuttle.listen() == "unix://" <> Path.join([base, "sock", "daemon.sock"])
       refute File.exists?(Path.join(base, "sock"))
+      assert Application.get_env(:shuttle, :peer_gate) == "none"
+    end
+
+    test "a shared TCP test endpoint bypasses the proc requirement", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
+
+      Shuttle.Application.configure_endpoint()
+
+      assert Shuttle.listen() == "tcp://127.0.0.1:4999"
+      assert Application.get_env(:shuttle, :peer_gate) == "none"
+    end
+
+    test "a shared TCP listener reports the daemon euid and source", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      {host_file, proc_root} = shared_tcp_fixtures(base)
+      System.put_env("FELT_HOST_FILE", host_file)
+      Application.put_env(:shuttle, :proc_net_root, proc_root)
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      Shuttle.Application.configure_endpoint()
+
+      {uid_text, 0} = System.cmd("id", ["-u"])
+      assert Application.get_env(:shuttle, :peer_gate) == "uid"
+
+      assert Application.get_env(:shuttle, :peer_gate_expected_uid) ==
+               String.to_integer(String.trim(uid_text))
+
+      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "euid"
+    end
+
+    test "a shared TCP uid override is reported and warned about", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      {host_file, proc_root} = shared_tcp_fixtures(base)
+      System.put_env("FELT_HOST_FILE", host_file)
+      System.put_env("SHUTTLE_PEER_UID", "424242")
+      Application.put_env(:shuttle, :proc_net_root, proc_root)
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      log = capture_log(fn -> Shuttle.Application.configure_endpoint() end)
+
+      assert log =~ "SHUTTLE_PEER_UID is set"
+      assert Application.get_env(:shuttle, :peer_gate) == "uid"
+      assert Application.get_env(:shuttle, :peer_gate_expected_uid) == 424_242
+      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "env"
+    end
+
+    test "a shared TCP listener refuses boot when proc is unreadable", %{
+      base: base,
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Shuttle.Application.configure_endpoint()
+        end
+
+      assert error.message =~ "shared-multi-user"
+      assert error.message =~ "tcp://127.0.0.1:4999"
+      assert error.message =~ "drop the tcp:// listen"
+      assert error.message =~ "declare the host single-user"
+    end
+
+    test "an exposed host refuses TCP and directs the front proxy to its socket", %{
+      endpoint: endpoint
+    } do
+      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "exposed.json"))
+      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Shuttle.Application.configure_endpoint()
+        end
+
+      assert error.message =~ "host class exposed"
+      assert error.message =~ "exposed hosts serve only the unix socket"
+      assert error.message =~ "the front proxy must dial the socket"
     end
 
     test "a single-user host keeps loopback tcp on the configured port", %{endpoint: endpoint} do
@@ -343,6 +456,26 @@ defmodule Shuttle.HostTest do
         Shuttle.Application.configure_endpoint()
       end
     end
+  end
+
+  defp shared_tcp_fixtures(base) do
+    host_file = Path.join(base, "shared-tcp-host.json")
+
+    File.write!(
+      host_file,
+      Jason.encode!(%{"class" => "shared-multi-user", "listen" => "tcp://127.0.0.1:4999"})
+    )
+
+    proc_root = Path.join(base, "proc")
+    net_dir = Path.join(proc_root, "net")
+    File.mkdir_p!(net_dir)
+
+    File.write!(
+      Path.join(net_dir, "tcp"),
+      "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+    )
+
+    {host_file, proc_root}
   end
 
   # Every listening socket in this VM, by address: `{ip, port}` for TCP and

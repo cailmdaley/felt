@@ -182,6 +182,7 @@ check_listen() { # $1 = "" (local) | host
 
 daemon_call() { # $1 = extra curl args, $2 = API path
   listen_prelude
+  printf '%s' 'felt shuttle host check-owner && '
   printf '%s' "curl -s --max-time 10 $1"' ${sock:+--unix-socket "$sock"} "$base'"$2"'"'
 }
 

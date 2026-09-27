@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -227,13 +228,57 @@ enabled = true
 	}
 }
 
+func TestCollectDaemonReceiptUsesListenerResolutionError(t *testing.T) {
+	hostFile := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, hostFile, nil, nil)
+	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectDaemonReceipt()
+	if got.Status != receiptMismatch || !strings.Contains(got.Repair, hostFile) || strings.Contains(got.Repair, "<nil>") {
+		t.Fatalf("daemon listener repair = %+v, want the host-file resolution error", got)
+	}
+}
+
+func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  *daemonTCPOwnerCheckError
+		want string
+	}{
+		{
+			name: "foreign owner",
+			err:  &daemonTCPOwnerCheckError{address: "127.0.0.1:4000", uid: 2000, foreign: true},
+			want: "stop the process holding 127.0.0.1:4000 (uid 2000), then restart the daemon",
+		},
+		{
+			name: "accept timeout",
+			err:  &daemonTCPOwnerCheckError{address: "[::1]:4000", pending: true},
+			want: "the listener did not accept within 2 s; retry, and if it persists inspect what holds [::1]:4000",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", tc.err)
+			got := daemonReceiptOnTransportError(ReceiptDaemon{Status: receiptMissing, Repair: "start the daemon"}, err)
+			if got.Status != receiptMismatch || got.Repair != tc.want {
+				t.Fatalf("daemon owner-check repair = %+v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 	tests := []struct {
 		name string
 		body map[string]any
 		want receiptStatus
 	}{
-		{"healthy", map[string]any{"contract": map[string]any{"expected": 2, "observed": 2, "ok": true}}, receiptHealthy},
+		{"healthy", map[string]any{
+			"listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user", "peer_gate": "uid",
+			"peer_gate_uid": 1000, "peer_gate_uid_source": "euid",
+			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
+		}, receiptHealthy},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
 	}
 	for _, tt := range tests {
@@ -250,6 +295,10 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}
 			if tt.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
+			}
+			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid" ||
+				got.PeerGateUID == nil || *got.PeerGateUID != 1000 || got.PeerGateUIDSource != "euid") {
+				t.Fatalf("version listener fields = listen %q, class %q, peer_gate %q, uid %v from %q", got.Listen, got.HostClass, got.PeerGate, got.PeerGateUID, got.PeerGateUIDSource)
 			}
 		})
 	}

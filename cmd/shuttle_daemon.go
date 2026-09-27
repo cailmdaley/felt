@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -73,18 +76,25 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 	}
 	base := transport.DialContext
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if addr != daemonSocketHost+":80" {
-			return base(ctx, network, addr)
+		if addr == daemonSocketHost+":80" {
+			s, err := resolveHostSettings()
+			if err != nil {
+				return nil, err
+			}
+			if s.listen.Network != "unix" {
+				return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
+			}
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", s.listen.Address)
 		}
-		s, err := resolveHostSettings()
+		checkOwner, err := isSocketClassDaemonTCP(network, addr)
 		if err != nil {
 			return nil, err
 		}
-		if s.listen.Network != "unix" {
-			return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
+		if checkOwner {
+			return dialAndCheckDaemonTCP(ctx, base, network, addr, "/proc", os.Geteuid(), acceptWait)
 		}
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", s.listen.Address)
+		return base(ctx, network, addr)
 	}
 	// The daemon's CORS plug admits only loopback authorities, so the synthetic
 	// host must not reach it: the request carries `Host: localhost` on the wire.
@@ -97,6 +107,33 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 			return fmt.Errorf("daemon redirected to %s; the daemon API never redirects, refusing to follow", req.URL)
 		},
 	}
+}
+
+func isSocketClassDaemonTCP(network, address string) (bool, error) {
+	if runtime.GOOS != "linux" || !strings.HasPrefix(network, "tcp") {
+		return false, nil
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return false, nil
+	}
+	ip := net.ParseIP(host)
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return false, nil
+	}
+	settings, err := resolveHostSettings()
+	if err != nil {
+		return false, err
+	}
+	if !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+		return false, nil
+	}
+	gotPort, err := strconv.Atoi(portText)
+	if err != nil {
+		return false, nil
+	}
+	_, wantPort, err := parseTCPEndpoint(settings.listen.Address)
+	return err == nil && gotPort == wantPort, nil
 }
 
 // socketHostTransport rewrites the wire Host of a request to the synthetic
@@ -219,11 +256,14 @@ func postLifecycle(action string, payload map[string]any) (string, error) {
 }
 
 // isLifecycleTransportError reports whether err means "daemon unreachable" (so
-// the caller should fall back to a local document write) as opposed to a
-// daemon-rejected request (a daemonStatusError, which must surface to the
-// user).
+// the caller should fall back to a local document write) rather than a daemon
+// refusal or an owner-check failure, both of which must surface to the user.
 func isLifecycleTransportError(err error) bool {
 	if err == nil {
+		return false
+	}
+	var ownerErr *daemonTCPOwnerCheckError
+	if errors.As(err, &ownerErr) {
 		return false
 	}
 	if _, ok := err.(daemonStatusError); ok {

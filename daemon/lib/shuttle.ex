@@ -133,7 +133,8 @@ defmodule Shuttle.Application do
       Shuttle.Meeting.Control,
       # Owns the ETS table the per-session token folds are cached in. Pure
       # cache: a restart costs one re-read per session, never a wrong number.
-      Shuttle.TokenSpend
+      Shuttle.TokenSpend,
+      ShuttleWeb.PeerGateThrottle
     ]
 
     optional =
@@ -180,6 +181,12 @@ defmodule Shuttle.Application do
   # only the lowest-ranked input to its single-user default.
   @doc false
   def configure_endpoint do
+    if System.get_env("SHUTTLE_PEER_UID") do
+      Logger.warning(
+        "SHUTTLE_PEER_UID is set; it overrides the effective uid when shared TCP peer gating is active"
+      )
+    end
+
     existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])
     http = Keyword.get(existing, :http, [])
     server? = Keyword.get(existing, :server, true)
@@ -201,8 +208,15 @@ defmodule Shuttle.Application do
       end
 
     listen_string = Shuttle.Host.format_listen(listen)
+
+    {peer_gate, peer_gate_expected_uid, peer_gate_uid_source} =
+      configure_peer_gate(class, listen, listen_string, server?)
+
     Application.put_env(:shuttle, :listen, listen_string)
     Application.put_env(:shuttle, :host_class, class)
+    Application.put_env(:shuttle, :peer_gate, peer_gate)
+    Application.put_env(:shuttle, :peer_gate_expected_uid, peer_gate_expected_uid)
+    Application.put_env(:shuttle, :peer_gate_uid_source, peer_gate_uid_source)
 
     Logger.info(
       "Shuttle listening on #{listen_string} (host class #{Shuttle.Host.class_name(class)})"
@@ -219,6 +233,28 @@ defmodule Shuttle.Application do
 
     Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
   end
+
+  defp configure_peer_gate(:exposed, {:tcp, _ip, _port}, listen_string, true) do
+    raise ArgumentError,
+          "refusing to listen on #{listen_string} for host class exposed: exposed hosts serve only the unix socket; the front proxy must dial the socket"
+  end
+
+  defp configure_peer_gate(:shared_multi_user, {:tcp, _ip, _port}, listen_string, true) do
+    proc_root = Application.get_env(:shuttle, :proc_net_root, "/proc")
+
+    unless Shuttle.ProcNetTcp.readable?(proc_root) do
+      raise ArgumentError,
+            "refusing to listen on #{listen_string} for host class shared-multi-user: " <>
+              "uid peer gating requires readable /proc/net/tcp; drop the tcp:// listen so the " <>
+              "class's unix socket is used, or declare the host single-user"
+    end
+
+    {uid, source} = Shuttle.Host.expected_peer_uid_config!()
+
+    {"uid", uid, Atom.to_string(source)}
+  end
+
+  defp configure_peer_gate(_class, _listen, _listen_string, _server?), do: {"none", nil, nil}
 
   # The endpoint's signing key.
   #

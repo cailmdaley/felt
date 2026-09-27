@@ -1,14 +1,24 @@
 defmodule ShuttleWeb.PeerPlugTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Plug.Test
 
   alias ShuttleWeb.PeerPlug
 
-  defp peer(conn), do: PeerPlug.call(conn, PeerPlug.init([])).assigns.peer
+  @loopback {127, 0, 0, 1}
+
+  defp peer(conn, opts \\ []) do
+    opts = Keyword.put_new(opts, :uid_resolver, fn _peer_data, _listen -> nil end)
+    PeerPlug.call(conn, PeerPlug.init(opts)).assigns.peer
+  end
 
   describe "on loopback tcp" do
     test "a direct request is tcp and unforwarded" do
-      assert peer(conn(:get, "/")) == %{transport: :tcp, forwarded: false, tailscale_login: nil}
+      assert peer(conn(:get, "/")) == %{
+               transport: :tcp,
+               uid: nil,
+               forwarded: false,
+               tailscale_login: nil
+             }
     end
 
     test "a tailscale login header is recorded as forwarded but never trusted" do
@@ -16,7 +26,57 @@ defmodule ShuttleWeb.PeerPlugTest do
         conn(:get, "/")
         |> Plug.Conn.put_req_header("tailscale-user-login", "someone@example.com")
 
-      assert peer(conn) == %{transport: :tcp, forwarded: true, tailscale_login: nil}
+      assert peer(conn) == %{
+               transport: :tcp,
+               uid: nil,
+               forwarded: true,
+               tailscale_login: nil
+             }
+    end
+
+    test "records a uid resolved for the TCP peer" do
+      resolver = fn _peer_data, listen ->
+        assert listen == Shuttle.listen()
+        42
+      end
+
+      assert peer(conn(:get, "/"), uid_resolver: resolver).uid == 42
+    end
+
+    @tag :tmp_dir
+    test "uses the configured proc root when none is passed to the plug", %{tmp_dir: root} do
+      net_dir = Path.join(root, "net")
+      File.mkdir_p!(net_dir)
+      {:ok, {:tcp, listen_address, listen_port}} = Shuttle.Host.parse_listen(Shuttle.listen())
+      assert listen_address == @loopback
+      address = proc_ipv4(@loopback)
+      peer_port = 54_321
+
+      listen_port_hex =
+        listen_port |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(4, "0")
+
+      File.write!(
+        Path.join(net_dir, "tcp"),
+        "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n" <>
+          "  0: #{address}:D431 #{address}:#{listen_port_hex} 01 00000000:00000000 00:00000000 00000000 4321 0 10001 1\n"
+      )
+
+      previous = Application.fetch_env(:shuttle, :proc_net_root)
+      Application.put_env(:shuttle, :proc_net_root, root)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:shuttle, :proc_net_root, value)
+          :error -> Application.delete_env(:shuttle, :proc_net_root)
+        end
+      end)
+
+      conn =
+        conn(:get, "/") |> put_peer_data(%{address: @loopback, port: peer_port, ssl_cert: nil})
+
+      resolved = PeerPlug.call(conn, host_class: :shared_multi_user)
+
+      assert resolved.assigns.peer.uid == 4321
     end
 
     for header <- ["x-forwarded-for", "x-forwarded-host", "forwarded", "tailscale-user-name"] do
@@ -27,12 +87,27 @@ defmodule ShuttleWeb.PeerPlugTest do
     end
   end
 
+  defp proc_ipv4(address) do
+    bytes = Tuple.to_list(address)
+    bytes = if :erlang.system_info(:endian) == :little, do: Enum.reverse(bytes), else: bytes
+
+    bytes
+    |> Enum.map(&(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
+    |> Enum.join()
+    |> String.upcase()
+  end
+
   describe "on a unix socket" do
     defp unix_conn,
       do: conn(:get, "/") |> put_peer_data(%{address: {:local, ""}, port: 0, ssl_cert: nil})
 
     test "the transport is unix" do
-      assert peer(unix_conn()) == %{transport: :unix, forwarded: false, tailscale_login: nil}
+      assert peer(unix_conn()) == %{
+               transport: :unix,
+               uid: nil,
+               forwarded: false,
+               tailscale_login: nil
+             }
     end
 
     test "the tailscale login header is recorded (not trusted; nothing reads it yet)" do
@@ -40,6 +115,7 @@ defmodule ShuttleWeb.PeerPlugTest do
 
       assert peer(conn) == %{
                transport: :unix,
+               uid: nil,
                forwarded: true,
                tailscale_login: "someone@example.com"
              }

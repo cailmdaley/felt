@@ -1,10 +1,11 @@
 package cmd
 
 // The receipt's host component: does the way this machine is actually running
-// match the class it declares? A shared-multi-user or exposed host must have
-// no fleet process listening on TCP (every local user can reach a loopback
-// port), no mesh-VPN proxy in the fleet file, and a socket directory only its
-// owner can enter. A single-user host must actually be single-user.
+// match the class it declares? A shared-multi-user or exposed host may keep
+// its daemon on loopback TCP only when it reports uid gating; other fleet TCP
+// listeners remain findings. It also avoids an unauthenticated mesh-VPN proxy
+// and keeps its socket directory private. A single-user host must actually be
+// single-user.
 //
 // Evidence is best effort and read-only: listeners come from `ss` (or /proc)
 // on Linux and `lsof` on macOS, users from `who`. A missing tool makes the
@@ -12,7 +13,10 @@ package cmd
 
 import (
 	"bufio"
+	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,15 +27,18 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // ReceiptHost reports the declared class against the observed host.
 type ReceiptHost struct {
-	Status      receiptStatus `json:"status"`
-	Repair      string        `json:"repair,omitempty"`
-	Class       string        `json:"class,omitempty"`
-	ClassSource string        `json:"class_source,omitempty"`
-	Listen      string        `json:"listen,omitempty"`
+	Status          receiptStatus           `json:"status"`
+	Repair          string                  `json:"repair,omitempty"`
+	Class           string                  `json:"class,omitempty"`
+	ClassSource     string                  `json:"class_source,omitempty"`
+	Listen          string                  `json:"listen,omitempty"`
+	PeerGate        *ReceiptPeerGate        `json:"peer_gate,omitempty"`
+	DaemonPortOwner *ReceiptDaemonPortOwner `json:"daemon_port_owner,omitempty"`
 	// UsersLoggedIn is the count of distinct users `who` reports; absent when
 	// `who` could not be read.
 	UsersLoggedIn *int              `json:"users_logged_in,omitempty"`
@@ -45,6 +52,18 @@ type ReceiptHost struct {
 	// Problems are the individual findings behind a non-healthy status, one
 	// line each, for the human path.
 	Problems []string `json:"problems,omitempty"`
+}
+
+// ReceiptDaemonPortOwner identifies the uid holding the daemon's TCP port.
+type ReceiptDaemonPortOwner struct {
+	UID      int  `json:"uid"`
+	IsCaller bool `json:"is_caller"`
+}
+
+// ReceiptPeerGate explains the daemon's loopback TCP admission boundary.
+type ReceiptPeerGate struct {
+	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
 }
 
 // ReceiptSocketDir is the socket directory, inspected without following a
@@ -96,15 +115,23 @@ type hostEvidence struct {
 	httpsProxy  string
 	// daemonListen and daemonClass are what the running daemon reports on
 	// /api/v1/version; empty when it was not reached.
-	daemonListen string
-	daemonClass  string
+	daemonListen            string
+	daemonClass             string
+	daemonPeerGate          string
+	daemonPeerGateUID       *int
+	daemonPeerGateUIDSource string
+	// daemonPortOwner is the uid holding the resolved or reported TCP listener.
+	daemonPortOwner  *ReceiptDaemonPortOwner
+	daemonPortListen string
 	// isDaemonCommand recognizes a shuttle daemon by its command line.
 	isDaemonCommand func(string) bool
 }
 
 func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
 	ev := gatherHostEvidence()
-	ev.daemonListen, ev.daemonClass = daemon.Listen, daemon.HostClass
+	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
+	ev.daemonPeerGateUID, ev.daemonPeerGateUIDSource = daemon.PeerGateUID, daemon.PeerGateUIDSource
+	ev.daemonPortOwner, ev.daemonPortListen = observedDaemonPortOwner(ev, os.Geteuid())
 	return evaluateHost(ev)
 }
 
@@ -216,6 +243,60 @@ func parsePSCommands(out string) map[int]string {
 	return commands
 }
 
+// observedDaemonPortOwner checks the running listener first, then the resolved
+// listener. Linux /proc is the only source that exposes socket owners across
+// uids; platforms without it leave this evidence absent.
+func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPortOwner, string) {
+	if runtime.GOOS != "linux" {
+		return nil, ""
+	}
+	return observedDaemonPortOwnerFromProc(ev, callerUID, "/proc")
+}
+
+func observedDaemonPortOwnerFromProc(ev hostEvidence, callerUID int, procRoot string) (*ReceiptDaemonPortOwner, string) {
+	if !(hostClass(ev.settings.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()) {
+		return nil, ""
+	}
+	candidates := []string{}
+	for _, listen := range []string{ev.daemonListen, ev.settings.Listen} {
+		if strings.HasPrefix(listen, "tcp://") && !slices.Contains(candidates, listen) {
+			candidates = append(candidates, listen)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+	rows, err := readProcTCP(procRoot)
+	if err != nil {
+		return nil, ""
+	}
+	var callerOwner *ReceiptDaemonPortOwner
+	var callerListen string
+	for _, listen := range candidates {
+		_, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if row.Port != port || !daemonListenerAddress(row.Address) {
+				continue
+			}
+			owner := &ReceiptDaemonPortOwner{UID: row.UID, IsCaller: row.UID == callerUID}
+			if !owner.IsCaller {
+				return owner, listen
+			}
+			if callerOwner == nil {
+				callerOwner, callerListen = owner, listen
+			}
+		}
+	}
+	return callerOwner, callerListen
+}
+
 // evaluateHost applies the status rules to gathered evidence.
 func evaluateHost(ev hostEvidence) ReceiptHost {
 	h := ReceiptHost{Status: receiptHealthy, Listeners: []ReceiptListener{}}
@@ -238,8 +319,45 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		}
 	}
 
-	const restartRepair = "restart the daemon so it binds the unix socket; retarget `tailscale serve` and tunnels at it"
+	const restartRepair = "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 	socketClass := hostClass(h.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()
+	portOwnerMismatch := ev.daemonPortOwner != nil && !ev.daemonPortOwner.IsCaller
+	if ev.daemonPortOwner != nil {
+		h.DaemonPortOwner = ev.daemonPortOwner
+	}
+	if portOwnerMismatch {
+		mismatch(fmt.Sprintf("%s is held by uid %d, not you", ev.daemonPortListen, ev.daemonPortOwner.UID),
+			"stop trusting this port: stop the foreign listener and restart Shuttle, or use the protected Unix socket")
+	}
+	if ev.daemonPeerGate == "uid" {
+		callerUID := os.Geteuid()
+		switch {
+		case ev.daemonPeerGateUIDSource == "env" && ev.daemonPeerGateUID == nil:
+			mismatch("the daemon reports SHUTTLE_PEER_UID as its peer-gate source but reports no admitted uid",
+				"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+		case ev.daemonPeerGateUIDSource == "" || ev.daemonPeerGateUID == nil:
+			mismatch("the daemon reports uid gating without saying which uid; restart onto the current build",
+				"restart onto the current build")
+		case ev.daemonPeerGateUIDSource == "env":
+			mismatch(fmt.Sprintf("the daemon admits uid %d (from SHUTTLE_PEER_UID); you are uid %d", *ev.daemonPeerGateUID, callerUID),
+				"unset SHUTTLE_PEER_UID and restart the daemon so the peer gate uses its effective uid")
+		case ev.daemonPeerGateUIDSource != "euid":
+			mismatch(fmt.Sprintf("the daemon reports unknown peer-gate uid source %q", ev.daemonPeerGateUIDSource),
+				"restart onto the current build")
+		case *ev.daemonPeerGateUID != callerUID:
+			mismatch(fmt.Sprintf("the daemon admits uid %d; you are uid %d", *ev.daemonPeerGateUID, callerUID),
+				"run the CLI and daemon as the same uid, then restart the daemon")
+		}
+	}
+	gatedDaemonTCP := hostClass(h.Class) == hostClassShared && hostClass(ev.daemonClass) == hostClassShared &&
+		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" &&
+		ev.daemonPeerGateUIDSource != "" && ev.daemonPeerGateUID != nil && !portOwnerMismatch
+	if gatedDaemonTCP {
+		h.PeerGate = &ReceiptPeerGate{
+			Mode:   "uid",
+			Reason: "the daemon uses /proc/net/tcp{,6} to admit loopback peers with its exact uid",
+		}
+	}
 	if ev.daemonClass != "" && ev.daemonClass != h.Class {
 		mismatch(fmt.Sprintf("the running daemon booted as %s; this host declares %s", ev.daemonClass, h.Class),
 			"restart the daemon so it takes the declared class")
@@ -248,17 +366,20 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		mismatch(fmt.Sprintf("the running daemon listens on %s; this host resolves %s", ev.daemonListen, h.Listen),
 			"restart the daemon so it binds the resolved listener")
 	}
-	if socketClass && strings.HasPrefix(ev.daemonListen, "tcp://") {
+	if socketClass && strings.HasPrefix(ev.daemonListen, "tcp://") && !gatedDaemonTCP {
 		mismatch(fmt.Sprintf("the running daemon reports a TCP listener %s on a %s host", ev.daemonListen, h.Class), restartRepair)
 	}
 
 	if hostClass(h.Class).usesSocket() {
-		if ev.settings.listen.Network == "tcp" {
+		if ev.settings.listen.Network == "tcp" && !gatedDaemonTCP {
 			mismatch(fmt.Sprintf("class %s declares a TCP listener %s", h.Class, h.Listen),
 				fmt.Sprintf("drop the tcp:// listen from %s so the daemon takes the class's unix socket, then restart it; retarget `tailscale serve` and tunnels at the socket",
 					describeHostSource(ev.settings.ListenSource, ev.settings.File)))
 		}
 		for _, l := range h.Listeners {
+			if gatedDaemonTCP && l.Role == "daemon" && daemonTCPListenerMatches(l, ev.daemonListen) {
+				continue
+			}
 			mismatch(fmt.Sprintf("%s (%s) listens on TCP %s", l.Process, l.Role, net.JoinHostPort(l.Address, strconv.Itoa(l.Port))), listenerRepair(l.Role))
 		}
 		if h.HTTPSProxy != "" {
@@ -302,6 +423,20 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	return h
 }
 
+// daemonTCPListenerMatches identifies the live listener named by /version.
+func daemonTCPListenerMatches(listener ReceiptListener, listen string) bool {
+	if !strings.HasPrefix(listen, "tcp://") {
+		return false
+	}
+
+	address, portText, err := net.SplitHostPort(strings.TrimPrefix(listen, "tcp://"))
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(portText)
+	return err == nil && listener.Address == address && listener.Port == port
+}
+
 // listenerRepair is the remedy for a fleet TCP listener on a host whose
 // class already requires a unix socket.
 func listenerRepair(role string) string {
@@ -311,7 +446,7 @@ func listenerRepair(role string) string {
 	case "tailscaled":
 		return "run tailscaled without a local TCP listener (no --outbound-http-proxy-listen or --socks5-server), and point `tailscale serve` at the daemon's socket"
 	}
-	return "restart the daemon so it binds the unix socket; retarget `tailscale serve` and tunnels at it"
+	return "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 }
 
 // hostFileRepair words the repair for a host file or listener setting that
@@ -478,18 +613,9 @@ func splitListenAddr(s string) (string, int, bool) {
 // procListeners is the ss-less Linux path: LISTEN rows of /proc/net/tcp{,6}
 // owned by uid, joined to their process through /proc/<pid>/fd socket inodes.
 func procListeners(procRoot string, uid int) ([]rawListener, error) {
-	var rows []procTCPRow
-	read := false
-	for _, name := range []string{"tcp", "tcp6"} {
-		data, err := os.ReadFile(filepath.Join(procRoot, "net", name))
-		if err != nil {
-			continue
-		}
-		read = true
-		rows = append(rows, parseProcNetTCP(string(data))...)
-	}
-	if !read {
-		return nil, fmt.Errorf("no %s/net/tcp", procRoot)
+	rows, err := readProcTCP(procRoot)
+	if err != nil {
+		return nil, err
 	}
 	owners := procSocketOwners(procRoot)
 	var ls []rawListener
@@ -506,41 +632,251 @@ func procListeners(procRoot string, uid int) ([]rawListener, error) {
 	return ls, nil
 }
 
-type procTCPRow struct {
-	Address string
-	Port    int
-	UID     int
-	Inode   string
+// daemonListenerAddress reports any loopback or wildcard address a co-tenant
+// could use to squat on the daemon port.
+func daemonListenerAddress(address string) bool {
+	ip := net.ParseIP(address)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
-// parseProcNetTCP reads the LISTEN (st 0A) rows of /proc/net/tcp or tcp6:
-//
-//	sl local_address rem_address st tx_queue:rx_queue tr:tm->when retrnsmt uid timeout inode
-//
-// The local address is hex in host byte order, one 32-bit word at a time.
-func parseProcNetTCP(data string) []procTCPRow {
+// checkResolvedDaemonPortOwner checks the socket-class TCP exception used by
+// bin/shuttle. A refused connection means there is no listener to inspect yet.
+func checkResolvedDaemonPortOwner(settings hostSettings) error {
+	if runtime.GOOS != "linux" || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+		return nil
+	}
+	conn, err := net.DialTimeout("tcp", settings.listen.Address, 2*time.Second)
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("checking owner of %s: %w", settings.listen.Address, err)
+	}
+	defer conn.Close()
+	return checkDaemonTCPConnOwner(context.Background(), "/proc", conn, os.Geteuid(), acceptWait)
+}
+
+// daemonTCPOwnerCheckError describes a post-connect owner-check refusal.
+// uidKnown marks a matching /proc row, including uid 0 while acceptance is
+// ambiguous; foreign marks a known owner different from the caller.
+type daemonTCPOwnerCheckError struct {
+	address  string
+	uid      int
+	foreign  bool
+	reason   string
+	uidKnown bool
+	// pending: the connection has no established row yet, or its row still
+	// carries uid 0 before accept(). The caller retries.
+	pending bool
+}
+
+// acceptWait bounds how long a client waits for the listener to accept() its
+// connection. Non-root callers refuse an unowned row after this interval;
+// root callers admit an established uid-0 row only after waiting it out.
+const acceptWait = 2 * time.Second
+
+func (e *daemonTCPOwnerCheckError) Error() string {
+	if e.foreign {
+		return fmt.Sprintf("%s is held by uid %d, not you", e.address, e.uid)
+	}
+	return fmt.Sprintf("could not verify owner of %s: %s", e.address, e.reason)
+}
+
+func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), network, address, procRoot string, callerUID int, wait time.Duration) (net.Conn, error) {
+	conn, err := dial(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkDaemonTCPConnOwner(ctx, procRoot, conn, callerUID, wait); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// checkDaemonTCPConnOwner is the post-connect owner check with the wait the
+// kernel imposes: the server-side row carries uid 0 until the listener has
+// accept()ed. A root-owned listener also reports uid 0, so root callers wait
+// like everyone else and an established uid-0 row is admitted only after the
+// wait, when root is the only remaining interpretation.
+func checkDaemonTCPConnOwner(ctx context.Context, procRoot string, conn net.Conn, callerUID int, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		err := checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
+		var pending *daemonTCPOwnerCheckError
+		if !errors.As(err, &pending) || !pending.pending {
+			return err
+		}
+		if time.Now().After(deadline) {
+			if callerUID == 0 && pending.uidKnown && pending.uid == 0 {
+				return nil
+			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// checkProcTCPConnectionOwner matches the server-side ESTABLISHED row for a
+// connected client socket. That row's uid belongs to the process which accepted
+// the connection; its endpoint order is the mirror of the daemon's peer gate.
+func checkProcTCPConnectionOwner(procRoot, serverLocal, clientLocal string, callerUID int) error {
+	address, port, err := parseTCPEndpoint(serverLocal)
+	if err != nil {
+		return &daemonTCPOwnerCheckError{address: serverLocal, reason: fmt.Sprintf("invalid server endpoint: %v", err)}
+	}
+	clientAddress, clientPort, err := parseTCPEndpoint(clientLocal)
+	if err != nil {
+		return &daemonTCPOwnerCheckError{address: net.JoinHostPort(address, strconv.Itoa(port)), reason: fmt.Sprintf("invalid client endpoint: %v", err)}
+	}
+	display := net.JoinHostPort(address, strconv.Itoa(port))
+	rows, err := readProcTCPRows(procRoot)
+	if err != nil {
+		return &daemonTCPOwnerCheckError{address: display, reason: fmt.Sprintf("cannot read /proc/net/tcp{,6}: %v", err)}
+	}
+	found := false
+	for _, row := range rows {
+		if row.State != "01" || row.Address != address || row.Port != port ||
+			row.RemoteAddress != clientAddress || row.RemotePort != clientPort {
+			continue
+		}
+		found = true
+		if row.UID == 0 {
+			return &daemonTCPOwnerCheckError{address: display, uid: 0, uidKnown: true, pending: true,
+				reason: "the listener has not accepted the connection (row uid 0)"}
+		}
+		if row.UID != callerUID {
+			return &daemonTCPOwnerCheckError{address: display, uid: row.UID, foreign: true}
+		}
+	}
+	if !found {
+		return &daemonTCPOwnerCheckError{address: display, pending: true, reason: "no established row yet"}
+	}
+	return nil
+}
+
+func parseTCPEndpoint(endpoint string) (string, int, error) {
+	host, portText, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", 0, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", 0, fmt.Errorf("%q is not an IP address", host)
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid port %q", portText)
+	}
+	return ip.String(), port, nil
+}
+
+func readProcTCP(procRoot string) ([]procTCPRow, error) {
+	rows, err := readProcTCPRows(procRoot)
+	if err != nil {
+		return nil, err
+	}
+	var listeners []procTCPRow
+	for _, row := range rows {
+		if row.State == "0A" {
+			listeners = append(listeners, row)
+		}
+	}
+	return listeners, nil
+}
+
+func readProcTCPRows(procRoot string) ([]procTCPRow, error) {
+	var rows []procTCPRow
+	read := false
+	for _, name := range []string{"tcp", "tcp6"} {
+		data, err := os.ReadFile(filepath.Join(procRoot, "net", name))
+		if err != nil {
+			continue
+		}
+		read = true
+		rows = append(rows, parseProcNetTCPRows(string(data))...)
+	}
+	if !read {
+		return nil, fmt.Errorf("no readable %s/net/tcp or tcp6", procRoot)
+	}
+	return rows, nil
+}
+
+type procTCPRow struct {
+	Address       string
+	Port          int
+	RemoteAddress string
+	RemotePort    int
+	State         string
+	UID           int
+	Inode         string
+}
+
+// parseProcNetTCP reads rows from /proc/net/tcp or tcp6. Addresses are hex in
+// host byte order, one 32-bit word at a time.
+func parseProcNetTCPRows(data string) []procTCPRow {
 	var rows []procTCPRow
 	sc := bufio.NewScanner(strings.NewReader(data))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
-		if len(f) < 10 || f[3] != "0A" {
+		if len(f) < 10 {
 			continue
 		}
-		hexAddr, hexPort, ok := strings.Cut(f[1], ":")
+		address, port, ok := parseProcEndpoint(f[1])
 		if !ok {
 			continue
 		}
-		port, err := strconv.ParseInt(hexPort, 16, 32)
-		if err != nil {
+		remoteAddress, remotePort, ok := parseProcEndpoint(f[2])
+		if !ok {
 			continue
 		}
 		uid, err := strconv.Atoi(f[7])
 		if err != nil {
 			continue
 		}
-		rows = append(rows, procTCPRow{Address: decodeProcAddr(hexAddr), Port: int(port), UID: uid, Inode: f[9]})
+		rows = append(rows, procTCPRow{
+			Address: address, Port: port, RemoteAddress: remoteAddress, RemotePort: remotePort,
+			State: f[3], UID: uid, Inode: f[9],
+		})
 	}
 	return rows
+}
+
+func parseProcEndpoint(endpoint string) (string, int, bool) {
+	hexAddr, hexPort, ok := strings.Cut(endpoint, ":")
+	if !ok {
+		return "", 0, false
+	}
+	port, err := strconv.ParseInt(hexPort, 16, 32)
+	if err != nil || port < 0 || port > 65535 {
+		return "", 0, false
+	}
+	address := net.ParseIP(decodeProcAddr(hexAddr))
+	if address == nil {
+		return "", 0, false
+	}
+	if v4 := address.To4(); v4 != nil {
+		address = v4
+	}
+	return address.String(), int(port), true
+}
+
+// parseProcNetTCP retains the LISTEN-only contract used by listener evidence.
+func parseProcNetTCP(data string) []procTCPRow {
+	var listeners []procTCPRow
+	for _, row := range parseProcNetTCPRows(data) {
+		if row.State == "0A" {
+			listeners = append(listeners, row)
+		}
+	}
+	return listeners
 }
 
 func decodeProcAddr(h string) string {
@@ -548,13 +884,11 @@ func decodeProcAddr(h string) string {
 	if err != nil || (len(raw) != 4 && len(raw) != 16) {
 		return h
 	}
-	// Each 4-byte word is little-endian on every architecture Linux reports
-	// this way for; reverse within words.
+	// /proc prints each 32-bit address word in host byte order; write it in
+	// network order for net.IP.
 	ip := make(net.IP, len(raw))
 	for w := 0; w < len(raw); w += 4 {
-		for b := 0; b < 4; b++ {
-			ip[w+b] = raw[w+3-b]
-		}
+		binary.BigEndian.PutUint32(ip[w:w+4], binary.NativeEndian.Uint32(raw[w:w+4]))
 	}
 	return ip.String()
 }
