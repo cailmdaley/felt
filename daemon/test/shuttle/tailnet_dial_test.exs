@@ -87,6 +87,25 @@ defmodule Shuttle.TailnetDialTest do
     assert filename =~ ~r/\Ahash-[0-9a-f]{16}\.sock\z/
   end
 
+  test "bridge specs skip a URL host outside the DNS and IP literal grammar", %{base: base} do
+    invalid = remote("hub_a.example.ts.net", 443)
+
+    {:ok, manager} =
+      TailnetDial.start_link(
+        remotes: [invalid],
+        tailscale_socket: Path.join(base, "localapi.sock"),
+        data_dir: Path.join(base, "data"),
+        refresh?: false
+      )
+
+    Process.unlink(manager)
+    on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
+
+    assert TailnetDial.socket_for("hub_a.example.ts.net", 443) == nil
+    assert TailnetDial.bridge_pid(invalid.name) == nil
+    assert TailnetDial.status().bridges == []
+  end
+
   test "an overlong physical socket path is rejected without a bind MatchError", %{base: base} do
     remote = remote(@host, 443)
     localapi = Path.join(base, "localapi.sock")

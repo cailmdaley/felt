@@ -152,6 +152,30 @@
     },
     "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
   },
+  "ip_literal.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-v6",
+        "url": "https://[2001:db8::1]",
+        "ssh": "",
+        "display": "hub-v6",
+        "port": 0,
+        "remote_port": 4000,
+        "remote_socket": "",
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-v6",
+        "manager": "none"
+      }
+    ],
+    "https_proxy": {
+      "host": "",
+      "port": 0
+    },
+    "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+  },
   "tailscale.json": {
     "launchd_label_prefix": "io.shuttle",
     "remotes": [
@@ -237,6 +261,10 @@
     "duplicate_https_authority.json": {
       "remote": "hub-b",
       "field": "https authority"
+    },
+    "invalid_url_host.json": {
+      "remote": "hub-b",
+      "field": "url"
     }
   }
 }

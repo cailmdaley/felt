@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "defaults": {
+    "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+  },
+  "remotes": [
+    {
+      "name": "hub-v6",
+      "url": "https://[2001:db8::1]"
+    }
+  ]
+}

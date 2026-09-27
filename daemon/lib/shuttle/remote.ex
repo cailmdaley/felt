@@ -115,7 +115,7 @@ defmodule Shuttle.Remote do
          {:ok, poll_interval_ms} <- positive_integer(fetch(entry, :poll_interval_ms), 5_000),
          {:ok, request_timeout_ms} <- positive_integer(fetch(entry, :request_timeout_ms), 2_000),
          {:ok, stale_multiplier} <- positive_integer(fetch(entry, :stale_multiplier), 4),
-         true <- is_binary(name) and name != "" and is_binary(url) and url != "" do
+         true <- is_binary(name) and name != "" and valid_url?(url) do
       %__MODULE__{
         name: name,
         url: url,
@@ -140,6 +140,28 @@ defmodule Shuttle.Remote do
   end
 
   def from_config(_), do: nil
+
+  @doc false
+  def valid_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> valid_url_host?(host)
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  def valid_url?(_), do: false
+
+  @doc false
+  def valid_url_host?(host) when is_binary(host) do
+    Regex.match?(~r/\A[A-Za-z0-9.-]+\z/, host) or
+      match?({:ok, _address}, :inet.parse_address(String.to_charlist(host)))
+  rescue
+    _ -> false
+  end
+
+  def valid_url_host?(_), do: false
 
   defp derived_url({:ok, port}) when is_integer(port), do: "http://127.0.0.1:#{port}"
   defp derived_url(_), do: nil

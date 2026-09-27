@@ -111,31 +111,35 @@ defmodule Shuttle.TailnetDial.Reconciler do
     remotes
     |> Enum.filter(& &1.enabled)
     |> Enum.flat_map(fn %Remote{} = remote ->
-      case URI.parse(remote.url) do
-        %URI{scheme: scheme, host: host} = uri
-        when is_binary(scheme) and is_binary(host) and host != "" ->
-          if String.downcase(scheme) == "https" do
-            host = String.downcase(host)
-            port = uri.port || 443
-            path = Shuttle.TailnetDial.socket_path(remote.name, data_dir)
+      if Remote.valid_url?(remote.url) do
+        case URI.parse(remote.url) do
+          %URI{scheme: scheme, host: host} = uri
+          when is_binary(scheme) and is_binary(host) and host != "" ->
+            if String.downcase(scheme) == "https" and Remote.valid_url_host?(host) do
+              host = String.downcase(host)
+              port = uri.port || 443
+              path = Shuttle.TailnetDial.socket_path(remote.name, data_dir)
 
-            [
-              {remote.name,
-               %{
-                 host: host,
-                 port: port,
-                 url: remote.url,
-                 localapi_socket: socket,
-                 request_timeout_ms: remote.request_timeout_ms,
-                 path: path
-               }}
-            ]
-          else
+              [
+                {remote.name,
+                 %{
+                   host: host,
+                   port: port,
+                   url: remote.url,
+                   localapi_socket: socket,
+                   request_timeout_ms: remote.request_timeout_ms,
+                   path: path
+                 }}
+              ]
+            else
+              []
+            end
+
+          _ ->
             []
-          end
-
-        _ ->
-          []
+        end
+      else
+        []
       end
     end)
     |> Map.new()

@@ -460,6 +460,9 @@ func normalizeRemotes(doc *remotesFile) error {
 		if r.URL == "" {
 			r.URL = fmt.Sprintf("http://127.0.0.1:%d", r.Port)
 		}
+		if err := validateRemoteURL(r.URL); err != nil {
+			return fmt.Errorf("remote %q: %w", r.Name, err)
+		}
 
 		if authority := privateHTTPSAuthority(r.URL); privateDialConfigured && r.enabledOr() && authority != "" {
 			if other, duplicate := seenHTTPSAuthorities[authority]; duplicate {
@@ -522,6 +525,23 @@ func normalizeRemotes(doc *remotesFile) error {
 
 	return nil
 }
+
+func validateRemoteURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("url %q is invalid: %w", raw, err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("url %q must include a host", raw)
+	}
+	if !remoteURLHostPattern.MatchString(host) && net.ParseIP(host) == nil {
+		return fmt.Errorf("url host %q must use ASCII letters, digits, dots, and hyphens or be an IP literal", host)
+	}
+	return nil
+}
+
+var remoteURLHostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 
 func privateHTTPSAuthority(raw string) string {
 	u, err := url.Parse(raw)
