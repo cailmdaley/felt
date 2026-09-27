@@ -106,7 +106,7 @@ terminus. Only `accept` clears the outcome.
 Beyond the columns the Desk offers a fiber and file viewer, Stash and Capture
 dialogs, and Attach. Each card's panel folds a drawer under its title: a message
 box with New session and Resume, the next launch's agent, effort, session and
-kind, the card's due day and parent, and Temper / Compost.
+kind, the card's due day and parent, and Temper.
 
 ### Attach
 

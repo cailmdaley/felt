@@ -45,6 +45,7 @@ try {
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByText('App conversation continuity', { exact: true }).click()
   const drawer = page.locator('.kbn-detail-controls-toggle')
+  assert.equal(await page.locator('.kbn-detail-controls').getByRole('button', { name: 'Compost', exact: true }).count(), 0, 'the drawer carries Temper alone')
   const stripWho = () => page.locator('.kbn-ctl-who > span').allInnerTexts()
   assert.equal((await stripWho())[0], 'codex-luna', 'the folded strip leads with the agent')
   await drawer.click()
@@ -172,7 +173,8 @@ try {
   assert.equal(joins.length, 1, 'choosing Room starts exactly one meeting')
   assert.deepEqual({ mode: joins[0].body.meeting.mode, note: joins[0].body.note }, { mode: 'room', note: 'null tests review' })
   assert.equal(await message.inputValue(), '', 'the note is spent once the meeting starts')
-  assert.ok(!(await meeting.isVisible()), 'a recording meeting leaves nothing to start')
+  assert.ok(await meeting.isVisible() && await meeting.isDisabled(), 'while a meeting records, Meeting stays in place, inert')
+  assert.match(await meeting.getAttribute('title'), /^Recording: /)
 
   // Resume carries the message exactly as written.
   await page.evaluate(() => { window.settingWrites = [] })

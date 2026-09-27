@@ -346,11 +346,6 @@
   border-color: rgba(63, 130, 120, 0.65);
   background: rgba(63, 130, 120, 0.12);
 }
-.kbn-ctl-compost { color: var(--ctl-muted); }
-.kbn-ctl-compost:hover:not(:disabled) {
-  color: #1B1611;
-  background: rgba(255, 251, 237, 0.95);
-}
 .kbn-ctl-sends {
   display: inline-flex;
   gap: 6px;
@@ -739,7 +734,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding-top: 12px;
+  /* Inset by the composer's frame, so Temper's right edge is Resume's. */
+  padding: 12px 9px 0;
   border-top: 1px solid rgba(27, 22, 17, 0.08);
 }
 .kbn-ctl-foot .kbn-detail-error {

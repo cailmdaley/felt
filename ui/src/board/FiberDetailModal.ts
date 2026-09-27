@@ -583,7 +583,7 @@ interface AgentRecord {
  *
  * Every card action lives in one drawer directly under the title, folded by
  * default: the message box with its meeting and New session / Resume, the
- * next launch's settings, due and parent, and Temper / Compost (see
+ * next launch's settings, due and parent, and Temper (see
  * `buildControls`).
  *
  * Deliberately NOT a Radix AppDialog and NOT background-locked: the panel
@@ -628,7 +628,7 @@ export class FiberDetailModal {
    *  kanban's onOpenWorker; drives the status pill's double-click. */
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /**
-   * Terminal-move delegate. Temper / Compost close the panel immediately and
+   * Terminal-move delegate. Temper closes the panel immediately and
    * hand the move to the parent kanban's optimistic transition path (instant
    * card relocation + background commit + banner on failure). The product
    * always wires it; the no-op default exists only for the offline harness
@@ -740,6 +740,8 @@ export class FiberDetailModal {
   /** The open card and its transcript pane, repainted by {@link syncMeeting}. */
   private transcriptCard: KanbanCard | null = null
   private transcriptPane: HTMLElement | null = null
+  /** Repaints the drawer's Meeting verb from the board's meeting status. */
+  private meetingPaint: (() => void) | null = null
 
   constructor(
     shuttleBase: string,
@@ -1133,8 +1135,10 @@ export class FiberDetailModal {
     return pane
   }
 
-  /** Repaint the open card's transcript from the board's current meeting. */
+  /** Repaint the open card's transcript and Meeting verb from the board's
+   *  current meeting. */
   syncMeeting(): void {
+    this.meetingPaint?.()
     const pane = this.transcriptPane
     const card = this.transcriptCard
     if (!pane || !card) return
@@ -1155,6 +1159,7 @@ export class FiberDetailModal {
   close(): void {
     this.transcriptCard = null
     this.transcriptPane = null
+    this.meetingPaint = null
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
     if (this.mobileWatch) {
@@ -2346,8 +2351,8 @@ export class FiberDetailModal {
    * it, how it recurs, where it runs, when it is due, how its last run went.
    * Unfolded, three things in the order they are reached for: the composer (a
    * message and the dispatch verbs that carry it), the ledger (what the next
-   * launch reads, beside the card's own due day and parent), and the verdicts
-   * that close the card.
+   * launch reads, beside the card's own due day and parent), and the Temper
+   * verdict that closes the card.
    *
    * Type carries the grammar, so no line of it needs a caption: mono for
    * machine values (ids, effort, cron, paths, times), serif for human words
@@ -2434,21 +2439,17 @@ export class FiberDetailModal {
       this.buildCardFields(card, statusEl, errorEl, swallow, reflect, watch),
     )
 
+    // The verdict, under the verbs and on their right edge. Composting stays
+    // on the board's review card and the CLI.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const temper = ctlButton('Temper', 'kbn-ctl-temper')
-    const compost = ctlButton('Compost', 'kbn-ctl-compost')
     temper.addEventListener('click', (e) => {
       e.stopPropagation()
       this.close()
       this.onTransition(card, 'tempered')
     })
-    compost.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.close()
-      this.onTransition(card, 'composted')
-    })
-    foot.append(errorEl, statusEl, temper, compost)
+    foot.append(errorEl, statusEl, temper)
 
     body.append(ledger, foot)
   }
@@ -2496,7 +2497,7 @@ export class FiberDetailModal {
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    if (this.meeting?.canJoin()) sends.append(this.buildMeeting(card, message, err))
+    if (this.meeting) sends.append(this.buildMeeting(card, message, err))
     sends.append(fresh, resume)
     foot.append(sends)
 
@@ -2521,6 +2522,10 @@ export class FiberDetailModal {
    * recording on this machine — nothing records before that pick. The
    * composer's message becomes the meeting's note, and the worker — live or
    * not — receives the meeting as a joined constitution.
+   *
+   * One meeting records at a time. While any does, the verb stays in its
+   * place, inert, naming the recording on hover; it is absent only where
+   * hark is not available. It follows the board's meeting poll.
    */
   private buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, err: HTMLElement): HTMLElement {
     const wrap = document.createElement('span')
@@ -2546,24 +2551,36 @@ export class FiberDetailModal {
       else document.removeEventListener('pointerdown', onOutside, true)
     }
 
+    let starting = false
+    const paint = (): void => {
+      const control = this.meeting
+      if (!control) return
+      const current = control.current()
+      const recording = current !== null && current.state !== 'failed'
+      wrap.hidden = !control.canJoin() && !recording
+      opener.disabled = starting || !control.canJoin()
+      opener.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
+      if (opener.disabled) setOpen(false)
+    }
+    this.meetingPaint = paint
+
     const start = (mode: MeetingMode): void => {
       setOpen(false)
-      opener.disabled = true
+      starting = true
+      paint()
       opener.textContent = 'Starting…'
       err.style.display = 'none'
       void this.meeting!.join(card, mode, note.value).then((error) => {
-        opener.disabled = false
+        starting = false
         opener.textContent = 'Meeting'
         if (error) {
           err.textContent = error
           err.style.display = ''
         } else {
-          // One meeting at a time: once it is recording there is nothing left
-          // to start here.
-          wrap.hidden = true
           note.value = ''
           note.dispatchEvent(new Event('input'))
         }
+        paint()
       })
     }
     const items = MEETING_MODES.map(({ value, label }) => {
@@ -2605,6 +2622,7 @@ export class FiberDetailModal {
     })
 
     wrap.append(opener, menu)
+    paint()
     return wrap
   }
 
