@@ -28,7 +28,7 @@ func walkCommands(c *cobra.Command, visit func(*cobra.Command)) {
 }
 
 // helpTokens splits a command segment shell-style: quoted strings are one
-// token. It stops at a comment, a pipe, or a command separator.
+// token. It stops at a comment, a redirection, a pipe, or a command separator.
 func helpTokens(s string) []string {
 	var tokens []string
 	var cur strings.Builder
@@ -61,7 +61,10 @@ func helpTokens(s string) []string {
 	}
 	flush()
 	for i, tok := range tokens {
-		if strings.HasPrefix(tok, "#") || tok == "|" || tok == "||" || tok == "&&" || tok == ";" {
+		switch {
+		// "<" alone is a redirection; <id> is a placeholder.
+		case strings.HasPrefix(tok, "#"), strings.HasPrefix(tok, ">"), strings.HasPrefix(tok, "2>"),
+			tok == "<", tok == "|", tok == "||", tok == "&&", tok == ";":
 			return tokens[:i]
 		}
 		if strings.HasSuffix(tok, ";") {
@@ -212,7 +215,15 @@ func unknownFlags(c *cobra.Command, args []string) []string {
 	return bad
 }
 
+// initDefaultCommands adds the help and completion commands Execute would add,
+// so the tests see the tree a user does whatever ran before them.
+func initDefaultCommands() {
+	rootCmd.InitDefaultHelpCmd()
+	rootCmd.InitDefaultCompletionCmd()
+}
+
 func TestHelpCommandLinesResolve(t *testing.T) {
+	initDefaultCommands()
 	walkCommands(rootCmd, func(owner *cobra.Command) {
 		for _, inv := range helpInvocations(owner) {
 			hasFlag := false
@@ -261,6 +272,7 @@ and 'felt add launch/log' is quoted, as is ` + "`felt hook session`" + `.
 
   felt ls "query" --body -r         regex, including bodies
   felt show <id> -d summary # comment
+  felt completion zsh > "$(brew --prefix)/_felt"
   -t rule:        an indented flag line`,
 		Example: `  felt edit analysis/covariance -o "done" | cat`,
 	}
@@ -276,6 +288,7 @@ and 'felt add launch/log' is quoted, as is ` + "`felt hook session`" + `.
 		"keeps going",
 		"ls \"query\" --body -r",
 		"show <id> -d summary",
+		"completion zsh",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("extracted invocations:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -326,6 +339,7 @@ func TestRootHelpCoversEveryVerb(t *testing.T) {
 }
 
 func TestEveryTopLevelCommandIsGrouped(t *testing.T) {
+	initDefaultCommands()
 	for _, c := range rootCmd.Commands() {
 		if c.Hidden || c.Name() == "completion" {
 			continue
