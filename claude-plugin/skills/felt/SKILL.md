@@ -3,10 +3,9 @@ name: felt
 description: >
   This skill should be used whenever working in a project that contains a `.felt/` directory, and
   when the user mentions fibers or asks to "file this", "record a decision", "add structure",
-  "close this fiber", "sketch a fiber", "think through",
-  "clean up fibers", "consolidate", "archive", "sweep", "maintenance pass", or "extract from the
+  "close this fiber", "clean up fibers", "consolidate", "archive", "sweep", "maintenance pass", or "extract from the
   session". It covers filing fibers, updating outcomes and bodies, using additional YAML fields
-  beyond what felt owns natively, end-of-session sweeps, maintenance passes, and transcript processing.
+  beyond what felt owns natively, end-of-session sweeps, and maintenance passes.
 ---
 
 # felt — Working with Fibers
@@ -60,7 +59,5 @@ Everything above applies always; references go deeper for specific activities.
 
 | When | Reference |
 |------|-----------|
-| Helping fuzzy thought crystallize into a fiber — two diamonds, funnel, ambiguity check | [ideating.md](references/ideating.md) |
-| Processing an external transcript — meeting notes, voice note, dictation | [transcripts.md](references/transcripts.md) |
 | Gardening, composting, reshaping, acting on Attention | [maintenance.md](references/maintenance.md) |
 | Linking a project into a cross-project store, or reasoning about views, find vs ls, and cross-project links | [cross-project.md](references/cross-project.md) |

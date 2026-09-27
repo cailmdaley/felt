@@ -6,7 +6,10 @@ description: >
   and for operating Shuttle, its kanban, agent selection, or dispatch.
   Also covers assigning persistent collaborators and roles, maintaining
   continuity across sessions, discovering conversations, and sending
-  messages or files between sessions across hosts and harnesses.
+  messages or files between sessions across hosts and harnesses, and
+  turning a meeting or any transcript into notes and fibers: "process
+  this transcript", "here's a transcript, make notes", "meeting notes",
+  a voice note or dictation to write up.
 ---
 
 # shuttle
@@ -25,6 +28,7 @@ The human's surface is the **board**, served by the daemon at `:4000`: a pure vi
 |---|---|
 | Capturing a new idea | [references/capture.md](references/capture.md), then the worker loop below. |
 | A meeting capture (`From User` opens with `Meeting mode`) | [references/capture.md](references/capture.md), then [references/meeting.md](references/meeting.md). |
+| Handed a transcript to write up — meeting notes, a voice note, dictation | [references/meeting.md](references/meeting.md), "From transcript to notes". |
 | A worker whose constitution a meeting joins (a message opening with `Meeting mode` that says so) | [references/meeting.md](references/meeting.md), "Joined to a constitution". |
 | A dispatched worker | This file, top to bottom. |
 | Authoring a constitution | [references/authoring.md](references/authoring.md) — the desired-state craft, install flow, drafts vs dispatch, agent selection, human gates. |
