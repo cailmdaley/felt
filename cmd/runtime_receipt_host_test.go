@@ -176,7 +176,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 }
 
-func TestObservedDaemonPortOwnerIncludesWildcardListeners(t *testing.T) {
+func TestObservedDaemonPortOwnerIncludesLoopbackAndWildcardListeners(t *testing.T) {
 	settings := hostSettings{Class: "shared-multi-user", Listen: "tcp://127.0.0.1:4000"}
 	ev := hostEvidence{settings: settings, daemonClass: "shared-multi-user", daemonListen: settings.Listen}
 	cases := []struct {
@@ -184,7 +184,9 @@ func TestObservedDaemonPortOwnerIncludesWildcardListeners(t *testing.T) {
 		address net.IP
 		tcp6    bool
 	}{
-		{"loopback", net.IPv4(127, 0, 0, 1), false},
+		{"ipv4 loopback", net.IPv4(127, 0, 0, 1), false},
+		{"other ipv4 loopback", net.IPv4(127, 0, 0, 2), false},
+		{"ipv6 loopback", net.ParseIP("::1"), true},
 		{"ipv4 wildcard", net.IPv4zero, false},
 		{"ipv6 wildcard", net.ParseIP("::"), true},
 		{"mapped ipv4 wildcard", net.ParseIP("::ffff:0.0.0.0"), true},

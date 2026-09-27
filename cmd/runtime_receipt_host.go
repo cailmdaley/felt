@@ -632,19 +632,11 @@ func procListeners(procRoot string, uid int) ([]rawListener, error) {
 	return ls, nil
 }
 
-// daemonListenerAddress reports a local address a co-tenant could use to
-// squat on the loopback daemon port, including wildcard and v4-mapped binds.
+// daemonListenerAddress reports any loopback or wildcard address a co-tenant
+// could use to squat on the daemon port.
 func daemonListenerAddress(address string) bool {
 	ip := net.ParseIP(address)
-	if ip == nil {
-		return false
-	}
-	for _, candidate := range []string{"127.0.0.1", "0.0.0.0", "::", "::ffff:0.0.0.0", "::ffff:127.0.0.1"} {
-		if ip.Equal(net.ParseIP(candidate)) {
-			return true
-		}
-	}
-	return false
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
 // checkResolvedDaemonPortOwner checks the socket-class TCP exception used by
