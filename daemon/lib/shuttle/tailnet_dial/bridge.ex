@@ -26,38 +26,59 @@ defmodule Shuttle.TailnetDial.Bridge do
     # Trap supervisor shutdown so terminate/2 can remove the private socket path.
     Process.flag(:trap_exit, true)
     path = opts |> Keyword.fetch!(:path) |> Shuttle.Host.prepare_unix_socket!()
+    bytes = byte_size(path)
+    limit = unix_socket_path_limit()
 
-    {:ok, listener} =
-      :gen_tcp.listen(0, [
-        :binary,
-        active: false,
-        packet: :raw,
-        ifaddr: {:local, path},
-        backlog: 128
-      ])
-
-    :ok = Shuttle.Host.restrict_bound_socket!(path)
-    owner = self()
-
-    {acceptor, acceptor_monitor} =
-      spawn_monitor(fn -> accept_loop(listener, Keyword.put(opts, :owner, owner)) end)
-
-    name = Keyword.fetch!(opts, :name)
-    host = Keyword.fetch!(opts, :host)
-    port = Keyword.fetch!(opts, :port)
-    Shuttle.TailnetDial.register_bridge(host, port, name, path)
-
-    {:ok,
-     %{
-       listener: listener,
-       acceptor: acceptor,
-       acceptor_monitor: acceptor_monitor,
-       path: path,
-       host: host,
-       port: port
-     }}
+    if bytes >= limit do
+      {:stop, {:socket_path_too_long, bytes, limit}}
+    else
+      start_listener(path, opts)
+    end
   rescue
     error in [ArgumentError] -> {:stop, error}
+  end
+
+  defp start_listener(path, opts) do
+    case :gen_tcp.listen(0, [
+           :binary,
+           active: false,
+           packet: :raw,
+           ifaddr: {:local, path},
+           backlog: 128
+         ]) do
+      {:ok, listener} ->
+        :ok = Shuttle.Host.restrict_bound_socket!(path)
+        owner = self()
+
+        {acceptor, acceptor_monitor} =
+          spawn_monitor(fn -> accept_loop(listener, Keyword.put(opts, :owner, owner)) end)
+
+        name = Keyword.fetch!(opts, :name)
+        host = Keyword.fetch!(opts, :host)
+        port = Keyword.fetch!(opts, :port)
+        Shuttle.TailnetDial.register_bridge(host, port, name, path)
+
+        {:ok,
+         %{
+           listener: listener,
+           acceptor: acceptor,
+           acceptor_monitor: acceptor_monitor,
+           path: path,
+           host: host,
+           port: port
+         }}
+
+      {:error, reason} ->
+        {:stop, {:listen_failed, reason}}
+    end
+  end
+
+  defp unix_socket_path_limit do
+    case :os.type() do
+      {:unix, :darwin} -> 104
+      {:unix, :linux} -> 108
+      _ -> 104
+    end
   end
 
   @impl true

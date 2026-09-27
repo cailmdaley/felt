@@ -1,5 +1,6 @@
 defmodule Shuttle.TailnetDialTest do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
   alias Shuttle.Remote
   alias Shuttle.TailnetDial
 
@@ -53,6 +54,47 @@ defmodule Shuttle.TailnetDialTest do
     digest = :crypto.hash(:sha256, unsafe_name) |> Base.encode16(case: :lower)
 
     refute TailnetDial.socket_path(unsafe_name, base) == TailnetDial.socket_path(digest, base)
+  end
+
+  test "hashed socket components use a compact 16-hex digest", %{base: base} do
+    name = String.duplicate("remote-", 12)
+    filename = name |> TailnetDial.socket_path(base) |> Path.basename()
+
+    assert filename =~ ~r/\Ahash-[0-9a-f]{16}\.sock\z/
+  end
+
+  test "an overlong physical socket path is rejected without a bind MatchError", %{base: base} do
+    remote = remote(@host, 443)
+    localapi = Path.join(base, "localapi.sock")
+    data_dir = Path.join(base, String.duplicate("d", 75))
+
+    log =
+      capture_log(fn ->
+        {:ok, manager} =
+          TailnetDial.start_link(
+            remotes: [remote],
+            tailscale_socket: localapi,
+            data_dir: data_dir,
+            refresh?: false
+          )
+
+        Process.unlink(manager)
+        send(self(), {:long_path_manager, manager})
+      end)
+
+    assert_receive {:long_path_manager, manager}, 1_000
+    on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
+
+    assert {:tailnet_dial, :listen, {:socket_path_too_long, bytes, limit}} =
+             TailnetDial.last_error(remote.name)
+
+    assert bytes >= limit
+    assert log =~ "socket path is #{bytes} bytes"
+    assert log =~ "platform limit is #{limit} bytes"
+    assert Process.alive?(manager)
+    assert Process.alive?(Process.whereis(Shuttle.TailnetDial.DynamicSupervisor))
+    assert {:error, :enoent} = File.lstat(TailnetDial.socket_path(remote.name, data_dir))
+    assert %{bridges: [%{status: "error", error_stage: "listen"}]} = TailnetDial.status()
   end
 
   test "LocalAPI dial upgrade carries verified TLS and preserves HTTP authority", %{

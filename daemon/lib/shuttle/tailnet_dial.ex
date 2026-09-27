@@ -148,7 +148,7 @@ defmodule Shuttle.TailnetDial do
     if byte_size(name) <= 64 and Regex.match?(~r/\A[A-Za-z0-9._-]+\z/, name) do
       "name-" <> name
     else
-      digest = :crypto.hash(:sha256, name) |> Base.encode16(case: :lower)
+      digest = :crypto.hash(:sha256, name) |> Base.encode16(case: :lower) |> binary_part(0, 16)
       "hash-" <> digest
     end
   end
@@ -168,9 +168,16 @@ defmodule Shuttle.TailnetDial do
       end
 
     if should_log? do
-      Logger.warning("TailnetDial: remote #{remote_name} failed at #{stage}: #{inspect(reason)}")
+      Logger.warning(
+        "TailnetDial: remote #{remote_name} failed at #{stage}: #{format_reason(reason)}"
+      )
     end
   rescue
     ArgumentError -> :ok
   end
+
+  defp format_reason({:socket_path_too_long, bytes, limit}),
+    do: "socket path is #{bytes} bytes; this platform limit is #{limit} bytes"
+
+  defp format_reason(reason), do: inspect(reason)
 end
