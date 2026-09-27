@@ -653,11 +653,12 @@ func checkResolvedDaemonPortOwner(settings hostSettings) error {
 		return fmt.Errorf("checking owner of %s: %w", settings.listen.Address, err)
 	}
 	defer conn.Close()
-	return checkDaemonTCPConnOwner(context.Background(), "/proc", conn, os.Geteuid())
+	return checkDaemonTCPConnOwner(context.Background(), "/proc", conn, os.Geteuid(), acceptWait)
 }
 
-// daemonTCPOwnerCheckError is a fail-closed refusal from the post-connect
-// owner check. A UID is present only when /proc identified a foreign owner.
+// daemonTCPOwnerCheckError describes a post-connect owner-check refusal.
+// uidKnown marks a matching /proc row, including uid 0 while acceptance is
+// ambiguous; foreign marks a known owner different from the caller.
 type daemonTCPOwnerCheckError struct {
 	address  string
 	uid      int
@@ -670,7 +671,8 @@ type daemonTCPOwnerCheckError struct {
 }
 
 // acceptWait bounds how long a client waits for the listener to accept() its
-// connection before treating the unowned row as a refusal.
+// connection. Non-root callers refuse an unowned row after this interval;
+// root callers admit an established uid-0 row only after waiting it out.
 const acceptWait = 2 * time.Second
 
 func (e *daemonTCPOwnerCheckError) Error() string {
@@ -680,12 +682,12 @@ func (e *daemonTCPOwnerCheckError) Error() string {
 	return fmt.Sprintf("could not verify owner of %s: %s", e.address, e.reason)
 }
 
-func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), network, address, procRoot string, callerUID int) (net.Conn, error) {
+func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), network, address, procRoot string, callerUID int, wait time.Duration) (net.Conn, error) {
 	conn, err := dial(ctx, network, address)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDaemonTCPConnOwner(ctx, procRoot, conn, callerUID); err != nil {
+	if err := checkDaemonTCPConnOwner(ctx, procRoot, conn, callerUID, wait); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -697,8 +699,8 @@ func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, strin
 // accept()ed. A root-owned listener also reports uid 0, so root callers wait
 // like everyone else and an established uid-0 row is admitted only after the
 // wait, when root is the only remaining interpretation.
-func checkDaemonTCPConnOwner(ctx context.Context, procRoot string, conn net.Conn, callerUID int) error {
-	deadline := time.Now().Add(acceptWait)
+func checkDaemonTCPConnOwner(ctx context.Context, procRoot string, conn net.Conn, callerUID int, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
 	for {
 		err := checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
 		var pending *daemonTCPOwnerCheckError

@@ -347,6 +347,9 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the TCP owner check reads Linux /proc")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("a root caller cannot distinguish a root listener from an unaccepted socket")
+	}
 	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
 	withOwnHost(t, "test-host")

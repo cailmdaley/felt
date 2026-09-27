@@ -92,7 +92,7 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 			return nil, err
 		}
 		if checkOwner {
-			return dialAndCheckDaemonTCP(ctx, base, network, addr, "/proc", os.Geteuid())
+			return dialAndCheckDaemonTCP(ctx, base, network, addr, "/proc", os.Geteuid(), acceptWait)
 		}
 		return base(ctx, network, addr)
 	}

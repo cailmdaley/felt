@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -8,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseSSListeners(t *testing.T) {
@@ -172,6 +175,78 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 		err := checkProcTCPConnectionOwner(filepath.Join(t.TempDir(), "absent"), "127.0.0.1:4000", "127.0.0.1:51432", 1000)
 		if err == nil || !strings.Contains(err.Error(), "cannot read /proc/net/tcp") {
 			t.Fatalf("unreadable proc error = %v", err)
+		}
+	})
+}
+
+func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the connection owner check reads Linux /proc")
+	}
+	const callerUID = 1 // Exercise the non-root refusal even when the test process is root.
+	wait := 100 * time.Millisecond
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}
+	listen := func(t *testing.T) *net.TCPListener {
+		t.Helper()
+		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = listener.Close() })
+		return listener
+	}
+
+	t.Run("refuses an unaccepted socket after the wait", func(t *testing.T) {
+		listener := listen(t)
+		started := time.Now()
+		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), "/proc", callerUID, wait)
+		elapsed := time.Since(started)
+		if conn != nil {
+			_ = conn.Close()
+			t.Fatal("unaccepted socket was returned as an owned connection")
+		}
+		var ownerErr *daemonTCPOwnerCheckError
+		if !errors.As(err, &ownerErr) || !ownerErr.pending || ownerErr.foreign {
+			t.Fatalf("owner check error = %v; want a pending refusal", err)
+		}
+		if elapsed < wait || elapsed > wait+time.Second {
+			t.Fatalf("refusal took %s; want about %s", elapsed, wait)
+		}
+	})
+
+	t.Run("root waits before admitting uid zero", func(t *testing.T) {
+		listener := listen(t)
+		started := time.Now()
+		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), "/proc", 0, wait)
+		elapsed := time.Since(started)
+		if err != nil || conn == nil {
+			t.Fatalf("root owner result = %v, %v; want admission after the wait", conn, err)
+		}
+		_ = conn.Close()
+		if elapsed < wait || elapsed > wait+time.Second {
+			t.Fatalf("root admission took %s; want about %s", elapsed, wait)
+		}
+	})
+
+	t.Run("context cancellation stops polling", func(t *testing.T) {
+		listener := listen(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		conn, err := dialAndCheckDaemonTCP(ctx, dial, "tcp4", listener.Addr().String(), "/proc", callerUID, time.Second)
+		elapsed := time.Since(started)
+		if conn != nil {
+			_ = conn.Close()
+			t.Fatal("connection returned after its context expired")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("owner check error = %v; want context deadline exceeded", err)
+		}
+		if elapsed >= time.Second {
+			t.Fatalf("cancellation took %s; want it before the one-second wait", elapsed)
 		}
 	})
 }
