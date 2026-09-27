@@ -128,6 +128,30 @@
       "port": 0
     }
   },
+  "tailnet.json": {
+    "launchd_label_prefix": "io.shuttle",
+    "remotes": [
+      {
+        "name": "hub-a",
+        "url": "https://hub-a.example.ts.net",
+        "ssh": "",
+        "display": "hub-a",
+        "port": 0,
+        "remote_port": 4000,
+        "remote_socket": "",
+        "poll_interval_ms": 5000,
+        "request_timeout_ms": 2000,
+        "stale_multiplier": 4,
+        "label": "io.shuttle.shuttle-tunnel-hub-a",
+        "manager": "none"
+      }
+    ],
+    "https_proxy": {
+      "host": "",
+      "port": 0
+    },
+    "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+  },
   "tailscale.json": {
     "launchd_label_prefix": "io.shuttle",
     "remotes": [
@@ -205,6 +229,10 @@
     "hostile_socket.json": {
       "remote": "hub-b",
       "field": "remote_socket"
+    },
+    "both_defaults.json": {
+      "remote": "",
+      "field": "defaults.https_proxy and defaults.tailscale_socket"
     }
   }
 }

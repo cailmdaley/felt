@@ -73,8 +73,7 @@ type remoteTunnel struct {
 }
 
 // remoteDefaults are the file-level fallbacks for the per-remote polling knobs,
-// plus the one fleet-wide setting that is not per-remote at all: the hub's
-// outbound HTTP proxy.
+// plus the mutually exclusive fleet-wide transports for outbound https remotes.
 type remoteDefaults struct {
 	PollIntervalMS   int `json:"poll_interval_ms,omitempty"`
 	RequestTimeoutMS int `json:"request_timeout_ms,omitempty"`
@@ -88,6 +87,11 @@ type remoteDefaults struct {
 	// environment is invisible to the operator debugging it, and this file is
 	// already the one `remotes list` validates.
 	HTTPSProxy string `json:"https_proxy,omitempty"`
+
+	// TailscaleSocket is tailscaled's private LocalAPI unix socket. The daemon
+	// uses it to establish per-remote dial bridges without exposing a loopback
+	// proxy to other users on a shared host.
+	TailscaleSocket string `json:"tailscale_socket,omitempty"`
 }
 
 // proxyEndpoint is defaults.https_proxy after parsing: a host with no IPv6
@@ -109,6 +113,20 @@ type proxyEndpoint struct {
 // never escapes parseProxyEndpoint — it returns an error instead — so host and
 // port are either both set or both zero.
 func (p proxyEndpoint) configured() bool { return p.Host != "" && p.Port != 0 }
+
+// normalizedTailscaleSocket validates defaults.tailscale_socket using the same
+// path grammar as remote_socket. An absent value is an ordinary fleet; a
+// present but unsafe path is an error because `remotes list` validates the file.
+func (d remoteDefaults) normalizedTailscaleSocket() (string, error) {
+	path := strings.TrimSpace(d.TailscaleSocket)
+	if path == "" {
+		return "", nil
+	}
+	if err := validateRemoteSocket(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
 
 // String is the human form `remotes list` prints and nothing parses back. It
 // goes through net.JoinHostPort so an IPv6 proxy comes out bracketed
@@ -363,9 +381,19 @@ func normalizeRemotes(doc *remotesFile) error {
 	defaults := remoteDefaults{}
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
-		if _, err := defaults.normalizedHTTPSProxy(); err != nil {
+		proxy, err := defaults.normalizedHTTPSProxy()
+		if err != nil {
 			return fmt.Errorf("defaults.https_proxy %q: %w", strings.TrimSpace(defaults.HTTPSProxy), err)
 		}
+		socket, err := defaults.normalizedTailscaleSocket()
+		if err != nil {
+			return fmt.Errorf("defaults.tailscale_socket %q: %w", strings.TrimSpace(defaults.TailscaleSocket), err)
+		}
+		if proxy.configured() && socket != "" {
+			return fmt.Errorf("defaults.https_proxy and defaults.tailscale_socket are mutually exclusive")
+		}
+		defaults.TailscaleSocket = socket
+		doc.Defaults = &defaults
 	}
 
 	seenNames := map[string]bool{}
@@ -619,11 +647,11 @@ var remotesListCmd = &cobra.Command{
 			return nil
 		}
 		if doc.Defaults != nil {
-			// loadRemotesFile has already refused a proxy that does not parse,
-			// so reaching here means the error is nil; the human line is the
-			// only thing left to do with it.
 			if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
 				fmt.Printf("https:// remotes via proxy %s\n\n", proxy)
+			}
+			if socket, _ := doc.Defaults.normalizedTailscaleSocket(); socket != "" {
+				fmt.Printf("https:// remotes via tailscale LocalAPI socket %s\n\n", socket)
 			}
 		}
 		fmt.Printf("%-16s %-6s %-18s %-12s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "URL")

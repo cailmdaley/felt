@@ -12,7 +12,7 @@ defmodule Shuttle.Remotes do
         "defaults": {
           "poll_interval_ms": 5000,
           "request_timeout_ms": 20000,
-          "https_proxy": "http://localhost:1055"
+          "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
         },
         "remotes": [
           {"name": "hub-a", "ssh": "hub-a", "port": 4001},
@@ -27,7 +27,9 @@ defmodule Shuttle.Remotes do
   cascade can bounce and revive it. A bare `url` entry with
   `tunnel.manager: "none"` is reached directly; unless it names an `ssh`, this
   host has no way to touch that daemon at all and an unreachable one is simply
-  reported stale. See `https_proxy/0` for the hub-side proxy such a URL may need.
+  reported stale. `tailscale_socket/0` selects the private LocalAPI dial
+  transport for `https://` URLs; `https_proxy/0` is the single-user-only
+  alternative.
 
   A bare JSON array of entries is also accepted. Absent, unreadable, or
   malformed file → `[]`: a hub with no fleet file is a correct local-only
@@ -153,6 +155,22 @@ defmodule Shuttle.Remotes do
   end
 
   @doc """
+  The hub's tailscaled LocalAPI socket from `defaults.tailscale_socket`, or
+  `nil` when the fleet has no private dial transport configured.
+
+  `$TS_SOCKET` is deliberately not read: the fleet file is the operator-visible
+  source of truth shared by the daemon and `felt shuttle remotes list`.
+  """
+  @spec tailscale_socket() :: String.t() | nil
+  def tailscale_socket do
+    case Application.get_env(:shuttle, :tailscale_socket) do
+      nil -> file_tailscale_socket()
+      false -> nil
+      value -> normalized_tailscale_socket(value)
+    end
+  end
+
+  @doc """
   A cheap change token for the fleet file — `{mtime, size}`, or `nil` when the
   file is absent. The registries stat this each tick so `felt shuttle remotes
   add` takes effect without a daemon bounce. Size is folded in because POSIX
@@ -196,6 +214,40 @@ defmodule Shuttle.Remotes do
     case read_document() do
       {:ok, doc} -> doc |> defaults_block() |> Map.get("https_proxy") |> parse_proxy()
       :error -> nil
+    end
+  end
+
+  defp file_tailscale_socket do
+    case read_document() do
+      {:ok, doc} ->
+        defaults = defaults_block(doc)
+
+        if valid_defaults?(defaults),
+          do: normalized_tailscale_socket(Map.get(defaults, "tailscale_socket"))
+
+      :error ->
+        nil
+    end
+  end
+
+  defp normalized_tailscale_socket(value) do
+    case Remote.normalize_socket_path(value) do
+      {:ok, path} -> path
+      :error -> nil
+    end
+  end
+
+  defp valid_defaults?(defaults) do
+    proxy = Map.get(defaults, "https_proxy")
+    socket = Map.get(defaults, "tailscale_socket")
+    proxy_absent? = is_nil(proxy) or (is_binary(proxy) and String.trim(proxy) == "")
+    proxy_valid? = proxy_absent? or not is_nil(parse_proxy(proxy))
+
+    with true <- proxy_valid?,
+         {:ok, normalized_socket} <- Remote.normalize_socket_path(socket) do
+      not (not is_nil(parse_proxy(proxy)) and not is_nil(normalized_socket))
+    else
+      _ -> false
     end
   end
 
@@ -291,8 +343,8 @@ defmodule Shuttle.Remotes do
   # Fleet-level `defaults` are folded into each entry here so the per-entry
   # value always wins and `Shuttle.Remote.from_config/1` sees one flat map.
   defp entries(%{"remotes" => remotes} = doc) when is_list(remotes) do
-    defaults = Map.get(doc, "defaults") || %{}
-    Enum.map(remotes, &apply_defaults(&1, defaults))
+    defaults = defaults_block(doc)
+    if valid_defaults?(defaults), do: Enum.map(remotes, &apply_defaults(&1, defaults)), else: []
   end
 
   defp entries(remotes) when is_list(remotes), do: Enum.map(remotes, &apply_defaults(&1, %{}))
