@@ -120,7 +120,8 @@ var nestCmd = &cobra.Command{
 	Short: "Move a fiber subtree under a parent",
 	Long: `The child keeps its basename and brings its descendants: nesting covariance
 under analysis gives analysis/covariance. inputs.from references to moved ids
-are rewritten across the store. Wikilinks are left as written; they resolve
+are rewritten within the store the move runs in; a move made inside a view
+leaves references from the enclosing store as written. Wikilinks are left as written; they resolve
 by basename, so they keep resolving.
 
 A <parent> that is an existing path in the store is used as spelled, even a
@@ -195,7 +196,8 @@ var unnestCmd = &cobra.Command{
 	Long: `The fiber keeps its basename and brings its descendants: analysis/covariance
 becomes covariance. inputs.from references are rewritten as nest does. A fiber
 in the enclosing store moves to that store's top level.`,
-	Args: cobra.ExactArgs(1),
+	Example: `  felt unnest analysis/covariance`,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {

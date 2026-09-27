@@ -41,7 +41,7 @@ its commit and date, a local build the source revision it was built from
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting ids and `inputs.from` references; wikilinks stay as written and resolve by basename |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting ids and `inputs.from` references within the store the move runs in; wikilinks stay as written and resolve by basename |
 | `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting as `nest` does |
 
 ## Maintenance

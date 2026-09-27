@@ -83,8 +83,8 @@ const (
 
 // rootLong is the page an agent reads once and works from. Every command line
 // in it is checked against the command tree by TestHelpCommandLinesResolve.
-const rootLong = `felt keeps fibers (tasks, decisions, findings, specs) as markdown files at
-.felt/<id>/<slug>.md; the id is the nested path, e.g. analysis/damping-prior.
+const rootLong = `felt keeps fibers (tasks, decisions, findings, specs) as markdown files: the id
+is the nested path, so analysis/prior lives at .felt/analysis/prior/prior.md.
 Relationships come from containment, [[wikilinks]] in bodies, and project-owned
 conventions such as inputs.from. Extra top-level YAML is preserved untouched.
 
@@ -94,7 +94,7 @@ statusless. Close a todo with an outcome that says what was learned.
 
 Views and stores: a project .felt that symlinks into a larger store is a view.
 ls lists the view, find searches the whole store, and an id reaches anywhere:
-show, edit, nest, and rm act on the fiber where it lives.
+show, edit, tree, nest, rm, and shuttle verbs act on the fiber where it lives.
 
 Common paths:
   felt add analysis/covariance "Covariance method" -o "one-line outcome"
@@ -103,20 +103,21 @@ Common paths:
   felt ls "query"                   search; closed matches are counted, not shown
   felt ls "query" --body -r         regex, including bodies
   felt find "query"                 search the whole store
-  felt show <id> -d summary         metadata, outcome, lede, back-references
+  felt show <id> -d summary         outcome, lede, back-references in this view
   felt show <id> --field shuttle    one frontmatter key, shell-friendly
-  felt show <id> --citations        fibers that link here
+  felt show <id> --citations        fibers anywhere in the store that link here
   felt tree <id> -L 2               containment around a fiber
   felt edit <id> --set key=value    a scalar project field (--unset key)
   felt nest <child> <parent>        move a subtree under a parent
 
 Editing: write bodies, outcomes longer than a sentence (outcome: |-), and
-structured YAML in the file directly. Never hand-edit created-at or updated-at;
-felt owns both and stamps updated-at on every write.
+structured YAML in the file directly; -o mangles quotes and newlines. Never
+hand-edit created-at or updated-at; felt stamps them when it adds or edits.
 
 Sync: felt sync merges the store's Git upstream, following a symlinked view to
-the real store. Commit intentional changes, then felt sync --push. Resolve
-conflicts in context; never take ours or theirs mechanically.
+the real store. Commit intentional changes, then felt sync --push at useful
+checkpoints. Resolve conflicts in context: never take ours or theirs
+mechanically, never discard another worker's edits.
 
 Hygiene: felt check reports broken links and layout problems; felt session
 prints the start-of-session context, including its Attention list.

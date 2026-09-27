@@ -56,19 +56,21 @@ var checkCmd = &cobra.Command{
 		}
 		issues = append(issues, legacyIssues...)
 		issues = append(issues, checkHostDrift(felts)...)
-		if jsonOutput {
-			return outputJSON(issues)
-		}
-		if len(issues) == 0 {
-			fmt.Println("Check OK")
-			return nil
-		}
-
 		errors := 0
 		for _, issue := range issues {
-			fmt.Println(issue.String())
 			if issue.Level == felt.CheckLevelError {
 				errors++
+			}
+		}
+		if jsonOutput {
+			if err := outputJSON(issues); err != nil {
+				return err
+			}
+		} else if len(issues) == 0 {
+			fmt.Println("Check OK")
+		} else {
+			for _, issue := range issues {
+				fmt.Println(issue.String())
 			}
 		}
 		if errors > 0 {

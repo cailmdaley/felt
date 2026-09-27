@@ -55,6 +55,26 @@ func TestCheckCommandNamesLegacyFlatMigration(t *testing.T) {
 	}
 }
 
+func TestCheckCommandJSONExitsNonZeroOnError(t *testing.T) {
+	dir, storage := newStore(t)
+
+	fiber := &felt.Felt{ID: "fiber-a"}
+	if err := fiber.SetExtraField("inputs", []map[string]any{{"id": "catalog", "from": "missing.output"}}); err != nil {
+		t.Fatalf("SetExtraField: %v", err)
+	}
+	if err := storage.Write(fiber); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	output, err := runCommand(t, dir, "check", "--json")
+	if err == nil {
+		t.Fatal("felt check --json succeeded despite an error-level issue")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(output), "[") {
+		t.Fatalf("expected a JSON array on stdout:\n%s", output)
+	}
+}
+
 func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
 	dir, storage := newStore(t)
 
@@ -119,13 +139,18 @@ func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 
 	oldArgs := os.Args
 	oldChangeDir := changeDir
+	oldJSON := jsonOutput
 	oldStdout := os.Stdout
 	defer func() {
 		os.Args = oldArgs
 		changeDir = oldChangeDir
+		jsonOutput = oldJSON
 		os.Stdout = oldStdout
 	}()
 
+	// cobra leaves a parsed flag's variable set across Execute calls, so a
+	// previous test's --json would otherwise leak into this run.
+	jsonOutput = false
 	changeDir = dir
 	rootCmd.SetArgs(args)
 
