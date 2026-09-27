@@ -1011,7 +1011,7 @@ export class FiberDetailModal {
     if (!this.host) {
       this.escapeHandler = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return
-        if (document.activeElement?.closest('.kbn-detail-parent-input, .kbn-detail-parent-dropdown')) return
+        if (document.activeElement?.closest('.kbn-detail-parent-input, .kbn-detail-parent-dropdown, .kbn-ctl-meet-open')) return
         // The wikilink panel, opened after the card, takes Escape first — a
         // reading unwinds one followed reference per press before the card it
         // was read from closes.
@@ -2488,14 +2488,15 @@ export class FiberDetailModal {
     err.className = 'kbn-detail-error'
     err.style.display = 'none'
 
+    // The verbs that take the message and act at once, side by side: a
+    // meeting (its note), a fresh worker, or the same worker resumed.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    if (this.meeting?.canJoin()) foot.append(this.buildMeeting(card, message, err))
-
     const fresh = ctlButton('New session', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send')
+    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
+    if (this.meeting?.canJoin()) sends.append(this.buildMeeting(card, message, err))
     sends.append(fresh, resume)
     foot.append(sends)
 
@@ -2515,31 +2516,44 @@ export class FiberDetailModal {
   }
 
   /**
-   * Meeting, for this constitution: which kind (Call or Room, a choice like
-   * any other in the drawer) and the Record verb that starts it — only the
-   * verb records. The recording runs on this machine; the composer's message
-   * becomes the meeting's note, and the worker — live or not — receives the
-   * meeting as a joined constitution.
+   * Meeting, for this constitution: a verb that asks one question first.
+   * Meeting opens a two-item menu, Call or Room, and picking one starts the
+   * recording on this machine — nothing records before that pick. The
+   * composer's message becomes the meeting's note, and the worker — live or
+   * not — receives the meeting as a joined constitution.
    */
   private buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, err: HTMLElement): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
-    const mode = segmented<MeetingMode>(
-      'Meeting kind',
-      MEETING_MODES.map(({ value, label }) => [value, label] as const),
-      MEETING_MODES[0].value,
-    )
-    const record = ctlButton('Record', 'kbn-ctl-record')
-    record.addEventListener('click', (e) => {
-      e.stopPropagation()
-      record.disabled = true
-      mode.setDisabled(true)
-      record.textContent = 'Starting…'
+    const opener = ctlButton('Meeting', 'kbn-ctl-meet-btn')
+    opener.setAttribute('aria-haspopup', 'menu')
+    opener.setAttribute('aria-expanded', 'false')
+    const menu = document.createElement('div')
+    menu.className = 'kbn-ctl-menu'
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', 'Meeting kind')
+    menu.hidden = true
+
+    const onOutside = (e: PointerEvent): void => {
+      if (!wrap.contains(e.target as Node)) setOpen(false)
+    }
+    function setOpen(open: boolean): void {
+      menu.hidden = !open
+      opener.setAttribute('aria-expanded', String(open))
+      // Marked so the card's own Escape steps aside while the menu is open.
+      wrap.classList.toggle('kbn-ctl-meet-open', open)
+      if (open) document.addEventListener('pointerdown', onOutside, true)
+      else document.removeEventListener('pointerdown', onOutside, true)
+    }
+
+    const start = (mode: MeetingMode): void => {
+      setOpen(false)
+      opener.disabled = true
+      opener.textContent = 'Starting…'
       err.style.display = 'none'
-      void this.meeting!.join(card, mode.value, note.value).then((error) => {
-        record.disabled = false
-        mode.setDisabled(false)
-        record.textContent = 'Record'
+      void this.meeting!.join(card, mode, note.value).then((error) => {
+        opener.disabled = false
+        opener.textContent = 'Meeting'
         if (error) {
           err.textContent = error
           err.style.display = ''
@@ -2551,8 +2565,46 @@ export class FiberDetailModal {
           note.dispatchEvent(new Event('input'))
         }
       })
+    }
+    const items = MEETING_MODES.map(({ value, label }) => {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'kbn-ctl-menu-item'
+      item.setAttribute('role', 'menuitem')
+      item.textContent = label
+      item.addEventListener('click', (e) => {
+        e.stopPropagation()
+        start(value)
+      })
+      return item
     })
-    wrap.append(mode.el, record)
+    menu.append(...items)
+
+    opener.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const opening = menu.hidden
+      setOpen(opening)
+      if (opening) items[0].focus()
+    })
+    menu.addEventListener('keydown', (e) => {
+      const at = items.indexOf(document.activeElement as HTMLButtonElement)
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const step = e.key === 'ArrowDown' ? 1 : -1
+        items[(at + step + items.length) % items.length].focus()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+        opener.focus()
+      }
+    })
+    menu.addEventListener('focusout', () => {
+      window.setTimeout(() => {
+        if (!wrap.contains(document.activeElement)) setOpen(false)
+      }, 0)
+    })
+
+    wrap.append(opener, menu)
     return wrap
   }
 

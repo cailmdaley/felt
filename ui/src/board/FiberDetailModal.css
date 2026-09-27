@@ -521,32 +521,78 @@
 }
 .kbn-ctl-compose .kbn-detail-error { margin-top: 6px; }
 
-/* Meeting: the kind, then Record — a verb in your pigment, the only thing
-   that starts a recording. */
+/* Resume — the same worker, carried on: sap green, kept apart from the
+   verdigris of a verdict. */
+.kbn-ctl-resume {
+  color: #3E6A33;
+  border-color: rgba(75, 122, 62, 0.42);
+  background: rgba(75, 122, 62, 0.06);
+}
+.kbn-ctl-resume:hover:not(:disabled) {
+  border-color: rgba(75, 122, 62, 0.65);
+  background: rgba(75, 122, 62, 0.13);
+}
+
+/* Meeting: a verb in your pigment whose caret says it asks first — Call or
+   Room — and records only on the answer. */
 .kbn-ctl-meet {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  margin-right: 6px;
 }
 .kbn-ctl-meet[hidden] { display: none; }
-.kbn-ctl-record {
+.kbn-ctl-meet-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  padding-right: 24px;
   color: #8E3A2F;
-  border-color: rgba(188, 69, 56, 0.36);
-  background: rgba(188, 69, 56, 0.04);
+  border-color: rgba(188, 69, 56, 0.34);
+  background: rgba(188, 69, 56, 0.035) var(--ctl-caret) no-repeat right 9px center;
 }
-.kbn-ctl-record::before {
+.kbn-ctl-meet-btn::before {
   content: '';
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--kbn-you, #BC4538);
 }
-.kbn-ctl-record:hover:not(:disabled) {
-  border-color: rgba(188, 69, 56, 0.6);
-  background: rgba(188, 69, 56, 0.1);
+.kbn-ctl-meet-btn:hover:not(:disabled),
+.kbn-ctl-meet-open .kbn-ctl-meet-btn {
+  border-color: rgba(188, 69, 56, 0.58);
+  background-color: rgba(188, 69, 56, 0.09);
+}
+.kbn-ctl-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  background: #F8F1E2;
+  border: 1px solid rgba(27, 22, 17, 0.18);
+  border-radius: 3px;
+  box-shadow: 0 10px 26px rgba(27, 22, 17, 0.18);
+  z-index: 20;
+}
+.kbn-ctl-menu[hidden] { display: none; }
+.kbn-ctl-menu-item {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  font-size: calc(14px * var(--kbn-type-scale, 1));
+  color: #1B1611;
+  text-align: left;
+  cursor: pointer;
+}
+.kbn-ctl-menu-item:hover,
+.kbn-ctl-menu-item:focus-visible {
+  outline: none;
+  background: rgba(188, 69, 56, 0.08);
 }
 
 /* ── The ledger: labels in a gutter, controls on ruled lines ── */
@@ -1994,12 +2040,18 @@
     padding: 0 14px;
     font-size: calc(15.5px * var(--kbn-type-scale, 1));
   }
-  .kbn-detail-sheet .kbn-ctl-sends { flex: 1 1 100%; }
+  .kbn-detail-sheet .kbn-ctl-sends { flex: 1 1 100%; flex-wrap: wrap; }
+  .kbn-detail-sheet .kbn-ctl-meet { flex: 1 1 auto; margin-right: 0; }
+  .kbn-detail-sheet .kbn-ctl-meet-btn { flex: 1 1 auto; justify-content: center; padding: 0 26px 0 12px; }
+  .kbn-detail-sheet .kbn-ctl-menu-item {
+    min-height: 44px;
+    font-size: calc(15.5px * var(--kbn-type-scale, 1));
+  }
   .kbn-detail-sheet .kbn-ctl-send,
   .kbn-detail-sheet .kbn-ctl-foot .kbn-ctl-btn {
-    flex: 1 1 0;
+    flex: 1 1 auto;
   }
-  .kbn-detail-sheet .kbn-ctl-agent-select { flex: 1 1 0; }
+  .kbn-detail-sheet .kbn-ctl-agent-select { flex: 1 1 9em; }
   .kbn-detail-sheet .kbn-ctl-effort-select { width: 6.5em; }
   .kbn-detail-sheet .kbn-ctl-segment,
   .kbn-detail-sheet .kbn-ctl-toggle {

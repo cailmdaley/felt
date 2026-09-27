@@ -153,22 +153,26 @@ try {
   assert.ok(await page.getByText('reshape refused').isVisible(), 'the refusal is shown')
   await page.evaluate(() => window.restoreFetch())
 
-  // Choosing a meeting kind is a setting; only Record starts one, and it
-  // carries the composer's message as the note.
+  // Meeting asks Call or Room before it records; only the answer starts one,
+  // carrying the composer's message as the note.
   await page.evaluate(() => { window.settingWrites = [] })
   const message = page.getByRole('textbox', { name: 'Message for the next worker', exact: true })
-  const meetingKind = page.getByRole('radiogroup', { name: 'Meeting kind', exact: true })
-  assert.equal(await meetingKind.getByRole('radio', { name: 'Call', exact: true }).getAttribute('aria-checked'), 'true')
-  await meetingKind.getByRole('radio', { name: 'Room', exact: true }).click()
-  assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'choosing Room starts nothing')
+  const meeting = page.getByRole('button', { name: 'Meeting', exact: true })
+  await meeting.click()
+  assert.ok(await page.getByRole('menu', { name: 'Meeting kind', exact: true }).isVisible(), 'Meeting opens its kinds')
+  assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'opening Meeting starts nothing')
+  await page.keyboard.press('Escape')
+  assert.ok(!(await page.getByRole('menu', { name: 'Meeting kind', exact: true }).isVisible()), 'Escape closes the menu')
+  assert.equal(await page.locator('.kbn-detail-controls').count(), 1, 'Escape in the menu keeps the card open')
   await message.fill('null tests review')
-  await page.getByRole('button', { name: 'Record', exact: true }).click()
+  await meeting.click()
+  await page.getByRole('menuitem', { name: 'Room', exact: true }).click()
   await page.waitForTimeout(200)
   const joins = (await page.evaluate(() => window.settingWrites)).filter(write => write.url.endsWith('/api/v1/meeting/join'))
-  assert.equal(joins.length, 1, 'Record starts exactly one meeting')
+  assert.equal(joins.length, 1, 'choosing Room starts exactly one meeting')
   assert.deepEqual({ mode: joins[0].body.meeting.mode, note: joins[0].body.note }, { mode: 'room', note: 'null tests review' })
   assert.equal(await message.inputValue(), '', 'the note is spent once the meeting starts')
-  assert.ok(!(await page.getByRole('button', { name: 'Record', exact: true }).isVisible()), 'a recording meeting leaves nothing to start')
+  assert.ok(!(await meeting.isVisible()), 'a recording meeting leaves nothing to start')
 
   // Resume carries the message exactly as written.
   await page.evaluate(() => { window.settingWrites = [] })
@@ -190,7 +194,7 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting Record and Resume passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu and Resume passed')
 } finally {
   await browser.close()
 }
