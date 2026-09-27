@@ -59,9 +59,7 @@ Some constitutions shape artifacts rather than code — documentation, a researc
 
 ## Human in the loop — directives and gates, not a mode
 
-Every dispatch is autonomous; there is no separate "interactive" dispatch mode. When work needs a human, the expectation rides one of two channels the worker already reads. (Workers also carry standing judgment to stay alive when open taste calls make human input the clear next move — SKILL.md, "When to stay interactive".)
-
-**Per-dispatch "talk to me first"** goes in the From User directive, as a line in the card drawer's message box. A talk-first signal gets a light survey, a greeting, and a wait; it belongs to the moment, and the next dispatch starts clean.
+Every dispatch is autonomous; there is no separate "interactive" dispatch mode. When a run needs the human, say so in plain words in its From User directive ("stay interactive", "talk to me first"); it belongs to that run, and the next dispatch starts clean. Workers also stay alive on their own judgment when open taste calls make human input the clear next move (SKILL.md, "When to stay interactive").
 
 **Structural gates** go in the constitution text: a final **send** in the user's voice, a **2FA** step only they can complete, any "draft-and-stage, human commits" shape — *"The user will be present; drive to the send and wait for them."* Portal work on the chrome axis almost always carries one. Genuinely headless work writes no gate and runs to exit.
 

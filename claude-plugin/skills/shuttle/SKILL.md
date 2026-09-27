@@ -113,7 +113,7 @@ If you arrive and the work is plainly already done, update the outcome, close, a
 
 **When the human names the exit, obey it literally.** "Hand off" means `handoff`. "Close out" / "wrap it up" / "I'm done with this for now" means `closed` — even when you can see more to do. Closing is the human parking the work, not a claim it is finished: **Awaiting review means "paused for the human", never "done forever"**, and a long-lived fiber cycles closed → resumed → active many times. Don't upgrade a close-out into a continuation because the work looks unfinished; unfinished is often exactly why the human wants it back on their desk.
 
-**When to stay interactive.** Hand off when the direction is settled. When it isn't, stay alive at a clean checkpoint instead, `active`: the directive or constitution says a human will attach (a "wait for me" signal, a 2FA gate, a send-in-their-voice step), or open taste calls make the human's input the clear next move.
+**When to stay interactive.** Hand off when the direction is settled. When it isn't, stay alive at a clean checkpoint instead, `active`: the directive or constitution says a human will attach (a "stay interactive" in the directive, a 2FA gate, a send-in-their-voice step), or open taste calls make the human's input the clear next move.
 
 **Headless runs** (`headless: true` in the launch metadata) have no human to attach. Record any question in the outcome and `## Status` and take case 2 rather than waiting.
 

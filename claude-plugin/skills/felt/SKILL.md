@@ -6,7 +6,7 @@ description: >
   "close this fiber", "sketch a fiber", "think through",
   "clean up fibers", "consolidate", "archive", "sweep", "maintenance pass", or "extract from the
   session". It covers filing fibers, updating outcomes and bodies, using additional YAML fields
-  beyond what felt owns natively, session mining, maintenance passes, and transcript processing.
+  beyond what felt owns natively, end-of-session sweeps, maintenance passes, and transcript processing.
 ---
 
 # felt — Working with Fibers
@@ -48,7 +48,7 @@ Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<s
 
 **File while working.** The moment to update a fiber is right after something crystallizes, while the understanding still has edges. Don't ask permission to file: the user's corrections and opinions are the primary trigger, and when the direction shifts, the fiber shifts too. Don't file empty stubs "for later" — file when the work is real.
 
-**Extract what slipped through, and make outcomes teach.** Continuous filing catches most things. At session end, mine the decisions, patterns, and findings that stayed implicit, write them down, and bring outcomes and statuses up to date ([mining.md](references/mining.md)). An outcome that says "done" has failed: put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone, because it is what `felt ls` shows. Names are concise labels; body and outcome carry the content.
+**Sweep the session before you close out or hand off.** Continuous filing catches most things; the rest gets filed before you leave. Reread the session for what stayed implicit — decisions (including what you decided *not* to do, and why), questions answered, patterns, findings — and file each under the parent it belongs to, statusless unless someone should act. Then bring the outcome and status of every fiber you touched up to date. An outcome that says "done" has failed: put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone, because it is what `felt ls` shows. Names are concise labels; body and outcome carry the content.
 
 **Tend the store as you go.** Tidying is part of every session, not a separate chore, and you have full standing permission for it: whenever you touch a region of the store and see mess, fix it in the same motion — nest stray top-level leaves under root buckets, demote open/active containers, close stale todos with real outcomes, compost clusters of quick fibers into a doc fiber, repair coherence across siblings, reshape wide branches. When `felt session` shows `## Attention`, clear it this session. Don't wait to be asked and don't ask first; mention a cleanup to the user only when it needs judgment or would derail the current task. When closing a fiber, ask whether its lesson belongs higher up — a doc fiber or the root fiber — and compose upward. [maintenance.md](references/maintenance.md) carries the moves and the authority boundary.
 
@@ -61,7 +61,6 @@ Everything above applies always; references go deeper for specific activities.
 | When | Reference |
 |------|-----------|
 | Helping fuzzy thought crystallize into a fiber — two diamonds, funnel, ambiguity check | [ideating.md](references/ideating.md) |
-| At the end of a session — extracting what slipped through | [mining.md](references/mining.md) |
 | Processing an external transcript — meeting notes, voice note, dictation | [transcripts.md](references/transcripts.md) |
 | Gardening, composting, reshaping, acting on Attention | [maintenance.md](references/maintenance.md) |
 | Migrating legacy flat fibers to directory format | [migration.md](references/migration.md) |

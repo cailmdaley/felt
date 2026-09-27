@@ -92,7 +92,7 @@ correspond to extension events on pi.
 ### Skills
 
 - **felt** — the substrate practice: filing fibers, updating outcomes and
-  bodies, additional YAML fields, session mining, maintenance passes.
+  bodies, additional YAML fields, end-of-session sweeps, maintenance passes.
 - **shuttle** — the dispatch practice: authoring constitutions, worker
   dispatch, operating the board. Only relevant once you're using the
   optional [shuttle](shuttle/index.md) layer.
