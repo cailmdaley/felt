@@ -128,8 +128,8 @@ felt nest jackknife-patches covariance-estimation   # move under a new parent
 felt unnest jackknife-patches                       # promote back to the top
 ```
 
-`felt nest` moves the whole subtree on disk and rewrites the addresses that
-would no longer reach it, wikilinks and `inputs.from` alike, naming each fiber
+`felt nest` moves the whole subtree on disk and rewrites the addresses whose
+meaning the move would change, wikilinks and `inputs.from` alike, naming each fiber
 it rewrote. The directory tree carries containment on its own, so
 no parent field can drift.
 

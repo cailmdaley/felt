@@ -257,3 +257,46 @@ func TestMoveSubtreeRewritesBareSlugTheMoveBreaks(t *testing.T) {
 		t.Fatalf("c.md = %q, want %q", got, want)
 	}
 }
+
+// newCaptureFixture holds a/sib linking [[x]], which names a/xy by prefix
+// through its scope, and a fiber b/x the move tests carry around.
+func newCaptureFixture(t *testing.T) (*Storage, string) {
+	t.Helper()
+	_, s := newStore(t)
+	for _, id := range []string{"a", "a/xy", "b", "b/x", "c"} {
+		writeFiberFile(t, s, id, fiber(strings.ToUpper(filepath.Base(id)), ""))
+	}
+	citing := fiber("Sib", "See [[x]] and [[x#k|it]].")
+	writeFiberFile(t, s, "a/sib", citing)
+	return s, citing
+}
+
+// A move that brings a fiber named x into a/ would make a/sib's [[x]] name it
+// instead of a/xy; the link is pinned to the fiber it named.
+func TestMoveSubtreePinsLinkTheMoveWouldCapture(t *testing.T) {
+	s, _ := newCaptureFixture(t)
+
+	result, err := s.MoveSubtree("b/x", "a/x")
+	if err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if got, want := readFiberFile(t, s, "a/sib"), fiber("Sib", "See [[a/xy]] and [[a/xy#k|it]]."); got != want {
+		t.Fatalf("sib.md = %q, want %q", got, want)
+	}
+	if !reflect.DeepEqual(result.Rewritten, []string{"a/sib"}) {
+		t.Fatalf("rewritten = %v", result.Rewritten)
+	}
+}
+
+// A move elsewhere leaves [[x]] naming a/xy, so nothing is written.
+func TestMoveSubtreeLeavesLinkTheMoveDoesNotCapture(t *testing.T) {
+	s, citing := newCaptureFixture(t)
+
+	result, err := s.MoveSubtree("b/x", "c/x")
+	if err != nil {
+		t.Fatalf("MoveSubtree: %v", err)
+	}
+	if len(result.Rewritten) != 0 || readFiberFile(t, s, "a/sib") != citing {
+		t.Fatalf("rewritten %v; sib.md = %q", result.Rewritten, readFiberFile(t, s, "a/sib"))
+	}
+}

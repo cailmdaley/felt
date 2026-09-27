@@ -125,9 +125,9 @@ Replicas should inherit the committed ids rather than minting their own.`,
 var nestCmd = &cobra.Command{
 	Use:   "nest <child> <parent>",
 	Short: "Move a fiber under another fiber",
-	Long: `Moves an existing fiber subtree under a parent. References whose path reached
-the moved fibers and would no longer reach them — wikilinks, markdown links,
-inputs.from — are rewritten, across the enclosing store too when this store is
+	Long: `Moves an existing fiber subtree under a parent. References whose path the move
+would point elsewhere — wikilinks, markdown links, inputs.from, whether they
+named the moved fibers or would be captured by them — are rewritten, across the enclosing store too when this store is
 a view into one, and each rewritten fiber is named.
 
 A parent spelled as a path that exists in the store is used exactly as

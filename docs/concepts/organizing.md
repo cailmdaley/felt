@@ -61,7 +61,9 @@ reached the moved fiber before and would not reach it after. The `unnest` above
 turns `[[bao-analysis/damping-prior/contour-plot#fit|the fit]]` into
 `[[damping-prior/contour-plot#fit|the fit]]`, keeping fragment and label.
 Spellings the move leaves working are not touched: a bare slug or a suffix
-such as `[[damping-prior/contour-plot]]` still names the fiber uniquely. Links
+such as `[[damping-prior/contour-plot]]` still names the fiber uniquely. A link
+to a fiber that stays put, but whose path would come to name one of the moved
+fibers instead, is pinned to its target's full id. Links
 inside code are left alone. Only files whose content changes are written, and
 nest names each one. In a view, the rewrite covers links spelled with the
 view's ids or the enclosing store's, and the enclosing store's fibers outside

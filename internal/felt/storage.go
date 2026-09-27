@@ -561,11 +561,12 @@ type MoveResult struct {
 }
 
 // MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
-// the references that the move would otherwise leave pointing at the old path.
+// the references whose meaning the move would otherwise change.
 //
 // A reference — body link or inputs.from — is rewritten when its path resolved
-// into the moved subtree before the move and no longer resolves to the same
-// fiber after it (see rewriteMovedRef). When this store is a view into an
+// before the move and no longer resolves to the same fiber after it: one left
+// pointing at the old path, or one the moved fibers would capture (see
+// rewriteMovedRef). When this store is a view into an
 // enclosing store, the enclosing store's fibers outside the view are rewritten
 // the same way, in its own coordinates: links from other projects are the ones
 // a move inside a view would otherwise leave behind. Only files whose content
@@ -755,13 +756,16 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 // rewriteMovedRef decides one reference's fate when oldID moves to newID. The
 // source fiber sits at sourceOld before the move and sourceNew after it.
 //
-// A reference is rewritten only when its path resolved into the moved subtree
-// before the move and does not resolve by path to the same fiber after it.
-// That leaves alone every spelling the move does not break — a bare slug or a
-// suffix that still names the fiber uniquely, a scope-relative path that moved
+// A reference is rewritten only when its path resolved before the move and
+// does not resolve by path to the same fiber after it — the same fiber being
+// the one it named, at its new id if it moved. That covers a path into the
+// moved subtree that the move leaves behind, and a path to a fiber that stays
+// put but that the move would capture: [[x]] naming a/xy by prefix from a/sib
+// comes to name a/x once x is nested under a, so it is pinned to a/xy. It
+// leaves alone every spelling the move does not change — a bare slug or a
+// suffix that still names its fiber uniquely, a scope-relative path that moved
 // with its scope — as well as links that already resolved only by the
-// basename rescue, and anything pointing elsewhere, including a sibling whose
-// name merely begins with the old one.
+// basename rescue.
 //
 // The new spelling keeps the reference's shape where it can: a path written
 // relative to a scope stays relative to that scope, and one written from the
@@ -772,10 +776,7 @@ func rewriteMovedRef(before, after *scopedIDResolver, sourceOld, sourceNew, targ
 	if !ok {
 		return "", false
 	}
-	destination, moved := remapIDPrefix(resolved, oldID, newID)
-	if !moved {
-		return "", false
-	}
+	destination, _ := remapIDPrefix(resolved, oldID, newID)
 	if got, ok := after.ResolvePath(sourceNew, target); ok && got == destination {
 		return "", false
 	}
