@@ -54,7 +54,6 @@ import {
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
 import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, type MeetingRecord } from './meeting.js'
-import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
@@ -237,12 +236,6 @@ interface KanbanSurfaceRendererOptions {
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
   onMeetingTerminal?: (session: string) => void
   onMeetingStop?: (meeting: MeetingRecord) => void | Promise<void>
-  /** Whether this card can have a meeting joined to it now: hark is available
-   *  here and nothing is recording. Omit to render no meeting control. */
-  canJoinMeeting?: (card: KanbanCard) => boolean
-  /** Record a meeting and join it to this constitution — the card's
-   *  Call | Room control. */
-  onMeetingJoin?: (card: KanbanCard, mode: MeetingMode) => void | Promise<void>
   /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
    *  (refresh is never read-only). */
   onRefresh: () => void
@@ -1631,39 +1624,6 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * The card's meeting control: Call | Room records a meeting on this machine
-   * and joins it to the constitution, whether or not its worker is running.
-   * Revealed on hover so a column of constitutions stays quiet.
-   */
-  private renderMeetingJoin(card: KanbanCard): HTMLElement {
-    const group = document.createElement('div')
-    group.className = 'kbn-card-meeting'
-    group.setAttribute('role', 'group')
-    group.setAttribute('aria-label', `Start a meeting for ${card.name}`)
-    const label = document.createElement('span')
-    label.className = 'kbn-card-meeting-label'
-    label.textContent = 'Meeting'
-    group.append(label)
-    const buttons = MEETING_MODES.map(({ value, label: modeLabel }) => {
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.className = 'kbn-card-meeting-mode'
-      button.textContent = modeLabel
-      button.title = `Record a ${modeLabel.toLowerCase()} meeting here and join it to “${card.name}”`
-      button.addEventListener('click', (event) => {
-        event.stopPropagation()
-        for (const b of buttons) b.disabled = true
-        void Promise.resolve(this.o.onMeetingJoin?.(card, value)).finally(() => {
-          for (const b of buttons) b.disabled = false
-        })
-      })
-      return button
-    })
-    group.append(...buttons)
-    return group
-  }
-
-  /**
    * Render one grid card. Title click opens the reading surface in vellum;
    * body click opens the action detail modal.
    */
@@ -1728,9 +1688,6 @@ export class KanbanSurfaceRenderer {
     name.textContent = card.name
 
     headerRow.append(glyph, name)
-    if (!isStale && isAgentCard(card) && this.o.onMeetingJoin && this.o.canJoinMeeting?.(card)) {
-      headerRow.append(this.renderMeetingJoin(card))
-    }
     el.append(headerRow)
 
     const idEl = document.createElement('div')

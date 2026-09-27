@@ -1416,57 +1416,6 @@
   white-space: nowrap;
 }
 .kbn-meeting-fiber[hidden] { display: none; }
-/* A constitution card's meeting control, revealed on hover over the end of
-   its title row: the Capture form's teal Meeting toggle, with Call | Room as
-   the choice that starts it. Hidden while a meeting records (one at a time)
-   and under a finger, where the detail panel carries the same control. */
-.kbn-card-header { position: relative; }
-.kbn-card-meeting {
-  position: absolute;
-  top: -5px;
-  right: -6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 8px;
-  border: 1px solid rgba(63, 130, 120, 0.36);
-  border-radius: 3px;
-  background: #FFFBED;
-  color: #2E6862;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-.kbn-card:hover .kbn-card-meeting,
-.kbn-card:focus-within .kbn-card-meeting { opacity: 1; pointer-events: auto; }
-.kbn-meeting-active .kbn-card-meeting { display: none; }
-.kbn-card-meeting-label::before {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: #3F8278;
-  vertical-align: 1px;
-}
-.kbn-card-meeting-mode {
-  padding: 1px 7px;
-  border: 1px solid rgba(63, 130, 120, 0.32);
-  border-radius: 2px;
-  background: rgba(63, 130, 120, 0.08);
-  color: #2E6862;
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-}
-.kbn-card-meeting-mode:hover:not(:disabled) { background: rgba(63, 130, 120, 0.18); }
-.kbn-card-meeting-mode:focus-visible { outline: 1px dashed #3F8278; outline-offset: 1px; }
-.kbn-card-meeting-mode:disabled { opacity: 0.5; cursor: progress; }
-@media (pointer: coarse) {
-  .kbn-card-meeting { display: none; }
-}
 /* Empty column — a quiet marginal line, set in italic with a small
    fleuron to make absence feel intentional rather than missing. */
 .kbn-empty {

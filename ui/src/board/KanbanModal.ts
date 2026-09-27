@@ -323,7 +323,7 @@ export class KanbanModal {
       this.openWorkerAfterGesture,
       {
         meeting: {
-          canJoin: () => this.canJoinMeeting(),
+          canJoin: () => meetingJoinable(this.meetingStatus),
           join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
         },
       },
@@ -353,8 +353,6 @@ export class KanbanModal {
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
       onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
-      canJoinMeeting: () => this.meetingStatus.available,
-      onMeetingJoin: async (card, mode) => { await this.joinCardMeeting(card, mode) },
       onRefresh: () => void this.refreshFromSource(),
     })
   }
@@ -369,17 +367,12 @@ export class KanbanModal {
     await this.fetchMeetingStatus()
   }
 
-  /** hark is available here and nothing is recording (a failed row can be replaced). */
-  private canJoinMeeting(): boolean {
-    return meetingJoinable(this.meetingStatus)
-  }
-
   /**
    * Record a meeting on this machine and join it to `card`'s constitution. The
    * banner says how its worker received the meeting; the returned string is
    * the error to show beside the control, or null once recording began.
    */
-  private async joinCardMeeting(card: KanbanCard, mode: MeetingMode, note = ''): Promise<string | null> {
+  private async joinCardMeeting(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null> {
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,
       origin: card.originId,
@@ -1826,7 +1819,6 @@ export class KanbanModal {
         this.meetingStopGuard.observe(status.meeting)
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
-        this.container?.classList.toggle('kbn-meeting-active', !meetingJoinable(status))
         this.syncMeetingClock()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.surfaces.updateMeetingPresentation()

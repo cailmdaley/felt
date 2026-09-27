@@ -3414,10 +3414,9 @@ export class FiberDetailModal {
   }
 
   /**
-   * The Capture form's Meeting toggle, for an existing constitution: checking
-   * it offers Call | Room and a start button. The recording runs on this
-   * machine; the message above becomes the meeting's note, and the worker —
-   * live or not — receives the meeting as a joined constitution.
+   * Meeting, for this constitution: pick Call or Room and start. The recording
+   * runs on this machine; the message above becomes the meeting's note, and
+   * the worker — live or not — receives the meeting as a joined constitution.
    */
   private buildMeetingRow(
     card: KanbanCard,
@@ -3426,35 +3425,19 @@ export class FiberDetailModal {
   ): HTMLElement {
     const row = document.createElement('div')
     row.className = 'kbn-detail-meeting-row'
-    const toggle = document.createElement('label')
-    toggle.className = 'kbn-detail-meeting-toggle'
-    const check = document.createElement('input')
-    check.type = 'checkbox'
-    const text = document.createElement('span')
-    text.textContent = 'Meeting'
-    toggle.append(check, text)
-
+    const label = document.createElement('span')
+    label.className = 'kbn-detail-meeting-label'
+    label.textContent = 'Meeting'
     const mode = document.createElement('select')
     mode.className = 'kbn-detail-select kbn-detail-meeting-mode'
     mode.setAttribute('aria-label', 'Meeting mode')
-    for (const { value, label } of MEETING_MODES) {
-      const option = document.createElement('option')
-      option.value = value
-      option.textContent = label
-      mode.append(option)
-    }
+    for (const { value, label: text } of MEETING_MODES) mode.append(new Option(text, value))
+    swallowDrag(mode)
     const start = this.buildActionBtn('Start meeting ▸', 'primary')
     start.title = 'Record the meeting on this machine and join it to this constitution; its worker follows the transcript'
     const err = document.createElement('div')
     err.className = 'kbn-detail-error'
     err.style.display = 'none'
-    const sync = (): void => {
-      mode.style.display = check.checked ? '' : 'none'
-      start.style.display = check.checked ? '' : 'none'
-    }
-    check.addEventListener('change', sync)
-    sync()
-    for (const el of [toggle, mode]) swallowDrag(el)
 
     start.addEventListener('click', (e) => {
       e.stopPropagation()
@@ -3468,15 +3451,13 @@ export class FiberDetailModal {
         if (error) {
           err.textContent = error
           err.style.display = ''
-          return
+        } else {
+          noteTa.value = ''
         }
-        check.checked = false
-        noteTa.value = ''
-        sync()
       })
     })
 
-    row.append(toggle, mode, start)
+    row.append(label, mode, start)
     const wrap = document.createElement('div')
     wrap.append(row, err)
     return wrap
