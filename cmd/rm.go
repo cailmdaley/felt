@@ -12,6 +12,8 @@ var rmCmd = &cobra.Command{
 	Long: `Deletes the fiber's file. Nested fibers are not removed: they keep their ids
 under a directory that no longer has a fiber of its own. Links to the deleted
 fiber are left broken; felt check reports them.`,
+	Example: `  felt show analysis/scratch --citations   # the fibers whose links would break
+  felt rm analysis/scratch`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()

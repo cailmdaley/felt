@@ -79,7 +79,8 @@ var installCmd = &cobra.Command{
 	Use:   "install <fiber>",
 	Short: "Install a fiber as a one-shot dispatch role",
 	Long: `Install the fiber as a oneshot role: a one-time dispatch that the daemon
-picks up on its next poll.
+picks up on its next poll (after a daemon restart, once the boot quarantine is
+released).
 
   felt shuttle install <fiber> --project-dir "$PWD"                      # armed, default agent
   felt shuttle install <fiber> --project-dir "$PWD" --model claude-opus  # explicit agent
