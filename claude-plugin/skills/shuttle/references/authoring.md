@@ -9,15 +9,15 @@ Write one when the desired state is clear, or can be made clear, but the path is
 1. **Study.** Read the code and fibers the work touches, so you can point workers at them. This is not a head start on the work itself.
 2. **Create the fiber** under the parent it belongs to: `felt add <root>/<branch>/<slug> "<name>" -t constitution`. The tag lets people browse constitutions (`felt ls -t constitution`); it never gates dispatch.
 3. **Write the spec** (below). The `ideating` skill carries the thinking: name what done *is* before designing how to get there, fence what stays untouched, and test whether the framing is right at all.
-4. **Refine it with the user.** Show the draft and revise it. A live uncertainty can sit in an "Open questions" section until it's resolved; then fold the answer in and delete the section.
-5. **Install the block.** `felt shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes and validates the `shuttle:` block and arms the fiber; add `--disabled` to leave it in Drafts.
-6. **Give it a role.** `felt shuttle assign <fiber-id> --role <role> --collaborator <model>`, choosing or creating the charter that fits ([collaboration.md](collaboration.md)). Without one, each worker has to rediscover the playbooks and the human gates.
+4. **Refine it with the user.** Show the draft, revise it, and check it once more for goal, constraints and success criteria before launch. A live uncertainty can sit in an "Open questions" section until it's resolved; then fold the answer in and delete the section.
+5. **Install the block.** `felt shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes and validates the `shuttle:` block and arms the fiber, an existing open draft included; add `--disabled` to leave it in Drafts. A hand-written block works too but skips validation, and without `status: active` it won't dispatch.
+6. **Give it a role.** `felt shuttle assign <fiber-id> --role <role> [--collaborator <model>]`, choosing or creating the charter that fits ([collaboration.md](collaboration.md)). Without one, each worker has to rediscover the playbooks and the human gates.
 
 Workers re-read the constitution at every dispatch, so keep refining it between sessions.
 
 ## The spec
 
-**Open with the lede, unheaded.** It orients both readers — a human skimming the card and a worker landing cold — with what this is, why it matters now, and where it sits, `[[wikilinks]]` woven in. Test it: someone who knows nothing reads the lede and Desired State and never wonders what this thing *is*.
+**Open with the lede, unheaded.** It orients both readers — a human skimming the card and a worker landing cold — with what this is, why it matters now, and where it sits, `[[wikilinks]]` woven in. Write it to stand alone, since `felt show -d summary` shows it without the rest. Test it: someone who knows nothing reads the lede and Desired State and never wonders what this thing *is*.
 
 **`## Desired State` is the one fixed heading**, and the contract: invariants, the quality bar, and a fence around what to aim for and what to leave alone. Phrase done-conditions so they can be checked wherever the work allows — a grep that returns nothing, a test command, "a reviewer can follow the narrative cold" — since workers and their verifiers measure against them. Give verification its own `## Evidence` section only when it needs room (a harness, a measurement procedure).
 

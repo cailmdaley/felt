@@ -29,7 +29,7 @@ When the message says the meeting joins this constitution, you stay that constit
 1. **File the meeting as a child fiber**, `<constitution>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, with the time, the mode and the transcript path. It holds the running notes and its own `report.html`.
 2. **Take `scribe` for the meeting's duration**, alongside the roles you already hold (create `roles/scribe` from this page if the store has none), and drop it at `# ended`.
 3. **Follow, act and keep the report live** as in steps 2–4, in the child fiber.
-4. **Carry it home.** At `# ended`, consolidate and close the child fiber as in step 5. Then bring what bears on the constitution back into its work: decisions into its body, your own action items into your next steps, the rest as proposals. The constitution stays open.
+4. **Carry it home.** At `# ended`, consolidate and close the child fiber as in step 5. Then bring what bears on the constitution back into its work: decisions into its body and plan, your own action items into your next steps, the rest as proposals. The constitution stays open.
 
 ## From transcript to notes
 
@@ -69,12 +69,12 @@ A `Previous session: <uuid> (<harness>)` line in your dispatch prompt names the 
 ```bash
 felt shuttle sessions <fiber-id>                 # every session a fiber has had
 felt shuttle sessions <session-uuid>             # the fiber a session served, and its siblings
-felt shuttle sessions --commit <sha>             # the session behind a commit
+felt shuttle sessions --commit <sha>             # the fiber behind a commit, and its sessions
 F=$(felt shuttle transcript <session-uuid>)      # the transcript as a local file, fetched if remote
 felt shuttle sessions <fiber-id> --materialize --dir <d>   # every transcript, plus manifest.json
 ```
 
-Each row says honestly whether its transcript is available locally, available on a remote host, on an unreachable host, or missing; an unreachable host never reads as absence. `--json` gives the structured rows. A subagent spawned natively by a harness leaves no ledger entry, so find it by searching resolved transcripts for a phrase you know it used.
+Each row gives its transcript's availability — `available_local`, `available_remote`, `host_unreachable`, `transcript_missing`, or `identity_pending` while the session id is still unknown — and an unreachable host never reads as absence. `--json` gives the structured rows. A subagent spawned natively by a harness leaves no ledger entry, so find it by searching resolved transcripts for a phrase you know it used.
 
 Once you have the file, read it with `jq` and `rg`. Lines are huge (tool results, base64), so never `cat` or `head` raw; always project through `jq -r` first.
 
@@ -92,6 +92,7 @@ jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") 
 ```bash
 jq -r 'select(.type=="response_item" and .payload.type=="message") | "\(.payload.role): \(.payload.content | map(.text // empty) | join("\n"))"' $F | tail -40   # conversation tail
 jq -r 'select(.type=="response_item" and .payload.type=="reasoning") | .payload.summary[]?.text // empty' $F   # reasoning summaries (often empty)
+jq -r 'select(.type=="response_item" and .payload.type=="message") | .payload.content | map(.text // empty) | join("\n")' $F | rg -i -C2 "<keyword>"   # search
 ```
 
-For either, `jq -rs '[.[]|select(.timestamp)] | "\(length) lines, \(first.timestamp) → \(last.timestamp)"' $F` gives the size and time span. A UUID that matches nothing usually means the predecessor ran on another host.
+For either, `jq -rs '[.[]|select(.timestamp)] | "\(length) lines, \(first.timestamp) → \(last.timestamp)"' $F` gives the size and time span. A UUID that matches nothing usually means the predecessor ran on another host: `shuttle.host` moved, or the ledger line's `host` differs from where you are.
