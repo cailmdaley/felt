@@ -1,6 +1,6 @@
 # Writing report.html
 
-The report is the fiber's human-facing surface: what a person reads to know where the work stands. It is a **current-state document, rewritten each session** — the felt skill's "bodies describe the now" and the `## Status` block's "rewritten each session, never appended", extended to the surface that carries figures.
+The report is the fiber's human-facing surface: what a person reads to know where the work stands. It is a **current-state document, rewritten each session** — the same rule as `outcome:` and `## Status`, extended to the surface that carries figures.
 
 Not every constitution wants one (see SKILL.md, "The fiber's surfaces"). When one exists, these rules bind.
 
@@ -13,8 +13,6 @@ Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesd
 **Name state as you use it.** "Run 04 (the apodized-mask one)" costs six words and saves a round trip. Never assume continuity of context across the gap.
 
 **Not the same surface as the other two.** `outcome:` is the kanban headline and `## Status` is the next worker's handoff — mechanics, blockers, where you stopped. The report is the human's: meaning, evidence, figures. Don't restate one in the other.
-
-**Follow this reference when drafting.** It defines the report's audience, evidence, and current-state shape, so the report stays self-contained.
 
 ## Rewrite, don't append
 

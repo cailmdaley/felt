@@ -11,10 +11,8 @@ transcript: read [meeting.md](meeting.md) too. It extends these steps.
 1. **Crystallize.** Search for related fibers, choose the right parent, and file
    the idea with a lede and Desired State proportionate to what the user has
    actually asked. Keep its status `open`.
-2. **Assign a role.** Find the charter under `roles/` that fits the work, or
-   create one when none does, and assign it with yourself as collaborator:
-   `felt shuttle assign <fiber-id> --role <role> --collaborator <your-model>`.
-   Read the charter before realizing; its playbooks and gates shape the work.
+2. **Assign a role** with yourself as collaborator, per
+   [collaboration.md](collaboration.md), and read the charter before realizing.
 3. **Install as a draft.** Use `felt shuttle install <fiber-id> --disabled`
    with the supplied model, surface, host and project directory; apply any
    supplied effort or chrome setting with `felt shuttle set-agent`. Preserve
@@ -24,7 +22,8 @@ transcript: read [meeting.md](meeting.md) too. It extends these steps.
 4. **Claim.** POST the supplied `Claim` JSON to `Claim endpoint` with
    `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
    you created. When the endpoint names a unix socket, send the request through
-   it exactly as given (`curl --unix-socket <path> http://localhost/...`). Encode JSON with a JSON library and pass it as a file or structured
+   it exactly as given (`curl --unix-socket <path> http://localhost/...`).
+   Encode JSON with a JSON library and pass it as a file or structured
    request body; do not interpolate user input into shell quoting. Run it only
    after the install succeeded — the daemon refuses an uninstalled fiber with
    `not_installed` — and do not pipe setup commands through `tail` or similar,
