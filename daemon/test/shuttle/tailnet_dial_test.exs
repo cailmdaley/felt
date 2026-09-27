@@ -20,7 +20,23 @@ defmodule Shuttle.TailnetDialTest do
     @impl true
     def call(conn, parent) do
       send(parent, {:https_request, Plug.Conn.get_req_header(conn, "host")})
-      Plug.Conn.send_resp(conn, 200, "tailnet-response")
+
+      case conn.request_path do
+        "/redirect" ->
+          conn
+          |> Plug.Conn.put_resp_header(
+            "location",
+            "https://redirect.example.ts.net/redirect-target"
+          )
+          |> Plug.Conn.send_resp(302, "redirect")
+
+        "/redirect-target" ->
+          send(parent, :redirect_followed)
+          Plug.Conn.send_resp(conn, 200, "redirect-followed")
+
+        _ ->
+          Plug.Conn.send_resp(conn, 200, "tailnet-response")
+      end
     end
   end
 
@@ -247,6 +263,37 @@ defmodule Shuttle.TailnetDialTest do
              )
 
     refute_receive {:https_request, _}, 100
+  end
+
+  test "private HTTPS requests do not follow cross-authority redirects", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    _remote = start_bridge(base, localapi, @host, tls_port)
+
+    assert {:error, {:http_status, 302}} =
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}:#{tls_port}/redirect",
+               5_000
+             )
+
+    assert_receive {:https_request, [host_header]}, 5_000
+    assert host_header == "#{@host}:#{tls_port}"
+    refute_receive :redirect_followed, 100
   end
 
   test "an invalid private socket configuration refuses HTTPS instead of dialing directly", %{
