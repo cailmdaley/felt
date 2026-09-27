@@ -120,9 +120,9 @@ var nestCmd = &cobra.Command{
 	Short: "Move a fiber subtree under a parent",
 	Long: `The child keeps its basename and brings its descendants: nesting covariance
 under analysis gives analysis/covariance. inputs.from references to moved ids
-are rewritten within the store the move runs in; a move made inside a view
-leaves references from the enclosing store as written. Wikilinks are left as written; they resolve
-by basename, so they keep resolving.
+are rewritten within the store the move runs in, so a move made inside a view
+leaves the enclosing store's references as written. Wikilinks stay as written
+and keep resolving by basename.
 
 A <parent> that is an existing path in the store is used as spelled, even a
 directory with no fiber of its own (roles/ is always the top-level roles

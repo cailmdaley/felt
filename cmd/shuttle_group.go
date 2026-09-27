@@ -24,26 +24,21 @@ var shuttleFeltStore string
 var shuttleCmd = &cobra.Command{
 	Use:   "shuttle",
 	Short: "Agent dispatch — the felt tree's active mode",
-	Long: `felt shuttle is the dispatch surface over the felt tree: the verbs that
-install, schedule, pause, and hand off the agent-scheduled facet of a fiber.
-
-A fiber carries the shuttle: facet or it does not — with it, the fiber is a
-task/role the daemon can dispatch; without it, a pure note. Write verbs
-validate the block before touching disk and work offline (accept, and resume
-on a standing role awaiting review, go through the owning daemon when it
-answers and write locally when it does not). snapshot, dispatch, sessions,
-transcript, message, validate-identity, and the cross-host table (felt shuttle
-status --all) talk to the local daemon's HTTP API — 127.0.0.1:4000 or a unix
-socket, per 'felt shuttle host'.
+	Long: `A fiber with a shuttle: block is work the daemon dispatches to an agent;
+without one it is a note. These verbs install, schedule, pause, and hand off
+that block. Write verbs validate before touching disk and work offline.
+snapshot, dispatch, sessions, transcript, message, validate-identity, and
+felt shuttle status --all talk to the local daemon (127.0.0.1:4000 or a unix
+socket; see felt shuttle host).
 
 Common paths:
   felt shuttle install <fiber> --project-dir "$PWD"   dispatch a fiber once
-  felt shuttle status <fiber>              its block, and whether status arms it
-  felt shuttle attach <fiber>              the worker's live tmux session
-  felt shuttle sessions                    addressable sessions across the fleet
-  felt shuttle message <address> "text"    deliver to a session and wake it
-  felt shuttle send-file <path>            offer a file through Shuttle's surface
-  felt shuttle handoff <fiber>             a worker's last call: exit cleanly`,
+  felt shuttle status <fiber>                         its block, and whether status arms it
+  felt shuttle attach <fiber>                         the worker's live tmux session
+  felt shuttle sessions                               addressable sessions across the fleet
+  felt shuttle message <address> "text"               deliver to a session and wake it
+  felt shuttle send-file <path>                       offer a file on Shuttle's board
+  felt shuttle handoff <fiber>                        a worker's last call: exit cleanly`,
 	// Map --felt-store onto felt's -C store selector before any verb runs, so the
 	// daemon's `--felt-store <store>` invocations resolve through felt's existing
 	// store-resolution path unchanged.
