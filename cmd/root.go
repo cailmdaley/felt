@@ -111,7 +111,7 @@ Common paths:
   felt nest <child> <parent>        move a subtree under a parent
 
 Editing: write bodies, outcomes longer than a sentence (outcome: |-), and
-structured YAML in the file directly; -o mangles quotes and newlines. Never
+structured YAML in the file directly; felt edit -o mangles quotes and newlines. Never
 hand-edit created-at or updated-at; felt stamps them when it adds or edits.
 
 Sync: felt sync merges the store's Git upstream, following a symlinked view to

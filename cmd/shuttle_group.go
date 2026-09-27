@@ -28,13 +28,22 @@ var shuttleCmd = &cobra.Command{
 install, schedule, pause, and hand off the agent-scheduled facet of a fiber.
 
 A fiber carries the shuttle: facet or it does not — with it, the fiber is a
-task/role the daemon can dispatch; without it, a pure note. These verbs write
-and read that facet. Write verbs validate the block before touching disk and
-work offline (accept, and resume on a standing role awaiting review, go through
-the owning daemon when it answers and write locally when it does not).
-snapshot, dispatch, status --all/--remote, sessions, transcript, message and
-validate-identity talk to the local daemon's HTTP API — 127.0.0.1:4000 or a
-unix socket, per 'felt shuttle host'.`,
+task/role the daemon can dispatch; without it, a pure note. Write verbs
+validate the block before touching disk and work offline (accept, and resume
+on a standing role awaiting review, go through the owning daemon when it
+answers and write locally when it does not). snapshot, dispatch, sessions,
+transcript, message, validate-identity, and the cross-host table (felt shuttle
+status --all) talk to the local daemon's HTTP API — 127.0.0.1:4000 or a unix
+socket, per 'felt shuttle host'.
+
+Common paths:
+  felt shuttle install <fiber> --project-dir "$PWD"   dispatch a fiber once
+  felt shuttle status <fiber>              its block, and whether status arms it
+  felt shuttle attach <fiber>              the worker's live tmux session
+  felt shuttle sessions                    addressable sessions across the fleet
+  felt shuttle message <address> "text"    deliver to a session and wake it
+  felt shuttle send-file <path>            offer a file through Shuttle's surface
+  felt shuttle handoff <fiber>             a worker's last call: exit cleanly`,
 	// Map --felt-store onto felt's -C store selector before any verb runs, so the
 	// daemon's `--felt-store <store>` invocations resolve through felt's existing
 	// store-resolution path unchanged.

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,7 +18,15 @@ import (
 type helpInvocation struct {
 	line   string   // the text as found, for the failure message
 	args   []string // tokens after "felt"
-	strict bool     // a command line (indented, Example, or quoted), not prose
+	strict bool     // a command line (indented, Example, or code), not prose
+	notes  []string // text describing this line (aligned column, comment): its bare flags are this command's
+}
+
+// helpScan is what one help text shows: the felt invocations in it, and the
+// text outside them, whose bare flags belong to the command the text is for.
+type helpScan struct {
+	invocations []helpInvocation
+	residual    []string
 }
 
 func walkCommands(c *cobra.Command, visit func(*cobra.Command)) {
@@ -28,34 +37,37 @@ func walkCommands(c *cobra.Command, visit func(*cobra.Command)) {
 }
 
 // helpTokens splits a command segment shell-style: quoted strings are one
-// token. It stops at a comment, a redirection, a pipe, or a command separator.
-func helpTokens(s string) []string {
-	var tokens []string
+// token. It stops at a comment, a redirection, a pipe, or a command separator
+// and returns the text from there on.
+func helpTokens(s string) (tokens []string, tail string) {
+	var starts []int
 	var cur strings.Builder
-	inToken := false
+	start := -1
 	var quote rune
 	flush := func() {
-		if inToken {
+		if start >= 0 {
 			tokens = append(tokens, cur.String())
+			starts = append(starts, start)
 		}
 		cur.Reset()
-		inToken = false
+		start = -1
 	}
-	for _, r := range s {
+	for i, r := range s {
 		switch {
 		case quote != 0:
 			cur.WriteRune(r)
 			if r == quote {
 				quote = 0
 			}
-		case r == '"' || r == '\'':
-			quote = r
-			inToken = true
-			cur.WriteRune(r)
 		case r == ' ' || r == '\t':
 			flush()
 		default:
-			inToken = true
+			if r == '"' || r == '\'' {
+				quote = r
+			}
+			if start < 0 {
+				start = i
+			}
 			cur.WriteRune(r)
 		}
 	}
@@ -65,91 +77,134 @@ func helpTokens(s string) []string {
 		// "<" alone is a redirection; <id> is a placeholder.
 		case strings.HasPrefix(tok, "#"), strings.HasPrefix(tok, ">"), strings.HasPrefix(tok, "2>"),
 			tok == "<", tok == "|", tok == "||", tok == "&&", tok == ";":
-			return tokens[:i]
+			return tokens[:i], s[starts[i]:]
 		}
 		if strings.HasSuffix(tok, ";") {
-			return append(tokens[:i:i], strings.TrimSuffix(tok, ";"))
+			return append(tokens[:i:i], strings.TrimSuffix(tok, ";")), s[starts[i]+len(tok):]
 		}
 	}
-	return tokens
+	return tokens, ""
 }
 
-// commandLineArgs parses a line that is a felt command: everything after
-// "felt" up to a comment, separator, or a run of two spaces that introduces
-// an aligned description.
-func commandLineArgs(trimmed string) []string {
-	rest := strings.TrimPrefix(trimmed, "felt ")
-	if i := strings.Index(rest, "  "); i >= 0 {
-		rest = rest[:i]
+// addCommandLine records a felt command line. What follows its arguments is
+// either a comment, which describes it, or shell, whose flags belong to other
+// programs but which may run felt again.
+func (s *helpScan) addCommandLine(inv helpInvocation, tail string) {
+	tail = strings.TrimSpace(tail)
+	if strings.HasPrefix(tail, "#") {
+		inv.notes = append(inv.notes, tail)
+		tail = ""
 	}
-	return helpTokens(rest)
+	s.invocations = append(s.invocations, inv)
+	if tail != "" {
+		s.invocations = append(s.invocations, scanProse(tail).invocations...)
+	}
+}
+
+// addLine records a line that is a felt command: everything after "felt" up
+// to a comment, a separator, or a run of two spaces that introduces an
+// aligned description.
+func (s *helpScan) addLine(trimmed string) {
+	rest := strings.TrimPrefix(trimmed, "felt ")
+	command, desc, aligned := strings.Cut(rest, "  ")
+	args, tail := helpTokens(command)
+	inv := helpInvocation{line: trimmed, args: args, strict: true}
+	if aligned {
+		inv.notes = append(inv.notes, strings.TrimSpace(desc))
+	}
+	s.addCommandLine(inv, tail)
 }
 
 var quotedFeltSpan = regexp.MustCompile("(?:`felt ([^`]+)`)|(?:'felt ([^']+)')|(?:\"felt ([^\"]+)\")")
 
 // proseArgs reads a bare "felt ..." mention in running text. The mention runs
-// until a token carrying closing punctuation or a dash separator.
-func proseArgs(after string) []string {
-	var args []string
-	for _, tok := range strings.Fields(after) {
-		if tok == "—" || strings.HasPrefix(tok, "(") || strings.HasPrefix(tok, "#") {
-			break
+// until a token carrying closing punctuation or a dash separator; a mention
+// opened by a backtick is code.
+func proseArgs(fields []string) (args []string, consumed int, code bool) {
+	for i, tok := range fields {
+		if i == 0 && strings.HasPrefix(tok, "`") {
+			code = true
+			tok = tok[1:]
 		}
-		trimmed := strings.TrimRight(tok, ".,;:)")
+		if tok == "—" || strings.HasPrefix(tok, "(") || strings.HasPrefix(tok, "#") {
+			return args, i, code
+		}
+		trimmed := strings.TrimRight(tok, ".,;:)`")
 		if trimmed != tok {
 			if trimmed != "" {
 				args = append(args, trimmed)
 			}
-			break
+			return args, i + 1, code
 		}
 		args = append(args, tok)
 	}
-	return args
+	return args, len(fields), code
 }
 
-// helpInvocations extracts every felt invocation from a command's help.
-func helpInvocations(c *cobra.Command) []helpInvocation {
-	var out []helpInvocation
-	for _, line := range strings.Split(c.Example, "\n") {
+// scanProse reads running text: quoted felt command lines, bare felt
+// mentions, and the text around them.
+func scanProse(text string) helpScan {
+	var s helpScan
+	for _, m := range quotedFeltSpan.FindAllStringSubmatch(text, -1) {
+		span := m[1] + m[2] + m[3]
+		args, tail := helpTokens(span)
+		s.addCommandLine(helpInvocation{line: "felt " + span, args: args, strict: true}, tail)
+	}
+	fields := strings.Fields(quotedFeltSpan.ReplaceAllString(text, " "))
+	var rest []string
+	for i := 0; i < len(fields); i++ {
+		if strings.TrimLeft(fields[i], "(") == "felt" {
+			args, n, code := proseArgs(fields[i+1:])
+			if len(args) > 0 {
+				s.invocations = append(s.invocations, helpInvocation{line: "felt " + strings.Join(args, " "), args: args, strict: code})
+				i += n
+				continue
+			}
+		}
+		rest = append(rest, fields[i])
+	}
+	if len(rest) > 0 {
+		s.residual = append(s.residual, strings.Join(rest, " "))
+	}
+	return s
+}
+
+func (s *helpScan) merge(o helpScan) {
+	s.invocations = append(s.invocations, o.invocations...)
+	s.residual = append(s.residual, o.residual...)
+}
+
+// scanHelp reads a command's Long and Example. Indented lines that start
+// with felt are command lines; other indented lines stand alone; unindented
+// lines join into paragraphs of prose.
+func scanHelp(long, example string) helpScan {
+	var s helpScan
+	for _, line := range strings.Split(example, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "felt ") {
-			out = append(out, helpInvocation{line: trimmed, args: commandLineArgs(trimmed), strict: true})
+			s.addLine(trimmed)
+		} else if trimmed != "" {
+			s.merge(scanProse(trimmed))
 		}
 	}
 
 	var prose []string
-	scanProse := func(text string) {
-		for _, m := range quotedFeltSpan.FindAllStringSubmatch(text, -1) {
-			span := m[1] + m[2] + m[3]
-			out = append(out, helpInvocation{line: "felt " + span, args: helpTokens(span), strict: true})
-		}
-		text = quotedFeltSpan.ReplaceAllString(text, " ")
-		fields := strings.Fields(text)
-		for i, f := range fields {
-			if f == "felt" && i+1 < len(fields) {
-				args := proseArgs(strings.Join(fields[i+1:], " "))
-				if len(args) > 0 {
-					out = append(out, helpInvocation{line: "felt " + strings.Join(args, " "), args: args})
-				}
-			}
-		}
-	}
 	flushProse := func() {
 		if len(prose) > 0 {
-			scanProse(strings.Join(prose, " "))
+			s.merge(scanProse(strings.Join(prose, " ")))
 			prose = nil
 		}
 	}
-	for _, line := range strings.Split(c.Long, "\n") {
+	for _, line := range strings.Split(long, "\n") {
 		trimmed := strings.TrimSpace(line)
 		indented := trimmed != "" && trimmed != line && (line[0] == ' ' || line[0] == '\t')
 		switch {
 		case indented && strings.HasPrefix(trimmed, "felt "):
 			flushProse()
-			out = append(out, helpInvocation{line: trimmed, args: commandLineArgs(trimmed), strict: true})
+			s.addLine(trimmed)
 		case indented:
 			flushProse()
-			scanProse(trimmed)
+			s.merge(scanProse(trimmed))
 		case trimmed == "":
 			flushProse()
 		default:
@@ -157,7 +212,25 @@ func helpInvocations(c *cobra.Command) []helpInvocation {
 		}
 	}
 	flushProse()
-	return out
+	return s
+}
+
+var bareFlagPattern = regexp.MustCompile(`^(?:--[a-z][a-z0-9-]*|-[A-Za-z][A-Za-z0-9]*)$`)
+
+// bareFlags returns the flag tokens in running text, each stripped of
+// surrounding punctuation and of a =value, with -L/--depth read as two.
+func bareFlags(text string) []string {
+	var flags []string
+	for _, field := range strings.Fields(text) {
+		for _, part := range strings.FieldsFunc(field, func(r rune) bool { return r == '/' || r == '|' }) {
+			part = strings.Trim(part, "`'\"()[]{},.;:!?")
+			name, _, _ := strings.Cut(part, "=")
+			if bareFlagPattern.MatchString(name) {
+				flags = append(flags, name)
+			}
+		}
+	}
+	return flags
 }
 
 func isFlagToken(tok string) bool {
@@ -222,81 +295,202 @@ func initDefaultCommands() {
 	rootCmd.InitDefaultCompletionCmd()
 }
 
-func TestHelpCommandLinesResolve(t *testing.T) {
-	initDefaultCommands()
-	walkCommands(rootCmd, func(owner *cobra.Command) {
-		for _, inv := range helpInvocations(owner) {
-			hasFlag := false
-			for _, a := range inv.args {
-				hasFlag = hasFlag || isFlagToken(a)
-			}
-			target, rest, err := rootCmd.Find(inv.args)
-			if err != nil {
-				// Running text such as "felt keeps fibers" names no verb; it
-				// is only an invocation when it carries a flag.
-				if inv.strict || hasFlag {
-					t.Errorf("%q help: %q names no felt command: %v", owner.CommandPath(), inv.line, err)
-				}
-				continue
-			}
-			named := len(inv.args) > 0 && !isFlagToken(inv.args[0])
-			if named && target == rootCmd {
-				t.Errorf("%q help: %q names no felt command", owner.CommandPath(), inv.line)
-				continue
-			}
-			if target.Deprecated != "" {
-				t.Errorf("%q help: %q uses deprecated %q", owner.CommandPath(), inv.line, target.CommandPath())
-			}
-			if inv.strict && !target.Runnable() && target.HasSubCommands() {
-				for _, a := range rest {
-					if !isFlagToken(a) {
-						t.Errorf("%q help: %q: %q has no subcommand %q", owner.CommandPath(), inv.line, target.CommandPath(), a)
-						break
-					}
-				}
-			}
-			for _, flag := range unknownFlags(target, inv.args) {
-				t.Errorf("%q help: %q: %q has no flag %s", owner.CommandPath(), inv.line, target.CommandPath(), flag)
+// helpReporter is where help checks report: a *testing.T, or a recorder that
+// proves a check fires.
+type helpReporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+}
+
+type helpRecorder struct{ errors []string }
+
+func (r *helpRecorder) Helper() {}
+func (r *helpRecorder) Errorf(format string, args ...any) {
+	r.errors = append(r.errors, fmt.Sprintf(format, args...))
+}
+
+// resolveInvocation finds the command a help invocation names, reporting
+// each way it fails to be a real felt command line. It returns nil when the
+// invocation names no command.
+func resolveInvocation(t helpReporter, where string, inv helpInvocation) *cobra.Command {
+	t.Helper()
+	hasFlag := false
+	for _, a := range inv.args {
+		hasFlag = hasFlag || isFlagToken(a)
+	}
+	// Running text such as "felt keeps fibers" names no verb; it is an
+	// invocation when it is code or carries a flag.
+	strict := inv.strict || hasFlag
+	target, rest, err := rootCmd.Find(inv.args)
+	if err != nil {
+		if strict {
+			t.Errorf("%s: %q names no felt command: %v", where, inv.line, err)
+		}
+		return nil
+	}
+	named := len(inv.args) > 0 && !isFlagToken(inv.args[0])
+	if named && target == rootCmd {
+		t.Errorf("%s: %q names no felt command", where, inv.line)
+		return nil
+	}
+	if target.Deprecated != "" {
+		t.Errorf("%s: %q uses deprecated %q", where, inv.line, target.CommandPath())
+	}
+	if strict && !target.Runnable() && target.HasSubCommands() {
+		for _, a := range rest {
+			if !isFlagToken(a) {
+				t.Errorf("%s: %q: %q has no subcommand %q", where, inv.line, target.CommandPath(), a)
+				break
 			}
 		}
+	}
+	for _, flag := range unknownFlags(target, inv.args) {
+		t.Errorf("%s: %q: %q has no flag %s", where, inv.line, target.CommandPath(), flag)
+	}
+	return target
+}
+
+// checkHelpScan holds a help text to the command tree: each invocation to
+// the command it names, each description to the command it describes, and
+// every other bare flag to target, the command the text is for.
+func checkHelpScan(t helpReporter, where string, target *cobra.Command, scan helpScan) {
+	t.Helper()
+	for _, inv := range scan.invocations {
+		named := resolveInvocation(t, where, inv)
+		if named == nil {
+			continue
+		}
+		for _, note := range inv.notes {
+			checkHelpScan(t, where, named, scanProse(note))
+		}
+	}
+	for _, text := range scan.residual {
+		for _, flag := range unknownFlags(target, bareFlags(text)) {
+			t.Errorf("%s: %q has no flag %s, in: %s", where, target.CommandPath(), flag, flagContext(text, flag))
+		}
+	}
+}
+
+// flagContext is the stretch of text around a flag, for a failure message.
+func flagContext(text, flag string) string {
+	i := strings.Index(text, flag)
+	if i < 0 {
+		return text
+	}
+	lo, hi := max(0, i-40), min(len(text), i+len(flag)+40)
+	return "…" + text[lo:hi] + "…"
+}
+
+// cobraGenerated reports a command cobra adds on its own: help, and the
+// completion tree.
+func cobraGenerated(c *cobra.Command) bool {
+	for ; c != nil && c != rootCmd; c = c.Parent() {
+		if c.Parent() == rootCmd && (c.Name() == "help" || c.Name() == "completion") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHelpCommandLinesResolve(t *testing.T) {
+	initDefaultCommands()
+	walkCommands(rootCmd, func(c *cobra.Command) {
+		scan := scanHelp(c.Long, c.Example)
+		if cobraGenerated(c) {
+			// cobra writes this help; its bare flags are the shell's.
+			scan.residual = nil
+		}
+		checkHelpScan(t, fmt.Sprintf("%q help", c.CommandPath()), c, scan)
+		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			checkHelpScan(t, fmt.Sprintf("%q --%s usage", c.CommandPath(), f.Name), c, scanProse(f.Usage))
+		})
 	})
 }
 
 // The extractor itself must see what a reader sees; pin the shapes it has to
 // handle so a quiet regression cannot turn the drift test into a no-op.
 func TestHelpInvocationExtraction(t *testing.T) {
-	c := &cobra.Command{
-		Use: "probe",
-		Long: `Prose mentions felt sync --push. Then felt keeps going,
+	long := `Prose mentions felt sync --push. Then felt keeps going,
 and 'felt add launch/log' is quoted, as is ` + "`felt hook session`" + `.
+Code opens felt ` + "`shuttle status -j`" + ` and prose closes felt shuttle bogus --all.
+An aside (felt tree -L 2) ends at its parenthesis.
+Loose flags: -s "" or -L/--depth 2, key=value, outcome: |-, a -- b, 3 -1 — non-empty.
+Pipes: ` + "`felt ls | head -5`" + ` and ` + "`felt sync && felt ls -r`" + `.
 
-  felt ls "query" --body -r         regex, including bodies
-  felt show <id> -d summary # comment
+  felt ls "query" --body -r         regex, including bodies (--unset key)
+  felt show <id> -d summary # comment -x
   felt completion zsh > "$(brew --prefix)/_felt"
-  -t rule:        an indented flag line`,
-		Example: `  felt edit analysis/covariance -o "done" | cat`,
-	}
+  -t rule:        an indented flag line`
+	example := `  felt edit analysis/covariance -o "done" | cat
+  # -q in a comment`
+	scan := scanHelp(long, example)
 	var got []string
-	for _, inv := range helpInvocations(c) {
-		got = append(got, strings.Join(inv.args, " "))
+	for _, inv := range scan.invocations {
+		line := strings.Join(inv.args, " ")
+		if inv.strict {
+			line += " [strict]"
+		}
+		for _, note := range inv.notes {
+			line += " {" + note + "}"
+		}
+		got = append(got, line)
 	}
 	want := []string{
-		"edit analysis/covariance -o \"done\"",
-		"add launch/log",
-		"hook session",
-		"sync --push",
-		"keeps going",
-		"ls \"query\" --body -r",
-		"show <id> -d summary",
-		"completion zsh",
+		`edit analysis/covariance -o "done" [strict]`,
+		`add launch/log [strict]`,
+		`hook session [strict]`,
+		`ls [strict]`,
+		`sync [strict]`,
+		`ls -r`,
+		`sync --push`,
+		`keeps going`,
+		`shuttle status -j [strict]`,
+		`shuttle bogus --all`,
+		`tree -L 2`,
+		`ls "query" --body -r [strict] {regex, including bodies (--unset key)}`,
+		`show <id> -d summary [strict] {# comment -x}`,
+		`completion zsh [strict]`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("extracted invocations:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
+	var flags []string
+	for _, text := range scan.residual {
+		flags = append(flags, bareFlags(text)...)
+	}
+	if got, want := strings.Join(flags, " "), "-q -s -L --depth -t"; got != want {
+		t.Fatalf("bare flags outside invocations = %q, want %q", got, want)
+	}
+
 	bad := unknownFlags(lsCmd, []string{"ls", "-rv", "-s", "all", "--body", "--json", "-C", "dir", "-q", "--bogus=1", "--", "--after"})
 	if strings.Join(bad, " ") != "-q --bogus=1" {
 		t.Fatalf("unknownFlags(ls) = %v, want [-q --bogus=1]", bad)
+	}
+}
+
+// A misspelled flag or verb must fail wherever help can hold one.
+func TestHelpDriftIsCaught(t *testing.T) {
+	initDefaultCommands()
+	cases := []struct {
+		name  string
+		owner *cobra.Command
+		scan  helpScan
+		want  string
+	}{
+		{"bare flag in Long", addCmd, scanHelp("--toplevel skips the view.", ""), "--toplevel"},
+		{"flag in an aligned description", rootCmd, scanHelp("  felt edit <id> --set key=value    a scalar field (--unsett key)", ""), "--unsett"},
+		{"verb in a flag usage", rootCmd, scanProse("park it; 'felt shuttle resum' arms it again"), `subcommand "resum"`},
+		{"subcommand in prose before a flag", rootCmd, scanProse("see felt shuttle bogus --json for more"), `subcommand "bogus"`},
+		{"verb in a code span after felt", rootCmd, scanProse("run felt `bogus` first"), "names no felt command"},
+		{"flag in a comment", lsCmd, scanHelp("", "  felt ls  # -q is quiet"), "no flag -q"},
+	}
+	for _, tc := range cases {
+		var probe helpRecorder
+		checkHelpScan(&probe, tc.name, tc.owner, tc.scan)
+		if !strings.Contains(strings.Join(probe.errors, "\n"), tc.want) {
+			t.Errorf("%s: want an error naming %q, got %q", tc.name, tc.want, probe.errors)
+		}
 	}
 }
 
