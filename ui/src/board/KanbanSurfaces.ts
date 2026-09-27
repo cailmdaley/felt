@@ -60,7 +60,7 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   inFlight: 'In flight',
   awaitingReview: 'Awaiting review',
   tempered: 'Tempered',
-  composted: 'Composted',
+  composted: 'Discarded',
   pinned: 'Pinned',
 }
 
@@ -1808,7 +1808,7 @@ export class KanbanSurfaceRenderer {
       }
       reviewMetaActions.append(
         verdictBtn('Temper', 'tempered', 'tempered'),
-        verdictBtn('Compost', 'drafts', 'composted'),
+        verdictBtn('Discard', 'drafts', 'composted'),
       )
     }
 
@@ -2138,7 +2138,7 @@ export class KanbanSurfaceRenderer {
         li.classList.add(
           note === 'awaiting review'
             ? 'kbn-card-queued-row--review'
-            : 'kbn-card-queued-row--composted',
+            : 'kbn-card-queued-row--discarded',
         )
         const suffix = document.createElement('span')
         suffix.className = 'kbn-card-queued-note'

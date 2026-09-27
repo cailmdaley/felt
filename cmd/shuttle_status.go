@@ -452,7 +452,7 @@ func sessionOwnerMap(entries []shuttleEntry) map[string]string {
 
 // computeState derives the display state from tmux liveness and the felt-native
 // status (the sole lifecycle axis). A closed fiber collapses to "closed" — the
-// finer awaiting/accepted/composted verdict is the tempered field the bulk
+// finer awaiting/tempered/discarded verdict is the tempered field the bulk
 // listing does not carry; the kanban makes that call.
 func computeState(b *shuttle.Block, status string, running bool) string {
 	if running {

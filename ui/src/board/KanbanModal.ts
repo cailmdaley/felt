@@ -970,7 +970,7 @@ export class KanbanModal {
     // buttons, the detail panel's terminal moves, and a drag onto the column —
     // so one guard covers all three.
     if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
-      const verb = target === 'tempered' ? 'temper' : 'compost'
+      const verb = target === 'tempered' ? 'temper' : 'discard'
       const ok = window.confirm(
         `“${card.name}” has a live worker. This stops it — ${verb} anyway?`,
       )
@@ -1534,10 +1534,10 @@ export class KanbanModal {
     // reopen-as-draft compose in commitSurface.)
     if (card.status === 'closed' && card.tempered === undefined && card.shuttleKind === 'pinned') {
       this.showBanner(
-        `“${card.name}” is a pinned role awaiting review — accept it (drag to Tempered) or compost it first.`,
+        `“${card.name}” is a pinned role awaiting review — accept it (drag to Tempered) or discard it first.`,
         'info',
       )
-      this.announce(`${card.name} awaits a verdict; accept or compost it first.`)
+      this.announce(`${card.name} awaits a verdict; accept or discard it first.`)
       return
     }
     const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined

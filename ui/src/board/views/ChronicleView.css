@@ -799,7 +799,7 @@
 .chr-state-resting { color: #7A6F5C; }
 .chr-state-awaitingReview { color: #C49333; }
 .chr-state-tempered { color: var(--kbn-tempered, #3F8278); }
-.chr-state-composted { color: #7A6F5C; opacity: 0.6; }
+.chr-state-discarded { color: #7A6F5C; opacity: 0.6; }
 
 .chr-name {
   flex: 1 1 auto;
@@ -985,7 +985,7 @@ button.chr-name:hover {
   pointer-events: none;
 }
 .chr-end { color: var(--kbn-tempered, #3F8278); }
-.chr-end-compost { color: #A89B83; }
+.chr-end-discard { color: #A89B83; }
 /* The one mark that writes back: a fiber's due date is a plain frontmatter
  * field, so unlike every other mark on the row it opts back into pointer
  * events and offers a grab cursor. `.chr-launch` stays inert — it draws a

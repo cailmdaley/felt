@@ -56,7 +56,7 @@ evaluates in this order:
 |---|---|
 | Cycles | tagged `cycle` — checked first, unconditionally |
 | Tempered | `closed` + `tempered: true` |
-| Composted | `closed` + `tempered: false` |
+| Discarded | `closed` + `tempered: false` |
 | Awaiting review | `closed`, `tempered` absent |
 | In flight | live tmux worker with a shuttle block — liveness wins over everything below |
 | Pinned | resting `kind: pinned` (`open` or `active`) |
@@ -106,7 +106,7 @@ terminus. Only `accept` clears the outcome.
 Beyond the columns the Desk offers a fiber and file viewer, Stash and Capture
 dialogs, and Attach. Each card's panel folds a drawer under its title: a message
 box with New session and Resume, the next launch's agent, effort, session and
-kind, the card's due day and parent, and Temper.
+kind, the card's due day and parent, and Temper / Discard.
 
 ### Attach
 

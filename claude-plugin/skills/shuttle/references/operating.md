@@ -28,7 +28,7 @@ The Desk admits fibers with a `shuttle:` block and cycle fibers, nothing else. C
 - **In flight**: a live worker or owned app conversation (any kind), or an armed oneshot — even one waiting on its dependencies.
 - **Awaiting review**: `status: closed`, `tempered` absent. Parked for the human's verdict.
 - **Tempered**: `status: closed`, `tempered: true`. Human-accepted.
-- **Composted**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block stays as the record.
+- **Discarded**: `status: closed`, `tempered: false`. Human-rejected (mooted, superseded). The block stays as the record.
 
 A **cycle** is not work: a fiber tagged `cycle` with `start:` and `due:` civil days and a body whose first paragraph is the intention for that stretch of time. The Chronicle draws it as a band; membership is derived (worked during the span or due inside it), never listed.
 
@@ -45,7 +45,7 @@ Drag-and-drop advances a card's state; the modal buttons (Resume, New session) m
 | standing, **awaiting** | modal **Resume** / **New session** | `felt shuttle resume` + dispatch | Re-arms; continues the prior session with the directive, or starts a fresh one. Outcome preserved. |
 | standing, **armed** | drag → inFlight | `felt shuttle dispatch --ad-hoc` | Ad-hoc run (`adhoc-*` id); schedule untouched. |
 | standing, **draft** | drag → inFlight | `felt shuttle reopen` | Arms it; the schedule applies from the next poll. |
-| oneshot, **awaiting** | drag → tempered / composted | `felt shuttle close --tempered=true/false` | Terminus / discarded. |
+| oneshot, **awaiting** | Temper / Discard | `felt shuttle close --tempered=true/false` | Terminus / discarded. |
 | any, **running worker** | any | dispatch returns `already_running` | Attach via tmux. |
 | any | drag → drafts | `felt shuttle pause` | `status: open`, live worker killed, schedule preserved. |
 
@@ -134,7 +134,7 @@ The shuttle block is the dispatch contract: agent, kind, schedule, host. Closing
 
 1. **Mistake recovery** — wrong slug, immediate undo.
 2. **Full rebuild** — converting kinds is normally `reshape`; uninstall + install only when project_dir, host, and status should be re-resolved from scratch.
-3. **Archive from kanban** — the fiber should leave the board entirely rather than rest in Tempered or Composted.
+3. **Archive from kanban** — the fiber should leave the board entirely rather than rest as tempered or discarded.
 4. **Tool boundary** — a different dispatcher takes ownership.
 
 It is never how a worker closes its own session.

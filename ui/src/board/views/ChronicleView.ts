@@ -726,7 +726,7 @@ export interface ChronicleRow {
   closeIdx: number | null
   live: boolean
   closed: boolean
-  /** Composted (`tempered === false`) closes get ✗; everything else ✓. */
+  /** Discarded (`tempered === false`) closes get ✗; everything else ✓. */
   closedOk: boolean
   dueIdx: number | null
   launchIdx: number | null
@@ -3573,7 +3573,7 @@ class ChronicleView implements TemporalView {
     }
 
     if (row.closed && row.closeIdx !== null) {
-      mark(`chr-end${row.closedOk ? '' : ' chr-end-compost'}`, row.closeIdx, row.closedOk ? '✓' : '✗')
+      mark(`chr-end${row.closedOk ? '' : ' chr-end-discard'}`, row.closeIdx, row.closedOk ? '✓' : '✗')
     }
     // Ahead of today: promises only, never ink.
     if (row.dueIdx !== null) {

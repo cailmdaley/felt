@@ -63,7 +63,7 @@ Every dispatch is autonomous; there is no separate "interactive" dispatch mode. 
 
 **Structural gates** go in the constitution text: a final **send** in the user's voice, a **2FA** step only they can complete, any "draft-and-stage, human commits" shape — *"The user will be present; drive to the send and wait for them."* Portal work on the chrome axis almost always carries one. Genuinely headless work writes no gate and runs to exit.
 
-**Talking to a worker later** is Resume from the kanban: on an awaiting-review, composted, or in-flight card it reopens the stored session as a live tmux you can attach to, with the drawer's message box for steering. Autonomous workers close normally, and the human resumes when they want the conversation; a missing session id degrades to a fresh dispatch carrying the directive. Standing roles work the same way — the morning run closes to awaiting-review and the user resumes over coffee.
+**Talking to a worker later** is Resume from the kanban: on an awaiting-review, discarded, or in-flight card it reopens the stored session as a live tmux you can attach to, with the drawer's message box for steering. Autonomous workers close normally, and the human resumes when they want the conversation; a missing session id degrades to a fresh dispatch carrying the directive. Standing roles work the same way — the morning run closes to awaiting-review and the user resumes over coffee.
 
 ## Agent selection
 

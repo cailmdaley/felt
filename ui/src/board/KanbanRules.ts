@@ -971,7 +971,7 @@ export function queueDropIndex(from: number, insertAt: number): number {
 
 /** A queue member that is closed: still in the chain, no longer waiting for
  *  its turn. `null` means an ordinary waiting member. */
-export type QueueMemberNote = 'awaiting review' | 'composted';
+export type QueueMemberNote = 'awaiting review' | 'discarded';
 
 /**
  * How does a queue member sit — waiting its turn, or closed without a verdict?
@@ -987,7 +987,7 @@ export function queueMemberNote(
   member: Pick<StackCandidate, 'status' | 'tempered'>,
 ): QueueMemberNote | null {
   if (member.status !== 'closed') return null;
-  return member.tempered === false ? 'composted' : 'awaiting review';
+  return member.tempered === false ? 'discarded' : 'awaiting review';
 }
 
 /**

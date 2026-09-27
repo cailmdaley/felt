@@ -346,6 +346,15 @@
   border-color: rgba(63, 130, 120, 0.65);
   background: rgba(63, 130, 120, 0.12);
 }
+.kbn-ctl-discard { color: var(--ctl-muted); }
+.kbn-ctl-discard:hover:not(:disabled) {
+  color: #1B1611;
+  background: rgba(255, 251, 237, 0.95);
+}
+/* The two pairs share one width, so the verdicts stand in columns under the
+   verbs they mirror. */
+.kbn-ctl-send,
+.kbn-ctl-foot .kbn-ctl-btn { min-width: 7.6em; }
 .kbn-ctl-sends {
   display: inline-flex;
   gap: 6px;
@@ -734,7 +743,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  /* Inset by the composer's frame, so Temper's right edge is Resume's. */
+  /* Inset by the composer's frame, so the verdicts stand under the verbs. */
   padding: 12px 9px 0;
   border-top: 1px solid rgba(27, 22, 17, 0.08);
 }
@@ -2046,6 +2055,7 @@
   .kbn-detail-sheet .kbn-ctl-send,
   .kbn-detail-sheet .kbn-ctl-foot .kbn-ctl-btn {
     flex: 1 1 auto;
+    min-width: 0;
   }
   .kbn-detail-sheet .kbn-ctl-agent-select { flex: 1 1 9em; }
   .kbn-detail-sheet .kbn-ctl-effort-select { width: 6.5em; }

@@ -18,7 +18,7 @@ import type { DrawnKind } from './momentTip.js'
  *   ◐ launch   a standing role's next firing, an instant
  *   ◌ snooze   a stashed card whose due lands here — deferred work returning
  *
- * NOT closure (✓ tempered · ✗ composted · ◦ awaiting a verdict) and not the
+ * NOT closure (✓ tempered · ✗ discarded · ◦ awaiting a verdict) and not the
  * Kanban card-kind glyphs. Those are different claims that happen to share ink.
  */
 export type MarkKind = 'due' | 'launch' | 'snooze'
@@ -42,7 +42,7 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐',
  *   ◦ awaiting review  closed, no verdict yet
  *   ⏾ resting          snoozed, pinned at rest, or waiting on its cron
  *   ✓ tempered         closed and kept
- *   ✗ composted        closed and let go
+ *   ✗ discarded        closed and let go
  *
  * ✓ · ✗ · ◦ are deliberately the marks Chronicle already ends a lifeline with,
  * and the glyphs here are disjoint from `MARK_GLYPH` — a state is a standing
@@ -54,7 +54,7 @@ export type LifecycleState =
   | 'awaitingReview'
   | 'resting'
   | 'tempered'
-  | 'composted'
+  | 'discarded'
 
 export const STATE_GLYPH: Record<LifecycleState, string> = {
   draft: '◇',
@@ -62,7 +62,7 @@ export const STATE_GLYPH: Record<LifecycleState, string> = {
   awaitingReview: '◦',
   resting: '⏾',
   tempered: '✓',
-  composted: '✗',
+  discarded: '✗',
 }
 
 /** What each state is called out loud — the title, the aria text, the key. */
@@ -72,7 +72,7 @@ export const STATE_WORD: Record<LifecycleState, string> = {
   awaitingReview: 'awaiting review',
   resting: 'resting',
   tempered: 'tempered',
-  composted: 'composted',
+  discarded: 'discarded',
 }
 
 /** The key's order: the life of a fiber, start to end. */
@@ -82,7 +82,7 @@ export const STATE_KEY_ITEMS: LifecycleState[] = [
   'resting',
   'awaitingReview',
   'tempered',
-  'composted',
+  'discarded',
 ]
 
 /** The fields a card must carry for its state to be readable. `KanbanCard`
@@ -108,7 +108,7 @@ export interface StateBearing {
 export function cardState(card: StateBearing): LifecycleState {
   if (card.status === 'closed') {
     if (card.tempered === true) return 'tempered'
-    if (card.tempered === false) return 'composted'
+    if (card.tempered === false) return 'discarded'
     return 'awaitingReview'
   }
   if (card.runningWorker) return 'inFlight'

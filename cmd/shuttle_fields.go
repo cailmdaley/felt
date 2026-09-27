@@ -18,7 +18,7 @@ import (
 // same fields the board and daemon already interpret.
 
 // shuttleTemperedKey is the top-level frontmatter key holding the human review
-// verdict (true=accepted, false=composted, absent=awaiting review).
+// verdict (true=tempered, false=discarded, absent=awaiting review).
 const shuttleTemperedKey = "tempered"
 
 // readTempered returns the fiber's tempered verdict: a *bool that is nil when the

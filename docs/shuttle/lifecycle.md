@@ -89,7 +89,7 @@ back.
 |---|---|
 | absent | Awaiting review |
 | `true` | Accepted |
-| `false` | Composted — mooted or superseded |
+| `false` | Discarded — mooted or superseded |
 
 Workers also never uninstall their own `shuttle:` block. Closing and
 uninstalling are separate decisions, and the block stays as historical record.

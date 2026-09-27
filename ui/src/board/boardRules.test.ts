@@ -2064,7 +2064,7 @@ describe('the queue counts every follower filed behind a head', () => {
     const composted = queueCard('f', { status: 'closed', tempered: false, closedAt: at0 })
     expect(queueMemberNote(waiting)).toBe(null)
     expect(queueMemberNote(review)).toBe('awaiting review')
-    expect(queueMemberNote(composted)).toBe('composted')
+    expect(queueMemberNote(composted)).toBe('discarded')
 
     // The chip counts, and only counts — how each member sits is the peek
     // list's job, per row, so the desk stays readable at a glance.

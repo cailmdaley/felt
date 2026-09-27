@@ -45,7 +45,8 @@ try {
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByText('App conversation continuity', { exact: true }).click()
   const drawer = page.locator('.kbn-detail-controls-toggle')
-  assert.equal(await page.locator('.kbn-detail-controls').getByRole('button', { name: 'Compost', exact: true }).count(), 0, 'the drawer carries Temper alone')
+  const verdicts = await page.locator('.kbn-ctl-foot .kbn-ctl-btn').allInnerTexts()
+  assert.deepEqual(verdicts, ['Discard', 'Temper'], 'the drawer offers both verdicts, Temper under Resume')
   const stripWho = () => page.locator('.kbn-ctl-who > span').allInnerTexts()
   assert.equal((await stripWho())[0], 'codex-luna', 'the folded strip leads with the agent')
   await drawer.click()
@@ -186,6 +187,23 @@ try {
   assert.equal(dispatch.body.resume_mode, 'previous')
   assert.equal(dispatch.body.user_message, 'rerun the null tests')
 
+  // Discard is the `tempered: false` verdict.
+  await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await page.getByText('File the conference travel reimbursement', { exact: true }).click()
+  await page.locator('.kbn-detail-controls-toggle').click()
+  await page.evaluate(() => {
+    window.settingWrites = []
+    const originalFetch = window.fetch
+    window.fetch = (input, init) => {
+      if (init?.method === 'POST') window.settingWrites.push({ url: String(input), body: JSON.parse(init.body) })
+      return originalFetch(input, init)
+    }
+  })
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await page.waitForTimeout(300)
+  const verdict = JSON.stringify(await page.evaluate(() => window.settingWrites))
+  assert.match(verdict, /composted|"tempered":false/, `Discard writes the false verdict: ${verdict}`)
+
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
   const stashSurface = page.getByRole('combobox', { name: 'Session', exact: true })
@@ -196,7 +214,7 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu and Resume passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }

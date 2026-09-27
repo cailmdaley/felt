@@ -172,7 +172,7 @@ For a standing role awaiting review (status: closed + untempered), resume re-arm
 it for immediate dispatch and routes to the owning daemon (which clears the
 awaiting marker and recomputes due-ness from the schedule), falling back to a
 local document write when the daemon is unreachable. A draft (status: open) is
-armed straight to active. Refuses on a tempered/composted close — use
+armed straight to active. Refuses on a tempered/discarded close — use
 'felt shuttle reopen' to requeue a finished fiber.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -262,7 +262,7 @@ field is missing. Use:
 
   felt shuttle close <fiber>                   # awaiting review (tempered cleared)
   felt shuttle close <fiber> --tempered=true   # human-accepted
-  felt shuttle close <fiber> --tempered=false  # composted / rejected
+  felt shuttle close <fiber> --tempered=false  # discarded
 
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until they are reopened.`,

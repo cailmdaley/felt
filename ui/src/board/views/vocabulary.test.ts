@@ -19,7 +19,7 @@ const card = (over: Partial<StateBearing> = {}): StateBearing => ({
 describe('cardState', () => {
   it('reads a closed fiber by its verdict', () => {
     expect(cardState(card({ status: 'closed', tempered: true }))).toBe('tempered')
-    expect(cardState(card({ status: 'closed', tempered: false }))).toBe('composted')
+    expect(cardState(card({ status: 'closed', tempered: false }))).toBe('discarded')
     expect(cardState(card({ status: 'closed' }))).toBe('awaitingReview')
   })
 

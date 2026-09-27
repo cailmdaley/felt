@@ -930,7 +930,7 @@ export function laneChip(card: KanbanCard | undefined, nowMs: number): DayChip |
 
 /**
  * How a fiber that ENDED inside this rail is marked. Display only — the verdict
- * itself belongs to the Desk, and offering Temper/Compost here would make two
+ * itself belongs to the Desk, and offering Temper/Discard here would make two
  * places to do one irreversible thing.
  */
 export function closureMark(
@@ -940,7 +940,7 @@ export function closureMark(
   const at = instantMs(card?.closedAt)
   if (at === undefined || at < win.startMs || at >= win.endMs) return undefined
   if (card?.tempered === true) return { glyph: '✓', title: 'Tempered today' }
-  if (card?.tempered === false) return { glyph: '✗', title: 'Composted today' }
+  if (card?.tempered === false) return { glyph: '✗', title: 'Discarded today' }
   return { glyph: '◦', title: 'Closed today — awaiting a verdict on the Desk' }
 }
 

@@ -149,11 +149,9 @@
    F1 flourish (.kbn-cap::before, ochre) stays consistent across all
    columns — the gilt language ties the row together.
 
-   Tempered + Composted column and card styling was removed in the dead-CSS
-   sweep: the buckets still exist in classifyFiber (ui/src/board/KanbanRules.ts)
-   and feed the timeline, but renderColumn/renderCard only ever take the three
-   Now kinds, so the rules matched nothing. Restyle from scratch if a future
-   surface brings them back. */
+   There is no Tempered or Discarded column styling: those buckets exist in
+   classifyFiber (ui/src/board/KanbanRules.ts) and feed the timeline, but
+   renderColumn/renderCard only ever take the three Now kinds. */
 .kbn-col-drafts .kbn-cap { color: var(--kbn-owed-bright); }       /* ochre */
 .kbn-col-inFlight .kbn-cap { color: #3D5BA0; }                 /* cobalt */
 .kbn-col-awaitingReview .kbn-cap { color: var(--kbn-tempered); }  /* verdigris — the verdict axis */
@@ -1714,7 +1712,7 @@
   flex: 1 1 0%;
 }
 /* One height for every small chip/button that can appear in the meta row —
-   due, +N queued, Temper/Compost, the phase badge, the held pill, the
+   due, +N queued, Temper/Discard, the phase badge, the held pill, the
    worker pill — so swapping between them (a worker landing, a review
    finishing) never makes the row's own height twitch. */
 .kbn-card-due,
@@ -1908,13 +1906,13 @@
   border-left: 1px dotted rgba(107, 78, 113, 0.5);
 }
 /* A member that is in the chain but no longer waiting its turn: closed without
-   a verdict (awaiting review) or composted. It still counts — the drop gesture
+   a verdict (awaiting review) or discarded. It still counts — the drop gesture
    ends the chain there — so it is shown, dimmer, saying which it is.
 
    The chip above says only how many; the STATE is carried here, in pigment. A
    row awaiting review takes verdigris — the same colour the Awaiting-review
    column's cap wears, so "there is a verdict waiting in this queue" reads the
-   same wherever it appears. Composted rows stay plum and just recede: they are
+   same wherever it appears. Discarded rows stay plum and just recede: they are
    in the chain, and nothing is being asked of you. */
 .kbn-card-queued-row--settled { opacity: 0.62; }
 .kbn-card-queued-row--review {
@@ -1950,7 +1948,7 @@
 }
 /* Running-worker pill — sits inline in the meta row, right-justified
    before the date stamp. Mirrors the proportions of .kbn-review-meta-btn
-   (Temper / Compost in awaiting-review cards) so the meta row reads
+   (Temper / Discard in awaiting-review cards) so the meta row reads
    uniformly across columns. Single line, never wraps. */
 .kbn-card-worker {
   text-decoration: none;
@@ -2165,7 +2163,7 @@
 .kbn-error-retry:disabled { opacity: 0.6; cursor: default; }
 .kbn-error-retry:focus-visible { outline: 1px dashed #9A7B35; outline-offset: 2px; }
 
-/* Temper / Compost inline in the meta row. Centered — a `.kbn-card-meta-spacer`
+/* Temper / Discard inline in the meta row. Centered — a `.kbn-card-meta-spacer`
    on each side (JS) divides whatever room the left-flowing chips left behind
    into two equal halves, so this group sits in the middle of that room. */
 .kbn-card-review-meta-actions {

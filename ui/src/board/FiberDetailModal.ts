@@ -583,7 +583,7 @@ interface AgentRecord {
  *
  * Every card action lives in one drawer directly under the title, folded by
  * default: the message box with its meeting and New session / Resume, the
- * next launch's settings, due and parent, and Temper (see
+ * next launch's settings, due and parent, and Temper / Discard (see
  * `buildControls`).
  *
  * Deliberately NOT a Radix AppDialog and NOT background-locked: the panel
@@ -628,7 +628,7 @@ export class FiberDetailModal {
    *  kanban's onOpenWorker; drives the status pill's double-click. */
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   /**
-   * Terminal-move delegate. Temper closes the panel immediately and
+   * Terminal-move delegate. Temper / Discard close the panel immediately and
    * hand the move to the parent kanban's optimistic transition path (instant
    * card relocation + background commit + banner on failure). The product
    * always wires it; the no-op default exists only for the offline harness
@@ -710,7 +710,7 @@ export class FiberDetailModal {
    *
    *   · its drawer appears only if the fiber actually carries a
    *     shuttle block — a plain note has nothing to dispatch, and offering
-   *     Temper/Compost/New session on it is noise; a real constitution keeps
+   *     Temper/Discard/New session on it is noise; a real constitution keeps
    *     its actions;
    *   · it has no frame of its own: no geometry, no drag, no resize, no
    *     click-away, and it never writes the session's default placement or its
@@ -2351,8 +2351,8 @@ export class FiberDetailModal {
    * it, how it recurs, where it runs, when it is due, how its last run went.
    * Unfolded, three things in the order they are reached for: the composer (a
    * message and the dispatch verbs that carry it), the ledger (what the next
-   * launch reads, beside the card's own due day and parent), and the Temper
-   * verdict that closes the card.
+   * launch reads, beside the card's own due day and parent), and the verdict
+   * that closes the card — Temper or Discard, `tempered` true or false.
    *
    * Type carries the grammar, so no line of it needs a caption: mono for
    * machine values (ids, effort, cron, paths, times), serif for human words
@@ -2439,17 +2439,20 @@ export class FiberDetailModal {
       this.buildCardFields(card, statusEl, errorEl, swallow, reflect, watch),
     )
 
-    // The verdict, under the verbs and on their right edge. Composting stays
-    // on the board's review card and the CLI.
+    // The verdict — `tempered` true or false — mirrors the send verbs above
+    // it: Discard under New session, Temper under Resume.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
+    const discard = ctlButton('Discard', 'kbn-ctl-discard')
     const temper = ctlButton('Temper', 'kbn-ctl-temper')
-    temper.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.close()
-      this.onTransition(card, 'tempered')
-    })
-    foot.append(errorEl, statusEl, temper)
+    for (const [btn, target] of [[discard, 'composted'], [temper, 'tempered']] as const) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.close()
+        this.onTransition(card, target)
+      })
+    }
+    foot.append(errorEl, statusEl, discard, temper)
 
     body.append(ledger, foot)
   }
