@@ -421,7 +421,7 @@ type nativeFrontmatter struct {
 	Name        string     `yaml:"name"`
 	Status      string     `yaml:"status,omitempty"`
 	Tags        []string   `yaml:"tags,omitempty"`
-	CreatedAt   time.Time  `yaml:"created-at"`
+	CreatedAt   time.Time  `yaml:"created-at,omitempty"`
 	UpdatedAt   *time.Time `yaml:"updated-at,omitempty"`
 	ClosedAt    *time.Time `yaml:"closed-at,omitempty"`
 	Outcome     string     `yaml:"outcome,omitempty"`
@@ -901,12 +901,72 @@ var codeBlockRe = regexp.MustCompile("(?s)```[^`]*```|~~~[^~]*~~~")
 // codeSpanRe matches inline code spans (`...`).
 var codeSpanRe = regexp.MustCompile("`[^`]+`")
 
-// stripCodeContent removes fenced code blocks and inline code spans from body
-// so that wikilink extraction doesn't match illustrative examples in documentation.
-func stripCodeContent(body string) string {
-	body = codeBlockRe.ReplaceAllString(body, "")
-	body = codeSpanRe.ReplaceAllString(body, "")
-	return body
+// proseSpans returns the byte ranges of body that lie outside fenced code
+// blocks and inline code spans, in document order. Everything that reads or
+// rewrites body references works span by span, so a link inside an
+// illustrative code example is never extracted, and never rewritten.
+func proseSpans(body string) [][2]int {
+	var spans [][2]int
+	addSpans := func(start, end int) {
+		pos := start
+		for _, m := range codeSpanRe.FindAllStringIndex(body[start:end], -1) {
+			if start+m[0] > pos {
+				spans = append(spans, [2]int{pos, start + m[0]})
+			}
+			pos = start + m[1]
+		}
+		if end > pos {
+			spans = append(spans, [2]int{pos, end})
+		}
+	}
+	pos := 0
+	for _, m := range codeBlockRe.FindAllStringIndex(body, -1) {
+		addSpans(pos, m[0])
+		pos = m[1]
+	}
+	addSpans(pos, len(body))
+	return spans
+}
+
+// bodyRefSite is one reference as it sits in a body: the parsed ref plus the
+// byte range of its target spelling, which is the only part a rewrite touches
+// — a wikilink's #fragment and |label, a markdown link's text, stay as written.
+type bodyRefSite struct {
+	ref        BodyRef
+	start, end int
+}
+
+// bodyRefSites finds every fiber reference in body: markdown links first,
+// then wikilinks, each in document order, skipping code.
+func bodyRefSites(body string) []bodyRefSite {
+	var sites []bodyRefSite
+	spans := proseSpans(body)
+	for _, re := range []*regexp.Regexp{bodyLinkRe, wikiLinkRe} {
+		for _, span := range spans {
+			text := body[span[0]:span[1]]
+			for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
+				raw := text[m[2]:m[3]]
+				fragment := ""
+				if len(m) > 5 && m[4] >= 0 {
+					fragment = text[m[4]:m[5]]
+				}
+				ref, ok := parseBodyRefTarget(raw, fragment)
+				if !ok {
+					continue
+				}
+				// The parsed target is the raw spelling minus decoration
+				// (whitespace, ./, a trailing #fragment), so it is found inside
+				// it; that inner range is what gets replaced.
+				at := strings.Index(raw, ref.Target)
+				if at < 0 {
+					continue
+				}
+				start := span[0] + m[2] + at
+				sites = append(sites, bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)})
+			}
+		}
+	}
+	return sites
 }
 
 // ExtractBodyRefs finds fiber references in a body from markdown links and wikilinks.
@@ -914,28 +974,44 @@ func stripCodeContent(body string) string {
 func ExtractBodyRefs(body string) []BodyRef {
 	seen := map[string]bool{}
 	var refs []BodyRef
-
-	add := func(target, fragment string) {
-		ref, ok := parseBodyRefTarget(target, fragment)
-		if !ok {
-			return
-		}
-		key := ref.Target + "#" + ref.Fragment
+	for _, site := range bodyRefSites(body) {
+		key := site.ref.Target + "#" + site.ref.Fragment
 		if seen[key] {
-			return
+			continue
 		}
 		seen[key] = true
-		refs = append(refs, ref)
-	}
-
-	stripped := stripCodeContent(body)
-	for _, m := range bodyLinkRe.FindAllStringSubmatch(stripped, -1) {
-		add(m[1], "")
-	}
-	for _, m := range wikiLinkRe.FindAllStringSubmatch(stripped, -1) {
-		add(m[1], m[2])
+		refs = append(refs, site.ref)
 	}
 	return refs
+}
+
+// RewriteBodyRefs replaces the target of every body reference for which
+// rewrite returns a new spelling, leaving fragments, labels, link text and
+// code untouched. It reports whether anything changed.
+func RewriteBodyRefs(body string, rewrite func(target string) (string, bool)) (string, bool) {
+	sites := bodyRefSites(body)
+	sort.Slice(sites, func(i, j int) bool { return sites[i].start < sites[j].start })
+	var b strings.Builder
+	pos := 0
+	changed := false
+	for _, site := range sites {
+		if site.start < pos {
+			continue
+		}
+		next, ok := rewrite(site.ref.Target)
+		if !ok || next == site.ref.Target {
+			continue
+		}
+		b.WriteString(body[pos:site.start])
+		b.WriteString(next)
+		pos = site.end
+		changed = true
+	}
+	if !changed {
+		return body, false
+	}
+	b.WriteString(body[pos:])
+	return b.String(), true
 }
 
 func (r BodyRef) String() string {

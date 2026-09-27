@@ -553,68 +553,191 @@ func (s *Storage) pruneEmptyDirs(startDir string) error {
 }
 
 // MoveSubtree moves a fiber and any nested descendants to a new path, rewriting
-// data-flow references across the repository.
-func (s *Storage) MoveSubtree(oldID, newID string) error {
+// the references that the move would otherwise leave pointing at the old path.
+// It returns the ids, after the move, of the fibers whose files it rewrote.
+//
+// A reference is rewritten when its path — not merely its slug — resolved into
+// the moved subtree before the move and no longer resolves to the same fiber
+// after it (see rewriteMovedRef). Body references and inputs.from are treated
+// alike. Only files whose content changes are written: a moved fiber's id is
+// its location, not its content, so the rename alone moves it.
+func (s *Storage) MoveSubtree(oldID, newID string) ([]string, error) {
 	oldID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(oldID)))
 	newID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(newID)))
 	if oldID == "." || oldID == "" || newID == "." || newID == "" {
-		return fmt.Errorf("invalid felt id")
+		return nil, fmt.Errorf("invalid felt id")
 	}
 	if oldID == newID {
-		return fmt.Errorf("source and destination are the same")
+		return nil, fmt.Errorf("source and destination are the same")
 	}
 	if strings.HasPrefix(newID, oldID+"/") {
-		return fmt.Errorf("cannot move %s into its own subtree %s", oldID, newID)
+		return nil, fmt.Errorf("cannot move %s into its own subtree %s", oldID, newID)
 	}
 	if _, err := os.Stat(s.Path(newID)); err == nil {
-		return fmt.Errorf("destination %s already exists", newID)
+		return nil, fmt.Errorf("destination %s already exists", newID)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking destination %s: %w", newID, err)
+		return nil, fmt.Errorf("checking destination %s: %w", newID, err)
 	}
 
 	felts, err := s.List()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	updated := make([]*Felt, 0, len(felts))
+	oldIDs := make([]string, 0, len(felts))
+	newIDs := make([]string, 0, len(felts))
 	movedAny := false
 	for _, f := range felts {
-		clone := *f
-		if remappedID, ok := remapIDPrefix(clone.ID, oldID, newID); ok {
-			clone.ID = remappedID
-			movedAny = true
-		}
-		clone.RewriteDataFlowRefs(func(ref string) (string, bool) {
-			return remapDataFlowRef(ref, oldID, newID)
-		})
-		updated = append(updated, &clone)
+		oldIDs = append(oldIDs, f.ID)
+		remapped, ok := remapIDPrefix(f.ID, oldID, newID)
+		movedAny = movedAny || ok
+		newIDs = append(newIDs, remapped)
 	}
-
 	if !movedAny {
-		return fmt.Errorf("no felt found at %s", oldID)
+		return nil, fmt.Errorf("no felt found at %s", oldID)
+	}
+	sort.Strings(oldIDs)
+	sort.Strings(newIDs)
+	external := s.ExternalRefs()
+	before := newScopedIDResolverIn(oldIDs, external)
+	after := newScopedIDResolverIn(newIDs, external)
+
+	type pendingWrite struct {
+		id   string
+		data []byte
+	}
+	var writes []pendingWrite
+	for _, f := range felts {
+		sourceNew, _ := remapIDPrefix(f.ID, oldID, newID)
+		rewrite := func(target string) (string, bool) {
+			return rewriteMovedRef(before, after, f.ID, sourceNew, target, oldID, newID)
+		}
+		clone := *f
+		clone.ID = sourceNew
+		flowChanged := clone.RewriteDataFlowRefs(func(ref string) (string, bool) {
+			target, fragment := splitDataFlowRef(ref)
+			next, ok := rewrite(target)
+			if !ok {
+				return ref, false
+			}
+			if fragment != "" {
+				next += "." + fragment
+			}
+			return next, true
+		})
+		body, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
+		if !flowChanged && !bodyChanged {
+			continue
+		}
+
+		var data []byte
+		if flowChanged {
+			// inputs.from lives in frontmatter, so the file is re-rendered.
+			clone.Body = body
+			data, err = clone.Marshal()
+		} else {
+			// A body-only change edits the body bytes in place, leaving the
+			// frontmatter exactly as its author wrote it.
+			data, err = rewriteFileBody(f.Path, rewrite)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("rewriting references in %s: %w", f.ID, err)
+		}
+		writes = append(writes, pendingWrite{id: sourceNew, data: data})
 	}
 
 	oldRoot := filepath.Join(s.root, filepath.FromSlash(oldID))
 	newRoot := filepath.Join(s.root, filepath.FromSlash(newID))
 	if _, err := os.Stat(newRoot); err == nil {
-		return fmt.Errorf("destination %s already exists", newID)
+		return nil, fmt.Errorf("destination %s already exists", newID)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking destination directory %s: %w", newID, err)
+		return nil, fmt.Errorf("checking destination directory %s: %w", newID, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(newRoot), 0755); err != nil {
-		return fmt.Errorf("creating destination parent %s: %w", filepath.Dir(newRoot), err)
+		return nil, fmt.Errorf("creating destination parent %s: %w", filepath.Dir(newRoot), err)
 	}
 	if err := os.Rename(oldRoot, newRoot); err != nil {
-		return fmt.Errorf("moving subtree %s -> %s: %w", oldRoot, newRoot, err)
+		return nil, fmt.Errorf("moving subtree %s -> %s: %w", oldRoot, newRoot, err)
 	}
 
-	for _, f := range updated {
-		if err := s.Write(f); err != nil {
-			return err
+	rewritten := make([]string, 0, len(writes))
+	for _, w := range writes {
+		path := s.Path(w.id)
+		if err := os.WriteFile(path, w.data, 0644); err != nil {
+			return rewritten, fmt.Errorf("writing file %s: %w", path, err)
+		}
+		rewritten = append(rewritten, w.id)
+	}
+	sort.Strings(rewritten)
+	return rewritten, s.pruneEmptyDirs(filepath.Dir(oldRoot))
+}
+
+// rewriteMovedRef decides one reference's fate when oldID moves to newID. The
+// source fiber sits at sourceOld before the move and sourceNew after it.
+//
+// A reference spelled as the old full id, or an id under it, becomes the same
+// spelling under the new one. Any other multi-segment spelling is rewritten
+// only when its path resolved into the moved subtree before the move and does
+// not resolve to the same fiber after it. That leaves alone bare slugs of
+// nested fibers (the slug moves with the fiber), suffix spellings the move
+// leaves intact, links that already resolved only by the basename rescue, and
+// anything pointing elsewhere — including a sibling whose name merely begins
+// with the old one.
+//
+// The new spelling keeps the reference's shape where it can: a path written
+// relative to a scope stays relative to that scope, and one written from the
+// enclosing store's namespace stays in it. Failing that, it is the full id.
+func rewriteMovedRef(before, after *scopedIDResolver, sourceOld, sourceNew, target, oldID, newID string) (string, bool) {
+	target = cleanLookupQuery(target)
+	if next, ok := remapIDPrefix(target, oldID, newID); ok {
+		return next, true
+	}
+	if !strings.Contains(target, "/") {
+		return "", false
+	}
+	resolved, ok := before.ResolvePath(sourceOld, target)
+	if !ok {
+		return "", false
+	}
+	destination, moved := remapIDPrefix(resolved, oldID, newID)
+	if !moved {
+		return "", false
+	}
+	if got, ok := after.ResolvePath(sourceNew, target); ok && got == destination {
+		return "", false
+	}
+
+	var candidates []string
+	if anchor, ok := strings.CutSuffix(resolved, "/"+target); ok {
+		if rest, ok := strings.CutPrefix(destination, anchor+"/"); ok {
+			candidates = append(candidates, rest)
+		}
+	} else if prefix := after.external.Prefix(); prefix != "" && target == prefix+"/"+resolved {
+		candidates = append(candidates, prefix+"/"+destination)
+	}
+	for _, candidate := range candidates {
+		if got, ok := after.ResolvePath(sourceNew, candidate); ok && got == destination {
+			return candidate, true
 		}
 	}
-	return s.pruneEmptyDirs(filepath.Dir(oldRoot))
+	return destination, true
+}
+
+// rewriteFileBody applies rewrite to the body references of the fiber file at
+// path, returning the file's new bytes with its frontmatter untouched.
+func rewriteFileBody(path string, rewrite func(string) (string, bool)) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	_, _, bodyStart, err := frontmatterBounds(content)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := RewriteBodyRefs(string(content[bodyStart:]), rewrite)
+	out := make([]byte, 0, bodyStart+len(body))
+	out = append(out, content[:bodyStart]...)
+	return append(out, body...), nil
 }
 
 // Migrate performs the storage-model normalization pass:
@@ -1542,6 +1665,31 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no felt found matching %q", query)
+}
+
+// ResolvePath is the answer a reference's PATH gives, as opposed to the one
+// its slug gives: exact id, lexical scope, unique suffix, and the local reading
+// of a spelling from the enclosing store's namespace — everything Resolve tries
+// except asking the enclosing store and the basename rescue. A multi-segment
+// query that Resolve answers and ResolvePath does not is a stale path held up
+// only by its final segment.
+func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
+	query = cleanLookupQuery(query)
+	scopeID = cleanLookupScope(scopeID)
+	if query == "" {
+		return "", false
+	}
+	if id, ok, err := r.resolveInStore(scopeID, query); err != nil {
+		return "", false
+	} else if ok {
+		return id, true
+	}
+	if local, stripped := r.external.Localize(query); stripped {
+		if id, ok, _ := r.resolveInStore(scopeID, local); ok {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // externalHit asks the enclosing store about a query this store could not

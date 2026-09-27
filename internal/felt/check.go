@@ -210,6 +210,23 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs) []CheckIs
 			}
 			return nil
 		}
+		if r.ResolveErr == nil && strings.Contains(cleanLookupQuery(r.RawTarget), "/") {
+			// Resolution keeps a stale path working through its final
+			// segment; check is where that repair becomes visible, before a
+			// second fiber with the same slug quietly redirects the link.
+			if _, ok := resolver.ResolvePath(r.Source.ID, r.RawTarget); !ok {
+				where := "body"
+				if r.Kind == refKindDataFlow {
+					where = "inputs." + r.InputID + ".from"
+				}
+				issues = append(issues, CheckIssue{
+					Level:   CheckLevelWarning,
+					FiberID: r.Source.ID,
+					Path:    where,
+					Message: fmt.Sprintf("stale path in reference %q: no fiber lives there; it resolves to %s only by its final segment", r.Label, r.ResolvedID),
+				})
+			}
+		}
 		if r.Kind == refKindReference {
 			path := "body"
 			if r.ResolveErr != nil {

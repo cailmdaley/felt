@@ -125,7 +125,9 @@ Replicas should inherit the committed ids rather than minting their own.`,
 var nestCmd = &cobra.Command{
 	Use:   "nest <child> <parent>",
 	Short: "Move a fiber under another fiber",
-	Long: `Moves an existing fiber subtree under a parent, rewriting IDs and dependencies.
+	Long: `Moves an existing fiber subtree under a parent. References whose path points
+into the moved subtree — wikilinks, markdown links, inputs.from — are rewritten
+to its new location, and each rewritten fiber is named.
 
 A parent spelled as a path that exists in the store is used exactly as
 spelled, including a directory that holds fibers without one of its own
@@ -167,11 +169,13 @@ like a fiber reference.`,
 		if err := where.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		if err := where.storage.MoveSubtree(childID, targetID); err != nil {
+		rewritten, err := where.storage.MoveSubtree(childID, targetID)
+		if err != nil {
 			return err
 		}
 
 		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.location())
+		printRewrittenRefs(rewritten)
 		return nil
 	},
 }
@@ -195,8 +199,9 @@ func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, er
 var unnestCmd = &cobra.Command{
 	Use:   "unnest <child>",
 	Short: "Promote a nested fiber to the top level",
-	Long:  `Moves a nested fiber subtree to the top level, rewriting IDs and dependencies.`,
-	Args:  cobra.ExactArgs(1),
+	Long: `Moves a nested fiber subtree to the top level, rewriting references whose
+path points into it (as nest does).`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, root, err := requireStore()
 		if err != nil {
@@ -218,13 +223,22 @@ var unnestCmd = &cobra.Command{
 		if err := child.storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		if err := child.storage.MoveSubtree(child.id, targetID); err != nil {
+		rewritten, err := child.storage.MoveSubtree(child.id, targetID)
+		if err != nil {
 			return err
 		}
 
 		fmt.Printf("Promoted %s to %s%s\n", child.id, targetID, child.location())
+		printRewrittenRefs(rewritten)
 		return nil
 	},
+}
+
+// printRewrittenRefs names each fiber whose references a move rewrote.
+func printRewrittenRefs(ids []string) {
+	for _, id := range ids {
+		fmt.Printf("Rewrote references in %s\n", id)
+	}
 }
 
 func init() {

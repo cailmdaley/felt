@@ -49,8 +49,16 @@ felt tree
 felt tree bao-analysis --depth 2
 ```
 
-Reshape with `nest` and `unnest`. Both move the whole subtree and rewrite ids
-and dependency references as they go.
+Reshape with `nest` and `unnest`. Both move the whole subtree and rewrite the
+references whose path points into it. Nesting `damping-prior` turns
+`[[damping-prior/contour-plot#fit|the fit]]` into
+`[[bao-analysis/damping-prior/contour-plot#fit|the fit]]`, keeping fragment and
+label, and `inputs.from` follows the same rule. The bare slug of a fiber that
+was already nested stays as written, since the slug moves with the fiber;
+links inside code are left alone. Only files whose content changes are written, and each is
+named in the output. In a view, links spelled with the view's ids and with the
+enclosing store's ids are both rewritten; fibers outside the store felt is
+reading are not, and `felt check` flags their stale paths.
 
 ```bash
 felt nest damping-prior bao-analysis     # → bao-analysis/damping-prior

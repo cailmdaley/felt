@@ -1125,7 +1125,7 @@ func TestStorageMoveSubtreeRewritesInputRefs(t *testing.T) {
 		}
 	}
 
-	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
+	if _, err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
 		t.Fatalf("MoveSubtree() error: %v", err)
 	}
 
@@ -1182,7 +1182,7 @@ func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
 		}
 	}
 
-	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
+	if _, err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err != nil {
 		t.Fatalf("MoveSubtree() error: %v", err)
 	}
 
@@ -1215,7 +1215,7 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	if err := s.MoveSubtree("bao-analysis", "bao-analysis/damping-prior"); err == nil {
+	if _, err := s.MoveSubtree("bao-analysis", "bao-analysis/damping-prior"); err == nil {
 		t.Fatal("MoveSubtree should reject moving into its own subtree")
 	}
 }
@@ -1233,7 +1233,7 @@ func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
 		}
 	}
 
-	if err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err == nil {
+	if _, err := s.MoveSubtree("damping-prior", "bao-analysis/damping-prior"); err == nil {
 		t.Fatal("MoveSubtree should reject an existing destination")
 	}
 }

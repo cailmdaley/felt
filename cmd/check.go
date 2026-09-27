@@ -16,6 +16,7 @@ Current checks cover:
   - fibers that fail to parse (invisible to every other command)
   - broken narrative wikilinks / body references
   - broken inputs.from data-flow references
+  - stale path references that resolve only by their final segment
   - legacy title frontmatter keys
   - legacy depends-on frontmatter keys
   - legacy MyST body anchors

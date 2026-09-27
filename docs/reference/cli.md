@@ -41,14 +41,14 @@ its commit and date, a local build the source revision it was built from
 
 | Command | Purpose |
 |---|---|
-| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting ids and dependencies |
-| `felt unnest <child>` | Promote a nested fiber subtree to the top level |
+| `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting references whose path points into it |
+| `felt unnest <child>` | Promote a nested fiber subtree to the top level, rewriting references the same way |
 
 ## Maintenance
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, legacy keys, slug collisions |
+| `felt check` | Lint fibers: broken wikilinks, broken `inputs.from` refs, stale reference paths, legacy keys, slug collisions |
 | `felt migrate` | Normalize legacy storage into the current model (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
