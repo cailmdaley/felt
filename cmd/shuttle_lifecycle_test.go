@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -335,6 +340,42 @@ func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
 	f := mustRead(t, storage, "f")
 	if f.Status != felt.StatusActive || f.ClosedAt != nil {
 		t.Fatalf("offline re-arm should set active + clear closed-at, got status=%q closedAt=%v", f.Status, f.ClosedAt)
+	}
+}
+
+func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the TCP owner check reads Linux /proc")
+	}
+	defer saveShuttleGlobals()()
+	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
+	withOwnHost(t, "test-host")
+
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	settingsPath := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, settingsPath, nil, nil)
+	if err := os.WriteFile(settingsPath, []byte(fmt.Sprintf(`{"class":"shared-multi-user","listen":"tcp://%s"}`, listener.Addr())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "host": "test-host", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, nil)
+
+	out, err := runCommand(t, dir, "shuttle", "resume", "f")
+	var ownerErr *daemonTCPOwnerCheckError
+	if !errors.As(err, &ownerErr) {
+		t.Fatalf("resume error = %v; want a TCP owner refusal\n%s", err, out)
+	}
+	if got := mustRead(t, storage, "f").Status; got != felt.StatusClosed {
+		t.Fatalf("owner refusal wrote locally: status = %q, want %q", got, felt.StatusClosed)
 	}
 }
 

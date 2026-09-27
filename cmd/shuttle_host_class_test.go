@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -343,6 +344,19 @@ func TestGetDaemon_DialsUnixSocket(t *testing.T) {
 // is an error naming the file, never a URL, and never a transport error: the
 // lifecycle verbs answer "daemon unreachable" with a local write, and a
 // malformed operator file must not take that path.
+func TestLifecycleOwnerCheckRefusalIsNotTransportError(t *testing.T) {
+	refusal := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", &daemonTCPOwnerCheckError{
+		address: "127.0.0.1:4000", uid: 2000, foreign: true,
+	})
+	var ownerErr *daemonTCPOwnerCheckError
+	if !errors.As(refusal, &ownerErr) {
+		t.Fatalf("error chain lost owner refusal: %v", refusal)
+	}
+	if isLifecycleTransportError(refusal) {
+		t.Fatalf("owner refusal was classified as a transport outage: %v", refusal)
+	}
+}
+
 func TestDaemonURL_BrokenHostFileFailsLoud(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host.json")
 	setHostEnv(t, path, nil, nil)

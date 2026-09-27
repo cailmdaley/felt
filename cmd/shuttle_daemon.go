@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -256,11 +257,14 @@ func postLifecycle(action string, payload map[string]any) (string, error) {
 }
 
 // isLifecycleTransportError reports whether err means "daemon unreachable" (so
-// the caller should fall back to a local document write) as opposed to a
-// daemon-rejected request (a daemonStatusError, which must surface to the
-// user).
+// the caller should fall back to a local document write) rather than a daemon
+// refusal or an owner-check failure, both of which must surface to the user.
 func isLifecycleTransportError(err error) bool {
 	if err == nil {
+		return false
+	}
+	var ownerErr *daemonTCPOwnerCheckError
+	if errors.As(err, &ownerErr) {
 		return false
 	}
 	if _, ok := err.(daemonStatusError); ok {
