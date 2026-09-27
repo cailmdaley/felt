@@ -1,43 +1,12 @@
 # Capture
 
-A capture starts from the user's idea rather than an existing constitution. Read
-`From User` as the current request; discuss unresolved scope when needed. The
-launch supplies the owning felt store, project directory, install metadata, and
-an exact claim endpoint and JSON body.
+A capture starts from the user's idea rather than an existing constitution: you turn it into a fiber, install and claim that fiber, then work it. `From User` is the current request; discuss scope with the user where it is unresolved. The launch gives you the owning felt store, the project directory, the install settings, and an exact claim endpoint and JSON body. If `From User` opens with `Meeting mode`, read [meeting.md](meeting.md) as well; it extends these steps.
 
-When `From User` opens with `Meeting mode`, the input is a live meeting
-transcript: read [meeting.md](meeting.md) too. It extends these steps.
+1. **Crystallize.** Search for related fibers, choose the right parent, and file the idea with a lede and a Desired State proportionate to what the user actually asked. Keep its status `open`.
+2. **Take up a role.** Choose the role that fits, or create one, with yourself as collaborator ([collaboration.md](collaboration.md)), and read its charter before you start the work.
+3. **Install as a draft.** Run `felt shuttle install <fiber-id> --disabled` with the supplied model, surface, host and project directory, and apply any supplied effort or chrome setting with `felt shuttle set-agent`. Keep every field in `Install` exactly as given. `--disabled` holds the status at `open`; never install armed and reset the status afterward, because in that gap the poller can launch a second worker.
+4. **Claim.** POST the supplied `Claim` JSON to the `Claim endpoint` with `Content-Type: application/json`, replacing only `<fiber id>` with your fiber. When the endpoint names a unix socket, send through it as given (`curl --unix-socket <path> http://localhost/...`). Build the JSON with a JSON library and pass it as a file or structured body, never by interpolating user text into shell quotes. Claim only after the install succeeded (the daemon refuses an uninstalled fiber with `not_installed`), and don't pipe setup commands through `tail` or the like, which hides their failures. Continue only on a successful claim: retry a lost response with the same body, and never activate after a rejection.
+5. **Activate.** Set the status to `active` only after the claim succeeds; activating sooner lets the poller launch a duplicate worker.
+6. **Work it** by the worker loop and exits in the shuttle skill.
 
-1. **Crystallize.** Search for related fibers, choose the right parent, and file
-   the idea with a lede and Desired State proportionate to what the user has
-   actually asked. Keep its status `open`.
-2. **Assign a role** with yourself as collaborator, per
-   [collaboration.md](collaboration.md), and read the charter before realizing.
-3. **Install as a draft.** Use `felt shuttle install <fiber-id> --disabled`
-   with the supplied model, surface, host and project directory; apply any
-   supplied effort or chrome setting with `felt shuttle set-agent`. Preserve
-   every field in `Install` exactly. `--disabled` keeps status `open` throughout
-   installation. Never install armed and reset status afterward: that gap lets
-   the poller launch another worker before you claim this session.
-4. **Claim.** POST the supplied `Claim` JSON to `Claim endpoint` with
-   `Content-Type: application/json`, replacing only `<fiber id>` with the fiber
-   you created. When the endpoint names a unix socket, send the request through
-   it exactly as given (`curl --unix-socket <path> http://localhost/...`).
-   Encode JSON with a JSON library and pass it as a file or structured
-   request body; do not interpolate user input into shell quoting. Run it only
-   after the install succeeded — the daemon refuses an uninstalled fiber with
-   `not_installed` — and do not pipe setup commands through `tail` or similar,
-   which hides their failure. Require a successful claim before continuing. A lost response can be retried with the
-   same body; a rejection must not be followed by activation.
-5. **Activate.** Set status `active` only after the successful claim. Activating
-   sooner permits the poller to launch a duplicate worker.
-6. **Realize.** Follow the worker loop and exit semantics in the shuttle skill.
-
-A terminal claim identifies `tmux_session` and, when supplied, the native
-`session_uuid`. Successful claim renames that terminal to the fiber's worker
-name. An app claim identifies `surface: app` and the exact conversation
-`session_uuid`; it does not rename or replace the conversation. Never substitute
-a terminal claim, another conversation ID, or a new app server. App workers end
-their turn after the exit write — `felt shuttle handoff` to continue, or
-`status: closed` to stop — and never kill the shared backend or a parent
-process either way.
+A terminal claim names your `tmux_session` and, when supplied, your native `session_uuid`, and renames the terminal to the fiber's worker name. An app claim names `surface: app` and the exact conversation `session_uuid`, and renames nothing. Never substitute a terminal claim, another conversation's id, or a new app server. As an app worker, end your turn after your exit write — `felt shuttle handoff` to continue, `status: closed` to stop — and never kill the shared backend or a parent process.

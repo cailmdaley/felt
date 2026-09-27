@@ -64,7 +64,9 @@ The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts
 
 ## Working a constitution
 
-**Survey.** Your dispatch prompt names the fiber and the store; sync, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you. Read the constitution, its `## Status`, and `report.html` if there is one. A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. Then take up your role: read the roster and your role's charter, or give a roster-less task one ([references/collaboration.md](references/collaboration.md)). A named `Previous session:` can give you texture ([references/transcripts.md](references/transcripts.md)), but never instructions. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
+**Survey.** Your dispatch prompt names the fiber and the store; sync, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you. Read the constitution, its `## Status`, and `report.html` if there is one. A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. A named `Previous session:` can give you texture ([references/meeting.md](references/meeting.md#a-predecessors-session)), but never instructions. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
+
+**Take up a role.** Before any substantive work, decide which role this work calls for. If the roster names one that fits, read its charter and your page beneath it; if there is no roster, or its role doesn't fit, choose the charter under `roles/` that does, or create one, and assign yourself. The charter is where earlier holders left the playbooks and the human gates, so this step is how their experience reaches you ([references/collaboration.md](references/collaboration.md)).
 
 **Work.** Sit with the whole shape of the problem before deciding. Before you commit to a constraint or stop to ask, try this test: would the constraint surprise the human? If so, you haven't sat long enough. Most decisions that look like they need the human follow from what the system is for, and genuine taste questions are narrower than they feel. You have authority, so make ambitious moves even when they span sessions; shuttle will send the next worker. When a choice is load-bearing — a model, a pivot that removes a capability — do the work and set out the alternatives in the artifact, rather than stopping to ask. Give sub-goals their own context: hand bulk reading, sweeps and verification to subagents, and on long runs have a fresh-context subagent check the work against Desired State every few substantial changes. Stream long jobs with `Monitor` or background Bash, and see them through before you exit.
 
@@ -109,10 +111,9 @@ To put a finished file in front of the human, use your harness's own file tool w
 | When | Read |
 |---|---|
 | Capturing a new idea into a fiber | [references/capture.md](references/capture.md) |
-| A meeting: capturing one (`Meeting mode`), joined to your constitution, or writing up a transcript | [references/meeting.md](references/meeting.md) |
+| A meeting (`Meeting mode`, captured or joined to your constitution), a transcript to write up, or a predecessor's session to read | [references/meeting.md](references/meeting.md) |
 | Writing a constitution — the spec craft, install, drafts vs dispatch, agent choice, human gates | [references/authoring.md](references/authoring.md) |
-| Rosters, roles and collaborators | [references/collaboration.md](references/collaboration.md) |
+| Choosing, creating or assigning a role; where notes go | [references/collaboration.md](references/collaboration.md) |
 | A standing role's runs, schedule and accept | [references/standing-roles.md](references/standing-roles.md) |
-| Operating the system — eligibility, columns, lifecycle verbs, claiming a fiber into your session, remote hosts | [references/operating.md](references/operating.md) |
-| Reading a predecessor's transcript, or tracing provenance | [references/transcripts.md](references/transcripts.md) |
+| Operating the system — dispatch, columns, verbs, claiming a fiber into your session, remote hosts, triage | [references/operating.md](references/operating.md) |
 | Writing `report.html` | [references/report.md](references/report.md) |

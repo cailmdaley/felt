@@ -1,160 +1,97 @@
 # Meetings and transcripts
 
-A conversation reaches you in one of two ways. A **live meeting** is a capture
-whose input is a conversation still happening: you follow its transcript as it
-grows and keep notes as you go. An **after-the-fact transcript** is handed to
-you whole — a meeting recording's transcript, a voice note, dictation, pasted
-notes — with a request like "here's a transcript, make notes". Both end the
-same way: [a notes document, then fiber extraction](#from-transcript-to-notes).
+Transcripts reach you three ways. In a **live meeting** you are the scribe: you follow the transcript as it grows, keep notes, and answer when someone addresses you. With a **handed-over transcript** — a recording's transcript, a voice note, dictation, pasted notes — you write it up after the fact. And as a worker you can read a **predecessor's session** to recover what its handoff left out. The first two end the same way, in [a notes document and then fibers](#from-transcript-to-notes).
 
-Things said in a conversation are candidates. Propose promotions to fibers;
-never make one silently. Nothing goes to another human (issue, chat, email,
-wiki) without the user approving the text. The transcript is a conversation
-between colleagues, so keep it out of git: reference its path, and quote only
-what the notes need.
+What people say in a conversation is a candidate, not a decision: propose promotions to fibers, never make one silently, and send nothing to another human (issue, chat, email, wiki) until the user approves the text. A meeting transcript is a conversation between colleagues, so keep it out of git; reference its path, and quote only what the notes need.
 
 ## Live meeting
 
-The user starts a meeting from the board: from the Capture form in meeting
-mode, which launches you as a new capture, or from a constitution's card, which
-joins the meeting to that constitution (see
-[Joined to a constitution](#joined-to-a-constitution)). `hark` is recording on
-the user's machine and writing a speaker-labelled transcript to a path on this
-host. Your message (`From User`, or a message into your running session) opens
-with `Meeting mode`, that path, and the mode (call or room), followed by the
-user's note, which may be empty. You are this meeting's scribe from the moment
-you claim, or, joined, from the moment the message arrives.
+The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode (call or room), then the user's note, which may be empty. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
 
 ### The transcript
 
-One line per finished turn, appended a few seconds after the words were
-spoken: `14:03:12 S2  so the covariance looks fine at small scales`. Around
-interruptions, lines can arrive slightly out of order, so sort by time when it
-matters. In call mode, `me` is the user's microphone and `S1`… are the other
-participants from the call audio. In room mode, everyone is diarized as
-`S1`…. Labels stay anonymous until a naming line such as `# S2 = Martin`
-appears. The last line is `# ended HH:MM:SS`.
+hark appends one line per finished turn, a few seconds after the words were spoken: `14:03:12 S2  so the covariance looks fine at small scales`. Around interruptions lines can arrive slightly out of order, so sort by time when it matters. In call mode `me` is the user's microphone and `S1`… are the other participants; in room mode hark labels everyone `S1`…. Labels stay anonymous until a naming line such as `# S2 = Martin` appears, and the last line is `# ended HH:MM:SS`.
 
-The file may not exist for the first half-minute while hark loads its models,
-and the meeting will usually have begun before you arrive. Follow it with
-`felt shuttle follow <path>`. It prints the lines already written, then the rest in
-batches: a batch flushes at once when a line addresses you by name (or a
-mishearing of it), at 150 words, 15 seconds after its first line, or at
-`# ended`, after which the command exits. In Claude Code, run it under
-`Monitor`, so each batch arrives as an event; elsewhere, run it and read its
-stdout as it comes.
+The file may not exist for the first half-minute while hark loads its models, and the meeting has usually begun before you arrive. Follow it with `felt shuttle follow <path>`: it prints what is already written, then the rest in batches, flushing at once when a line addresses you by name (or a mishearing of it), at 150 words, 15 seconds after a batch's first line, or at `# ended`, when it exits. In Claude Code, run it under `Monitor` so each batch arrives as an event; elsewhere, read its stdout as it comes.
 
 ### Steps
 
-1. **Capture as usual, with two meeting specifics** (`capture.md`, steps 1–5).
-   The fiber is the meeting: put it where the project keeps meetings,
-   conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub
-   from the note and the project's tree. Its body names when, the mode, and the
-   transcript path. If the note is empty, a provisional name is fine; rename it
-   once the first minutes make the subject clear. The role in step 2 is
-   `scribe`: if the store has no `roles/scribe` charter, create one from this
-   page. Its charter carries the user's conventions and outranks this page
-   where they differ. The supplied `Claim` carries the meeting's launch id:
-   post it as given, after the install, and the board seats the meeting on
-   your fiber's card, wherever you run.
-2. **Follow quietly, from the moment you've claimed.** The meeting is already
-   running, so start watching before you polish the fiber. Keep notes in the
-   fiber as the meeting runs: what was discussed, decisions, action items by
-   owner, and open questions, each with its timestamp and speaker label as
-   provenance. Don't narrate.
-3. **Act when addressed.** A line spoken to the agent by name is a request.
-   The recognizer mishears "Claude" as "Cloud", "Clawed" or "Klaud", so read
-   generously. Do the request (retrieve a plot, number or past decision, make a
-   quick plot, record something) and deliver it where the user can see it
-   mid-call: `felt shuttle send-file <path>`. Anything that takes more than a
-   couple of minutes, say so and keep following.
-4. **Keep the report live.** Keep `report.html` in the fiber directory as the
-   meeting's current state: summary, decisions, action items, figures. Rewrite
-   it whole and keep it self-contained, per `report.md`. Send it once with
-   `send-file` so it sits on the Board, and rewrite it in place after each
-   substantive change.
-5. **Consolidate at `# ended`** per
-   [From transcript to notes](#from-transcript-to-notes): the notes document
-   first, then fiber extraction as proposals. Rewrite the report, then close
-   the fiber.
+1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`: if the store has no `roles/scribe` charter, create one from this page. The charter carries the user's conventions and outranks this page where they differ. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.
+2. **Follow quietly, from the moment you've claimed.** The meeting is already running, so start watching before you polish the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
+3. **Act when addressed.** A line spoken to you by name is a request; the recognizer hears "Claude" as "Cloud", "Clawed" or "Klaud", so read generously. Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `felt shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
+4. **Keep the report live.** Keep `report.html` in the fiber folder as the meeting's current state — summary, decisions, action items, figures — rewritten whole and self-contained ([report.md](report.md)). Send it once with `send-file` so it sits on the Board, then rewrite it in place after each substantive change.
+5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then close the fiber.
 
 ### Joined to a constitution
 
-When the message says the meeting joins this constitution, you are that
-constitution's worker, and you stay it: its charter, roles and open work are
-still yours, and the meeting is input to them. Nothing is captured or claimed.
+When the message says the meeting joins this constitution, you stay that constitution's worker — its charter, roles and open work are still yours — and the meeting is input to them. You capture and claim nothing.
 
-1. **File the meeting as a child fiber**
-   `<constitution>/meetings/<YYYY-MM-DD-HHMM>-<slug>`: when, the mode, and the
-   transcript path. It holds the running notes and its own `report.html`.
-2. **Take `scribe` for the meeting's duration**, alongside the roles you already
-   carry. Create `roles/scribe` from this page if the store has none; its
-   charter outranks this page. Drop the role at `# ended`.
+1. **File the meeting as a child fiber**, `<constitution>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, with the time, the mode and the transcript path. It holds the running notes and its own `report.html`.
+2. **Take `scribe` for the meeting's duration**, alongside the roles you already hold (create `roles/scribe` from this page if the store has none), and drop it at `# ended`.
 3. **Follow, act and keep the report live** as in steps 2–4, in the child fiber.
-4. **Carry it home.** At `# ended`, consolidate the child fiber as in step 5 and
-   close it. Then bring what bears on the constitution back into its own work:
-   decisions into its body and plan, action items that are yours into your next
-   steps, and the rest as proposals. The constitution stays open.
+4. **Carry it home.** At `# ended`, consolidate and close the child fiber as in step 5. Then bring what bears on the constitution back into its work: decisions into its body, your own action items into your next steps, the rest as proposals. The constitution stays open.
 
 ## From transcript to notes
 
-A live meeting's running notes are the first draft of the notes document. With
-an after-the-fact transcript you weren't there and start from nothing, so show
-the draft and the extraction plan and get approval at each step.
+A live meeting's running notes are your first draft. With a handed-over transcript you start from nothing and weren't there, so show the user the draft and the extraction plan, and get approval at each step.
 
 ### 1. The notes document
 
-The notes are the primary output: readable by someone who wasn't there, and
-enough that they know what happened, what was decided, and what's expected of
-them. Read the transcript end-to-end and segment it by topic, not by speaker or
-chronology. Then write, in this order:
+Write for someone who wasn't there: enough that they know what happened, what was decided, and what's expected of them. Read the transcript end to end, segment it by topic rather than speaker or time, then write, in this order:
 
 - a title and date, attendees, and a one-sentence purpose;
-- a **summary** of two to four sentences, leading with the most consequential
-  outcome, for the reader who skims only this;
-- **topics**: for each, the trajectory in a few sentences (how the group moved
-  from uncertainty to conclusion), with any decision on its own
-  `**Decision:**` line and its reason;
+- a **summary** of two to four sentences, leading with the most consequential outcome;
+- **topics**, each with its trajectory in a few sentences — how the group moved from uncertainty to conclusion — and any decision on its own `**Decision:**` line with its reason;
 - **action items** as a Who / What / When table;
-- a **parking lot** (raised but not resolved) and **open questions** (what
-  must be answered before next steps).
+- a **parking lot** (raised, not resolved) and **open questions** (what must be answered before next steps).
 
-For a dense meeting it can help to regroup instead into *Decisions and next
-steps*, *Not yet landed*, and *New evidence*. For a voice note or dictation
-with one speaker, drop the sections that would be empty and keep the summary,
-topics and open questions.
+A dense meeting may read better regrouped as *Decisions and next steps*, *Not yet landed* and *New evidence*. A single-speaker voice note keeps just the summary, topics and open questions.
 
-- **Decisions are explicit convergence.** "X suggested Y, nobody objected" is a
-  proposal, not a decision; when in doubt, demote. Overclaiming creates phantom
-  commitments that return later as "but we decided this." For a non-obvious
-  decision, keep the factor that tipped it, not the back-and-forth; note
-  meaningful dissent by position, not person.
-- **Attribute sparingly**: action-item owners, presenters, formal proposals.
-  "Concerns were raised about X", not "Alice was worried about X."
-- **Action items are atomic.** One owner (never "the team"), one deliverable,
-  one deadline, or "TBD — needs confirmation". "I'll send that over" counts.
-- **Compress hard.** A 60-minute transcript is ~10,000 words; good notes are
-  500–1,000. Cut filler, false starts, repetition and small talk. Keep specific
-  numbers, dates, commitments, and the substance behind a shift in the room's
-  energy.
+- **A decision is explicit convergence.** "X suggested Y, nobody objected" is a proposal; when in doubt, demote it, because an overclaimed decision comes back later as "but we decided this". For a non-obvious one, keep the factor that tipped it, and note real dissent by position rather than person.
+- **Attribute sparingly**: action-item owners, presenters, formal proposals. Write "concerns were raised about X", not "Alice was worried about X".
+- **Make action items atomic**: one owner (never "the team"), one deliverable, one deadline or "TBD — needs confirmation". "I'll send that over" counts.
+- **Compress hard.** A 60-minute transcript runs ~10,000 words; good notes run 500–1,000. Cut filler, false starts, repetition and small talk; keep numbers, dates, commitments, and the substance behind any shift in the room.
 
-Put the notes in the meeting fiber's body (or a new fiber where the project
-keeps meetings or notes), and show them to the user. They may restructure, cut,
-or add context you couldn't infer; get the notes right before extracting.
+Put the notes in the meeting fiber's body, or a new fiber where the project keeps meetings, and show them to the user, who may restructure, cut, or add context you couldn't infer. Get the notes right before extracting.
 
 ### 2. Fiber extraction
 
-Walk the notes for what should persist beyond the conversation: decisions,
-action items that are real work, open questions that need their own
-investigation, parking-lot items worth tracking, and status on fibers the
-store already tracks. Then re-scan the transcript for what the notes
-compressed away: an idea buried in a complaint ("this keeps breaking
-because…"), a principle dropped as an aside, a decision by omission ("we could
-do X but…" and moving on).
+Walk the notes for what should outlast the conversation: decisions, action items that are real work, open questions that deserve their own investigation, parking-lot items worth tracking, and news about fibers the store already tracks. Then re-scan the transcript for what the notes compressed away — an idea buried in a complaint ("this keeps breaking because…"), a principle dropped as an aside, a decision by omission ("we could do X but…" and moving on).
 
-Present the plan split into *probably file* and *probably skip* (other people's
-action items, ephemeral status), and wait for approval. Then file per the felt
-skill: new fibers nested where they belong and linked in prose, closed or
-updated outcomes on existing ones, and for narrative updates,
-edit `.felt/<path>/<slug>.md` directly. A decision that changes how the project
-works may also belong in its root fiber or CLAUDE.md.
+Present the plan as *probably file* and *probably skip* (other people's action items, passing status), and wait for approval. Then file per the felt skill: new fibers nested where they belong and linked in prose, updated or closed outcomes on existing ones, and for narrative updates, edit `.felt/<path>/<slug>.md` directly. A decision that changes how the project works may belong in its entry-point fiber or CLAUDE.md too.
+
+## A predecessor's session
+
+A `Previous session: <uuid> (<harness>)` line in your dispatch prompt names the last worker's transcript. Its `## Status` is that worker's summary; the transcript holds what actually happened — the searches, the dead ends, the thinking left mid-flight. Read it when the handoff leaves you wanting that texture, and read it surgically: sessions run to hundreds of thousands of tokens, so never load the whole file, and prefer `## Status` when it already answers the question.
+
+`felt shuttle` resolves the lineage for you; don't grep raw ledgers or guess harness paths.
+
+```bash
+felt shuttle sessions <fiber-id>                 # every session a fiber has had
+felt shuttle sessions <session-uuid>             # the fiber a session served, and its siblings
+felt shuttle sessions --commit <sha>             # the session behind a commit
+F=$(felt shuttle transcript <session-uuid>)      # the transcript as a local file, fetched if remote
+felt shuttle sessions <fiber-id> --materialize --dir <d>   # every transcript, plus manifest.json
+```
+
+Each row says honestly whether its transcript is available locally, available on a remote host, on an unreachable host, or missing; an unreachable host never reads as absence. `--json` gives the structured rows. A subagent spawned natively by a harness leaves no ledger entry, so find it by searching resolved transcripts for a phrase you know it used.
+
+Once you have the file, read it with `jq` and `rg`. Lines are huge (tool results, base64), so never `cat` or `head` raw; always project through `jq -r` first.
+
+**Claude Code** transcripts are one JSON object per line. Conversation lines have `.type` `user` or `assistant` and content blocks under `.message.content[]` (`text`, `thinking`, `tool_use`, `tool_result`); many other line types exist, so always filter on `.type`. User lines mix real human turns with harness notifications and tool results.
+
+```bash
+jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' $F | tail -40      # where it ended
+jq -r 'select(.type=="user") | .message.content | if type=="string" then . else (map(select(.type=="text")|.text)|join("\n")) end | select(length>0)' $F | tail -20   # last user-side turns
+jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="thinking") | .thinking' $F | tail -60   # thinking
+jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text' $F | rg -i -C2 "<keyword>"   # search
+```
+
+**Codex** transcripts keep the conversation in `response_item` lines (`.payload.type` `message`, `reasoning`, `function_call`, …). The first `message` items are the injected environment and dispatch context, not the human, and `event_msg` lines duplicate `response_item` content.
+
+```bash
+jq -r 'select(.type=="response_item" and .payload.type=="message") | "\(.payload.role): \(.payload.content | map(.text // empty) | join("\n"))"' $F | tail -40   # conversation tail
+jq -r 'select(.type=="response_item" and .payload.type=="reasoning") | .payload.summary[]?.text // empty' $F   # reasoning summaries (often empty)
+```
+
+For either, `jq -rs '[.[]|select(.timestamp)] | "\(length) lines, \(first.timestamp) → \(last.timestamp)"' $F` gives the size and time span. A UUID that matches nothing usually means the predecessor ran on another host.

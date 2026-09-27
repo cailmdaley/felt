@@ -1,42 +1,42 @@
 # Roles and collaborators
 
-A task constitution can carry a collaboration roster naming the offices and identities that work it:
+Every worker holds a role. The role is an office — editor, scribe, analyst — and its charter carries what the office has learned across tasks: its remit, the human gates it must respect, the people its work touches, and where its playbooks live. Taking up the right role before you touch the work is how that learning reaches you; a worker that skips it rediscovers the playbooks and misses the gates.
+
+## Taking up a role
+
+Do this first, before substantive work, on every dispatch.
+
+**If the task has a roster**, find yourself on it. A task's `collaboration:` field maps roles to the collaborators who hold them:
 
 ```yaml
 collaboration:
   vizier: [fable, astra]
-  organizer: [opus]
+  editor: [opus]
 ```
 
-Roles and collaborators are ordinary fibers at the top level of the shared store. A role maps to `roles/<role>/`, whose body is the **charter**: remit, human gates, where the playbooks live. A collaborator maps to `roles/<role>/<collaborator>/` and **is named for the model that plays the role** — `roles/vizier/fable`, `roles/intendant/opus` — so the next session of that model finds its own page by knowing what it is. Keep that page thin (voice and stance); what the office knows belongs on the role. A role may carry a name that emerges from its first real run (the intendant is Colbert): it belongs to the office, every holder inherits it, and any holder may decline it with a note. A role-only entry such as `organizer: []` is valid. Create identity fibers only when durable context will help.
+When the roster has exactly one role and collaborator, the launch prompt names them; otherwise read the roster and take the collaborator named for your model. Read the role's charter, `roles/<role>`, and your own page, `roles/<role>/<collaborator>`, with `felt -C <store> show`. Other collaborators' pages are not required reading; follow their links when a question or disagreement calls for it.
 
-The roster names identities; it does not choose the execution model (`shuttle.agent` does).
-
-## Arriving
-
-The launch prompt names an actor only when the roster has exactly one role/collaborator pair; otherwise read the roster from the task's YAML and take the collaborator named for your model. Read the global `roles/<role>` charter and `roles/<role>/<collaborator>` page with `felt -C <shared-store> show` (the prompt supplies the store). Other collaborators' full notes are not required reading; follow source links when a question or disagreement calls for them.
-
-**A task with no roster gets one from its worker**, before substantive work. Find the charter under `roles/` that fits (`felt -C <shared-store> ls roles`), or create one when none does, and assign it with yourself as collaborator:
+**If the task has no roster, or the roster names a role that doesn't fit the work**, choose one. List the offices with `felt -C <store> ls roles`, read the charters that look close, and take the one whose remit matches what this task is really asking for. When none fits, create one: a role is cheap, and a charter that starts with two sentences grows as holders fold in what they learn.
 
 ```bash
-felt -C <shared-store> add roles/intendant "Intendant" -b "<charter: remit, human gates, where the playbooks live>"
-felt -C <shared-store> add roles/intendant/opus "Opus · intendant"     # only if new and worth a page
-felt shuttle assign <task> --role intendant --collaborator opus
+felt -C <store> add roles/editor "Editor · skills and docs" -o "<one-line remit>"   # then write the charter body
+felt -C <store> add roles/editor/opus "Opus as editor"                             # only if you'll keep notes
+felt shuttle assign <task> --role editor --collaborator opus
 ```
 
-`assign` adds membership without replacing existing entries. `--json-assignment '{"vizier":["fable","astra"],"organizer":[]}'` replaces the roster exactly; `--clear` removes it. Inputs can name profiles by slug, path, or UID; the stored roster uses readable slugs.
+`assign` adds to the roster without replacing it; `--json-assignment '{"vizier":["fable","astra"],"editor":[]}'` replaces it exactly, and `--clear` removes it. A role with no collaborators (`editor: []`) is valid. The roster names identities only; `shuttle.agent` still decides what runs.
 
 ## Where notes go
 
+Roles live at `roles/<role>/` at the top of the shared store. A collaborator page lives beneath its role and is named for the model that holds it — `roles/editor/opus` — so the next session of that model finds its own page by knowing what it is. A role may carry a name that emerged from its first real run; the name belongs to the office, every holder inherits it, and any holder may decline it with a note.
+
 - **The task** (its body and `## Status`): what the next worker on this task needs.
-- **The global role**: what the office learned that holds across tasks — fold it into the charter.
-- **Your collaborator page**: what is specific to you in this role.
-- **Task-local notes** under `<constitution>/roles/<role>/` or `<constitution>/roles/<role>/<collaborator>/`, only when they add task context. These are notes about the same identities, not new ones.
+- **The role's charter**: what the office learned that holds across tasks. When a session teaches you a playbook, a gate, or a mistake to avoid, fold it in before you exit.
+- **Your collaborator page**: what is particular to you in this role — voice, stance, habits to correct. Keep it thin.
+- **Task-local notes**, under `<constitution>/roles/<role>/[<collaborator>/]`, only when they add context for this task; they describe the same identities, not new ones.
 
-Keep disagreement attributed where that context helps; being on a roster does not mean holding every view recorded there. There is no mandatory profile template or acknowledgment ceremony.
+Keep disagreement attributed where the context helps; being on a roster doesn't mean holding every view recorded there.
 
-## Handoffs and history
+## Handoffs
 
-Session ledgers record the roster configured at launch; they do not assert that every listed collaborator authored the session or its changes. A new session reads the handoff and may accept, revise, or question its conclusions without claiming personal memory of producing them. When responsibility passes to a different collaborator, say so in the handoff and update the roster. Closing a session consolidates the warm handoff; don't wake a cold predecessor just to ask it for a summary.
-
-Identity is the fiber's intrinsic UID. When a role or collaborator fiber is renamed, update the authored roster entries; old UID mappings stay readable for past records. Assignment is not an exclusivity lock and does not change exit behaviour.
+A new session reads the handoff and may accept, revise or question its conclusions without claiming to remember producing them. When responsibility passes to a different collaborator, say so in the handoff and update the roster. Session ledgers record the roster at launch; they don't claim that every listed collaborator wrote the session or its changes. When you rename a role or collaborator fiber, update the rosters that name it.
