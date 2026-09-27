@@ -148,10 +148,10 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("unaccepted row (uid 0) is pending, then refused after the wait", func(t *testing.T) {
+	t.Run("uid-0 row is one-shot pending for every caller", func(t *testing.T) {
 		// The kernel reports uid 0 on the server-side row until accept(); the
-		// one-shot check says pending, and the connection-level check gives
-		// up after acceptWait rather than admitting the unowned listener.
+		// one-shot check cannot distinguish an unaccepted connection from a
+		// root-owned listener.
 		root := t.TempDir()
 		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 0, "4242", false), "")
 		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
@@ -161,6 +161,10 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "not accepted") {
 			t.Fatalf("pending message = %v", err)
+		}
+		rootErr := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 0)
+		if !errors.As(rootErr, &owner) || !owner.pending || owner.foreign {
+			t.Fatalf("root caller should also see uid-0 as pending, got %v", rootErr)
 		}
 	})
 

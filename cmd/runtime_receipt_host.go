@@ -667,10 +667,11 @@ func checkResolvedDaemonPortOwner(settings hostSettings) error {
 // daemonTCPOwnerCheckError is a fail-closed refusal from the post-connect
 // owner check. A UID is present only when /proc identified a foreign owner.
 type daemonTCPOwnerCheckError struct {
-	address string
-	uid     int
-	foreign bool
-	reason  string
+	address  string
+	uid      int
+	foreign  bool
+	reason   string
+	uidKnown bool
 	// pending: the connection has no established row yet, or its row still
 	// carries uid 0 before accept(). The caller retries.
 	pending bool
@@ -701,15 +702,21 @@ func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, strin
 
 // checkDaemonTCPConnOwner is the post-connect owner check with the wait the
 // kernel imposes: the server-side row carries uid 0 until the listener has
-// accept()ed, so an unowned row is polled until it is owned or acceptWait
-// passes, at which point it is a refusal (a listener that never accepts
-// cannot answer HTTP either).
+// accept()ed. A root-owned listener also reports uid 0, so root callers wait
+// like everyone else and an established uid-0 row is admitted only after the
+// wait, when root is the only remaining interpretation.
 func checkDaemonTCPConnOwner(ctx context.Context, procRoot string, conn net.Conn, callerUID int) error {
 	deadline := time.Now().Add(acceptWait)
 	for {
 		err := checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
 		var pending *daemonTCPOwnerCheckError
-		if !errors.As(err, &pending) || !pending.pending || time.Now().After(deadline) {
+		if !errors.As(err, &pending) || !pending.pending {
+			return err
+		}
+		if time.Now().After(deadline) {
+			if callerUID == 0 && pending.uidKnown && pending.uid == 0 {
+				return nil
+			}
 			return err
 		}
 		select {
@@ -744,8 +751,8 @@ func checkProcTCPConnectionOwner(procRoot, serverLocal, clientLocal string, call
 			continue
 		}
 		found = true
-		if row.UID == 0 && callerUID != 0 {
-			return &daemonTCPOwnerCheckError{address: display, uid: 0, pending: true,
+		if row.UID == 0 {
+			return &daemonTCPOwnerCheckError{address: display, uid: 0, uidKnown: true, pending: true,
 				reason: "the listener has not accepted the connection (row uid 0)"}
 		}
 		if row.UID != callerUID {
