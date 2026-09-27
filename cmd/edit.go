@@ -31,9 +31,10 @@ stamps closed-at; -s open or -s active clears it. Setting active on a fiber
 with a shuttle: block arms it for dispatch, so its agent must resolve. For a
 change smaller than the whole body, edit the file.
 
---set and --unset write top-level scalar frontmatter felt does not own. The
-value is read as YAML, so true and 12 keep their types. Native keys, empty
-values, and keys holding a mapping or list are refused.`,
+--set writes a top-level scalar to frontmatter felt does not own, read as
+YAML so true and 12 keep their types; native keys, empty values, and keys
+holding a mapping or list are refused. --unset removes any key felt does not
+own, structured ones included.`,
 	Example: `  felt edit analysis/covariance -s closed -o "jackknife, 200 patches"
   felt edit analysis/covariance --set horizon=stashed`,
 	Args: cobra.ExactArgs(1),

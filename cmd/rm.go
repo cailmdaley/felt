@@ -15,7 +15,8 @@ fiber are left broken; felt check reports them.
 
 rm never acts on a guess. An id that resolves only by its last segment or as a
 prefix completion is refused, naming the fiber it would have reached; exact
-ids, unique bare slugs, and correct partial paths are not guesses.`,
+ids, scope-relative paths, unique bare slugs, and correct partial paths are
+not guesses.`,
 	Example: `  felt show analysis/scratch --citations   # the fibers whose links would break
   felt rm analysis/scratch`,
 	Args: cobra.ExactArgs(1),

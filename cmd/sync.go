@@ -32,7 +32,8 @@ var syncCmd = &cobra.Command{
 it into the checked-out branch. A project .felt that is a symlink syncs the
 repository it points into.
 
-sync never stages, commits, stashes, or force-pushes. It refuses to start with
+sync never stages, stashes, or force-pushes, and commits nothing of yours; a
+diverged upstream makes a merge commit. It refuses to start with
 staged changes, unresolved conflicts, or a merge, rebase, cherry-pick, revert,
 or bisect in progress. Unstaged and untracked files stay put unless the merge
 would overwrite them, in which case Git stops it. A merge that conflicts is
