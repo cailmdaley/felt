@@ -64,6 +64,42 @@ export function bringPanelToFront(el: HTMLElement): void {
 }
 
 /**
+ * Raise `el` when a click lands inside one of its frames.
+ *
+ * The `pointerdown` that raises a window never fires for a click INSIDE an
+ * iframe — the event belongs to the frame's own document, a PDF viewer's or a
+ * report's, and never reaches this one. So a file viewer tucked behind its
+ * card stayed tucked while its PDF was clicked, and only its tab strip could
+ * bring it up. What the page does see is focus leaving it: the window blurs
+ * and the clicked frame becomes `document.activeElement` — read one task
+ * later, once the focus move has settled. One listener serves every window
+ * that asks; the returned function withdraws the request.
+ */
+const frameRaised = new Set<HTMLElement>()
+let frameFocusWatched = false
+export function raiseOnFrameFocus(el: HTMLElement): () => void {
+  frameRaised.add(el)
+  if (!frameFocusWatched) {
+    frameFocusWatched = true
+    window.addEventListener('blur', () => {
+      window.setTimeout(() => {
+        const active = document.activeElement
+        if (!(active instanceof HTMLIFrameElement)) return
+        for (const panel of frameRaised) {
+          if (panel.contains(active)) {
+            bringPanelToFront(panel)
+            return
+          }
+        }
+      }, 0)
+    })
+  }
+  return () => {
+    frameRaised.delete(el)
+  }
+}
+
+/**
  * Every floating window currently on screen, in open order.
  *
  * Two behaviours need the whole set rather than one window's own element.

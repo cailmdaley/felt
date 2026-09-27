@@ -35,6 +35,7 @@ import {
   animatePanelGeometry,
   applyPanelGeometry as applyGeometryTo,
   bringPanelToFront as bringToFront,
+  raiseOnFrameFocus,
   fittedGeometry as fitted,
   halfAndHalf,
   inSomeOpenPanel,
@@ -462,6 +463,8 @@ export class FiberDetailModal {
    *  draggable + resizable independently of the card). Null until the first
    *  file opens; nulled when the last tab closes or its ✕ is clicked. */
   private viewerWindow: HTMLElement | null = null
+  /** Withdraws the viewer from {@link raiseOnFrameFocus} when it closes. */
+  private stopViewerFrameRaise: (() => void) | null = null
   /** Remembered viewer-window geometry for THIS card: loaded from persistence
    *  on open, updated on the window's drag/resize settle, captured before the
    *  window closes. Drives "reopen where you left it" vs the half-and-half
@@ -1978,8 +1981,11 @@ export class FiberDetailModal {
         onSettle: rememberViewer,
       })
     }
-    // Clicking anywhere on the viewer raises it above the card.
+    // Clicking anywhere on the viewer raises it above the card — its chrome
+    // by `pointerdown`, the file inside it (a frame, whose clicks never reach
+    // this document) by the focus move.
     win.addEventListener('pointerdown', () => bringToFront(win), true)
+    this.stopViewerFrameRaise = raiseOnFrameFocus(win)
 
     this.viewerWindow = win
     document.body.append(win)
@@ -2008,6 +2014,8 @@ export class FiberDetailModal {
       disposeFileViewer(entry.viewer)
       entry.viewer = null
     })
+    this.stopViewerFrameRaise?.()
+    this.stopViewerFrameRaise = null
     this.viewerWindow?.remove()
     this.viewerWindow = null
     this.rightCol = null
@@ -3107,6 +3115,10 @@ export class FiberDetailModal {
     )
     this.openFiles = [...state.tabs]
     this.setActive(entry, card)
+    // Asking for a file means wanting to see it. The click that asked landed
+    // on the card, which raised the card over the viewer on its way in, so the
+    // viewer comes back up here — whether the file was new or already open.
+    if (this.viewerWindow) bringToFront(this.viewerWindow)
     this.syncLauncherActiveState()
     if (opts?.persist !== false) this.writePersist()
   }
