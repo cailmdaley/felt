@@ -111,8 +111,9 @@ defmodule Shuttle.CollaborationTest do
       Collaboration.prompt_section({:ok, %{"vizier" => ["fable"]}}, "/tmp/shared loom")
 
     assert prompt =~ "You are working as fable within the vizier role."
-    assert prompt =~ "felt -C '/tmp/shared loom' show roles/vizier"
-    assert prompt =~ "felt -C '/tmp/shared loom' show roles/vizier/fable"
+    # The store resolves through its realpath; on macOS /tmp is /private/tmp.
+    assert prompt =~ ~r"felt -C '(/private)?/tmp/shared loom' show roles/vizier\n"
+    assert prompt =~ ~r"felt -C '(/private)?/tmp/shared loom' show roles/vizier/fable"
   end
 
   @tag :tmp_dir

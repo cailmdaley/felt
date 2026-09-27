@@ -567,7 +567,8 @@ defmodule Shuttle.DispatcherTest do
       Dispatcher.render_prompt("tests/a", collaboration: singleton, felt_store: "/tmp/loom")
 
     assert singleton_prompt =~ "You are working as fable within the vizier role."
-    assert singleton_prompt =~ "felt -C '/tmp/loom' show roles/vizier/fable"
+    # Role fibers resolve through the store's realpath; on macOS /tmp is /private/tmp.
+    assert singleton_prompt =~ ~r"felt -C '(/private)?/tmp/loom' show roles/vizier/fable"
 
     for prompt <- [
           Dispatcher.render_prompt("tests/a", collaboration: multi),
