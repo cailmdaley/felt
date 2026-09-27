@@ -159,6 +159,12 @@ felt migrate
 
 `--dir <path>` points the migration at a store other than the current project's.
 
+Afterwards, `felt check` should pass. Two things outside the store may still
+point at the old layout: hex-suffixed ids in CLAUDE.md or other notes
+(`rg '<slug>-[0-9a-f]{8}'` finds them; drop the suffix), and code or hooks that
+glob `.felt/*.md` directly, which must walk directories and read
+`<slug>/<slug>.md` instead.
+
 A separate one-off pass, `felt backfill-ids`, mints intrinsic ULIDs for fibers
 that lack them. Run it on the **canonical** copy of a store only, then sync the
 files, so replicas inherit the committed ids instead of minting their own. See
