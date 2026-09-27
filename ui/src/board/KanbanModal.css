@@ -1412,13 +1412,13 @@
   font-variant-numeric: tabular-nums;
 }
 .kbn-meeting-host { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The transcript tail: a few lines tall, scrollable back through the last
+/* The transcript tail: two lines tall, scrollable back through the last
    thirty, following the newest line until the reader scrolls away. */
 .kbn-meeting-tail {
   margin: 0;
   padding: 5px 7px;
   list-style: none;
-  max-height: calc(6 * 1.35em + 10px);
+  max-height: calc(2 * 1.35em + 10px);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-radius: 2px;
