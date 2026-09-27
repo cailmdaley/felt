@@ -20,7 +20,7 @@ defmodule ShuttleWeb.DispatchController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [app_server_unavailable_message: 0, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
 
   alias Shuttle.OriginRouter
 
@@ -48,158 +48,22 @@ defmodule ShuttleWeb.DispatchController do
       |> put_status(400)
       |> json(%{error: "fiber_id is required"})
     else
-      case Shuttle.Poller.dispatch_fiber(fiber_id,
-             force: force or ad_hoc,
-             ad_hoc: ad_hoc,
-             # STORE 3: the directive + continuation mode ride the dispatch.
-             user_message: normalize_message(Map.get(params, "user_message")),
-             resume_mode: normalize_resume_mode(Map.get(params, "resume_mode"))
-           ) do
-        {:ok, session} ->
-          # A forced dispatch may have re-armed the doc (status:active). Re-read it
-          # into the document cache so the board's post-dispatch refetch moves the
-          # card to inFlight immediately rather than after the next poll.
-          Shuttle.Poller.refresh_document(fiber_id)
+      result =
+        Shuttle.Poller.dispatch_fiber(fiber_id,
+          force: force or ad_hoc,
+          ad_hoc: ad_hoc,
+          # STORE 3: the directive + continuation mode ride the dispatch.
+          user_message: normalize_message(Map.get(params, "user_message")),
+          resume_mode: normalize_resume_mode(Map.get(params, "resume_mode"))
+        )
 
-          # WHICH session this dispatch started. The tmux session name is
-          # `<leaf>-<uid>-shuttle` — keyed on the FIBER's uid, so it is byte-for-byte
-          # identical before and after a fresh dispatch and cannot distinguish the
-          # new session from the one it replaced. The runtime UUID can: it is
-          # stamped synchronously at launch for a Claude worker, and the refresh
-          # above just re-read it off disk. `nil` for a codex/pi worker (scraped
-          # and backfilled seconds later) — a client then falls back to comparing
-          # against the value it saw before dispatching.
-          json(
-            conn,
-            Map.merge(
-              %{
-                dispatched: true,
-                fiber_id: fiber_id,
-                session_uuid: Shuttle.Poller.session_uuid(fiber_id)
-              },
-              Shuttle.WorkerBackend.wire(session)
-            )
-          )
-
-        {:error, {:app_launch_failed, id, reason}} ->
-          if reason == :app_server_unavailable do
-            app_server_unavailable(conn, fiber_id, %{session_uuid: id})
-          else
-            conn
-            |> put_status(502)
-            |> json(%{
-              dispatched: false,
-              surface: "app",
-              session_uuid: id,
-              tmux_session: nil,
-              reason: "app_launch_failed",
-              error: inspect(reason),
-              message:
-                "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-            })
-          end
-
-        {:error, :app_server_unavailable} ->
-          app_server_unavailable(conn, fiber_id)
-
-        {:error, :already_running} ->
-          conn
-          |> put_status(409)
-          |> json(already_running_body(fiber_id))
-
-        {:error, :not_eligible} ->
-          conn
-          |> put_status(422)
-          |> json(%{dispatched: false, reason: "not_eligible", fiber_id: fiber_id})
-
-        {:error, {:not_eligible, detail}} ->
-          conn
-          |> put_status(422)
-          |> json(
-            Map.merge(
-              %{dispatched: false, reason: "not_eligible", fiber_id: fiber_id},
-              ineligible_detail(detail)
-            )
-          )
-
-        {:error, reopen} when reopen in [:reopen_unavailable, :reopen_failed] ->
-          conn
-          |> put_status(422)
-          |> json(%{
-            dispatched: false,
-            reason: to_string(reopen),
-            fiber_id: fiber_id,
-            message:
-              "Could not reopen the closed fiber — no worker was spawned. " <>
-                "Reopen it (`felt shuttle reopen #{fiber_id}`) and try again."
-          })
-
-        # A dispatch preflight refused before anything spawned: the agent's
-        # wrapper does not resolve in the login bash the worker launches
-        # through, the work directory is not on this host, or (macOS) there is
-        # no tmux server the daemon is allowed to fork under. All three are
-        # operator config problems, not server faults, so 422 with the message
-        # that names the thing and the fix. No worker was spawned; the
-        # alternative is the tmux session that dies invisibly.
-        {:error, {tag, message}}
-        when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-               is_binary(message) ->
-          conn
-          |> put_status(422)
-          |> json(%{
-            dispatched: false,
-            reason: to_string(tag),
-            fiber_id: fiber_id,
-            message: message
-          })
-
-        {:error, reason} ->
-          conn
-          |> put_status(500)
-          |> json(%{dispatched: false, reason: inspect(reason), fiber_id: fiber_id})
-      end
+      {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
+      conn |> put_status(status) |> json(body)
     end
   end
 
   defp dispatch_failed(name, reason),
     do: %{dispatched: false, reason: "forward_failed", origin: name, error: inspect(reason)}
-
-  defp already_running_body(fiber_id) do
-    base = %{dispatched: false, reason: "already_running", fiber_id: fiber_id}
-
-    case Shuttle.Poller.worker_status(fiber_id) do
-      %{session: session} = worker when is_binary(session) and session != "" ->
-        Map.merge(Map.merge(base, Shuttle.WorkerBackend.wire(session)), %{
-          agent: Map.get(worker, :agent_id),
-          started_at: maybe_unix_ms(Map.get(worker, :started_at)),
-          last_activity_at: maybe_unix_ms(Map.get(worker, :last_activity_at))
-        })
-
-      _ ->
-        base
-    end
-  end
-
-  defp maybe_unix_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
-  defp maybe_unix_ms(_), do: nil
-
-  defp app_server_unavailable(conn, fiber_id, extra \\ %{}) do
-    conn
-    |> put_status(503)
-    |> json(
-      Map.merge(
-        %{
-          dispatched: false,
-          surface: "app",
-          fiber_id: fiber_id,
-          tmux_session: nil,
-          reason: "app_server_unavailable",
-          message: app_server_unavailable_message()
-        },
-        extra
-      )
-    )
-  end
 
   defp truthy?(value) when value in [true, "true", "1", 1], do: true
   defp truthy?(_), do: false
@@ -220,48 +84,4 @@ defmodule ShuttleWeb.DispatchController do
   # autonomous heuristic rather than a hard error.
   defp normalize_resume_mode(mode) when mode in ["previous", "fresh"], do: mode
   defp normalize_resume_mode(_), do: nil
-
-  # Turns a structured ineligibility detail into a stable `detail` code plus a
-  # human `message`. The kanban renders `detail` to accurate copy and falls
-  # back to `message`; both beat the old flat "not_eligible".
-  defp ineligible_detail({:homed_elsewhere, fiber_host, own_host}) do
-    %{
-      detail: "homed_elsewhere",
-      fiber_host: fiber_host,
-      daemon_host: own_host,
-      message:
-        "This fiber is homed on #{describe_host(fiber_host)} and can only run there. " <>
-          "The daemon that received this dispatch is #{describe_host(own_host)}."
-    }
-  end
-
-  defp ineligible_detail({:project_dir_missing, dir}) do
-    %{
-      detail: "project_dir_missing",
-      project_dir: dir,
-      message:
-        "The fiber's project_dir (#{describe_host(dir)}) does not exist on the owning host."
-    }
-  end
-
-  defp ineligible_detail(:disabled),
-    do: %{detail: "disabled", message: "Draft — set status: active to allow dispatch."}
-
-  defp ineligible_detail(:closed),
-    do: %{detail: "closed", message: "Fiber is closed — reopen it before dispatching."}
-
-  defp ineligible_detail(:no_shuttle_block),
-    do: %{detail: "no_shuttle_block", message: "Fiber has no shuttle: block to dispatch."}
-
-  defp ineligible_detail(:not_due_or_blocked),
-    do: %{
-      detail: "not_due_or_blocked",
-      message: "Not currently dispatchable — not yet due, or held by another gate."
-    }
-
-  defp ineligible_detail(other),
-    do: %{detail: to_string(other)}
-
-  defp describe_host(value) when is_binary(value) and value != "", do: value
-  defp describe_host(_), do: "(unset)"
 end

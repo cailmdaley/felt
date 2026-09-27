@@ -60,7 +60,7 @@ defmodule Shuttle.MeetingTest do
     :meeting_now,
     :meeting_launch_wait_ms
   ]
-  @tmux_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}"
+  @tmux_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
 
   setup %{tmp_dir: tmp_dir} do
     previous = Map.new(@config_keys, &{&1, Application.fetch_env(:shuttle, &1)})
@@ -116,6 +116,129 @@ defmodule Shuttle.MeetingTest do
     assert call =~ "`/tmp/meetings/session.txt` on this host"
     assert call =~ "references/meeting.md"
     assert call =~ "The user's note about the meeting follows (it may be empty)."
+  end
+
+  test "a joined meeting's message names the constitution it joins" do
+    joined = Meeting.meeting_message("room", "~/.hark/meetings/x.txt", {:fiber, "proj/shear"})
+
+    assert joined =~ "Meeting mode (room)."
+    assert joined =~ "`~/.hark/meetings/x.txt` on this host"
+    assert joined =~ "This meeting joins this constitution (`proj/shear`)"
+    assert joined =~ "references/meeting.md"
+    refute Meeting.meeting_message("room", "x", {:capture, "cli"}) =~ "joins this constitution"
+  end
+
+  test "joining a constitution records locally, names the fiber, and delivers to its owner", %{
+    hark_dir: hark_dir
+  } do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient,
+       {:ok, 200, Jason.encode!(%{"delivered" => true, "delivery" => "message"})}}
+    )
+
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_joined_meeting_handler(hark_dir)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/join",
+        Jason.encode!(%{
+          "fiber_id" => "cosmo/shear-bmodes",
+          "origin" => "project-host",
+          "meeting" => %{"mode" => "call"},
+          "note" => ""
+        })
+      )
+
+    assert conn.status == 200
+
+    assert %{
+             "delivery" => %{"delivered" => true, "delivery" => "message"},
+             "meeting" => %{
+               "state" => "live",
+               "fiber" => "cosmo/shear-bmodes",
+               "mirror_host" => "project-host"
+             }
+           } = Jason.decode!(conn.resp_body)
+
+    forwarded = Shuttle.Test.MeetingCaptureForwardClient.last()
+    assert forwarded.url == "http://127.0.0.1:4001/api/v1/deliver"
+    request = Jason.decode!(forwarded.body)
+    assert request["fiber_id"] == "cosmo/shear-bmodes"
+    assert request["from"] == "shuttle meeting"
+    assert request["text"] =~ "Meeting mode (call)."
+    assert request["text"] =~ "~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt"
+    assert request["text"] =~ "joins this constitution (`cosmo/shear-bmodes`)"
+
+    {"tmux", ["new-session" | args], _} =
+      Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    assert fiber_from_tmux_args(args) == "cosmo/shear-bmodes"
+    command = List.last(Enum.take_while(args, &(&1 != ";")))
+    assert command =~ "--mirror"
+    assert command =~ "'--title' 'shear-bmodes'"
+
+    assert %{"meeting" => %{"fiber" => "cosmo/shear-bmodes"}} =
+             api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
+  end
+
+  test "a delivery failure after hark starts keeps the recording row", %{hark_dir: hark_dir} do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient,
+       {:ok, 422,
+        Jason.encode!(%{
+          "dispatched" => false,
+          "reason" => "not_eligible",
+          "message" => "Fiber is closed — reopen it before dispatching."
+        })}}
+    )
+
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_joined_meeting_handler(hark_dir)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/join",
+        Jason.encode!(%{
+          "fiber_id" => "cosmo/shear-bmodes",
+          "origin" => "project-host",
+          "meeting" => %{"mode" => "room"},
+          "note" => "B-mode telecon"
+        })
+      )
+
+    assert conn.status == 422
+
+    assert %{
+             "recording" => true,
+             "error" => "Fiber is closed — reopen it before dispatching.",
+             "meeting" => %{"state" => "live", "fiber" => "cosmo/shear-bmodes"}
+           } = Jason.decode!(conn.resp_body)
+  end
+
+  test "joining validates the fiber before recording" do
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/join",
+        Jason.encode!(%{"meeting" => %{"mode" => "call"}, "fiber_id" => " "})
+      )
+
+    assert conn.status == 422
+    assert Jason.decode!(conn.resp_body)["error"] =~ "fiber_id"
+    assert Shuttle.Test.MeetingRunner.calls() == []
   end
 
   test "an ended recording that carries an error is a failure, not a clean end" do
@@ -228,10 +351,13 @@ defmodule Shuttle.MeetingTest do
 
   test "tmux output parser distinguishes alive, dead exit status, and absent sessions" do
     assert {:ok, %{state: :alive, session_created: 1234, launch: "launch-a"}} =
-             Meeting.parse_tmux_result("0|0|1234|launch-a\n", 0)
+             Meeting.parse_tmux_result("0|0|1234|launch-a|\n", 0)
 
-    assert {:ok, %{state: {:dead, 17}, session_created: 1234, launch: nil}} =
-             Meeting.parse_tmux_result("1|17|1234|\n", 0)
+    assert {:ok, %{state: {:dead, 17}, session_created: 1234, launch: nil, fiber: nil}} =
+             Meeting.parse_tmux_result("1|17|1234||\n", 0)
+
+    assert {:ok, %{state: :alive, launch: "launch-a", fiber: "cosmo/shear"}} =
+             Meeting.parse_tmux_result("0|0|1234|launch-a|cosmo/shear\n", 0)
 
     assert {:ok, :absent} = Meeting.parse_tmux_result("can't find session: throwaway", 1)
     assert {:error, {:tmux, _}} = Meeting.parse_tmux_result("garbled", 0)
@@ -536,7 +662,7 @@ defmodule Shuttle.MeetingTest do
     results =
       1..2
       |> Task.async_stream(
-        fn _ -> Meeting.start_capture(request, "", "local", "cli") end,
+        fn _ -> Meeting.start(request, {:capture, "cli"}, "", "local") end,
         timeout: 5_000
       )
       |> Enum.to_list()
@@ -604,7 +730,7 @@ defmodule Shuttle.MeetingTest do
     Shuttle.Test.MeetingRunner.set_handler(
       fn
         "tmux", ["display-message" | _], _opts, :starting ->
-          {{"0|0|1234|", 0}, :starting}
+          {{"0|0|1234||", 0}, :starting}
 
         "tmux", ["display-message" | _], _opts, :absent ->
           {{"can't find session: hark-meeting", 1}, :absent}
@@ -645,7 +771,7 @@ defmodule Shuttle.MeetingTest do
           {{"", 0}, :present}
 
         "tmux", ["display-message" | _], _opts, :present ->
-          {{"1|2|1234|launch-failed\\n", 0}, :present}
+          {{"1|2|1234|launch-failed|\\n", 0}, :present}
 
         "tmux", ["capture-pane" | _], _opts, :present ->
           {{"pane error\\n", 0}, :present}
@@ -688,7 +814,7 @@ defmodule Shuttle.MeetingTest do
     set_starting_meeting_handler(hark_dir)
 
     assert {:ok, %{prompt: prompt}} =
-             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
 
     {"tmux", ["new-session" | args], _} =
       Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
@@ -725,7 +851,7 @@ defmodule Shuttle.MeetingTest do
         {{"$4\n", 0}, launch_from_tmux_args(args)}
 
       "tmux", ["display-message" | _], _opts, launch ->
-        {{"1|2|1234|#{launch}\n", 0}, launch}
+        {{"1|2|1234|#{launch}|\n", 0}, launch}
 
       "tmux", ["capture-pane" | _], _opts, launch ->
         {{"hark: error: unrecognized arguments: --launch\n", 0}, launch}
@@ -777,7 +903,7 @@ defmodule Shuttle.MeetingTest do
     end)
 
     assert {:ok, %{meeting: %{state: "starting", tmux_session: "hark-meeting"}}} =
-             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
   end
 
   test "an unmatched observation after creation is uncertain, not a failed launch", %{
@@ -799,7 +925,7 @@ defmodule Shuttle.MeetingTest do
     end)
 
     assert {:ok, %{meeting: %{state: "starting", title: "Shear review"}}} =
-             Meeting.start_capture(%{"mode" => "call"}, "Shear review", "local", "cli")
+             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
   end
 
   test "a reap never kills a newer launch that replaced the inspected one", %{
@@ -810,10 +936,10 @@ defmodule Shuttle.MeetingTest do
     Shuttle.Test.MeetingRunner.set_handler(
       fn
         "tmux", ["display-message" | _], _opts, 0 ->
-          {{"1|0|1234|L1\n", 0}, 1}
+          {{"1|0|1234|L1|\n", 0}, 1}
 
         "tmux", ["display-message" | _], _opts, n ->
-          {{"0|0|1235|L2\n", 0}, n + 1}
+          {{"0|0|1235|L2|\n", 0}, n + 1}
 
         _command, _args, _opts, state ->
           {{"", 0}, state}
@@ -833,7 +959,7 @@ defmodule Shuttle.MeetingTest do
 
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["display-message" | _], _opts, state ->
-        {{"0|0|1234|#{launch}\n", 0}, state}
+        {{"0|0|1234|#{launch}|\n", 0}, state}
 
       "ps", ["-p", ^pid_string, "-o", "command="], _opts, false ->
         {{"", 1}, false}
@@ -870,13 +996,53 @@ defmodule Shuttle.MeetingTest do
         {{"$4\n", 0}, launch}
 
       "tmux", ["display-message" | _], _opts, launch ->
-        {{"0|0|1234|#{launch}\n", 0}, launch}
+        {{"0|0|1234|#{launch}|\n", 0}, launch}
 
       "ps", ["-p", "321", "-o", "command="], _opts, launch ->
         {{"python hark capture", 0}, launch}
 
       _command, _args, _opts, state ->
         {{"", 0}, state}
+    end)
+  end
+
+  defp set_joined_meeting_handler(hark_dir) do
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["new-session" | args], _opts, _state ->
+        launch = launch_from_tmux_args(args)
+
+        write_meeting(hark_dir, %{
+          "launch" => launch,
+          "pid" => 321,
+          "phase" => "live",
+          "title" => "shear-bmodes",
+          "started" => "2026-09-25T14:03:00+02:00",
+          "transcript" => Path.join(hark_dir, "meetings/2026-09-25_1403_shear-bmodes.txt"),
+          "mirror" => "remote-alias:~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt"
+        })
+
+        {{"$4\n", 0}, {launch, fiber_from_tmux_args(args)}}
+
+      "tmux", ["display-message" | _], _opts, {launch, fiber} ->
+        {{"0|0|1234|#{launch}|#{fiber}\n", 0}, {launch, fiber}}
+
+      "ps", ["-p", "321", "-o", "command="], _opts, state ->
+        {{"python hark capture", 0}, state}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+  end
+
+  defp fiber_from_tmux_args(args) do
+    args
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.find_value(fn
+      ["@hark_fiber", fiber] -> fiber
+      _ -> nil
     end)
   end
 

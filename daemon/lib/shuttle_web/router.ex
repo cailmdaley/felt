@@ -21,8 +21,11 @@ defmodule ShuttleWeb.Router do
     # Spawn-without-constitution: launch a capture session from a free-text
     # prompt; the session files the fiber and claims itself.
     post("/capture", CaptureController, :create)
-    # The board starts a recording through /capture; these routes observe and
-    # stop only this daemon's local microphone capture.
+    # A recording starts for a new capture (/capture with `meeting`) or joins
+    # an existing constitution (/meeting/join). Both record on THIS daemon's
+    # microphone; only the agent's half is owner-routed. The other two routes
+    # observe and stop the local capture.
+    post("/meeting/join", MeetingController, :join)
     post("/meeting/stop", MeetingController, :stop)
     get("/meeting", MeetingController, :show)
     # The unified kanban write-plane: one call hides resolve + invoke +
@@ -37,6 +40,9 @@ defmodule ShuttleWeb.Router do
     # UI (where the human is), ssh-ing out for a remote worker. See Shuttle.Kitty.
     post("/attach", AttachController, :create)
     post("/inject", InjectController, :create)
+    # Put a message in front of a fiber's worker (owner-routed): message a live
+    # session, else resume or dispatch it with the message as From User.
+    post("/deliver", DeliverController, :create)
     get("/peers", MessagingController, :peers)
     post("/messages", MessagingController, :create)
     post("/messages/files", MessagingController, :create_files)

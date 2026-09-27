@@ -7,8 +7,9 @@ defmodule ShuttleWeb.CaptureController do
   itself via `/api/v1/claim`, and continues as the worker realizing it.
 
   A meeting capture starts hark on the daemon receiving the request before the
-  ordinary capture is routed to the project owner. The meeting instructions
-  travel in the capture prompt; the owner does not need meeting-specific code.
+  ordinary capture is routed to the project owner (`Shuttle.Meeting.start/5`
+  with a capture target). The meeting instructions travel in the capture
+  prompt; the owner does not need meeting-specific code.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -24,11 +25,11 @@ defmodule ShuttleWeb.CaptureController do
         route_capture(conn, params, nil)
 
       {:ok, meeting} ->
-        case Meeting.start_capture(
+        case Meeting.start(
                meeting,
+               {:capture, Map.get(params, "surface")},
                Map.get(params, "prompt"),
-               Map.get(params, "origin"),
-               Map.get(params, "surface")
+               Map.get(params, "origin")
              ) do
           {:ok, %{meeting: row, prompt: prompt}} ->
             params =
@@ -170,30 +171,9 @@ defmodule ShuttleWeb.CaptureController do
     conn |> put_status(status) |> json(payload)
   end
 
-  defp meeting_error(conn, {:validation, message}),
-    do: conn |> put_status(422) |> json(%{error: message})
-
-  defp meeting_error(conn, {:conflict, meeting}) do
-    conn |> put_status(409) |> json(%{error: "a meeting is already active", meeting: meeting})
-  end
-
-  defp meeting_error(conn, {:launch_failed, meeting}) do
-    conn
-    |> put_status(503)
-    |> json(%{
-      error:
-        "recording did not start: #{meeting.error || "hark exited before recording started"}",
-      meeting: meeting,
-      recording: false
-    })
-  end
-
-  defp meeting_error(conn, :unavailable) do
-    conn |> put_status(503) |> json(%{error: "hark is not available on this host"})
-  end
-
   defp meeting_error(conn, reason) do
-    conn |> put_status(503) |> json(%{error: error_message(reason)})
+    {status, body} = ShuttleWeb.MeetingController.start_error(reason)
+    conn |> put_status(status) |> json(body)
   end
 
   defp error_code(reason) when is_binary(reason), do: reason
@@ -217,8 +197,4 @@ defmodule ShuttleWeb.CaptureController do
 
   defp capture_failed(name, reason),
     do: %{spawned: false, reason: "forward_failed", origin: name, error: inspect(reason)}
-
-  defp error_message({:operation, message}), do: message
-  defp error_message({:tmux, message}), do: "tmux is unavailable: #{message}"
-  defp error_message(reason), do: inspect(reason)
 end

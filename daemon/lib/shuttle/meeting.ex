@@ -28,23 +28,34 @@ defmodule Shuttle.Meeting do
   Starts and observes the local hark capture in a dedicated tmux session.
   The transcript and `meeting.json` remain owned by hark; this module controls
   the local capture and derives its state from hark's lifecycle and tmux.
+
+  A meeting starts for a target: `{:capture, surface}` hands it to a new
+  capture agent, `{:fiber, id}` joins it to an existing constitution. The
+  recording is the same either way; the target shapes the name, the message
+  its agent receives, and the `fiber` the live row names.
   """
 
   alias Shuttle.{Remote, Remotes, Runner, Tmux}
 
   @session "hark-meeting"
   @launch_option "@hark_launch"
+  @fiber_option "@hark_fiber"
   @active_phases ~w(loading live stopping)
   @tail_bytes 8_192
   @command_timeout_ms 5_000
   @launch_wait_ms 5_000
   @launch_poll_ms 100
-  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}"
+  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
 
   @type tmux_status ::
           :absent
-          | %{state: :alive, session_created: integer(), launch: String.t() | nil}
-          | %{state: {:dead, integer()}, session_created: integer(), launch: String.t() | nil}
+          | %{
+              state: :alive | {:dead, integer()},
+              session_created: integer(),
+              launch: String.t() | nil,
+              fiber: String.t() | nil
+            }
+  @type target :: {:capture, String.t() | nil} | {:fiber, String.t()}
   @type meeting :: map() | nil
 
   @doc false
@@ -58,20 +69,20 @@ defmodule Shuttle.Meeting do
     case tmux_status do
       :absent ->
         if phase in @active_phases and pid_alive?,
-          do: {meeting_row(fresh, phase, false), false},
+          do: {meeting_row(fresh, phase, :absent), false},
           else: {nil, false}
 
       %{state: :alive} ->
         if phase in @active_phases and pid_alive?,
-          do: {meeting_row(fresh, phase, true), false},
-          else: {meeting_row(fresh, "starting", true), false}
+          do: {meeting_row(fresh, phase, tmux_status), false},
+          else: {meeting_row(fresh, "starting", tmux_status), false}
 
       %{state: {:dead, 0}} when clean_end? ->
         {nil, true}
 
       %{state: {:dead, _status}} ->
         data = if is_map(fresh), do: fresh, else: %{}
-        {meeting_row(data, "failed", true, first_error(data["error"], pane_tail)), false}
+        {meeting_row(data, "failed", tmux_status, first_error(data["error"], pane_tail)), false}
     end
   end
 
@@ -81,11 +92,14 @@ defmodule Shuttle.Meeting do
     with {:ok, snapshot, _context} <- inspect_current(opts), do: {:ok, snapshot}
   end
 
-  @doc "Start hark locally and prepare the ordinary capture prompt."
-  @spec start_capture(map(), String.t() | nil, String.t() | nil, String.t() | nil, keyword()) ::
+  @doc """
+  Start hark locally, mirrored toward `origin`, for `target`, and prepare the
+  message its agent receives: the meeting header followed by the user's note.
+  """
+  @spec start(map(), target(), String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, %{meeting: map(), prompt: String.t()}} | {:error, term()}
-  def start_capture(meeting, note, origin, surface, opts \\ []) do
-    with_meeting_lock(fn -> do_start_capture(meeting, note, origin, surface, opts) end)
+  def start(meeting, target, note, origin, opts \\ []) do
+    with_meeting_lock(fn -> do_start(meeting, target, note, origin, opts) end)
   end
 
   @doc "Stop the local meeting once, or dismiss a dead tmux pane."
@@ -106,11 +120,7 @@ defmodule Shuttle.Meeting do
   @doc "Derive the meeting name and title from the first line of a note."
   @spec name_and_title(String.t() | nil, NaiveDateTime.t()) :: {String.t(), String.t()}
   def name_and_title(note, now \\ NaiveDateTime.local_now()) do
-    first_line =
-      (note || "")
-      |> String.split(["\n", "\r"], parts: 2)
-      |> List.first()
-      |> String.trim()
+    first_line = first_line(note)
 
     title = if first_line == "", do: "Meeting", else: String.slice(first_line, 0, 80)
 
@@ -127,15 +137,25 @@ defmodule Shuttle.Meeting do
   end
 
   @doc """
-  The facts a meeting capture's agent needs; the procedure lives in the shuttle
-  skill's `references/meeting.md`.
+  The facts a meeting's agent needs; the procedure lives in the shuttle skill's
+  `references/meeting.md`. A joined meeting also names the constitution it
+  joins, whose worker stays itself.
   """
-  @spec meeting_message(String.t(), String.t()) :: String.t()
-  def meeting_message(mode, transcript_path) when mode in ["call", "room"] do
+  @spec meeting_message(String.t(), String.t(), target()) :: String.t()
+  def meeting_message(mode, transcript_path, target \\ {:capture, nil})
+      when mode in ["call", "room"] do
     "Meeting mode (#{mode}). hark is transcribing a live meeting to `#{transcript_path}` on this host. " <>
       "Read the shuttle skill's references/meeting.md before anything else and follow it. " <>
+      joined_line(target) <>
       "The user's note about the meeting follows (it may be empty)."
   end
+
+  defp joined_line({:fiber, fiber_id}),
+    do:
+      "This meeting joins this constitution (`#{fiber_id}`): you stay its worker; " <>
+        "follow meeting.md's section on a joined meeting. "
+
+  defp joined_line(_capture), do: ""
 
   @doc "Resolve capture paths and remote mirror settings for a meeting."
   @spec meeting_paths(String.t(), String.t() | nil, keyword()) ::
@@ -174,10 +194,16 @@ defmodule Shuttle.Meeting do
           {:ok, tmux_status()} | {:error, term()}
   def parse_tmux_result(output, 0) do
     case output |> String.trim() |> String.split("|", trim: false) do
-      [dead, exit_status, created, launch] ->
+      [dead, exit_status, created, launch, fiber] ->
         with {:ok, session_created} <- parse_integer(created),
              {:ok, state} <- parse_dead(dead, exit_status) do
-          {:ok, %{state: state, session_created: session_created, launch: blank_to_nil(launch)}}
+          {:ok,
+           %{
+             state: state,
+             session_created: session_created,
+             launch: blank_to_nil(launch),
+             fiber: blank_to_nil(fiber)
+           }}
         else
           _ -> {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
         end
@@ -193,16 +219,16 @@ defmodule Shuttle.Meeting do
       else: {:error, {:tmux, String.trim(output)}}
   end
 
-  defp do_start_capture(meeting, note, origin, surface, opts) do
+  defp do_start(meeting, target, note, origin, opts) do
     with {:ok, mode} <- validate_meeting(meeting),
          {:ok, note} <- validate_note(note),
+         :ok <- validate_target(target),
          executable when is_binary(executable) <- find_hark(opts),
          {:ok, snapshot, context} <- inspect_current(opts),
          :ok <- ensure_startable(snapshot),
-         :ok <- validate_surface(surface),
          {name, title} <-
            name_and_title(
-             note,
+             name_source(note, target),
              Keyword.get(
                opts,
                :now,
@@ -212,10 +238,11 @@ defmodule Shuttle.Meeting do
          :ok <- dismiss_failed(context, opts),
          {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
+         fiber <- target_fiber(target),
          argv <- hark_argv(executable, paths, title, mode, launch_id),
-         :ok <- create_session(argv, launch_id, opts),
-         {:ok, row} <- await_launch(launch_id, paths, title, opts) do
-      message = meeting_message(mode, paths.transcript)
+         :ok <- create_session(argv, launch_id, fiber, opts),
+         {:ok, row} <- await_launch(launch_id, paths, title, fiber, opts) do
+      message = meeting_message(mode, paths.transcript, target)
       {:ok, %{meeting: row, prompt: message <> "\n\n" <> note}}
     else
       nil -> {:error, :unavailable}
@@ -223,15 +250,40 @@ defmodule Shuttle.Meeting do
     end
   end
 
+  # A joined meeting with no note is named after the constitution it joins.
+  defp name_source(note, {:fiber, fiber_id}) do
+    if first_line(note) == "", do: Path.basename(fiber_id), else: note
+  end
+
+  defp name_source(note, _capture), do: note
+
+  defp target_fiber({:fiber, fiber_id}), do: fiber_id
+  defp target_fiber(_capture), do: nil
+
   defp validate_meeting(%{"mode" => mode}) when mode in ["call", "room"], do: {:ok, mode}
 
   defp validate_meeting(_),
     do: {:error, {:validation, "meeting.mode must be 'call' or 'room'"}}
 
-  defp validate_surface("app"),
+  defp first_line(note) do
+    (note || "")
+    |> String.split(["\n", "\r"], parts: 2)
+    |> List.first()
+    |> String.trim()
+  end
+
+  defp validate_target({:capture, "app"}),
     do: {:error, {:validation, "meeting mode requires a terminal capture surface"}}
 
-  defp validate_surface(_), do: :ok
+  defp validate_target({:capture, _surface}), do: :ok
+
+  defp validate_target({:fiber, fiber_id}) when is_binary(fiber_id) do
+    if String.trim(fiber_id) == "" or String.contains?(fiber_id, ["|", <<0>>, "\n"]),
+      do: {:error, {:validation, "fiber_id must name a fiber"}},
+      else: :ok
+  end
+
+  defp validate_target(_), do: {:error, {:validation, "fiber_id must name a fiber"}}
 
   defp validate_note(nil), do: {:ok, ""}
 
@@ -262,37 +314,41 @@ defmodule Shuttle.Meeting do
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end
 
-  defp create_session(argv, launch_id, opts) do
+  defp create_session(argv, launch_id, fiber, opts) do
     command = "exec " <> Enum.map_join(argv, " ", &shell_quote/1)
 
-    args = [
-      "new-session",
-      "-d",
-      "-P",
-      "-F",
-      "\#{session_id}",
-      "-s",
-      @session,
-      "-c",
-      home_dir(opts),
-      "-e",
-      "HARK_DIR=" <> hark_dir(opts),
-      "--",
-      command,
-      ";",
-      "set-option",
-      "-t",
-      "=" <> @session <> ":",
-      @launch_option,
-      launch_id,
-      ";",
-      "set-option",
-      "-w",
-      "-t",
-      "=" <> @session <> ":",
-      "remain-on-exit",
-      "on"
-    ]
+    args =
+      [
+        "new-session",
+        "-d",
+        "-P",
+        "-F",
+        "\#{session_id}",
+        "-s",
+        @session,
+        "-c",
+        home_dir(opts),
+        "-e",
+        "HARK_DIR=" <> hark_dir(opts),
+        "--",
+        command,
+        ";",
+        "set-option",
+        "-t",
+        "=" <> @session <> ":",
+        @launch_option,
+        launch_id
+      ] ++
+        fiber_option(fiber) ++
+        [
+          ";",
+          "set-option",
+          "-w",
+          "-t",
+          "=" <> @session <> ":",
+          "remain-on-exit",
+          "on"
+        ]
 
     # Once the session exists hark may be recording, so only a launch that
     # provably created nothing is an error; anything after that is observed.
@@ -310,6 +366,13 @@ defmodule Shuttle.Meeting do
     end
   end
 
+  # The joined fiber rides the session like the launch id, so every later read
+  # of the live row can name it.
+  defp fiber_option(nil), do: []
+
+  defp fiber_option(fiber),
+    do: [";", "set-option", "-t", "=" <> @session <> ":", @fiber_option, fiber]
+
   # A reserved name never reuses a transcript: an earlier meeting in the same
   # minute with the same note would otherwise be appended to after its end.
   defp reserve_meeting_paths(name, origin, opts, suffix \\ 1) do
@@ -325,13 +388,13 @@ defmodule Shuttle.Meeting do
 
   # Watch the new launch briefly so a hark that dies at once never gets a
   # scribe. A slow import or an unreadable tmux leaves it `starting`.
-  defp await_launch(launch_id, paths, title, opts) do
+  defp await_launch(launch_id, paths, title, fiber, opts) do
     wait_ms = Application.get_env(:shuttle, :meeting_launch_wait_ms, @launch_wait_ms)
     deadline = System.monotonic_time(:millisecond) + wait_ms
-    await_launch(launch_id, paths, title, opts, deadline)
+    await_launch(launch_id, paths, title, fiber, opts, deadline)
   end
 
-  defp await_launch(launch_id, paths, title, opts, deadline) do
+  defp await_launch(launch_id, paths, title, fiber, opts, deadline) do
     observed =
       case inspect_current(opts) do
         {:ok, %{meeting: %{state: state} = row}, %{tmux: %{launch: ^launch_id}}}
@@ -350,15 +413,15 @@ defmodule Shuttle.Meeting do
         observed
 
       System.monotonic_time(:millisecond) >= deadline ->
-        {:ok, starting_row(paths, title)}
+        {:ok, starting_row(paths, title, fiber)}
 
       true ->
         Process.sleep(@launch_poll_ms)
-        await_launch(launch_id, paths, title, opts, deadline)
+        await_launch(launch_id, paths, title, fiber, opts, deadline)
     end
   end
 
-  defp starting_row(paths, title) do
+  defp starting_row(paths, title, fiber) do
     %{
       state: "starting",
       title: title,
@@ -366,6 +429,7 @@ defmodule Shuttle.Meeting do
       last_line: nil,
       transcript: paths.local_transcript,
       mirror_host: paths.mirror_host,
+      fiber: fiber,
       tmux_session: @session,
       error: nil
     }
@@ -617,8 +681,9 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp meeting_row(data, state, tmux_exists?, error \\ nil) do
+  defp meeting_row(data, state, tmux, error \\ nil) do
     data = if is_map(data), do: data, else: %{}
+    tmux_exists? = tmux != :absent
 
     %{
       state: state,
@@ -627,6 +692,7 @@ defmodule Shuttle.Meeting do
       last_line: nil,
       transcript: data["transcript"],
       mirror_host: mirror_host(data["mirror"]),
+      fiber: if(tmux_exists?, do: Map.get(tmux, :fiber), else: nil),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]
     }

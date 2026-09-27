@@ -63,6 +63,11 @@ defmodule Shuttle.Messaging do
     end
   end
 
+  @doc "The canonical `shuttle://HOST/HARNESS/NATIVE_ID` address of a session."
+  @spec address(String.t(), String.t(), String.t()) :: String.t()
+  def address(host, harness, native),
+    do: build_address(host, %{harness: harness, native: native})
+
   def send_message(payload) when is_map(payload), do: send_message(payload, :text)
   def send_message(_), do: {:error, 400, "body must be a JSON object"}
 

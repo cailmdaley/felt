@@ -409,6 +409,20 @@ defmodule Shuttle.Poller do
     :exit, _ -> nil
   end
 
+  @doc """
+  The messaging identity of `fiber_id`'s live worker: its session, the harness
+  conversation id (`session_uuid`, `nil` until known) and the agent's `cli`, or
+  `nil` when no worker is running.
+  """
+  @spec live_worker(String.t()) ::
+          %{session: String.t(), session_uuid: String.t() | nil, cli: String.t() | nil} | nil
+  def live_worker(fiber_id), do: live_worker(__MODULE__, fiber_id)
+
+  @spec live_worker(GenServer.server(), String.t()) :: map() | nil
+  def live_worker(server, fiber_id) when is_binary(fiber_id) do
+    GenServer.call(server, {:live_worker, fiber_id})
+  end
+
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []), do: dispatch_fiber(__MODULE__, fiber_id, opts)
 
@@ -899,22 +913,32 @@ defmodule Shuttle.Poller do
 
   def handle_call({:session_uuid, fiber_id}, _from, state) do
     worker = running_worker(state, fiber_id)
+    {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
+  end
 
-    uuid =
-      (worker && Shuttle.AppWorkers.id(worker.session)) ||
-        Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
-          fiber = Map.get(entry, :fiber, %{})
+  def handle_call({:live_worker, fiber_id}, _from, state) do
+    reply =
+      case running_worker(state, fiber_id) do
+        nil ->
+          nil
 
-          with ^fiber_id <- Map.get(fiber, "id"),
-               value when is_binary(value) and value != "" <-
-                 get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
-            value
-          else
-            _ -> nil
-          end
-        end)
+        worker ->
+          id = Map.get(worker, :fiber_id) || fiber_id
 
-    {:reply, uuid, state}
+          fiber =
+            case fetch_fiber_full(id, state) do
+              {:ok, fiber} -> fiber
+              {:error, _} -> cached_fiber(state, id)
+            end
+
+          %{
+            session: worker.session,
+            session_uuid: worker_session_uuid(worker, fiber),
+            cli: fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+          }
+      end
+
+    {:reply, reply, state}
   end
 
   def handle_call({:worker_status, fiber_id}, _from, state) do
@@ -1266,6 +1290,23 @@ defmodule Shuttle.Poller do
   end
 
   def running_key(_, _), do: nil
+
+  # An app worker is addressed by its conversation id; any other worker by the
+  # harness session the daemon stamped on the fiber.
+  defp worker_session_uuid(worker, fiber) do
+    (worker && Shuttle.AppWorkers.id(worker.session)) ||
+      case fiber && get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+        value when is_binary(value) and value != "" -> value
+        _ -> nil
+      end
+  end
+
+  defp cached_fiber(%State{} = state, fiber_id) do
+    Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
+      fiber = Map.get(entry, :fiber, %{})
+      if fiber_id in [Map.get(fiber, "id"), Map.get(fiber, "uid")], do: fiber
+    end)
+  end
 
   defp running_worker(%State{} = state, fiber_id) do
     case running_key(state, fiber_id) do
