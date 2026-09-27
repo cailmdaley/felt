@@ -35,7 +35,7 @@ Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<s
 
 **Statuses:** · none (the default — most fibers stay here) ○ open (todo) ◐ active (in flight) ● closed (resolved). `open`/`active` mean *someone should do something*; a finding, decision, recipe, or note exists by being filed and stays statusless. Never pass `-s` on `felt add` unless someone should act, and close in the same motion when an outcome reads complete.
 
-**Stores and views.** A project whose `.felt` symlinks into a larger store (the loom) is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere.
+**Stores and views.** A project whose `.felt` symlinks into a larger store (the loom) is a *view*, not a fence: `felt ls` lists the view, `felt find` searches the whole store, and an id reaches anywhere — `show`, `edit`, `nest`, `felt shuttle <verb>` act on the fiber where it lives and say `(in <root>)` when that is elsewhere. Linking a new project into a store is a one-time setup with a data-loss trap; follow https://cailmdaley.github.io/felt/concepts/cross-project/.
 
 **Sync.** Before substantive work, run `felt sync` to merge the store's Git upstream (it follows a symlinked view to the real store). Edit local files, commit intentional changes, and `felt sync --push` at useful checkpoints. Resolve relevant conflicts with context and retry; never pick ours/theirs mechanically or discard another worker's edits. Report a failed sync rather than treating local content as current.
 
@@ -49,15 +49,9 @@ Bodies, long outcomes, and structured frontmatter: Read then Edit `.felt/<id>/<s
 
 **Sweep the session before you close out or hand off.** Continuous filing catches most things; the rest gets filed before you leave. Reread the session for what stayed implicit — decisions (including what you decided *not* to do, and why), questions answered, patterns, findings — and file each under the parent it belongs to, statusless unless someone should act. Then bring the outcome and status of every fiber you touched up to date. An outcome that says "done" has failed: put the conclusion in — what was learned, what was decided, why — in a sentence that stands alone, because it is what `felt ls` shows. Names are concise labels; body and outcome carry the content.
 
-**Tend the store as you go.** Tidying is part of every session, not a separate chore, and you have full standing permission for it: whenever you touch a region of the store and see mess, fix it in the same motion — nest stray top-level leaves under root buckets, demote open/active containers, close stale todos with real outcomes, compost clusters of quick fibers into a doc fiber, repair coherence across siblings, reshape wide branches. When `felt session` shows `## Attention`, clear it this session. Don't wait to be asked and don't ask first; mention a cleanup to the user only when it needs judgment or would derail the current task. When closing a fiber, ask whether its lesson belongs higher up — a doc fiber or the root fiber — and compose upward. [maintenance.md](references/maintenance.md) carries the moves and the authority boundary.
+**Tend the store as you go.** Tidying is part of every session, and you have full standing permission for it: whenever you touch a region of the store and see mess, fix it in the same motion, and when `felt session` shows `## Attention`, clear it this session. Don't ask first; mention a cleanup only when it needs judgment or would derail the current task. Larger passes suit a background subagent while you keep working. What good shape looks like:
 
----
-
-## References
-
-Everything above applies always; references go deeper for specific activities.
-
-| When | Reference |
-|------|-----------|
-| Gardening, composting, reshaping, acting on Attention | [maintenance.md](references/maintenance.md) |
-| Linking a project into a cross-project store, or reasoning about views, find vs ls, and cross-project links | [cross-project.md](references/cross-project.md) |
+- **Open and active mean todo** — not important or canonical. Demote open/active containers and keep their actionable children tracked; close stale todos with an outcome that can be stated now (`felt edit <id> -s closed -o "…"`).
+- **The tree stays walkable.** Top level under about 20 entries; a parent past 5–7 children wants grouping nodes (`felt nest`). Name buckets for categories future fibers will reuse (`performance`, `setup`), never temporary ones (`misc`).
+- **Understanding composes upward**: quick fiber → doc fiber → root fiber. Compost a cluster by reading the siblings side by side, writing the doc fiber as what is true now, and closing each source with `-o "Consolidated into [[<topic>]]."`
+- **Ask first** before deleting fibers with possible historical value, merging where the synthesis needs domain judgment, moving private fibers across roots, or changing project-owned YAML semantics. Prefer the reversible move — nest rather than delete, close rather than remove — and commit each reshape with a message that explains it.
