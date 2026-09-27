@@ -23,7 +23,7 @@ defmodule Shuttle.Contract do
   # `resolveOwnHost` is pure local state, so the daemon-shelled ownership
   # override carried no correctness. Bumped in lockstep with
   # cmd/shuttle_contract.go's ShuttleContractLevel.
-  @expected_level 2
+  @expected_level 3
 
   @doc "The daemon's expected `felt shuttle contract` level."
   @spec expected_level() :: pos_integer()

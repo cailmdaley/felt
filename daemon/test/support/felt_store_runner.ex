@@ -352,7 +352,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "felt" and match?(["shuttle", "contract"], args) ->
-        level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, "2"))
+        level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level())))
         {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
 
       # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber

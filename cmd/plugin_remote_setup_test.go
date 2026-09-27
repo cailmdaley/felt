@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -46,7 +47,7 @@ func newRemoteSetupFixture(t *testing.T, harness string) *remoteSetupFixture {
 	f.source = f.remotePayload(t, "one")
 	writeExecutable(t, filepath.Join(f.bin, "felt"), `#!/bin/sh
 if [ "$1" = shuttle ] && [ "$2" = contract ]; then
-  printf '%s\n' 2
+  printf '%s\n' `+strconv.Itoa(ShuttleContractLevel)+`
   exit 0
 fi
 exit 1

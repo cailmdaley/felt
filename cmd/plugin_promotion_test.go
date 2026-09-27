@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -105,7 +106,7 @@ func testRepoRoot(t *testing.T) string {
 
 func TestValidatePluginCandidateChecksGenerationAndContract(t *testing.T) {
 	root := testRepoRoot(t)
-	if err := validatePluginCandidate(root, testContractExecutable(t, "2")); err != nil {
+	if err := validatePluginCandidate(root, testContractExecutable(t, strconv.Itoa(ShuttleContractLevel))); err != nil {
 		t.Fatalf("repository candidate should validate: %v", err)
 	}
 
@@ -129,7 +130,7 @@ func TestValidatePluginCandidateChecksGenerationAndContract(t *testing.T) {
 	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePluginCandidate(bad, testContractExecutable(t, "2")); err == nil || !strings.Contains(err.Error(), "versions disagree") {
+	if err := validatePluginCandidate(bad, testContractExecutable(t, strconv.Itoa(ShuttleContractLevel))); err == nil || !strings.Contains(err.Error(), "versions disagree") {
 		t.Fatalf("version skew should be rejected, got %v", err)
 	}
 	if err := validatePluginCandidate(root, testContractExecutable(t, "1")); err == nil || !strings.Contains(err.Error(), "contract") {
@@ -167,7 +168,7 @@ func TestStagePluginCandidateCopiesOnlyValidatedPayload(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	root := testRepoRoot(t)
-	candidate, err := stagePluginCandidate(root, testContractExecutable(t, "2"))
+	candidate, err := stagePluginCandidate(root, testContractExecutable(t, strconv.Itoa(ShuttleContractLevel)))
 	if err != nil {
 		t.Fatalf("stagePluginCandidate: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestCopyTreeRejectsSymlinkPayload(t *testing.T) {
 }
 
 func TestLocalPluginSourceWithoutManifestIsRejectedBeforeInstall(t *testing.T) {
-	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	t.Setenv("FELT_BIN", testContractExecutable(t, strconv.Itoa(ShuttleContractLevel)))
 	called := false
 	err := withStagedPluginCandidateWithRestore(t.TempDir(), func(string) error {
 		called = true
@@ -449,7 +450,7 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 
 	root := testRepoRoot(t)
 	installFakeGitForPluginAcquisition(t, root)
-	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	t.Setenv("FELT_BIN", testContractExecutable(t, strconv.Itoa(ShuttleContractLevel)))
 	t.Setenv("FELT_TEST_GIT_FAIL", "1")
 	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
 		t.Fatal("native installer called after acquisition failure")
@@ -554,7 +555,7 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 	t.Setenv("HOME", home)
 	root := testRepoRoot(t)
 	installFakeGitForPluginAcquisition(t, root)
-	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	t.Setenv("FELT_BIN", testContractExecutable(t, strconv.Itoa(ShuttleContractLevel)))
 
 	var seen []string
 	install := func(active string) error {
@@ -614,7 +615,7 @@ func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing
 	root := testRepoRoot(t)
 	installFakeGitForPluginAcquisition(t, root)
 	t.Setenv("FELT_TEST_GIT_FAIL", "1")
-	t.Setenv("FELT_BIN", testContractExecutable(t, "2"))
+	t.Setenv("FELT_BIN", testContractExecutable(t, strconv.Itoa(ShuttleContractLevel)))
 	called := false
 	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
 		called = true

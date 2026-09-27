@@ -41,7 +41,7 @@ import (
 // daemon that still sends it against a CLI that dropped it) is exactly the
 // kind of flag-shape skew this level exists to catch. Bumped in lockstep
 // with daemon/lib/shuttle/contract.ex's @expected_level.
-const ShuttleContractLevel = 2
+const ShuttleContractLevel = 3
 
 var shuttleContractCmd = &cobra.Command{
 	Use:   "contract",
