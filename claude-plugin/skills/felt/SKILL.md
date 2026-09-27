@@ -43,18 +43,14 @@ Before substantive work, run `felt sync` to merge the store's Git upstream (it f
 
 ## Working paths
 
-`felt --help` and `felt <verb> --help` carry the full reference. The paths worth knowing without looking:
+`felt --help` is the reference — read it once in a session before leaning on felt; `felt <verb> --help` has each verb's flags and examples. The paths worth knowing without looking:
 
 ```
-felt add <slug> "name" -t tag -o "one-line outcome"   # file; nests under an existing parent by slug path
-felt edit <id> -o "what was learned" -s closed        # conclude a thread
-felt ls                                               # open/active work in this view
-felt ls "query"                                       # search this view (closed matches counted, not shown)
-felt find "query"                                     # search the whole store
-felt show <id> -d summary                             # metadata, outcome, lede, back-refs
-felt tree <id> -L 2                                   # containment around a fiber
-felt nest <child> <parent>                            # reshape
-felt check                                            # broken links, layout issues
+felt add <parent>/<slug> "name" -o "one-line outcome"   # file where it belongs
+felt edit <id> -o "what was learned" -s closed          # conclude a thread
+felt ls "query"   /   felt find "query"                 # search this view / the whole store
+felt show <id> -d summary                               # outcome, lede, back-refs
+felt tree <id> -L 2                                     # containment around a fiber
 ```
 
 Bodies, long outcomes, and structured fields: Read then Edit the fiber's file directly. An outcome longer than a sentence goes in a `|-` block scalar — `-o "…"` mangles quotes and newlines.

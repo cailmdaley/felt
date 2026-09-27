@@ -112,7 +112,7 @@ Common paths:
 
 Editing: write bodies, outcomes longer than a sentence (outcome: |-), and
 structured YAML in the file directly. Never hand-edit created-at or updated-at;
-felt stamps them on every write.
+felt owns both and stamps updated-at on every write.
 
 Sync: felt sync merges the store's Git upstream, following a symlinked view to
 the real store. Commit intentional changes, then felt sync --push. Resolve
