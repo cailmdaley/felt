@@ -69,8 +69,6 @@ Every dispatch is autonomous; there is no separate "interactive" dispatch mode. 
 
 ## Agent selection
 
-When the user or the constitution names an agent, use it. Otherwise route by the work: a Luna (`codex-luna`, `pi-luna`) for well-scoped implementation and search, `claude-opus` (the registry default) for complex work, and Fable or Astra (`claude-fable`, `codex-astra`) for open-ended judgment and consults. Don't route to Sonnet.
-
-`felt shuttle agents` lists the effective registry on this machine: the built-ins (Claude, Codex, and pi CLIs) with the user's `~/.config/felt/agents.json` layered on top — other CLIs, models, cost classes, aliases. Prefer an agent the listing shows; when the user names one you don't recognize, check the listing before assuming it exists. `felt shuttle agents init` seeds the user file from the built-ins; `felt shuttle agents effort <id> <level>` changes one agent's default effort. Edits take effect on the next read, and each remote host reads its own copy. There is no `human` agent — write a human gate into the spec instead.
+When the user or the constitution names an agent, use it; otherwise pick from `felt shuttle agents`, the effective registry on this machine (built-ins plus `~/.config/felt/agents.json`; each remote host reads its own copy). Check the listing before assuming an agent exists. There is no `human` agent — write a human gate into the spec instead.
 
 Set with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents dispatch with `--permission-mode auto`. Headless (`claude -p`) runs come from a user alias record — `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}` — since no built-in agent is headless.
