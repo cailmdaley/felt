@@ -51,9 +51,8 @@ substring; exact matches on name, id, or basename sort first. --body also
 searches bodies.
 
 A filter (query, -t, --has-field) widens to every status and counts closed
-matches in a trailing hint instead of printing them; -s names the statuses
-outright (open, active, closed, all). -n lists the N most recent of every
-status, by closed-at, else created-at.
+matches in a trailing hint instead of printing them, unless -s names the
+statuses.
 
 Query matches under a matching ancestor fold into it with a count; -v lists
 them flat. --json is neither folded nor stripped of closed matches.
@@ -651,8 +650,8 @@ var treeCmd = &cobra.Command{
 	Use:   "tree [id]",
 	Short: "Show the containment tree",
 	Long: `Draws fibers by nesting, every status included: the whole view, or with an id
-that fiber's subtree, from the enclosing store when it lives there. -L caps
-the depth and marks each cut branch with the count below it; --json is always
+that fiber's subtree, from the enclosing store when it lives there. A branch
+cut at the depth limit shows how many fibers lie below it; --json is always
 the full tree.`,
 	Example: `  felt tree analysis -L 2`,
 	Args:    cobra.MaximumNArgs(1),

@@ -27,12 +27,10 @@ var showCmd = &cobra.Command{
            lede paragraph
   full     everything, body included (the default)
 
-A selector prints one thing instead, and only one may be given: --body (with
-its start line in the file), --citations (fibers that wikilink here),
---consumers (fibers naming it in inputs.from), or --field (one frontmatter key
-by its YAML name: a scalar on one line, a list of scalars one per line,
-anything else as YAML; a missing key prints nothing). --citations and
---consumers search the whole store, not just this view.`,
+--body, --citations, --consumers, and --field each print one thing instead of
+the fiber, and only one may be given. --citations and --consumers search the
+whole store, not just this view. --field prints a scalar on one line, a list of
+scalars one per line, anything else as YAML, and nothing for a missing key.`,
 	Example: `  felt show analysis/covariance -d summary
   felt show analysis/covariance --field status`,
 	Args: cobra.ExactArgs(1),

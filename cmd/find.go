@@ -36,8 +36,8 @@ plain search.
 
 A query, -t, or --has-field is required. Every status is searched; closed
 matches are counted rather than printed unless -s asks for them. Matches under
-a matching ancestor fold into it (-v lists them flat), and the outer block
-stops at 20 entries (--limit sets the cap, 0 removes it).
+a matching ancestor fold into it (-v lists them flat), and --limit caps the
+enclosing store's block.
 
 --json is one array with a "store" field on each fiber, every match and status
 included; --limit caps it only when given.`,

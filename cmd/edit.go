@@ -27,10 +27,9 @@ var editCmd = &cobra.Command{
 	Use:   "edit <id>",
 	Short: "Change a fiber's native fields or scalar frontmatter",
 	Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
-stamps closed-at, -s open or -s active clears it, and -s "" clears the status.
-Setting active on a fiber with a shuttle: block arms it for dispatch, so its
-agent must resolve. -b replaces the whole body; for anything smaller, edit the
-file.
+stamps closed-at; -s open or -s active clears it. Setting active on a fiber
+with a shuttle: block arms it for dispatch, so its agent must resolve. For a
+change smaller than the whole body, edit the file.
 
 --set and --unset write top-level scalar frontmatter felt does not own. The
 value is read as YAML, so true and 12 keep their types. Native keys, empty
