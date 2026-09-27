@@ -147,7 +147,7 @@ felt ls
 
 `felt ls` shows tracked fibers only, open and active by default. Pass a query to
 search names, outcomes, frontmatter text, and slugs. Any filter widens the
-search to every status automatically:
+search to every status except closed, which it counts in a trailing hint:
 
 ```bash
 felt ls "jackknife"          # search

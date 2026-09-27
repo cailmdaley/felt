@@ -28,14 +28,14 @@ Closing stamps `closed-at`. Write the outcome at the same moment — see
 [Outcomes](#outcomes-teach) below.
 
 `felt ls` shows open and active by default. Any filter — a query, `-t`, `-n` —
-widens automatically to all statuses, so a search finds closed work without
-your having to ask twice.
+widens to every status except closed, including untracked fibers; closed matches
+are counted in a trailing hint, and `-s closed` or `-s all` shows them.
 
 ```bash
 felt ls                       # open and active
 felt ls -s closed             # only closed
 felt ls -s all                # everything
-felt ls "covariance"          # search, all statuses
+felt ls "covariance"          # search, all statuses but closed
 ```
 
 ## Containment
