@@ -178,7 +178,7 @@ func TestMoveSubtreeKeepsScopeRelativeSpelling(t *testing.T) {
 }
 
 func TestExtractBodyRefsAgreesWithRewrite(t *testing.T) {
-	body := "[[one]] `[[code]]` [t](two#f) ```\n[[fenced]]\n``` [[three#s|label]]"
+	body := "[[one]] `[[code]]` [t](two#f) ```\n[[fenced]]\n``` [[three#s|label]] [`four`](four) `[x](not)`"
 	var seen []string
 	out, changed := RewriteBodyRefs(body, func(target string) (string, bool) {
 		seen = append(seen, target)
@@ -191,10 +191,10 @@ func TestExtractBodyRefsAgreesWithRewrite(t *testing.T) {
 	for _, ref := range ExtractBodyRefs(body) {
 		extracted = append(extracted, ref.Target)
 	}
-	if want := []string{"two", "one", "three"}; !reflect.DeepEqual(extracted, want) || !reflect.DeepEqual(seen, []string{"one", "two", "three"}) {
+	if want := []string{"two", "four", "one", "three"}; !reflect.DeepEqual(extracted, want) || !reflect.DeepEqual(seen, []string{"one", "two", "three", "four"}) {
 		t.Fatalf("extracted %v, rewrite saw %v", extracted, seen)
 	}
-	if want := "[[ONE]] `[[code]]` [t](TWO#f) ```\n[[fenced]]\n``` [[THREE#s|label]]"; out != want {
+	if want := "[[ONE]] `[[code]]` [t](TWO#f) ```\n[[fenced]]\n``` [[THREE#s|label]] [`four`](FOUR) `[x](not)`"; out != want {
 		t.Fatalf("rewritten = %q, want %q", out, want)
 	}
 }

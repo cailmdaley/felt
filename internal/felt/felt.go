@@ -901,31 +901,26 @@ var codeBlockRe = regexp.MustCompile("(?s)```[^`]*```|~~~[^~]*~~~")
 // codeSpanRe matches inline code spans (`...`).
 var codeSpanRe = regexp.MustCompile("`[^`]+`")
 
-// proseSpans returns the byte ranges of body that lie outside fenced code
-// blocks and inline code spans, in document order. Everything that reads or
-// rewrites body references works span by span, so a link inside an
-// illustrative code example is never extracted, and never rewritten.
-func proseSpans(body string) [][2]int {
-	var spans [][2]int
-	addSpans := func(start, end int) {
-		pos := start
-		for _, m := range codeSpanRe.FindAllStringIndex(body[start:end], -1) {
-			if start+m[0] > pos {
-				spans = append(spans, [2]int{pos, start + m[0]})
+// codeMask stands in for every byte of code in a masked body.
+const codeMask = '\x00'
+
+// maskCode returns body with fenced code blocks and inline code spans blanked
+// to codeMask byte for byte, so offsets into the mask are offsets into body.
+// Link patterns run over the mask: a link inside an illustrative code example
+// is never extracted, and never rewritten, while a link whose text merely
+// contains code — [`felt nest`](target) — still is.
+func maskCode(body string) string {
+	masked := []byte(body)
+	blank := func(text string, re *regexp.Regexp) {
+		for _, m := range re.FindAllStringIndex(text, -1) {
+			for i := m[0]; i < m[1]; i++ {
+				masked[i] = codeMask
 			}
-			pos = start + m[1]
-		}
-		if end > pos {
-			spans = append(spans, [2]int{pos, end})
 		}
 	}
-	pos := 0
-	for _, m := range codeBlockRe.FindAllStringIndex(body, -1) {
-		addSpans(pos, m[0])
-		pos = m[1]
-	}
-	addSpans(pos, len(body))
-	return spans
+	blank(body, codeBlockRe)
+	blank(string(masked), codeSpanRe)
+	return string(masked)
 }
 
 // bodyRefSite is one reference as it sits in a body: the parsed ref plus the
@@ -940,30 +935,31 @@ type bodyRefSite struct {
 // then wikilinks, each in document order, skipping code.
 func bodyRefSites(body string) []bodyRefSite {
 	var sites []bodyRefSite
-	spans := proseSpans(body)
+	masked := maskCode(body)
 	for _, re := range []*regexp.Regexp{bodyLinkRe, wikiLinkRe} {
-		for _, span := range spans {
-			text := body[span[0]:span[1]]
-			for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
-				raw := text[m[2]:m[3]]
-				fragment := ""
-				if len(m) > 5 && m[4] >= 0 {
-					fragment = text[m[4]:m[5]]
-				}
-				ref, ok := parseBodyRefTarget(raw, fragment)
-				if !ok {
-					continue
-				}
-				// The parsed target is the raw spelling minus decoration
-				// (whitespace, ./, a trailing #fragment), so it is found inside
-				// it; that inner range is what gets replaced.
-				at := strings.Index(raw, ref.Target)
-				if at < 0 {
-					continue
-				}
-				start := span[0] + m[2] + at
-				sites = append(sites, bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)})
+		for _, m := range re.FindAllStringSubmatchIndex(masked, -1) {
+			raw := masked[m[2]:m[3]]
+			fragment := ""
+			if len(m) > 5 && m[4] >= 0 {
+				fragment = masked[m[4]:m[5]]
 			}
+			// A target or fragment that runs into code is not a link.
+			if strings.IndexByte(raw, codeMask) >= 0 || strings.IndexByte(fragment, codeMask) >= 0 {
+				continue
+			}
+			ref, ok := parseBodyRefTarget(raw, fragment)
+			if !ok {
+				continue
+			}
+			// The parsed target is the raw spelling minus decoration
+			// (whitespace, ./, a trailing #fragment), so it is found inside
+			// it; that inner range is what gets replaced.
+			at := strings.Index(raw, ref.Target)
+			if at < 0 {
+				continue
+			}
+			start := m[2] + at
+			sites = append(sites, bodyRefSite{ref: ref, start: start, end: start + len(ref.Target)})
 		}
 	}
 	return sites

@@ -172,6 +172,11 @@ like a fiber reference.`,
 		}
 		result, err := where.storage.MoveSubtree(childID, targetID)
 		if err != nil {
+			// A write that fails after the rename leaves the subtree moved;
+			// name what was rewritten so the rest can be finished by hand.
+			if result != nil {
+				printRewrittenRefs(where.storage, result)
+			}
 			return err
 		}
 
@@ -226,6 +231,11 @@ would break as nest does.`,
 		}
 		result, err := child.storage.MoveSubtree(child.id, targetID)
 		if err != nil {
+			// A write that fails after the rename leaves the subtree moved;
+			// name what was rewritten so the rest can be finished by hand.
+			if result != nil {
+				printRewrittenRefs(child.storage, result)
+			}
 			return err
 		}
 
