@@ -368,7 +368,9 @@ defmodule Shuttle.TailnetDial.Bridge do
       {:ssl_error, ^tls_socket, reason} ->
         {:error, {:peer_tls, reason}}
     after
-      timeout -> {:error, if(client_open? and tls_open?, do: :idle_timeout, else: :drain_timeout)}
+      timeout ->
+        # httpc pools both-open sockets; only a one-sided close is a failed drain.
+        if client_open? and tls_open?, do: :ok, else: {:error, :drain_timeout}
     end
   end
 

@@ -37,6 +37,13 @@ defmodule Shuttle.TailnetDialTest do
         "/large" ->
           Plug.Conn.send_resp(conn, 200, :binary.copy(<<0, 255, 0xC3, 0xA9>>, 524_288))
 
+        "/in-flight" ->
+          send(parent, {:inflight_request, self()})
+
+          receive do
+            :respond -> Plug.Conn.send_resp(conn, 200, "in-flight-retried")
+          end
+
         _ ->
           Plug.Conn.send_resp(conn, 200, "tailnet-response")
       end
@@ -405,23 +412,102 @@ defmodule Shuttle.TailnetDialTest do
              Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
   end
 
-  test "an idle client connection expires after twice the remote request timeout", %{base: base} do
+  test "idle keep-alive closure is quiet and the next request reconnects", %{
+    base: base,
+    tls_port: tls_port
+  } do
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
-    on_exit(fn -> restore_cacerts(previous_cacerts) end)
-
-    {tls_port, _peer} = start_silent_tls_peer(base)
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
-    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
-    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    remote =
+      start_bridge(base, localapi, @host, tls_port,
+        request_timeout_ms: 250,
+        name: "idle-keep-alive"
+      )
+
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    url = "https://#{@host}:#{tls_port}/api/v1/version"
+
+    assert {:ok, "tailnet-response"} = Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+    assert_receive {:dial_request, _request}, 5_000
+    assert_receive {:https_request, [host_header]}, 5_000
+    assert host_header == "#{@host}:#{tls_port}"
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) != baseline end, 200)
+
+    assert eventually(
+             fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end,
+             1_000
+           )
+
+    assert TailnetDial.last_error(remote.name) == nil
+    assert %{bridges: [%{name: "idle-keep-alive", status: "ready"}]} = TailnetDial.status()
+
+    assert {:ok, "tailnet-response"} = Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+    assert_receive {:dial_request, _request}, 5_000
+    assert_receive {:https_request, [host_header]}, 5_000
+    assert host_header == "#{@host}:#{tls_port}"
+  end
+
+  test "an in-flight request reports the bridge's quiet idle close", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    remote =
+      start_bridge(base, localapi, @host, tls_port,
+        request_timeout_ms: 250,
+        name: "idle-in-flight"
+      )
+
     baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
 
-    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
-    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+    request =
+      Task.async(fn ->
+        Shuttle.RemoteRegistry.Client.Default.get(
+          "https://#{@host}:#{tls_port}/in-flight",
+          5_000
+        )
+      end)
 
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 200)
-    assert TailnetDial.last_error(remote.name) == {:tailnet_dial, :relay, :idle_timeout}
-    :gen_tcp.close(client)
+    assert_receive {:inflight_request, stalled_pid}, 5_000
+    on_exit(fn -> if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill) end)
+    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+
+    assert eventually(
+             fn -> relay_pid not in Task.Supervisor.children(Shuttle.TaskSupervisor) end,
+             1_000
+           )
+
+    assert TailnetDial.last_error(remote.name) == nil
+    assert %{bridges: [%{name: "idle-in-flight", status: "ready"}]} = TailnetDial.status()
+
+    assert {:ok, {:error, :socket_closed_remotely}} = Task.yield(request, 2_000)
+    if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill)
+    assert TailnetDial.last_error(remote.name) == nil
   end
 
   test "a closed client cannot leave a stalled TLS relay task behind", %{base: base} do
@@ -694,7 +780,7 @@ defmodule Shuttle.TailnetDialTest do
 
   defp remote(host, port, opts \\ []) do
     %Remote{
-      name: "hub-a",
+      name: Keyword.get(opts, :name, "hub-a"),
       url: "https://#{host}:#{port}",
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, 2_000),
       tunnel: %{manager: :none, multiplex: false, label: nil}
