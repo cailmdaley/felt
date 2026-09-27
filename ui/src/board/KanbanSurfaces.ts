@@ -1808,7 +1808,7 @@ export class KanbanSurfaceRenderer {
       }
       reviewMetaActions.append(
         verdictBtn('Temper', 'tempered', 'tempered'),
-        verdictBtn('Discard', 'drafts', 'composted'),
+        verdictBtn('Discard', 'discard', 'composted'),
       )
     }
 

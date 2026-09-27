@@ -1758,15 +1758,15 @@
   background: rgba(63, 130, 120, 0.20);
   color: #1E5852;
 }
-.kbn-action-drafts {
-  background: rgba(122, 111, 92, 0.08);
-  color: #7A6F5C;
-  border-color: rgba(122, 111, 92, 0.30);
-  font-style: italic;
+/* Discard — the `tempered: false` verdict, in the board's deletion red. */
+.kbn-action-discard {
+  background: rgba(168, 74, 62, 0.06);
+  color: #9A3F33;
+  border-color: rgba(168, 74, 62, 0.36);
 }
-.kbn-action-drafts:hover {
-  background: rgba(122, 111, 92, 0.18);
-  color: #1B1611;
+.kbn-action-discard:hover {
+  background: rgba(168, 74, 62, 0.14);
+  color: #7E3127;
 }
 /* Subtler card style inside the drafts column. */
 .kbn-card-drafts {

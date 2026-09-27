@@ -346,10 +346,14 @@
   border-color: rgba(63, 130, 120, 0.65);
   background: rgba(63, 130, 120, 0.12);
 }
-.kbn-ctl-discard { color: var(--ctl-muted); }
+.kbn-ctl-discard {
+  color: #9A3F33;
+  border-color: rgba(168, 74, 62, 0.36);
+  background: rgba(168, 74, 62, 0.05);
+}
 .kbn-ctl-discard:hover:not(:disabled) {
-  color: #1B1611;
-  background: rgba(255, 251, 237, 0.95);
+  border-color: rgba(168, 74, 62, 0.6);
+  background: rgba(168, 74, 62, 0.12);
 }
 /* The two pairs share one width, so the verdicts stand in columns under the
    verbs they mirror. */
