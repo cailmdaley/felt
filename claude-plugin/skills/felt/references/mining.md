@@ -1,79 +1,25 @@
 # Session Mining
 
-Retroactive extraction at session end. What wasn't captured in the moment.
+Retroactive extraction at session end: what wasn't captured in the moment. **Autonomous** — no review needed; you were there.
 
-**Autonomous** — no review needed. You were there.
+## What to look for
 
----
-
-## What to Extract
-
-Read through the conversation looking for:
-
-- **Decisions made** — choices, trade-offs, rejections, "decided NOT to"
-- **Questions answered** — mechanisms, causes, how things work
-- **Patterns discovered** — architectural insights, conventions
-- **Outcomes** — what was built, found, produced
-- **Documentation candidates** — recurring patterns worth a `doc` fiber
-
----
+- **Decisions** — choices, trade-offs, rejections, "decided NOT to", with the reasoning.
+- **Questions answered** — mechanisms, causes, how things work.
+- **Patterns** — architectural insights, conventions, workflows.
+- **Findings** — what was built, measured, produced.
+- **Doc candidates** — a pattern that has recurred and wants a reference fiber, or a procedure that will be reused.
 
 ## Steps
 
-### 1. Extract Fibers
+1. **File each one.** A mined fiber is a record, not a todo: leave it statusless (`-s closed` only for a tracked thread that resolved). Give it a body with `-b` when the name and outcome aren't enough.
 
-For each undocumented finding:
+   ```bash
+   felt add chose-x-over-y "Chose X over Y for Z" -o "X was better because…; Y failed due to…"
+   ```
 
-```bash
-# Simple fiber (title + outcome)
-felt add chose-x-over-y "Chose X over Y for Z reason" -o "X was better because... Y failed due to..."
+2. **Connect it.** Nest it under the parent it belongs to, cite related fibers with `[[wikilinks]]` in the prose, and add `inputs.from` only when the relation is computational. `felt find "<concept>"` surfaces neighbours. Isolated fibers are hard to find.
 
-# Complex fiber (with body for detailed context)
-felt add architecture-decision-event-sourcing "Architecture decision: event sourcing" -b "Background: needed audit trail..." -o "Chose event sourcing over CRUD because..."
-```
+3. **Update what was left stale.** Outcomes and statuses on the fibers the session touched; the project's CLAUDE.md for new commands, paths, and pointers to doc fibers (keep it lean — depth goes in fibers).
 
-A mined fiber is a record, not a todo — leave it statusless (the default; `-s closed` only if it was a tracked thread that resolved). Use `-b` for the body when there's enough background or complexity that the name and outcome aren't sufficient.
-
-### 2. Connect it
-
-For each new fiber:
-- What should it cite with `[[wikilinks]]`?
-- Should it live under an existing parent fiber?
-- Does it need `inputs.from` because the relation is computational?
-
-```bash
-felt ls -s all "<concept>"
-felt show <id>
-```
-
-Err toward useful connection. Isolated fibers are hard to find.
-
-### 3. Update CLAUDE.md
-
-Practical lookups:
-- **Commands** — tool invocations, common operations
-- **Context pointers** — paths, important fibers, documentation fibers
-- **Workflows** — "to do X, run Y then Z"
-
-```bash
-# Which CLAUDE.md?
-# Project-specific → ./CLAUDE.md
-# Cross-project → ~/.claude/CLAUDE.md
-```
-
-Keep it lean. Depth goes in documentation fibers.
-
-### 4. Git Commit (if applicable)
-
-```bash
-git add -A && git commit -m "session: <what happened>"
-```
-
-## Quality Checklist
-
-- [ ] Decisions captured with reasoning
-- [ ] Questions answered documented
-- [ ] Patterns noted
-- [ ] New fibers linked to related fibers
-- [ ] CLAUDE.md updated if needed
-- [ ] Documentation fiber created if pattern is recurring
+4. **Commit**, if the store is a git repo.

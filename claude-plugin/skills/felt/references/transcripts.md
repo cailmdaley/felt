@@ -1,6 +1,6 @@
 # Transcript Processing
 
-Turn a raw transcript into useful content: a notes document that stands alone, then fiber extraction for anything that enters the DAG.
+Turn a raw transcript into useful content: a notes document that stands alone, then fiber extraction for anything that should persist in the store.
 
 **Review required.** You weren't there — present the plan, get approval, then proceed.
 
@@ -91,7 +91,6 @@ Do not force this structure onto every meeting. Use it when it clarifies the art
 
 **Tone shifts signal importance.** When the conversation's energy changes — someone gets animated, the room goes quiet, a joke lands that's actually about a real tension — note the substance, not the drama.
 
-
 ### 3. Review Notes with User
 
 Present the draft. They may restructure, cut, or add context you couldn't infer. The notes document is the artifact — get it right before moving to extraction.
@@ -100,7 +99,7 @@ Present the draft. They may restructure, cut, or add context you couldn't infer.
 
 ## Phase 2: Fiber Extraction
 
-The notes document already contains decisions, action items, and open questions. Phase 2 asks: which of these belong in the DAG, and what did the notes miss?
+The notes document already contains decisions, action items, and open questions. Phase 2 asks: which of these belong in the store, and what did the notes miss?
 
 ### 4. Identify Fiber Candidates
 
@@ -143,22 +142,6 @@ felt edit <id> -s closed -o "Resolved in meeting: decided to use Z because..."
 # for narrative updates, edit .felt/<path>/<slug>.md directly and add wikilinks/body text there
 ```
 
-Link new fibers to related ones:
-```bash
-felt ls -s all "related concept"
-felt show <id>
-```
+Nest new fibers where they belong and link related ones in prose (`felt find "related concept"`).
 
 Big decisions may also warrant updating CLAUDE.md or documentation fibers.
-
----
-
-## Quality Checklist
-
-- [ ] Transcript read end-to-end
-- [ ] Topics segmented and classified (information / discussion / decision)
-- [ ] Notes document drafted and reviewed with user
-- [ ] Fiber candidates identified (from notes + implicit content re-scan)
-- [ ] Extraction plan approved before filing
-- [ ] Outcomes stand alone without the body
-- [ ] New fibers connected through containment, wikilinks, or data flow (`inputs.from`)
