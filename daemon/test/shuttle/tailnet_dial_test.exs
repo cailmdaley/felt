@@ -277,6 +277,51 @@ defmodule Shuttle.TailnetDialTest do
     assert %{configured: true, socket: nil, bridges: []} = TailnetDial.status()
   end
 
+  test "a remotes-file path change invalidates cached socket config with matching metadata", %{
+    base: base
+  } do
+    first_file = Path.join(base, "remotes-first.json")
+    second_file = Path.join(base, "remotes-second.json")
+    valid_socket = Path.join(base, "localapi.sock")
+
+    valid_doc =
+      Jason.encode!(%{"defaults" => %{"tailscale_socket" => valid_socket}, "remotes" => []})
+
+    invalid_doc =
+      Jason.encode!(%{"defaults" => %{"tailscale_socket" => "relative.sock"}, "remotes" => []})
+
+    invalid_doc =
+      invalid_doc <> String.duplicate(" ", byte_size(valid_doc) - byte_size(invalid_doc))
+
+    File.write!(first_file, valid_doc)
+    File.write!(second_file, invalid_doc)
+    File.touch!(second_file, File.stat!(first_file).mtime)
+
+    previous_file = System.get_env("FELT_REMOTES_FILE")
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    System.put_env("FELT_REMOTES_FILE", first_file)
+    Application.delete_env(:shuttle, :tailscale_socket)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_env("FELT_REMOTES_FILE", previous_file)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    first_token = Shuttle.Remotes.config_token()
+
+    assert {:error, {:tailnet_dial, :unavailable, {:no_bridge, @host, 443}}} =
+             Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
+
+    System.put_env("FELT_REMOTES_FILE", second_file)
+    assert Shuttle.Remotes.config_token() == first_token
+
+    assert {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}} =
+             Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
+  end
+
   test "an idle client connection expires after twice the remote request timeout", %{base: base} do
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())

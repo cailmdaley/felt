@@ -1500,7 +1500,9 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   end
 
   defp current_tailscale_socket do
-    key = {Shuttle.Remotes.config_token(), Application.get_env(:shuttle, :tailscale_socket)}
+    # The resolved file path matters independently of its stat token: two
+    # selected files can have the same `{mtime, size}` and different sockets.
+    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :tailscale_socket)}
 
     case :persistent_term.get(@tailscale_socket_key, :unset) do
       {^key, socket} ->
@@ -1593,18 +1595,21 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
+  defp remotes_file_snapshot do
+    {Shuttle.Remotes.config_path(), Shuttle.Remotes.config_token()}
+  end
+
   # The configured proxy, re-derived only when one of its inputs has moved.
   # Three registries polling several remotes every 5s would otherwise parse the
   # same JSON a few times a second to learn the same answer; this makes the
   # steady state a stat plus an ETS read.
   #
-  # The cache key is the WHOLE input — the fleet file's `{mtime, size}` token
-  # and the application-config override that outranks it — so a test that
-  # `put_env`s a proxy is not served a value cached from the file, and
-  # `Shuttle.Remotes.https_proxy/0` stays the single place the precedence
-  # between them is decided.
+  # The cache key is the whole input — selected fleet path and its `{mtime,
+  # size}` token, plus the application-config override — so switching
+  # `FELT_REMOTES_FILE` cannot reuse a value from another file with matching
+  # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
-    key = {Shuttle.Remotes.config_token(), Application.get_env(:shuttle, :https_proxy)}
+    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}
 
     case :persistent_term.get(@proxy_key, :unset) do
       {^key, proxy} ->
