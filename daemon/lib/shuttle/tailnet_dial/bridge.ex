@@ -4,6 +4,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   use GenServer
 
   @connect_timeout_ms 5_000
+  @drain_timeout_ms 5_000
   @socket_options [:binary, active: false, packet: :http_bin]
 
   def child_spec(opts) do
@@ -136,7 +137,7 @@ defmodule Shuttle.TailnetDial.Bridge do
         Shuttle.TailnetDial.clear_error(name)
 
         try do
-          case pump(client, tls_socket) do
+          case pump(client, tls_socket, Keyword.fetch!(opts, :request_timeout_ms)) do
             :ok -> :ok
             {:error, reason} -> Shuttle.TailnetDial.record_error(name, :relay, reason)
           end
@@ -298,46 +299,71 @@ defmodule Shuttle.TailnetDial.Bridge do
     end
   end
 
-  defp pump(client, tls_socket) do
+  defp pump(client, tls_socket, request_timeout_ms) do
     with :ok <- :inet.setopts(client, active: :once),
          :ok <- :ssl.setopts(tls_socket, active: :once) do
-      pump(client, tls_socket, true, true)
+      pump(client, tls_socket, true, true, 2 * request_timeout_ms)
     end
   end
 
-  defp pump(_client, _tls_socket, false, false), do: :ok
+  defp pump(_client, _tls_socket, false, false, _idle_timeout_ms), do: :ok
 
-  defp pump(client, tls_socket, client_open?, tls_open?) do
+  defp pump(client, tls_socket, client_open?, tls_open?, idle_timeout_ms) do
+    timeout = if client_open? and tls_open?, do: idle_timeout_ms, else: @drain_timeout_ms
+
     receive do
       {:tcp, ^client, data} ->
-        relay_result(:ssl.send(tls_socket, data), client, tls_socket, client_open?, tls_open?)
+        relay_result(
+          :ssl.send(tls_socket, data),
+          client,
+          tls_socket,
+          client_open?,
+          tls_open?,
+          idle_timeout_ms
+        )
 
       {:ssl, ^tls_socket, data} ->
-        relay_result(:gen_tcp.send(client, data), client, tls_socket, client_open?, tls_open?)
+        relay_result(
+          :gen_tcp.send(client, data),
+          client,
+          tls_socket,
+          client_open?,
+          tls_open?,
+          idle_timeout_ms
+        )
 
       {:tcp_closed, ^client} ->
         _ = :ssl.shutdown(tls_socket, :write)
-        pump(client, tls_socket, false, tls_open?)
+        pump(client, tls_socket, false, tls_open?, idle_timeout_ms)
 
       {:ssl_closed, ^tls_socket} ->
         _ = :gen_tcp.shutdown(client, :write)
-        pump(client, tls_socket, client_open?, false)
+        pump(client, tls_socket, client_open?, false, idle_timeout_ms)
 
       {:tcp_error, ^client, reason} ->
         {:error, {:client_tcp, reason}}
 
       {:ssl_error, ^tls_socket, reason} ->
         {:error, {:peer_tls, reason}}
+    after
+      timeout -> {:error, if(client_open? and tls_open?, do: :idle_timeout, else: :drain_timeout)}
     end
   end
 
-  defp relay_result(:ok, client, tls_socket, client_open?, tls_open?) do
+  defp relay_result(:ok, client, tls_socket, client_open?, tls_open?, idle_timeout_ms) do
     with :ok <- if(client_open?, do: :inet.setopts(client, active: :once), else: :ok),
          :ok <- if(tls_open?, do: :ssl.setopts(tls_socket, active: :once), else: :ok) do
-      pump(client, tls_socket, client_open?, tls_open?)
+      pump(client, tls_socket, client_open?, tls_open?, idle_timeout_ms)
     end
   end
 
-  defp relay_result({:error, reason}, _client, _tls_socket, _client_open?, _tls_open?),
-    do: {:error, reason}
+  defp relay_result(
+         {:error, reason},
+         _client,
+         _tls_socket,
+         _client_open?,
+         _tls_open?,
+         _idle_timeout_ms
+       ),
+       do: {:error, reason}
 end

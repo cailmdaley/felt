@@ -122,7 +122,14 @@ defmodule Shuttle.TailnetDial.Reconciler do
 
             [
               {remote.name,
-               %{host: host, port: port, url: remote.url, localapi_socket: socket, path: path}}
+               %{
+                 host: host,
+                 port: port,
+                 url: remote.url,
+                 localapi_socket: socket,
+                 request_timeout_ms: remote.request_timeout_ms,
+                 path: path
+               }}
             ]
           else
             []

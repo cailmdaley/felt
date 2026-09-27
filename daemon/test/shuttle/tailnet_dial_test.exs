@@ -156,6 +156,67 @@ defmodule Shuttle.TailnetDialTest do
     assert %{configured: true, socket: nil, bridges: []} = TailnetDial.status()
   end
 
+  test "an idle client connection expires after twice the remote request timeout", %{base: base} do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+
+    {tls_port, _peer} = start_silent_tls_peer(base)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
+    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 200)
+    assert TailnetDial.last_error(remote.name) == {:tailnet_dial, :relay, :idle_timeout}
+    :gen_tcp.close(client)
+  end
+
+  test "a closed client cannot leave a stalled TLS relay task behind", %{base: base} do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+
+    {tls_port, _peer} = start_silent_tls_peer(base)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
+    assert_receive {:localapi_relay_pid, relay_pid}, 5_000
+    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+    send(relay_pid, :hold)
+    assert_receive {:localapi_relay_held, ^relay_pid}, 5_000
+    :gen_tcp.close(client)
+
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert TailnetDial.last_error(remote.name) == nil
+  end
+
+  test "a half-closed TLS peer cannot leave a draining relay task behind", %{base: base} do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+
+    {tls_port, _peer} = start_silent_tls_peer(base, close_write?: true)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
+    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+    assert_receive {:silent_tls_write_closed, _peer_pid}, 5_000
+
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert TailnetDial.last_error(remote.name) == {:tailnet_dial, :relay, :drain_timeout}
+    :gen_tcp.close(client)
+  end
+
   test "an absent LocalAPI socket closes its client and records the dial failure", %{base: base} do
     localapi = Path.join(base, "absent.sock")
     remote = start_bridge(base, localapi, @host, 443)
@@ -327,8 +388,8 @@ defmodule Shuttle.TailnetDialTest do
     assert inspect(reason) =~ "0755"
   end
 
-  defp start_bridge(base, localapi, host, port) do
-    remote = remote(host, port)
+  defp start_bridge(base, localapi, host, port, opts \\ []) do
+    remote = remote(host, port, opts)
     data_dir = Path.join(base, "data")
 
     {:ok, manager} =
@@ -345,15 +406,16 @@ defmodule Shuttle.TailnetDialTest do
     remote
   end
 
-  defp remote(host, port) do
+  defp remote(host, port, opts \\ []) do
     %Remote{
       name: "hub-a",
       url: "https://#{host}:#{port}",
+      request_timeout_ms: Keyword.get(opts, :request_timeout_ms, 2_000),
       tunnel: %{manager: :none, multiplex: false, label: nil}
     }
   end
 
-  defp request_via_bridge(path, host, port) do
+  defp request_via_bridge(path, host, port, timeout_ms \\ 5_000) do
     case :inets.start(:httpc, profile: @profile) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
@@ -367,10 +429,48 @@ defmodule Shuttle.TailnetDialTest do
     :httpc.request(
       :get,
       {String.to_charlist(url), []},
-      [{:timeout, 5_000}, {:connect_timeout, 5_000}],
+      [{:timeout, timeout_ms}, {:connect_timeout, timeout_ms}],
       [body_format: :binary],
       @profile
     )
+  end
+
+  defp start_silent_tls_peer(_base, opts \\ []) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, listener} =
+          :ssl.listen(0, [
+            :binary,
+            active: false,
+            certfile: String.to_charlist(@cert),
+            keyfile: String.to_charlist(@key),
+            ip: {127, 0, 0, 1},
+            reuseaddr: true
+          ])
+
+        {:ok, {{127, 0, 0, 1}, port}} = :ssl.sockname(listener)
+        send(parent, {:silent_tls_peer_ready, self(), port})
+        {:ok, transport} = :ssl.transport_accept(listener, 5_000)
+        {:ok, socket} = :ssl.handshake(transport, 5_000)
+        send(parent, {:silent_tls_handshake, self()})
+
+        if Keyword.get(opts, :close_write?, false) do
+          :ok = :ssl.shutdown(socket, :write)
+          send(parent, {:silent_tls_write_closed, self()})
+        end
+
+        receive do
+          :stop -> :ssl.close(socket)
+        end
+
+        :ssl.close(listener)
+      end)
+
+    assert_receive {:silent_tls_peer_ready, ^pid, port}, 5_000
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+    {port, pid}
   end
 
   defp start_localapi(base, opts) do
@@ -451,7 +551,9 @@ defmodule Shuttle.TailnetDialTest do
             packet: :raw
           ])
 
-        relay(socket, upstream)
+        parent = Keyword.fetch!(opts, :parent)
+        send(parent, {:localapi_relay_pid, self()})
+        relay(socket, upstream, parent)
     end
   end
 
@@ -466,21 +568,31 @@ defmodule Shuttle.TailnetDialTest do
     end
   end
 
-  defp relay(left, right) do
+  defp relay(left, right, parent) do
     :ok = :inet.setopts(left, active: :once)
     :ok = :inet.setopts(right, active: :once)
-    relay(left, right, true, true)
+    relay(left, right, parent, true, true, false)
   end
 
-  defp relay(_left, _right, false, false), do: :ok
+  defp relay(_left, _right, _parent, false, false, _held?), do: :ok
 
-  defp relay(left, right, left_open?, right_open?) do
+  defp relay(left, right, parent, left_open?, right_open?, held?) do
     receive do
+      :hold ->
+        send(parent, {:localapi_relay_held, self()})
+        relay(left, right, parent, left_open?, right_open?, true)
+
+      {:tcp, ^left, _data} when held? ->
+        relay(left, right, parent, left_open?, right_open?, held?)
+
+      {:tcp, ^right, _data} when held? ->
+        relay(left, right, parent, left_open?, right_open?, held?)
+
       {:tcp, ^left, data} ->
         case :gen_tcp.send(right, data) do
           :ok ->
             if left_open?, do: :inet.setopts(left, active: :once)
-            relay(left, right, left_open?, right_open?)
+            relay(left, right, parent, left_open?, right_open?, held?)
 
           {:error, :closed} ->
             :ok
@@ -493,7 +605,7 @@ defmodule Shuttle.TailnetDialTest do
         case :gen_tcp.send(left, data) do
           :ok ->
             if right_open?, do: :inet.setopts(right, active: :once)
-            relay(left, right, left_open?, right_open?)
+            relay(left, right, parent, left_open?, right_open?, held?)
 
           {:error, :closed} ->
             :ok
@@ -502,13 +614,16 @@ defmodule Shuttle.TailnetDialTest do
             raise "LocalAPI relay send failed: #{inspect(reason)}"
         end
 
+      {:tcp_closed, ^left} when held? ->
+        relay(left, right, parent, false, right_open?, held?)
+
       {:tcp_closed, ^left} ->
         _ = :gen_tcp.shutdown(right, :write)
-        relay(left, right, false, right_open?)
+        relay(left, right, parent, false, right_open?, held?)
 
       {:tcp_closed, ^right} ->
         _ = :gen_tcp.shutdown(left, :write)
-        relay(left, right, left_open?, false)
+        relay(left, right, parent, left_open?, false, held?)
 
       {:tcp_error, _socket, reason} ->
         raise "LocalAPI relay failed: #{inspect(reason)}"
