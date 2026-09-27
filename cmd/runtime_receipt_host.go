@@ -661,7 +661,7 @@ func checkResolvedDaemonPortOwner(settings hostSettings) error {
 		return fmt.Errorf("checking owner of %s: %w", settings.listen.Address, err)
 	}
 	defer conn.Close()
-	return checkDaemonTCPConnOwner("/proc", conn, os.Geteuid())
+	return checkDaemonTCPConnOwner(context.Background(), "/proc", conn, os.Geteuid())
 }
 
 // daemonTCPOwnerCheckError is a fail-closed refusal from the post-connect
@@ -671,7 +671,14 @@ type daemonTCPOwnerCheckError struct {
 	uid     int
 	foreign bool
 	reason  string
+	// pending: the row exists but its uid is 0, which the kernel reports until
+	// the listening process accept()s the connection. The caller retries.
+	pending bool
 }
+
+// acceptWait bounds how long a client waits for the listener to accept() its
+// connection before treating the unowned row as a refusal.
+const acceptWait = 2 * time.Second
 
 func (e *daemonTCPOwnerCheckError) Error() string {
 	if e.foreign {
@@ -685,15 +692,32 @@ func dialAndCheckDaemonTCP(ctx context.Context, dial func(context.Context, strin
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDaemonTCPConnOwner(procRoot, conn, callerUID); err != nil {
+	if err := checkDaemonTCPConnOwner(ctx, procRoot, conn, callerUID); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	return conn, nil
 }
 
-func checkDaemonTCPConnOwner(procRoot string, conn net.Conn, callerUID int) error {
-	return checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
+// checkDaemonTCPConnOwner is the post-connect owner check with the wait the
+// kernel imposes: the server-side row carries uid 0 until the listener has
+// accept()ed, so an unowned row is polled until it is owned or acceptWait
+// passes, at which point it is a refusal (a listener that never accepts
+// cannot answer HTTP either).
+func checkDaemonTCPConnOwner(ctx context.Context, procRoot string, conn net.Conn, callerUID int) error {
+	deadline := time.Now().Add(acceptWait)
+	for {
+		err := checkProcTCPConnectionOwner(procRoot, conn.RemoteAddr().String(), conn.LocalAddr().String(), callerUID)
+		var pending *daemonTCPOwnerCheckError
+		if !errors.As(err, &pending) || !pending.pending || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 // checkProcTCPConnectionOwner matches the server-side ESTABLISHED row for a
@@ -720,6 +744,10 @@ func checkProcTCPConnectionOwner(procRoot, serverLocal, clientLocal string, call
 			continue
 		}
 		found = true
+		if row.UID == 0 && callerUID != 0 {
+			return &daemonTCPOwnerCheckError{address: display, uid: 0, pending: true,
+				reason: "the listener has not accepted the connection (row uid 0)"}
+		}
 		if row.UID != callerUID {
 			return &daemonTCPOwnerCheckError{address: display, uid: row.UID, foreign: true}
 		}

@@ -147,6 +147,22 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 		}
 	})
 
+	t.Run("unaccepted row (uid 0) is pending, then refused after the wait", func(t *testing.T) {
+		// The kernel reports uid 0 on the server-side row until accept(); the
+		// one-shot check says pending, and the connection-level check gives
+		// up after acceptWait rather than admitting the unowned listener.
+		root := t.TempDir()
+		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 0, "4242", false), "")
+		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
+		var owner *daemonTCPOwnerCheckError
+		if !errors.As(err, &owner) || !owner.pending || owner.foreign {
+			t.Fatalf("uid-0 row should be pending, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "not accepted") {
+			t.Fatalf("pending message = %v", err)
+		}
+	})
+
 	t.Run("unreadable proc fails closed", func(t *testing.T) {
 		err := checkProcTCPConnectionOwner(filepath.Join(t.TempDir(), "absent"), "127.0.0.1:4000", "127.0.0.1:51432", 1000)
 		if err == nil || !strings.Contains(err.Error(), "cannot read /proc/net/tcp") {
