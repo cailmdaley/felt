@@ -898,9 +898,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "You are a Shuttle worker"
   end
 
-  # A "talk to me first" directive rides the From User block (the channel the
-  # kanban "wait for me" affordance prepends to) — the worker reads it at the top
-  # of context and waits, no dispatch-mode flag involved.
+  # A "talk to me first" directive rides the From User block — the worker reads
+  # it at the top of context and waits, no dispatch-mode flag involved.
   test "a talk-first From User directive surfaces in the dispatch prompt", %{host: host} do
     write_fiber(host, "tests/talk-first", """
     ---

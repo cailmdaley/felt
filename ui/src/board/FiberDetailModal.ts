@@ -315,9 +315,6 @@ function buildStrip(card: KanbanCard): HTMLElement {
   return strip
 }
 
-/** The line "Wait for me" puts at the head of a dispatch message. */
-const WAIT_FOR_ME_LINE = "Wait for me before doing anything heavy — let's talk first.\n\n"
-
 function ctlButton(label: string, cls: string): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
@@ -584,9 +581,10 @@ interface AgentRecord {
  * composite feed always carries. `:::{embed}` artifacts and relative images render through the
  * daemon's owner-routed `/file` route, anchored on the fiber's own dir.
  *
- * Every card action lives in one dropdown directly under the title,
- * collapsed by default: directive box + "wait for me", New session /
- * Resume, Temper / Compost, agent / kind / schedule, and parent fiber.
+ * Every card action lives in one drawer directly under the title, folded by
+ * default: the message box with its meeting and New session / Resume, the
+ * next launch's settings, due and parent, and Temper / Compost (see
+ * `buildControls`).
  *
  * Deliberately NOT a Radix AppDialog and NOT background-locked: the panel
  * is non-modal by design — "drag it aside to keep an eye on one fiber
@@ -2376,11 +2374,13 @@ export class FiberDetailModal {
     // reflected into a local copy of the card and the strip redrawn from it.
     let view = card
     let strip = buildStrip(view)
+    const watchers: Array<(view: KanbanCard) => void> = []
     const reflect = (patch: Partial<KanbanCard>): void => {
       view = { ...view, ...patch }
       const next = buildStrip(view)
       strip.replaceWith(next)
       strip = next
+      for (const watch of watchers) watch(view)
     }
     toggle.append(chevron, name, strip)
 
@@ -2397,7 +2397,7 @@ export class FiberDetailModal {
     })
 
     wrap.append(toggle, body)
-    this.buildControlsBody(body, card, shuttleManaged, reflect)
+    this.buildControlsBody(body, card, shuttleManaged, reflect, (watch) => watchers.push(watch))
     return wrap
   }
 
@@ -2406,6 +2406,7 @@ export class FiberDetailModal {
     card: KanbanCard,
     shuttleManaged: boolean,
     reflect: (patch: Partial<KanbanCard>) => void,
+    watch: (fn: (view: KanbanCard) => void) => void,
   ): void {
     // A drag or click inside a field is the field's own — it must not reach the
     // header's drag or the panel's click-away.
@@ -2430,7 +2431,7 @@ export class FiberDetailModal {
     ledger.className = 'kbn-ctl-ledger'
     ledger.append(
       this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, swallow, reflect),
-      this.buildCardFields(card, statusEl, errorEl, swallow, reflect),
+      this.buildCardFields(card, statusEl, errorEl, swallow, reflect, watch),
     )
 
     const foot = document.createElement('div')
@@ -2489,9 +2490,6 @@ export class FiberDetailModal {
 
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const wait = ctlToggle('Wait for me', 'kbn-ctl-wait')
-    swallow(wait.label)
-    foot.append(wait.label)
     if (this.meeting?.canJoin()) foot.append(this.buildMeeting(card, message, err))
 
     const fresh = ctlButton('New session', 'kbn-ctl-send')
@@ -2501,12 +2499,7 @@ export class FiberDetailModal {
     sends.append(fresh, resume)
     foot.append(sends)
 
-    // "Wait for me" rides the message as its first line: the worker reads a
-    // talk-first request exactly where it reads every other instruction.
-    const directive = (): string => {
-      const text = message.value.trim()
-      return wait.input.checked ? `${WAIT_FOR_ME_LINE}${text}`.trim() : text
-    }
+    const directive = (): string => message.value.trim()
     fresh.addEventListener('click', (e) => {
       e.stopPropagation()
       void this.runRequeue(card, directive(), 'fresh', fresh, err)
@@ -2522,38 +2515,44 @@ export class FiberDetailModal {
   }
 
   /**
-   * Meeting, for this constitution: a recording dot and one button per kind
-   * of meeting — pressing Call or Room is what starts it, and nothing else
-   * does. The recording runs on this machine; the composer's message becomes
-   * the meeting's note, and the worker — live or not — receives the meeting
-   * as a joined constitution.
+   * Meeting, for this constitution: which kind (Call or Room, a choice like
+   * any other in the drawer) and the Record verb that starts it — only the
+   * verb records. The recording runs on this machine; the composer's message
+   * becomes the meeting's note, and the worker — live or not — receives the
+   * meeting as a joined constitution.
    */
   private buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, err: HTMLElement): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
-    const buttons = MEETING_MODES.map(({ value, label }) => {
-      const btn = ctlButton(label, 'kbn-ctl-meet-btn')
-      btn.setAttribute('aria-label', `Record a ${label.toLowerCase()} meeting`)
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        for (const b of buttons) b.disabled = true
-        btn.textContent = 'Starting…'
-        err.style.display = 'none'
-        void this.meeting!.join(card, value, note.value).then((error) => {
-          for (const b of buttons) b.disabled = false
-          btn.textContent = label
-          if (error) {
-            err.textContent = error
-            err.style.display = ''
-          } else {
-            note.value = ''
-            note.dispatchEvent(new Event('input'))
-          }
-        })
+    const mode = segmented<MeetingMode>(
+      'Meeting kind',
+      MEETING_MODES.map(({ value, label }) => [value, label] as const),
+      MEETING_MODES[0].value,
+    )
+    const record = ctlButton('Record', 'kbn-ctl-record')
+    record.addEventListener('click', (e) => {
+      e.stopPropagation()
+      record.disabled = true
+      mode.setDisabled(true)
+      record.textContent = 'Starting…'
+      err.style.display = 'none'
+      void this.meeting!.join(card, mode.value, note.value).then((error) => {
+        record.disabled = false
+        mode.setDisabled(false)
+        record.textContent = 'Record'
+        if (error) {
+          err.textContent = error
+          err.style.display = ''
+        } else {
+          // One meeting at a time: once it is recording there is nothing left
+          // to start here.
+          wrap.hidden = true
+          note.value = ''
+          note.dispatchEvent(new Event('input'))
+        }
       })
-      return btn
     })
-    wrap.append(...buttons)
+    wrap.append(mode.el, record)
     return wrap
   }
 
@@ -2846,7 +2845,8 @@ export class FiberDetailModal {
    * card gets a day to come back on, so on a resting card the field is named
    * for that: Returns. A cycle's due is its band's closing edge: Ends. A
    * standing role (placed by its cron) and a resting pinned role (on the
-   * Pinned strip) are never sorted by `due:`, so they carry no field.
+   * Pinned strip) are never sorted by `due:`, so the field is absent while
+   * the card is either.
    */
   private buildCardFields(
     card: KanbanCard,
@@ -2854,6 +2854,7 @@ export class FiberDetailModal {
     errorEl: HTMLElement,
     swallow: (el: HTMLElement) => void,
     reflect: (patch: Partial<KanbanCard>) => void,
+    watch: (fn: (view: KanbanCard) => void) => void,
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
@@ -2863,46 +2864,51 @@ export class FiberDetailModal {
       })
     }
 
-    if (placedByDue(card)) {
-      // Seeded through `dueCivilDay`, NEVER `new Date(card.due)`: felt stores a
-      // civil day as UTC midnight, and the Date round trip names the day BEFORE
-      // in every negative-offset zone (see civilDay.ts). The bare `YYYY-MM-DD`
-      // the input wants is also what goes back on the wire.
-      let current = dueCivilDay(card.due) ?? null
-      const input = document.createElement('input')
-      input.type = 'date'
-      input.className = 'kbn-ctl-input kbn-ctl-date'
-      const label = card.isCycle ? 'Ends' : card.storedHorizon === 'stashed' ? 'Returns' : 'Due'
-      input.setAttribute('aria-label', card.isCycle ? 'Cycle end date' : label === 'Returns' ? 'Return date' : 'Due date')
-      input.value = current ?? ''
-      swallow(input)
-      const clear = ctlButton('×', 'kbn-ctl-clear')
-      clear.setAttribute('aria-label', 'Clear date')
-      const paint = (): void => {
-        clear.hidden = !input.value
-        input.classList.toggle('kbn-ctl-empty', !input.value)
-      }
-      paint()
-
-      const commit = (next: string | null): void => {
-        if ((next ?? '') === (current ?? '')) return
-        livePatch({ due: next }, () => {
-          current = next
-          input.value = next ?? ''
-          paint()
-          reflect({ due: next ?? undefined })
-        })
-      }
-      // `change`, not `input`: a native picker fires `input` per keystroke of a
-      // half-typed year. Emptying the field is itself the clear; × is its
-      // visible spelling.
-      input.addEventListener('change', () => commit(input.value || null))
-      clear.addEventListener('click', (e) => {
-        e.stopPropagation()
-        commit(null)
-      })
-      col.append(field(label, input, clear))
+    // Seeded through `dueCivilDay`, NEVER `new Date(card.due)`: felt stores a
+    // civil day as UTC midnight, and the Date round trip names the day BEFORE
+    // in every negative-offset zone (see civilDay.ts). The bare `YYYY-MM-DD`
+    // the input wants is also what goes back on the wire.
+    let current = dueCivilDay(card.due) ?? null
+    const input = document.createElement('input')
+    input.type = 'date'
+    input.className = 'kbn-ctl-input kbn-ctl-date'
+    const label = card.isCycle ? 'Ends' : card.storedHorizon === 'stashed' ? 'Returns' : 'Due'
+    input.setAttribute('aria-label', card.isCycle ? 'Cycle end date' : label === 'Returns' ? 'Return date' : 'Due date')
+    input.value = current ?? ''
+    swallow(input)
+    const clear = ctlButton('×', 'kbn-ctl-clear')
+    clear.setAttribute('aria-label', 'Clear date')
+    const paint = (): void => {
+      clear.hidden = !input.value
+      input.classList.toggle('kbn-ctl-empty', !input.value)
     }
+    paint()
+
+    const commit = (next: string | null): void => {
+      if ((next ?? '') === (current ?? '')) return
+      livePatch({ due: next }, () => {
+        current = next
+        input.value = next ?? ''
+        paint()
+        reflect({ due: next ?? undefined })
+      })
+    }
+    // `change`, not `input`: a native picker fires `input` per keystroke of a
+    // half-typed year. Emptying the field is itself the clear; × is its
+    // visible spelling.
+    input.addEventListener('change', () => commit(input.value || null))
+    clear.addEventListener('click', (e) => {
+      e.stopPropagation()
+      commit(null)
+    })
+    const dueRow = field(label, input, clear)
+    // Present only while the board places the card by due — it follows a
+    // kind changed in this drawer.
+    dueRow.hidden = !placedByDue(card)
+    watch((view) => {
+      dueRow.hidden = !placedByDue(view)
+    })
+    col.append(dueRow)
 
     col.append(field('Parent', this.buildParentPicker(card, livePatch, swallow)))
     return col

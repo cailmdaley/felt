@@ -471,16 +471,6 @@
 .kbn-ctl-toggle[hidden] { display: none; }
 .kbn-ctl-toggle:has(input:disabled) { opacity: 0.6; cursor: default; }
 .kbn-ctl-toggle input:disabled { cursor: default; }
-/* Wait for me — the worker will hold its hand up for you: gold. */
-.kbn-ctl-wait:has(input:checked) {
-  color: #6B5526;
-  border-color: rgba(154, 123, 53, 0.42);
-  background: rgba(196, 147, 51, 0.13);
-}
-.kbn-ctl-wait:has(input:checked) span::before {
-  border-color: var(--kbn-owed, #9A7B35);
-  background: var(--kbn-owed-bright, #C49333);
-}
 /* Chrome — an axis of the machine: cobalt. */
 .kbn-ctl-chrome:has(input:checked) {
   color: var(--kbn-agent, #3D5BA0);
@@ -531,30 +521,32 @@
 }
 .kbn-ctl-compose .kbn-detail-error { margin-top: 6px; }
 
-/* Meeting: a recording dot, then one quiet button per kind of meeting. */
+/* Meeting: the kind, then Record — a verb in your pigment, the only thing
+   that starts a recording. */
 .kbn-ctl-meet {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  margin-left: 6px;
+  gap: 6px;
 }
-.kbn-ctl-meet::before {
+.kbn-ctl-meet[hidden] { display: none; }
+.kbn-ctl-record {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #8E3A2F;
+  border-color: rgba(188, 69, 56, 0.36);
+  background: rgba(188, 69, 56, 0.04);
+}
+.kbn-ctl-record::before {
   content: '';
   width: 7px;
   height: 7px;
-  margin-right: 5px;
   border-radius: 50%;
   background: var(--kbn-you, #BC4538);
 }
-.kbn-ctl-meet-btn {
-  padding: 0 8px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ctl-muted);
-}
-.kbn-ctl-meet-btn:hover:not(:disabled) {
-  color: #1B1611;
-  background: rgba(27, 22, 17, 0.05);
+.kbn-ctl-record:hover:not(:disabled) {
+  border-color: rgba(188, 69, 56, 0.6);
+  background: rgba(188, 69, 56, 0.1);
 }
 
 /* ── The ledger: labels in a gutter, controls on ruled lines ── */

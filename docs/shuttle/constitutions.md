@@ -239,7 +239,7 @@ Every dispatch runs autonomously; shuttle offers no interactive mode. When work
 needs a human, that expectation rides one of two channels.
 
 **Per-dispatch.** The card drawer's message box carries a free-text "From User"
-directive, and its Wait for me toggle puts a talk-first line at its head.
+directive; a line asking the worker to talk first makes that run wait for you.
 The worker reads the directive at the top of its context. The directive applies
 to that moment only — the next dispatch starts clean.
 

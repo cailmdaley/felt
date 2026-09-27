@@ -113,6 +113,8 @@ try {
   // Standing is a revealed form until its cron is confirmed: the click writes
   // nothing, Enter in the cron writes the promotion once.
   await page.evaluate(() => { window.settingWrites = [] })
+  const dueField = page.locator('.kbn-ctl-date')
+  assert.ok(await dueField.isVisible(), 'a one-shot card shows its due field')
   await page.getByRole('radiogroup', { name: 'Kind', exact: true }).getByRole('radio', { name: 'Standing', exact: true }).click()
   assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'choosing Standing alone writes nothing')
   const cron = page.getByRole('textbox', { name: 'Cron', exact: true })
@@ -125,6 +127,7 @@ try {
     { action: promotion[0].body.action, kind: promotion[0].body.kind, schedule: promotion[0].body.schedule },
     { action: 'reshape', kind: 'standing', schedule: '0 9 * * 1-5' },
   )
+  assert.ok(!(await dueField.isVisible()), 'a standing role has no due field — it runs on its cron')
 
   // Escape in the parent search cancels the search, not the card.
   await page.locator('.kbn-ctl-parent').click()
@@ -150,16 +153,32 @@ try {
   assert.ok(await page.getByText('reshape refused').isVisible(), 'the refusal is shown')
   await page.evaluate(() => window.restoreFetch())
 
-  // "Wait for me" rides the dispatch as the message's first line.
+  // Choosing a meeting kind is a setting; only Record starts one, and it
+  // carries the composer's message as the note.
   await page.evaluate(() => { window.settingWrites = [] })
-  await page.getByRole('textbox', { name: 'Message for the next worker', exact: true }).fill('rerun the null tests')
-  await page.getByRole('checkbox', { name: 'Wait for me', exact: true }).check()
+  const message = page.getByRole('textbox', { name: 'Message for the next worker', exact: true })
+  const meetingKind = page.getByRole('radiogroup', { name: 'Meeting kind', exact: true })
+  assert.equal(await meetingKind.getByRole('radio', { name: 'Call', exact: true }).getAttribute('aria-checked'), 'true')
+  await meetingKind.getByRole('radio', { name: 'Room', exact: true }).click()
+  assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'choosing Room starts nothing')
+  await message.fill('null tests review')
+  await page.getByRole('button', { name: 'Record', exact: true }).click()
+  await page.waitForTimeout(200)
+  const joins = (await page.evaluate(() => window.settingWrites)).filter(write => write.url.endsWith('/api/v1/meeting/join'))
+  assert.equal(joins.length, 1, 'Record starts exactly one meeting')
+  assert.deepEqual({ mode: joins[0].body.meeting.mode, note: joins[0].body.note }, { mode: 'room', note: 'null tests review' })
+  assert.equal(await message.inputValue(), '', 'the note is spent once the meeting starts')
+  assert.ok(!(await page.getByRole('button', { name: 'Record', exact: true }).isVisible()), 'a recording meeting leaves nothing to start')
+
+  // Resume carries the message exactly as written.
+  await page.evaluate(() => { window.settingWrites = [] })
+  await message.fill('rerun the null tests')
   await page.getByRole('button', { name: 'Resume', exact: true }).click()
   await page.waitForTimeout(200)
   const dispatch = (await page.evaluate(() => window.settingWrites)).find(write => write.url.endsWith('/api/v1/dispatch'))
   assert.ok(dispatch, 'Resume dispatches')
   assert.equal(dispatch.body.resume_mode, 'previous')
-  assert.match(dispatch.body.user_message, /^Wait for me before doing anything heavy[^\n]*\n\nrerun the null tests$/)
+  assert.equal(dispatch.body.user_message, 'rerun the null tests')
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
@@ -171,7 +190,7 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback and Wait-for-me passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting Record and Resume passed')
 } finally {
   await browser.close()
 }
