@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const hostFixtureDir = "../daemon/test/fixtures/host"
@@ -250,6 +251,70 @@ func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
 		if err := checkResolvedDaemonPortOwner(settings); err != nil {
 			t.Fatalf("check for %+v: %v", settings, err)
 		}
+	}
+}
+
+func TestIsSocketClassDaemonTCPMatchesLoopbackAddresses(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the owner check applies to Linux socket-class TCP listeners")
+	}
+	hostFile := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, hostFile, nil, nil)
+	if err := os.WriteFile(hostFile, []byte(`{"class":"shared-multi-user","listen":"tcp://127.0.0.1:4102"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		address string
+		want    bool
+	}{
+		{"127.0.0.1:4102", true},
+		{"127.0.0.2:4102", true},
+		{"[::1]:4102", true},
+		{"localhost:4102", true},
+		{"10.0.0.1:4102", false},
+		{"127.0.0.1:4103", false},
+	} {
+		t.Run(tc.address, func(t *testing.T) {
+			got, err := isSocketClassDaemonTCP("tcp", tc.address)
+			if err != nil || got != tc.want {
+				t.Fatalf("isSocketClassDaemonTCP(%q) = %v, %v; want %v", tc.address, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDaemonHTTPClientFailsClosedWhenSettingsCannotResolve(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the owner check applies to Linux socket-class TCP listeners")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan struct{}, 1)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		_, _ = w.Write([]byte("connected"))
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() { _ = server.Close() })
+
+	hostFile := filepath.Join(t.TempDir(), "host.json")
+	setHostEnv(t, hostFile, nil, nil)
+	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
+	for _, key := range []string{"HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"} {
+		t.Setenv(key, "")
+	}
+	if _, err := getDaemon("http://"+listener.Addr().String(), time.Second); err == nil || !strings.Contains(err.Error(), hostFile) {
+		t.Fatalf("getDaemon error = %v; want host settings error naming %s", err, hostFile)
+	}
+	select {
+	case <-requests:
+		t.Fatal("request reached the listener despite unresolved owner-check settings")
+	default:
 	}
 }
 

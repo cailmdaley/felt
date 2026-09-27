@@ -87,7 +87,11 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", s.listen.Address)
 		}
-		if isSocketClassDaemonTCP(network, addr) {
+		checkOwner, err := isSocketClassDaemonTCP(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		if checkOwner {
 			return dialAndCheckDaemonTCP(ctx, base, network, addr, "/proc", os.Geteuid())
 		}
 		return base(ctx, network, addr)
@@ -105,36 +109,31 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func isSocketClassDaemonTCP(network, address string) bool {
+func isSocketClassDaemonTCP(network, address string) (bool, error) {
 	if runtime.GOOS != "linux" || !strings.HasPrefix(network, "tcp") {
-		return false
+		return false, nil
 	}
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	ip := net.ParseIP(host)
-	localhost := strings.EqualFold(host, "localhost")
-	if !localhost && (ip == nil || !ip.IsLoopback()) {
-		return false
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return false, nil
 	}
 	settings, err := resolveHostSettings()
-	if err != nil || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
-		return false
+	if err != nil {
+		return false, err
+	}
+	if !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+		return false, nil
 	}
 	gotPort, err := strconv.Atoi(portText)
 	if err != nil {
-		return false
+		return false, nil
 	}
-	wantAddress, wantPort, err := parseTCPEndpoint(settings.listen.Address)
-	if err != nil || gotPort != wantPort {
-		return false
-	}
-	if localhost {
-		return true
-	}
-	gotAddress, gotPort, err := parseTCPEndpoint(address)
-	return err == nil && gotAddress == wantAddress && gotPort == wantPort
+	_, wantPort, err := parseTCPEndpoint(settings.listen.Address)
+	return err == nil && gotPort == wantPort, nil
 }
 
 // socketHostTransport rewrites the wire Host of a request to the synthetic
