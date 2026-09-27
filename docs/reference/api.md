@@ -38,7 +38,9 @@ is not enough.
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
 | `POST /capture` | owner-routed; meeting setup is local first | Launch a session from a free-text prompt; meeting mode starts local hark recording before routing the scribe capture |
+| `POST /meeting/join` | local recording; delivery owner-routed | Start local hark recording and join the meeting to an existing constitution's worker |
 | `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
+| `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
 | `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -181,7 +183,8 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `GET /meeting` returns `{available, meeting}`. The row is `null` when this
 daemon has no local meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `last_line`, `transcript`, `mirror_host`,
-`tmux_session`, and `error`. `mirror_host` is the configured remote name when
+`fiber`, `tmux_session`, and `error`. `fiber` names the constitution a joined
+meeting belongs to and is `null` for a capture meeting. `mirror_host` is the configured remote name when
 the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
 A `null` mirror host means the transcript is local.
 
@@ -200,14 +203,32 @@ Meeting mode rejects `surface: "app"` and an invalid mode with **422**.
 If capture fails after hark starts, the capture's status and error body include
 the meeting row and `recording: true`; the local recording continues.
 
+`POST /meeting/join` accepts `{fiber_id, origin?, meeting: {mode}, note?}`. It
+starts hark exactly as meeting capture does, mirrored toward `origin`, and names
+the recording after the note's first line or, with no note, the fiber's leaf.
+The meeting message (the same facts as a meeting capture's, plus a line saying
+the meeting joins this constitution) and the note go to the fiber's worker
+through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
+`delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
+the delivery's status with `recording: true` and `error`, and the recording
+continues. Start errors are the same as meeting capture's.
+
+`POST /deliver` accepts `{fiber_id, text, from?}` (plus `origin` to forward). A
+fiber with a live worker receives `text` through session messaging at
+`shuttle://<host>/<harness>/<session_uuid>`, woken, and the answer is
+`{delivered, delivery: "message", receipt}`. Otherwise the owner force-dispatches
+it with `text` as the From User: `delivery: "resume"` continues its previous
+conversation, `delivery: "dispatch"` starts one when it has none. These answer
+with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
+
 `POST /meeting/stop` returns HTTP 202 with `{meeting}` or 404 when no meeting
 exists. It sends at most one SIGINT to a live hark process, even while hark's
 lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
 no-op; a `starting` or `failed` meeting dismisses its tmux session.
 
-These meeting routes control this daemon's local recording and never use owner
-routing. `POST /capture` starts that recording before it routes the scribe to
-the capture's project owner.
+These meeting routes control this daemon's local recording and never owner-route
+it. `POST /capture` and `POST /meeting/join` start that recording before they
+route the agent's half to the project's or the fiber's owner.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the

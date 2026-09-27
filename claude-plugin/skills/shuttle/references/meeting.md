@@ -2,12 +2,16 @@
 
 A meeting capture is a capture whose input is a live conversation. This page
 covers following it live; turning the finished transcript into notes is the
-felt skill's `references/transcripts.md`. The user
-started it from the board's Capture form in meeting mode. `hark` is recording
-on the user's machine and writing a speaker-labelled transcript to a path on
-this host, and `From User` opens with `Meeting mode`, that path, and the mode
+felt skill's `references/transcripts.md`. The user starts a meeting from the
+board: from the Capture form in meeting mode, which launches you as a new
+capture, or from a constitution's card, which joins the meeting to that
+constitution (see [Joined to a constitution](#joined-to-a-constitution)).
+`hark` is recording on the user's machine and writing a speaker-labelled
+transcript to a path on this host. Your message (`From User`, or a message
+into your running session) opens with `Meeting mode`, that path, and the mode
 (call or room), followed by the user's note, which may be empty. You are this
-meeting's scribe from the moment you claim.
+meeting's scribe from the moment you claim, or, joined, from the moment the
+message arrives.
 
 ## The transcript
 
@@ -59,3 +63,21 @@ keep it out of git. Reference its path, and quote only what the notes need.
 Things said in a meeting are candidates. Propose promotions; never make one
 silently. Nothing goes to another human (issue, chat, email, wiki) without the
 user approving the text.
+
+## Joined to a constitution
+
+When the message says the meeting joins this constitution, you are that
+constitution's worker, and you stay it: its charter, roles and open work are
+still yours, and the meeting is input to them. Nothing is captured or claimed.
+
+1. **File the meeting as a child fiber**
+   `<constitution>/meetings/<YYYY-MM-DD-HHMM>-<slug>`: when, the mode, and the
+   transcript path. It holds the running notes and its own `report.html`.
+2. **Take `scribe` for the meeting's duration**, alongside the roles you already
+   carry. Create `roles/scribe` from this page if the store has none; its
+   charter outranks this page. Drop the role at `# ended`.
+3. **Follow, act and keep the report live** as in steps 2–4, in the child fiber.
+4. **Carry it home.** At `# ended`, consolidate the child fiber as in step 5 and
+   close it. Then bring what bears on the constitution back into its own work:
+   decisions into its body and plan, action items that are yours into your next
+   steps, and the rest as proposals. The constitution stays open.
