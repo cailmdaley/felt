@@ -18,6 +18,9 @@ const (
 	CheckLevelInfo    = "info"
 )
 
+// LegacyFlatMigrationHint names the safe path for migrating a flat store.
+const LegacyFlatMigrationHint = "run `felt migrate --dry-run`, then `felt migrate`"
+
 type CheckIssue struct {
 	Level   string `json:"level"`
 	FiberID string `json:"fiber_id"`
@@ -105,7 +108,7 @@ func CheckStructure(s *Storage) ([]CheckIssue, error) {
 		issues = append(issues, CheckIssue{
 			Level:   CheckLevelError,
 			FiberID: ".",
-			Message: fmt.Sprintf("multiple bare fiber files at .felt/ root: %s — at most one (the entry-point fiber) is allowed", strings.Join(bareSlugs, ", ")),
+			Message: fmt.Sprintf("multiple bare fiber files at .felt/ root: %s — at most one (the entry-point fiber) is allowed; %s", strings.Join(bareSlugs, ", "), LegacyFlatMigrationHint),
 		})
 	}
 	for slug := range bareSet {

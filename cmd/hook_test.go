@@ -233,6 +233,24 @@ func TestSessionCommandPrintsPlainContext(t *testing.T) {
 	}
 }
 
+func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
+	dir, storage := newStore(t)
+	for _, name := range []string{"old-thing-1a2b3c4d", "other-9f8e7d6c"} {
+		content := "---\nname: " + name + "\n---\n"
+		if err := os.WriteFile(filepath.Join(storage.Root(), name+".md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	ctx := sessionContextFor(t, dir)
+	if !strings.Contains(ctx, "## Attention") {
+		t.Fatalf("session context missing Attention section:\n%s", ctx)
+	}
+	if !strings.Contains(ctx, "run `felt migrate --dry-run`, then `felt migrate`") {
+		t.Fatalf("session context missing legacy migration hint:\n%s", ctx)
+	}
+}
+
 func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	var felts []*felt.Felt
@@ -245,7 +263,7 @@ func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 		})
 	}
 
-	attention := buildSessionAttention(felts, now)
+	attention := buildSessionAttention(felts, now, false)
 	for _, want := range []string{
 		"## Attention",
 		"Top-level sprawl: 21 root-level fibers (21 without children)",
@@ -278,7 +296,7 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 		},
 	}
 
-	attention := buildSessionAttention(felts, now)
+	attention := buildSessionAttention(felts, now, false)
 	for _, want := range []string{
 		"Fix tracked containers: 1 open/active fiber has children",
 		"Open/active should mean todo, not documentation or importance",

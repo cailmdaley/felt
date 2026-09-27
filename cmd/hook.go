@@ -191,6 +191,18 @@ func buildSessionContext() string {
 		fmt.Fprintf(&sb, "*felt listing failed: %s*\n", err)
 		return sb.String()
 	}
+	structureIssues, err := felt.CheckStructure(storage)
+	if err != nil {
+		fmt.Fprintf(&sb, "*felt layout inspection failed: %s*\n", err)
+		return sb.String()
+	}
+	legacyFlat := false
+	for _, issue := range structureIssues {
+		if issue.FiberID == "." {
+			legacyFlat = true
+			break
+		}
+	}
 
 	// Recency signal is the git-durable frontmatter anchor — updated-at when
 	// present, else created-at (RecencyAnchor) — never file mtime. felt is
@@ -246,7 +258,7 @@ func buildSessionContext() string {
 		sb.WriteString("\n")
 	}
 
-	if attention := buildSessionAttention(felts, time.Now()); attention != "" {
+	if attention := buildSessionAttention(felts, time.Now(), legacyFlat); attention != "" {
 		sb.WriteString(attention)
 		sb.WriteString("\n")
 	}
@@ -292,7 +304,7 @@ func hookEntryHead(f *felt.Felt, recency time.Time) string {
 	return recency.Local().Format("2006-01-02 15:04") + " — " + f.ID
 }
 
-func buildSessionAttention(felts []*felt.Felt, now time.Time) string {
+func buildSessionAttention(felts []*felt.Felt, now time.Time, legacyFlat bool) string {
 	childrenByParent := make(map[string]int)
 	for _, f := range felts {
 		parts := strings.Split(f.ID, "/")
@@ -337,6 +349,9 @@ func buildSessionAttention(felts []*felt.Felt, now time.Time) string {
 	sortFibersByCreatedAt(topLevelLeaves)
 
 	var notes []string
+	if legacyFlat {
+		notes = append(notes, fmt.Sprintf("Legacy flat fibers are present at .felt/ root; %s.", felt.LegacyFlatMigrationHint))
+	}
 	if len(topLevel) > sessionTopLevelLimit {
 		notes = append(notes, fmt.Sprintf(
 			"Top-level sprawl: %d root-level fibers (%d without children). Proactively nest leaf fibers under root buckets or create broader categories; do not leave obvious cleanup for the user. Start with: %s.",

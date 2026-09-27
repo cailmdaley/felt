@@ -31,6 +31,30 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 	}
 }
 
+func TestCheckCommandNamesLegacyFlatMigration(t *testing.T) {
+	dir, storage := newStore(t)
+	for _, name := range []string{"old-thing-1a2b3c4d", "other-9f8e7d6c"} {
+		content := "---\nname: " + name + "\n---\n"
+		if err := os.WriteFile(filepath.Join(storage.Root(), name+".md"), []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	output, err := runCommand(t, dir, "check")
+	if err == nil {
+		t.Fatalf("felt check succeeded for a legacy flat store:\n%s", output)
+	}
+	for _, want := range []string{
+		"multiple bare fiber files at .felt/ root",
+		"old-thing-1a2b3c4d, other-9f8e7d6c",
+		"run `felt migrate --dry-run`, then `felt migrate`",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("check output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
 	dir, storage := newStore(t)
 
