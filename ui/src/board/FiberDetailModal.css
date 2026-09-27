@@ -749,14 +749,16 @@
 
 /* ── The full-view area ───────────────────────────────────────────────────
    One file fills the column. Only the active tab's cell is shown; the rest
-   stay built-but-hidden so switching tabs keeps each file's scroll + zoom.
-   The cell is the pan surface: Cmd-scroll sets `zoom` on the viewer, which
-   grows its layout box, and the cell (overflow:auto) scrolls to pan. */
+   stay built, laid out and invisible so switching tabs keeps each file's
+   scroll + zoom. The cell is the pan surface: Cmd-scroll sets `zoom` on the
+   viewer, which grows its layout box, and the cell (overflow:auto) scrolls to
+   pan. */
 .kbn-detail-views {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
   background: var(--porch-rag, #FFFDF6);
 }
 .kbn-detail-view-cell {
@@ -768,7 +770,19 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(154, 123, 53, 0.35) transparent;
 }
-.kbn-detail-view-cell[hidden] { display: none; }
+/* An inactive tab keeps its full size, stacked under the active one and
+   invisible, rather than leaving layout. The browser's PDF viewer lives inside
+   its frame: under `display: none` the frame collapses to nothing, and WebKit's
+   viewer re-fits the document to that zero-size box — so returning to the tab
+   found the PDF at a different scale and position than it was left at. Laid
+   out at full size, the hidden viewer never learns it was hidden. */
+.kbn-detail-view-cell[hidden] {
+  display: block;
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 .kbn-detail-view-cell::-webkit-scrollbar { width: 9px; height: 9px; }
 .kbn-detail-view-cell::-webkit-scrollbar-thumb {
   background: rgba(154, 123, 53, 0.3);
@@ -998,6 +1012,13 @@
      would give the reader two bars for one column. */
   overflow: hidden;
 }
+/* A hidden linked card leaves layout entirely. It holds no PDF viewer to keep
+   alive (its files open in a reader window of their own), and laid out under
+   the active card it would count as on screen to the IntersectionObserver
+   that defers its attachment previews, loading and polling them unseen. */
+.kbn-detail-overlay.kbn-linkview-window .kbn-detail-view-cell[hidden] {
+  display: none;
+}
 /* A card mounted in a tab: no frame, no shadow, no corner — it IS the cell. */
 .kbn-detail-overlay.kbn-detail-tabbed {
   position: static;
@@ -1068,6 +1089,45 @@
   height: auto;
   border-radius: 4px;
   margin: 0.4em 0;
+}
+
+/* ── Files band ───────────────────────────────────────────────────────────
+   Attachments and the sent-files trail share one band, attachments first.
+   Alone, either group fills it. Together on a wide card they sit side by
+   side: the attachment cards set the band's height, and the trail wraps its
+   chips to their right and scrolls within that height — one row of cards is
+   tall enough for several rows of chips, so the pair costs one band instead of
+   two. A narrow card or any phone sheet (even a landscape one, wide enough
+   for the query) stacks them: the phone trail folds rather than scrolls. */
+.kbn-detail-files {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+@container kbn-detail (min-width: 520px) {
+  .kbn-detail-overlay:not(.kbn-detail-sheet) > .kbn-detail-files:has(.kbn-detail-attach):has(> .kbn-detail-sent:not(.kbn-detail-sent-empty)) {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .kbn-detail-overlay:not(.kbn-detail-sheet) > .kbn-detail-files:has(> .kbn-detail-sent:not(.kbn-detail-sent-empty)) > .kbn-detail-attach-host:has(.kbn-detail-attach) {
+    flex: 0 1 auto;
+    min-width: 180px;
+    display: flex;
+  }
+  .kbn-detail-overlay:not(.kbn-detail-sheet) > .kbn-detail-files:has(> .kbn-detail-sent:not(.kbn-detail-sent-empty)) .kbn-detail-attach {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .kbn-detail-overlay:not(.kbn-detail-sheet) > .kbn-detail-files:has(.kbn-detail-attach) > .kbn-detail-sent {
+    flex: 1 1 240px;
+    min-width: 220px;
+    /* Size containment: the trail contributes nothing to the band's height,
+       so the cards alone set it and the trail stretches to match, scrolling
+       whatever does not fit. */
+    contain: size;
+    max-height: none;
+    border-left: 1px solid rgba(154, 123, 53, 0.16);
+  }
 }
 
 /* ── Attachments strip ────────────────────────────────────────────────────
@@ -1617,10 +1677,9 @@
      flex children is the whole mechanism — no second copy of the actions,
      no sticky positioning, and the expanded cluster grows upward over the
      page from the edge it is anchored to. */
-  /* Attachments first: what the fiber IS, before what it has sent. */
+  /* The files band (attachments, then sent files) sits right under the header. */
   .kbn-detail-sheet .kbn-detail-header { order: 0; }
-  .kbn-detail-sheet .kbn-detail-attach-host { order: 1; }
-  .kbn-detail-sheet .kbn-detail-sent { order: 2; }
+  .kbn-detail-sheet .kbn-detail-files { order: 1; }
 
   /* The trail folds to its three most recent chips. The cap-and-scroll the
      desktop band uses is the wrong instrument on a phone — it puts a second

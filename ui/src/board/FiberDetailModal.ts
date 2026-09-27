@@ -760,20 +760,28 @@ export class FiberDetailModal {
     // window on first open). Empty trail → the launcher never reveals itself.
     const launcher = this.buildSentFilesLauncher(card)
 
-    // ── Attachments band ─────────────────────────────────────────────────────
-    // Mounted empty and ABOVE the sent-files trail, because an attachment is
+    // ── Files band: attachments, then the sent-files trail ──────────────────
+    // One band holds both groups. Attachments lead, because an attachment is
     // what the fiber is about and a sent file is a delivery it made along the
-    // way. The body read fills it (renderFiberBody → renderAttachments); a
-    // fiber with no `:::{embed}` never shows a band at all.
+    // way; the body read fills them (renderFiberBody → renderAttachments). A
+    // fiber rarely has more than a few attachments, and a row of their cards
+    // is tall enough for several rows of sent-file chips, so on a wide card
+    // the trail sits to the RIGHT of the cards and scrolls within their
+    // height rather than stacking a second band under them. The stylesheet
+    // owns that choice (a container query on the card's width), and either
+    // group alone takes the whole band.
     const attachHost = document.createElement('div')
     attachHost.className = 'kbn-detail-attach-host'
     this.attachHost = attachHost
+    const files = document.createElement('div')
+    files.className = 'kbn-detail-files'
+    files.append(attachHost, launcher)
 
     // ── Assemble: a single reading column ────────────────────────────────────
-    // The card panel is one flex column again — header, controls, attachments,
-    // sent files, body. The file viewer is a SEPARATE floating window
-    // (openViewerWindow), so the card keeps its own size and never grows.
-    overlay.append(header, ...(controls ? [controls] : []), attachHost, launcher, page)
+    // The card panel is one flex column — header, controls, files, body. The
+    // file viewer is a SEPARATE floating window (openViewerWindow), so the
+    // card keeps its own size and never grows.
+    overlay.append(header, ...(controls ? [controls] : []), files, page)
     if (this.host) {
       // A tab's card: no frame of its own, no z-order, no registration — it is
       // inside the panel's window, which carries all three for it.
@@ -1121,8 +1129,8 @@ export class FiberDetailModal {
    *
    * The strip is NOT the sent-files trail and never merges with it. An
    * attachment is evergreen and central to the fiber; a sent file is a one-off
-   * delivery. They wear the same card idiom so they read as one family, and
-   * they stay two groups because they are two things.
+   * delivery. They share one band and wear the same card idiom so they read
+   * as one family, and they stay two groups because they are two things.
    */
   private renderAttachments(attachments: readonly Attachment[], card: KanbanCard): void {
     this.disposeAttachmentPreviews()

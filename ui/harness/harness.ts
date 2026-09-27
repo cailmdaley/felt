@@ -24,6 +24,12 @@
  *
  * Query params drive the scenario:
  *   ?open=2        — pre-open the first 2 sent files into the accordion
+ *   ?pdfs=1        — open the trail's two PDFs as two reader tabs, to flip
+ *                    between them and check each keeps its page
+ *   ?fixtures=<url> — resolve EVERY mock file to `<url>/<basename>` instead of
+ *                    the built-in fixture map; for `?pdfs=1` the directory
+ *                    needs `paper-a.pdf` and `paper-b.pdf` (any multi-page
+ *                    PDFs). Same-named files share one fixture.
  *   ?close=1       — open 1 file, then close the viewer window via its ✕ → the
  *                    window must unmount cleanly and the card must KEEP the
  *                    half-and-half geometry it glided to (closing the viewer
@@ -64,6 +70,13 @@ while we iterate on the **two-column file viewer** offline.
 - A third, longer point so the prose column has enough text to show its measure
   and the manuscript typography at a real reading length.
 
+:::{embed} report.html
+:title: Standing report
+:::
+
+:::{embed} paper.pdf
+:::
+
 ### A subsection
 
 More prose. The point of the harness is faithful CSS, not faithful data.`
@@ -72,6 +85,11 @@ const MOCK_SENT_FILES = [
   { fullPath: '/home/ada/loom/.felt/loom/email/morning-post/report.html', basename: 'report.html', timestamp: Date.now() - 2 * 60_000, sessionId: '' },
   { fullPath: '/home/ada/loom/.felt/work/spectra/desi-bao-v1.png', basename: 'desi-bao-v1.png', timestamp: Date.now() - 48 * 60_000, sessionId: '' },
   { fullPath: '/home/ada/loom/.felt/ai-futures/portolan/standalone-kanban/report.html', basename: 'standalone-kanban-report.html', timestamp: Date.now() - 5 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/papers/paper-a.pdf', basename: 'paper-a.pdf', timestamp: Date.now() - 6 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/papers/paper-b.pdf', basename: 'paper-b.pdf', timestamp: Date.now() - 6 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/work/spectra/notes.md', basename: 'notes.md', timestamp: Date.now() - 7 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/work/spectra/residuals-by-redshift-bin.png', basename: 'residuals-by-redshift-bin.png', timestamp: Date.now() - 8 * 24 * 60 * 60_000, sessionId: '' },
+  { fullPath: '/home/ada/work/spectra/chains.csv', basename: 'chains.csv', timestamp: Date.now() - 9 * 24 * 60 * 60_000, sessionId: '' },
 ]
 
 // Map a mock daemon path → a real fixture file:// URL for the iframe/img.
@@ -126,6 +144,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   // Sent files — the daemon endpoint the panel reads.
   if (url.includes('/api/v1/sent-files')) return json({ files: MOCK_SENT_FILES })
+  // The PDF viewer's HEAD probe. The bytes themselves are a real navigation
+  // the fixture rewriter redirects, so the probe answers for exactly the paths
+  // that rewriter can serve — an unmapped file still shows its "couldn't load".
+  if (url.includes('/api/v1/file?') && init?.method === 'HEAD') {
+    return new Response(null, { status: fixtureFor(url) ? 200 : 404 })
+  }
   // Parent-picker index — and the live reader's bodyless `modified_at` probe,
   // which shares this shape. An empty `fibers` reads as "no answer", so the
   // harness never re-renders a body on a tick; the body above is stamped with a
@@ -139,13 +163,21 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 // ── Fixture rewriter: point real iframe/img navigations at file:// fixtures ──
 // The viewer builds `/api/v1/file?path=<ABS>` URLs; rewrite each to its fixture.
-function rewriteToFixture(el: HTMLImageElement | HTMLIFrameElement): void {
-  const src = el.getAttribute('src') ?? ''
+const FIXTURES_DIR = new URLSearchParams(location.search).get('fixtures')
+
+/** The fixture URL a daemon `/api/v1/file?path=…` URL stands for, if any. */
+function fixtureFor(src: string): string | undefined {
   const m = src.match(/[?&]path=([^&]+)/)
-  if (!m) return
+  if (!m) return undefined
   let abs: string
   try { abs = decodeURIComponent(m[1].replace(/%7E/g, '~')) } catch { abs = m[1] }
-  const fixture = FIXTURE_MAP[abs]
+  return FIXTURES_DIR
+    ? `${FIXTURES_DIR.replace(/\/$/, '')}/${abs.split('/').pop()}`
+    : FIXTURE_MAP[abs]
+}
+
+function rewriteToFixture(el: HTMLImageElement | HTMLIFrameElement): void {
+  const fixture = fixtureFor(el.getAttribute('src') ?? '')
   if (fixture && el.src !== fixture) el.src = fixture
 }
 const fixtureObserver = new MutationObserver((muts) => {
@@ -206,10 +238,18 @@ window.setTimeout(() => {
   const recency = params.get('recency') === '1'
   const reload = params.get('reload') === '1'
   const closeLast = params.get('close') === '1'
+  const pdfs = params.get('pdfs') === '1'
 
   if (KIND_PARAM) {
     // The Worker section lives inside the collapsed Actions disclosure.
     document.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')?.click()
+    return
+  }
+
+  if (pdfs) {
+    document.querySelectorAll<HTMLButtonElement>('.kbn-detail-sent-file').forEach((row) => {
+      if (row.dataset.fullPath?.endsWith('.pdf')) row.click()
+    })
     return
   }
 
