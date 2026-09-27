@@ -243,6 +243,68 @@ func TestBinShuttleChecksTCPOwnerBeforeCurl(t *testing.T) {
 	}
 }
 
+func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
+	script, err := os.ReadFile("../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(script), "daemon_call() {")
+	if start < 0 {
+		t.Fatal("daemon_call function not found")
+	}
+	end := strings.Index(string(script[start:]), "\n}")
+	if end < 0 {
+		t.Fatal("daemon_call function is unterminated")
+	}
+	definition := string(script[start : start+end+2])
+	generated, err := exec.Command("bash", "-c", "listen_prelude() { printf 'sock=; port=4000; base=http://127.0.0.1:4000; '; }\n"+definition+"\ndaemon_call '' /api/v1/version").Output()
+	if err != nil {
+		t.Fatalf("generate daemon call: %v", err)
+	}
+
+	binDir := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	felt := "#!/bin/sh\n[ \"$*\" = 'shuttle host check-owner' ] || exit 2\necho check-owner >> \"$CALLS\"\n[ \"${FAIL_OWNER:-0}\" = 0 ]\n"
+	curl := "#!/bin/sh\necho curl >> \"$CALLS\"\n"
+	for name, body := range map[string]string{"felt": felt, "curl": curl} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		failOwner bool
+		wantCalls string
+	}{
+		{"owner accepted", false, "check-owner\ncurl"},
+		{"owner refused", true, "check-owner"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("CALLS", calls)
+			if tc.failOwner {
+				t.Setenv("FAIL_OWNER", "1")
+			} else {
+				t.Setenv("FAIL_OWNER", "0")
+			}
+			_, err := exec.Command("bash", "-c", string(generated)).CombinedOutput()
+			if (err != nil) != tc.failOwner {
+				t.Fatalf("daemon call error = %v; want failure %v", err, tc.failOwner)
+			}
+			got, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(got)) != tc.wantCalls {
+				t.Fatalf("calls = %q, want %q", got, tc.wantCalls)
+			}
+			if err := os.WriteFile(calls, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
 	for _, settings := range []hostSettings{
 		{Class: "single-user", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}},
