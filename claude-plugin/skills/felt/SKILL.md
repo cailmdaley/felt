@@ -79,13 +79,13 @@ felt show <id> -d compact                   # outcome and metadata
 felt show <id> -d summary                   # + lede and links in both directions
 felt show <id> --citations                  # only what links here
 felt tree <id> -L 2                         # containment around a fiber
-felt nest <child> <parent>                  # move a subtree
+felt nest <child> <parent>                  # move a subtree; links it would break are rewritten
 felt check                                  # broken links and layout problems
 felt session                                # reprint the session-start context
 felt -C <dir> <verb>                        # run as if from <dir>
 ```
 
-Bodies, long outcomes and structured fields are edited in the file itself: Read, then Edit `.felt/<path>/<slug>.md`, and a hook stamps `updated-at` for you. (`felt edit -b` replaces the whole body, so it only suits one-liners.) An outcome longer than a sentence goes in a `|-` block scalar, since `-o "…"` mangles quotes and newlines. `felt nest` does not rewrite `[[wikilinks]]` that spell out the old path; fix them by hand.
+Bodies, long outcomes and structured fields are edited in the file itself: Read, then Edit `.felt/<path>/<slug>.md`, and a hook stamps `updated-at` for you. (`felt edit -b` replaces the whole body, so it only suits one-liners.) An outcome longer than a sentence goes in a `|-` block scalar, since `-o "…"` mangles quotes and newlines.
 
 ---
 
