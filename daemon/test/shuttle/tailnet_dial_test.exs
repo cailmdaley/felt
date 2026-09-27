@@ -150,6 +150,39 @@ defmodule Shuttle.TailnetDialTest do
     assert Process.alive?(Process.whereis(Shuttle.TailnetDial))
   end
 
+  test "the private HTTP authority omits an explicit default HTTPS port", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    Application.put_env(:shuttle, :tailnet_dial_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+
+    on_exit(fn ->
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    _remote = start_bridge(base, localapi, @host, 443)
+
+    assert {:ok, "tailnet-response"} =
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}:443/api/v1/version",
+               5_000
+             )
+
+    assert_receive {:dial_request, request}, 5_000
+    assert request =~ "Dial-Port: 443\r\n"
+    assert_receive {:https_request, [host_header]}, 5_000
+    assert host_header == @host
+  end
+
   test "a configured private dial fails closed while its bridge is unavailable", %{
     base: base,
     tls_port: tls_port

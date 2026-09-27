@@ -1484,9 +1484,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # The local leg is clear HTTP over the private Unix socket. TLS terminates in
   # the bridge, where it can carry the original hostname as SNI and verify it;
   # using https:// here would make httpc pass its local-family option to ssl.
-  # Rewriting only the wire scheme preserves the URL authority and Host header.
+  # httpc derives Host from the wire URL, so omit an explicit standard HTTPS
+  # port while retaining every non-default port in the authority.
   defp private_wire_url(url) do
-    url |> URI.parse() |> Map.put(:scheme, "http") |> URI.to_string()
+    uri = URI.parse(url)
+    uri = if uri.port == 443, do: %{uri | port: nil}, else: uri
+    uri |> Map.put(:scheme, "http") |> URI.to_string()
   end
 
   defp current_tailscale_socket do
