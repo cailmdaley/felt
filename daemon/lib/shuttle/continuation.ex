@@ -172,7 +172,7 @@ defmodule Shuttle.Continuation do
 
   @doc """
   Stamp the dispatch runtime fields into a fiber's `shuttle.runtime` block:
-  `{session_uuid, dispatched_at, run_id}`, by shelling `felt shuttle
+  `{session_uuid, dispatched_at, run_id, meeting}`, by shelling `felt shuttle
   mark-runtime` (felt's daemon-facing runtime-write channel) with
   `cd: felt_store`. `fiber_id` is the id scoped to `felt_store` — the same pair
   the dispatch read the fiber with — so felt resolves it from that store.
@@ -180,7 +180,8 @@ defmodule Shuttle.Continuation do
   `dispatched_at` is set to now (RFC3339 UTC) unless the caller supplied one.
   `session_uuid` is passed only when non-empty (a codex/pi claim with no scraped
   UUID still stamps `dispatched_at`, the run-window anchor). `run_id` is passed
-  only when present (a plain oneshot omits it).
+  only when present (a plain oneshot omits it), as is `meeting`, the launch id
+  of the meeting a claimed capture scribes.
 
   Best-effort: a non-zero `felt` exit is logged, not raised, so it can never
   block dispatch. A missing `felt_store`/`fiber_id` is a no-op (the fiber then
@@ -194,6 +195,7 @@ defmodule Shuttle.Continuation do
       [{"--dispatched-at", Map.get(fields, :dispatched_at) || iso_now()}]
       |> add_flag("--session", Map.get(fields, :session_uuid))
       |> add_flag("--run-id", Map.get(fields, :run_id))
+      |> add_flag("--meeting", Map.get(fields, :meeting))
 
     mark_runtime(runner, felt_store, fiber_id, flags)
   end

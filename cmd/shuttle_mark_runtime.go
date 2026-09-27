@@ -11,6 +11,7 @@ var (
 	markRuntimeSession      string
 	markRuntimeRunID        string
 	markRuntimeHandedOffAt  string
+	markRuntimeMeeting      string
 )
 
 // markRuntimeCmd is the daemon-facing runtime-stamp verb: it sets whichever
@@ -37,7 +38,7 @@ var markRuntimeCmd = &cobra.Command{
 	Use:   "mark-runtime <fiber>",
 	Short: "Stamp machine-managed shuttle.runtime fields (daemon-facing)",
 	Long: `Sets the shuttle.runtime continuation fields named by flags
-(--dispatched-at, --session, --run-id, --handed-off-at), nested under
+(--dispatched-at, --session, --run-id, --handed-off-at, --meeting), nested under
 shuttle.runtime, preserving config and any unspecified runtime key. An empty
 flag value removes that key. This is the daemon's channel for writing
 continuation state: the daemon shells it rather than editing the fiber file, so
@@ -56,6 +57,7 @@ touches tmux.`,
 			{"session", "session_uuid", markRuntimeSession},
 			{"run-id", "run_id", markRuntimeRunID},
 			{"handed-off-at", "handed_off_at", markRuntimeHandedOffAt},
+			{"meeting", "meeting", markRuntimeMeeting},
 		}
 
 		set := false
@@ -69,7 +71,7 @@ touches tmux.`,
 			set = true
 		}
 		if !set {
-			return fmt.Errorf("mark-runtime: pass at least one of --dispatched-at/--session/--run-id/--handed-off-at")
+			return fmt.Errorf("mark-runtime: pass at least one of --dispatched-at/--session/--run-id/--handed-off-at/--meeting")
 		}
 
 		if err := st.Write(f); err != nil {
@@ -85,5 +87,6 @@ func init() {
 	markRuntimeCmd.Flags().StringVar(&markRuntimeSession, "session", "", "Resumable session UUID → shuttle.runtime.session_uuid")
 	markRuntimeCmd.Flags().StringVar(&markRuntimeRunID, "run-id", "", "Standing-role run id → shuttle.runtime.run_id")
 	markRuntimeCmd.Flags().StringVar(&markRuntimeHandedOffAt, "handed-off-at", "", "RFC3339 UTC clean-exit instant → shuttle.runtime.handed_off_at")
+	markRuntimeCmd.Flags().StringVar(&markRuntimeMeeting, "meeting", "", "Launch id of the meeting this fiber scribes → shuttle.runtime.meeting")
 	shuttleCmd.AddCommand(markRuntimeCmd)
 }

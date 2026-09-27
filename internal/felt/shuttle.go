@@ -138,7 +138,7 @@ func (f *Felt) shuttleRuntimeNode() *yaml.Node {
 }
 
 // SetShuttleRuntimeField surgically sets a single machine-managed runtime key
-// (session_uuid / dispatched_at / handed_off_at / run_id) inside the fiber's
+// (session_uuid / dispatched_at / handed_off_at / run_id / meeting) inside the fiber's
 // shuttle.runtime sub-mapping, creating runtime: if absent. It is the nested
 // counterpart to SetShuttleField — one level deeper — and mutates only the one
 // runtime key, so every config sibling AND every other runtime key rides through

@@ -37,7 +37,7 @@ appears. The last line is `# ended HH:MM:SS`.
 
 The file may not exist for the first half-minute while hark loads its models,
 and the meeting will usually have begun before you arrive. Follow it with
-`hark follow <path>`. It prints the lines already written, then the rest in
+`felt shuttle follow <path>`. It prints the lines already written, then the rest in
 batches: a batch flushes at once when a line addresses you by name (or a
 mishearing of it), at 150 words, 15 seconds after its first line, or at
 `# ended`, after which the command exits. In Claude Code, run it under
@@ -54,7 +54,9 @@ stdout as it comes.
    once the first minutes make the subject clear. The role in step 2 is
    `scribe`: if the store has no `roles/scribe` charter, create one from this
    page. Its charter carries the user's conventions and outranks this page
-   where they differ.
+   where they differ. The supplied `Claim` carries the meeting's launch id:
+   post it as given, after the install, and the board seats the meeting on
+   your fiber's card, wherever you run.
 2. **Follow quietly, from the moment you've claimed.** The meeting is already
    running, so start watching before you polish the fiber. Keep notes in the
    fiber as the meeting runs: what was discussed, decisions, action items by

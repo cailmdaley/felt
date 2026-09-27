@@ -1749,10 +1749,35 @@ defmodule Shuttle.DispatcherTest do
 
     assert unix_prompt =~
              "Claim endpoint: http://localhost/api/v1/claim via `curl --unix-socket '/srv/shuttle/sock/daemon.sock'`"
+
     assert prompt =~ ~s("tmux_session":"capture-ab12cd34")
     assert prompt =~ ~s("session_uuid":"uuid-cap-1")
+    refute prompt =~ ~s("meeting")
     # Capture behavior is defined once in its reference.
     assert prompt =~ "references/capture.md"
+  end
+
+  test "a meeting capture's Claim body carries the meeting's launch id" do
+    prompt =
+      Dispatcher.render_capture_prompt("Meeting mode (call).",
+        session: "capture-ab12cd34",
+        felt_store: "/Users/x/loom",
+        listen: "tcp://127.0.0.1:4123",
+        agent_id: "pi-luna",
+        project_dir: "/home/x/loom",
+        host: "candide",
+        meeting: "launch-xyz"
+      )
+
+    [claim_line] = Regex.run(~r/^Claim: (.*)$/m, prompt, capture: :all_but_first)
+
+    assert %{
+             "fiber_id" => "<fiber id>",
+             "tmux_session" => "capture-ab12cd34",
+             "meeting" => "launch-xyz"
+           } = claim = Jason.decode!(claim_line)
+
+    refute Map.has_key?(claim, "session_uuid")
   end
 
   test "capture identity and install metadata roundtrip JSON on both surfaces" do

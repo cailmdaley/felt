@@ -110,6 +110,35 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 	}
 }
 
+// TestShuttleMarkRuntime_ClaimMeetingArgv locks in the claim-time write of a
+// meeting capture, which stamps the recording's launch id beside the session:
+//
+//	felt shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --meeting <launch>
+func TestShuttleMarkRuntime_ClaimMeetingArgv(t *testing.T) {
+	defer saveShuttleGlobals()()
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	withOwnHost(t, "candide")
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "candide",
+	}, nil)
+
+	out, err := runCommand(t, dir, "shuttle", "mark-runtime", "f",
+		"--dispatched-at", "2026-09-27T20:14:55Z",
+		"--session", "sess-abc-123",
+		"--meeting", "launch-xyz",
+	)
+	if err != nil {
+		t.Fatalf("mark-runtime with a meeting claim's argv must succeed: %v\n%s", err, out)
+	}
+
+	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
+	if got, _ := rt["meeting"].(string); got != "launch-xyz" {
+		t.Fatalf("shuttle.runtime.meeting = %q, want %q", got, "launch-xyz")
+	}
+}
+
 // TestShuttleMarkRuntime_AliasGuardWithoutOverride proves the negative: without
 // --host, ambient own-host resolution alone (via the host file, daemon still
 // down) drives the ownership guard, so a fiber owned by a DIFFERENT host is

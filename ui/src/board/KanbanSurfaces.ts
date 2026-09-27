@@ -1624,8 +1624,12 @@ export class KanbanSurfaceRenderer {
       root.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
       root.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
       const fiber = root.querySelector<HTMLElement>('.kbn-meeting-fiber')!
-      fiber.textContent = meeting.fiber ? `joins ${meeting.fiber}` : ''
-      fiber.title = meeting.fiber ? `This meeting joins the constitution ${meeting.fiber}` : ''
+      fiber.textContent = meeting.fiber ? `${meeting.joined ? 'joins' : 'notes in'} ${meeting.fiber}` : ''
+      fiber.title = !meeting.fiber
+        ? ''
+        : meeting.joined
+          ? `This meeting joins the constitution ${meeting.fiber}`
+          : `The scribe keeps this meeting's notes in ${meeting.fiber}`
       fiber.hidden = !meeting.fiber
     }
     const block = root.querySelector<HTMLElement>('.kbn-meeting')!

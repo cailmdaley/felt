@@ -23,7 +23,7 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   transcript: null,
   mirror_host: null,
   fiber: null,
-  scribe_session_uuid: null,
+  joined: false,
   tmux_session: 'hark-meeting',
   error: null,
   ...overrides,
@@ -149,16 +149,17 @@ describe('a meeting on its card', () => {
   const desk = () => ({
     drafts: [card('loom/draft')],
     inFlight: [card('loom/running'), card('loom/other')],
-    awaitingReview: [card('loom/review'), card('loom/scribe', { sessionUuid: 'scribe-uuid' })],
+    awaitingReview: [card('loom/review'), card('loom/scribe')],
   })
 
-  it('reads the tail and scribe session off the wire row', () => {
+  it('reads the tail and whether the fiber was joined off the wire row', () => {
     const row = parseMeetingStatus({
       available: true,
-      meeting: { ...meeting(), tail: ['14:03:12 S2  hello', 7], scribe_session_uuid: 'scribe-uuid' },
+      meeting: { ...meeting(), tail: ['14:03:12 S2  hello', 7], fiber: 'loom/scribe', joined: false },
     })?.meeting
     expect(row?.tail).toEqual(['14:03:12 S2  hello'])
-    expect(row?.scribe_session_uuid).toBe('scribe-uuid')
+    expect(row?.joined).toBe(false)
+    expect(parseMeetingStatus({ available: true, meeting: { ...meeting(), joined: true } })?.meeting?.joined).toBe(true)
     expect(parseMeetingStatus({ available: true, meeting: { state: 'live' } })?.meeting?.tail).toEqual([])
   })
 
@@ -174,15 +175,15 @@ describe('a meeting on its card', () => {
     expect(now.inFlight.map((c) => c.id)).toEqual(['loom/other', 'loom/running'])
   })
 
-  it('finds a capture scribe by its harness session once it has claimed', () => {
-    const { now, host } = seatMeetingHost(desk(), meeting({ scribe_session_uuid: 'scribe-uuid' }))
+  it('seats a capture scribe\'s card once the daemon has found its fiber', () => {
+    const { now, host } = seatMeetingHost(desk(), meeting({ fiber: 'loom/scribe', joined: false }))
     expect(host?.id).toBe('loom/scribe')
     expect(now.awaitingReview.map((c) => c.id)).toEqual(['loom/review'])
   })
 
   it('leaves the desk alone when the meeting has no card on it', () => {
     const columns = desk()
-    for (const row of [null, meeting(), meeting({ fiber: 'loom/elsewhere' }), meeting({ scribe_session_uuid: 'unclaimed' })]) {
+    for (const row of [null, meeting(), meeting({ fiber: 'loom/elsewhere' }), meeting({ fiber: 'loom/unseen', joined: false })]) {
       const seated = seatMeetingHost(columns, row)
       expect(seated.host).toBeNull()
       expect(seated.now).toBe(columns)

@@ -13,10 +13,11 @@ export interface MeetingRecord {
   tail: string[]
   transcript: string | null
   mirror_host: string | null
-  /** The constitution this meeting joined; `null` for a capture meeting. */
+  /** The fiber this meeting rides on: the constitution it joined, or the fiber
+   *  its capture scribe claimed, once the daemon has found it. */
   fiber: string | null
-  /** A capture meeting's scribe session, once its launch reported one. */
-  scribe_session_uuid: string | null
+  /** Whether `fiber` is a constitution the meeting joined. */
+  joined: boolean
   tmux_session: string | null
   error: string | null
 }
@@ -42,7 +43,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     transcript: nullableString('transcript'),
     mirror_host: nullableString('mirror_host'),
     fiber: nullableString('fiber'),
-    scribe_session_uuid: nullableString('scribe_session_uuid'),
+    joined: raw.joined === true,
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }
@@ -174,19 +175,13 @@ export function formatMeetingDuration(startedAt: string | null, nowMs = Date.now
 }
 
 /**
- * The card a meeting lives on: the constitution it joined, or the fiber its
- * capture scribe claimed (matched by the scribe's harness session). `null`
- * when neither is on the desk, and the meeting draws its own card.
+ * The card a meeting lives on: its fiber's, the constitution it joined or the
+ * fiber its capture scribe claimed. `null` when the meeting has no fiber yet or
+ * its card is not on the desk, and the meeting draws its own card.
  */
 export function meetingHostCard(meeting: MeetingRecord | null, cards: Iterable<KanbanCard>): KanbanCard | null {
-  if (!meeting) return null
-  const matches = meeting.fiber
-    ? (card: KanbanCard) => card.id === meeting.fiber
-    : meeting.scribe_session_uuid
-      ? (card: KanbanCard) => card.sessionUuid === meeting.scribe_session_uuid
-      : null
-  if (!matches) return null
-  for (const card of cards) if (matches(card)) return card
+  if (!meeting?.fiber) return null
+  for (const card of cards) if (card.id === meeting.fiber) return card
   return null
 }
 

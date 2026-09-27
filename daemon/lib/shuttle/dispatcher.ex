@@ -422,6 +422,8 @@ defmodule Shuttle.Dispatcher do
       `effort_levels` (same contract as `shuttle.effort` on a fiber)
     * `:chrome` — boolean; claude harness only (same as `shuttle.chrome`)
     * `:host` — owning host id to stamp into the shuttle block (optional)
+    * `:meeting` — the launch id of the meeting this capture scribes; it rides
+      in the supplied `Claim` body, so the claim stamps it on the fiber
 
   Returns `{:ok, %{session:, session_uuid:, agent_id:}}` or `{:error, reason}`.
   """
@@ -459,6 +461,7 @@ defmodule Shuttle.Dispatcher do
             agent_id: agent.id,
             project_dir: work_dir,
             host: host,
+            meeting: Keyword.get(opts, :meeting),
             effort: effort,
             chrome: chrome,
             headless: agent[:headless] == true
@@ -539,9 +542,12 @@ defmodule Shuttle.Dispatcher do
     if surface == "app", do: Keyword.fetch!(opts, :session_uuid)
 
     claim =
-      if Keyword.get(opts, :session_uuid),
-        do: Map.put(claim, :session_uuid, opts[:session_uuid]),
-        else: claim
+      Enum.reduce([:session_uuid, :meeting], claim, fn key, acc ->
+        case Keyword.get(opts, key) do
+          value when is_binary(value) and value != "" -> Map.put(acc, key, value)
+          _ -> acc
+        end
+      end)
 
     install = %{
       kind: "oneshot",

@@ -5303,7 +5303,10 @@ defmodule Shuttle.PollerTest do
       )
 
     assert {:ok, %{session: session}} =
-             Poller.claim_session(poller, id, "capture-abc123", session_uuid: "uuid-claim-1")
+             Poller.claim_session(poller, id, "capture-abc123",
+               session_uuid: "uuid-claim-1",
+               meeting: "launch-xyz"
+             )
 
     # Renamed to the canonical worker name — indistinguishable from a dispatch.
     assert session == "claim-me-01CLAIMUID-shuttle"
@@ -5322,6 +5325,14 @@ defmodule Shuttle.PollerTest do
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
                "--session" in args and "uuid-claim-1" in args
+           end)
+
+    # A meeting capture's claim stamps the meeting's launch id in the same
+    # write: that stamp is how the recording's daemon, on any host, finds the
+    # fiber its scribe filed.
+    assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               Enum.chunk_every(args, 2, 1, :discard) |> Enum.member?(["--meeting", "launch-xyz"])
            end)
 
     # …and the same fact structurally: a claim is the moment this host learns

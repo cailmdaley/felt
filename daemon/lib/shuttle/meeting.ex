@@ -31,11 +31,16 @@ defmodule Shuttle.Meeting do
 
   A meeting starts for a target: `{:capture, surface}` hands it to a new
   capture agent, `{:fiber, id}` joins it to an existing constitution. The
-  recording is the same either way; the target shapes the name, the message
-  its agent receives, and the `fiber` the live row names. A capture meeting
-  learns its scribe's harness session once the capture launches
-  (`bind_scribe/3`), which is how the board finds the scribe's card after it
-  claims a fiber.
+  recording is the same either way; the target shapes the name and the message
+  its agent receives.
+
+  The live row names the meeting's `fiber`, the card it rides on. A joined
+  meeting knows it from the start (`joined: true`). A capture meeting finds it:
+  the scribe's claim stamps the recording's launch id on the fiber it filed
+  (`shuttle.runtime.meeting`), and every read looks for that stamp across the
+  fibers this daemon serves and the remote feeds it polls. The scribe may run
+  on any host, reachable or not from its own side, and may rename its fiber;
+  the stamp travels with the fiber either way.
   """
 
   alias Shuttle.{Remote, Remotes, Runner, Tmux}
@@ -43,14 +48,13 @@ defmodule Shuttle.Meeting do
   @session "hark-meeting"
   @launch_option "@hark_launch"
   @fiber_option "@hark_fiber"
-  @scribe_option "@hark_scribe"
   @active_phases ~w(loading live stopping)
   @tail_bytes 16_384
   @tail_lines 30
   @command_timeout_ms 5_000
   @launch_wait_ms 5_000
   @launch_poll_ms 100
-  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}|\#{@hark_scribe}"
+  @tmux_status_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
 
   @type tmux_status ::
           :absent
@@ -58,8 +62,7 @@ defmodule Shuttle.Meeting do
               state: :alive | {:dead, integer()},
               session_created: integer(),
               launch: String.t() | nil,
-              fiber: String.t() | nil,
-              scribe: String.t() | nil
+              fiber: String.t() | nil
             }
   @type target :: {:capture, String.t() | nil} | {:fiber, String.t()}
   @type meeting :: map() | nil
@@ -101,44 +104,14 @@ defmodule Shuttle.Meeting do
   @doc """
   Start hark locally, mirrored toward `origin`, for `target`, and prepare the
   message its agent receives: the meeting header followed by the user's note.
-  `launch` identifies this recording for `bind_scribe/3`.
+  `launch` identifies this recording; a capture's scribe carries it into its
+  claim.
   """
   @spec start(map(), target(), String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, %{meeting: map(), prompt: String.t(), launch: String.t()}} | {:error, term()}
   def start(meeting, target, note, origin, opts \\ []) do
     with_meeting_lock(fn -> do_start(meeting, target, note, origin, opts) end)
   end
-
-  @doc """
-  Record the capture scribe's harness session on the recording `launch`, so
-  the live row can name it. A launch that is no longer current is left alone.
-  """
-  @spec bind_scribe(String.t(), String.t() | nil, keyword()) :: :ok
-  def bind_scribe(launch, session_uuid, opts \\ [])
-
-  def bind_scribe(launch, session_uuid, opts)
-      when is_binary(launch) and is_binary(session_uuid) and session_uuid != "" do
-    with_meeting_lock(fn ->
-      case tmux_status(opts) do
-        {:ok, %{launch: ^launch}} ->
-          _ =
-            run(opts, "tmux", [
-              "set-option",
-              "-t",
-              "=" <> @session <> ":",
-              @scribe_option,
-              session_uuid
-            ])
-
-          :ok
-
-        _ ->
-          :ok
-      end
-    end)
-  end
-
-  def bind_scribe(_launch, _session_uuid, _opts), do: :ok
 
   @doc "Stop the local meeting once, or dismiss a dead tmux pane."
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
@@ -232,7 +205,7 @@ defmodule Shuttle.Meeting do
           {:ok, tmux_status()} | {:error, term()}
   def parse_tmux_result(output, 0) do
     case output |> String.trim() |> String.split("|", trim: false) do
-      [dead, exit_status, created, launch, fiber, scribe] ->
+      [dead, exit_status, created, launch, fiber] ->
         with {:ok, session_created} <- parse_integer(created),
              {:ok, state} <- parse_dead(dead, exit_status) do
           {:ok,
@@ -240,8 +213,7 @@ defmodule Shuttle.Meeting do
              state: state,
              session_created: session_created,
              launch: blank_to_nil(launch),
-             fiber: blank_to_nil(fiber),
-             scribe: blank_to_nil(scribe)
+             fiber: blank_to_nil(fiber)
            }}
         else
           _ -> {:error, {:tmux, "invalid pane status: #{String.trim(output)}"}}
@@ -469,7 +441,7 @@ defmodule Shuttle.Meeting do
       transcript: paths.local_transcript,
       mirror_host: paths.mirror_host,
       fiber: fiber,
-      scribe_session_uuid: nil,
+      joined: not is_nil(fiber),
       tmux_session: @session,
       error: nil
     }
@@ -510,7 +482,9 @@ defmodule Shuttle.Meeting do
       with :ok <- if(reap?, do: with_meeting_lock(fn -> kill_launch(tmux, opts) end), else: :ok) do
         meeting =
           if is_map(meeting) do
-            Map.put(meeting, :tail, transcript_tail(meeting.transcript))
+            meeting
+            |> Map.put(:tail, transcript_tail(meeting.transcript))
+            |> find_scribe_fiber(launch_from(usable_meeting) || tmux_launch(tmux), opts)
           else
             nil
           end
@@ -728,6 +702,7 @@ defmodule Shuttle.Meeting do
   defp meeting_row(data, state, tmux, error \\ nil) do
     data = if is_map(data), do: data, else: %{}
     tmux_exists? = tmux != :absent
+    joined_fiber = if tmux_exists?, do: Map.get(tmux, :fiber), else: nil
 
     %{
       state: state,
@@ -736,11 +711,53 @@ defmodule Shuttle.Meeting do
       tail: [],
       transcript: data["transcript"],
       mirror_host: mirror_host(data["mirror"]),
-      fiber: if(tmux_exists?, do: Map.get(tmux, :fiber), else: nil),
-      scribe_session_uuid: if(tmux_exists?, do: Map.get(tmux, :scribe), else: nil),
+      fiber: joined_fiber,
+      joined: not is_nil(joined_fiber),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]
     }
+  end
+
+  defp tmux_launch(%{launch: launch}), do: launch
+  defp tmux_launch(_tmux), do: nil
+
+  # A capture meeting's fiber is whichever fiber carries its launch id in
+  # `shuttle.runtime.meeting`, the stamp its scribe's claim wrote.
+  defp find_scribe_fiber(%{fiber: nil} = meeting, launch, opts)
+       when is_binary(launch) and launch != "" do
+    fibers =
+      Keyword.get(opts, :fibers, Application.get_env(:shuttle, :meeting_fibers, &served_fibers/0))
+
+    fiber =
+      Enum.find_value(fibers.(), fn fiber ->
+        if is_map(fiber) and get_in(fiber, ["shuttle", "runtime", "meeting"]) == launch,
+          do: fiber["slug"] || fiber["id"]
+      end)
+
+    %{meeting | fiber: fiber}
+  end
+
+  defp find_scribe_fiber(meeting, _launch, _opts), do: meeting
+
+  @doc false
+  @spec served_fibers() :: [map()]
+  def served_fibers do
+    local =
+      try do
+        case Shuttle.Poller.cached_fiber_documents(
+               felt_stores: Shuttle.FeltStores.configured_hosts()
+             ) do
+          {:ok, %{fibers: entries}} -> entries
+          _ -> []
+        end
+      catch
+        :exit, _ -> []
+      end
+
+    remote =
+      Enum.flat_map(Shuttle.RemoteFiberRegistry.feeds(), fn {_name, feed} -> feed.fibers end)
+
+    Enum.map(local ++ remote, &(Map.get(&1, :fiber) || Map.get(&1, "fiber")))
   end
 
   defp first_error(error, _fallback) when is_binary(error) and error != "", do: error

@@ -447,7 +447,9 @@ defmodule Shuttle.Poller do
 
   Options: `:agent` (optional execution agent asserted by the claimant; the
   fiber's shuttle.agent remains the display fallback),
-  `:session_uuid` (the harness transcript UUID, for the dispatch marker).
+  `:session_uuid` (the harness transcript UUID, for the dispatch marker),
+  `:meeting` (the launch id of the meeting a capture scribes, stamped as
+  `shuttle.runtime.meeting` so the meeting's daemon can find the fiber).
   """
   @spec claim_session(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def claim_session(fiber_id, tmux_session, opts \\ []),
@@ -515,7 +517,8 @@ defmodule Shuttle.Poller do
   pre-existing fiber) in `work_dir`. See `Shuttle.Dispatcher.capture/2`.
 
   Options: `:agent`, `:work_dir` (required), `:felt_store` (defaults to the
-  daemon's primary store).
+  daemon's primary store), `:meeting` (the launch id of the meeting the
+  capture scribes).
   """
   @spec capture(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def capture(yap, opts \\ []), do: capture(__MODULE__, yap, opts)
@@ -1054,7 +1057,8 @@ defmodule Shuttle.Poller do
             effort: Keyword.get(opts, :effort),
             chrome: Keyword.get(opts, :chrome) == true,
             surface: Keyword.get(opts, :surface),
-            host: state.own_host_id
+            host: state.own_host_id,
+            meeting: Keyword.get(opts, :meeting)
           )
 
         {:reply, result, state}
@@ -2971,7 +2975,7 @@ defmodule Shuttle.Poller do
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->
-        log_worker_claim(state, fiber_id, Keyword.get(opts, :session_uuid))
+        log_worker_claim(state, fiber_id, opts)
 
         # The structural half: the claim is the moment this host learns that
         # this externally-spawned session belongs to this fiber. `record/1`
@@ -3010,14 +3014,19 @@ defmodule Shuttle.Poller do
   # path: `host_for_fiber` (the same owning-store the poll enumerated this fiber
   # from), falling back to the primary configured store. A claim with no captured
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
-  # handoff can later be compared against it.
-  defp log_worker_claim(%State{} = state, fiber_id, session_uuid) do
+  # handoff can later be compared against it. A meeting capture's claim also
+  # stamps the meeting's launch id, which is how the meeting finds its fiber.
+  defp log_worker_claim(%State{} = state, fiber_id, opts) do
     felt_store = owning_store(fiber_id, state)
 
     Shuttle.Continuation.write_dispatch(state.runner, felt_store, fiber_id, %{
-      session_uuid: if(is_binary(session_uuid) and session_uuid != "", do: session_uuid)
+      session_uuid: present_string(Keyword.get(opts, :session_uuid)),
+      meeting: present_string(Keyword.get(opts, :meeting))
     })
   end
+
+  defp present_string(value) when is_binary(value) and value != "", do: value
+  defp present_string(_value), do: nil
 
   # Records (or refreshes the attempt count on) a dispatch failure. The map
   # entry is surfaced in `build_snapshot/1` under `blocked` so the kanban can

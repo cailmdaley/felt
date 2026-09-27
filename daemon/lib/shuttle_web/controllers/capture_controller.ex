@@ -9,9 +9,11 @@ defmodule ShuttleWeb.CaptureController do
   A meeting capture starts hark on the daemon receiving the request before the
   ordinary capture is routed to the project owner (`Shuttle.Meeting.start/5`
   with a capture target). The meeting instructions travel in the capture
-  prompt; the owner does not need meeting-specific code. Once the scribe
-  launches, its harness session (when the owner reports one) is bound to the
-  recording, so the live meeting row can name the scribe.
+  prompt, and the recording's launch id travels as `meeting_launch`: the owner
+  puts it in the scribe's `Claim` body, so the claim stamps it on the fiber
+  the scribe files (`shuttle.runtime.meeting`). The meeting's daemon finds its
+  fiber from that stamp (`Shuttle.Meeting`), wherever the owner is and whether
+  or not the owner can reach back.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -39,8 +41,9 @@ defmodule ShuttleWeb.CaptureController do
               |> Map.delete("meeting")
               |> Map.put("prompt", prompt)
               |> Map.put("surface", "cli")
+              |> Map.put("meeting_launch", launch)
 
-            conn |> assign(:meeting_launch, launch) |> route_capture(params, row)
+            route_capture(conn, params, row)
 
           {:error, reason} ->
             meeting_error(conn, reason)
@@ -84,7 +87,8 @@ defmodule ShuttleWeb.CaptureController do
                agent: Map.get(params, "agent"),
                effort: Map.get(params, "effort"),
                chrome: Map.get(params, "chrome") == true,
-               surface: Map.get(params, "surface")
+               surface: Map.get(params, "surface"),
+               meeting: Map.get(params, "meeting_launch")
              ) do
           {:ok, %{session: session, agent_id: agent_id} = launched} ->
             capture_json(
@@ -142,9 +146,7 @@ defmodule ShuttleWeb.CaptureController do
     do: relay_json(conn, result, &capture_failed/2)
 
   defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
-    payload = decode_capture_body(body)
-    if status < 300, do: bind_scribe(conn, payload["session_uuid"])
-    payload = Map.put(payload, "meeting", meeting_row)
+    payload = decode_capture_body(body) |> Map.put("meeting", meeting_row)
     payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
     conn |> put_status(status) |> json(payload)
   end
@@ -168,19 +170,13 @@ defmodule ShuttleWeb.CaptureController do
 
   defp capture_json(conn, payload, nil), do: json(conn, payload)
 
-  defp capture_json(conn, payload, row) do
-    bind_scribe(conn, payload[:session_uuid])
-    json(conn, Map.put(payload, "meeting", row))
-  end
+  defp capture_json(conn, payload, row), do: json(conn, Map.put(payload, "meeting", row))
 
   # A terminal capture's harness session, when the launch pre-assigned one.
   defp put_session_uuid(payload, uuid) when is_binary(uuid),
     do: Map.put_new(payload, :session_uuid, uuid)
 
   defp put_session_uuid(payload, _uuid), do: payload
-
-  defp bind_scribe(conn, session_uuid),
-    do: Meeting.bind_scribe(conn.assigns[:meeting_launch], session_uuid)
 
   defp capture_error(conn, status, payload, nil),
     do: conn |> put_status(status) |> json(payload)
