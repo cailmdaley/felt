@@ -38,6 +38,7 @@ defmodule Shuttle.WorkerProcess do
   @script_prefix "shuttle-run-"
   @scan_timeout_ms 10_000
   @warn_every_ms 600_000
+  @session_flags ["--resume", "--session-id", "--session", "resume"]
 
   @doc """
   A fresh run-script path for tmux session `session`:
@@ -112,15 +113,23 @@ defmodule Shuttle.WorkerProcess do
   end
 
   @doc """
-  The process whose argv carries harness session `uuid` as a whole token
-  (`<uuid>` or `--flag=<uuid>`), or nil.
+  The process whose argv opens harness session `uuid`, or nil: the uuid as the
+  value of a harness session flag (`--resume <uuid>`, `--session-id <uuid>`,
+  `--session <uuid>`, `resume <uuid>`, or `--flag=<uuid>`). A uuid that merely
+  appears as a word — inside a prompt argument naming a previous session, or
+  a shell command line — does not hold the transcript.
   """
   @spec holder([proc()], String.t()) :: proc() | nil
   def holder(procs, uuid) when is_binary(uuid) and uuid != "" do
-    Enum.find(procs, fn %{args: args} ->
-      args
-      |> String.split()
-      |> Enum.any?(&(&1 == uuid or String.ends_with?(&1, "=" <> uuid)))
+    Enum.find(procs, fn %{args: args} = proc ->
+      not tmux?(proc) and
+        args
+        |> String.split()
+        |> Enum.chunk_every(2, 1, [nil])
+        |> Enum.any?(fn
+          [flag, ^uuid] when flag in @session_flags -> true
+          [token, _] -> String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
+        end)
     end)
   end
 
@@ -176,11 +185,17 @@ defmodule Shuttle.WorkerProcess do
   defp climb(_by_pid, _proc, 0), do: nil
 
   defp climb(by_pid, proc, depth) do
-    command = proc.args |> String.split() |> List.first("") |> Path.basename()
-
-    if command == "tmux" or String.starts_with?(command, "tmux:"),
+    if tmux?(proc),
       do: proc.pid,
       else: climb(by_pid, Map.get(by_pid, proc.ppid), depth - 1)
+  end
+
+  # A tmux process — client or server. A server forked by `new-session` keeps
+  # that client's argv (Linux and macOS alike), run-script path included, for
+  # its whole life; it is never itself a worker.
+  defp tmux?(%{args: args}) do
+    command = args |> String.split() |> List.first("") |> Path.basename()
+    command == "tmux" or String.starts_with?(command, "tmux:")
   end
 
   @doc """
@@ -217,7 +232,11 @@ defmodule Shuttle.WorkerProcess do
   end
 
   # The session named by a `…/shuttle-run-<session>.<n>.sh` token in argv.
-  defp script_session(%{args: args}) do
+  defp script_session(%{args: args} = proc) do
+    if tmux?(proc), do: nil, else: script_session_in(args)
+  end
+
+  defp script_session_in(args) do
     case Regex.run(~r{(?:^|[\s/])shuttle-run-([^\s/.]+)\.\d+\.sh(?:\s|$)}, args) do
       [_, session] -> session
       _ -> nil

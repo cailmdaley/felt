@@ -16,6 +16,8 @@ defmodule Shuttle.WorkerProcessTest do
     900   700 bash -l /var/folders/T/shuttle-run-resume-#{@uuid}.7.sh
     950     1 bash -l /var/folders/T/shuttle-run-9859.sh
     951   950 claude --session-id=aaaaaaaa-0000-0000-0000-000000000000
+    960     1 /usr/bin/tmux new-session -d -s dead-01XYZ-shuttle bash -l /tmp/shuttle-run-dead-01XYZ-shuttle.3.sh
+    970   700 pi --model x Previous session: bbbbbbbb-0000-0000-0000-000000000000 (claude)
   """
 
   defp procs, do: WorkerProcess.parse(@table)
@@ -35,10 +37,17 @@ defmodule Shuttle.WorkerProcessTest do
     assert WorkerProcess.sessions(procs()) == ["leaf-01ABC-shuttle"]
   end
 
+  test "a tmux server keeping its forking client's argv is not a live worker" do
+    assert WorkerProcess.session_process(procs(), "dead-01XYZ-shuttle") == nil
+    refute "dead-01XYZ-shuttle" in WorkerProcess.sessions(procs())
+  end
+
   test "holder matches the uuid as a whole argv token, or a --flag=<uuid> token" do
     assert %{pid: 813} = WorkerProcess.holder(procs(), @uuid)
     assert %{pid: 951} = WorkerProcess.holder(procs(), "aaaaaaaa-0000-0000-0000-000000000000")
     assert WorkerProcess.holder(procs(), "11111111-2222") == nil
+    # A uuid named inside a prompt argument does not hold the transcript.
+    assert WorkerProcess.holder(procs(), "bbbbbbbb-0000-0000-0000-000000000000") == nil
   end
 
   test "tmux_server climbs the ppid chain to the tmux process" do
