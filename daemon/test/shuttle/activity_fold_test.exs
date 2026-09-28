@@ -41,11 +41,13 @@ defmodule Shuttle.ActivityFoldTest do
       ev(@a, "notification", 10 * @s),
       ev(@a, "notification", 70 * @s),
       ev(@a, "user_prompt_submit", 2 * @m),
-      # A: a tool call whose interior meets a real event already tallied
-      # (the machine prompt at 3m) and one tallied after the fill (6m).
+      # A: a tool call whose interior meets real events already tallied (two
+      # at 3m, so a fill that overwrote them would show) and one tallied after
+      # the fill (6m).
       ev(@a, "pre_tool_use", 2 * @m + 5 * @s, sid("s1")),
       ev(@b, "notification", 2 * @m + 30 * @s),
       ev(@a, "user_prompt_submit", 3 * @m, %{"machine" => true}),
+      ev(@a, "subagent_stop", 3 * @m + 20 * @s),
       "not json at all",
       ev(@b, "stop", 4 * @m),
       ev(@a, "post_tool_use", 9 * @m, sid("s1")),
@@ -139,7 +141,7 @@ defmodule Shuttle.ActivityFoldTest do
     assert %{n: 1} = at.(0, @a, "notify")
     refute at.(@m, @a, "notify")
     # Real-then-fill keeps the real count; fill-then-real replaces the fill.
-    assert %{n: 1} = at.(3 * @m, @a, "agent")
+    assert %{n: 2} = at.(3 * @m, @a, "agent")
     assert %{n: 1} = at.(6 * @m, @a, "agent")
     assert %{n: 1} = at.(8 * @m, @a, "agent")
     # The cap: 21..49 filled, 50..79 not.
