@@ -247,7 +247,7 @@ defmodule Shuttle.SessionLinkTest do
     end
 
     test "no transcript on this host is transcript_missing, with no link" do
-      assert %{availability: :transcript_missing, url: nil, desktop_link: nil, harness: nil} =
+      assert %{availability: :transcript_missing, url: nil, harness: nil} =
                SessionLink.resolve("00000000-0000-0000-0000-000000000000", root: default_tree())
     end
   end

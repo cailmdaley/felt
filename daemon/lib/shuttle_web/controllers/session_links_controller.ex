@@ -1,14 +1,15 @@
 defmodule ShuttleWeb.SessionLinksController do
   @moduledoc """
-  Where past sessions open: `GET /api/v1/sessions/links?sessions=<uuid>,…&host=<name>`.
+  What the host that ran a batch of sessions knows about them:
+  `GET /api/v1/sessions/links?sessions=<uuid>,…&host=<name>` — whether each
+  transcript is there, its harness, and a bridged Claude session's claude.ai URL.
 
       {"host": "hub-mac",
        "links": [{"session": "0883ade1-…", "availability": "available_local",
                   "harness": "claude-code",
-                  "url": "https://claude.ai/code/session_01…", "desktop_link": null},
+                  "url": "https://claude.ai/code/session_01…"},
                  {"session": "01a0b39f-…", "availability": "available_local",
-                  "harness": "codex", "url": null,
-                  "desktop_link": "codex://threads/01a0b39f-…"}]}
+                  "harness": "codex", "url": null}]}
 
   One entry per requested session, in request order, resolved by
   `Shuttle.SessionLink.resolve/2` on the host that ran them — a transcript
@@ -17,7 +18,7 @@ defmodule ShuttleWeb.SessionLinksController do
   host-local reads. A remote that cannot be reached answers every session
   `host_unreachable` with no link; a link is never inferred from the ledger,
   and a remote's answer is re-checked here — only the sessions asked for, and
-  only a `https://claude.ai/` URL or the thread route for that very session.
+  only a `https://claude.ai/` URL.
 
   A sibling of `/api/v1/transcript` rather than a field on its receipt: the
   receipt hashes the whole transcript, which is the wrong price for a list of
@@ -87,7 +88,6 @@ defmodule ShuttleWeb.SessionLinksController do
 
   defp relayed_entry(session, entry) do
     url = entry["url"]
-    desktop = entry["desktop_link"]
     availability = entry["availability"]
     harness = entry["harness"]
 
@@ -99,8 +99,7 @@ defmodule ShuttleWeb.SessionLinksController do
           else: "transcript_missing"
         ),
       harness: if(is_binary(harness), do: harness),
-      url: if(SessionLink.claude_url?(url), do: url),
-      desktop_link: if(desktop == SessionLink.desktop_url(session), do: desktop)
+      url: if(SessionLink.claude_url?(url), do: url)
     }
   end
 
@@ -112,8 +111,7 @@ defmodule ShuttleWeb.SessionLinksController do
       session: session,
       availability: "host_unreachable",
       harness: nil,
-      url: nil,
-      desktop_link: nil
+      url: nil
     }
   end
 

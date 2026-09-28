@@ -44,8 +44,7 @@ defmodule Shuttle.SessionLink do
           session: String.t(),
           availability: :available_local | :transcript_missing,
           harness: String.t() | nil,
-          url: String.t() | nil,
-          desktop_link: String.t() | nil
+          url: String.t() | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -62,13 +61,9 @@ defmodule Shuttle.SessionLink do
   end
 
   @doc """
-  Where `session` opens, from its transcript on this host.
-
-    * a Claude Code transcript → `url`, its last bridge URL, when it has one;
-    * a Codex rollout → `desktop_link`, the `codex://threads/<id>` route the
-      Codex app on THIS host answers (the rollout being here is the evidence
-      that this host's Codex has the thread);
-    * a pi transcript, or no transcript → neither.
+  What this host knows about `session`: whether its transcript is here
+  (`availability`), which harness wrote it, and — for a Claude Code transcript
+  that was bridged — `url`, its last claude.ai bridge URL.
 
   Nothing is guessed: a missing transcript is `:transcript_missing` with no
   link, whatever the ledger says the harness was.
@@ -112,8 +107,7 @@ defmodule Shuttle.SessionLink do
       session: session,
       availability: :transcript_missing,
       harness: nil,
-      url: nil,
-      desktop_link: nil
+      url: nil
     }
   end
 
@@ -124,8 +118,7 @@ defmodule Shuttle.SessionLink do
       session: session,
       availability: :available_local,
       harness: harness,
-      url: if(harness == "claude-code", do: last_url(path)),
-      desktop_link: if(harness == "codex", do: desktop_url(session))
+      url: if(harness == "claude-code", do: last_url(path))
     }
   end
 

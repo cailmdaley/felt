@@ -82,19 +82,18 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
     assert %{
              "session" => @bridged,
              "harness" => "claude-code",
-             "url" => @url,
-             "desktop_link" => nil
+             "url" => @url
            } =
              bridged
 
-    assert %{"harness" => "claude-code", "url" => nil, "desktop_link" => nil} = unbridged
+    assert %{"harness" => "claude-code", "url" => nil} = unbridged
 
-    assert %{"harness" => "codex", "url" => nil, "desktop_link" => "codex://threads/" <> @codex} =
-             codex
+    assert %{"harness" => "codex", "url" => nil} = codex
+    refute Map.has_key?(codex, "desktop_link")
 
-    assert %{"harness" => "pi", "url" => nil, "desktop_link" => nil} = pi
+    assert %{"harness" => "pi", "url" => nil} = pi
 
-    assert %{"availability" => "transcript_missing", "url" => nil, "desktop_link" => nil} =
+    assert %{"availability" => "transcript_missing", "url" => nil} =
              missing
 
     assert bridged["availability"] == "available_local"
@@ -143,8 +142,7 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
           "session" => @bridged,
           "availability" => "available_local",
           "harness" => "claude-code",
-          "url" => @url,
-          "desktop_link" => nil
+          "url" => @url
         }
       ]
 
@@ -174,7 +172,8 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
                "session" => @codex,
                "availability" => "available_local",
                "harness" => "codex",
-               "desktop_link" => "codex://threads/" <> @pi
+               "url" => "https://claude.ai/code/session_01OTHER",
+               "extra" => "dropped"
              },
              %{
                "session" => @missing,
@@ -189,7 +188,8 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
 
       assert [bridged, codex, pi] = body["links"]
       assert %{"session" => @bridged, "url" => nil} = bridged
-      assert %{"session" => @codex, "desktop_link" => nil} = codex
+      # Relayed entries carry exactly the route's fields.
+      assert Map.keys(codex) |> Enum.sort() == ["availability", "harness", "session", "url"]
       # Asked for but not answered: no link, and said so.
       assert %{"session" => @pi, "availability" => "host_unreachable", "url" => nil} = pi
     end
@@ -201,7 +201,7 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
                links(%{"sessions" => "#{@bridged},#{@codex}", "host" => "hub-a"})
 
       for entry <- [a, b] do
-        assert %{"availability" => "host_unreachable", "url" => nil, "desktop_link" => nil} =
+        assert %{"availability" => "host_unreachable", "url" => nil} =
                  entry
       end
     end
