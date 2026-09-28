@@ -577,6 +577,15 @@ back to the platform default (`~/Library/Logs/shuttle.log`,
 `~/.shuttle/shuttle.log`), which is right for a default install and wrong for
 any `--log` override. The tmux respawn loop rides that fallback by design.
 
+### Log level
+
+The daemon logs at `info`. Set `SHUTTLE_LOG_LEVEL` in its environment to
+change that at boot — `debug` adds a line per request and per poll, which is
+what you want while chasing load and not otherwise, since it grows the log by
+hundreds of megabytes a day. Any Elixir `Logger` level is accepted (`debug`,
+`info`, `notice`, `warning`, `error`, …, plus `all` and `none`); an unknown
+value is ignored with a warning in the log.
+
 ### Linux without systemd (tmux respawn loop)
 
 Plenty of Linux hosts have no systemd user session — an HPC login node typically

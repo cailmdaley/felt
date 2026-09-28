@@ -111,6 +111,7 @@ defmodule Shuttle.Application do
     # Resolve the endpoint's binding, server flag, and signing key here, at
     # runtime.
     configure_endpoint()
+    configure_log_level()
 
     # The time zone database, set again at runtime. In the escript era this
     # call was the only thing setting it — escript boot loaded no compile-time
@@ -169,6 +170,30 @@ defmodule Shuttle.Application do
     case Application.get_env(:shuttle, :listen) do
       "unix://" <> path when server? -> Shuttle.Host.restrict_bound_socket!(path)
       _ -> :ok
+    end
+  end
+
+  # The log level, from `SHUTTLE_LOG_LEVEL` when it is set. The release bakes
+  # `level: :info` into its sys.config (config/prod.exs), so this is the only
+  # way to make a production daemon log its requests without rebuilding. An
+  # unknown value keeps the configured level and says so.
+  @doc false
+  def configure_log_level(value \\ System.get_env("SHUTTLE_LOG_LEVEL")) do
+    wanted = value |> to_string() |> String.trim() |> String.downcase()
+    levels = Logger.levels() ++ [:all, :none]
+
+    case Enum.find(levels, &(Atom.to_string(&1) == wanted)) do
+      nil when wanted == "" ->
+        :ok
+
+      nil ->
+        Logger.warning(
+          "SHUTTLE_LOG_LEVEL=#{inspect(value)} is not a log level " <>
+            "(#{Enum.map_join(levels, ", ", &Atom.to_string/1)}); keeping #{Logger.level()}"
+        )
+
+      level ->
+        Logger.configure(level: level)
     end
   end
 
