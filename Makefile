@@ -137,8 +137,11 @@ endif
 	@# daemon holds NIF .so files open under bin/rel/lib; on an NFS home that
 	@# turns every unlink into a .nfs* silly-rename stub, and `--overwrite`'s
 	@# rm_rf of the old lib dirs dies with "file already exists". The old tree
-	@# lives on as bin/rel.prev (the running BEAM keeps its inodes) until the
-	@# next build, by which time the cycle has retired it.
+	@# lives on as bin/rel.prev (the running BEAM keeps its inodes). When a
+	@# daemon still holds bin/rel.prev at the next build — two builds with no
+	@# cycle between them — its .nfs* stubs make the tree unremovable, so it is
+	@# set aside as bin/rel.retained-<epoch> and swept by a later build once
+	@# nothing holds it.
 	rm -rf bin/rel.next
 	cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel.next
 	@if [ -f ui/dist/index.html ]; then \
@@ -148,7 +151,10 @@ endif
 	    cp -R ui/dist "$$app/priv/ui/"; \
 	  done; \
 	fi
-	rm -rf bin/rel.prev
+	@for d in bin/rel.retained-*; do [ -d "$$d" ] && rm -rf "$$d" 2>/dev/null; done; true
+	@if [ -d bin/rel.prev ] && ! rm -rf bin/rel.prev 2>/dev/null; then \
+	  mv bin/rel.prev "bin/rel.retained-$$(date +%s)"; \
+	fi
 	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
 	mv bin/rel.next bin/rel
 
