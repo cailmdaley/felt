@@ -215,5 +215,10 @@ defmodule Shuttle.ActivityFoldTest do
     assert Activity.slice(acc, @t0 + 2 * @m, @t0 + 2 * @m) == []
     assert acc |> Activity.slice(@t0 + 7 * @m, @t0 + 7 * @m) |> length() == 1
     assert Activity.drop_before(acc, nil) == acc
+
+    # Identities that only the dropped minutes referred to are forgotten.
+    b_only = path |> Activity.fold_stream() |> Activity.fold_lines([ev(@b, "stop", 0)])
+    assert map_size(b_only.names) == 2
+    assert map_size(Activity.drop_before(b_only, @t0 + 5 * @m).names) == 1
   end
 end

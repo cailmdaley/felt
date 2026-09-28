@@ -398,19 +398,26 @@ defmodule Shuttle.Activity do
 
   @doc """
   `acc` without the buckets whose minute starts before `ts`'s, nor the pending
-  tool calls that began before `ts`. After a rotation `ts` is the first
-  timestamp of the new rotated file, so what remains is what the two files
-  hold, and the tally stays bounded by them. `nil` drops nothing.
+  tool calls that began before `ts`, nor the interned identities nothing left
+  refers to. After a rotation `ts` is the first timestamp of the new rotated
+  file, so what remains is what the two files hold, and the state stays
+  bounded by them. `nil` drops nothing.
   """
   @spec drop_before(acc(), integer() | nil) :: acc()
   def drop_before(acc, nil), do: acc
 
-  def drop_before(%{tally: tally, pending: pending} = acc, ts) do
-    %{
-      acc
-      | tally: drop_minutes_before(tally, floor_minute(ts)),
-        pending: Map.reject(pending, fn {_sid, {start_ts, _identity}} -> start_ts < ts end)
-    }
+  def drop_before(%{tally: tally, pending: pending, spells: spells} = acc, ts) do
+    tally = drop_minutes_before(tally, floor_minute(ts))
+    pending = Map.reject(pending, fn {_sid, {start_ts, _identity}} -> start_ts < ts end)
+
+    names =
+      :gb_trees.keys(tally)
+      |> Enum.map(fn {_m, s, cwd, _k} -> {s, cwd} end)
+      |> Enum.concat(Map.keys(spells))
+      |> Enum.concat(Enum.map(Map.values(pending), &elem(&1, 1)))
+      |> Map.new(&{&1, &1})
+
+    %{acc | tally: tally, pending: pending, names: names}
   end
 
   defp drop_minutes_before(tally, cutoff) do

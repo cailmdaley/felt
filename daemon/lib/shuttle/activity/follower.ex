@@ -26,11 +26,11 @@ defmodule Shuttle.Activity.Follower do
 
   The rename overwrites the previous `events.jsonl.1`, so after a rotation the
   follower drops the buckets whose minute precedes the new rotated file's
-  first line, and the pending tool calls that began before it
-  (`Shuttle.Activity.drop_before/2`). What it serves is what the two files
-  hold, and what it holds stays bounded by them. Spell state is kept: it is a
-  handful of identities, and dropping it would re-open a spell that is in fact
-  still open.
+  first line, the pending tool calls that began before it, and the interned
+  identities nothing left refers to (`Shuttle.Activity.drop_before/2`). What
+  it serves is what the two files hold, and what it holds stays bounded by
+  them. Spell state is kept: it is a handful of identities, and dropping it
+  would re-open a spell that is in fact still open.
 
   Anything else — the live file shrinking in place, or replaced by a file the
   follower cannot account for — rebuilds the fold from the two files.
