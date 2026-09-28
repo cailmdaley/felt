@@ -177,9 +177,9 @@ defmodule Shuttle.Activity do
   hubs ask for a window quantized so that validator can match, and they ask
   only while someone is looking (`Shuttle.RemoteTemporalRegistry`). The shape
   of the fix, if the rate ever stops being enough: keep the tally in a
-  GenServer that tails the stream the way `Shuttle.WaitingTracker` already
-  does (seed once, then read forward from a byte offset) and serve buckets from
-  memory.
+  GenServer that follows the stream with `Shuttle.FileTail` the way
+  `Shuttle.WaitingTracker` and `Shuttle.SentFiles.Follower` do (seed once, then
+  read forward from a byte offset) and serve buckets from memory.
   """
 
   require Logger

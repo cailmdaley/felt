@@ -87,15 +87,17 @@ defmodule Shuttle.Application do
 
   # Optional children, in start order. Each is gated by an app-config flag that
   # defaults to on; config/test.exs turns most of them off so the suite drives
-  # them explicitly. Note that :start_waiting_tracker and
-  # :start_remote_temporal_registry have no prod config entry at all — they ride
-  # the inline `true` default. The endpoint is deliberately NOT in this list.
+  # them explicitly. Note that :start_waiting_tracker,
+  # :start_sent_files_follower and :start_remote_temporal_registry have no prod
+  # config entry at all — they ride the inline `true` default. The endpoint is
+  # deliberately NOT in this list.
   @optional_children [
     {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},
     {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
     {:start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
     {:start_waiting_tracker, Shuttle.WaitingTracker},
+    {:start_sent_files_follower, Shuttle.SentFiles.Follower},
     {:start_log_rotator, Shuttle.LogRotator},
     {:start_poller, Shuttle.Poller}
   ]
