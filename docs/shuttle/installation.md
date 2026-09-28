@@ -1180,7 +1180,10 @@ redispatching, because that counts as continuation, and a standing role whose
 cron is due fires on schedule. See
 [Boot quarantine](lifecycle.md#boot-quarantine) for why.) The quarantine guards
 your token budget. It also explains why your first worker never starts while
-nothing appears to be wrong.
+nothing appears to be wrong. One restart lifts it by itself: a bounce the daemon
+can prove was seconds long, with its workers still alive and no crash loop
+behind it — see
+[the one automatic exit](lifecycle.md#the-one-automatic-exit-a-proven-fast-bounce).
 
 ```bash
 bin/shuttle release

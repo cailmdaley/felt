@@ -182,6 +182,32 @@ bin/shuttle release
 
 A human force-dispatch bypasses the quarantine without clearing it.
 
+### The one automatic exit: a proven fast bounce
+
+A restart nobody asked for is not a restart the quarantine was built for. A
+kernel that kills the daemon on a CPU rlimit, with a supervisor respawning it
+seconds later, leaves the workers running (tmux owns them) and nothing stale —
+yet the hold stopped all new work until someone noticed.
+
+So the daemon records its own liveness while it has it, in
+`$SHUTTLE_DATA_DIR/heartbeat.json` (default `~/.shuttle/heartbeat.json`): the
+time of the write, when this incarnation booted, the workers it has live, and a
+short ring of recent boot times. It is rewritten every 10 seconds, and the next
+boot reads it once, after adoption. The hold lifts by itself only when all three
+hold:
+
+1. the heartbeat is less than 60 seconds old;
+2. every worker it recorded is live **now**, established by this daemon's own
+   tmux adoption rather than by trusting the file;
+3. the previous incarnation ran at least 90 seconds, and the daemon has booted
+   at most 3 times in the last 10 minutes.
+
+Anything else holds: a stale heartbeat (a real outage), a crash loop, a missing
+or malformed file, or a CLI/daemon contract skew — which has no release path at
+all, automatic or manual. The snapshot's `quarantine_release` says which way the
+hold came off (`auto` with the reason, or `human`), so the board never implies a
+person pressed release when nobody did.
+
 ## CLI verbs
 
 Two commands, cleanly split. `felt shuttle` serves agents: it runs offline,
