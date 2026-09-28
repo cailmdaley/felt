@@ -2732,3 +2732,20 @@ func TestCheckFromViewLocalizedLinkToStrayIsBroken(t *testing.T) {
 		t.Fatalf("citer issues = %q", messages)
 	}
 }
+
+// TestResolveScopedIDExactOuterScopeBeatsInnerPrefix: every exact answer
+// outranks every completion. From scope a/b, [[c]] names a/c exactly; a/b/cx
+// only begins with the same letter.
+func TestResolveScopedIDExactOuterScopeBeatsInnerPrefix(t *testing.T) {
+	ids := []string{"a", "a/b", "a/b/cx", "a/c"}
+	for _, tc := range []struct{ scope, query, want string }{
+		{"a/b", "c", "a/c"},
+		{"a/b", "b/c", "a/b/cx"}, // no exact a/b/c anywhere: completion still works
+		{"a/b", "cx", "a/b/cx"},
+	} {
+		got, err := ResolveScopedIDIn(ids, tc.scope, tc.query, nil)
+		if err != nil || got != tc.want {
+			t.Errorf("resolve(%q from %q) = %q, %v; want %q", tc.query, tc.scope, got, err, tc.want)
+		}
+	}
+}

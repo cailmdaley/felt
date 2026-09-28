@@ -453,3 +453,44 @@ func TestGettingStartedNestSequence(t *testing.T) {
 		t.Fatalf("subtree did not come back under its parent: %v", err)
 	}
 }
+
+// TestExactOutsideIDBeatsLocalPrefixCompletion: an id written out in full
+// names that fiber, even from a view holding a local id that merely begins
+// with the same letters. `ai-futures/portolan/charted` exists out in the loom;
+// the view holds `ai-futures/portolan/chartedx`. edit and show must reach the
+// loom's fiber, and rm must act on it rather than call the query a guess.
+func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	sub := felt.NewStorage(subProj)
+	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
+
+	out, err := runCommand(t, subProj, "show", "ai-futures/portolan/charted")
+	if err != nil {
+		t.Fatalf("show: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Name:     Charted") {
+		t.Fatalf("show answered with the local prefix completion:\n%s", out)
+	}
+
+	out, err = runCommand(t, subProj, "edit", "ai-futures/portolan/charted", "-s", "active")
+	if err != nil {
+		t.Fatalf("edit: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Updated ai-futures/portolan/charted (in "+loomRoot(t, subProj)+")") {
+		t.Fatalf("edit output = %q, want the loom's fiber", out)
+	}
+	if local, err := sub.Read("ai-futures/portolan/chartedx"); err != nil || local.Status != felt.StatusOpen {
+		t.Fatalf("local lookalike was edited: %v %+v", err, local)
+	}
+
+	out, err = runCommand(t, subProj, "rm", "ai-futures/portolan/charted")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if _, err := felt.NewStorage(loomProj).Read("ai-futures/portolan/charted"); err == nil {
+		t.Fatalf("rm did not delete the loom's fiber")
+	}
+	if _, err := sub.Read("ai-futures/portolan/chartedx"); err != nil {
+		t.Fatalf("rm deleted the local lookalike: %v", err)
+	}
+}
