@@ -38,7 +38,7 @@ A constitution that shapes an artifact rather than code — documentation, a res
 
 ## Drafts or dispatch
 
-An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lands it in Drafts, and `felt shuttle resume` arms it later. Default to drafts: most constitutions are stashed now and launched later. Dispatch straight away when the user plainly wants action — they are mid-iteration, name the agent in an action-shaped sentence, or say "launch", "go" or "dispatch now". When the signals are mixed, write the constitution first and then ask; that is the one thing worth confirming.
+An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lands it in Drafts, and `felt shuttle resume` arms it later — keep `--project-dir` on the draft install, since arming refuses a block without one (`resume --project-dir` supplies it late). Default to drafts: most constitutions are stashed now and launched later. Dispatch straight away when the user plainly wants action — they are mid-iteration, name the agent in an action-shaped sentence, or say "launch", "go" or "dispatch now". When the signals are mixed, write the constitution first and then ask; that is the one thing worth confirming.
 
 `install` only creates. On a fiber that already has a block it refuses and points you to `felt shuttle status` (inspect), `reshape` (kind or schedule), `set-agent` (agent and its settings), or `uninstall` (start over).
 
