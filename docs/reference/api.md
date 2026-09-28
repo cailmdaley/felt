@@ -51,7 +51,8 @@ is not enough.
 | `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
-| `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
+| `POST /attach` | **not** owner-routed | Open a tmux session in kitty — a worker's, or a past session's resume — where the human is, ssh-ing out for a remote host |
+| `POST /sessions/resume` | local | Start (or find) the `resume-<uuid>` tmux session resuming a past harness session on this host |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
@@ -138,6 +139,17 @@ A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
 `/attach` and `/inject` are terminal operations. An app conversation's UUID
 is not a terminal name or a verified mobile URL. Phone conversation access
 uses the host's Codex project listing until a direct app URL is available.
+
+`/attach` takes `{tmux_session, shuttle_host?}` for a live worker, or
+`{session, shuttle_host?}` for a past harness session (the card's History). For
+the second, the host that ran the session starts a tmux session named
+`resume-<uuid>` running the harness's own resume — the command the dispatcher
+resumes workers with, for the agent that host's ledger recorded, in the working
+directory the transcript records — or finds the one already running; a remote
+host is asked through `/sessions/resume`. The tab then attaches to it like any
+worker's. The name does not end in `-shuttle`, so no dispatch, adoption or
+orphan path treats it as a worker. 422 when that host has no transcript or no
+recorded working directory to resume in.
 
 ## Read plane
 

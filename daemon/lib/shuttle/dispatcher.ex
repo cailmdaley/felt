@@ -1863,19 +1863,7 @@ defmodule Shuttle.Dispatcher do
     # standing role). After the timeout the harness proceeds at the
     # default-size, same as the world before this gate existed.
     wait_for_client_block =
-      if session != "" and not headless do
-        ~s"""
-        WAIT_DEADLINE=$(( $(date +%s) + 10 ))
-        while [ "$(date +%s)" -lt "$WAIT_DEADLINE" ]; do
-          if tmux list-clients -t '#{session}' -F '\#{client_control_mode}' 2>/dev/null | grep -qx '0'; then
-            break
-          fi
-          sleep 0.2
-        done
-        """
-      else
-        ""
-      end
+      if session != "" and not headless, do: wait_for_client_block(session), else: ""
 
     """
     #!/bin/bash
@@ -1890,6 +1878,22 @@ defmodule Shuttle.Dispatcher do
 
     echo ""
     echo "Shuttle worker exited (agent=#{agent_id})"
+    """
+  end
+
+  @doc false
+  # Shell that waits up to 10s for a human tmux client on `session` (see the
+  # wait-for-client note in `build_run_script/4`). Shared with
+  # `Shuttle.SessionResume`, whose tab attaches the same way.
+  def wait_for_client_block(session) do
+    ~s"""
+    WAIT_DEADLINE=$(( $(date +%s) + 10 ))
+    while [ "$(date +%s)" -lt "$WAIT_DEADLINE" ]; do
+      if tmux list-clients -t '#{session}' -F '\#{client_control_mode}' 2>/dev/null | grep -qx '0'; then
+        break
+      fi
+      sleep 0.2
+    done
     """
   end
 
@@ -1913,7 +1917,10 @@ defmodule Shuttle.Dispatcher do
   # release's own directories out of PATH before anything else runs. A worker
   # with no Erlang on PATH is correct — it sees whatever the host installs,
   # the same as before the daemon shipped its own.
-  defp erts_scrub_block do
+  @doc false
+  # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
+  # must drop the release's Erlang first.
+  def erts_scrub_block do
     ~S"""
     unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME
     if [ -n "${RELEASE_ROOT:-}" ]; then
