@@ -780,7 +780,14 @@ defmodule Shuttle.Poller do
       now_ms: System.system_time(:millisecond),
       live: Map.keys(state.running),
       host: state.own_host_id,
-      node: DaemonHeartbeat.node_name()
+      node: DaemonHeartbeat.node_name(),
+      app:
+        for(
+          {key, meta} <- state.running,
+          Shuttle.AppWorkers.app?(Map.get(meta, :session)),
+          do: key
+        ),
+      machine_booted_at_ms: DaemonHeartbeat.machine_booted_at_ms()
     }
 
     case DaemonHeartbeat.verdict(heartbeat, observed) do

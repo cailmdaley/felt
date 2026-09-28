@@ -300,7 +300,10 @@ defmodule Shuttle.DaemonHeartbeat do
     * `:now_ms` — wall clock, epoch ms;
     * `:live` — the runtime keys reconciliation/adoption has just found live;
     * `:host` — this daemon's `own_host_id`;
-    * `:node` — this machine's OS node name (`node_name/0`).
+    * `:node` — this machine's OS node name (`node_name/0`);
+    * `:app` — the live keys whose worker is an app conversation (optional);
+    * `:machine_booted_at_ms` — when this machine booted (`machine_booted_at_ms/0`;
+      optional, `nil` where unknown).
 
   Returns `{:release, reason}` or `{:hold, reason}`; the reason is logged.
   """
@@ -331,10 +334,24 @@ defmodule Shuttle.DaemonHeartbeat do
       age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
         {:hold, "daemon heartbeat is #{age_ms}ms old (grace #{@default_grace_ms}ms)"}
 
+      predates_machine_boot?(hb["at"], Map.get(observed, :machine_booted_at_ms)) ->
+        {:hold, "daemon heartbeat predates this machine's boot"}
+
       not MapSet.subset?(recorded, live) ->
         missing = recorded |> MapSet.difference(live) |> Enum.sort()
 
         {:hold, "workers recorded live in the heartbeat are gone: #{Enum.join(missing, ", ")}"}
+
+      # An app conversation's liveness is not observed by adoption: the daemon
+      # re-adopts it from its own JSON record (`Shuttle.AppWorkers.active/0`),
+      # so for app workers the continuity check would only compare the file
+      # with itself. Hold rather than release on a proof that degenerates.
+      not MapSet.disjoint?(recorded, MapSet.new(Map.get(observed, :app, []))) ->
+        app = recorded |> MapSet.intersection(MapSet.new(observed.app)) |> Enum.sort()
+
+        {:hold,
+         "heartbeat recorded app workers, whose liveness adoption cannot observe: " <>
+           Enum.join(app, ", ")}
 
       previous_run_ms < @min_healthy_run_ms ->
         {:hold,
@@ -353,6 +370,25 @@ defmodule Shuttle.DaemonHeartbeat do
            "#{MapSet.size(recorded)} worker(s) still live"}
     end
   end
+
+  @doc """
+  When this machine booted, epoch ms, from `/proc/stat`'s `btime`; `nil` where
+  that is unavailable (non-Linux, unreadable). A heartbeat older than the
+  machine's boot was written before a reboot, however fresh its clock says it
+  is.
+  """
+  @spec machine_booted_at_ms() :: integer() | nil
+  def machine_booted_at_ms do
+    with {:ok, stat} <- File.read("/proc/stat"),
+         [_, secs] <- Regex.run(~r/^btime (\d+)$/m, stat) do
+      String.to_integer(secs) * 1000
+    else
+      _ -> nil
+    end
+  end
+
+  defp predates_machine_boot?(at, booted) when is_integer(booted), do: at < booted
+  defp predates_machine_boot?(_at, _booted), do: false
 
   @doc """
   This machine's OS node name. The heartbeat's `host` is the fleet identity

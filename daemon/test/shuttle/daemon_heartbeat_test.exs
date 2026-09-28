@@ -152,6 +152,52 @@ defmodule Shuttle.DaemonHeartbeatTest do
       assert {:ok, %{"host" => "fleet-host", "node" => "login01"}} = DaemonHeartbeat.read(path)
     end
 
+    test "the previous incarnation's run length: 90_000ms releases, 89_999ms holds" do
+      at = @now - 3_000
+      assert {:release, _} = judge(hb(%{"at" => at, "booted_at" => at - 90_000}))
+      assert {:hold, reason} = judge(hb(%{"at" => at, "booted_at" => at - 89_999}))
+      assert reason =~ "crash loop"
+    end
+
+    test "freshness is symmetric: within ±60_000ms releases, beyond holds" do
+      # A heartbeat from the future is a clock step, not evidence; the grace
+      # bounds it the same way as one from the past.
+      assert {:release, _} = judge(hb(%{"at" => @now - 60_000}))
+      assert {:hold, _} = judge(hb(%{"at" => @now - 60_001}))
+      assert {:release, _} = judge(hb(%{"at" => @now + 60_000}))
+      assert {:hold, reason} = judge(hb(%{"at" => @now + 60_001}))
+      assert reason =~ "-60001ms old"
+    end
+
+    test "recorded workers must all be live; extra live workers do not matter" do
+      assert {:release, _} = judge(hb(%{"workers" => ["a"]}), %{live: ["a", "b"]})
+      assert {:hold, reason} = judge(hb(%{"workers" => ["a", "c"]}), %{live: ["a"]})
+      assert reason =~ "gone: c"
+    end
+
+    test "a recorded app worker holds, since adoption cannot observe it" do
+      assert {:hold, reason} =
+               judge(hb(%{"workers" => ["a", "b"]}), %{live: ["a", "b"], app: ["b"]})
+
+      assert reason =~ "app workers"
+      # A live app worker the heartbeat never recorded is not part of the proof.
+      assert {:release, _} = judge(hb(%{"workers" => ["a"]}), %{live: ["a", "b"], app: ["b"]})
+    end
+
+    test "a heartbeat written before this machine booted holds" do
+      assert {:hold, reason} = judge(hb(), %{machine_booted_at_ms: @now - 1_000})
+      assert reason =~ "machine's boot"
+      assert {:release, _} = judge(hb(), %{machine_booted_at_ms: @now - 86_400_000})
+      assert {:release, _} = judge(hb(), %{machine_booted_at_ms: nil})
+    end
+
+    test "machine_booted_at_ms reads a plausible btime where /proc/stat exists" do
+      case DaemonHeartbeat.machine_booted_at_ms() do
+        nil -> refute File.exists?("/proc/stat")
+        ms -> assert ms > 0 and ms < System.system_time(:millisecond)
+      end
+    end
+
     test "boots older than the window do not count" do
       at = @now - 3_000
       old = for k <- 1..5, do: @now - 600_001 - k
