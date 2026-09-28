@@ -193,6 +193,34 @@ defmodule Shuttle.HostTest do
       assert File.dir?(Path.join(real, "sock"))
     end
 
+    test "rejects a physical socket path beyond sun_path after symlink resolution", %{
+      base: base
+    } do
+      target_name = "deep-" <> String.duplicate("x", 96)
+      target = Path.join(base, target_name)
+      File.mkdir_p!(target)
+      File.chmod!(target, 0o755)
+      link = Path.join(base, "link")
+      File.ln_s!(target, link)
+      configured_path = Path.join([link, "sock", "daemon.sock"])
+
+      assert byte_size(configured_path) < 100
+      assert byte_size(Path.join([target, "sock", "daemon.sock"])) >= 108
+
+      error = assert_raise ArgumentError, fn -> Host.prepare_unix_socket!(configured_path) end
+
+      [configured_message, resolved_message] =
+        String.split(error.message, " resolves to ", parts: 2)
+
+      assert configured_message =~ inspect(configured_path)
+      refute resolved_message =~ link
+      assert resolved_message =~ target_name
+      assert [_, bytes] = Regex.run(~r/\((\d+) bytes\)/, resolved_message)
+      assert [_, limit] = Regex.run(~r/platform sun_path limit is (\d+) bytes/, resolved_message)
+      assert String.to_integer(bytes) >= String.to_integer(limit)
+      assert String.to_integer(limit) in [104, 108]
+    end
+
     test "accepts a sticky world-writable ancestor, as /tmp is", %{base: base} do
       sticky = Path.join(base, "sticky")
       File.mkdir_p!(sticky)

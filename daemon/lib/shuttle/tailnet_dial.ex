@@ -180,8 +180,5 @@ defmodule Shuttle.TailnetDial do
     ArgumentError -> :ok
   end
 
-  defp format_reason({:socket_path_too_long, bytes, limit}),
-    do: "socket path is #{bytes} bytes; this platform limit is #{limit} bytes"
-
   defp format_reason(reason), do: inspect(reason)
 end

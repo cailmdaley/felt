@@ -355,8 +355,8 @@ defmodule Shuttle.Host do
 
   # Absolute, free of `..` segments and a trailing `/` (both refused, since
   # cleaning them away would bind somewhere other than what was written),
-  # then cleaned of `//` and `/./`; the cleaned form is what is bound, what is
-  # reported, and what the length limit applies to.
+  # then cleaned of `//` and `/./`. The configured form is checked here;
+  # prepare_unix_socket!/2 checks the fully resolved path that is bound.
   defp unix_listen(path) do
     segments = String.split(path, "/")
 
@@ -392,6 +392,8 @@ defmodule Shuttle.Host do
   @doc """
   Make a unix socket path safe to bind, or raise. Returns the fully resolved
   physical socket path so callers bind the same path that passed the checks.
+  The resolved path must fit the platform's `sun_path` limit, even when the
+  configured path was shorter.
 
   The socket's directory is the access check — anyone who can traverse it can
   connect — so the guarantee is only as strong as the path to it. Every
@@ -427,8 +429,28 @@ defmodule Shuttle.Host do
     socket_dir = Path.join(parent, Path.basename(dir))
     ensure_socket_dir!(socket_dir, euid)
     resolved_path = Path.join(socket_dir, Path.basename(path))
+    ensure_socket_path_length!(path, resolved_path)
     clear_stale_socket!(resolved_path)
     resolved_path
+  end
+
+  defp ensure_socket_path_length!(configured_path, resolved_path) do
+    bytes = byte_size(resolved_path)
+    limit = unix_socket_path_limit()
+
+    if bytes >= limit do
+      raise ArgumentError,
+            "configured socket path #{inspect(configured_path)} resolves to " <>
+              "#{inspect(resolved_path)} (#{bytes} bytes); platform sun_path limit is #{limit} bytes"
+    end
+  end
+
+  defp unix_socket_path_limit do
+    case :os.type() do
+      {:unix, :darwin} -> 104
+      {:unix, :linux} -> 108
+      _ -> 104
+    end
   end
 
   @doc """

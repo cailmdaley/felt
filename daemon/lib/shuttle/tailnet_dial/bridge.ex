@@ -26,14 +26,7 @@ defmodule Shuttle.TailnetDial.Bridge do
     # Trap supervisor shutdown so terminate/2 can remove the private socket path.
     Process.flag(:trap_exit, true)
     path = opts |> Keyword.fetch!(:path) |> Shuttle.Host.prepare_unix_socket!()
-    bytes = byte_size(path)
-    limit = unix_socket_path_limit()
-
-    if bytes >= limit do
-      {:stop, {:socket_path_too_long, bytes, limit}}
-    else
-      start_listener(path, opts)
-    end
+    start_listener(path, opts)
   rescue
     error in [ArgumentError] -> {:stop, error}
   end
@@ -71,14 +64,6 @@ defmodule Shuttle.TailnetDial.Bridge do
 
       {:error, reason} ->
         {:stop, {:listen_failed, reason}}
-    end
-  end
-
-  defp unix_socket_path_limit do
-    case :os.type() do
-      {:unix, :darwin} -> 104
-      {:unix, :linux} -> 108
-      _ -> 104
     end
   end
 

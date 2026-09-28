@@ -161,12 +161,11 @@ defmodule Shuttle.TailnetDialTest do
     assert_receive {:long_path_manager, manager}, 1_000
     on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
 
-    assert {:tailnet_dial, :listen, {:socket_path_too_long, bytes, limit}} =
-             TailnetDial.last_error(remote.name)
-
-    assert bytes >= limit
-    assert log =~ "socket path is #{bytes} bytes"
-    assert log =~ "platform limit is #{limit} bytes"
+    assert {:tailnet_dial, :listen, reason} = TailnetDial.last_error(remote.name)
+    assert inspect(reason) =~ TailnetDial.socket_path(remote.name, data_dir)
+    assert inspect(reason) =~ "resolves to"
+    assert inspect(reason) =~ "platform sun_path limit"
+    assert log =~ "configured socket path"
     assert Process.alive?(manager)
     assert Process.alive?(Process.whereis(Shuttle.TailnetDial.DynamicSupervisor))
     assert {:error, :enoent} = File.lstat(TailnetDial.socket_path(remote.name, data_dir))
