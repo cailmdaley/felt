@@ -13,7 +13,7 @@
  *
  * TIME IS NOT A DESK SURFACE. A permanent day-ribbon used to sit above Now,
  * showing past landings and future-dated work on one scrollable axis. The
- * chronicle / week / day views tell that story better, so the ribbon's display
+ * chronicle tells that story better, so the ribbon's display
  * job retired and Pinned + Resting inherited its vertical room. What the ribbon
  * uniquely OWNED was the gesture — "this one on Tuesday" — so the day axis
  * survives as the drag-reveal horizon: a slim row of future days that appears
@@ -72,7 +72,6 @@ import {
   listViews,
   createViewFallbackPage,
   keystrokeIsSpokenFor,
-  normalizeFocusDate,
   type BoardViewId,
   type TemporalFetchers,
   settingsHotkey,
@@ -129,8 +128,8 @@ interface KanbanModalOptions {
   temporalFetchers?: TemporalFetchers
 }
 
-/** The Desk's own hotkey. The other four come from the view registry, so a
- *  view names its own key and nothing here has to agree with it twice. */
+/** The Desk's own hotkey. The others come from the view registry, so a view
+ *  names its own key and nothing here has to agree with it twice. */
 const DESK_HOTKEY = '1'
 
 interface KanbanScrollSnapshot {
@@ -207,15 +206,6 @@ export class KanbanModal {
   private activeViewId: BoardViewId = 'desk'
   /** The mounted view, or null on Desk / before the first response lands. */
   private activeView: TemporalView | null = null
-  /**
-   * The shared temporal cursor — one bare civil day (`YYYY-MM-DD`) across all
-   * views, or null for today/current. Held here rather than in any view so it
-   * SURVIVES a tab switch: page Day back to Tuesday, press `4`, and Week opens
-   * on Tuesday's week. Read into every ViewContext, so a view sees it on mount
-   * and on every refresh. Reset to null on unmount, with the rest of the
-   * chrome state.
-   */
-  private focusDate: string | null = null
   /**
    * The cycle the Desk is currently seen through, or null for the plain Desk.
    * VIEW-LOCAL on purpose: never persisted, never sent anywhere, and dropped on
@@ -603,7 +593,7 @@ export class KanbanModal {
     strip.append(this.lensSlotEl)
 
     // Settings rides the same row as the pages without being one of them. It
-    // is deliberately NOT a tab: the five tabs are windows onto the work, and
+    // is deliberately NOT a tab: the tabs are windows onto the work, and
     // a preferences sheet is not a window onto anything — so it wears a glyph
     // rather than a name and a keycap, and sits past the lens where the row
     // has already ended. On a phone the row scrolls; the CSS pins this one
@@ -647,44 +637,6 @@ export class KanbanModal {
       return
     }
     this.mountOrRefreshActiveView()
-  }
-
-  /**
-   * Move the shared temporal cursor and let the active view redraw on it.
-   *
-   * Deliberately NOT a re-mount: the view keeps its DOM, its scroll position
-   * and any local UI state, and patches itself from the new `focusDate` in its
-   * `refresh`. Unconditional — calling it with the day already showing still
-   * refreshes, so a "go to today" control works from any state without the
-   * caller having to know whether it is already there.
-   */
-  private setFocusDate(dayISO: string | null): void {
-    this.focusDate = normalizeFocusDate(dayISO)
-    this.mountOrRefreshActiveView()
-  }
-
-  /**
-   * The programmatic twin of clicking a tab — one entry point for a view that
-   * wants to hand off to another ("see this week", "open that day"), optionally
-   * moving the cursor as part of the same gesture so the destination mounts
-   * already on the right day instead of flashing today first.
-   *
-   * Re-targeting the ALREADY-ACTIVE view is a refresh rather than a no-op when
-   * the cursor moved: "show me this in Day" is a real request even when Day is
-   * what you are looking at.
-   */
-  private switchView(id: BoardViewId, opts?: { focusDate?: string }): void {
-    const requested = opts?.focusDate
-    const nextFocus = requested === undefined ? this.focusDate : normalizeFocusDate(requested)
-    const focusMoved = nextFocus !== this.focusDate
-    this.focusDate = nextFocus
-    if (id !== this.activeViewId) {
-      // setView mounts (or refreshes) with a context built from the cursor we
-      // just set, so the destination never renders the old day.
-      this.setView(id)
-      return
-    }
-    if (focusMoved) this.mountOrRefreshActiveView()
   }
 
   /**
@@ -733,8 +685,8 @@ export class KanbanModal {
       tab.classList.toggle('kbn-viewtab-active', selected)
       tab.setAttribute('aria-selected', String(selected))
       // On a phone the strip scrolls, so the tab you just chose can be off
-      // screen the moment it becomes current — a hotkey or a programmatic
-      // switchView both land there. Bring it back into the run.
+      // screen the moment it becomes current — a hotkey lands there. Bring it
+      // back into the run.
       if (selected && isMobileViewport()) {
         tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
       }
@@ -827,19 +779,7 @@ export class KanbanModal {
         const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
         if (card) this.detailModal.open(card)
       },
-      // The Desk's worker pill, handed to the views. Passed through rather than
-      // wrapped: it is already the gesture-deferred form (see the constructor —
-      // kitty hides on focus loss, so activation waits for the click to finish),
-      // and it is already undefined when the host wired no `onOpenWorker`, which
-      // is exactly the optionality the contract promises.
-      openWorker: this.openWorkerAfterGesture,
       requestRefresh: () => { void this.fetchAndRender() },
-      // Read at build time, and the context is rebuilt for every mount and
-      // refresh — so a view always sees the current cursor, never a snapshot
-      // from when it mounted.
-      focusDate: this.focusDate,
-      setFocusDate: (dayISO) => this.setFocusDate(dayISO),
-      switchView: (id, opts) => this.switchView(id, opts),
     }
   }
 
@@ -869,7 +809,7 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`5` switch views. Deliberately narrow: a bare digit only, so
+   * `1`–`3` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a Radix
    * dialog / fiber-detail panel layered over the board. Returns true when the
@@ -900,7 +840,6 @@ export class KanbanModal {
     this.viewHostEl = null
     this.activeView = null
     this.activeViewId = 'desk'
-    this.focusDate = null
     this.lensCycleId = null
     this.viewFallbackSig = null
     this.lastFetchFailed = false

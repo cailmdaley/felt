@@ -53,8 +53,8 @@ describe('rendering a wikilink', () => {
 
 describe('a surface that does not opt in', () => {
   it('leaves the reference as the literal text it was written as', () => {
-    // The board grid's card outcomes and Day's prose blocks never run the
-    // resolver, so they must not strip the brackets and imply a link.
+    // The board grid's card outcomes never run the resolver, so they must
+    // not strip the brackets and imply a link.
     expect(renderMarkdown('see [[ai-futures/felt/debug]]'))
       .toContain('see [[ai-futures/felt/debug]]')
   })

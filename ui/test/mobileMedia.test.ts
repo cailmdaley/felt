@@ -8,7 +8,6 @@ import {
   MOBILE_MAX_PX,
   MOBILE_MEDIA,
   MOBILE_SHORT_MAX_PX,
-  NARROW_MEDIA,
   SHORT_MEDIA,
 } from '../src/board/mobile.js'
 
@@ -75,26 +74,14 @@ function sheets(): Array<{ path: string; text: string }> {
 
 const PRELUDE = /@media([^{]*)\{/g
 
-/** The three forms the board is allowed to write, and nothing else. A prelude
+/** The two forms the board is allowed to write, and nothing else. A prelude
  *  that mentions either number must be exactly one of these. */
-const FORMS = [MOBILE_MEDIA, SHORT_MEDIA, NARROW_MEDIA]
+const FORMS = [MOBILE_MEDIA, SHORT_MEDIA]
 
 describe('the mobile threshold is one contract', () => {
-  it('has three named forms built from the same two numbers', () => {
+  it('has two named forms built from the same two numbers', () => {
     expect(MOBILE_MEDIA).toBe(`(max-width: ${MOBILE_MAX_PX}px), ${SHORT_MEDIA}`)
     expect(SHORT_MEDIA).toBe(`(max-height: ${MOBILE_SHORT_MAX_PX}px) and (pointer: coarse)`)
-    expect(NARROW_MEDIA).toBe(
-      `(max-width: ${MOBILE_MAX_PX}px) and (min-height: ${MOBILE_SHORT_MAX_PX + 1}px)`,
-    )
-  })
-
-  // NARROW and SHORT must PARTITION the mobile viewports, not merely differ:
-  // a height that matched both would apply a stacking reflow and its opposite
-  // at once, and one that matched neither would drop a phone out of both.
-  it('narrow and short are exact complements in height', () => {
-    const shortMax = Number(/max-height: (\d+)px/.exec(SHORT_MEDIA)![1])
-    const narrowMin = Number(/min-height: (\d+)px/.exec(NARROW_MEDIA)![1])
-    expect(narrowMin).toBe(shortMax + 1)
   })
 
   // A scanner that finds nothing passes every assertion below it. This is the
@@ -102,7 +89,7 @@ describe('the mobile threshold is one contract', () => {
   it('actually reads the board stylesheets', () => {
     const paths = sheets().map((f) => f.path)
     expect(paths).toContain('board/KanbanModal.css')
-    expect(paths).toContain('board/views/DayView.css')
+    expect(paths).toContain('board/views/ChronicleView.css')
     expect(paths).toContain('forms/StashForm.tsx')
     // The canary for the RECURSION. `forms/settings/` is the first feature to
     // land a stylesheet in a directory of its own, and it is exactly the case
@@ -112,7 +99,7 @@ describe('the mobile threshold is one contract', () => {
     expect(sheets().filter((f) => f.text.includes('max-width: 700px')).length).toBeGreaterThan(4)
   })
 
-  it('every prelude that names either number is exactly one of the three forms', () => {
+  it('every prelude that names either number is exactly one of the two forms', () => {
     const offenders: string[] = []
     for (const { path, text } of sheets()) {
       for (const m of text.matchAll(PRELUDE)) {
@@ -122,7 +109,7 @@ describe('the mobile threshold is one contract', () => {
         if (!names) continue
         // The whole prelude must BE a form — not merely contain one — so a
         // stray extra clause is caught as loudly as a missing one, and so is a
-        // hand-rolled fourth threshold.
+        // hand-rolled third threshold.
         if (!FORMS.includes(prelude)) offenders.push(`${path}: @media ${prelude}`)
       }
     }

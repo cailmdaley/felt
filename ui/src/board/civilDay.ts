@@ -43,31 +43,27 @@ export function isoDayLocal(ms: number): string {
 }
 
 /** The hour a rail opens, and the next one closes. Work past midnight belongs
- *  to the day it started, so the day boundary is dawn, not midnight. Day, Week
- *  and Chronicle all draw from this one value (re-exported by
- *  views/railTime.ts) — three views disagreeing about which day it is, is the
- *  defect it exists to prevent. */
+ *  to the day it started, so the day boundary is dawn, not midnight. Every
+ *  surface that asks "which day is it" draws from this one value (re-exported
+ *  by views/railTime.ts) — two surfaces disagreeing about which day it is, is
+ *  the defect it exists to prevent. */
 export const RAIL_START_HOUR = 6;
 
 /**
  * The civil day whose RAIL contains an instant — the "which day is it" a view
  * whose day begins at dawn has to ask.
  *
- * The temporal views draw a day as a `startHour → startHour` rail, because work
+ * The chronicle draws a day as a `startHour → startHour` rail, because work
  * that runs past midnight belongs to the evening it grew from. That makes this a
  * different question from {@link isoDayLocal}: at 02:00 on Wednesday the rail
  * being worked is TUESDAY's. Asking the midnight question while drawing the dawn
- * one is a real defect — it puts "today" on a row that has not started yet, pins
- * the now-marker to the left edge of an empty rail, and greys out the live row as
- * past, taking its in-flight marginalia and its obligation marks with it.
+ * one is a real defect — it puts "today" on a column that has not started yet
+ * and inks the night's work one column past its own today line.
  *
  * The boundary is a WALL-CLOCK hour, so this reads `getHours()` and steps back a
  * calendar day rather than subtracting `startHour` hours of milliseconds. On a
  * DST day those are not the same thing, and only the wall-clock reading agrees
  * with the rail the view actually drew.
- *
- * One definition, shared: WeekView's row classification and DayView's
- * `defaultDayISO` are the same rule and must not drift apart.
  */
 export function railCivilDay(ms: number, startHour = RAIL_START_HOUR): string {
   const d = new Date(ms);
@@ -210,9 +206,6 @@ export function sameCivilDue(cardDue: string | undefined, next: string | null): 
  * line up. `empty`, when given, replaces any non-positive span — omit it to
  * render `0m` (and to let a negative span show as itself, which is a bug worth
  * seeing rather than hiding).
- *
- * WeekView keeps its own `formatSpan`: it renders a whole hour as `1h`, not
- * `1h 0m`, and that difference does not fit an option.
  */
 export function formatSpanMinutes(
   minutes: number,

@@ -44,12 +44,12 @@
 
      A hue outside these is a claim the data never made. */
 
-  /* YOU. A message you sent, a role you drive, a human actor. The spine on
-     Day and Week, the attention tick on the Chronicle, the glyph on a pin. */
+  /* YOU. A message you sent, a role you drive, a human actor. The attention
+     tick on the Chronicle, the glyph on a pin. */
   --kbn-you: #BC4538;
 
-  /* THE MACHINE. Agent work of every kind: the density curve, the delegation
-     ladder, an agent glyph, a worker in the air. */
+  /* THE MACHINE. Agent work of every kind: the chronicle's spells, an agent
+     glyph, a worker in the air. */
   --kbn-agent: #3D5BA0;
 
   /* NOW, AND WHAT IS OWED. The now-thread, a due date, a worker with its hand
@@ -507,9 +507,8 @@
   font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
-/* A role YOU drive, against the agent's cobalt below — the same pair Day and
-   Week draw as spine-against-curve. It was verdigris, which made one fact
-   wear two colours on two pages. */
+/* A role YOU drive, against the agent's cobalt below — the board's one pair
+   for who acted. */
 .kbn-pin-chip-human .kbn-pin-chip-glyph { color: var(--kbn-you); }
 .kbn-pin-chip-agent .kbn-pin-chip-glyph { color: var(--kbn-agent); }
 .kbn-pin-chip-name {
@@ -558,7 +557,7 @@
 }
 
 /* ── Drag-reveal horizon ─────────────────────────────────────────────────────
-   The Desk's permanent day-ribbon retired: three chronological views tell the
+   The Desk's permanent day-ribbon retired: the chronicle tells the
    past-and-future story, and the room it took now goes to Pinned and Resting.
    What it uniquely owned was the GESTURE — dropping a card on a date — so the
    day axis comes back for exactly as long as a card is in the air.
@@ -1956,12 +1955,9 @@
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  /* A WORKER IN THE AIR IS AGENT WORK, so it wears the agent's cobalt. It was
-     verdigris — which put the Day view in the position of drawing one fiber's
-     live worker as a teal pill and the very delegations that worker had aloft
-     as cobalt rungs, on the same row of the same page. The pill's ALARM states
-     below stay gold and cinnabar, because those are no longer claims about who
-     is working: they are claims about who is waited on. */
+  /* A WORKER IN THE AIR IS AGENT WORK, so it wears the agent's cobalt. The
+     pill's ALARM states below stay gold and cinnabar, because those are not
+     claims about who is working: they are claims about who is waited on. */
   color: var(--kbn-agent);
   background: rgba(61, 91, 160, 0.10);
   padding: 2px 6px;
@@ -2234,7 +2230,7 @@
   }
 
   /* ── View tabs: a run of pages, scrolled ───────────────────────────────
-     Five tabs plus the cycle lens will not sit in 390px, and wrapping them
+     The tabs plus the cycle lens will not sit in 390px, and wrapping them
      into two rows spends the fold on chrome. So the row scrolls, and the
      keycaps go: a hotkey glyph is an instruction you cannot follow on a
      device with no keyboard. The lens chips give up their auto-margin and
@@ -2604,8 +2600,8 @@
     gap: 6px;
   }
 
-  /* The view strip earns its place — it is the only way to reach Day, Week
-     and the rest — but it does not need to be a button bar. Trimmed to a
+  /* The view strip earns its place — it is the only way to reach Chronicle
+     and the board — but it does not need to be a button bar. Trimmed to a
      header rule of page names, still a comfortable target because the row's
      own height, not its padding, is what a thumb lands on. */
   .kbn-viewtabs {

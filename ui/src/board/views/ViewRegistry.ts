@@ -1,20 +1,17 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is five full-page views behind one hotkey row:
+ * The board is three full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Timeline ribbon + Now board + Pinned +
  *                 Stash). Owned by KanbanModal itself, NOT a TemporalView.
- *   2  day        ┐
- *   3  week       ├ registered views — each mounts into a full-width host
- *   4  chronicle  │ where the Desk surfaces would otherwise be.
- *   5  shelf      ┘
+ *   2  chronicle  ┐ registered views — each mounts into a full-width host
+ *   3  shelf      ┘ where the Desk surfaces would otherwise be.
  *
- * The first four run from the tightest window outward, so the strip reads as
- * a zoom: today, this week, the whole record. Shelf sits after them because it
- * is not a window at all — it is the fleet's sent WORK on a canvas, ordered by
- * a lens rather than by the shared temporal cursor. It shares the lifecycle
- * and nothing else, which is exactly what the interface asks of it.
+ * Chronicle is the whole record in time. Shelf is not a window onto time at
+ * all — it is the fleet's sent WORK on a canvas, ordered by a lens. It shares
+ * the lifecycle and nothing else, which is exactly what the interface asks of
+ * it.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -26,14 +23,15 @@
  * `refresh` fires on every successful 15s poll, INCLUDING polls where the
  * fiber data is byte-identical (the Desk skips those re-renders; views do not,
  * because their content also moves with the clock). Keep it cheap and
- * idempotent.
+ * idempotent — a view that reads the temporal feeds decides its own cadence
+ * for them rather than refetching per poll.
  */
 
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { TemporalFetchers } from './TemporalData.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'day' | 'week' | 'shelf'
+  id: 'chronicle' | 'shelf'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -43,8 +41,8 @@ export interface TemporalView {
 
 /**
  * What a view is handed. It IS a {@link TemporalFetchers} — `activity`,
- * `sessions`, `commits` and `moment` are that interface's, documented there —
- * plus the board's own response, cards and gestures.
+ * `sessions` and `commits` are that interface's, documented there — plus the
+ * board's own response, cards and gestures.
  *
  * The one thing a view must know that the fetchers' own docs do not say: feed
  * `sessions` to `buildSessionIndex` and join buckets through `lookupTmux`.
@@ -56,8 +54,7 @@ export interface TemporalView {
  * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
  * the fiber is a recorded fact rather than a reading of the subject line.
  * Both degrade to an empty ledger on an older daemon, so a view that adopts
- * either must keep its existing rungs. And reach for `moment` only on demand —
- * a hover, a click — never on a paint: one call reads one transcript file.
+ * either must keep its existing rungs.
  */
 export interface ViewContext extends TemporalFetchers {
   response: KanbanResponse
@@ -86,60 +83,8 @@ export interface ViewContext extends TemporalFetchers {
    * An id matching neither warns to the console and does nothing.
    */
   openCard(cardId: string): void
-  /**
-   * Focus a running worker's terminal — the same gesture as the Desk's `Aloft`
-   * / `☞ needs-you-now` pill, reached from a view.
-   *
-   * Not a new write plane: it delegates to the host callback the board has
-   * always had, which POSTs `/api/v1/attach` so the daemon opens the tmux
-   * session in kitty. `shuttleHost` routes a remote worker; omit it for local.
-   *
-   * OPTIONAL. Undefined when the board was mounted without `onOpenWorker` — a
-   * read-only context, or the offline harness. Check before calling and hide
-   * the affordance when it is absent, exactly as the Desk's pill degrades.
-   */
-  openWorker?(tmuxSessionName: string, shuttleHost?: string): void
+  /** Re-fetch the board's own feed now, rather than on the next poll. */
   requestRefresh(): void
-  /**
-   * The shared temporal cursor: a bare civil day (`YYYY-MM-DD`), or null for
-   * "today / current", which is the default and the state after a reset.
-   *
-   * It is ONE cursor across all views, held by KanbanModal, and it survives
-   * tab switches — so paging Day back to Tuesday and pressing `4` opens Week
-   * on the week containing Tuesday, not on this week. A view that keeps its
-   * own local day state instead will disagree with its neighbours; read this
-   * on every mount and refresh and let it be the source of truth.
-   *
-   * Null is not "no opinion" — it is the live present, and a view should
-   * re-resolve it against the clock each time rather than freezing the day it
-   * first saw.
-   */
-  focusDate: string | null
-  /**
-   * Move the cursor. Pass null to return it to today/current.
-   *
-   * This does NOT re-mount: it updates the shared state and calls the active
-   * view's `refresh` with a context carrying the new `focusDate`, so the
-   * caller patches itself in place. Do not call it from inside your own
-   * `refresh` — that is a loop.
-   *
-   * The argument is a bare civil day. A full ISO timestamp is accepted for
-   * convenience (its leading day is taken) but warns, because a civil day and
-   * an instant are different kinds and the board keeps them apart — see
-   * src/board/civilDay.ts.
-   */
-  setFocusDate(dayISO: string | null): void
-  /**
-   * Switch the page programmatically — a Day lane's "see this week" link, a
-   * Chronicle entry jumping into its day. Same path as clicking the tab or
-   * pressing the hotkey, tab styling included; `'desk'` returns to the kanban.
-   *
-   * `opts.focusDate` moves the cursor as part of the same gesture, so the
-   * destination mounts already showing the right day rather than flashing
-   * today first. Switching to the view that is already active is not a no-op
-   * when it carries a new `focusDate`: the view refreshes on the new cursor.
-   */
-  switchView(id: BoardViewId, opts?: { focusDate?: string }): void
 }
 
 /** A view's id, or `desk` for the kanban page KanbanModal renders itself. */
@@ -198,10 +143,10 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// Three surfaces run bare-key hotkeys — the chassis's 1-5 view switch, and Day
-// and Week's own paging keys — and all three must agree on when a keystroke is
-// NOT theirs. They had three hand-copied predicates; these are the shared ones,
-// so the next dialog added to the app is covered everywhere at once.
+// The chassis runs bare-key hotkeys — the 1-3 view switch and the bare `,` for
+// settings — and each must agree on when a keystroke is NOT theirs. These are
+// the shared predicates, so the next dialog added to the app is covered by
+// every bare key at once.
 
 /** The board's own root. It carries `role="dialog" aria-modal="true"`, so a
  *  naive "is a modal dialog open?" query matches the board itself. */
@@ -239,7 +184,7 @@ export function isBlockingDialog(
  * `[data-state="open"]` is Radix's stamp (Stash/Capture went through
  * `AppDialog`). `[aria-modal="true"]` catches every OTHER modal dialog — the
  * hand-rolled `StashForm` sets `role="dialog" aria-modal="true"` and NO
- * data-state, which is exactly the gap that let `1`-`5` switch views out from
+ * data-state, which is exactly the gap that let `1`-`3` switch views out from
  * under an open form. Matching on aria rather than on a library's attribute
  * means the next hand-rolled dialog is covered without a code change here.
  */
@@ -265,8 +210,8 @@ export function blockingDialogOpen(): boolean {
  * True when a bare keystroke belongs to something other than the board: a text
  * field has focus, or a dialog is layered over it.
  *
- * THE predicate — chassis, Day and Week should all call this rather than keep
- * their own copy, so they cannot drift apart again.
+ * THE predicate — every bare-key handler calls this rather than keeping its own
+ * copy, so they cannot drift apart.
  */
 export function keystrokeIsSpokenFor(): boolean {
   if (isTypingTarget(document.activeElement as HTMLElement | null)) return true
@@ -291,9 +236,8 @@ export interface HotkeyLike {
  * Two openings, because the board is two things at once. On a keyboard it is
  * an application, and an application's preferences are `⌘,` — the one chord
  * a Mac user tries without being told. On the board itself every other page is
- * a BARE key (`1`–`5`, `t`), and a phone's keyboard has no `⌘` at all, so a
- * bare `,` opens it too. `,` is free: the chassis owns only the digits, and Day
- * and Week own `t` and the arrows.
+ * a BARE key (`1`–`3`), and a phone's keyboard has no `⌘` at all, so a bare `,`
+ * opens it too. `,` is free: the chassis owns only the digits.
  *
  * Pure, and it deliberately does NOT consult the DOM — the two kinds are
  * guarded differently and the caller applies the guard:
@@ -313,36 +257,6 @@ export function settingsHotkey(e: HotkeyLike): SettingsHotkey | null {
   if (e.altKey || e.shiftKey) return null
   if (e.metaKey || e.ctrlKey) return 'chord'
   return 'bare'
-}
-
-const CIVIL_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
-const LEADING_CIVIL_DAY_RE = /^(\d{4}-\d{2}-\d{2})/
-
-/**
- * Coerce a `setFocusDate` / `switchView` argument to the cursor's own kind: a
- * bare civil day, or null for today/current.
- *
- * A civil day and an instant are different kinds, and the board keeps them
- * apart on purpose (src/board/civilDay.ts opens with why — reading a civil day
- * through `new Date()` loses a day west of Greenwich). So a full timestamp is
- * accepted, since the caller's intent is unambiguous, but it warns: passing one
- * means the call site is holding an instant where the cursor wants a day, and
- * that is worth seeing before it becomes a date-off-by-one somewhere downstream.
- * Anything unparseable resolves to null rather than poisoning the cursor.
- */
-export function normalizeFocusDate(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) return null
-  const trimmed = value.trim()
-  if (CIVIL_DAY_RE.test(trimmed)) return trimmed
-  const leading = LEADING_CIVIL_DAY_RE.exec(trimmed)?.[1]
-  if (leading) {
-    console.warn(
-      `[views] focusDate wants a bare civil day (YYYY-MM-DD); got "${value}". Using "${leading}".`,
-    )
-    return leading
-  }
-  console.warn(`[views] focusDate is not a civil day: "${value}". Falling back to today.`)
-  return null
 }
 
 /**

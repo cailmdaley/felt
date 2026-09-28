@@ -81,8 +81,8 @@ marked.use({
  * Nothing here is a fiber-id rule — the resolver owns that.
  *
  * OPT-IN, via `wikilinks: true`. Only a surface that will run the resolver may
- * render anchors: everywhere else — a card's outcome on the board grid, a Day
- * prose block — a `[[…]]` renders as the literal text it always did. A surface
+ * render anchors: everywhere else — a card's outcome on the board grid, say —
+ * a `[[…]]` renders as the literal text it always did. A surface
  * that stripped the brackets without ever resolving anything would be claiming
  * a reference is a link when nothing there can open it.
  */

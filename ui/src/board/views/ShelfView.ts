@@ -1,5 +1,5 @@
 /**
- * ShelfView (hotkey 5) — the BOARD: the sent work, as a surface rather than a
+ * ShelfView (hotkey 3) — the BOARD: the sent work, as a surface rather than a
  * list. ("Shelf" is the internal name, kept in the id, the storage keys and
  * these module names; the reader sees "board".)
  *
@@ -185,7 +185,7 @@ class ShelfView implements TemporalView {
   // the storage keys and the module names) — renaming those would be churn
   // through half the board for no reader-visible gain.
   readonly title = 'Board'
-  readonly hotkey = '5'
+  readonly hotkey = '3'
 
   private ctx: ViewContext | null = null
   private viewport: HTMLElement | null = null
