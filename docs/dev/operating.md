@@ -92,6 +92,40 @@ Repeatedly increasing `stalls` means the daemon is alive but an input remains
 wedged; inspect `~/.config/felt/stores.json` and remote tunnel health rather
 than restarting the daemon to clear the symptom.
 
+## A worker tmux cannot see
+
+tmux reaches its server through a socket file, `/tmp/tmux-<uid>/default`
+(under `TMUX_TMPDIR` when set). If something deletes that file while the server
+runs — a `/tmp` cleaner, a careless `rm` — every tmux command answers "no server
+running" although every worker under the server is still alive. The daemon
+does not read that as death:
+
+- **Every session's run script names it.** A worker runs as
+  `bash -l <tmp>/shuttle-run-<session>.<n>.sh`, and that bash lives as long as
+  the worker. When tmux says a session is absent, the daemon scans its own
+  uid's processes (`ps -ww -o pid=,ppid=,args= -U <uid>`); a live run script
+  makes the session `:unknown` — held as present, never struck dead — and the
+  poller's session listing includes it. A scan that cannot run is uncertainty
+  too, never evidence of death.
+- **No resume onto a held transcript.** Before resuming a fiber onto harness
+  session `<uuid>` (the dispatcher, or a History row's resume), the daemon
+  refuses if any process carries `<uuid>` in its argv. The poller parks the
+  fiber as blocked with a message naming the pid.
+
+The log line `tmux cannot see session …` (at most every ten minutes per
+session) or the blocked message names the worker and, when it can, the orphaned
+tmux server's pid. To restore the view, make the server recreate its socket:
+
+```bash
+kill -USR1 <tmux server pid>    # tmux recreates the socket when the path is free
+tmux ls                         # the sessions are back
+```
+
+If another tmux server has since claimed the socket path (a later `tmux
+new-session` started one there), `USR1` cannot reclaim it: stop the new server,
+or finish the orphaned workers by stopping their processes. A blocked resume
+proceeds once no process holds the session.
+
 ## Remedying a daemon-born tmux server (macOS)
 
 `felt setup receipt` (or `felt shuttle status`) prints a one-liner when the

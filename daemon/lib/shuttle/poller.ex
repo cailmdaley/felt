@@ -27,6 +27,7 @@ defmodule Shuttle.Poller do
 
   use GenServer
   require Logger
+  require Shuttle.Dispatcher
 
   alias Shuttle.{
     Collaboration,
@@ -2227,9 +2228,7 @@ defmodule Shuttle.Poller do
 
     if preflight_cooldown_open?(state, runtime_key) do
       case Map.get(state.dispatch_failures, runtime_key) do
-        %{reason: {tag, message}}
-        when is_binary(message) and
-               tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] ->
+        %{reason: {tag, message}} when Dispatcher.refusal?(tag, message) ->
           {tag, message}
 
         %{reason: {:project_dir_missing, _dir} = reason} ->
@@ -3415,7 +3414,8 @@ defmodule Shuttle.Poller do
              :wrapper_unresolved,
              :work_dir_missing,
              :project_dir_missing,
-             :tmux_server_unavailable
+             :tmux_server_unavailable,
+             :transcript_held
            ] ->
         DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
 
@@ -3830,41 +3830,49 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Lists live shuttle tmux sessions, classifying failure the same three ways
-  # as `Shuttle.Tmux.session_status/2` (see that moduledoc): "no sessions" is
-  # a POSITIVE claim, and only two outcomes may make it — exit 0, or a
-  # non-zero exit whose output is tmux's own absence message ("no server
-  # running", …). Anything else — the runner's wall-clock `:timeout` (a wedged
-  # tmux), an exec failure, an unrecognized error — returns
-  # `{:error, :unknown}`: the world is UNCERTAIN, not empty. Conflating the
-  # two is how a single wedged `tmux ls` mass-marked every live standing role
-  # dead (reconcile_dead_standing_roles writes status flips to their fibers!)
-  # and made boot adoption adopt nothing. Callers whose action on an empty
-  # list is destructive or reconciling MUST skip the pass on `:unknown` —
-  # uncertainty counts as present; the next healthy scan catches up.
+  # Lists live shuttle worker sessions: those tmux lists, united with those
+  # whose run script is still running (`Shuttle.WorkerProcess`), so a worker
+  # whose tmux server lost its socket is still listed. Failure is classified
+  # the same three ways as `Shuttle.Tmux.session_status/2` (see that
+  # moduledoc): "no sessions" is a POSITIVE claim, made only when tmux answers
+  # (exit 0, or its own absence message such as "no server running") AND the
+  # process scan answers. Anything else — the runner's wall-clock `:timeout` (a
+  # wedged tmux), an exec failure, an unrecognized error, or an empty tmux
+  # answer the process scan could not check — returns `{:error, :unknown}`:
+  # the world is UNCERTAIN, not empty. Conflating the two is how a single
+  # wedged `tmux ls` mass-marked every live standing role dead
+  # (reconcile_dead_standing_roles writes status flips to their fibers!) and
+  # made boot adoption adopt nothing. Callers whose action on an empty list is
+  # destructive or reconciling MUST skip the pass on `:unknown` — uncertainty
+  # counts as present; the next healthy scan catches up. A listed session tmux
+  # cannot see is adopted like any other; its watcher reads `:unknown` and
+  # holds.
   @doc false
   def list_shuttle_sessions(state) do
-    case state.runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
-      {output, 0} ->
-        sessions =
-          output
-          |> String.split("\n")
-          |> Enum.map(&String.trim/1)
-          |> Enum.filter(&Dispatcher.shuttle_session?/1)
+    tmux =
+      case state.runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
+        {output, 0} ->
+          {:ok,
+           output
+           |> String.split("\n")
+           |> Enum.map(&String.trim/1)
+           |> Enum.filter(&Dispatcher.shuttle_session?/1)}
 
-        {:ok, sessions}
-
-      {_output, :timeout} ->
-        {:error, :unknown}
-
-      {output, _status} ->
-        # Genuine no-server exits non-zero WITH tmux's own absence message —
-        # positive evidence of emptiness. Any other failure is uncertainty.
-        if Shuttle.Tmux.absence_message?(output) do
-          {:ok, []}
-        else
+        {_output, :timeout} ->
           {:error, :unknown}
-        end
+
+        {output, _status} ->
+          # Genuine no-server exits non-zero WITH tmux's own absence message.
+          # Any other failure is uncertainty.
+          if Shuttle.Tmux.absence_message?(output), do: {:ok, []}, else: {:error, :unknown}
+      end
+
+    with {:ok, listed} <- tmux do
+      case Shuttle.WorkerProcess.scan(state.runner) do
+        {:ok, procs} -> {:ok, Enum.uniq(listed ++ Shuttle.WorkerProcess.sessions(procs))}
+        {:error, :unknown} when listed == [] -> {:error, :unknown}
+        {:error, :unknown} -> {:ok, listed}
+      end
     end
   end
 

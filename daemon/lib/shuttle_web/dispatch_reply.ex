@@ -6,6 +6,7 @@ defmodule ShuttleWeb.DispatchReply do
   """
 
   import ShuttleWeb.RelayHelpers, only: [app_server_unavailable_message: 0]
+  require Shuttle.Dispatcher
 
   @spec render(String.t(), term()) :: {pos_integer(), map()}
   def render(fiber_id, {:ok, session}) do
@@ -77,16 +78,14 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
-  # A dispatch preflight refused before anything spawned: the agent's
-  # wrapper does not resolve in the login bash the worker launches
-  # through, the work directory is not on this host, or (macOS) there is
-  # no tmux server the daemon is allowed to fork under. All three are
-  # operator config problems, not server faults, so 422 with the message
-  # that names the thing and the fix. No worker was spawned; the
-  # alternative is the tmux session that dies invisibly.
-  def render(fiber_id, {:error, {tag, message}})
-      when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-             is_binary(message) do
+  # A dispatch preflight refused before anything spawned
+  # (`Shuttle.Dispatcher.refusal?/2`): the agent's wrapper does not resolve in
+  # the login bash the worker launches through, the work directory is not on
+  # this host, (macOS) there is no tmux server the daemon is allowed to fork
+  # under, or the session a resume targets is still open in another process.
+  # None is a server fault, so 422 with the message that names the thing and
+  # the fix. No worker was spawned.
+  def render(fiber_id, {:error, {tag, message}}) when Shuttle.Dispatcher.refusal?(tag, message) do
     {422,
      %{
        dispatched: false,

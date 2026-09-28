@@ -51,6 +51,7 @@ defmodule Shuttle.SessionResumeTest do
     def calls, do: Agent.get(__MODULE__, & &1.calls)
     def set_running(running), do: Agent.update(__MODULE__, &Map.put(&1, :running, running))
     def set_duplicate(dup), do: Agent.update(__MODULE__, &Map.put(&1, :duplicate, dup))
+    def set_ps(result), do: Agent.update(__MODULE__, &Map.put(&1, :ps, result))
 
     def cmd(command, args, _opts) do
       Agent.update(
@@ -67,6 +68,9 @@ defmodule Shuttle.SessionResumeTest do
             nil -> {"unknown agent #{id}", 1}
             agent -> {Jason.encode!(agent), 0}
           end
+
+        {"ps", _} ->
+          Agent.get(__MODULE__, &Map.get(&1, :ps, {"", 0}))
 
         {"tmux", ["new-session" | _]} ->
           if Agent.get(__MODULE__, &Map.get(&1, :duplicate)),
@@ -236,6 +240,8 @@ defmodule Shuttle.SessionResumeTest do
       assert [{"tmux", ["new-session", "-d", "-s", ^tmux, "-c", ^project, "bash", "-l", script]}] =
                Enum.filter(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
 
+      assert Path.basename(script) =~ ~r/^shuttle-run-resume-#{@claude}\.\d+\.sh$/
+
       body = File.read!(script)
       assert body =~ "unset ROOTDIR"
       assert body =~ "tmux list-clients -t '#{tmux}'"
@@ -260,6 +266,29 @@ defmodule Shuttle.SessionResumeTest do
 
       assert reason =~ "running worker"
       assert Runner.calls() == []
+    end
+
+    test "prepare refuses a session a process tmux cannot see still holds" do
+      Runner.set_ps(
+        {"""
+           700     1 tmux: server
+           812   700 bash -l /tmp/shuttle-run-9859.sh
+           813   812 claude --resume #{@claude}
+         """, 0}
+      )
+
+      assert {:error, {:live, reason}} = SessionResume.prepare(@claude, runner: Runner)
+      assert reason =~ "pid 813"
+      assert reason =~ "kill -USR1 700"
+      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+    end
+
+    test "prepare refuses when the process scan cannot run" do
+      Runner.set_ps({"ps: boom", 1})
+
+      assert {:error, reason} = SessionResume.prepare(@claude, runner: Runner)
+      assert reason =~ "could not check"
+      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
     end
 
     test "both routes answer 409" do

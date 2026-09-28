@@ -32,7 +32,23 @@ defmodule Shuttle.Dispatcher do
           | {:error, {:work_dir_missing, String.t()}}
           | {:error, {:tmux_server_unavailable, String.t()}}
           | {:error, {:session_open_in_resume, String.t()}}
+          | {:error, {:transcript_held, String.t()}}
           | {:error, String.t()}
+
+  @doc """
+  True for a dispatch preflight refusal — `{:error, {tag, message}}` with an
+  operator-facing `message` every surface renders verbatim (the poller's
+  `blocked` row, the dispatch API's 422, the CLI's stderr). Usable in guards
+  after `require Shuttle.Dispatcher`.
+  """
+  defguard refusal?(tag, message)
+           when tag in [
+                  :wrapper_unresolved,
+                  :work_dir_missing,
+                  :tmux_server_unavailable,
+                  :session_open_in_resume,
+                  :transcript_held
+                ] and is_binary(message)
 
   @doc """
   Dispatches a worker for the given fiber ID.
@@ -1003,6 +1019,15 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  defp check_resume_target_free(session_id, runner) do
+    with :ok <- check_no_human_resume(session_id, runner) do
+      case Shuttle.WorkerProcess.check_free(runner, session_id) do
+        :ok -> :ok
+        {:error, {_held_or_unknown, message}} -> dispatch_refused(:transcript_held, message)
+      end
+    end
+  end
+
   defp check_no_human_resume(session_id, runner) do
     tmux = Shuttle.SessionResume.tmux_name(session_id)
 
@@ -1299,13 +1324,14 @@ defmodule Shuttle.Dispatcher do
 
     case resume_intent do
       {:previous, session_id} ->
-        # A human resume of this very session (a card History row,
-        # `Shuttle.SessionResume`) may be open in `resume-<uuid>`. Two harness
-        # processes on one transcript would interleave it, so the dispatch is
-        # refused like any other preflight — the poller parks the fiber as
-        # blocked with this message — rather than killing a terminal a person
-        # may be typing in.
-        case check_no_human_resume(session_id, runner) do
+        # Two harness processes on one transcript would interleave it. A
+        # human resume of this very session (a card History row,
+        # `Shuttle.SessionResume`) may be open in `resume-<uuid>`, or a live
+        # process tmux cannot see may still hold it (a worker whose tmux
+        # socket was deleted). Either way the dispatch is refused like any
+        # other preflight — the poller parks the fiber as blocked with the
+        # message — rather than killing a process a person may be typing in.
+        case check_resume_target_free(session_id, runner) do
           :ok ->
             # Resume mode: invoke the harness-appropriate resume command and
             # inject a small prompt as the next user turn so the resumed
@@ -1500,10 +1526,12 @@ defmodule Shuttle.Dispatcher do
 
   def effective_resume_intent(intent, _agent, _opts), do: intent
 
-  # Spawn a tmux session from a run-script string.
+  # Spawn a tmux session from a run-script string. The script's path names the
+  # session (`Shuttle.WorkerProcess.script_path/1`) and stays in the pane
+  # bash's argv for the worker's life, so the process table can vouch for a
+  # worker tmux cannot see.
   defp spawn_tmux(session, work_dir, run_script, runner) do
-    tmp_path =
-      Path.join(System.tmp_dir!(), "shuttle-run-#{System.unique_integer([:positive])}.sh")
+    tmp_path = Shuttle.WorkerProcess.script_path(session)
 
     File.write!(tmp_path, run_script)
     File.chmod!(tmp_path, 0o755)
