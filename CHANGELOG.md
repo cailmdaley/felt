@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An id written out in full resolves to that fiber before any prefix completion.
   From a project view, `felt edit other/deep` no longer edits a local `other/deepx` when `other/deep` exists in the enclosing store, and `felt rm` no longer calls the exact id a guess.
+- A query spelling a fiber's own file as an id (`science/cmbx/cmbx` for `.felt/science/cmbx/cmbx.md`) is a stale path the slug rescue answers, not a stray file to migrate.
 - `felt add -s <status>` validates the status as `felt edit` does, and `-s closed` stamps `closed-at`.
 - `felt shuttle set-model` can no longer leave a Claude or Pi agent on `surface: app`, a block `set-agent` then refused.
 - Run-time errors print the error without the usage block; only a command line cobra cannot accept (an unknown flag, a wrong argument count, a missing required flag, exclusive flags together) shows usage.
