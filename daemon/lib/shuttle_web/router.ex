@@ -135,6 +135,9 @@ defmodule ShuttleWeb.Router do
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.
     get("/sessions", SessionsController, :show)
+    # Where the ledgered sessions open — the claude.ai bridge URL or the Codex
+    # app route — resolved from each transcript on the host that ran it (`host`).
+    get("/sessions/links", SessionLinksController, :show)
     # Join rung 0 for commit narration: the commit↔session pairing the hook
     # recorded at commit time (~/.shuttle/commits.jsonl), the sole source for
     # the commit strip. Host-scoped like /sessions.

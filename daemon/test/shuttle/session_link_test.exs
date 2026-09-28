@@ -169,4 +169,57 @@ defmodule Shuttle.SessionLinkTest do
     File.rm!(Path.join([root, "-Users-cail-felt", "#{session}.jsonl"]))
     assert SessionLink.cached_url(session, root: root) == @last
   end
+
+  # ── resolve/2: past sessions, cached on the transcript's {mtime, size} ──────
+
+  describe "resolve/2" do
+    defp resolve_fixture do
+      session =
+        "5eedcafe-0000-4000-8000-" <>
+          String.pad_leading("#{System.unique_integer([:positive])}", 12, "0")
+
+      bridged = Jason.encode!(bridge(@first))
+      # Same byte length as the bridged line, and no bridge record in it.
+      plain =
+        Jason.encode!(%{
+          "type" => "user",
+          "pad" => String.duplicate("x", byte_size(bridged) - 24)
+        })
+
+      assert byte_size(plain) == byte_size(bridged)
+
+      root = write_tree([{session, [plain]}])
+      {session, root, Path.join([root, "-Users-cail-felt", "#{session}.jsonl"]), bridged}
+    end
+
+    test "an unbridged ended transcript is read once while its file is unchanged" do
+      {session, root, path, bridged} = resolve_fixture()
+      assert %{url: nil, harness: "claude-code"} = SessionLink.resolve(session, root: root)
+
+      # Rewrite the bytes but keep {mtime, size}: the cached answer stands,
+      # which is the proof the file was not read again.
+      {:ok, %File.Stat{mtime: mtime}} = File.stat(path, time: :posix)
+      File.write!(path, bridged <> "\n")
+      File.touch!(path, mtime)
+      assert %{url: nil} = SessionLink.resolve(session, root: root)
+
+      # A transcript that grew is a different file, and is read again.
+      File.write!(path, bridged <> "\n" <> bridged <> "\n")
+      assert %{url: @first} = SessionLink.resolve(session, root: root)
+    end
+
+    test "cache: false always reads" do
+      {session, root, path, bridged} = resolve_fixture()
+      assert %{url: nil} = SessionLink.resolve(session, root: root)
+      {:ok, %File.Stat{mtime: mtime}} = File.stat(path, time: :posix)
+      File.write!(path, bridged <> "\n")
+      File.touch!(path, mtime)
+      assert %{url: @first} = SessionLink.resolve(session, root: root, cache: false)
+    end
+
+    test "no transcript on this host is transcript_missing, with no link" do
+      assert %{availability: :transcript_missing, url: nil, desktop_link: nil, harness: nil} =
+               SessionLink.resolve("00000000-0000-0000-0000-000000000000", root: default_tree())
+    end
+  end
 end

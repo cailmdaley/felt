@@ -13,9 +13,119 @@ defmodule Shuttle.SessionLink do
   This module reads only that one record shape. It does not interpret anything
   else in the transcript, and a session from another harness, or one that was
   never bridged, honestly has no link.
+
+  ## Two readers, two caches
+
+  `cached_url/2` serves the poller: a handful of LIVE workers, each asked every
+  tick, memoised in `:persistent_term` with a miss retried on a timer.
+
+  `resolve/2` serves the card's session history (`GET /api/v1/sessions/links`):
+  any past session the drawer shows, asked only when a card opens. Those are
+  mostly ended transcripts that will never change, so the answer is cached in
+  an ETS table owned by this module's GenServer and validated on the
+  transcript's `{mtime, size}` — an unbridged ended session is read once, not
+  once a minute, and a session still running is re-read only when its file has
+  grown. Without the GenServer the resolution still happens, uncached.
   """
 
-  alias Shuttle.Moment
+  use GenServer
+
+  alias Shuttle.{Moment, TokenSpend, Transcript}
+
+  @table :shuttle_session_links
+
+  @typedoc "Where one session can be opened, as resolved on this host."
+  @type link :: %{
+          session: String.t(),
+          availability: :available_local | :transcript_missing,
+          harness: String.t() | nil,
+          url: String.t() | nil,
+          desktop_link: String.t() | nil
+        }
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+  end
+
+  @impl true
+  def init(_opts) do
+    table =
+      :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+
+    {:ok, %{table: table}}
+  end
+
+  @doc """
+  Where `session` opens, from its transcript on this host.
+
+    * a Claude Code transcript → `url`, its last bridge URL, when it has one;
+    * a Codex rollout → `desktop_link`, the `codex://threads/<id>` route the
+      Codex app on THIS host answers (the rollout being here is the evidence
+      that this host's Codex has the thread);
+    * a pi transcript, or no transcript → neither.
+
+  Nothing is guessed: a missing transcript is `:transcript_missing` with no
+  link, whatever the ledger says the harness was.
+
+  Opts (for tests): the transcript roots `Shuttle.Moment.transcript_path/2`
+  takes, and `cache: false` to bypass the table.
+  """
+  @spec resolve(String.t(), keyword()) :: link()
+  def resolve(session, opts \\ []) when is_binary(session) do
+    case Moment.transcript_path(session, opts) do
+      nil ->
+        %{
+          session: session,
+          availability: :transcript_missing,
+          harness: nil,
+          url: nil,
+          desktop_link: nil
+        }
+
+      path ->
+        harness = Transcript.harness_for(path, opts)
+
+        %{
+          session: session,
+          availability: :available_local,
+          harness: harness,
+          url: if(harness == "claude-code", do: stable_url(session, path, opts)),
+          desktop_link: if(harness == "codex", do: desktop_url(session))
+        }
+    end
+  end
+
+  # The bridge URL for a transcript, cached against the file's `{mtime, size}`.
+  defp stable_url(session, path, opts) do
+    token = TokenSpend.file_token(path)
+    cache? = Keyword.get(opts, :cache, true) and not is_nil(token)
+
+    case cache? && lookup_stable(session, path, token) do
+      {:ok, url} ->
+        url
+
+      _ ->
+        url = last_url(path)
+        if cache?, do: store_stable(session, path, token, url)
+        url
+    end
+  end
+
+  defp lookup_stable(session, path, token) do
+    case :ets.lookup(@table, session) do
+      [{^session, ^path, ^token, url}] -> {:ok, url}
+      _ -> :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  defp store_stable(session, path, token, url) do
+    :ets.insert(@table, {session, path, token, url})
+  rescue
+    ArgumentError -> :ok
+  end
 
   @doc "The installed desktop app's native thread route; not a phone universal link."
   def desktop_url(thread_id) when is_binary(thread_id) do

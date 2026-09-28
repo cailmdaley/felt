@@ -94,7 +94,9 @@ defmodule Shuttle.Transcript do
   @spec digest(String.t()) :: {non_neg_integer(), String.t()}
   def digest(path) when is_binary(path), do: {byte_count(path), sha256(path)}
 
-  defp harness_for(path, opts) do
+  @doc "The harness that owns `path`, by which transcript root it sits under."
+  @spec harness_for(String.t(), keyword()) :: String.t() | nil
+  def harness_for(path, opts \\ []) do
     expanded = Path.expand(path)
     claude = Path.expand(HarnessPaths.claude_projects_root(opts))
     pi = Path.expand(HarnessPaths.pi_sessions_root(opts))

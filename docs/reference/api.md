@@ -156,6 +156,7 @@ uses the host's Codex project listing until a direct app URL is available.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
+| `GET /sessions/links` | host-routed | Where a batch of sessions open: each one's claude.ai bridge URL or Codex app thread route |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | local | Report hark availability and meeting state on this daemon's host |
 
@@ -259,6 +260,19 @@ receipt carries `availability` (`available_local`, `available_remote`,
 adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
 use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
 define a transcript reader or search language.
+
+`/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
+optional `host=<name>`, and answers `{host, links}` with one entry per session
+in request order: `session`, `availability` (`available_local`,
+`transcript_missing` or `host_unreachable`), `harness`, `url` and
+`desktop_link`. A Claude Code transcript yields `url`, the last
+`remote_session_change` bridge URL it recorded; a Codex rollout yields
+`desktop_link`, `codex://threads/<uuid>`, which only the Codex app on that
+host can open; pi and unbridged sessions yield neither. The board's card
+drawer asks for the sessions it lists, one request per host. Each answer is
+cached against the transcript's `{mtime, size}`, so an ended session is read
+once. It is a sibling of `/transcript` because that receipt hashes the whole
+file.
 
 ## Temporal read plane
 
