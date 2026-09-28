@@ -2653,10 +2653,14 @@ export class FiberDetailModal {
         opener.focus()
       }
     })
-    menu.addEventListener('focusout', () => {
-      window.setTimeout(() => {
-        if (!wrap.contains(document.activeElement)) setOpen(false)
-      }, 0)
+    // Focus moving to another control (Tab away) closes the menu; focus
+    // dropping to nothing does not. WebKit gives a clicked button no focus, so
+    // pressing Room blurs Call to the body before Room's click lands — closing
+    // then would hide Room under the pointer and swallow the pick. Presses
+    // outside are `onOutside`'s.
+    menu.addEventListener('focusout', (e) => {
+      const to = e.relatedTarget as Node | null
+      if (to && !wrap.contains(to)) setOpen(false)
     })
 
     wrap.append(opener, menu)
