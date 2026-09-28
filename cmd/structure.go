@@ -36,8 +36,7 @@ A stray that cannot fold safely (its target already exists, its <slug> is a
 file or symlink, or the stray is itself a symlink) is left in place with the
 reason; the rest of the pass runs and migrate exits non-zero until it is moved
 by hand.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, err := resolveMigrationStorage(migrateDir)
 		if err != nil {

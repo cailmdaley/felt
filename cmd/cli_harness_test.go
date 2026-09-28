@@ -72,11 +72,13 @@ func executeCLI(t *testing.T, dir string, args ...string) (stdout, stderr string
 }
 
 // resetFlags returns every flag on every command to its registered default
-// and clears its Changed mark.
+// and clears its Changed mark, and clears the SilenceUsage a previous run's
+// pre-run hook set, so a parse error still shows usage.
 func resetFlags(t *testing.T) {
 	t.Helper()
 	var walk func(*cobra.Command)
 	walk = func(c *cobra.Command) {
+		c.SilenceUsage = false
 		for _, set := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags()} {
 			set.VisitAll(func(f *pflag.Flag) {
 				if err := resetFlag(f); err != nil {
@@ -104,6 +106,31 @@ func resetFlag(f *pflag.Flag) error {
 		return slice.Replace(values)
 	}
 	return f.Value.Set(f.DefValue)
+}
+
+// TestUsageOnlyForCommandLineErrors: a command that fails at run time prints
+// its error, not the usage block — edit, add and sync included; a command
+// line cobra cannot parse still gets usage.
+func TestUsageOnlyForCommandLineErrors(t *testing.T) {
+	dir, _ := newStore(t)
+	for _, args := range [][]string{
+		{"edit", "nowhere", "-s", "open"},
+		{"add", "x", "X", "-s", "bogus"},
+		{"sync"}, // the fixture store is not a git repository
+		{"shuttle", "resume", "nowhere"},
+	} {
+		stdout, stderr, err := executeCLI(t, dir, args...)
+		if err == nil {
+			t.Fatalf("%v: expected a run-time failure", args)
+		}
+		if strings.Contains(stdout+stderr, "Usage:") {
+			t.Fatalf("%v printed usage for a run-time error:\n%s%s", args, stdout, stderr)
+		}
+	}
+	stdout, stderr, err := executeCLI(t, dir, "edit", "x", "--no-such-flag")
+	if err == nil || !strings.Contains(stdout+stderr, "Usage:") {
+		t.Fatalf("a flag-parse error should show usage: err=%v\n%s%s", err, stdout, stderr)
+	}
 }
 
 // TestFlagsDoNotLeakAcrossInvocations: a flag passed to one invocation is

@@ -136,6 +136,14 @@ var rootCmd = &cobra.Command{
 	// create verbs' "already has a block, here are the verbs you meant") turns
 	// into a wall.
 	SilenceErrors: true,
+	// Usage is for a command line cobra could not parse. By the time any
+	// pre-run hook runs, flags, arguments and required flags have all been
+	// accepted, so an error from here on is the command failing, not the
+	// caller misusing it — and the usage wall would only bury the message.
+	// (The daemon shells felt and logs its stderr; so do hooks.)
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		cmd.SilenceUsage = true
+	},
 }
 
 // Execute runs the root command.
@@ -147,6 +155,10 @@ func Execute() {
 }
 
 func init() {
+	// Every ancestor's persistent pre-run runs, root's included, so a
+	// subcommand group with a hook of its own (shuttle's --felt-store) does
+	// not shadow root's.
+	cobra.EnableTraverseRunHooks = true
 	rootCmd.AddGroup(
 		&cobra.Group{ID: groupFibers, Title: "Fibers:"},
 		&cobra.Group{ID: groupSearch, Title: "Finding:"},

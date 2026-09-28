@@ -108,14 +108,22 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				if err != nil {
 					return err
 				}
-				return outputShowSelection(citations)
+				if jsonOutput {
+					return outputJSON(citations)
+				}
+				printCitations(f.ID, citations)
+				return nil
 			}
 			if showConsumers {
 				_, consumers, err := storage.ScanRelationshipsAcrossStore(f.ID)
 				if err != nil {
 					return err
 				}
-				return outputShowSelection(consumers)
+				if jsonOutput {
+					return outputJSON(consumers)
+				}
+				printConsumers(f.ID, consumers)
+				return nil
 			}
 			if showField != "" {
 				return outputShowField(storage, f, showField)
@@ -217,16 +225,40 @@ func outputShowBody(storage *felt.Storage, f *felt.Felt) error {
 	return nil
 }
 
-func outputShowSelection(v interface{}) error {
-	if jsonOutput {
-		return outputJSON(v)
+// printCitations lists the fibers that link to id, one per line, in the same
+// shape as show's "Cited by:" line, then the citing fiber's name.
+func printCitations(id string, citations []felt.Citation) {
+	if len(citations) == 0 {
+		fmt.Printf("No fibers link to %s\n", id)
+		return
 	}
-	data, err := yaml.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal show selection: %w", err)
+	for _, c := range citations {
+		ref := c.SourceID
+		if c.Fragment != "" {
+			ref += "#" + c.Fragment
+		}
+		fmt.Printf("%s  %s\n", ref, c.SourceName)
 	}
-	fmt.Print(string(data))
-	return nil
+}
+
+// printConsumers lists the fibers that name id in inputs.from, one per line,
+// in the same shape as show's "Consumed by:" line: the output consumed, the
+// consuming fiber and its input id, then the consumer's name.
+func printConsumers(id string, consumers []felt.DataFlowConsumer) {
+	if len(consumers) == 0 {
+		fmt.Printf("No fibers name %s in inputs.from\n", id)
+		return
+	}
+	for _, c := range consumers {
+		ref := c.SourceID
+		if c.InputID != "" {
+			ref += "#" + c.InputID
+		}
+		if c.OutputID != "" {
+			ref = c.OutputID + " \u2192 " + ref
+		}
+		fmt.Printf("%s  %s\n", ref, c.SourceName)
+	}
 }
 
 // outputShowField emits a single frontmatter field, identified by its

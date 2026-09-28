@@ -51,8 +51,7 @@ the same command, or a git commit that failed and left HEAD where it was,
 records nothing.
 
 Prints nothing and exits 0 on every path, including malformed input.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCommitHook(os.Stdin)
 	},

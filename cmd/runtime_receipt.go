@@ -162,8 +162,7 @@ compatibility, and the running shuttle daemon's contract. It exits non-zero
 unless every component enabled on this host is present and compatible and
 exactly one felt build is on PATH. -j prints the machine-readable receipt that
 setup and deployment checks read.`,
-	SilenceUsage: true,
-	Args:         cobra.NoArgs,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		receipt := collectRuntimeReceipt()
 		if jsonOutput {

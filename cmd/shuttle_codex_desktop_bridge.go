@@ -45,10 +45,9 @@ var (
 )
 
 var codexDesktopBridgeCmd = &cobra.Command{
-	Use:          "codex-desktop-bridge --codex /absolute/path/to/codex -- [codex args...]",
-	Short:        "Bridge Codex desktop JSONL to a private native app-server websocket",
-	Args:         cobra.ArbitraryArgs,
-	SilenceUsage: true,
+	Use:   "codex-desktop-bridge --codex /absolute/path/to/codex -- [codex args...]",
+	Short: "Bridge Codex desktop JSONL to a private native app-server websocket",
+	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer stop()

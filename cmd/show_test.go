@@ -333,26 +333,26 @@ func TestShowIncludesConsumers(t *testing.T) {
 	}
 }
 
-func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
+func TestShowConsumersSelectorPrintsOneLinePerConsumer(t *testing.T) {
 	dir := consumerStore(t, "")
 
 	out, err := runCommand(t, dir, "show", "project/question", "--consumers")
 	if err != nil {
 		t.Fatalf("show --consumers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "inputid: catalog") || !strings.Contains(out, "outputid: posterior") {
+	if strings.TrimSpace(out) != "posterior \u2192 project/analysis#catalog  Analysis" {
 		t.Fatalf("show --consumers output mismatch:\n%s", out)
 	}
 }
 
-func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
+func TestShowCitationsSelectorPrintsOneLinePerCitation(t *testing.T) {
 	dir := citationStore(t)
 
 	out, err := runCommand(t, dir, "show", "project/question", "--citations")
 	if err != nil {
 		t.Fatalf("show --citations: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "sourcename: Analysis") {
+	if strings.TrimSpace(out) != "project/analysis  Analysis" {
 		t.Fatalf("show --citations output mismatch:\n%s", out)
 	}
 }
@@ -367,7 +367,7 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show --citations should not sync unrelated malformed fibers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") {
+	if !strings.Contains(out, "project/analysis  Analysis") {
 		t.Fatalf("show --citations missing source:\n%s", out)
 	}
 }

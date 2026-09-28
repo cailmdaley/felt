@@ -79,8 +79,7 @@ var hookPreToolCmd = &cobra.Command{
 (if the felt skill hasn't been activated this session in a felt-enabled
 project) or nothing (pass through). Outside felt-enabled projects, or in
 non-Claude sessions like Codex, this is a pass-through.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPreToolHook(os.Stdin, os.Stdout)
 	},
@@ -93,8 +92,7 @@ var hookPostToolCmd = &cobra.Command{
 MultiEdit on a markdown file inside a felt store, stamps the owning fiber's
 updated-at, so a direct edit counts toward recency as felt add and felt edit
 do. Silent for any other tool, file, or error.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPostToolHook(os.Stdin)
 	},

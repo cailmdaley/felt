@@ -51,8 +51,7 @@ and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
 offer queued peer messages as additionalContext; Stop never wakes the session.
 SHUTTLE_MESSAGES=off disables mailbox registration and delivery.`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runEventAndMessageHook(os.Stdin, os.Stdout)
 	},
