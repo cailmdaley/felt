@@ -227,7 +227,7 @@ defmodule Shuttle.Moment do
   @idle_report ~s({"type":"idle_notification")
 
   # Canonical UUID. Narrow on purpose: this string becomes a glob segment.
-  @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+  @uuid ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
   @typedoc """
   One recovered message: when it landed, who spoke, what they said — and which
@@ -463,10 +463,10 @@ defmodule Shuttle.Moment do
   asking without reading them.
 
   Each harness root is globbed in turn — Claude Code first, then pi, then Codex
-  — and the first regular-file hit wins. Pi leads its basenames with an ISO
-  stamp, while Codex fans out by local civil date; the session id is
-  UUID-validated before any of this, so it remains the only caller-supplied
-  pattern component.
+  — and the first regular-file hit wins; the later roots are not globbed. Pi
+  leads its basenames with an ISO stamp, while Codex fans out by local civil
+  date; the session id is UUID-validated before any of this, so it remains the
+  only caller-supplied pattern component.
   """
   @spec transcript_path(String.t(), keyword()) :: String.t() | nil
   def transcript_path(session, opts \\ []) when is_binary(session) do
@@ -476,8 +476,9 @@ defmodule Shuttle.Moment do
         Path.join(pi_root(opts), "*/*#{session}.jsonl"),
         Shuttle.HarnessPaths.codex_session_glob(session, opts)
       ]
-      |> Enum.flat_map(&Path.wildcard/1)
-      |> Enum.find(&File.regular?/1)
+      |> Enum.find_value(fn pattern ->
+        pattern |> Path.wildcard() |> Enum.find(&File.regular?/1)
+      end)
     end
   end
 

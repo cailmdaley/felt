@@ -46,6 +46,7 @@ import {
   type PanelGeometry,
 } from './FloatingPanelChrome.js'
 import { LinkedFiberPanel } from './LinkedFiberPanel.js'
+import { buildSessionHistory } from './sessionHistory.js'
 import { suppressNextClick } from './dismissGesture.js'
 import {
   buildFileViewer,
@@ -2349,10 +2350,12 @@ export class FiberDetailModal {
    *
    * Folded, the strip is a reading of the fiber ({@link stripFacts}): who works
    * it, how it recurs, where it runs, when it is due, how its last run went.
-   * Unfolded, three things in the order they are reached for: the composer (a
+   * Unfolded, four things in the order they are reached for: the composer (a
    * message and the dispatch verbs that carry it), the ledger (what the next
-   * launch reads, beside the card's own due day and parent), and the verdict
-   * that closes the card — Temper or Discard, `tempered` true or false.
+   * launch reads, beside the card's own due day and parent), the history
+   * (folded: the fiber's past sessions, each linked to its own chat — see
+   * `sessionHistory.ts`), and the verdict that closes the card — Temper or
+   * Discard, `tempered` true or false.
    *
    * Type carries the grammar, so no line of it needs a caption: mono for
    * machine values (ids, effort, cron, paths, times), serif for human words
@@ -2454,7 +2457,25 @@ export class FiberDetailModal {
     }
     foot.append(errorEl, statusEl, discard, temper)
 
-    body.append(ledger, foot)
+    // The fiber's sessions, each opening its own terminal as Aloft does —
+    // folded, and read only when first unfolded.
+    const history = card.uid
+      ? buildSessionHistory({
+          shuttleBase: this.shuttleBase,
+          uid: card.uid,
+          fiberHost: card.shuttleHost,
+          liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
+          liveTmux: card.runningWorker,
+          desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
+          onError: (message) => {
+            errorEl.textContent = message
+            errorEl.style.display = ''
+          },
+        })
+      : null
+    if (history) swallow(history)
+
+    body.append(...[ledger, history, foot].filter((el): el is HTMLElement => el !== null))
   }
 
   /**

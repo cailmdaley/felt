@@ -13,9 +13,143 @@ defmodule Shuttle.SessionLink do
   This module reads only that one record shape. It does not interpret anything
   else in the transcript, and a session from another harness, or one that was
   never bridged, honestly has no link.
+
+  ## Two readers, two caches
+
+  `cached_url/2` serves the poller: a handful of LIVE workers, each asked every
+  tick, memoised in `:persistent_term` with a miss retried on a timer.
+
+  `resolve/2` serves the card's session history (`GET /api/v1/sessions/links`):
+  any past session the drawer shows, asked only when a card opens. Those are
+  mostly ended transcripts that will never change, so the answer is cached in
+  an ETS table owned by this module's GenServer and validated on the
+  transcript's `{mtime, size}` — a repeat costs one `stat` of the remembered
+  file rather than a glob across the harness roots and a read of the
+  transcript, so an unbridged ended session is read once, and a session still
+  running is re-read only when its file has grown. A session with no transcript
+  here is remembered as missing for a minute. Without the GenServer the
+  resolution still happens, uncached.
+
+  Only a `https://claude.ai/` address counts as a bridge URL, for both readers.
   """
 
-  alias Shuttle.Moment
+  use GenServer
+
+  alias Shuttle.{Moment, TokenSpend, Transcript}
+
+  @table :shuttle_session_links
+
+  @typedoc "Where one session can be opened, as resolved on this host."
+  @type link :: %{
+          session: String.t(),
+          availability: :available_local | :transcript_missing,
+          harness: String.t() | nil,
+          url: String.t() | nil
+        }
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+  end
+
+  @impl true
+  def init(_opts) do
+    table =
+      :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+
+    {:ok, %{table: table}}
+  end
+
+  @doc """
+  What this host knows about `session`: whether its transcript is here
+  (`availability`), which harness wrote it, and — for a Claude Code transcript
+  that was bridged — `url`, its last claude.ai bridge URL.
+
+  Nothing is guessed: a missing transcript is `:transcript_missing` with no
+  link, whatever the ledger says the harness was.
+
+  Opts (for tests): the transcript roots `Shuttle.Moment.transcript_path/2`
+  takes, and `cache: false` to bypass the table.
+  """
+  @spec resolve(String.t(), keyword()) :: link()
+  def resolve(session, opts \\ []) when is_binary(session) do
+    cache? = Keyword.get(opts, :cache, true)
+
+    case cache? && lookup(session) do
+      {:ok, link} ->
+        link
+
+      _ ->
+        case Moment.transcript_path(session, opts) do
+          nil ->
+            link = missing(session)
+            if cache?, do: store(session, :missing, deadline(), link)
+            link
+
+          path ->
+            token = TokenSpend.file_token(path)
+            link = read_link(session, path, opts)
+            if cache? and not is_nil(token), do: store(session, path, token, link)
+            link
+        end
+    end
+  end
+
+  # A transcript that is not here costs three globs to establish, and the
+  # answer can change only when a harness writes one, so it is remembered
+  # briefly rather than re-established on every open of the card.
+  @missing_ttl_ms 60_000
+
+  defp deadline, do: System.monotonic_time(:millisecond) + @missing_ttl_ms
+
+  defp missing(session) do
+    %{
+      session: session,
+      availability: :transcript_missing,
+      harness: nil,
+      url: nil
+    }
+  end
+
+  defp read_link(session, path, opts) do
+    harness = Transcript.harness_for(path, opts)
+
+    %{
+      session: session,
+      availability: :available_local,
+      harness: harness,
+      url: if(harness == "claude-code", do: last_url(path))
+    }
+  end
+
+  # A hit needs the remembered file to still carry the remembered
+  # `{mtime, size}` — one stat, and no glob across the harness roots. A file
+  # that moved, grew or vanished is a miss and is looked up afresh. A missing
+  # transcript is remembered until its deadline instead.
+  defp lookup(session) do
+    case :ets.lookup(@table, session) do
+      [{^session, :missing, deadline, link}] ->
+        if System.monotonic_time(:millisecond) < deadline, do: {:ok, link}, else: :miss
+
+      [{^session, path, token, link}] ->
+        if TokenSpend.file_token(path) == token, do: {:ok, link}, else: :miss
+
+      _ ->
+        :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  defp store(session, path, token, link) do
+    :ets.insert(@table, {session, path, token, link})
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc "True for a claude.ai address — the only kind of bridge URL this module hands out."
+  @spec claude_url?(term()) :: boolean()
+  def claude_url?(url), do: is_binary(url) and String.starts_with?(url, "https://claude.ai/")
 
   @doc "The installed desktop app's native thread route; not a phone universal link."
   def desktop_url(thread_id) when is_binary(thread_id) do
@@ -116,7 +250,7 @@ defmodule Shuttle.SessionLink do
   defp decode_url(line) do
     case Jason.decode(line) do
       {:ok, %{"attachment" => %{"type" => @marker, "url" => url}}} when is_binary(url) ->
-        if String.starts_with?(url, "https://"), do: url
+        if claude_url?(url), do: url
 
       _ ->
         nil

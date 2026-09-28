@@ -35,10 +35,14 @@ defmodule ShuttleWeb.Router do
     # Hard-kill a fiber's live worker (owner-routed). The kanban fires this when
     # a running card is dragged off the in-flight column; the column write follows.
     post("/kill", KillController, :create)
-    # Open a worker's tmux session in kitty (the ▸ aloft / ☞ needs-you-now pill).
+    # Open a tmux session in kitty: a worker's (the ▸ aloft / ☞ needs-you-now pill), or
+    # a past session's resume (a History row).
     # Deliberately NOT owner-routed: the terminal opens on the host serving the
     # UI (where the human is), ssh-ing out for a remote worker. See Shuttle.Kitty.
     post("/attach", AttachController, :create)
+    # Start (or find) the tmux session resuming a past harness session on THIS
+    # host — the leg /attach forwards to the host that ran it.
+    post("/sessions/resume", SessionResumeController, :create)
     post("/inject", InjectController, :create)
     # Put a message in front of a fiber's worker (owner-routed): message a live
     # session, else resume or dispatch it with the message as From User.
@@ -135,6 +139,9 @@ defmodule ShuttleWeb.Router do
     # this host recorded at dispatch / claim / resume. Host-scoped like its two
     # neighbours above.
     get("/sessions", SessionsController, :show)
+    # What the host that ran ledgered sessions knows of them — transcript present,
+    # harness, a bridged Claude session's claude.ai URL — for the card's History.
+    get("/sessions/links", SessionLinksController, :show)
     # Join rung 0 for commit narration: the commit↔session pairing the hook
     # recorded at commit time (~/.shuttle/commits.jsonl), the sole source for
     # the commit strip. Host-scoped like /sessions.

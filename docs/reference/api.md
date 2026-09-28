@@ -51,7 +51,8 @@ is not enough.
 | `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
-| `POST /attach` | **not** owner-routed | Open a worker's tmux session in kitty — the terminal opens where the human is, ssh-ing out for a remote worker |
+| `POST /attach` | **not** owner-routed | Open a tmux session in kitty — a worker's, or a past session's resume — where the human is, ssh-ing out for a remote host |
+| `POST /sessions/resume` | local | Start (or find) the `resume-<uuid>` tmux session resuming a past harness session on this host |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
@@ -139,6 +140,21 @@ A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
 is not a terminal name or a verified mobile URL. Phone conversation access
 uses the host's Codex project listing until a direct app URL is available.
 
+`/attach` takes `{tmux_session, shuttle_host?}` for a live worker, or
+`{session, shuttle_host?}` for a past harness session (the card's History). For
+the second, the host that ran the session starts a tmux session named
+`resume-<uuid>` running the harness's own resume — the command the dispatcher
+resumes workers with, for the agent that host's ledger recorded, in the working
+directory the transcript records — or finds the one already running; a remote
+host is asked through `/sessions/resume`. The tab then attaches to it like any
+worker's. The name does not end in `-shuttle`, so no dispatch, adoption or
+orphan path treats it as a worker. 409 when the session is that host's running
+worker (attach to its tmux instead); 422 when that host has no transcript or no
+recorded working directory to resume in. The other way round, a dispatcher
+resume of a session whose `resume-<uuid>` is open is refused
+(`session_open_in_resume`) and the fiber shows as blocked, rather than two
+harness processes sharing one transcript.
+
 ## Read plane
 
 | Route | Routing | Purpose |
@@ -156,6 +172,7 @@ uses the host's Codex project listing until a direct app URL is available.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
+| `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | local | Report hark availability and meeting state on this daemon's host |
 
@@ -260,6 +277,19 @@ adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
 use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
 define a transcript reader or search language.
 
+`/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
+optional `host=<name>`, and answers `{host, links}` with one entry per session
+in request order: `session`, `availability` (`available_local`,
+`transcript_missing` or `host_unreachable`), `harness` and `url` — a Claude
+Code transcript's last `remote_session_change` bridge URL, and only when that
+is a `https://claude.ai/` address. A remote's answer is re-checked by the
+daemon that relays it: entries for sessions not asked about are dropped, and a
+URL of any other shape is nulled. The board's card History asks for the
+sessions it lists, one request per host. Each answer is cached against the
+transcript's `{mtime, size}`, so an ended session is read once, and a session
+with no transcript on the host is remembered as missing for a minute. It is a
+sibling of `/transcript` because that receipt hashes the whole file.
+
 ## Temporal read plane
 
 The feeds behind the board's time views. The five host-scoped feeds each have a
@@ -271,7 +301,7 @@ underneath.
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
-| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to |
+| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; `uid=` narrows to one fiber |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
@@ -293,7 +323,7 @@ The composite siblings are:
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity/composite` | local feed + remote caches | Cross-host activity buckets with per-origin freshness |
-| `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings |
+| `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /spend/composite` | local transcripts + remote caches | Cross-host token rollups |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
