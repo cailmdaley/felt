@@ -865,8 +865,12 @@ needs none of this: an absent file means no remotes.
 
 `bin/shuttle-deploy` reads the same file, so the fleet is described once. Give
 a remote a `checkout` (its repo path) to make it a deploy target — a remote
-without one is skipped. Two more optional keys serve deploy only: `ssh_flags`,
-a list of extra ssh arguments, and `auth`, which the deploy script reads as
+without one is skipped. Three more optional keys serve deploy only: `ssh_flags`,
+a list of extra ssh arguments; `build_ui`, which is true unless you write
+`false` to mark a host that should take the board bundle from the deploy host
+rather than build it (see
+[Building and deploying](../dev/build-and-deploy.md#the-bundle-on-a-host-that-does-not-build-it));
+and `auth`, which the deploy script reads as
 `"pubkey"` (the default) or `"interactive"`. Mark a host `"interactive"` when
 its ssh needs a live human credential — push-2FA or a short-lived certificate —
 and `bin/shuttle-deploy --handshake` will bootstrap a `ControlMaster` for it

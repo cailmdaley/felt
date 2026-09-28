@@ -19,6 +19,7 @@
       "request_timeout_ms": 30000,
       "stale_multiplier": 6,
       "ssh_flags": ["-o", "ClearAllForwardings=yes"],
+      "build_ui": false,
       "tunnel": {"manager": "launchd", "multiplex": true}
     }
   ]

@@ -124,7 +124,7 @@ if [ "$DRY_RUN" = 1 ]; then
   step "Plan (dry-run — nothing will change)"
   note "2. felt CLI : $(cli_desc)"
   note "3. daemon   : make daemon (fetch deps + build) → bin/rel (fronted by bin/shuttle)"
-  note "4. ui/dist  : make ui (npm ci + npm run build) → ui/dist"
+  note "4. ui/dist  : make ui (npm ci when the lockfile moved, then npm run build) → ui/dist"
   note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
   note "6. keepalive: $(keepalive_desc)"
   [ "$WITH_TUNNELS" = 1 ] && note "+  tunnels  : felt shuttle tunnels install"

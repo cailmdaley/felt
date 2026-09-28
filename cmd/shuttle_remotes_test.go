@@ -329,6 +329,55 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSaveRemotes_KeepsDeployOnlyKeys — `remotes add`/`rm` re-encode the WHOLE
+// document from remoteSpec, so every key the struct does not name is dropped
+// from every entry the next time anyone edits the fleet. The deploy-side keys
+// are read only by bin/shuttle-deploy, never by the CLI or the daemon, and that
+// is exactly why they are declared: an operator who marks a cluster login node
+// `"build_ui": false` and later runs `remotes add` on an unrelated host must not
+// silently get a six-minute `npm ci` back.
+func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
+	path := writeRemotes(t, `{"version":1,"remotes":[
+	  {"name":"hub-a","port":4001,"checkout":"/srv/felt","auth":"interactive",
+	   "ssh_flags":["-o","ClearAllForwardings=yes"],"build_ui":false}]}`)
+
+	doc, err := loadRemotesFileRaw()
+	if err != nil {
+		t.Fatalf("loadRemotesFileRaw: %v", err)
+	}
+	if err := saveRemotes(doc); err != nil {
+		t.Fatalf("saveRemotes: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"checkout"`, `"auth"`, `"ssh_flags"`, `"build_ui": false`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("round trip dropped %s:\n%s", want, raw)
+		}
+	}
+
+	reloaded, err := loadRemotesFileRaw()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.Remotes[0].BuildUI; got == nil || *got {
+		t.Errorf("build_ui = %v, want a pointer to false", got)
+	}
+
+	// Absent means "this host builds its own UI", and the sparse file says so by
+	// omitting the key rather than writing true.
+	doc.Remotes[0].BuildUI = nil
+	if err := saveRemotes(doc); err != nil {
+		t.Fatalf("saveRemotes(absent): %v", err)
+	}
+	raw, _ = os.ReadFile(path)
+	if strings.Contains(string(raw), "build_ui") {
+		t.Errorf("absent build_ui should not be written:\n%s", raw)
+	}
+}
+
 // writeRemotes points FELT_REMOTES_FILE at a temp file holding body.
 func writeRemotes(t *testing.T, body string) string {
 	t.Helper()

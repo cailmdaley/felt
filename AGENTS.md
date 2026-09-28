@@ -125,10 +125,14 @@ lives in the docs site (`docs/`, published to
 
 ```bash
 make build                 # felt CLI + UI + daemon release
+make build SKIP_UI=1       # ditto, leaving ui/dist to whatever put it there
 make cli-install           # felt CLI only → ~/.local/bin
 make restart               # rebuild UI + release, then stop + start
 make status / make logs    # ps + snapshot / tail the daemon log
 ```
+
+`npm ci` is stamped on `ui/package-lock.json` and runs only when the lockfile
+moves; `npm run build` runs every time.
 
 Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing the Go CLI needs `make cli`.
@@ -172,7 +176,10 @@ git_short_sha and booted_at both move → bin/shuttle release
 ```
 
 `bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
-`~/.config/felt/remotes.json`. **Every restart arms the boot quarantine** — no
+`~/.config/felt/remotes.json`. A host marked `"build_ui": false` there is built
+with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
+instead — for a cluster login node on a network filesystem, where `npm ci` alone
+costs minutes. **Every restart arms the boot quarantine** — no
 fresh oneshot dispatch proceeds until `bin/shuttle release` (cron-due standing
 roles still fire). A daemon
 route change must ship with the matching UI; `make build` builds both.
