@@ -359,7 +359,16 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 		"runtime":     map[string]any{"session_uuid": "old-session"},
 	})
 	isolateMessageFiberStore(t, store)
-	messageTargetDaemon(t, nil, []SessionProvenance{
+	messageTargetDaemon(t, []messaging.Session{
+		{
+			Address: "shuttle://peer-node/pi/live-peer",
+			Fiber:   "work/worker", FiberUID: messageTargetFiberUID,
+		},
+		{
+			Address: "shuttle://peer-node/pi/unrelated-peer",
+			Fiber:   "work/other", FiberUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+		},
+	}, []SessionProvenance{
 		{
 			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
 			Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
@@ -373,8 +382,10 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 	_, err := resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "old-session") ||
 		!strings.Contains(err.Error(), "new-session") || !strings.Contains(err.Error(), "sync the store") ||
-		!strings.Contains(err.Error(), "explicit shuttle:// address") {
-		t.Fatalf("expected stale-runtime refusal naming both sessions and remedies, got %v", err)
+		!strings.Contains(err.Error(), "explicit shuttle:// address") ||
+		!strings.Contains(err.Error(), "shuttle://peer-node/pi/live-peer") ||
+		strings.Contains(err.Error(), "unrelated-peer") {
+		t.Fatalf("expected stale-runtime refusal naming the live peer candidate and remedies, got %v", err)
 	}
 }
 
