@@ -2,6 +2,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
   use ExUnit.Case, async: false
   import Phoenix.ConnTest
   import Shuttle.Test.ApiConn
+  import Shuttle.Test.Ledgers
 
   alias Shuttle.Remote
   @endpoint ShuttleWeb.Endpoint
@@ -153,6 +154,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     previous_runner = Application.get_env(:shuttle, :felt_runner)
     previous_client = Application.get_env(:shuttle, :write_forward_client)
     previous_remotes = Application.get_env(:shuttle, :remotes)
+    ledger_path = ledger_setup!("SHUTTLE_SESSIONS_FILE", "messaging_peer_sessions")
     host = Shuttle.Poller.own_host_id()
     Process.register(self(), Client)
     Application.put_env(:shuttle, :felt_runner, Runner)
@@ -166,15 +168,22 @@ defmodule ShuttleWeb.MessagingControllerTest do
       restore(:remotes, previous_remotes)
     end)
 
-    {:ok, host: host}
+    {:ok, host: host, ledger_path: ledger_path}
   end
 
-  test "local discovery does not fan out", %{host: host} do
+  test "local discovery includes the fiber from its session ledger", %{
+    host: host,
+    ledger_path: path
+  } do
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/worker", "host" => host, "at" => 1}
+    ])
+
     body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
     expected_address = "shuttle://#{host}/codex/native%2Fid"
     assert body["host"] == host
 
-    assert [%{"address" => ^expected_address, "host" => ^host}] =
+    assert [%{"address" => ^expected_address, "host" => ^host, "fiber" => "work/worker"}] =
              body["sessions"]
 
     assert body["gaps"] == []

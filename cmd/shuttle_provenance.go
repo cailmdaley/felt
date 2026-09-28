@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
@@ -55,6 +56,7 @@ type SessionProvenance struct {
 	FiberID string `json:"fiber_id,omitempty"`
 	UID     string `json:"uid,omitempty"`
 	Session string `json:"session"`
+	Address string `json:"address,omitempty"`
 	Harness string `json:"harness,omitempty"`
 	Host    string `json:"host,omitempty"`
 	Tmux    string `json:"tmux,omitempty"`
@@ -201,10 +203,10 @@ func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProv
 		if row.UID != uid {
 			continue
 		}
-		key := row.Host + "\x00" + row.Harness + "\x00" + row.Session
+		key := provenanceSessionKey(row)
 		if seen[key] {
 			for i := range rows {
-				if rows[i].Host+"\x00"+rows[i].Harness+"\x00"+rows[i].Session == key {
+				if provenanceSessionKey(rows[i]) == key {
 					rows[i].Events = append(rows[i].Events, sessionEvent(row))
 					break
 				}
@@ -219,6 +221,18 @@ func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProv
 		sort.SliceStable(rows[i].Events, func(a, b int) bool { return rows[i].Events[a].At < rows[i].Events[b].At })
 	}
 	return rows
+}
+
+func provenanceSessionKey(row SessionProvenance) string {
+	return row.Host + "\x00" + messaging.NormalizeHarness(row.Harness) + "\x00" + row.Session
+}
+
+func provenanceAddress(row SessionProvenance) string {
+	address, err := messaging.FormatAddress(row.Host, row.Harness, row.Session)
+	if err != nil {
+		return ""
+	}
+	return address
 }
 
 func sessionEvent(row SessionProvenance) SessionEvent {
@@ -633,6 +647,7 @@ and availability.`,
 		rows = applyOriginFreshness(rows, ledger.Origins)
 		for i := range rows {
 			rows[i] = enrichSessionReceipt(rows[i])
+			rows[i].Address = provenanceAddress(rows[i])
 		}
 		sort.SliceStable(rows, func(i, j int) bool {
 			if rows[i].At != rows[j].At {
@@ -674,13 +689,13 @@ and availability.`,
 			fmt.Printf("no recorded Shuttle sessions for %s\n", query)
 			return nil
 		}
-		fmt.Printf("%-38s %-16s %-16s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "KIND", "AVAILABILITY", "FIBER")
+		fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "ADDRESS", "KIND", "AVAILABILITY", "FIBER")
 		for _, row := range rows {
 			fiberName := row.fiber()
 			if row.Stale {
 				fiberName += " [stale]"
 			}
-			fmt.Printf("%-38s %-16s %-16s %-14s %-18s %s\n", row.Session, row.Host, row.Harness, row.Kind, row.Transcript.Availability, fiberName)
+			fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, row.Harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
 		}
 		return nil
 	},

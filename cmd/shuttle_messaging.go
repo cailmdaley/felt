@@ -63,7 +63,7 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 			q.Set("host", sessionsDiscoveryHost)
 		}
 		if sessionsDiscoveryHarness != "" {
-			q.Set("harness", sessionsDiscoveryHarness)
+			q.Set("harness", messaging.NormalizeHarness(strings.TrimSpace(sessionsDiscoveryHarness)))
 		}
 		u.RawQuery = q.Encode()
 		directory, err = getDaemonJSON[messaging.Directory](u.String(), "parsing peer directory")
@@ -81,13 +81,13 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 
 func filterPeerDirectory(directory messaging.Directory, host, harness string) messaging.Directory {
 	host = strings.TrimSpace(host)
-	harness = strings.TrimSpace(harness)
+	harness = messaging.NormalizeHarness(strings.TrimSpace(harness))
 	filtered := directory.Sessions[:0]
 	for _, session := range directory.Sessions {
 		if host != "" && session.Host != host {
 			continue
 		}
-		if harness != "" && session.Harness != harness {
+		if harness != "" && messaging.NormalizeHarness(session.Harness) != harness {
 			continue
 		}
 		filtered = append(filtered, session)
@@ -99,7 +99,7 @@ func filterPeerDirectory(directory messaging.Directory, host, harness string) me
 			if host != "" && gap.Host != host {
 				continue
 			}
-			if harness != "" && gap.Harness != "" && gap.Harness != "*" && gap.Harness != harness {
+			if harness != "" && gap.Harness != "" && gap.Harness != "*" && messaging.NormalizeHarness(gap.Harness) != harness {
 				continue
 			}
 			gaps = append(gaps, gap)
@@ -116,6 +116,9 @@ func printPeerDirectory(directory messaging.Directory) {
 	for _, session := range directory.Sessions {
 		detail := session.Title
 		if detail == "" {
+			detail = session.Fiber
+		}
+		if detail == "" {
 			detail = session.CWD
 		}
 		fmt.Printf("%s\t%s\t%s\n", session.Address, session.State, detail)
@@ -126,12 +129,12 @@ func printPeerDirectory(directory messaging.Directory) {
 }
 
 var shuttleMessageCmd = &cobra.Command{
-	Use:   "message <address> [text|-]",
+	Use:   "message <address|session-id|fiber> [text|-]",
 	Short: "Send a message and files to an existing session",
-	Long: `Delivers text (and --attach files) to a session address from
-'felt shuttle sessions', routed through the local daemon to the owning host.
-The text is the second argument, '-' for stdin, or --file; it is capped at
-64 KiB. At least one of text, --file, or --attach is required.
+	Long: `Resolves a shuttle:// address, a unique native session ID, or a fiber's
+current worker session, then routes text (and --attach files) through the local
+daemon to the owning host. The text is the second argument, '-' for stdin, or
+--file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
 By default the addressed session is woken; --context-only (or --wake=false)
 adds the message as context without starting or steering a model turn. Prints
@@ -162,6 +165,12 @@ rejected or unknown; reuse --message-id to retry safely.`,
 		request, err := buildMessageRequest(cmd.InOrStdin(), args)
 		if err != nil {
 			return err
+		}
+		if !messageRequestJSON {
+			request.Address, err = resolveMessageTarget(request.Address)
+			if err != nil {
+				return err
+			}
 		}
 		id := request.MessageID
 		var receipt messaging.Receipt

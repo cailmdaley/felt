@@ -1,7 +1,7 @@
 defmodule Shuttle.Messaging do
   @moduledoc "Fleet discovery and strictly host-addressed worker messaging."
 
-  alias Shuttle.{Felt, Harnesses, OriginRouter, Poller, RegistryCommon, Remote}
+  alias Shuttle.{Felt, Harnesses, OriginRouter, Poller, RegistryCommon, Remote, SessionLedger}
 
   @local_message_timeout_ms 20_000
   @remote_message_timeout_ms 25_000
@@ -98,14 +98,18 @@ defmodule Shuttle.Messaging do
             if Enum.all?(sessions, &valid_session?/1) and valid_gaps?(gaps),
               do: %{
                 host: host,
-                sessions: alias_sessions(sessions, host),
+                sessions: sessions |> attach_session_fibers(host) |> alias_sessions(host),
                 gaps: alias_gaps(gaps, host)
               },
               else: malformed_local_directory(host)
 
           {:ok, sessions} when is_list(sessions) ->
             if Enum.all?(sessions, &valid_session?/1),
-              do: %{host: host, sessions: alias_sessions(sessions, host), gaps: []},
+              do: %{
+                host: host,
+                sessions: sessions |> attach_session_fibers(host) |> alias_sessions(host),
+                gaps: []
+              },
               else: malformed_local_directory(host)
 
           _ ->
@@ -173,6 +177,47 @@ defmodule Shuttle.Messaging do
 
   defp alias_gaps(gaps, host) do
     Enum.map(gaps, fn gap -> gap |> stringify_keys() |> Map.put("host", host) end)
+  end
+
+  defp attach_session_fibers(sessions, host) do
+    fibers_by_session =
+      SessionLedger.read_since(0)
+      |> Enum.reduce(%{}, fn record, acc ->
+        session = record["session"]
+        fiber = record["fiber"]
+        at = if is_integer(record["at"]), do: record["at"], else: 0
+
+        if record["host"] == host and is_binary(session) and session != "" and
+             is_binary(fiber) and fiber != "" do
+          Map.update(acc, session, {at, fiber}, fn {previous_at, previous_fiber} ->
+            if at >= previous_at, do: {at, fiber}, else: {previous_at, previous_fiber}
+          end)
+        else
+          acc
+        end
+      end)
+      |> Map.new(fn {session, {_at, fiber}} -> {session, fiber} end)
+
+    Enum.map(sessions, fn session ->
+      session = stringify_keys(session)
+
+      case Map.get(session, "address") do
+        address when is_binary(address) ->
+          case parse_address(address) do
+            {:ok, %{native: native}} ->
+              case Map.get(fibers_by_session, native) do
+                fiber when is_binary(fiber) -> Map.put(session, "fiber", fiber)
+                _ -> session
+              end
+
+            _ ->
+              session
+          end
+
+        _ ->
+          session
+      end
+    end)
   end
 
   defp alias_sessions(sessions, host) do

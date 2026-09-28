@@ -70,6 +70,12 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 	if rows[0].Agent != "codex-luna" || rows[0].Model != "gpt-6" || rows[0].Collaboration == nil || rows[0].Collaboration.Collaborator == nil {
 		t.Fatalf("dispatch attribution missing from row: %#v", rows[0])
 	}
+	if rows[0].Address != "shuttle://candide/codex/"+provenanceSession {
+		t.Fatalf("codex address = %q", rows[0].Address)
+	}
+	if rows[1].Harness != "claude-code" || rows[1].Address != "shuttle://cineca/claude/other" {
+		t.Fatalf("ledger harness spelling did not produce a canonical address: %#v", rows[1])
+	}
 	if rows[0].Events[1].Agent != "codex-sol" || rows[0].Events[1].Model != "gpt-6.1" || rows[0].Events[1].Collaboration == nil || rows[0].Events[1].Collaboration.Role == nil {
 		t.Fatalf("resume attribution missing from event: %#v", rows[0].Events[1])
 	}
@@ -284,6 +290,18 @@ func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
 			_, _ = w.Write(transcriptBody)
 		},
 	})
+}
+
+func TestShuttleSessions_ProvenanceTableIncludesAddress(t *testing.T) {
+	server := provenanceDaemon(t, []byte("x\n"))
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "new/name")
+	if err != nil {
+		t.Fatalf("sessions: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "ADDRESS") || !strings.Contains(out, "shuttle://candide/codex/"+provenanceSession) {
+		t.Fatalf("provenance table omitted address column or address: %s", out)
+	}
 }
 
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {

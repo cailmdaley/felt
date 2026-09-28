@@ -336,9 +336,13 @@ func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
 		Sessions: []messaging.Session{
 			{Address: "shuttle://b/codex/2", Host: "b", Harness: "codex"},
 			{Address: "shuttle://a/codex/1", Host: "a", Harness: "codex"},
-			{Address: "shuttle://a/claude/3", Host: "a", Harness: "claude"},
+			{Address: "shuttle://a/claude/3", Host: "a", Harness: "claude", Fiber: "work/worker"},
 		},
-		Gaps: []messaging.Gap{{Host: "a", Harness: "codex", Error: "down"}, {Host: "b", Harness: "codex", Error: "down"}},
+		Gaps: []messaging.Gap{
+			{Host: "a", Harness: "codex", Error: "down"},
+			{Host: "b", Harness: "codex", Error: "down"},
+			{Host: "a", Harness: "claude-code", Error: "down"},
+		},
 	}
 	got := filterPeerDirectory(directory, "a", "codex")
 	if len(got.Sessions) != 1 || got.Sessions[0].Address != "shuttle://a/codex/1" {
@@ -346,5 +350,12 @@ func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
 	}
 	if len(got.Gaps) != 1 || got.Gaps[0].Host != "a" {
 		t.Fatalf("unexpected gaps: %#v", got.Gaps)
+	}
+	got = filterPeerDirectory(directory, "a", "claude-code")
+	if len(got.Sessions) != 1 || got.Sessions[0].Address != "shuttle://a/claude/3" || got.Sessions[0].Fiber != "work/worker" {
+		t.Fatalf("alias filter lost the fiber discovery row: %#v", got.Sessions)
+	}
+	if len(got.Gaps) != 1 || got.Gaps[0].Harness != "claude-code" {
+		t.Fatalf("alias filter lost its discovery gap: %#v", got.Gaps)
 	}
 }
