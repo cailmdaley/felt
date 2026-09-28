@@ -23,9 +23,11 @@ defmodule Shuttle.SessionLink do
   any past session the drawer shows, asked only when a card opens. Those are
   mostly ended transcripts that will never change, so the answer is cached in
   an ETS table owned by this module's GenServer and validated on the
-  transcript's `{mtime, size}` — an unbridged ended session is read once, not
-  once a minute, and a session still running is re-read only when its file has
-  grown. Without the GenServer the resolution still happens, uncached.
+  transcript's `{mtime, size}` — a repeat costs one `stat` of the remembered
+  file rather than a glob across the harness roots and a read of the
+  transcript, so an unbridged ended session is read once, and a session still
+  running is re-read only when its file has grown. Without the GenServer the
+  resolution still happens, uncached.
   """
 
   use GenServer
@@ -73,56 +75,61 @@ defmodule Shuttle.SessionLink do
   """
   @spec resolve(String.t(), keyword()) :: link()
   def resolve(session, opts \\ []) when is_binary(session) do
-    case Moment.transcript_path(session, opts) do
-      nil ->
-        %{
-          session: session,
-          availability: :transcript_missing,
-          harness: nil,
-          url: nil,
-          desktop_link: nil
-        }
+    cache? = Keyword.get(opts, :cache, true)
 
-      path ->
-        harness = Transcript.harness_for(path, opts)
-
-        %{
-          session: session,
-          availability: :available_local,
-          harness: harness,
-          url: if(harness == "claude-code", do: stable_url(session, path, opts)),
-          desktop_link: if(harness == "codex", do: desktop_url(session))
-        }
-    end
-  end
-
-  # The bridge URL for a transcript, cached against the file's `{mtime, size}`.
-  defp stable_url(session, path, opts) do
-    token = TokenSpend.file_token(path)
-    cache? = Keyword.get(opts, :cache, true) and not is_nil(token)
-
-    case cache? && lookup_stable(session, path, token) do
-      {:ok, url} ->
-        url
+    case cache? && lookup(session) do
+      {:ok, link} ->
+        link
 
       _ ->
-        url = last_url(path)
-        if cache?, do: store_stable(session, path, token, url)
-        url
+        case Moment.transcript_path(session, opts) do
+          nil ->
+            %{
+              session: session,
+              availability: :transcript_missing,
+              harness: nil,
+              url: nil,
+              desktop_link: nil
+            }
+
+          path ->
+            token = TokenSpend.file_token(path)
+            link = read_link(session, path, opts)
+            if cache? and not is_nil(token), do: store(session, path, token, link)
+            link
+        end
     end
   end
 
-  defp lookup_stable(session, path, token) do
+  defp read_link(session, path, opts) do
+    harness = Transcript.harness_for(path, opts)
+
+    %{
+      session: session,
+      availability: :available_local,
+      harness: harness,
+      url: if(harness == "claude-code", do: last_url(path)),
+      desktop_link: if(harness == "codex", do: desktop_url(session))
+    }
+  end
+
+  # A hit needs the remembered file to still carry the remembered
+  # `{mtime, size}` — one stat, and no glob across the harness roots. A file
+  # that moved, grew or vanished is a miss and is looked up afresh.
+  defp lookup(session) do
     case :ets.lookup(@table, session) do
-      [{^session, ^path, ^token, url}] -> {:ok, url}
-      _ -> :miss
+      [{^session, path, token, link}] ->
+        if TokenSpend.file_token(path) == token, do: {:ok, link}, else: :miss
+
+      _ ->
+        :miss
     end
   rescue
     ArgumentError -> :miss
   end
 
-  defp store_stable(session, path, token, url) do
-    :ets.insert(@table, {session, path, token, url})
+  defp store(session, path, token, link) do
+    :ets.insert(@table, {session, path, token, link})
   rescue
     ArgumentError -> :ok
   end
