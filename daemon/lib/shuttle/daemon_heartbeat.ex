@@ -62,6 +62,13 @@ defmodule Shuttle.DaemonHeartbeat do
   previous record before adoption (before its own first write replaces it) and
   judges it after adoption.
 
+  One launder remains, accepted as theoretical: a released Poller crashes
+  inside a live VM, its last writer's rename stalls in the filesystem and lands
+  after the restarted (held) Poller's first write, and the VM is then SIGKILLed
+  before the next tick rewrites the file — crash, stall and hard kill all
+  within 10s — leaving a `held: false` record from the old Poller for the next
+  VM to release on.
+
   ## The conditions for an automatic release
 
   `verdict/2` releases the quarantine only when all of these hold. Anything
