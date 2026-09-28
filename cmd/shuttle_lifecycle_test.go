@@ -254,6 +254,31 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 	}
 }
 
+// TestEditOfArmedFiberWithoutProjectDirIsNotArming: the gate is on the act
+// of arming, not on an armed fiber. A standing role armed before project_dir
+// was required still takes a tag or an outcome — from the board, or from the
+// worker running it — and an edit that leaves it active arms nothing.
+func TestEditOfArmedFiberWithoutProjectDirIsNotArming(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
+		"kind": "standing", "agent": "claude-opus",
+		"schedule": map[string]any{"expr": "0 13 * * *", "tz": "Europe/Paris"},
+	}, nil)
+
+	for _, args := range [][]string{
+		{"edit", "role", "-t", "morning"},
+		{"edit", "role", "-o", "digest sent"},
+		{"edit", "role", "-s", "active"},
+	} {
+		if out, err := runCommand(t, dir, args...); err != nil {
+			t.Fatalf("%v on an armed fiber: %v\n%s", args, err, out)
+		}
+	}
+	if f := mustRead(t, storage, "role"); f.Outcome != "digest sent" || f.Status != felt.StatusActive {
+		t.Fatalf("after edits: status=%q outcome=%q", f.Status, f.Outcome)
+	}
+}
+
 func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
