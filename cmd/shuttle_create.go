@@ -90,8 +90,9 @@ On the fiber, dispatch is switched by the felt-native status field alone (there
 is no enabled flag): status:active is armed, status:open is a draft. An armed
 install requires --project-dir and sets status:active; an armed install on a
 closed fiber is refused — reopen it first. --disabled sets status:open (from
-any prior status) and makes --project-dir optional, but 'felt shuttle resume'
-arms the block as it stands, so pass --project-dir if the draft will run.
+any prior status) and makes --project-dir optional; 'felt shuttle resume'
+arms only a block that has one, so a draft installed without it is armed with
+'felt shuttle resume <fiber> --project-dir <dir>'.
 
 install creates; it never rewrites. A fiber that already has a shuttle: block is
 refused, with a pointer at the verb that edits in place (reshape for kind or
@@ -138,11 +139,9 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			block.Surface = surface
 		}
 		// An armed install requires a cwd. A draft does not — but an explicitly
-		// passed one is still honored: the board's Promote button installs
-		// --disabled WITH a project_dir, and nothing later supplies one (resume
-		// only moves status), so dropping it would arm a role the poller then
-		// disqualifies for having no usable project_dir — armed, and silently
-		// never dispatched.
+		// passed one is still honored (the board's Promote button installs
+		// --disabled WITH a project_dir): arming later refuses a block
+		// without one.
 		if !installDisabled || cmd.Flags().Changed("project-dir") {
 			projectDir, perr := resolveProjectDirFlag(installProjectDir)
 			if perr != nil {

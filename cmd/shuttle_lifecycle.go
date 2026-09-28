@@ -162,6 +162,8 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 
 // ---- resume ----------------------------------------------------------------
 
+var resumeProjectDir string
+
 var resumeCmd = &cobra.Command{
 	Use:   "resume <fiber>",
 	Short: "Arm a paused fiber (status: active)",
@@ -175,7 +177,13 @@ awaiting marker and recomputes due-ness from the schedule), falling back to a
 local document write when the daemon is unreachable. A draft (status: open) is
 armed straight to active. Every other closed fiber — a oneshot or pinned role,
 or any accepted or discarded close — is refused; use 'felt shuttle reopen' to
-requeue it. Arming refuses an agent the registry cannot resolve.`,
+requeue it.
+
+Arming needs what an armed install needs: an agent the registry resolves and a
+project_dir. A draft installed without one is refused; --project-dir sets it
+(an existing directory on this machine, stored absolute) and arms in one step.`,
+	Example: `  felt shuttle resume analysis/scratch
+  felt shuttle resume analysis/scratch --project-dir "$PWD"   # a draft installed without one`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
@@ -183,15 +191,32 @@ requeue it. Arming refuses an agent the registry cannot resolve.`,
 			return err
 		}
 		defer unlock()
-		if err := resolveBlockAgent(block); err != nil {
+		if cmd.Flags().Changed("project-dir") {
+			projectDir, err := resolveProjectDirFlag(resumeProjectDir)
+			if err != nil {
+				return err
+			}
+			if err := f.SetShuttleField("project_dir", projectDir); err != nil {
+				return err
+			}
+			block.ProjectDir = projectDir
+		}
+		if err := checkArmable(args[0], block); err != nil {
 			return err
 		}
 
 		// A standing role awaiting review (status:closed + untempered) re-arms
 		// through the owning daemon, which clears the awaiting marker and
 		// recomputes due-ness. Falls back to a local write when the daemon is down.
+		// A --project-dir lands in the document first, so the daemon arms the
+		// block as it now stands.
 		docAwaiting := f.Status == felt.StatusClosed && readTempered(f) == nil
 		if block.Kind == "standing" && docAwaiting {
+			if cmd.Flags().Changed("project-dir") {
+				if err := st.Write(f); err != nil {
+					return fmt.Errorf("writing fiber: %w", err)
+				}
+			}
 			if output, err := postLifecycle("resume", map[string]any{"fiber": f.ID}); err == nil {
 				fmt.Print(output)
 				return nil
@@ -230,11 +255,17 @@ requeue it. Arming refuses an agent the registry cannot resolve.`,
 	},
 }
 
-// resolveBlockAgent is the arming gate: a verb that makes a fiber dispatchable
-// resolves its agent against the registry first, so a retired id (kept on
-// closed fibers as history — content edits never check it) is refused with the
-// registry's list rather than failing later inside the daemon.
-func resolveBlockAgent(block *shuttle.Block) error {
+// checkArmable is the arming gate: every verb that makes a fiber dispatchable
+// (resume, reopen, accept, edit -s active) holds the block to what an armed
+// install requires. It needs a project_dir — without one the poller
+// disqualifies the fiber, so it would sit armed and silently never dispatch —
+// and an agent the registry resolves, so a retired id (kept on closed fibers
+// as history — content edits never check it) is refused with the registry's
+// list rather than failing later inside the daemon.
+func checkArmable(fiberID string, block *shuttle.Block) error {
+	if strings.TrimSpace(block.ProjectDir) == "" {
+		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it and arm: felt shuttle resume %s --project-dir <dir>)", fiberID, fiberID)
+	}
 	reg, err := shuttle.LoadAgentRegistry()
 	if err != nil {
 		return err
@@ -328,7 +359,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 		status := felt.StatusActive
 		if reopenAsDraft {
 			status = felt.StatusOpen
-		} else if err := resolveBlockAgent(block); err != nil {
+		} else if err := checkArmable(args[0], block); err != nil {
 			return err
 		}
 		statusBefore := f.Status
@@ -479,7 +510,7 @@ falls back to a local document write when the daemon is down.`,
 		// the offline local write both arm the fiber (status: active), so
 		// both need a resolvable agent up front (the daemon resolves again
 		// at dispatch; that's fine, this just fails fast and offline too).
-		if err := resolveBlockAgent(block); err != nil {
+		if err := checkArmable(args[0], block); err != nil {
 			return err
 		}
 
@@ -891,6 +922,7 @@ and a live worker is left running.`,
 
 // registerShuttleLifecycleFlags binds the lifecycle verbs' flags.
 func registerShuttleLifecycleFlags() {
+	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none)")
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")

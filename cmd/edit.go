@@ -132,14 +132,14 @@ own, structured ones included.`,
 		}
 
 		// A status write that arms the fiber (status: active on a fiber
-		// carrying a shuttle: block) must resolve the agent, same as every
-		// other arming verb — otherwise `edit -s active` can arm a fiber
-		// whose shuttle.agent has since been retired from the registry.
+		// carrying a shuttle: block) passes the same gate as every other
+		// arming verb — otherwise `edit -s active` could arm a fiber with no
+		// project_dir, or whose shuttle.agent has since been retired.
 		if f.Status == felt.StatusActive {
 			if block, ok, err := f.ShuttleBlock(); err != nil {
 				return err
 			} else if ok {
-				if err := resolveBlockAgent(block); err != nil {
+				if err := checkArmable(f.ID, block); err != nil {
 					return err
 				}
 			}

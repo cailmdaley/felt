@@ -75,7 +75,7 @@ func withStubbedTmux(t *testing.T, live map[string]bool) *[]string {
 }
 
 func oneshot() map[string]any {
-	return map[string]any{"kind": "oneshot", "agent": "claude-opus"}
+	return map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/srv/work"}
 }
 
 // ---- close -----------------------------------------------------------------
@@ -217,11 +217,48 @@ func TestShuttleResume_RefusesClosed(t *testing.T) {
 	}
 }
 
+// TestShuttleResume_RequiresProjectDir: arming holds a draft to what an armed
+// install requires. A draft installed --disabled without --project-dir is
+// refused by resume (and by edit -s active) with the call that fixes it;
+// resume --project-dir sets it and arms in one step.
+func TestShuttleResume_RequiresProjectDir(t *testing.T) {
+	dir, storage := newStore(t)
+	if out, err := runCommand(t, dir, "add", "draft", "Draft"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if out, err := runCommand(t, dir, "shuttle", "install", "draft", "--disabled"); err != nil {
+		t.Fatalf("install --disabled: %v\n%s", err, out)
+	}
+
+	for _, args := range [][]string{
+		{"shuttle", "resume", "draft"},
+		{"edit", "draft", "-s", "active"},
+	} {
+		_, err := runCommand(t, dir, args...)
+		if err == nil || !strings.Contains(err.Error(), "felt shuttle resume draft --project-dir") {
+			t.Fatalf("%v on a draft with no project_dir: err=%v, want a refusal naming --project-dir", args, err)
+		}
+		if got := mustRead(t, storage, "draft").Status; got != felt.StatusOpen {
+			t.Fatalf("%v armed the draft anyway: status=%q", args, got)
+		}
+	}
+
+	work := t.TempDir()
+	if out, err := runCommand(t, dir, "shuttle", "resume", "draft", "--project-dir", work); err != nil {
+		t.Fatalf("resume --project-dir: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "draft")
+	b, _, err := f.ShuttleBlock()
+	if err != nil || f.Status != felt.StatusActive || b.ProjectDir != work {
+		t.Fatalf("after resume --project-dir: status=%q block=%#v err=%v", f.Status, b, err)
+	}
+}
+
 func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
-		"kind": "standing", "agent": "claude-sonnet",
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
@@ -294,7 +331,7 @@ func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 	// Awaiting review: standing, closed, untempered, with a prior outcome.
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, Outcome: "prior digest", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := f.SetExtraField("shuttle", map[string]any{
-		"kind": "standing", "agent": "claude-sonnet",
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -337,7 +374,7 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	priorDispatch := "2026-07-20T09:00:00Z"
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := f.SetExtraField("shuttle", map[string]any{
-		"kind": "standing", "agent": "claude-sonnet",
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 		"runtime":  map[string]any{"dispatched_at": priorDispatch},
 	}); err != nil {
@@ -390,7 +427,7 @@ func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
 	dir, storage := newStore(t)
 	// Active (not awaiting) standing role → accept refuses.
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
-		"kind": "standing", "agent": "claude-sonnet",
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
@@ -666,7 +703,7 @@ func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 // changed to a current one.
 func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent", "project_dir": "/srv/work"}, nil)
 
 	if out, err := runCommand(t, dir, "edit", "f", "-o", "still editable"); err != nil {
 		t.Fatalf("edit with a retired agent must succeed: %v\n%s", err, out)
@@ -699,7 +736,7 @@ func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
 // pass untouched.
 func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent", "project_dir": "/srv/work"}, nil)
 
 	if out, err := runCommand(t, dir, "edit", "f", "-s", "active"); err == nil {
 		t.Fatalf("edit -s active with a retired agent must refuse\n%s", out)
@@ -725,7 +762,7 @@ func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
-		"kind": "standing", "agent": "retired-agent",
+		"kind": "standing", "agent": "retired-agent", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 

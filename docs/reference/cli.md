@@ -115,7 +115,7 @@ untouched by any of this.
 | Command | Purpose |
 |---|---|
 | `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`) |
+| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a draft installed without one |
 | `felt shuttle accept <fiber>` | Resolve a human verdict on a role awaiting review (kind-aware re-arm/re-park; `--keep-outcome`) |
 | `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead) |
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
