@@ -136,13 +136,22 @@ var rootCmd = &cobra.Command{
 	// create verbs' "already has a block, here are the verbs you meant") turns
 	// into a wall.
 	SilenceErrors: true,
-	// Usage is for a command line cobra could not parse. By the time any
-	// pre-run hook runs, flags, arguments and required flags have all been
-	// accepted, so an error from here on is the command failing, not the
-	// caller misusing it — and the usage wall would only bury the message.
-	// (The daemon shells felt and logs its stderr; so do hooks.)
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	// Usage is for a command line cobra could not accept. Flags and
+	// arguments are parsed before any pre-run hook runs; required flags and
+	// flag groups cobra checks only after, so they are checked here first,
+	// while a failure still earns usage. An error from here on is the
+	// command failing, not the caller misusing it — and the usage wall would
+	// only bury the message. (The daemon shells felt and logs its stderr; so
+	// do hooks.)
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := cmd.ValidateRequiredFlags(); err != nil {
+			return err
+		}
+		if err := cmd.ValidateFlagGroups(); err != nil {
+			return err
+		}
 		cmd.SilenceUsage = true
+		return nil
 	},
 }
 

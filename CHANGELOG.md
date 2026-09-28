@@ -26,7 +26,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   From a project view, `felt edit other/deep` no longer edits a local `other/deepx` when `other/deep` exists in the enclosing store, and `felt rm` no longer calls the exact id a guess.
 - `felt add -s <status>` validates the status as `felt edit` does, and `-s closed` stamps `closed-at`.
 - `felt shuttle set-model` can no longer leave a Claude or Pi agent on `surface: app`, a block `set-agent` then refused.
-- Run-time errors print the error without the usage block; only a command line that cannot be parsed shows usage.
+- Run-time errors print the error without the usage block; only a command line cobra cannot accept (an unknown flag, a wrong argument count, a missing required flag, exclusive flags together) shows usage.
 - `felt shuttle reshape --help` no longer shows a UTC default for `--tz`; omitting it keeps the block's timezone.
 - Messages say "fiber" where they said "felt" (`No fibers matching`, `no fiber found matching`), and `install --disabled` confirms "(draft, status: open)".
 

@@ -127,9 +127,15 @@ func TestUsageOnlyForCommandLineErrors(t *testing.T) {
 			t.Fatalf("%v printed usage for a run-time error:\n%s%s", args, stdout, stderr)
 		}
 	}
-	stdout, stderr, err := executeCLI(t, dir, "edit", "x", "--no-such-flag")
-	if err == nil || !strings.Contains(stdout+stderr, "Usage:") {
-		t.Fatalf("a flag-parse error should show usage: err=%v\n%s%s", err, stdout, stderr)
+	for _, args := range [][]string{
+		{"edit", "x", "--no-such-flag"},
+		{"shuttle", "repeat", "x"},                          // a required flag missing
+		{"shuttle", "status", "--all", "--remote", "other"}, // mutually exclusive flags
+	} {
+		stdout, stderr, err := executeCLI(t, dir, args...)
+		if err == nil || !strings.Contains(stdout+stderr, "Usage:") {
+			t.Fatalf("%v: a command-line error should show usage: err=%v\n%s%s", args, err, stdout, stderr)
+		}
 	}
 }
 
