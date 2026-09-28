@@ -106,11 +106,18 @@ defmodule Shuttle.TailnetDialTest do
     assert TailnetDial.bridge_pid("stale") == nil
   end
 
+  test "bridge sockets share the daemon directory and flatten the component into the filename", %{
+    base: base
+  } do
+    assert TailnetDial.socket_path("hub-a", base) ==
+             Path.join([base, "sock", "dial-name-hub-a.sock"])
+  end
+
   test "hashed socket components use a compact 16-hex digest", %{base: base} do
     name = String.duplicate("remote-", 12)
     filename = name |> TailnetDial.socket_path(base) |> Path.basename()
 
-    assert filename =~ ~r/\Ahash-[0-9a-f]{16}\.sock\z/
+    assert filename =~ ~r/\Adial-hash-[0-9a-f]{16}\.sock\z/
   end
 
   test "bridge specs skip a URL host outside the DNS and IP literal grammar", %{base: base} do
@@ -727,11 +734,10 @@ defmodule Shuttle.TailnetDialTest do
 
   test "the bridge refuses a traversable socket directory with Host's refusal", %{base: base} do
     data_dir = Path.join(base, "data")
-    dial_dir = Path.join([data_dir, "sock", "dial"])
-    File.mkdir_p!(dial_dir)
+    socket_dir = Path.join(data_dir, "sock")
+    File.mkdir_p!(socket_dir)
     File.chmod!(data_dir, 0o755)
-    File.chmod!(Path.dirname(dial_dir), 0o755)
-    File.chmod!(dial_dir, 0o755)
+    File.chmod!(socket_dir, 0o755)
     localapi = Path.join(base, "localapi.sock")
     remote = remote(@host, 443)
 
@@ -751,19 +757,62 @@ defmodule Shuttle.TailnetDialTest do
              match?({:tailnet_dial, :listen, _}, TailnetDial.last_error(remote.name))
            end)
 
-    assert {:ok, %File.Stat{mode: mode}} = File.stat(dial_dir)
+    assert {:ok, %File.Stat{mode: mode}} = File.stat(socket_dir)
     assert Bitwise.band(mode, 0o777) == 0o755
     refute File.exists?(path)
 
     assert {:tailnet_dial, :listen, reason} = TailnetDial.last_error(remote.name)
     assert inspect(reason) =~ "refusing to listen in socket directory"
-    assert inspect(reason) =~ "sock/dial"
+    assert inspect(reason) =~ "sock"
     assert inspect(reason) =~ "0755"
+  end
+
+  test "the bridge and daemon share the socket directory when the bridge starts first", %{
+    base: base
+  } do
+    data_dir = Path.join(base, "bridge-first")
+
+    remote =
+      start_bridge(base, Path.join(base, "localapi.sock"), @host, 443,
+        name: "bridge-first",
+        data_dir: data_dir
+      )
+
+    assert is_binary(
+             Shuttle.Host.prepare_unix_socket!(Path.join([data_dir, "sock", "daemon.sock"]))
+           )
+
+    assert_private_socket_directory(data_dir)
+
+    bridge_path = TailnetDial.socket_for(@host, 443)
+    assert Path.basename(bridge_path) == "dial-name-#{remote.name}.sock"
+    assert Path.basename(Path.dirname(bridge_path)) == "sock"
+  end
+
+  test "the bridge and daemon share the socket directory when the daemon starts first", %{
+    base: base
+  } do
+    data_dir = Path.join(base, "daemon-first")
+    daemon_path = Path.join([data_dir, "sock", "daemon.sock"])
+
+    assert is_binary(Shuttle.Host.prepare_unix_socket!(daemon_path))
+    assert_private_socket_directory(data_dir)
+
+    remote =
+      start_bridge(base, Path.join(base, "localapi.sock"), @host, 443,
+        name: "daemon-first",
+        data_dir: data_dir
+      )
+
+    bridge_path = TailnetDial.socket_for(@host, 443)
+    assert Path.basename(bridge_path) == "dial-name-#{remote.name}.sock"
+    assert Path.basename(Path.dirname(bridge_path)) == "sock"
+    assert_private_socket_directory(data_dir)
   end
 
   defp start_bridge(base, localapi, host, port, opts \\ []) do
     remote = remote(host, port, opts)
-    data_dir = Path.join(base, "data")
+    data_dir = Keyword.get(opts, :data_dir, Path.join(base, "data"))
 
     {:ok, manager} =
       TailnetDial.start_link(
@@ -788,6 +837,13 @@ defmodule Shuttle.TailnetDialTest do
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, 2_000),
       tunnel: %{manager: :none, multiplex: false, label: nil}
     }
+  end
+
+  defp assert_private_socket_directory(data_dir) do
+    assert {:ok, %File.Stat{type: :directory, mode: mode}} =
+             File.lstat(Path.join(data_dir, "sock"))
+
+    assert Bitwise.band(mode, 0o777) == 0o700
   end
 
   defp request_via_bridge(path, host, port, timeout_ms \\ 5_000) do

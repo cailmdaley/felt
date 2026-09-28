@@ -2,10 +2,11 @@ defmodule Shuttle.TailnetDial do
   @moduledoc """
   Private per-remote HTTPS bridges over tailscaled's LocalAPI unix socket.
 
-  Each URL remote gets an owner-only unix listener under the daemon's data
-  directory. The listener accepts only local `:httpc` traffic and carries it
-  through a verified TLS connection opened by this process over the configured
-  LocalAPI socket.
+  Each URL remote gets an owner-only unix listener in the daemon's
+  `<data_dir>/sock` directory. When the daemon uses its default Unix listener,
+  that socket shares the same `0700` directory. The bridge accepts only local
+  `:httpc` traffic and carries it through a verified TLS connection opened by
+  this process over the configured LocalAPI socket.
   """
 
   use Supervisor
@@ -138,7 +139,7 @@ defmodule Shuttle.TailnetDial do
 
   @doc false
   def socket_path(remote_name, data_dir \\ Shuttle.data_dir()) do
-    Path.join([data_dir, "sock", "dial", "#{socket_component(remote_name)}.sock"])
+    Path.join([data_dir, "sock", "dial-#{socket_component(remote_name)}.sock"])
   end
 
   @doc false

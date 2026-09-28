@@ -969,10 +969,12 @@ For example, a per-user userspace instance might use:
 }
 ```
 
-The daemon creates one owner-only client socket per enabled HTTPS remote under
-`$SHUTTLE_DATA_DIR/sock/dial/`.
-It carries local HTTP over that socket, then performs verified TLS to the
-configured hostname through tailscaled's LocalAPI dial endpoint.
+The daemon creates one owner-only client socket per enabled HTTPS remote
+immediately under `$SHUTTLE_DATA_DIR/sock/`, named `dial-<component>.sock`.
+On shared/exposed hosts using the default Unix listener, bridge sockets sit
+beside `daemon.sock` and share its `0700` owner-only directory guard. Each bridge
+carries local HTTP over its socket, then performs verified TLS to the configured
+hostname through tailscaled's LocalAPI dial endpoint.
 The `/api/v1/version` response reports whether the transport is configured and
 which bridges are ready; `felt setup receipt` shows the same live state and
 flags missing or unhealthy bridges. `ready` means the private listener is

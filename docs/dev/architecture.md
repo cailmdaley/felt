@@ -166,7 +166,8 @@ the local Tailscale HTTP proxy is an unauthenticated loopback gateway to the
 whole tailnet.
 For `https://` remotes, `defaults.tailscale_socket` instead asks the daemon to
 open a private, owner-only Unix socket per remote and dial the remote through
-tailscaled's LocalAPI.
+tailscaled's LocalAPI. On shared/exposed hosts using the default Unix listener,
+bridge sockets sit beside `daemon.sock` under the same `0700` directory guard.
 The bridge verifies the remote TLS certificate and hostname before it relays
 traffic; it never exposes a loopback proxy to co-tenants.
 When the private socket is configured, HTTPS requests fail closed if their
