@@ -34,7 +34,7 @@ defmodule ShuttleWeb.CORSPlug do
                        port <- @dev_ports,
                        do: "http://#{host}:#{port}"
 
-  @allowed_methods "GET, POST, OPTIONS"
+  @allowed_methods "GET, HEAD, POST, OPTIONS"
   @allowed_headers "Content-Type, Accept, If-None-Match, If-Modified-Since"
   @exposed_headers "ETag, Last-Modified"
   @max_age "3600"

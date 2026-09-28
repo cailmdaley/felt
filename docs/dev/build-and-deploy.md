@@ -76,7 +76,9 @@ Push the verified revision, then deploy it on each host:
 
 1. Pull the checkout and run `make build` in the host's login shell.
 2. Cycle the daemon through its supervisor or respawn loop.
-3. Poll `/api/v1/version` until `git_short_sha` matches and `booted_at` advances.
+3. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
+   and `ready` is `true` (up to 15 minutes by default; set
+   `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
 4. Check the changed behavior through the live API or board.
 5. Run `bin/shuttle release` to release the boot quarantine.
 
@@ -138,10 +140,14 @@ Where `shuttle-launch --loop` runs in tmux session `shuttle-daemon`, kill the
 lsof -ti:4000 -sTCP:LISTEN | xargs kill
 ```
 
-Confirm `git_short_sha` flipped; if not, the old process is still bound. **A
-host with large felt stores can take minutes to start** — it walks every store
-and adopts orphan sessions before binding `:4000`; wait it out, don't assume a
-crash.
+Confirm `git_short_sha` flipped and `/api/v1/version` reports `ready: true`; if
+not, the old process may still be bound or the new daemon is still initializing.
+The listener binds before store resolution, orphan adoption, event-stream
+seeding, and Tailnet bridge reconciliation finish. While that synchronous boot
+work runs, `/api/v1/version` answers with `ready: false`; state-dependent routes
+return a fast 503. The respawn loop treats the bound listener as alive, polls
+booting daemons every five seconds, and falls through to `start --force` if the
+listener stops answering.
 
 **`RemoteRegistry`'s circuit breaker paces revival attempts; it never abandons
 a remote.** Each configured remote is driven by a recovery state machine; after

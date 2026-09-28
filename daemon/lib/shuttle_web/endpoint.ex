@@ -29,6 +29,12 @@ defmodule ShuttleWeb.Endpoint do
     only: ~w(assets fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest)
   )
 
+  # CORS must run before readiness can send a booting 503, so cross-origin
+  # board clients receive the daemon's real status instead of a browser CORS
+  # failure. Static assets above have already short-circuited this plug stack.
+  plug(ShuttleWeb.CORSPlug)
+  plug(ShuttleWeb.ReadinessPlug)
+
   # File-bearing message envelopes get a larger, route-specific JSON ceiling.
   # Plug.Parsers leaves an already-fetched body alone, so the ordinary parser
   # below retains its default 8 MB limit for every other endpoint.
@@ -40,7 +46,6 @@ defmodule ShuttleWeb.Endpoint do
     json_decoder: Phoenix.json_library()
   )
 
-  plug(ShuttleWeb.CORSPlug)
   plug(Plug.Head)
   plug(ShuttleWeb.Router)
 end

@@ -90,8 +90,9 @@ defmodule Shuttle.Application do
   # them explicitly. Note that :start_waiting_tracker,
   # :start_sent_files_follower, :start_activity_follower and
   # :start_remote_temporal_registry have no prod config entry at all — they
-  # ride the inline `true` default. The endpoint is deliberately NOT in this
-  # list.
+  # ride the inline `true` default. The endpoint starts before these children
+  # so it binds before slow store, event-stream, follower seed, or bridge
+  # initialization.
   @optional_children [
     {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},
@@ -133,7 +134,22 @@ defmodule Shuttle.Application do
     # matches AND booted_at is newer than the deploy started.
     Application.put_env(:shuttle, :booted_at, DateTime.utc_now())
 
-    children = [
+    Shuttle.Readiness.begin_boot()
+
+    case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
+      {:ok, pid} ->
+        duration_ms = Shuttle.Readiness.mark_ready()
+        Logger.info("Shuttle ready after #{duration_ms}ms")
+        {:ok, pid}
+
+      other ->
+        other
+    end
+  end
+
+  @doc false
+  def child_specs do
+    core = [
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       Shuttle.Meeting.Control,
@@ -149,16 +165,16 @@ defmodule Shuttle.Application do
           Application.get_env(:shuttle, flag, true),
           do: mod
 
-    # The endpoint is unconditional and last. The test env keeps it from
-    # listening with `server: false` (config/test.exs), not by omitting the
-    # child — the Phoenix.ConnTest modules need it in the tree.
-    children = children ++ optional ++ [ShuttleWeb.Endpoint]
+    # The endpoint binds before any synchronous child that may walk stores,
+    # seed events.jsonl or reconcile Tailnet bridges. Its start callback logs
+    # "listening" only after the adapter's listener has actually started.
+    endpoint =
+      Supervisor.child_spec(ShuttleWeb.Endpoint,
+        start: {__MODULE__, :start_endpoint, []}
+      )
 
-    with {:ok, pid} <-
-           Supervisor.start_link(children, strategy: :one_for_one, name: Shuttle.Supervisor) do
-      restrict_bound_socket()
-      {:ok, pid}
-    end
+    Enum.map(core, &Supervisor.child_spec(&1, [])) ++
+      [endpoint] ++ Enum.map(optional, &Supervisor.child_spec(&1, []))
   end
 
   # A graceful stop (SIGTERM → `init:stop/0`) calls this before any child is
@@ -175,9 +191,8 @@ defmodule Shuttle.Application do
     state
   end
 
-  # The endpoint is the last child, so by now a unix listener has bound its
-  # socket; narrow it to the owner. Raising here fails boot, which is the
-  # right answer for a socket this daemon cannot secure.
+  # The endpoint child invokes this immediately after Phoenix has successfully
+  # started its listener, before any potentially slow optional child starts.
   @doc false
   def restrict_bound_socket do
     server? = Keyword.get(Application.get_env(:shuttle, ShuttleWeb.Endpoint, []), :server, true)
@@ -209,6 +224,28 @@ defmodule Shuttle.Application do
 
       level ->
         Logger.configure(level: level)
+    end
+  end
+
+  @doc false
+  def start_endpoint do
+    case ShuttleWeb.Endpoint.start_link() do
+      {:ok, _pid} = started ->
+        restrict_bound_socket()
+
+        if Keyword.get(Application.get_env(:shuttle, ShuttleWeb.Endpoint, []), :server, true) do
+          listen = Shuttle.listen()
+          class = Shuttle.host_class()
+
+          Logger.info(
+            "Shuttle listening on #{listen} (host class #{Shuttle.Host.class_name(class)})"
+          )
+        end
+
+        started
+
+      other ->
+        other
     end
   end
 
@@ -262,10 +299,6 @@ defmodule Shuttle.Application do
     Application.put_env(:shuttle, :peer_gate, peer_gate)
     Application.put_env(:shuttle, :peer_gate_expected_uid, peer_gate_expected_uid)
     Application.put_env(:shuttle, :peer_gate_uid_source, peer_gate_uid_source)
-
-    Logger.info(
-      "Shuttle listening on #{listen_string} (host class #{Shuttle.Host.class_name(class)})"
-    )
 
     merged =
       Keyword.merge(existing,

@@ -2,43 +2,42 @@ defmodule ShuttleWeb.VersionController do
   @moduledoc """
   Agent-API endpoint: GET /api/v1/version
 
-  Returns the daemon's compile-time build stamp so consumers can detect a
-  stale daemon release after a schema-touching source update, plus (S2) the
-  daemon-shelled CLI contract level: what this daemon EXPECTS
-  (`Shuttle.Contract.expected_level/0`) versus what it PROBED at boot from the
-  CLI (`felt shuttle contract`, cached in the Poller's `contract_check`
-  state). Makes a skew human-visible remotely, not just in the boot log/board.
-
-  Also where this daemon listens (`listen`, e.g. `"unix:///…/daemon.sock"`),
-  the host class that chose it (`host_class`, e.g. `"single-user"`), and the
-  TCP peer gate mode, admitted uid, and uid source as bound at boot.
+  Returns the daemon's compile-time build stamp, listener and host identity,
+  plus the independent application-readiness bit. It never calls into the
+  Poller: this probe must stay prompt while Poller boot work is still running.
   """
 
   use Phoenix.Controller, formats: [:json]
 
-  @state_timeout_ms 1_500
-
   def show(conn, _params) do
+    readiness = Shuttle.Readiness.status()
+
     json(
       conn,
       Shuttle.BuildStamp.stamp()
-      |> Map.put(:contract, contract_check())
+      |> Map.put(:ready, readiness.ready)
+      |> Map.put(:boot_duration_ms, readiness.duration_ms)
+      |> Map.put(:contract, contract_check(readiness.ready))
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
       |> Map.put(:peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
       |> Map.put(:peer_gate_uid, Application.get_env(:shuttle, :peer_gate_expected_uid))
       |> Map.put(:peer_gate_uid_source, Application.get_env(:shuttle, :peer_gate_uid_source))
-      |> Map.put(:tailnet_dial, Shuttle.TailnetDial.status())
+      |> Map.put(:tailnet_dial, tailnet_dial_status(readiness.ready))
     )
   end
 
-  # The Poller probes once at boot and caches the result (`contract_check`
-  # state) — reading it here is a cheap GenServer call, not a fresh shell-out.
-  # Degrades to "we don't know, ask again" rather than crashing this endpoint
-  # if the Poller is unreachable (mirrors `StateController`'s poller-call
-  # seam).
-  defp contract_check do
-    Shuttle.Poller.snapshot(Shuttle.Poller, @state_timeout_ms)
+  defp contract_check(false) do
+    %{
+      expected: Shuttle.Contract.expected_level(),
+      observed: nil,
+      ok: nil,
+      reason: "booting"
+    }
+  end
+
+  defp contract_check(true) do
+    Shuttle.Poller.snapshot(Shuttle.Poller, 1_500)
     |> Map.get(:contract, %{})
     |> Map.put(:expected, Shuttle.Contract.expected_level())
   catch
@@ -49,5 +48,16 @@ defmodule ShuttleWeb.VersionController do
         ok: nil,
         reason: "poller_unavailable"
       }
+  end
+
+  defp tailnet_dial_status(false),
+    do: %{configured: nil, socket: nil, bridges: [], status: "booting"}
+
+  defp tailnet_dial_status(true) do
+    if Process.whereis(Shuttle.TailnetDial.Reconciler) do
+      Shuttle.TailnetDial.status()
+    else
+      %{configured: false, socket: nil, bridges: []}
+    end
   end
 end

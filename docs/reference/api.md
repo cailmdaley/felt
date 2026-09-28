@@ -402,11 +402,25 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` (the configured LocalAPI socket and each private HTTPS bridge's readiness/error) |
+| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` |
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+
+The endpoint binds before synchronous store resolution, orphan adoption,
+event-stream seeding, and Tailnet bridge reconciliation finish. Until every
+application child has started, `/version` returns HTTP 200 with `ready: false`
+and a boot duration. Routes that depend on initialized state return HTTP 503
+with `{"error":"booting","ready":false,...}` and no `Retry-After` header.
+The liveness-safe exceptions are the board shell `GET /`, static assets (served
+before the gate), `GET`/`HEAD /version`, `GET /peers`, `GET /sessions`, and
+`POST /messages` plus `/messages/files`. Session discovery and direct message
+delivery do not call into the initializing Poller. Remote message delivery can
+still return its explicit `no_bridge` result before this host's Tailnet bridge
+has initialized. `bin/shuttle status` reports a bound listener as alive while
+booting, and the launcher polls every five seconds until it is ready or stops
+answering.
 
 A TailnetDial bridge is `ready` when its private listener is bound and no
 dial/relay failure is recorded. Upstream reachability is observed on actual

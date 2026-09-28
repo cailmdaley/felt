@@ -180,7 +180,7 @@ worker that has built and verified a change SHOULD deploy it.
 ```
 push → on the host: pull → make build → cycle the :4000
 listener (the host's supervisor brings it back) → poll /api/v1/version until
-git_short_sha and booted_at both move → bin/shuttle release
+git_short_sha matches, booted_at advances, and ready is true → bin/shuttle release
 ```
 
 `bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
