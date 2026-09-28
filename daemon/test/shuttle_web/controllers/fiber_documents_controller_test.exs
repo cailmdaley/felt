@@ -1396,7 +1396,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
             name: Shuttle.Poller,
             poll_interval_ms: 600_000,
             max_concurrent_workers: 0,
-            felt_stores: [store]
+            felt_stores: [store],
+            daemon_heartbeat_file: Shuttle.Test.PollerHelpers.test_heartbeat_file()
           )
 
         {pid, nil}

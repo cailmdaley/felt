@@ -160,13 +160,14 @@ defmodule Shuttle.DaemonHeartbeat do
   @type verdict :: {:release, String.t()} | {:hold, String.t()}
 
   @doc """
-  The heartbeat path, honoring the same env the rest of the daemon's host-local
-  state does: `SHUTTLE_HEARTBEAT_FILE`, else `$SHUTTLE_DATA_DIR/heartbeat.json`,
-  default `~/.shuttle/heartbeat.json`.
+  The heartbeat path: `heartbeat.json` in `Shuttle.data_dir/0`
+  (`$SHUTTLE_DATA_DIR`, default `~/.shuttle`). Derived from the data dir alone,
+  so the stop marker beside it is where the stop scripts'
+  `${SHUTTLE_DATA_DIR:-$HOME/.shuttle}` points.
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_HEARTBEAT_FILE") || Path.join(Shuttle.data_dir(), "heartbeat.json")
+    Path.join(Shuttle.data_dir(), "heartbeat.json")
   end
 
   @spec default_write_interval_ms() :: pos_integer()

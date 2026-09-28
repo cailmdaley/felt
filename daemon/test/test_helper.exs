@@ -19,12 +19,14 @@ System.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-sessions-#{System.system_time(:nanosecond)}.jsonl")
 )
 
-# Pin the daemon's own liveness heartbeat away from the real ~/.shuttle for the
-# same reason as the session ledger: every Poller boot writes it. Tests that
-# exercise the boot-quarantine auto-release pass their own
-# `daemon_heartbeat_file:` opt (or scope it under their own SHUTTLE_DATA_DIR).
-System.put_env(
-  "SHUTTLE_HEARTBEAT_FILE",
+# Where test Pollers write the daemon's own liveness heartbeat unless a test
+# passes `daemon_heartbeat_file:` itself: away from the real ~/.shuttle, for the
+# same reason as the session ledger (every Poller boot writes it). The daemon
+# derives the path from SHUTTLE_DATA_DIR alone, so test Pollers get it as an
+# opt (`Shuttle.Test.PollerHelpers.start_poller!/1`).
+Application.put_env(
+  :shuttle,
+  :test_daemon_heartbeat_file,
   Path.join(System.tmp_dir!(), "shuttle-test-heartbeat-#{System.system_time(:nanosecond)}.json")
 )
 

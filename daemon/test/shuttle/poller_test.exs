@@ -36,16 +36,9 @@ defmodule Shuttle.PollerTest do
     prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
     System.delete_env("SHUTTLE_SESSIONS_FILE")
 
-    # Same for the daemon's own liveness heartbeat: the suite-wide pin keeps it
-    # out of the real ~/.shuttle, and dropping it here lands each test's boot
-    # record under that test's own throwaway data dir.
-    prev_heartbeat_file = System.get_env("SHUTTLE_HEARTBEAT_FILE")
-    System.delete_env("SHUTTLE_HEARTBEAT_FILE")
-
     on_exit(fn ->
       restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
       restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
-      restore_env("SHUTTLE_HEARTBEAT_FILE", prev_heartbeat_file)
       rm_rf_settled!(data_dir)
     end)
 

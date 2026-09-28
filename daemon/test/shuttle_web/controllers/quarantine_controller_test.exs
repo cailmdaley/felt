@@ -36,7 +36,8 @@ defmodule ShuttleWeb.QuarantineControllerTest do
              runner: QuietRunner,
              poll_interval_ms: 60_000,
              felt_stores: [],
-             boot_quarantine: true
+             boot_quarantine: true,
+             daemon_heartbeat_file: Shuttle.Test.PollerHelpers.test_heartbeat_file()
            ]
          ]},
       restart: :temporary

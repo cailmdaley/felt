@@ -46,6 +46,8 @@ defmodule Shuttle.Test.PollerHelpers do
   `{:ok, pid}` so existing `{:ok, poller} = ...` call sites are unchanged.
   """
   def start_poller!(opts) do
+    opts = Keyword.put_new_lazy(opts, :daemon_heartbeat_file, &test_heartbeat_file/0)
+
     pid =
       start_supervised!(%{
         id: make_ref(),
@@ -55,4 +57,7 @@ defmodule Shuttle.Test.PollerHelpers do
 
     {:ok, pid}
   end
+
+  @doc "The suite-wide heartbeat path test Pollers write when a test names none."
+  def test_heartbeat_file, do: Application.fetch_env!(:shuttle, :test_daemon_heartbeat_file)
 end
