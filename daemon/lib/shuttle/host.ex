@@ -355,8 +355,8 @@ defmodule Shuttle.Host do
 
   # Absolute, free of `..` segments and a trailing `/` (both refused, since
   # cleaning them away would bind somewhere other than what was written),
-  # then cleaned of `//` and `/./`; the cleaned form is what is bound, what is
-  # reported, and what the length limit applies to.
+  # then cleaned of `//` and `/./`. The configured form is checked here;
+  # prepare_unix_socket!/2 checks the fully resolved path that is bound.
   defp unix_listen(path) do
     segments = String.split(path, "/")
 
@@ -390,7 +390,10 @@ defmodule Shuttle.Host do
   end
 
   @doc """
-  Make a unix socket path safe to bind, or raise.
+  Make a unix socket path safe to bind, or raise. Returns the fully resolved
+  physical socket path so callers bind the same path that passed the checks.
+  The resolved path must fit the platform's `sun_path` limit, even when the
+  configured path was shorter.
 
   The socket's directory is the access check — anyone who can traverse it can
   connect — so the guarantee is only as strong as the path to it. Every
@@ -418,13 +421,36 @@ defmodule Shuttle.Host do
 
   `opts[:euid]` overrides the effective uid (tests).
   """
-  @spec prepare_unix_socket!(String.t(), keyword()) :: :ok
+  @spec prepare_unix_socket!(String.t(), keyword()) :: String.t()
   def prepare_unix_socket!(path, opts \\ []) do
     euid = Keyword.get_lazy(opts, :euid, &effective_uid/0)
     dir = Path.dirname(path)
     parent = secure_ancestors!(Path.dirname(dir), euid)
-    ensure_socket_dir!(Path.join(parent, Path.basename(dir)), euid)
-    clear_stale_socket!(path)
+    socket_dir = Path.join(parent, Path.basename(dir))
+    ensure_socket_dir!(socket_dir, euid)
+    resolved_path = Path.join(socket_dir, Path.basename(path))
+    ensure_socket_path_length!(path, resolved_path)
+    clear_stale_socket!(resolved_path)
+    resolved_path
+  end
+
+  defp ensure_socket_path_length!(configured_path, resolved_path) do
+    bytes = byte_size(resolved_path)
+    limit = unix_socket_path_limit()
+
+    if bytes >= limit do
+      raise ArgumentError,
+            "configured socket path #{inspect(configured_path)} resolves to " <>
+              "#{inspect(resolved_path)} (#{bytes} bytes); platform sun_path limit is #{limit} bytes"
+    end
+  end
+
+  defp unix_socket_path_limit do
+    case :os.type() do
+      {:unix, :darwin} -> 104
+      {:unix, :linux} -> 108
+      _ -> 104
+    end
   end
 
   @doc """
@@ -472,7 +498,7 @@ defmodule Shuttle.Host do
     candidate = Path.join(current, name)
 
     case File.lstat(candidate) do
-      {:ok, %File.Stat{type: :symlink}} ->
+      {:ok, %File.Stat{type: :symlink, uid: uid}} when uid in [euid, 0] ->
         target = File.read_link!(candidate)
 
         case Path.split(target) do
@@ -482,6 +508,11 @@ defmodule Shuttle.Host do
           parts ->
             walk!(current, parts ++ rest, euid, links + 1)
         end
+
+      {:ok, %File.Stat{type: :symlink, uid: uid}} ->
+        raise ArgumentError,
+              "refusing to follow symlink #{candidate}: it is owned by uid #{uid}, " <>
+                "neither this daemon's uid #{euid} nor root"
 
       {:ok, %File.Stat{type: :directory}} ->
         check_ancestor!(candidate, euid)

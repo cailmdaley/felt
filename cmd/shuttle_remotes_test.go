@@ -45,6 +45,7 @@ type proxyFixture struct {
 type remoteFixtureDoc struct {
 	LaunchdLabelPrefix string          `json:"launchd_label_prefix"`
 	HTTPSProxy         proxyFixture    `json:"https_proxy"`
+	TailscaleSocket    string          `json:"tailscale_socket"`
 	Remotes            []remoteFixture `json:"remotes"`
 }
 
@@ -93,6 +94,13 @@ func TestRemotesFixtureParity(t *testing.T) {
 			}
 			if (proxyFixture{Host: gotProxy.Host, Port: gotProxy.Port}) != want.HTTPSProxy {
 				t.Errorf("defaults.https_proxy = %+v, want %+v", gotProxy, want.HTTPSProxy)
+			}
+			var gotTailscaleSocket string
+			if doc.Defaults != nil {
+				gotTailscaleSocket, _ = doc.Defaults.normalizedTailscaleSocket()
+			}
+			if gotTailscaleSocket != want.TailscaleSocket {
+				t.Errorf("defaults.tailscale_socket = %q, want %q", gotTailscaleSocket, want.TailscaleSocket)
 			}
 			if len(doc.Remotes) != len(want.Remotes) {
 				t.Fatalf("got %d remotes, want %d", len(doc.Remotes), len(want.Remotes))
@@ -156,7 +164,7 @@ func TestRemotesFixtureRejected(t *testing.T) {
 			t.Errorf("%s loaded; want a refusal of %s.%s", fixture, want.Remote, want.Field)
 			continue
 		}
-		if !strings.Contains(err.Error(), `"`+want.Remote+`"`) || !strings.Contains(err.Error(), want.Field) {
+		if (want.Remote != "" && !strings.Contains(err.Error(), `"`+want.Remote+`"`)) || !strings.Contains(err.Error(), want.Field) {
 			t.Errorf("%s: error %q does not name %s.%s", fixture, err, want.Remote, want.Field)
 		}
 	}
@@ -274,6 +282,9 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 		{"remote socket with dot-dot", `[{"name":"a","port":4001,"remote_socket":"/srv/../etc/d.sock"}]`, "clean path"},
 		{"remote socket with a trailing slash", `[{"name":"a","port":4001,"remote_socket":"/srv/sock/"}]`, "clean path"},
 		{"proxy with a path", `{"defaults":{"https_proxy":"http://h:1/x"},"remotes":[{"name":"a","port":4001}]}`, "https_proxy"},
+		{"relative tailscale socket", `{"defaults":{"tailscale_socket":"sock/tailscaled.sock"},"remotes":[{"name":"a","port":4001}]}`, "defaults.tailscale_socket"},
+		{"unclean tailscale socket", `{"defaults":{"tailscale_socket":"/run/../tailscaled.sock"},"remotes":[{"name":"a","port":4001}]}`, "defaults.tailscale_socket"},
+		{"both dial transports", `{"defaults":{"https_proxy":"localhost:1055","tailscale_socket":"/run/tailscaled.sock"},"remotes":[{"name":"a","port":4001}]}`, "mutually exclusive"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

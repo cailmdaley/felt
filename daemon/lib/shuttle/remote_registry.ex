@@ -1184,9 +1184,11 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   profile, not per request, so configuring it on `:default` would impose this
   hub's fleet proxy on every other `:httpc` user in the VM.
 
-  **There are two of them, and neither is ever stopped.** `:shuttle_fleet`
-  carries the proxy; `:shuttle_fleet_direct` never has one applied, and a
-  request picks its profile from what the fleet file currently says. The
+  **The shared profiles are never stopped.** `:shuttle_fleet` carries the
+  proxy; `:shuttle_fleet_direct` never has one applied, and a request picks its
+  profile from what the fleet file currently says. A private Tailnet dial gets
+  its own profile per remote so its unix-socket options cannot leak onto either
+  shared profile. None is stopped while requests may be in flight. The
   alternative — one profile, reconfigured — cannot express "no proxy" at all:
   `:httpc` rejects `undefined` as an option value, so clearing would mean
   stopping the profile, and stopping a profile kills every request in flight on
@@ -1207,8 +1209,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   behind a facade, and a caller must not inherit its death: a transport fault
   belongs in the remote's `last_error`, not in the caller's mailbox.
 
-  TLS for `https://` remotes is verified explicitly against the OS CA store.
-  Fleet URLs on a mesh VPN carry publicly-trusted certificates; there is no
+  Production TLS for `https://` remotes is verified explicitly against the OS
+  CA store. Test builds enable a compile-time-gated CA override for local TLS
+  fixtures; runtime production configuration cannot add trust anchors. Fleet
+  URLs on a mesh VPN carry publicly-trusted certificates; there is no
   `verify_none` path here and adding one would silently un-authenticate every
   cross-host read and write the hub makes.
   """
@@ -1230,6 +1234,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # What is actually applied to `@proxied_profile` right now, so a request only
   # calls into httpc when the value has genuinely changed.
   @applied_key {__MODULE__, :applied_https_proxy}
+  @tailscale_socket_key {__MODULE__, :tailscale_socket}
+  @tailnet_dial_test_cacerts_enabled Application.compile_env(
+                                       :shuttle,
+                                       :tailnet_dial_test_cacerts_enabled,
+                                       false
+                                     )
 
   # Loopback never goes through the proxy: ssh-tunnelled remotes are
   # `http://127.0.0.1:<port>` and the daemon's own endpoints are local. httpc
@@ -1240,9 +1250,9 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @impl true
   def get(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
-    with {:ok, profile} <- prepare(url) do
-      request = {String.to_charlist(url), []}
-      http_opts = http_opts(url, timeout_ms)
+    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
+      request = {String.to_charlist(request_url), []}
+      http_opts = http_opts(request_url, timeout_ms, private_dial?)
 
       # `body_format: :binary` returns the response body as a raw binary. Without
       # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
@@ -1257,7 +1267,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:error, {:http_status, status}}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1270,25 +1280,45 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  defp transport_error(reason, true, url) do
+    case URI.parse(url) do
+      %URI{host: host} = uri when is_binary(host) and host != "" ->
+        remote_name = Shuttle.TailnetDial.remote_for(String.downcase(host), uri.port || 443)
+
+        case {remote_name, remote_name && Shuttle.TailnetDial.last_error(remote_name)} do
+          {name, {:tailnet_dial, stage, bridge_reason}} when is_binary(name) ->
+            {:error, {:tailnet_dial, stage, %{httpc: reason, bridge: bridge_reason}}}
+
+          _ ->
+            {:error, reason}
+        end
+
+      _ ->
+        {:error, reason}
+    end
+  end
+
+  defp transport_error(reason, false, _url), do: {:error, reason}
+
   # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
   # with the last etag) and return the raw status + response headers so the
   # caller can treat 304 as "unchanged". Binary-safe like get/2.
   @impl true
   def get(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    with {:ok, profile} <- prepare(url) do
+    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       headers =
         Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
 
-      request = {String.to_charlist(url), headers}
-      http_opts = http_opts(url, timeout_ms)
+      request = {String.to_charlist(request_url), headers}
+      http_opts = http_opts(request_url, timeout_ms, private_dial?)
 
       case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
         {:ok, {{_, status, _}, resp_headers, body}} ->
           {:ok, status, normalize_headers(resp_headers), body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1311,18 +1341,18 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def post(url, body, content_type, timeout_ms)
       when is_binary(url) and is_binary(body) and is_binary(content_type) and
              is_integer(timeout_ms) do
-    with {:ok, profile} <- prepare(url) do
+    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       request =
-        {String.to_charlist(url), [], String.to_charlist(content_type), body}
+        {String.to_charlist(request_url), [], String.to_charlist(content_type), body}
 
-      http_opts = http_opts(url, timeout_ms)
+      http_opts = http_opts(request_url, timeout_ms, private_dial?)
 
       case :httpc.request(:post, request, http_opts, [body_format: :binary], profile) do
         {:ok, {{_, status, _}, _headers, resp_body}} ->
           {:ok, status, resp_body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1350,14 +1380,14 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   @impl true
   def get_file(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    with {:ok, profile} <- prepare(url) do
+    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       headers =
         Enum.map(req_headers, fn {key, value} ->
           {String.to_charlist(key), String.to_charlist(value)}
         end)
 
-      request = {String.to_charlist(url), headers}
-      http_opts = http_opts(url, timeout_ms)
+      request = {String.to_charlist(request_url), headers}
+      http_opts = http_opts(request_url, timeout_ms, private_dial?)
 
       case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
         {:ok, {{_, status, _}, response_headers, body}} ->
@@ -1366,7 +1396,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
 
         {:error, reason} ->
-          {:error, reason}
+          transport_error(reason, private_dial?, url)
       end
     end
   rescue
@@ -1381,28 +1411,128 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   # ── Transport setup ──
 
-  # Everything a request needs before it goes out: the apps started, the
-  # profile it will use alive, and that profile carrying the fleet file's
-  # current proxy. `{:ok, profile}`, or `{:error, reason}` when the request
-  # would need a proxy this host refuses to use (`proxy_refusal/1`).
+  # Ensure the transport applications and profile are ready. Returns the
+  # profile, wire URL, and whether TLS terminates in the private bridge, or an
+  # error when the configured transport cannot serve this URL.
   defp prepare(url) do
     {:ok, _} = Application.ensure_all_started(:inets)
     {:ok, _} = Application.ensure_all_started(:ssl)
 
-    case current_proxy() do
-      nil ->
-        ensure_profile(@direct_profile)
-        {:ok, @direct_profile}
+    case private_dial_profile(url) do
+      {:ok, profile} ->
+        {:ok, {profile, private_wire_url(url), true}}
 
-      {host, port} = proxy ->
-        case proxy_refusal(url) do
+      {:error, reason} ->
+        {:error, reason}
+
+      :none ->
+        case current_proxy() do
           nil ->
-            pid = ensure_profile(@proxied_profile)
-            apply_proxy(pid, proxy, host, port)
-            {:ok, @proxied_profile}
+            ensure_profile(@direct_profile)
+            {:ok, {@direct_profile, url, false}}
 
-          reason ->
-            {:error, reason}
+          {host, port} = proxy ->
+            case proxy_refusal(url) do
+              nil ->
+                pid = ensure_profile(@proxied_profile)
+                apply_proxy(pid, proxy, host, port)
+                {:ok, {@proxied_profile, url, false}}
+
+              reason ->
+                {:error, reason}
+            end
+        end
+    end
+  end
+
+  # @sc [label:security] https-tailnet-dial-fails-closed
+  # A configured private socket admits no direct/proxy fallback: each HTTPS URL
+  # must have a live host/port bridge, or the request returns a dial error.
+  defp private_dial_profile(url) do
+    cond do
+      not https?(url) or not Shuttle.Remotes.tailscale_socket_configured?() ->
+        :none
+
+      is_nil(current_tailscale_socket()) ->
+        {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}}
+
+      true ->
+        case URI.parse(url) do
+          %URI{host: host} = uri when is_binary(host) and host != "" ->
+            host = String.downcase(host)
+            port = uri.port || 443
+
+            case {Shuttle.TailnetDial.remote_for(host, port),
+                  Shuttle.TailnetDial.socket_for(host, port)} do
+              {remote_name, path} when is_binary(remote_name) and is_binary(path) ->
+                profile = Shuttle.TailnetDial.profile(remote_name)
+
+                case ensure_profile(profile) do
+                  pid when is_pid(pid) ->
+                    case apply_dial_socket(pid, profile, path) do
+                      :ok -> {:ok, profile}
+                      {:error, reason} -> {:error, {:tailnet_dial, :profile, reason}}
+                    end
+
+                  _ ->
+                    {:error, {:tailnet_dial, :profile, :httpc_unavailable}}
+                end
+
+              _ ->
+                {:error, {:tailnet_dial, :unavailable, {:no_bridge, host, port}}}
+            end
+
+          _ ->
+            {:error, {:tailnet_dial, :unavailable, :invalid_https_url}}
+        end
+    end
+  end
+
+  # The local leg is clear HTTP over the private Unix socket. TLS terminates in
+  # the bridge, where it can carry the original hostname as SNI and verify it;
+  # using https:// here would make httpc pass its local-family option to ssl.
+  # httpc derives Host from the wire URL, so omit an explicit standard HTTPS
+  # port while retaining every non-default port in the authority.
+  defp private_wire_url(url) do
+    uri = URI.parse(url)
+    uri = if uri.port == 443, do: %{uri | port: nil}, else: uri
+    uri |> Map.put(:scheme, "http") |> URI.to_string()
+  end
+
+  defp current_tailscale_socket do
+    # The resolved file path matters independently of its stat token: two
+    # selected files can have the same `{mtime, size}` and different sockets.
+    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :tailscale_socket)}
+
+    case :persistent_term.get(@tailscale_socket_key, :unset) do
+      {^key, socket} ->
+        socket
+
+      _ ->
+        socket = Shuttle.Remotes.tailscale_socket()
+        :persistent_term.put(@tailscale_socket_key, {key, socket})
+        socket
+    end
+  end
+
+  defp apply_dial_socket(pid, profile, path) do
+    key = {__MODULE__, :applied_tailscale_dial, pid}
+
+    case :persistent_term.get(key, :unset) do
+      ^path ->
+        :ok
+
+      _ ->
+        case :httpc.set_options(
+               [ipfamily: :local, unix_socket: String.to_charlist(path)],
+               profile
+             ) do
+          :ok ->
+            :persistent_term.put(key, path)
+            :ok
+
+          error ->
+            error
         end
     end
   end
@@ -1465,18 +1595,21 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
+  defp remotes_file_snapshot do
+    {Shuttle.Remotes.config_path(), Shuttle.Remotes.config_token()}
+  end
+
   # The configured proxy, re-derived only when one of its inputs has moved.
   # Three registries polling several remotes every 5s would otherwise parse the
   # same JSON a few times a second to learn the same answer; this makes the
   # steady state a stat plus an ETS read.
   #
-  # The cache key is the WHOLE input — the fleet file's `{mtime, size}` token
-  # and the application-config override that outranks it — so a test that
-  # `put_env`s a proxy is not served a value cached from the file, and
-  # `Shuttle.Remotes.https_proxy/0` stays the single place the precedence
-  # between them is decided.
+  # The cache key is the whole input — selected fleet path and its `{mtime,
+  # size}` token, plus the application-config override — so switching
+  # `FELT_REMOTES_FILE` cannot reuse a value from another file with matching
+  # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
-    key = {Shuttle.Remotes.config_token(), Application.get_env(:shuttle, :https_proxy)}
+    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}
 
     case :persistent_term.get(@proxy_key, :unset) do
       {^key, proxy} ->
@@ -1530,16 +1663,25 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   # Timeouts always; explicit TLS verification for https. httpc fills in SNI and
   # the hostname from the URL, but the verification policy is ours to state.
-  defp http_opts(url, timeout_ms) do
+  defp http_opts(url, timeout_ms, private_dial?) do
     base = [{:timeout, timeout_ms}, {:connect_timeout, timeout_ms}]
+    base = if private_dial?, do: [{:autoredirect, false} | base], else: base
 
     if https?(url), do: [{:ssl, tls_opts()} | base], else: base
   end
 
-  defp tls_opts do
+  @doc false
+  def tls_opts do
+    cacerts =
+      if @tailnet_dial_test_cacerts_enabled do
+        Application.get_env(:shuttle, :tailnet_dial_test_cacerts) || :public_key.cacerts_get()
+      else
+        :public_key.cacerts_get()
+      end
+
     [
       verify: :verify_peer,
-      cacerts: :public_key.cacerts_get(),
+      cacerts: cacerts,
       depth: 3,
       customize_hostname_check: [
         match_fun: :public_key.pkix_verify_hostname_match_fun(:https)

@@ -263,7 +263,7 @@ the existing owner-served file surface.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
+| `felt shuttle remotes list` | List the configured remote daemons and document defaults; validates paths, proxy/dial exclusivity, duplicate names, and port collisions |
 | `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |

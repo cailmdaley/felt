@@ -161,11 +161,19 @@ and code-server or Jupyter `/proxy/` routes. Operators must not run relays as
 themselves. Root has no separate admission exception; it can already inspect
 or control the daemon process.
 
-The daemon also refuses to dial out through `defaults.https_proxy` (a
-`remotes.json` setting that points outbound tailnet requests at a local
-Tailscale HTTP proxy) unless the host is `single-user`: that proxy is an
-unauthenticated loopback gateway to the whole tailnet, and on a shared host
-every co-tenant can reach it.
+The daemon refuses `defaults.https_proxy` on shared and exposed hosts because
+the local Tailscale HTTP proxy is an unauthenticated loopback gateway to the
+whole tailnet.
+
+For `https://` remotes, `defaults.tailscale_socket` asks the daemon to open a
+private, owner-only Unix socket per remote and dial the remote through
+tailscaled's LocalAPI. On shared/exposed hosts using the default Unix listener,
+bridge sockets sit beside `daemon.sock` under the same `0700` directory guard.
+The bridge verifies the remote TLS certificate and hostname before it relays
+traffic; it never exposes a loopback proxy to co-tenants.
+When the private socket is configured, HTTPS requests fail closed if their
+bridge is missing or unavailable; they never fall back to direct or proxy
+routing. The two transport defaults are mutually exclusive.
 
 Every connection gets peer facts in `conn.assigns.peer`: transport (`unix` or
 `tcp`), TCP uid when `/proc` resolves it, whether forwarding headers are

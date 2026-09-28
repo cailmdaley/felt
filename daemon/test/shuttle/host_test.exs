@@ -97,7 +97,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "creates a missing socket directory 0700", %{sock: sock} do
-      assert :ok = Host.prepare_unix_socket!(sock)
+      assert is_binary(Host.prepare_unix_socket!(sock))
 
       assert {:ok, %File.Stat{type: :directory, mode: mode}} = File.stat(Path.dirname(sock))
       assert Bitwise.band(mode, 0o777) == 0o700
@@ -123,6 +123,24 @@ defmodule Shuttle.HostTest do
       error =
         assert_raise ArgumentError, fn -> Host.prepare_unix_socket!(sock, euid: 999_999) end
 
+      assert error.message =~ "neither this daemon's uid 999999 nor root"
+    end
+
+    test "refuses a symlink owned by a different uid before following it", %{base: base} do
+      target = Path.join(base, "target")
+      link = Path.join("/tmp", "shuttle-host-link-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(target)
+      File.chmod!(target, 0o755)
+      File.ln_s!(target, link)
+      on_exit(fn -> File.rm(link) end)
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Host.prepare_unix_socket!(Path.join([link, "sock", "daemon.sock"]), euid: 999_999)
+        end
+
+      assert error.message =~ link
+      assert error.message =~ "refusing to follow symlink"
       assert error.message =~ "neither this daemon's uid 999999 nor root"
     end
 
@@ -169,8 +187,38 @@ defmodule Shuttle.HostTest do
       File.chmod!(real, 0o755)
       File.ln_s!(real, Path.join(base, "link"))
 
-      assert :ok = Host.prepare_unix_socket!(Path.join([base, "link", "sock", "daemon.sock"]))
+      resolved = Host.prepare_unix_socket!(Path.join([base, "link", "sock", "daemon.sock"]))
+      assert String.contains?(resolved, "real")
+      refute String.contains?(resolved, "link")
       assert File.dir?(Path.join(real, "sock"))
+    end
+
+    test "rejects a physical socket path beyond sun_path after symlink resolution", %{
+      base: base
+    } do
+      target_name = "deep-" <> String.duplicate("x", 96)
+      target = Path.join(base, target_name)
+      File.mkdir_p!(target)
+      File.chmod!(target, 0o755)
+      link = Path.join(base, "link")
+      File.ln_s!(target, link)
+      configured_path = Path.join([link, "sock", "daemon.sock"])
+
+      assert byte_size(configured_path) < 100
+      assert byte_size(Path.join([target, "sock", "daemon.sock"])) >= 108
+
+      error = assert_raise ArgumentError, fn -> Host.prepare_unix_socket!(configured_path) end
+
+      [configured_message, resolved_message] =
+        String.split(error.message, " resolves to ", parts: 2)
+
+      assert configured_message =~ inspect(configured_path)
+      refute resolved_message =~ link
+      assert resolved_message =~ target_name
+      assert [_, bytes] = Regex.run(~r/\((\d+) bytes\)/, resolved_message)
+      assert [_, limit] = Regex.run(~r/platform sun_path limit is (\d+) bytes/, resolved_message)
+      assert String.to_integer(bytes) >= String.to_integer(limit)
+      assert String.to_integer(limit) in [104, 108]
     end
 
     test "accepts a sticky world-writable ancestor, as /tmp is", %{base: base} do
@@ -181,12 +229,12 @@ defmodule Shuttle.HostTest do
       assert {:ok, %File.Stat{mode: mode}} = File.lstat(sticky)
       assert Bitwise.band(mode, 0o1777) == 0o1777
 
-      assert :ok = Host.prepare_unix_socket!(Path.join([sticky, "sock", "daemon.sock"]))
+      assert is_binary(Host.prepare_unix_socket!(Path.join([sticky, "sock", "daemon.sock"])))
     end
 
     test "creates missing ancestors without group or other write", %{base: base} do
       sock = Path.join([base, "a", "b", "sock", "daemon.sock"])
-      assert :ok = Host.prepare_unix_socket!(sock)
+      assert is_binary(Host.prepare_unix_socket!(sock))
 
       for dir <- [Path.join(base, "a"), Path.join([base, "a", "b"])] do
         {:ok, %File.Stat{mode: mode}} = File.lstat(dir)
@@ -206,17 +254,17 @@ defmodule Shuttle.HostTest do
     end
 
     test "removes a stale socket nothing answers on", %{sock: sock} do
-      :ok = Host.prepare_unix_socket!(sock)
+      _resolved = Host.prepare_unix_socket!(sock)
       {:ok, listener} = :gen_tcp.listen(0, [{:ifaddr, {:local, sock}}])
       :gen_tcp.close(listener)
       assert {:ok, %File.Stat{type: :other}} = File.lstat(sock)
 
-      assert :ok = Host.prepare_unix_socket!(sock)
+      assert is_binary(Host.prepare_unix_socket!(sock))
       refute File.exists?(sock)
     end
 
     test "refuses a socket another daemon is listening on", %{sock: sock} do
-      :ok = Host.prepare_unix_socket!(sock)
+      _resolved = Host.prepare_unix_socket!(sock)
       {:ok, listener} = :gen_tcp.listen(0, [{:ifaddr, {:local, sock}}])
       on_exit(fn -> :gen_tcp.close(listener) end)
 
@@ -228,7 +276,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "leaves a non-socket file at the path alone", %{sock: sock} do
-      :ok = Host.prepare_unix_socket!(sock)
+      _resolved = Host.prepare_unix_socket!(sock)
       File.write!(sock, "not a socket")
 
       assert_raise ArgumentError, ~r/not a stale socket/, fn ->
@@ -300,10 +348,19 @@ defmodule Shuttle.HostTest do
       assert Shuttle.listen() == "unix://" <> sock
       assert Shuttle.host_class() == :shared_multi_user
 
-      # The probe sees the unix listener it was asked about — so an empty TCP
-      # difference below is a finding, not a probe that sees nothing.
+      # The probe's new unix socket shares the requested path's inode — so an
+      # empty TCP difference below is a finding, not a probe that sees nothing.
       opened = listening_sockets() -- before
-      assert {:local, sock} in opened
+      {:ok, %File.Stat{inode: inode}} = File.stat(sock)
+
+      assert Enum.any?(opened, fn
+               {:local, path} ->
+                 match?({:ok, %File.Stat{inode: ^inode}}, File.stat(path))
+
+               _ ->
+                 false
+             end)
+
       assert Enum.filter(opened, &match?({{_, _, _, _}, _}, &1)) == []
       assert Enum.filter(opened, &match?({{_, _, _, _, _, _, _, _}, _}, &1)) == []
 

@@ -820,16 +820,16 @@ loopback is private to the operator. `felt setup receipt` reports
 `peer_gate: uid` when the daemon gates its shared-class TCP listener and
 treats an ungated TCP listener as a mismatch.
 
-The same class gates dial-out. The daemon refuses `defaults.https_proxy`
-(configured below, under `defaults.https_proxy`) unless the host is
-`single-user`, because `tailscaled --outbound-http-proxy-listen` is an
-unauthenticated loopback gateway into the whole tailnet, and a co-tenant who
-finds it arrives everywhere wearing your node's identity. A `shared-multi-user`
-host dials out over ssh instead. To reach the tailnet from userspace mode
-without the proxy, use `ssh -o ProxyCommand="tailscale nc %h %p" <node>`,
-which rides `tailscaled`'s private LocalAPI socket rather than an
-unauthenticated listener. Tunnel *local* ends are still plain TCP loopback
-today and are flagged, not fixed, on a shared host.
+The same class gates dial-out. The daemon refuses `defaults.https_proxy` on
+`shared-multi-user` and `exposed` hosts because
+`tailscaled --outbound-http-proxy-listen` is an unauthenticated loopback
+gateway into the whole tailnet. A co-tenant who finds it can reach every
+tailnet service as your node.
+
+For private HTTPS remotes, set `defaults.tailscale_socket` below. Shuttle uses
+tailscaled's LocalAPI to establish verified per-remote bridges without
+exposing the loopback proxy. Tunnel *local* ends remain plain TCP loopback and
+are flagged, not fixed, on a shared host.
 
 `felt setup receipt` is where this is checked. It reports the declared
 class, the resolved listen address, the set of distinct logged-in users, the
@@ -840,6 +840,8 @@ checks worth watching turn the receipt red on purpose: declaring
 `single-user` on a login node, `chmod 755`-ing the socket directory, setting
 `SHUTTLE_LISTEN=tcp` on a shared host, and setting `defaults.https_proxy` on
 a shared host.
+The receipt also reports the configured Tailscale LocalAPI socket and the
+live state of each private remote bridge.
 
 ## Configuring remotes
 
@@ -949,6 +951,46 @@ there is no local port for that supervisor to forward to, so `felt shuttle
 tunnels install` rejects it rather than writing a job that starts and
 immediately has nothing to do.
 
+### `defaults.tailscale_socket`
+
+A hub whose `tailscaled` runs in userspace-networking mode can dial private
+`https://` remotes through its LocalAPI Unix socket instead of exposing the
+unauthenticated loopback HTTP proxy.
+Set `defaults.tailscale_socket` to the socket path used by that `tailscaled`
+instance; the Shuttle daemon's account must be allowed to connect to it.
+For example, a per-user userspace instance might use:
+
+```json
+{
+  "defaults": {"tailscale_socket": "/path/to/tailscaled.sock"},
+  "remotes": [
+    {"name": "hub-a", "url": "https://hub-a.example.ts.net"}
+  ]
+}
+```
+
+The daemon creates one owner-only client socket per enabled HTTPS remote
+immediately under `$SHUTTLE_DATA_DIR/sock/`, named `dial-<component>.sock`. On
+shared/exposed hosts using the default Unix listener, bridge sockets sit beside
+`daemon.sock` and share its `0700` owner-only directory guard. Each bridge
+carries local HTTP over its socket, then performs verified TLS to the configured
+hostname through tailscaled's LocalAPI dial endpoint.
+The `/api/v1/version` response reports whether the transport is configured and
+which bridges are ready; `felt setup receipt` shows the same live state and
+flags missing or unhealthy bridges. `ready` means the private listener is
+bound with no recorded dial/relay failure; upstream reachability is observed on
+actual requests, not a synthetic probe. Once configured, HTTPS requests fail
+closed without a matching bridge instead of falling back to direct or proxy
+routing.
+`felt shuttle remotes list` validates the socket path.
+`felt setup receipt` checks that it is a Unix socket and, on shared/exposed
+hosts, that ownership, mode bits, and macOS ACLs prevent co-tenants from
+traversing to it; it also compares the running daemon's effective socket with
+the fleet file.
+`defaults.tailscale_socket` and `defaults.https_proxy` are mutually exclusive.
+The daemon doesn't read `$TS_SOCKET` or `$HTTPS_PROXY`; configure the fleet file
+so its validator and supervised daemon agree.
+
 ### `defaults.https_proxy`
 
 A hub whose *own* `tailscaled` also runs in userspace-networking mode has no
@@ -1009,17 +1051,14 @@ and reach every daemon in your tailnet, including the control API that
 launches and kills workers. An HPC login node routinely has a dozen other
 people on it.
 
-Only a hub needs the proxy — a node that merely runs `tailscale serve` to
+Only a hub needs the proxy: a node that merely runs `tailscale serve` to
 expose its own daemon needs no outbound route at all, so a proxy there is pure
-exposure for no function. This is why `bin/tailscaled-launch` ships with both
-its listeners off: turn the HTTP proxy on only for a `single-user` hub that
-composites the fleet. (`socks5-listen` is the same switch for
-`--socks5-server`; nothing in felt or shuttle uses it.)
-
-A hub that is itself a shared host dials out over ssh instead of the proxy —
-see [Host classes and trust boundaries](#host-classes-and-trust-boundaries)
-for the `tailscale nc` ProxyCommand that reaches the tailnet through
-`tailscaled`'s private LocalAPI socket.
+exposure for no function. `bin/tailscaled-launch` ships with both listeners
+off. A single-user hub that composites the fleet can enable the HTTP proxy; a
+shared/exposed hub can leave it off and set `defaults.tailscale_socket` for
+private HTTPS remotes (see [Configuring remotes](#configuring-remotes)).
+(`socks5-listen` is the same switch for `--socks5-server`; nothing in felt or
+shuttle uses it.)
 
 ### Policy caveat
 

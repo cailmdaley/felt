@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -73,8 +74,7 @@ type remoteTunnel struct {
 }
 
 // remoteDefaults are the file-level fallbacks for the per-remote polling knobs,
-// plus the one fleet-wide setting that is not per-remote at all: the hub's
-// outbound HTTP proxy.
+// plus the mutually exclusive fleet-wide transports for outbound https remotes.
 type remoteDefaults struct {
 	PollIntervalMS   int `json:"poll_interval_ms,omitempty"`
 	RequestTimeoutMS int `json:"request_timeout_ms,omitempty"`
@@ -88,6 +88,11 @@ type remoteDefaults struct {
 	// environment is invisible to the operator debugging it, and this file is
 	// already the one `remotes list` validates.
 	HTTPSProxy string `json:"https_proxy,omitempty"`
+
+	// TailscaleSocket is tailscaled's private LocalAPI unix socket. The daemon
+	// uses it to establish per-remote dial bridges without exposing a loopback
+	// proxy to other users on a shared host.
+	TailscaleSocket string `json:"tailscale_socket,omitempty"`
 }
 
 // proxyEndpoint is defaults.https_proxy after parsing: a host with no IPv6
@@ -109,6 +114,20 @@ type proxyEndpoint struct {
 // never escapes parseProxyEndpoint — it returns an error instead — so host and
 // port are either both set or both zero.
 func (p proxyEndpoint) configured() bool { return p.Host != "" && p.Port != 0 }
+
+// normalizedTailscaleSocket validates defaults.tailscale_socket using the same
+// path grammar as remote_socket. An absent value is an ordinary fleet; a
+// present but unsafe path is an error because `remotes list` validates the file.
+func (d remoteDefaults) normalizedTailscaleSocket() (string, error) {
+	path := strings.TrimSpace(d.TailscaleSocket)
+	if path == "" {
+		return "", nil
+	}
+	if err := validateRemoteSocket(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
 
 // String is the human form `remotes list` prints and nothing parses back. It
 // goes through net.JoinHostPort so an IPv6 proxy comes out bracketed
@@ -354,22 +373,36 @@ func configuredRemotes() ([]remoteSpec, error) {
 //
 // Validation is fail-loud on the things that silently break routing: a nameless
 // entry has no routing key, a duplicate name means two daemons answer to one
-// origin, and a duplicate local port means one tunnel shadows another.
+// origin, duplicate local ports shadow tunnels, and private HTTPS remotes may
+// not claim the same authority.
 func normalizeRemotes(doc *remotesFile) error {
 	if doc.LaunchdLabelPrefix == "" {
 		doc.LaunchdLabelPrefix = defaultLaunchdLabelPrefix
 	}
 
 	defaults := remoteDefaults{}
+	privateDialConfigured := false
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
-		if _, err := defaults.normalizedHTTPSProxy(); err != nil {
+		proxy, err := defaults.normalizedHTTPSProxy()
+		if err != nil {
 			return fmt.Errorf("defaults.https_proxy %q: %w", strings.TrimSpace(defaults.HTTPSProxy), err)
 		}
+		socket, err := defaults.normalizedTailscaleSocket()
+		if err != nil {
+			return fmt.Errorf("defaults.tailscale_socket %q: %w", strings.TrimSpace(defaults.TailscaleSocket), err)
+		}
+		if proxy.configured() && socket != "" {
+			return fmt.Errorf("defaults.https_proxy and defaults.tailscale_socket are mutually exclusive")
+		}
+		defaults.TailscaleSocket = socket
+		privateDialConfigured = socket != ""
+		doc.Defaults = &defaults
 	}
 
 	seenNames := map[string]bool{}
 	seenPorts := map[int]string{}
+	seenHTTPSAuthorities := map[string]string{}
 
 	for i := range doc.Remotes {
 		r := &doc.Remotes[i]
@@ -427,6 +460,16 @@ func normalizeRemotes(doc *remotesFile) error {
 		if r.URL == "" {
 			r.URL = fmt.Sprintf("http://127.0.0.1:%d", r.Port)
 		}
+		if err := validateRemoteURL(r.URL); err != nil {
+			return fmt.Errorf("remote %q: %w", r.Name, err)
+		}
+
+		if authority := privateHTTPSAuthority(r.URL); privateDialConfigured && r.enabledOr() && authority != "" {
+			if other, duplicate := seenHTTPSAuthorities[authority]; duplicate {
+				return fmt.Errorf("remote %q: duplicate https authority %q already used by %q", r.Name, authority, other)
+			}
+			seenHTTPSAuthorities[authority] = r.Name
+		}
 
 		// Replace rather than mutate through the pointer: a caller may be
 		// validating a shallow copy of a sparse document it intends to SAVE
@@ -481,6 +524,44 @@ func normalizeRemotes(doc *remotesFile) error {
 	}
 
 	return nil
+}
+
+func validateRemoteURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("url %q is invalid: %w", raw, err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("url %q must include a host", raw)
+	}
+	if !remoteURLHostPattern.MatchString(host) && net.ParseIP(host) == nil {
+		return fmt.Errorf("url host %q must use ASCII letters, digits, dots, and hyphens or be an IP literal", host)
+	}
+	return nil
+}
+
+var remoteURLHostPattern = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+
+func privateHTTPSAuthority(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" {
+		return ""
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	} else if number, err := strconv.Atoi(port); err == nil {
+		port = strconv.Itoa(number)
+	} else {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // remoteSocketPattern is the whole alphabet a remote socket path may use. It
@@ -620,11 +701,11 @@ var remotesListCmd = &cobra.Command{
 			return nil
 		}
 		if doc.Defaults != nil {
-			// loadRemotesFile has already refused a proxy that does not parse,
-			// so reaching here means the error is nil; the human line is the
-			// only thing left to do with it.
 			if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
 				fmt.Printf("https:// remotes via proxy %s\n\n", proxy)
+			}
+			if socket, _ := doc.Defaults.normalizedTailscaleSocket(); socket != "" {
+				fmt.Printf("https:// remotes via tailscale LocalAPI socket %s\n\n", socket)
 			}
 		}
 		fmt.Printf("%-16s %-6s %-18s %-12s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "URL")
