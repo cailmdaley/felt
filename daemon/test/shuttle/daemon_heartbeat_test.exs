@@ -90,6 +90,8 @@ defmodule Shuttle.DaemonHeartbeatTest do
      Map.merge(
        %{
          "v" => 1,
+         "host" => "fleet-host",
+         "node" => "login01",
          "at" => @now - 4_000,
          "booted_at" => booted_at,
          "workers" => [],
@@ -99,7 +101,12 @@ defmodule Shuttle.DaemonHeartbeatTest do
      )}
   end
 
-  defp judge(read_result, live \\ []), do: DaemonHeartbeat.verdict(read_result, @now, live)
+  defp judge(read_result, observed \\ %{}) do
+    DaemonHeartbeat.verdict(
+      read_result,
+      Map.merge(%{now_ms: @now, live: [], host: "fleet-host", node: "login01"}, observed)
+    )
+  end
 
   describe "verdict" do
     test "the baseline heartbeat releases" do
@@ -120,6 +127,29 @@ defmodule Shuttle.DaemonHeartbeatTest do
       three_before = %{two_before | "boots" => [at - 300_000, at - 200_000, at - 100_000]}
       assert {:hold, reason} = judge(hb(three_before))
       assert reason =~ "4 daemon boots"
+    end
+
+    test "a heartbeat from another login node sharing this $HOME holds" do
+      # Same fleet identity (own_host_id), different machine: an idle daemon
+      # there keeps a fresh heartbeat with no workers, which is no evidence
+      # about this node's restart.
+      assert {:hold, reason} = judge(hb(), %{node: "login02"})
+      assert reason =~ "login01"
+    end
+
+    test "a heartbeat stamped with another host id holds" do
+      assert {:hold, _} = judge(hb(), %{host: "other-host"})
+    end
+
+    test "a heartbeat with no host or node stamp holds" do
+      {:ok, record} = hb()
+      assert {:hold, _} = judge({:ok, Map.delete(record, "node")})
+      assert {:hold, _} = judge({:ok, Map.delete(record, "host")})
+    end
+
+    test "write then read round-trips the host and node stamps", %{path: path} do
+      :ok = DaemonHeartbeat.write(path, booted_at: 1, host: "fleet-host", node: "login01")
+      assert {:ok, %{"host" => "fleet-host", "node" => "login01"}} = DaemonHeartbeat.read(path)
     end
 
     test "boots older than the window do not count" do

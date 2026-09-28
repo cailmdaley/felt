@@ -256,7 +256,7 @@ defmodule Shuttle.Poller do
       #
       # ONE automatic exit exists, and it is not a timer: a restart the daemon
       # can PROVE was a fast bounce of a healthy incarnation releases itself at
-      # boot (`Shuttle.DaemonHeartbeat.verdict/3`, evaluated in `init/1` after
+      # boot (`Shuttle.DaemonHeartbeat.verdict/2`, evaluated in `init/1` after
       # adoption). A kernel that kills the beam on an rlimit is not a human
       # asking for a hold, and the hold cost all new work until someone noticed.
       # The proof is three-part (fresh heartbeat, the recorded workers still live
@@ -776,9 +776,14 @@ defmodule Shuttle.Poller do
   end
 
   defp maybe_auto_release_boot_quarantine(%State{} = state, heartbeat) do
-    live_workers = Map.keys(state.running)
+    observed = %{
+      now_ms: System.system_time(:millisecond),
+      live: Map.keys(state.running),
+      host: state.own_host_id,
+      node: DaemonHeartbeat.node_name()
+    }
 
-    case DaemonHeartbeat.verdict(heartbeat, System.system_time(:millisecond), live_workers) do
+    case DaemonHeartbeat.verdict(heartbeat, observed) do
       {:release, reason} ->
         Logger.info("boot quarantine auto-released (#{reason}); fresh dispatch resumes")
 
@@ -799,6 +804,8 @@ defmodule Shuttle.Poller do
     :ok =
       DaemonHeartbeat.write_async(state.daemon_heartbeat_file,
         booted_at: state.daemon_booted_at,
+        host: state.own_host_id,
+        node: DaemonHeartbeat.node_name(),
         workers: Map.keys(state.running),
         boots: state.daemon_boots
       )

@@ -2418,6 +2418,8 @@ defmodule Shuttle.PollerTest do
       Map.merge(
         %{
           "v" => 1,
+          "host" => System.fetch_env!("SHUTTLE_HOST"),
+          "node" => Shuttle.DaemonHeartbeat.node_name(),
           "at" => now - 4_000,
           "booted_at" => booted_at,
           "workers" => [],
@@ -2695,6 +2697,9 @@ defmodule Shuttle.PollerTest do
       assert hb["boots"] == [previous_boot, :sys.get_state(poller).daemon_booted_at]
       assert hb["booted_at"] == :sys.get_state(poller).daemon_booted_at
       assert live_id in hb["workers"]
+      # Stamped with this daemon's fleet identity and this machine's node name.
+      assert hb["host"] == :sys.get_state(poller).own_host_id
+      assert hb["node"] == Shuttle.DaemonHeartbeat.node_name()
       # And it keeps writing: `at` advances past the boot write.
       assert hb["at"] > hb["booted_at"]
     end)

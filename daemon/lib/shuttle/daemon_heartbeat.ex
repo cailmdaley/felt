@@ -30,6 +30,7 @@ defmodule Shuttle.DaemonHeartbeat do
       {"v":1,
        "at":1764500000000,         # wall clock of THIS write, epoch ms
        "booted_at":1764499000000,  # when the writing incarnation booted
+       "host":"…", "node":"…",     # its own_host_id and OS node name
        "workers":["fiber-uid", …], # runtime keys it had live at this write
        "boots":[…,1764499000000]}  # ring of recent boot times, newest last
 
@@ -40,7 +41,7 @@ defmodule Shuttle.DaemonHeartbeat do
 
   ## The three conditions for an automatic release
 
-  `verdict/3` releases the quarantine only when all three hold. Anything else —
+  `verdict/2` releases the quarantine only when all three hold. Anything else —
   a missing file, a truncated one, a key of the wrong type, a stale timestamp —
   **holds** (fail closed: the quarantine is the safe state, and the cost of
   holding is a human typing one command, versus a mass re-dispatch of stale work
@@ -153,6 +154,8 @@ defmodule Shuttle.DaemonHeartbeat do
          "v" => json["v"],
          "at" => at,
          "booted_at" => booted_at,
+         "host" => string_or_nil(json["host"]),
+         "node" => string_or_nil(json["node"]),
          "workers" => string_list(json["workers"]),
          "boots" => ms_list(json["boots"])
        }}
@@ -179,6 +182,8 @@ defmodule Shuttle.DaemonHeartbeat do
       "v" => @version,
       "at" => Keyword.get(opts, :at, System.system_time(:millisecond)),
       "booted_at" => Keyword.fetch!(opts, :booted_at),
+      "host" => Keyword.get(opts, :host),
+      "node" => Keyword.get(opts, :node),
       "workers" => opts |> Keyword.get(:workers, []) |> Enum.to_list() |> Enum.map(&to_string/1),
       "boots" => Keyword.get(opts, :boots, [])
     }
@@ -289,23 +294,27 @@ defmodule Shuttle.DaemonHeartbeat do
   @doc """
   The boot-time verdict: may this daemon release its own boot quarantine?
 
-  `live_workers` is the set of runtime keys reconciliation/adoption has just
-  established as live — the daemon's own observation, not the file's claim.
-  `now_ms` is wall clock. Returns `{:release, reason}` or `{:hold, reason}`;
-  the reason string is what gets logged and surfaced in the snapshot.
+  `observed` is what this daemon established for itself, never what the file
+  claims:
+
+    * `:now_ms` — wall clock, epoch ms;
+    * `:live` — the runtime keys reconciliation/adoption has just found live;
+    * `:host` — this daemon's `own_host_id`;
+    * `:node` — this machine's OS node name (`node_name/0`).
+
+  Returns `{:release, reason}` or `{:hold, reason}`; the reason is logged.
   """
-  @spec verdict({:ok, record()} | {:error, term()}, non_neg_integer(), Enumerable.t()) ::
-          verdict()
-  def verdict(read_result, now_ms, live_workers)
+  @spec verdict({:ok, record()} | {:error, term()}, map()) :: verdict()
+  def verdict(read_result, observed)
 
   # Fail closed, loudly enough to explain itself: no usable heartbeat means the
   # daemon has no evidence this restart was a fast bounce, and "no evidence" is
-  # a hold. This is the first-boot case, the wiped-data-dir case, and the
-  # truncated/garbage-file case alike.
-  def verdict({:error, reason}, _now_ms, _live_workers),
+  # a hold. This is the first-boot case, the graceful-shutdown case, the
+  # wiped-data-dir case, and the truncated/garbage-file case alike.
+  def verdict({:error, reason}, _observed),
     do: {:hold, "no usable daemon heartbeat (#{inspect(reason)})"}
 
-  def verdict({:ok, hb}, now_ms, live_workers) do
+  def verdict({:ok, hb}, %{now_ms: now_ms, live: live_workers} = observed) do
     age_ms = now_ms - hb["at"]
     previous_run_ms = hb["at"] - hb["booted_at"]
     recorded = MapSet.new(hb["workers"] || [])
@@ -313,6 +322,12 @@ defmodule Shuttle.DaemonHeartbeat do
     recent_boots = 1 + Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
 
     cond do
+      hb["host"] != Map.get(observed, :host) or hb["node"] != Map.get(observed, :node) ->
+        {:hold,
+         "daemon heartbeat was written by host #{inspect(hb["host"])} on node " <>
+           "#{inspect(hb["node"])}, not this daemon (host #{inspect(Map.get(observed, :host))} " <>
+           "on node #{inspect(Map.get(observed, :node))})"}
+
       age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
         {:hold, "daemon heartbeat is #{age_ms}ms old (grace #{@default_grace_ms}ms)"}
 
@@ -339,6 +354,19 @@ defmodule Shuttle.DaemonHeartbeat do
     end
   end
 
+  @doc """
+  This machine's OS node name. The heartbeat's `host` is the fleet identity
+  (`own_host_id`), which several login nodes sharing one `$HOME` can all carry;
+  the node name is what tells their heartbeats apart.
+  """
+  @spec node_name() :: String.t() | nil
+  def node_name do
+    case :inet.gethostname() do
+      {:ok, name} -> to_string(name)
+      _ -> nil
+    end
+  end
+
   # ── Parsing ──
 
   defp fetch_ms(json, key) do
@@ -348,6 +376,9 @@ defmodule Shuttle.DaemonHeartbeat do
       _ -> {:error, {:malformed, key}}
     end
   end
+
+  defp string_or_nil(value) when is_binary(value), do: value
+  defp string_or_nil(_), do: nil
 
   defp string_list(value) when is_list(value), do: Enum.filter(value, &is_binary/1)
   defp string_list(_), do: []
