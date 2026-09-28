@@ -207,6 +207,8 @@ export interface SessionRecord {
   host: string | null
   tmux: string | null
   kind: 'dispatch' | 'claim' | 'resume'
+  /** The agent id the session was dispatched as, on ledger lines that name one. */
+  agent?: string
 }
 
 export interface SessionsResult {
@@ -819,6 +821,7 @@ export function parseSessions(body: unknown, fallback: SessionsResult): Sessions
       host: text(entry.host) ?? (host || null),
       tmux: text(entry.tmux),
       kind: kind as SessionRecord['kind'],
+      ...(text(entry.agent) ? { agent: text(entry.agent)! } : {}),
     })
   }
   return { host, records, origins: parseOrigins(body.origins, host) }

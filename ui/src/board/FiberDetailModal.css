@@ -2272,3 +2272,69 @@ a.kbn-detail-aloft { text-decoration: none; }
   line-height: 1.5;
 }
 
+
+/* ── Sessions: the fiber's past chats, newest first, each a way back in ── */
+.kbn-ctl-history[hidden] { display: none; }
+.kbn-ctl-history > .kbn-ctl-field > .kbn-ctl-label { align-self: start; padding-top: 3px; }
+.kbn-ctl-sessions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+.kbn-ctl-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+.kbn-ctl-session {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.06);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: #4A443C;
+  white-space: nowrap;
+  min-width: 0;
+}
+.kbn-ctl-session:last-child { border-bottom: none; }
+.kbn-ctl-session-when { flex: none; min-width: 7.6em; color: var(--ctl-muted); }
+.kbn-ctl-session-agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--kbn-agent, #3D5BA0);
+}
+.kbn-ctl-session-kind,
+.kbn-ctl-session-host { flex: none; color: var(--ctl-faint); }
+.kbn-ctl-session-live { flex: none; color: var(--kbn-agent, #3D5BA0); font-weight: 500; }
+.kbn-ctl-session-live::before { content: '● '; }
+.kbn-ctl-session-link {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--kbn-agent, #3D5BA0);
+  text-decoration: none;
+  cursor: pointer;
+}
+.kbn-ctl-session-link:hover { text-decoration: underline; }
+.kbn-ctl-session-copy { color: var(--ctl-faint); }
+.kbn-ctl-session-copy:hover { color: #1B1611; text-decoration: none; }
+.kbn-ctl-session-more {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  color: var(--ctl-faint);
+  cursor: pointer;
+}
+.kbn-ctl-session-more:hover { color: #1B1611; }

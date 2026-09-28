@@ -1007,6 +1007,60 @@ const MOCK_SESSIONS: SessionRecord[] = [
 ]
 
 /**
+ * The App-conversation card's own history, for the drawer's Sessions row:
+ * more than the row shows folded (so "all N" has something to unfold), every
+ * link shape the daemon answers — a bridged Claude session, an unbridged one,
+ * the live Codex app thread, a Codex CLI thread, a pi session — and one run on
+ * the foreign host, which names its host and resolves there.
+ */
+const APP_UID = '01KVBR2G7CXDWMG85592QW78ZZ'
+const APP_SESSIONS: SessionRecord[] = [
+  ['8f493f87-28db-4ec9-8f7d-527fd614bcd5', 'claude-code', 'claude-opus', 50, 'dispatch', LOCAL_HOST],
+  ['7c9a7c8a-2079-479b-b813-772a305727c9', 'claude-code', 'claude-opus', 30, 'dispatch', LOCAL_HOST],
+  ['c6239266-4ba7-4b72-9ba0-fb302c75458e', 'claude-code', 'claude-opus', 28, 'resume', FOREIGN_HOST],
+  ['01a042f4-6b7f-7f79-9c6c-8140ffd0126c', 'pi', undefined, 26, 'dispatch', LOCAL_HOST],
+  ['01a0806b-ea58-74d2-b58d-607464ec0c64', 'codex', 'codex-luna', 24, 'dispatch', LOCAL_HOST],
+  ['b69296a4-1023-4231-b372-270d7b3c4a9b', 'claude-code', 'claude-opus', 6, 'dispatch', LOCAL_HOST],
+  ['f466597a-56d0-4047-8585-2159281ca18b', 'claude-code', 'claude-fable', 3, 'claim', LOCAL_HOST],
+  ['01a0be38-6c36-7cd1-aec9-53a680d1f693', 'codex', 'codex-luna', 0.5, 'dispatch', LOCAL_HOST],
+].map(([session, harness, agent, hoursAgo, kind, host]) => ({
+  at: now - (hoursAgo as number) * 3_600_000,
+  fiber: 'operator/app-conversation',
+  uid: APP_UID,
+  session: session as string,
+  harness: harness as string,
+  host: host as string,
+  tmux: null,
+  kind: kind as SessionRecord['kind'],
+  ...(agent ? { agent: agent as string } : {}),
+}))
+
+/** `GET /api/v1/sessions/links` for one host, as the daemon would read it. */
+function mockSessionLinks(url: string) {
+  const params = new URL(url, 'http://harness').searchParams
+  const host = params.get('host') || LOCAL_HOST
+  const ids = (params.get('sessions') ?? '').split(',').filter(Boolean)
+  const unbridged = 'b69296a4-1023-4231-b372-270d7b3c4a9b'
+  return {
+    host,
+    links: ids.map((session) => {
+      const record = APP_SESSIONS.find((r) => r.session === session)
+      const harness = record?.harness ?? null
+      return {
+        session,
+        availability: record ? 'available_local' : 'transcript_missing',
+        harness,
+        url:
+          harness === 'claude-code' && session !== unbridged
+            ? `https://claude.ai/code/session_01${session.slice(0, 8).toUpperCase()}`
+            : null,
+        desktop_link: harness === 'codex' ? `codex://threads/${session}` : null,
+      }
+    }),
+  }
+}
+
+/**
  * Per-origin freshness, the block the daemon's temporal composites serve.
  *
  * The remote is STALE on purpose. An unreachable host keeps its last-good data
@@ -1446,6 +1500,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       local: mockHostState(LOCAL_HOST),
       remotes: { [FOREIGN_HOST]: { snapshot: mockHostState(FOREIGN_HOST), stale: false, last_error: null } },
     })
+  }
+
+  if (url.includes('/api/v1/sessions/links')) return json(mockSessionLinks(url))
+  if (url.includes('/api/v1/sessions/composite')) {
+    return json({ host: LOCAL_HOST, records: [...MOCK_SESSIONS, ...APP_SESSIONS], origins: MOCK_ORIGINS })
   }
 
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow

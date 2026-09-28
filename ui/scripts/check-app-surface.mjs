@@ -61,6 +61,43 @@ try {
   if (process.env.SCREENSHOT_DIR) {
     await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'detail-phone.png') })
   }
+  // Sessions: newest first, each with the one link its transcript supports.
+  const sessionRows = page.locator('.kbn-ctl-session')
+  await sessionRows.first().waitFor()
+  assert.equal(await sessionRows.count(), 6, 'the folded history shows six sessions')
+  const liveRow = sessionRows.nth(0)
+  assert.equal(await liveRow.getAttribute('data-session'), '01a0be38-6c36-7cd1-aec9-53a680d1f693', 'newest first')
+  assert.equal(await liveRow.locator('.kbn-ctl-session-live').count(), 1, 'the running session is marked live')
+  assert.equal(
+    await liveRow.locator('a.kbn-ctl-session-app').getAttribute('href'),
+    'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693',
+    'a Codex thread on the board host opens in the desktop app',
+  )
+  const claimRow = page.locator('.kbn-ctl-session[data-session="f466597a-56d0-4047-8585-2159281ca18b"]')
+  assert.deepEqual(
+    await claimRow.locator('.kbn-ctl-session-agent, .kbn-ctl-session-kind').allInnerTexts(),
+    ['claude-fable', 'claim'],
+    'agent, and the kind when it is not a plain dispatch',
+  )
+  const claimLink = claimRow.locator('a.kbn-ctl-session-web')
+  assert.equal(await claimLink.getAttribute('href'), 'https://claude.ai/code/session_01F466597A')
+  assert.equal(await claimLink.getAttribute('target'), '_blank', 'a claude.ai page opens in a new tab')
+  const unbridged = page.locator('.kbn-ctl-session[data-session="b69296a4-1023-4231-b372-270d7b3c4a9b"]')
+  assert.equal(await unbridged.locator('a').count(), 0, 'an unbridged session is never linked')
+  assert.equal(await unbridged.locator('button.kbn-ctl-session-copy').innerText(), 'b69296a4')
+  await page.locator('.kbn-ctl-session-more').click()
+  await page.waitForFunction(() => document.querySelectorAll('.kbn-ctl-session').length === 8)
+  const foreign = page.locator('.kbn-ctl-session[data-session="c6239266-4ba7-4b72-9ba0-fb302c75458e"]')
+  assert.equal(await foreign.locator('.kbn-ctl-session-host').innerText(), 'basalt-login-02', 'a session run elsewhere names its host')
+  assert.ok((await foreign.locator('a.kbn-ctl-session-web').getAttribute('href')).startsWith('https://claude.ai/'))
+  const pi = page.locator('.kbn-ctl-session[data-session="01a042f4-6b7f-7f79-9c6c-8140ffd0126c"]')
+  assert.equal(await pi.locator('a').count(), 0, 'a pi session has no link to open')
+  const historyBox = await page.locator('.kbn-ctl-sessions').boundingBox()
+  assert.ok(historyBox && historyBox.x + historyBox.width <= 390, 'phone: the history fits')
+  if (process.env.SCREENSHOT_DIR) {
+    await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'sessions-phone.png') })
+  }
+
   // Editing a live worker's settings must never substitute for a launch gesture.
   await page.evaluate(() => {
     window.settingWrites = []
@@ -214,7 +251,7 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, session history links, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }
