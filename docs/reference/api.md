@@ -353,15 +353,16 @@ here" rather than as a missing file.
 | Route | Purpose |
 |---|---|
 | `GET /version` | Daemon build stamp — the liveness probe, and what a deploy verifier watches (`git_short_sha` AND `booted_at` must both move); also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` (the configured LocalAPI socket and each private HTTPS bridge's readiness/error) |
-
-A TailnetDial bridge is `ready` when its private listener is bound and it has no
-recorded dial/relay failure. Upstream reachability is observed on actual
-requests, not by a synthetic probe; a failure remains visible until a later
-request succeeds.
 | `GET /state` | Full local state: running workers, retry queue, waiters |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+
+A TailnetDial bridge is `ready` when its private listener is bound and no
+dial/relay failure is recorded. Upstream reachability is observed on actual
+requests, not by a synthetic probe. A recorded request error clears when a
+later dial succeeds; a relay error from that request can set the status back
+to `error`.
 
 A TCP peer refused by the uid gate receives HTTP 403 before static assets
 are served or a request body is parsed. Exposed hosts refuse TCP listeners at

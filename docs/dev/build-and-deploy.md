@@ -55,8 +55,9 @@ supervisor.
 **Remote hosts are configured in `~/.config/felt/remotes.json`** (`felt shuttle
 remotes list|add|rm|path`). SSH entries name an alias and local forwarded port;
 the daemon reaches their API over that tunnel.
-HTTPS `url` entries dial the remote directly, optionally through the private
-Tailscale LocalAPI bridge configured by `defaults.tailscale_socket` (see
+HTTPS `url` entries use the configured dial transport. When
+`defaults.tailscale_socket` is set, the private LocalAPI bridge is mandatory
+and requests fail closed if it is unavailable (see
 [Configuring remotes](../shuttle/installation.md#configuring-remotes)).
 How an SSH entry authenticates is your ssh config's business — but an alias
 needing a live credential (a short-lived certificate, a 2FA-backed

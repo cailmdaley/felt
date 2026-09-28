@@ -164,8 +164,9 @@ or control the daemon process.
 The daemon refuses `defaults.https_proxy` on shared and exposed hosts because
 the local Tailscale HTTP proxy is an unauthenticated loopback gateway to the
 whole tailnet.
-For `https://` remotes, `defaults.tailscale_socket` instead asks the daemon to
-open a private, owner-only Unix socket per remote and dial the remote through
+
+For `https://` remotes, `defaults.tailscale_socket` asks the daemon to open a
+private, owner-only Unix socket per remote and dial the remote through
 tailscaled's LocalAPI. On shared/exposed hosts using the default Unix listener,
 bridge sockets sit beside `daemon.sock` under the same `0700` directory guard.
 The bridge verifies the remote TLS certificate and hostname before it relays
