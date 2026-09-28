@@ -26,8 +26,10 @@ defmodule ShuttleWeb.MeetingController do
   @doc """
   Body `{fiber_id, origin?, meeting: {mode}, note?}`. Records locally, mirrors
   the transcript toward `origin`, and delivers the meeting message to the
-  fiber's worker. A delivery failure after recording began answers with the
-  delivery's status, `recording: true` and the live row.
+  fiber's worker. The answer carries the delivery's status: 202 with
+  `delivery.delivered: null` when the message was sent but its arrival is
+  unconfirmed; a delivery failure after recording began adds `recording: true`
+  and the error beside the live row.
   """
   def join(conn, params) do
     fiber_id = Map.get(params, "fiber_id")

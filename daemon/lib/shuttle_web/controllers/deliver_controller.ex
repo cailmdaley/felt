@@ -10,6 +10,10 @@ defmodule ShuttleWeb.DeliverController do
 
   The answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
+  `delivered` is `true` when the worker has the text, `false` when it did not
+  get it, and `null` (status 202) when the text was sent but its arrival is
+  unconfirmed: a receipt of status `"unknown"`, or an owner that did not answer
+  in time. `detail` then says what is known.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -55,15 +59,26 @@ defmodule ShuttleWeb.DeliverController do
   end
 
   defp reply({:message, status, receipt}, fiber_id) do
-    delivered = status < 300 and receipt["status"] not in ["rejected", "unknown"]
+    body = %{delivery: "message", fiber_id: fiber_id, receipt: receipt}
 
-    body = %{delivered: delivered, delivery: "message", fiber_id: fiber_id, receipt: receipt}
+    cond do
+      receipt["status"] == "unknown" ->
+        {202,
+         Map.merge(body, %{
+           delivered: nil,
+           detail: receipt["detail"] || "the message was sent; its arrival is unconfirmed"
+         })}
 
-    if delivered,
-      do: {status, body},
-      else:
+      status < 300 and receipt["status"] != "rejected" ->
+        {status, Map.put(body, :delivered, true)}
+
+      true ->
         {if(status < 300, do: 502, else: status),
-         Map.put(body, :error, receipt["detail"] || "the worker did not accept the message")}
+         Map.merge(body, %{
+           delivered: false,
+           error: receipt["detail"] || "the worker did not accept the message"
+         })}
+    end
   end
 
   defp reply({:launch, mode, result}, fiber_id) do
@@ -75,11 +90,29 @@ defmodule ShuttleWeb.DeliverController do
   defp reply({:error, status, error}, fiber_id),
     do: {status, %{delivered: false, delivery: "message", fiber_id: fiber_id, error: error}}
 
+  # The receipt decides a message delivery's outcome, whichever daemon rendered
+  # the owner's answer.
   defp relay({:forwarded, status, body}) do
     case Jason.decode(body) do
-      {:ok, payload} when is_map(payload) -> {status, payload}
-      _ -> {502, %{delivered: false, error: "the owning daemon answered: #{body}"}}
+      {:ok, %{"delivery" => "message", "receipt" => %{"status" => _} = receipt} = payload} ->
+        reply({:message, status, receipt}, payload["fiber_id"])
+
+      {:ok, payload} when is_map(payload) ->
+        {status, payload}
+
+      _ ->
+        {502, %{delivered: false, error: "the owning daemon answered: #{body}"}}
     end
+  end
+
+  defp relay({:error, {:forward_failed, name, :timeout}}) do
+    {202,
+     %{
+       delivered: nil,
+       reason: "forward_timeout",
+       origin: name,
+       detail: "#{name} did not answer in time; the message may have reached its worker"
+     }}
   end
 
   defp relay({:error, {:forward_failed, name, reason}}) do

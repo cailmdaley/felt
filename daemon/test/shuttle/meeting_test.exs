@@ -229,6 +229,49 @@ defmodule Shuttle.MeetingTest do
            } = Jason.decode!(conn.resp_body)
   end
 
+  test "an unconfirmed delivery joins the meeting without claiming a failure", %{
+    hark_dir: hark_dir
+  } do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    detail =
+      "native message queued behind the receiver's current turn; no model response to it observed yet"
+
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient,
+       {:ok, 202,
+        Jason.encode!(%{
+          "delivered" => nil,
+          "delivery" => "message",
+          "fiber_id" => "cosmo/shear-bmodes",
+          "receipt" => %{"status" => "unknown", "detail" => detail},
+          "detail" => detail
+        })}}
+    )
+
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_joined_meeting_handler(hark_dir)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/join",
+        Jason.encode!(%{
+          "fiber_id" => "cosmo/shear-bmodes",
+          "origin" => "project-host",
+          "meeting" => %{"mode" => "room"}
+        })
+      )
+
+    assert conn.status == 202
+    body = Jason.decode!(conn.resp_body)
+    assert %{"delivery" => %{"delivered" => nil, "detail" => ^detail}} = body
+    refute Map.has_key?(body, "error")
+    refute Map.has_key?(body, "recording")
+  end
+
   test "joining validates the fiber before recording" do
     conn =
       api_conn()
