@@ -272,6 +272,10 @@ defmodule Shuttle.Poller do
       # serve the next boot's verdict; see `Shuttle.DaemonHeartbeat`.
       daemon_heartbeat_file: nil,
       daemon_heartbeat_interval_ms: nil,
+      # Whether this host opts in to the automatic release at all
+      # (`Shuttle.Host.quarantine_auto_release?/0`, host.json). Off: the
+      # heartbeat is still written, but no verdict is asked for.
+      quarantine_auto_release: false,
       # The heartbeat writer currently in flight, if any (see
       # `write_daemon_heartbeat/1`).
       daemon_heartbeat_writer: nil,
@@ -724,7 +728,9 @@ defmodule Shuttle.Poller do
           :daemon_heartbeat_interval_ms,
           DaemonHeartbeat.default_write_interval_ms()
         ),
-      daemon_booted_at: System.system_time(:millisecond)
+      daemon_booted_at: System.system_time(:millisecond),
+      quarantine_auto_release:
+        Keyword.get_lazy(opts, :quarantine_auto_release, &Shuttle.Host.quarantine_auto_release?/0)
     }
 
     Logger.info("configured felt stores: #{inspect(felt_stores)}")
@@ -768,6 +774,15 @@ defmodule Shuttle.Poller do
   # daemon restarted. Nothing here touches `contract_check`, so even a released
   # quarantine keeps parking fresh launches while skewed.
   defp maybe_auto_release_boot_quarantine(%State{boot_quarantine: false} = state, _hb), do: state
+
+  defp maybe_auto_release_boot_quarantine(%State{quarantine_auto_release: false} = state, _hb) do
+    Logger.info(
+      "boot quarantine held: automatic release is off for this host " <>
+        "(host.json \"quarantine_auto_release\")"
+    )
+
+    state
+  end
 
   defp maybe_auto_release_boot_quarantine(%State{adopted?: false} = state, _hb) do
     Logger.info("boot quarantine held: boot adoption has not established the live workers")

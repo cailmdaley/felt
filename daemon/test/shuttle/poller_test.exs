@@ -2460,6 +2460,7 @@ defmodule Shuttle.PollerTest do
       poll_interval_ms: 60_000,
       felt_stores: [MockRunner.felt_root()],
       boot_quarantine: true,
+      quarantine_auto_release: true,
       daemon_heartbeat_file: heartbeat_file()
     )
   end
@@ -2659,6 +2660,25 @@ defmodule Shuttle.PollerTest do
     {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stopped)
     send(poller, :run_poll_cycle)
 
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a host that has not opted in holds even a provable hard-kill bounce" do
+    fiber_id = fresh_candidate!("tests/hb-opt-out")
+    write_heartbeat!()
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_hb_opt_out,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        quarantine_auto_release: false,
+        daemon_heartbeat_file: heartbeat_file()
+      )
+
+    send(poller, :run_poll_cycle)
     assert_held!(poller, fiber_id)
   end
 
