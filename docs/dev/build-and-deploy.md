@@ -8,10 +8,12 @@ The developer-side build and fleet-deploy loop. For *installing* a daemon
 
 ```
 make build        # felt CLI + UI + daemon release
+make build SKIP_UI=1   # same, but leave ui/dist alone (host gets its bundle elsewhere)
 make cli          # felt CLI only → ./felt
 make cli-install  # felt CLI → ~/.local/bin (go install .)
 make ui           # install UI dependencies and build ui/dist
 make daemon       # daemon release only → bin/rel (MIX_ENV=prod)
+make daemon SKIP_CLI=1 # same, trusting the felt already on PATH
 make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks
 make restart      # rebuild UI and release, then stop + start
 make all          # restart
@@ -78,8 +80,8 @@ Push the verified revision, then deploy it on each host:
 4. Check the changed behavior through the live API or board.
 5. Run `bin/shuttle release` to release the boot quarantine.
 
-The helper builds the CLI, UI, and daemon on each host.
-It does not copy a UI bundle from the machine invoking it.
+The helper builds the CLI, daemon, and — on every host that is not marked
+`"build_ui": false` — the UI, on that host.
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
 Every restart quarantines new launches and resumes until `bin/shuttle release`.
@@ -89,6 +91,29 @@ For a manual remote build:
 ```bash
 ssh <host> "bash -lc 'cd <checkout> && git pull --ff-only && make build'"
 ```
+
+### The bundle on a host that does not build it
+
+The board bundle is identical on every host, and building it is expensive
+exactly where it is least worth doing: on a cluster login node whose home
+directory is a network filesystem, `npm ci` takes minutes and `vite build`
+several more. Such a host opts out with `"build_ui": false` in its
+`~/.config/felt/remotes.json` entry:
+
+```json
+{"name": "hub-a", "port": 4001, "checkout": "/home/op/dev/felt", "build_ui": false}
+```
+
+`bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
+For a `shipped` host the helper rsyncs the deploy host's own freshly-built
+`ui/dist` into that checkout and then builds it with `make build SKIP_UI=1`. The
+key is absent on every host that builds its own, and only `bin/shuttle-deploy`
+reads it — the felt CLI and the daemon carry it through untouched.
+
+**The rsync precedes the remote build, and the order is load-bearing.**
+`make daemon` copies `ui/dist` into the release's `priv/ui/dist`, and
+`ShuttleWeb.Assets` serves the release's copy in preference to the checkout's. A
+bundle that landed after the build would sit in the checkout unserved.
 
 Packaged releases carry their own Erlang runtime and native components.
 The target must match the release's OS and CPU architecture and provide a compatible runtime environment.
@@ -136,8 +161,16 @@ checkout that hasn't built the bundle gets a 404 with the hint
 `cd ui && npm run build`; the API stays usable regardless.
 
 `make ui` installs the UI dependencies and builds `ui/dist` on the current host.
-Both `make build` and `make restart` include this step.
+Both `make build` and `make restart` include this step, and both skip it under
+`SKIP_UI=1`.
 The compiled UI requires no Node runtime to serve.
+
+`npm ci` is gated on a stamp under `ui/node_modules/` that depends on
+`ui/package-lock.json`, so it runs on a fresh checkout and after a lockfile
+change and not otherwise; `npm run build` runs every time, because vite is the
+cheap half and its sources change with every commit. A host that should not run
+either builds with `SKIP_UI=1` and takes its `ui/dist` from elsewhere — see
+[the bundle on a host that does not build it](#the-bundle-on-a-host-that-does-not-build-it).
 
 When changing API routes, update the matching UI and `docs/reference/api.md` in the same change.
 Deploy with `make build` so the daemon and UI come from the same revision.

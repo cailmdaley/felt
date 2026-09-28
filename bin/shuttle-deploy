@@ -15,29 +15,42 @@
 # let the host's own supervisor bring it back — launchd kickstart on macOS, a
 # systemd user unit's Restart=always, or the tmux respawn loop) → verify
 # git_short_sha flipped → release the boot quarantine the restart armed.
-# Each host builds its CLI, daemon, and UI using its login-shell environment.
+# Each host builds its CLI and daemon using its login-shell environment, and its
+# UI too unless it is marked `"build_ui": false` — see the bundle note below.
 # The operator agent registry is synced too: the board reads
 # the local registry, while owner-routed mutations resolve agents on the
 # owning host.
 #
 # The fleet is NOT written here. It comes from ~/.config/felt/remotes.json
 # ($FELT_REMOTES_FILE overrides) — the same file the daemon and `felt shuttle
-# remotes` read. Deploy uses five of its per-remote keys: `ssh` (destination,
+# remotes` read. Deploy uses six of its per-remote keys: `ssh` (destination,
 # defaults to the name), `checkout` (repo path on that host), `ssh_flags`
 # (extra ssh arguments), `auth` ("interactive" marks a host that needs a live
-# human credential), and `enabled`. A remote without `checkout` is not a deploy
-# target and is skipped. "local" is always in the fleet; a missing fleet file
-# means local only. Portable to macOS bash 3.2 (no assoc arrays).
+# human credential), `enabled`, and `build_ui`. A remote without `checkout` is
+# not a deploy target and is skipped. "local" is always in the fleet; a missing
+# fleet file means local only. Portable to macOS bash 3.2 (no assoc arrays).
+#
+# `"build_ui": false` marks a host that must not build the board bundle. On a
+# cluster login node `npm ci` against a network home filesystem costs minutes
+# and `vite build` several more, for a bundle that is identical everywhere. Such
+# a host is built with `make build SKIP_UI=1`, and this script ships the deploy
+# host's own freshly-built ui/dist to its checkout instead. The rsync happens
+# BEFORE the remote build, because the release assembled by `make daemon` copies
+# ui/dist into its priv/ — and the daemon serves the release's copy in
+# preference to the checkout's, so a bundle that lands after the build would not
+# be the one served.
 
 set -uo pipefail
 
 FLEET_FILE="${FELT_REMOTES_FILE:-$HOME/.config/felt/remotes.json}"
 AGENTS_FILE="${FELT_AGENTS_FILE:-$HOME/.config/felt/agents.json}"
 
-# The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags.
-# jq if it is installed, python3 otherwise — the file is read on the deploy host
-# only, so this needs no remote-side dependency. Both accept either document
-# shape the Go and Elixir readers accept: {"remotes": [...]} or a bare list.
+# The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags,
+# build_ui ("1"/"0"). jq if it is installed, python3 otherwise — the file is read
+# on the deploy host only, so this needs no remote-side dependency. Both accept
+# either document shape the Go and Elixir readers accept: {"remotes": [...]} or a
+# bare list, and both must agree field for field: only a literal `false` turns
+# `enabled` or `build_ui` off, exactly as the Go reader's `enabledOr` does.
 read_fleet() {
   [ -f "$FLEET_FILE" ] || return 0
   if command -v jq >/dev/null 2>&1; then
@@ -46,7 +59,8 @@ read_fleet() {
            | select(.enabled != false)
            | select((.checkout // "") != "")
            | [.name, (.ssh // .name), .checkout, (.auth // "pubkey"),
-              ((.ssh_flags // []) | join(" "))]
+              ((.ssh_flags // []) | join(" ")),
+              (if .build_ui == false then "0" else "1" end)]
            | @tsv' "$FLEET_FILE"
   elif command -v python3 >/dev/null 2>&1; then
     python3 - "$FLEET_FILE" <<'PY'
@@ -57,7 +71,8 @@ for r in (doc if isinstance(doc, list) else doc.get("remotes") or []):
         continue
     print("\t".join([r.get("name", ""), r.get("ssh") or r.get("name", ""),
                      r["checkout"], r.get("auth") or "pubkey",
-                     " ".join(r.get("ssh_flags") or [])]))
+                     " ".join(r.get("ssh_flags") or []),
+                     "0" if r.get("build_ui") is False else "1"]))
 PY
   else
     echo "shuttle-deploy: need jq or python3 to read $FLEET_FILE" >&2
@@ -76,6 +91,7 @@ fleet_dir() { # host → checkout dir (empty = unknown host)
 fleet_ssh()   { fleet_row "$1" | awk -F'\t' '{print $2}'; }   # ssh destination
 fleet_flags() { fleet_row "$1" | awk -F'\t' '{print $5}'; }   # extra ssh flags
 fleet_auth()  { fleet_row "$1" | awk -F'\t' '{print $4}'; }   # pubkey | interactive
+builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
 
 # Hosts whose ssh needs an interactive human credential (push-2FA, short-lived
 # certificates) get a handshake verb: when the preflight finds no live
@@ -129,10 +145,13 @@ while [ $# -gt 0 ]; do
     --no-push) PUSH=0; shift ;;
     --handshake) HANDSHAKE=1; shift ;;
     --list)
-      for h in $FLEET_ORDER; do printf '%-16s %-16s %s\n' "$h" "$(fleet_ssh "$h")" "$(fleet_dir "$h")"; done
+      for h in $FLEET_ORDER; do
+        ui=build; builds_ui "$h" || ui=shipped
+        printf '%-16s %-16s %-8s %s\n' "$h" "$(fleet_ssh "$h")" "$ui" "$(fleet_dir "$h")"
+      done
       [ -f "$FLEET_FILE" ] || printf 'no fleet file at %s — local only\n' "$FLEET_FILE"
       exit 0 ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -231,10 +250,36 @@ wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA from
   return 1
 }
 
+# A host marked `"build_ui": false` is served the deploy host's bundle, so the
+# deploy host must hold a current one before the first such remote is reached.
+# `make ui` is cheap after the first call in a deploy — npm ci is stamped on the
+# lockfile and vite rebuilds from a warm cache — and deploy_local's `make build`
+# has already done it, so the flag keeps a full-fleet run to one build.
+LOCAL_UI_BUILT=0
+ensure_local_ui() {
+  [ "$LOCAL_UI_BUILT" = 1 ] && return 0
+  bash -lc "cd $(shell_quote "$REPO") && make ui" >/dev/null \
+    || { bad "make ui failed on the deploy host; it has no bundle to ship"; return 1; }
+  LOCAL_UI_BUILT=1
+}
+
+# Ship ui/dist into a non-building host's checkout. --delete because ui/dist is
+# wholly generated: a file left from an older bundle is never referenced by the
+# new index.html and only accumulates.
+ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
+  ensure_local_ui || return 1
+  ssh $4 "$2" "mkdir -p $(shell_quote "$3/ui")" \
+    || { bad "could not prepare $3/ui"; return 1; }
+  rsync -az --delete -e "ssh $4" "$REPO/ui/dist/" "$2:$3/ui/dist/" \
+    || { bad "could not ship the UI bundle"; return 1; }
+  ok "shipped ui/dist (this host does not build it)"
+}
+
 deploy_local() {
   say "local ($TARGET_SHA)"
   bash -lc "cd $(shell_quote "$REPO") && make build" >/dev/null \
     || { bad "make build failed"; return 1; }
+  LOCAL_UI_BUILT=1
   # Kill the listener FIRST: the daemon may be running outside launchd
   # (a hand-started `bin/shuttle start`), where kickstart restarts nothing and
   # the old BEAM keeps running the previous release. The booted_at check in
@@ -255,7 +300,13 @@ deploy_remote() {
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
+  # The bundle goes over BEFORE the build, so the release this build assembles
+  # embeds it (see the bundle note at the top of this file).
   build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && make build"
+  if ! builds_ui "$host"; then
+    ship_ui "$host" "$dest" "$dir" "$flags" || return 1
+    build_cmd="$build_cmd SKIP_UI=1"
+  fi
   ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
     || { bad "pull/build failed"; return 1; }
   if [ -f "$AGENTS_FILE" ]; then

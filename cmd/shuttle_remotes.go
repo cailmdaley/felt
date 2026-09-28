@@ -240,10 +240,20 @@ type remoteSpec struct {
 	StaleMultiplier  int `json:"stale_multiplier,omitempty"`
 
 	// Deploy-side fields. Carried so the fleet stops being described in four
-	// places; not read by the CLI or the daemon yet.
+	// places; not read by the CLI or the daemon yet. They are declared here
+	// because this struct is also the WRITER: `remotes add`/`rm` re-encode the
+	// whole document from it, so a key no field names is silently dropped from
+	// every entry the next time the fleet is edited.
+	//
+	// BuildUI false marks a host that does not build the board bundle — a
+	// cluster login node where `npm ci` against a network home filesystem costs
+	// minutes. bin/shuttle-deploy builds such a host with `make build SKIP_UI=1`
+	// and rsyncs the deploy host's own ui/dist into its checkout instead. Absent
+	// means true, so only a host that opts out carries the key.
 	Checkout string   `json:"checkout,omitempty"`
 	Auth     string   `json:"auth,omitempty"`
 	SSHFlags []string `json:"ssh_flags,omitempty"`
+	BuildUI  *bool    `json:"build_ui,omitempty"`
 }
 
 // remotesFile is the whole document: fleet-wide settings plus the entries.

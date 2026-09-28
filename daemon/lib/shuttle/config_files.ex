@@ -26,9 +26,9 @@ defmodule Shuttle.ConfigFiles do
   it back: that round trip silently drops every key the structure does not know
   about, which is exactly the loss `Shuttle.Remotes` warns against — "the fleet
   is operator setup a UI round-trip must never clobber". `remotes.json` carries
-  `auth`, `ssh_flags`, per-entry timeouts and `tunnel.label`, none of which the
-  CLI's own `remotes add` flags can express; a text edit cannot lose them
-  because nothing ever re-encoded them.
+  `auth`, `ssh_flags`, `build_ui`, per-entry timeouts and `tunnel.label`, none of
+  which the CLI's own `remotes add` flags can express; a text edit cannot lose
+  them because nothing ever re-encoded them.
 
   The two path-list files (`stores.json`, `projects.json`) are flat lists of
   strings, so their structured writers (`Shuttle.FeltStores.save/1`,

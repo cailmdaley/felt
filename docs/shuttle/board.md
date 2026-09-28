@@ -180,12 +180,13 @@ A checkout serves `ui/dist` from the checkout, and the repo does not ship that.
 Build it with:
 
 ```bash
-cd ui && npm ci && npm run build
+make ui        # npm ci when the lockfile changed, then npm run build
 ```
 
 A fresh clone builds it fine — no private checkout needed (see [Sharp
-edges](installation.md#sharp-edges)). `make all` rebuilds only the daemon
-release, never the bundle.
+edges](installation.md#sharp-edges)). `make build`, `make restart` and `make
+all` all include this step; `SKIP_UI=1` leaves the bundle alone, which is how a
+host that takes its bundle from elsewhere is built.
 
 `SHUTTLE_UI_DIST` overrides both, pointing the daemon at any built bundle on
 disk.

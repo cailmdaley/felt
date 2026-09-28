@@ -27,10 +27,15 @@
 # systemd --user units on Linux, so either platform can be the fleet's hub.
 #
 # Source builds use Go, Elixir/OTP, and Node/npm on the host's PATH.
-# `make daemon SKIP_CLI=1` can reuse an already-installed felt CLI.
+# `make daemon SKIP_CLI=1` can reuse an already-installed felt CLI, and
+# `make build SKIP_UI=1` can reuse a ui/dist placed there by other means —
+# which is how a host with no fast Node toolchain gets a board (bin/shuttle-deploy
+# rsyncs the bundle to any remote marked `"build_ui": false` in the fleet file).
 
 # SKIP_CLI=1 makes `daemon` skip the felt-CLI rebuild step (see daemon: below).
 SKIP_CLI ?=
+# SKIP_UI=1 makes `build` and `restart` skip the UI bundle (see ui: below).
+SKIP_UI ?=
 INSTALL_DIR := $(HOME)/.local/bin
 UNAME_S := $(shell uname -s)
 # The daemon log. macOS has a conventional home for it; Linux does not, so the
@@ -74,7 +79,8 @@ AGENT_PATH ?=
 help:
 	@echo "felt + shuttle (one repo, three shipped artifacts):"
 	@echo "  make build       — build felt CLI + UI bundle + daemon release"
-	@echo "  make ui          — build the board bundle (npm ci + npm run build)"
+	@echo "                     SKIP_UI=1 leaves ui/dist alone (host gets its bundle elsewhere)"
+	@echo "  make ui          — build the board bundle (npm ci on a lockfile change, then npm run build)"
 	@echo "  make cli         — build the felt CLI (go build .)"
 	@echo "  make cli-install — install felt CLI → $(INSTALL_DIR)"
 	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"
@@ -85,6 +91,7 @@ help:
 	@echo ""
 	@echo "daemon lifecycle:"
 	@echo "  make restart     — UI + daemon (rebuild release) + stop + start  [load-bearing]"
+	@echo "                     honours SKIP_UI=1 the same way build does"
 	@echo "  make all         — restart"
 	@echo "  make start       — start daemon detached (logs → $(LOG))"
 	@echo "  make stop        — SIGTERM the running daemon"
@@ -96,14 +103,39 @@ help:
 
 # ── build ──────────────────────────────────────────────────────────────────
 # `build` is the everything-target; `cli`, `ui`, and `daemon` build individual artifacts.
-build: cli ui
+#
+# SKIP_UI=1 leaves ui/dist alone — whatever is in the tree is what `daemon`
+# embeds in the release. It is for a host that gets its bundle from elsewhere:
+# on a cluster login node with a network home filesystem `npm ci` costs minutes,
+# so bin/shuttle-deploy builds such a host with SKIP_UI=1 and rsyncs the deploy
+# host's freshly-built ui/dist into the checkout before the release is assembled.
+build: cli
+ifeq ($(SKIP_UI),1)
+	@echo "ui: skipped (SKIP_UI=1); the release embeds whatever ui/dist already holds"
+else
+	$(MAKE) ui
+endif
 	$(MAKE) daemon
 
 cli:
 	go build .
 
-ui:
-	cd ui && npm ci && npm run build
+# `npm ci` is the expensive half — minutes on a network home filesystem — and its
+# only input is the lockfile, so it is gated on a stamp inside node_modules that
+# depends on ui/package-lock.json: it runs on a fresh checkout, after a lockfile
+# change, and never otherwise. `npm run build` always runs; vite is the cheap half
+# and the sources it reads change every commit. The stamp lives under
+# node_modules/ so `npm ci`, which wipes and recreates that tree, cannot leave a
+# stamp standing over dependencies it deleted.
+UI_DEPS_STAMP := ui/node_modules/.npm-ci-stamp
+
+$(UI_DEPS_STAMP): ui/package-lock.json
+	cd ui && npm ci
+	@mkdir -p $(dir $@)
+	@touch $@
+
+ui: $(UI_DEPS_STAMP)
+	cd ui && npm run build
 
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install .
@@ -237,7 +269,12 @@ stop:
 	fi
 
 # Rebuild the UI and daemon together before restarting the service.
-restart: ui
+restart:
+ifeq ($(SKIP_UI),1)
+	@echo "ui: skipped (SKIP_UI=1); the release embeds whatever ui/dist already holds"
+else
+	$(MAKE) ui
+endif
 	$(MAKE) daemon
 	$(MAKE) stop
 	$(MAKE) start
