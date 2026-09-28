@@ -341,7 +341,77 @@ try {
   )
   await phone.close()
 
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  // On a phone the card's sheet is one scroll surface: with the drawer and
+  // History unfolded, a touch swipe reaches the last History row and the
+  // verdicts, and swiping back reaches the page. The files band is stretched
+  // to stand in for a card with attachments and a sent-files trail — the
+  // height that used to push the drawer's end under the sheet's clip.
+  const touch = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+  await touch.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await touch.getByText('App conversation continuity', { exact: true }).click()
+  await touch.locator('.kbn-detail-files').evaluate(files => { files.style.minHeight = '260px' })
+  await touch.locator('.kbn-detail-controls-toggle').click()
+  await touch.locator('.kbn-ctl-history-toggle').click()
+  await touch.locator('.kbn-ctl-session').first().waitFor()
+  await touch.waitForTimeout(700)
+  const overflowing = await touch.locator('.kbn-ctl-session').evaluateAll(rows =>
+    rows.filter(r => r.scrollWidth > r.clientWidth).map(r => r.dataset.session))
+  assert.deepEqual(overflowing, [], 'every History row fits the phone width, a long host name included')
+  const cdp = await touch.context().newCDPSession(touch)
+  const swipe = yDistance => cdp.send('Input.synthesizeScrollGesture', { x: 195, y: 420, yDistance, speed: 3000, gestureSourceType: 'touch' })
+  // Where each target scrolls, and whether it can be seen at all once there:
+  // inside every clipping ancestor, and the thing a finger at its centre hits.
+  const reach = sel => touch.locator(sel).last().evaluate(el => {
+    const scrollerOf = node => {
+      for (let n = node.parentElement; n; n = n.parentElement) {
+        const cs = getComputedStyle(n)
+        if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight) return n
+      }
+      return null
+    }
+    const r = el.getBoundingClientRect()
+    let clipped = r.top < 0 || r.bottom > innerHeight
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      if (getComputedStyle(n).overflowY === 'visible') continue
+      const c = n.getBoundingClientRect()
+      if (r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5) clipped = true
+    }
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    const scroller = scrollerOf(el)
+    return {
+      sheetScrolls: scroller?.classList.contains('kbn-detail-overlay') ?? false,
+      scrollTop: scroller ? scroller.scrollTop : null,
+      visible: !clipped && !!hit && el.contains(hit),
+    }
+  })
+  const prose = await reach('.kbn-detail-prose')
+  assert.ok(prose.sheetScrolls, 'phone: the page scrolls with the sheet')
+  const before = await reach('.kbn-ctl-session')
+  assert.ok(before.sheetScrolls, 'phone: History scrolls with the sheet, not a drawer of its own')
+  assert.equal(before.visible, false, 'phone: the stretched card starts with History below the fold')
+  await swipe(-2400)
+  await touch.waitForTimeout(300)
+  const lastRow = await reach('.kbn-ctl-session')
+  assert.ok(lastRow.scrollTop > before.scrollTop, `phone: a touch swipe moves the sheet (${before.scrollTop} → ${lastRow.scrollTop})`)
+  assert.ok(lastRow.visible, 'phone: the last History row can be reached and is not clipped')
+  for (const name of ['Discard', 'Temper']) {
+    const verdict = await touch.getByRole('button', { name, exact: true }).evaluate(el => {
+      const r = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      const sheet = el.closest('.kbn-detail-overlay').getBoundingClientRect()
+      return r.top >= sheet.top && r.bottom <= Math.min(sheet.bottom, innerHeight) && !!hit && el.contains(hit)
+    })
+    assert.ok(verdict, `phone: ${name} can be reached and is not clipped`)
+  }
+  if (process.env.SCREENSHOT_DIR) {
+    await touch.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'drawer-bottom-phone.png') })
+  }
+  await swipe(2400)
+  await touch.waitForTimeout(300)
+  assert.ok((await reach('.kbn-detail-prose')).visible, 'phone: swiping back reaches the page')
+  await touch.close()
+
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), phone sheet touch-scrolls to the drawer end, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }

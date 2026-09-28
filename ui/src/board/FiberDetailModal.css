@@ -1923,6 +1923,24 @@
        working while the height comes from `inset`. */
     container-type: inline-size;
   }
+  /* The card's sheet is ONE scroll surface: header, files, page and drawer
+     stack at their own heights and the sheet scrolls them together, the
+     title bar pinned to the top edge and the folded strip to the bottom.
+     A second scroller for the drawer would have to be capped against the
+     viewport while its siblings keep their heights, and a fixed, clipped
+     sheet cannot hold both — the page is squeezed away and the drawer's end
+     (History, the verdicts) falls under the clip where no scroll reaches.
+     The file viewer shares the sheet frame but pans its own view cells, so
+     it keeps its fixed column. */
+  .kbn-detail-overlay.kbn-detail-sheet:not(.kbn-fileview-window) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .kbn-detail-sheet:not(.kbn-fileview-window) > * { flex-shrink: 0; }
+  .kbn-detail-sheet .kbn-detail-page {
+    flex: 1 0 auto;
+    overflow: visible;
+  }
 
   /* Title bar. The row stops being a drag handle, so it stops looking like
      one, and the close grows to a real target. */
@@ -1933,7 +1951,12 @@
     gap: 8px;
     padding: 8px 10px 8px 16px;
     border-bottom: 1px solid rgba(27, 22, 17, 0.14);
-    background: linear-gradient(rgba(255, 251, 237, 0.5), transparent);
+    background: linear-gradient(rgba(255, 251, 237, 0.5), transparent) #EDE2CE;
+  }
+  .kbn-detail-sheet:not(.kbn-fileview-window) .kbn-detail-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
   }
   .kbn-detail-sheet .kbn-detail-title {
     font-size: calc(17px * var(--kbn-type-scale, 1));
@@ -1958,9 +1981,10 @@
   .kbn-detail-sheet .kbn-detail-id { display: none; }
 
   /* The bottom bar: the controls cluster moves under the page. Ordering the
-     flex children is the whole mechanism — no second copy of the actions,
-     no sticky positioning, and the expanded cluster grows upward over the
-     page from the edge it is anchored to. */
+     flex children puts it there — no second copy of the actions — and
+     folded, the strip sticks to the sheet's bottom edge while the page
+     scrolls behind it. Unfolded, the drawer drops back into the flow at the
+     page's end, where the sheet's one scroll reaches every line of it. */
   /* The files band (attachments, then sent files) sits right under the header. */
   .kbn-detail-sheet .kbn-detail-header { order: 0; }
   .kbn-detail-sheet .kbn-detail-files { order: 1; }
@@ -2030,18 +2054,22 @@
     order: 4;
     border-bottom: none;
     border-top: 1px solid rgba(27, 22, 17, 0.16);
-    background: linear-gradient(transparent, rgba(255, 251, 237, 0.45));
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: linear-gradient(transparent, rgba(255, 251, 237, 0.45)) #EDE2CE;
+  }
+  .kbn-detail-sheet:not(.kbn-fileview-window) .kbn-detail-controls:not(.kbn-detail-controls-open) {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
   }
   .kbn-detail-sheet .kbn-detail-controls-toggle {
     min-height: 44px;
     padding: 4px 16px;
     font-size: calc(11px * var(--kbn-type-scale, 1));
   }
-  /* Expanded, the drawer takes the room it needs and scrolls; the cap is
-     dvh (not vh) so the browser chrome collapsing does not strand it. */
+  /* Expanded, the drawer is as tall as its lines; the sheet does the scrolling. */
   .kbn-detail-sheet .kbn-detail-controls-body {
-    max-height: 58dvh;
+    max-height: none;
+    overflow: visible;
     padding: 8px 16px 14px;
   }
   /* Thumb-sized verbs that share the row between them. */
@@ -2206,8 +2234,7 @@ a.kbn-detail-aloft { text-decoration: none; }
    A phone in landscape opens the same sheet with 400px of height to spend,
    and the head that reads as a title bar in portrait reads as a lid there.
    So the head gives up its second line of title and its vertical padding, the
-   controls cluster's expanded body stops being able to swallow the page, and
-   the file viewer's frame keeps everything that is left — which on this shape
+   drawer tightens its lines, and the file viewer's frame keeps everything that is left — which on this shape
    is the entire point of having opened it. */
 @media (max-height: 500px) and (pointer: coarse) {
   .kbn-detail-sheet .kbn-detail-header {
@@ -2230,10 +2257,7 @@ a.kbn-detail-aloft { text-decoration: none; }
     min-height: 36px;
     padding: 2px 16px;
   }
-  /* 58dvh of 400 is the page. Half is the most a drawer may take from the
-     thing it is a drawer for, and it scrolls, so nothing is lost. */
   .kbn-detail-sheet .kbn-detail-controls-body {
-    max-height: 50dvh;
     padding: 4px 16px 10px;
   }
   .kbn-detail-sheet .kbn-ctl-btn {
@@ -2340,8 +2364,15 @@ a.kbn-detail-aloft { text-decoration: none; }
   text-overflow: ellipsis;
   color: var(--kbn-agent, #3D5BA0);
 }
-.kbn-ctl-session-kind,
-.kbn-ctl-session-host { flex: none; color: var(--ctl-faint); }
+.kbn-ctl-session-kind { flex: none; color: var(--ctl-faint); }
+/* A long host name gives way before the row's link does. */
+.kbn-ctl-session-host {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ctl-faint);
+}
 .kbn-ctl-session-live { flex: none; color: var(--kbn-agent, #3D5BA0); font-weight: 500; }
 .kbn-ctl-session-live::before { content: '● '; }
 .kbn-ctl-session-link,
