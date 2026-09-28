@@ -791,13 +791,14 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Record this incarnation's liveness. Best-effort by contract — the write never
-  # raises and never blocks on anything but one small rename, so a misbehaving
-  # filesystem costs the next boot its evidence (holding the quarantine, the safe
-  # direction) and nothing else.
+  # Record this incarnation's liveness. Best-effort by contract — the write runs
+  # off this process and never raises, so a misbehaving filesystem costs the next
+  # boot its evidence (holding the quarantine, the safe direction) and never
+  # stalls the Poller. After a graceful shutdown has retired the file, the writer
+  # declines to re-create it (`DaemonHeartbeat.retire/2`).
   defp write_daemon_heartbeat(%State{} = state) do
     :ok =
-      DaemonHeartbeat.write(state.daemon_heartbeat_file,
+      DaemonHeartbeat.write_async(state.daemon_heartbeat_file,
         booted_at: state.daemon_booted_at,
         workers: Map.keys(state.running),
         boots: state.daemon_boots

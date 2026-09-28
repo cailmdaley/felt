@@ -161,6 +161,19 @@ defmodule Shuttle.Application do
     end
   end
 
+  # A graceful stop (SIGTERM → `init:stop/0`) calls this before any child is
+  # terminated — the Poller does not trap exits, so its `terminate/2` never runs
+  # — and this app stops first, being the last started. Removing the daemon
+  # heartbeat here is what makes every asked-for restart (a deploy, `make stop`,
+  # a supervisor restart) arm the next boot's quarantine; only a hard kill leaves
+  # the file behind for the next boot's `Shuttle.DaemonHeartbeat` verdict. The wait
+  # for an in-flight write is bounded well inside `make stop`'s 5s SIGTERM grace.
+  @impl true
+  def prep_stop(state) do
+    Shuttle.DaemonHeartbeat.retire(Shuttle.DaemonHeartbeat.default_path())
+    state
+  end
+
   # The endpoint is the last child, so by now a unix listener has bound its
   # socket; narrow it to the owner. Raising here fails boot, which is the
   # right answer for a socket this daemon cannot secure.

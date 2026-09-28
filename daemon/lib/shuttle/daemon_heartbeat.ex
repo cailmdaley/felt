@@ -201,6 +201,82 @@ defmodule Shuttle.DaemonHeartbeat do
   end
 
   @doc """
+  Write the heartbeat off the caller's process.
+
+  The caller (the Poller's liveness tick) keeps the timer, because handling the
+  tick is what proves the daemon alive; the write itself runs in an unlinked
+  process so a slow filesystem never stalls the Poller. At most one write per
+  path is in flight: the writer holds a `:global` name for the path while it
+  works, and a tick that finds the name taken skips its write rather than
+  queueing behind a stuck one. A writer checks `retired?/1` only after taking the
+  name, which is what lets `retire/2` guarantee no write lands after it returns.
+  """
+  @spec write_async(String.t(), keyword()) :: :ok
+  def write_async(path, opts) when is_binary(path) and is_list(opts) do
+    {:ok, _pid} =
+      Task.start(fn ->
+        name = writer_name(path)
+
+        if :global.register_name(name, self()) == :yes do
+          try do
+            unless retired?(path), do: write(path, opts)
+          after
+            :global.unregister_name(name)
+          end
+        end
+      end)
+
+    :ok
+  end
+
+  @doc """
+  Remove the heartbeat for good, for a graceful shutdown.
+
+  A SIGTERM'd daemon (`make stop`, `bin/shuttle stop`, a supervisor restart, a
+  deploy's listener kill) is a restart someone asked for, and must arm the next
+  boot's quarantine. Removing the file is how it says so: the next boot finds no
+  heartbeat and holds. Only a hard kill (an rlimit SIGKILL) leaves the file for
+  the next boot to judge.
+
+  Marks `path` retired first, so no later write can re-create it, then waits up
+  to `wait_ms` for a write already in flight to finish, then deletes the file.
+  A writer takes its name before it checks the mark, so every writer either
+  finished before the wait or sees the mark and writes nothing. Never raises.
+  """
+  @spec retire(String.t(), non_neg_integer()) :: :ok
+  def retire(path, wait_ms \\ 2_000) when is_binary(path) do
+    :persistent_term.put({__MODULE__, :retired, path}, true)
+
+    case :global.whereis_name(writer_name(path)) do
+      pid when is_pid(pid) ->
+        ref = Process.monitor(pid)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :ok
+        after
+          wait_ms -> Process.demonitor(ref, [:flush])
+        end
+
+      :undefined ->
+        :ok
+    end
+
+    _ = File.rm(path)
+    _ = File.rm(path <> ".tmp")
+    :ok
+  rescue
+    error ->
+      Logger.warning("daemon heartbeat retire failed (#{path}): #{inspect(error)}")
+      :ok
+  end
+
+  @doc "Whether `retire/2` has run for `path` in this VM."
+  @spec retired?(String.t()) :: boolean()
+  def retired?(path), do: :persistent_term.get({__MODULE__, :retired, path}, false)
+
+  defp writer_name(path), do: {__MODULE__, :writer, path}
+
+  @doc """
   Append `boot_at` to `boots`, keeping the newest `#{@boots_ring_size}`.
   """
   @spec push_boot([integer()], integer()) :: [integer()]
@@ -216,7 +292,8 @@ defmodule Shuttle.DaemonHeartbeat do
   `now_ms` is wall clock. Returns `{:release, reason}` or `{:hold, reason}`;
   the reason string is what gets logged and surfaced in the snapshot.
   """
-  @spec verdict({:ok, record()} | {:error, term()}, non_neg_integer(), Enumerable.t()) :: verdict()
+  @spec verdict({:ok, record()} | {:error, term()}, non_neg_integer(), Enumerable.t()) ::
+          verdict()
   def verdict(read_result, now_ms, live_workers)
 
   # Fail closed, loudly enough to explain itself: no usable heartbeat means the
@@ -240,8 +317,7 @@ defmodule Shuttle.DaemonHeartbeat do
       not MapSet.subset?(recorded, live) ->
         missing = recorded |> MapSet.difference(live) |> Enum.sort()
 
-        {:hold,
-         "workers recorded live in the heartbeat are gone: #{Enum.join(missing, ", ")}"}
+        {:hold, "workers recorded live in the heartbeat are gone: #{Enum.join(missing, ", ")}"}
 
       previous_run_ms < @min_healthy_run_ms ->
         {:hold,

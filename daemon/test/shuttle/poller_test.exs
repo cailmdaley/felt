@@ -45,6 +45,10 @@ defmodule Shuttle.PollerTest do
       restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
       restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
       restore_env("SHUTTLE_HEARTBEAT_FILE", prev_heartbeat_file)
+      # The heartbeat writer runs unlinked from the Poller and can outlive it;
+      # retiring the path first (as a graceful shutdown does) waits out a write
+      # in flight and refuses later ones, so none re-creates the dir mid-removal.
+      Shuttle.DaemonHeartbeat.retire(Path.join(data_dir, "heartbeat.json"))
       File.rm_rf!(data_dir)
     end)
 
