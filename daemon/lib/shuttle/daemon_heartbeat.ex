@@ -1,0 +1,278 @@
+defmodule Shuttle.DaemonHeartbeat do
+  @moduledoc """
+  The daemon's own liveness record on disk, and the boot-time verdict it
+  supports: *was this restart a fast bounce of a healthy daemon, or a real gap?*
+
+  ## Why the daemon has to record its own liveness
+
+  `Shuttle.Poller`'s boot quarantine parks every genuinely-fresh autonomous
+  dispatch on each (re)start until a human runs `bin/shuttle release`. That is
+  right for the restarts it was built for — a crash loop on an overloaded login
+  node, a deploy, a machine coming back after hours down — because the danger
+  is mass re-dispatch of stale work.
+
+  It is wrong for a restart nobody asked for and nothing was stale across. A
+  host that hard-caps every process at some number of CPU-seconds kills the beam
+  mid-flight and a supervisor respawns it seconds later; the workers keep running
+  (tmux owns them, and `SessionReconciliation.adopt_orphans/1` re-adopts them),
+  but all *new* work silently stops until a person notices the hold.
+
+  An rlimit kill writes no clean-exit marker, so nothing on disk distinguishes
+  "killed four seconds ago while healthy" from "down since yesterday" — unless
+  the daemon records liveness while it has it. Hence this file: written every
+  10s of uptime, read once at the next boot.
+
+  ## Shape
+
+  One JSON object, rewritten whole (write-temp-then-rename, so a kill mid-write
+  leaves the previous complete file rather than a truncated one):
+
+      {"v":1,
+       "at":1764500000000,         # wall clock of THIS write, epoch ms
+       "booted_at":1764499000000,  # when the writing incarnation booted
+       "workers":["fiber-uid", …], # runtime keys it had live at this write
+       "boots":[…,1764499000000]}  # ring of recent boot times, newest last
+
+  Every write is best-effort and never raises: the poller must not die, stall or
+  log-spam because a filesystem misbehaved. The *first* write happens at boot,
+  before anything else, which is what makes the crash-loop gate below work — a
+  incarnation that dies two seconds in still leaves its own `booted_at` behind.
+
+  ## The three conditions for an automatic release
+
+  `verdict/3` releases the quarantine only when all three hold. Anything else —
+  a missing file, a truncated one, a key of the wrong type, a stale timestamp —
+  **holds** (fail closed: the quarantine is the safe state, and the cost of
+  holding is a human typing one command, versus a mass re-dispatch of stale work
+  if we guess wrong).
+
+  1. **Fresh** — `now - at <= 60_000` ms. The write interval is
+     10_000 ms, so the grace is 6× the interval: it has to absorb the
+     last write's lag plus the respawn plus this daemon's own boot (a `felt
+     shuttle contract` probe and a tmux scan) on a login node under contention,
+     while staying far too short to cover any restart a human would call an
+     outage.
+
+  2. **Worker continuity** — every runtime key the heartbeat recorded as live is
+     live NOW, as established by reconciliation/adoption, never by trusting the
+     file. Workers recorded and gone means something ended the workers too: not a
+     fast bounce. An empty recorded set is vacuously continuous — an idle daemon
+     that bounced in seconds has no stale backlog to withhold, which is the only
+     thing the quarantine exists to prevent.
+
+  3. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
+     condition 1 cannot see it. Two brakes, coarse and fine:
+
+       * the previous incarnation lived at least 90_000 ms
+         (`at - booted_at`), the same number `Shuttle.Poller`'s resume-loop
+         breaker calls a healthy run: below it, the daemon is dying faster than
+         it can do useful work and a human should look;
+       * at most 3 boots in the preceding
+         600_000 ms (the resume-loop cooldown's window), counted from the
+         `boots` ring. Condition 3's first brake only measures the incarnation
+         that wrote last; the ring bounds churn across several, including the
+         pattern where each incarnation lives just over the threshold.
+
+  The contract-skew gate (`contract_check.ok`) is deliberately outside all of
+  this: it has no release endpoint by design, so `Shuttle.Poller` does not even
+  ask for a verdict while skewed.
+  """
+
+  require Logger
+
+  @version 1
+
+  # Write cadence. Ten seconds is cheap (one small rename per tick) and well
+  # under the freshness grace, so a single missed write can never make a healthy
+  # daemon look stale.
+  @default_write_interval_ms 10_000
+
+  # Freshness grace: 6× the write interval. See the moduledoc.
+  @default_grace_ms 60_000
+
+  # "The previous incarnation was a healthy run." Mirrors
+  # `Shuttle.Poller`'s @resume_loop_rapid_exit_threshold_ms — the codebase
+  # already calls 90s the line between a real run and instant death, and the
+  # same reasoning applies to the daemon itself: a config-, port- or
+  # stack-level failure dies in seconds, while an rlimit kill only lands after
+  # the beam has burned its CPU budget, which takes minutes of wall clock.
+  @min_healthy_run_ms 90_000
+
+  # Churn bound: at most 3 boots in 10 minutes. The window is the resume-loop
+  # cooldown (@resume_loop_cooldown_ms), for the same reason it was chosen
+  # there — long enough that a genuine loop cannot hide inside it, short enough
+  # that yesterday's incident does not hold today's work. Three allows the
+  # ordinary case (a deploy, or one rlimit kill, plus this boot) while refusing
+  # a daemon that is coming back every few minutes.
+  @crash_loop_window_ms 600_000
+  @max_boots_in_window 3
+
+  # How many boot times the ring keeps. Enough to answer the window question
+  # above with room to spare; the file stays one short line.
+  @boots_ring_size 8
+
+  @type record :: %{String.t() => term()}
+  @type verdict :: {:release, String.t()} | {:hold, String.t()}
+
+  @doc """
+  The heartbeat path, honoring the same env the rest of the daemon's host-local
+  state does: `SHUTTLE_HEARTBEAT_FILE`, else `$SHUTTLE_DATA_DIR/heartbeat.json`,
+  default `~/.shuttle/heartbeat.json`.
+  """
+  @spec default_path() :: String.t()
+  def default_path do
+    System.get_env("SHUTTLE_HEARTBEAT_FILE") || Path.join(Shuttle.data_dir(), "heartbeat.json")
+  end
+
+  @spec default_write_interval_ms() :: pos_integer()
+  def default_write_interval_ms, do: @default_write_interval_ms
+
+  @spec grace_ms() :: pos_integer()
+  def grace_ms, do: @default_grace_ms
+
+  @spec min_healthy_run_ms() :: pos_integer()
+  def min_healthy_run_ms, do: @min_healthy_run_ms
+
+  @doc """
+  Read the heartbeat left by the previous incarnation.
+
+  `{:ok, record}` only for a file that parses into an object carrying a numeric
+  `at` and `booted_at`; everything else is `{:error, reason}` and the caller
+  holds. Never raises.
+  """
+  @spec read(String.t()) :: {:ok, record()} | {:error, term()}
+  def read(path) when is_binary(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, %{} = json} <- Jason.decode(body),
+         {:ok, at} <- fetch_ms(json, "at"),
+         {:ok, booted_at} <- fetch_ms(json, "booted_at") do
+      {:ok,
+       %{
+         "v" => json["v"],
+         "at" => at,
+         "booted_at" => booted_at,
+         "workers" => string_list(json["workers"]),
+         "boots" => ms_list(json["boots"])
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      {:ok, _not_an_object} -> {:error, :malformed}
+    end
+  rescue
+    # A heartbeat read can never be the reason the daemon fails to boot.
+    error -> {:error, error}
+  end
+
+  @doc """
+  Write the heartbeat for this incarnation.
+
+  `workers` is the set (or list) of runtime keys currently live; `boots` is the
+  ring to persist, newest last. Always `:ok` — a failed write logs at debug and
+  is retried by the next tick; the only consequence of losing writes is that the
+  next boot holds the quarantine, which is the safe direction.
+  """
+  @spec write(String.t(), keyword()) :: :ok
+  def write(path, opts) when is_binary(path) and is_list(opts) do
+    record = %{
+      "v" => @version,
+      "at" => Keyword.get(opts, :at, System.system_time(:millisecond)),
+      "booted_at" => Keyword.fetch!(opts, :booted_at),
+      "workers" => opts |> Keyword.get(:workers, []) |> Enum.to_list() |> Enum.map(&to_string/1),
+      "boots" => Keyword.get(opts, :boots, [])
+    }
+
+    tmp = path <> ".tmp"
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         {:ok, body} <- Jason.encode(record),
+         :ok <- File.write(tmp, body),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.debug("daemon heartbeat write failed (#{path}): #{inspect(reason)}")
+        _ = File.rm(tmp)
+        :ok
+    end
+  rescue
+    error ->
+      Logger.debug("daemon heartbeat write raised (#{path}): #{inspect(error)}")
+      :ok
+  end
+
+  @doc """
+  Append `boot_at` to `boots`, keeping the newest `#{@boots_ring_size}`.
+  """
+  @spec push_boot([integer()], integer()) :: [integer()]
+  def push_boot(boots, boot_at) when is_list(boots) and is_integer(boot_at) do
+    (boots ++ [boot_at]) |> Enum.take(-@boots_ring_size)
+  end
+
+  @doc """
+  The boot-time verdict: may this daemon release its own boot quarantine?
+
+  `live_workers` is the set of runtime keys reconciliation/adoption has just
+  established as live — the daemon's own observation, not the file's claim.
+  `now_ms` is wall clock. Returns `{:release, reason}` or `{:hold, reason}`;
+  the reason string is what gets logged and surfaced in the snapshot.
+  """
+  @spec verdict({:ok, record()} | {:error, term()}, non_neg_integer(), Enumerable.t()) :: verdict()
+  def verdict(read_result, now_ms, live_workers)
+
+  # Fail closed, loudly enough to explain itself: no usable heartbeat means the
+  # daemon has no evidence this restart was a fast bounce, and "no evidence" is
+  # a hold. This is the first-boot case, the wiped-data-dir case, and the
+  # truncated/garbage-file case alike.
+  def verdict({:error, reason}, _now_ms, _live_workers),
+    do: {:hold, "no usable daemon heartbeat (#{inspect(reason)})"}
+
+  def verdict({:ok, hb}, now_ms, live_workers) do
+    age_ms = now_ms - hb["at"]
+    previous_run_ms = hb["at"] - hb["booted_at"]
+    recorded = MapSet.new(hb["workers"] || [])
+    live = MapSet.new(live_workers)
+    recent_boots = Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
+
+    cond do
+      age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
+        {:hold, "daemon heartbeat is #{age_ms}ms old (grace #{@default_grace_ms}ms)"}
+
+      not MapSet.subset?(recorded, live) ->
+        missing = recorded |> MapSet.difference(live) |> Enum.sort()
+
+        {:hold,
+         "workers recorded live in the heartbeat are gone: #{Enum.join(missing, ", ")}"}
+
+      previous_run_ms < @min_healthy_run_ms ->
+        {:hold,
+         "previous daemon incarnation lived #{previous_run_ms}ms " <>
+           "(< #{@min_healthy_run_ms}ms); looks like a crash loop"}
+
+      recent_boots > @max_boots_in_window ->
+        {:hold,
+         "#{recent_boots} daemon boots in the last #{div(@crash_loop_window_ms, 60_000)}m " <>
+           "(> #{@max_boots_in_window}); looks like a crash loop"}
+
+      true ->
+        {:release,
+         "fast bounce: heartbeat #{age_ms}ms old, previous incarnation ran #{previous_run_ms}ms, " <>
+           "#{MapSet.size(recorded)} worker(s) still live"}
+    end
+  end
+
+  # ── Parsing ──
+
+  defp fetch_ms(json, key) do
+    case Map.get(json, key) do
+      value when is_integer(value) -> {:ok, value}
+      value when is_float(value) -> {:ok, trunc(value)}
+      _ -> {:error, {:malformed, key}}
+    end
+  end
+
+  defp string_list(value) when is_list(value), do: Enum.filter(value, &is_binary/1)
+  defp string_list(_), do: []
+
+  defp ms_list(value) when is_list(value), do: Enum.filter(value, &is_integer/1)
+  defp ms_list(_), do: []
+end

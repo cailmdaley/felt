@@ -31,6 +31,7 @@ defmodule Shuttle.Poller do
 
   alias Shuttle.{
     Collaboration,
+    DaemonHeartbeat,
     Dispatcher,
     LifecycleStore,
     StandingRole,
@@ -252,8 +253,32 @@ defmodule Shuttle.Poller do
       # Human force-dispatch bypasses (and does not clear) the quarantine. Set at
       # init from the `:boot_quarantine` opt / app config (default true;
       # config/test.exs disables it).
+      #
+      # ONE automatic exit exists, and it is not a timer: a restart the daemon
+      # can PROVE was a fast bounce of a healthy incarnation releases itself at
+      # boot (`Shuttle.DaemonHeartbeat.verdict/3`, evaluated in `init/1` after
+      # adoption). A kernel that kills the beam on an rlimit is not a human
+      # asking for a hold, and the hold cost all new work until someone noticed.
+      # The proof is three-part (fresh heartbeat, the recorded workers still live
+      # BY THIS DAEMON'S OWN observation, previous incarnation not in a crash
+      # loop) and fails closed. Everything the quarantine exists for is
+      # untouched: a real gap, a crash loop, or no evidence at all still holds.
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
+      # How the quarantine came off, for the snapshot (and the log): `nil` while
+      # still held or never armed, else `%{mode: :auto | :human, at: DateTime.t,
+      # reason: String.t}`. The board needs the distinction — a hold lifted
+      # automatically because the daemon proved a fast bounce is a different fact
+      # about the fleet than a human pressing release.
+      quarantine_release: nil,
+      # Where this daemon records its own liveness, how often, when THIS
+      # incarnation booted (epoch ms), and the ring of recent boot times carried
+      # forward from the previous incarnation's file. All four exist only to
+      # serve the next boot's verdict; see `Shuttle.DaemonHeartbeat`.
+      daemon_heartbeat_file: nil,
+      daemon_heartbeat_interval_ms: nil,
+      daemon_booted_at: nil,
+      daemon_boots: [],
       # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1` (S2): the
       # daemon shells `felt shuttle contract` and compares it to
       # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
@@ -680,10 +705,30 @@ defmodule Shuttle.Poller do
       # tick, so a skewed CLI is caught (and fresh dispatch held) before any
       # autonomous work is even considered. Runner-bounded, so a slow/wedged
       # `felt` degrades to a logged skew rather than hanging boot.
-      contract_check: Shuttle.Contract.check_and_log(runner)
+      contract_check: Shuttle.Contract.check_and_log(runner),
+      # Where this daemon records its OWN liveness, and how often — the evidence
+      # the next boot reads to tell a fast bounce (a kernel rlimit kill nobody
+      # asked for, respawned seconds later) from a real gap. Nothing to do with
+      # `heartbeat_interval_ms` above, which is WorkerWatcher's per-worker
+      # backend probe; `Shuttle.DaemonHeartbeat` owns this cadence and the
+      # freshness grace it must stay well under. Both opts are test injection
+      # points.
+      daemon_heartbeat_file:
+        Keyword.get(opts, :daemon_heartbeat_file, DaemonHeartbeat.default_path()),
+      daemon_heartbeat_interval_ms:
+        Keyword.get(
+          opts,
+          :daemon_heartbeat_interval_ms,
+          DaemonHeartbeat.default_write_interval_ms()
+        ),
+      daemon_booted_at: System.system_time(:millisecond)
     }
 
     Logger.info("configured felt stores: #{inspect(felt_stores)}")
+
+    # Read the PREVIOUS incarnation's heartbeat before this one overwrites it —
+    # the only evidence that distinguishes a fast bounce from a real gap.
+    previous_heartbeat = DaemonHeartbeat.read(state.daemon_heartbeat_file)
 
     # Daemon state is derived and disposable. Rebuild
     # `running` from tmux by adopting any live shuttle sessions — a restart
@@ -691,9 +736,83 @@ defmodule Shuttle.Poller do
     # tmux owns the worker process.
     state = SessionReconciliation.adopt_orphans(state)
 
+    # Adoption has run, so `state.running` is this daemon's OWN observation of
+    # what is live — which is what the continuity condition is checked against.
+    state = maybe_auto_release_boot_quarantine(state, previous_heartbeat)
+
+    # Carry the previous ring forward with this boot appended, then write
+    # immediately: an incarnation that dies seconds in still leaves its own
+    # `booted_at`, which is what lets the next boot see a crash loop.
+    boots =
+      case previous_heartbeat do
+        {:ok, hb} -> DaemonHeartbeat.push_boot(hb["boots"] || [], state.daemon_booted_at)
+        {:error, _} -> [state.daemon_booted_at]
+      end
+
+    state = write_daemon_heartbeat(%{state | daemon_boots: boots})
+
     state = schedule_tick(state, 0)
     {:ok, state}
   end
+
+  # Auto-release: the one non-human exit from the boot quarantine, for the
+  # restart the daemon can PROVE was a fast bounce of a healthy incarnation (see
+  # the `boot_quarantine` State field comment and `Shuttle.DaemonHeartbeat`).
+  #
+  # A contract skew is NOT auto-releasable: it has no release endpoint by design,
+  # because a skewed CLI makes every shelled write suspect, so the daemon does
+  # not even ask for a verdict — the hold stands until the pair is fixed and the
+  # daemon restarted. Nothing here touches `contract_check`, so even a released
+  # quarantine keeps parking fresh launches while skewed.
+  defp maybe_auto_release_boot_quarantine(%State{boot_quarantine: false} = state, _hb), do: state
+
+  defp maybe_auto_release_boot_quarantine(%State{contract_check: %{ok: false}} = state, _hb) do
+    Logger.info("boot quarantine held: contract skew is not auto-releasable")
+    state
+  end
+
+  defp maybe_auto_release_boot_quarantine(%State{} = state, heartbeat) do
+    live_workers = Map.keys(state.running)
+
+    case DaemonHeartbeat.verdict(heartbeat, System.system_time(:millisecond), live_workers) do
+      {:release, reason} ->
+        Logger.info("boot quarantine auto-released (#{reason}); fresh dispatch resumes")
+
+        %{
+          state
+          | boot_quarantine: false,
+            parked_launches: %{},
+            quarantine_release: %{mode: :auto, at: DateTime.utc_now(), reason: reason}
+        }
+
+      {:hold, reason} ->
+        Logger.info("boot quarantine held (#{reason}); awaiting `bin/shuttle release`")
+        state
+    end
+  end
+
+  # Record this incarnation's liveness. Best-effort by contract — the write never
+  # raises and never blocks on anything but one small rename, so a misbehaving
+  # filesystem costs the next boot its evidence (holding the quarantine, the safe
+  # direction) and nothing else.
+  defp write_daemon_heartbeat(%State{} = state) do
+    :ok =
+      DaemonHeartbeat.write(state.daemon_heartbeat_file,
+        booted_at: state.daemon_booted_at,
+        workers: Map.keys(state.running),
+        boots: state.daemon_boots
+      )
+
+    schedule_daemon_heartbeat(state)
+  end
+
+  defp schedule_daemon_heartbeat(%State{daemon_heartbeat_interval_ms: interval} = state)
+       when is_integer(interval) and interval > 0 do
+    Process.send_after(self(), :write_daemon_heartbeat, interval)
+    state
+  end
+
+  defp schedule_daemon_heartbeat(state), do: state
 
   @impl true
   # Zombie-watcher prevention: `Shuttle.WatcherSupervisor` is a GLOBAL,
@@ -730,6 +849,15 @@ defmodule Shuttle.Poller do
   end
 
   def handle_info({:tick, _}, state), do: {:noreply, state}
+
+  # The daemon's own liveness tick. Deliberately its own timer rather than a
+  # rider on the poll cycle: a poll can stall for minutes behind a wedged felt
+  # read (the read runs in a Task, so this GenServer stays responsive), and what
+  # the next boot needs to know is that THIS process was alive and serving, which
+  # is exactly what handling this message proves.
+  def handle_info(:write_daemon_heartbeat, state) do
+    {:noreply, write_daemon_heartbeat(state)}
+  end
 
   def handle_info(:run_poll_cycle, %{poll_check_in_progress: true} = state), do: {:noreply, state}
 
@@ -1187,8 +1315,15 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call(:release_boot_quarantine, _from, state) do
-    Logger.info("boot quarantine released; fresh dispatch resumes on the next tick")
-    state = %{state | boot_quarantine: false, parked_launches: %{}}
+    Logger.info("boot quarantine released by a human; fresh dispatch resumes on the next tick")
+
+    state = %{
+      state
+      | boot_quarantine: false,
+        parked_launches: %{},
+        quarantine_release: %{mode: :human, at: DateTime.utc_now(), reason: "released by a human"}
+    }
+
     # Tick now so parked fibers dispatch immediately, not a poll interval later.
     {:reply, :ok, schedule_tick(state, 0)}
   end
