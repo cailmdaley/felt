@@ -484,6 +484,31 @@ func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
 	}
 }
 
+// TestNestFromViewLeavesExactOutsideLinkAlone: a link that names the loom's
+// `ai-futures/portolan/charted` outright is a link out of the view, however a
+// local id begins. Moving the local lookalike must not rewrite it to follow
+// the lookalike: the move plan reads paths by the same tiers resolution does.
+func TestNestFromViewLeavesExactOutsideLinkAlone(t *testing.T) {
+	_, subProj := newCrossStoreFixture(t)
+	sub := felt.NewStorage(subProj)
+	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
+	citer := &felt.Felt{ID: "citer", Name: "Citer", Status: felt.StatusOpen, CreatedAt: time.Now(), Body: "see [[ai-futures/portolan/charted]]\n"}
+	if err := sub.Write(citer); err != nil {
+		t.Fatalf("write citer: %v", err)
+	}
+
+	if out, err := runCommand(t, subProj, "nest", "ai-futures/portolan/chartedx", "debug"); err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	got, err := sub.Read("citer")
+	if err != nil {
+		t.Fatalf("read citer: %v", err)
+	}
+	if !strings.Contains(got.Body, "[[ai-futures/portolan/charted]]") {
+		t.Fatalf("nest rewrote a link to the enclosing store's fiber:\n%s", got.Body)
+	}
+}
+
 // writeConsumer writes a loom fiber whose inputs name from, once with an
 // input id and once without: an entry with `from:` is a data-flow edge either
 // way.

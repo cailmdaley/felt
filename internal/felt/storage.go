@@ -1922,47 +1922,8 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 		return "", resolvedExact, fmt.Errorf("no fiber found matching %q", query)
 	}
 
-	if id, ok, err := r.exactInStore(scopeID, query); ok || err != nil {
-		return id, resolvedExact, err
-	}
-
-	// A target spelled from the enclosing store's namespace but pointing back
-	// into this one (`ai-futures/felt/debug`) names a LOCAL fiber. It is tried
-	// only after the query's own spelling, so a local fiber whose id
-	// genuinely begins with this store's own prefix still answers to it — and
-	// a miss keeps the query the caller typed in its error.
-	local, localized := r.external.Localize(query)
-	if localized {
-		if id, ok, err := r.exactInStore(scopeID, local); ok || err != nil {
-			return id, resolvedExact, err
-		}
-	}
-
-	// A path naming a stray fiber file in the enclosing store means that
-	// file; the enclosing store's own slug and suffix rules must not answer
-	// it with a same-named fiber elsewhere.
-	if rel, ok := r.external.strayAt(scopeID, query); ok {
-		return "", resolvedExact, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
-	}
-
-	// A query that is a fiber's id in the enclosing store, written out from
-	// its root, is a link out of this view. That is how a foreign id is
-	// normally written (it is what `felt ls` prints and what a user copies),
-	// and it is what lets `felt rm ai-futures/portolan/debug` reach the fiber
-	// it names. A stat pair, memoized — no walk. A spelling relative to the
-	// citing fiber's scopes out there is the enclosing store's inference,
-	// asked below, after this store's own.
-	if id, ok := r.external.LookupPath(query); ok {
-		return "", resolvedExact, r.external.err(query, id, false, false)
-	}
-
-	if id, via, ok, err := r.inferInStore(scopeID, query); ok || err != nil {
+	if id, via, ok, err := r.resolveByPath(scopeID, query); ok || err != nil {
 		return id, via, err
-	}
-	if localized {
-		if id, via, ok, _ := r.inferInStore(scopeID, local); ok {
-			return id, via, nil
-		}
 	}
 
 	// Nothing in this store answers to the query. Before the basename rescue
@@ -2006,39 +1967,70 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 }
 
 // ResolvePath is the answer a reference's PATH gives, as opposed to the one
-// its slug gives: exact id, lexical scope, unique suffix, and the local reading
-// of a spelling from the enclosing store's namespace — the steps resolve takes
-// before it asks the enclosing store to infer or falls back to the basename
-// rescue. A query resolve answers with resolvedBySlug is exactly one
-// ResolvePath does not answer: a stale path held up only by its final segment.
+// its slug gives: tiers 1 and 2 of resolve, the steps it takes before it asks
+// the enclosing store to infer or falls back to the basename rescue. A query
+// resolve answers with resolvedBySlug is exactly one ResolvePath does not
+// answer: a stale path held up only by its final segment. A path that names a
+// fiber in the enclosing store answers nothing here either — it is a link out
+// of this view, and a move inside the view leaves it alone.
 func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
 		return "", false
 	}
-	if id, _, ok, err := r.resolveInStore(scopeID, query); err != nil {
-		return "", false
-	} else if ok {
-		return id, true
-	}
-	if local, stripped := r.external.Localize(query); stripped {
-		if id, _, ok, _ := r.resolveInStore(scopeID, local); ok {
-			return id, true
-		}
-	}
-	return "", false
+	id, _, ok, err := r.resolveByPath(scopeID, query)
+	return id, ok && err == nil
 }
 
-// resolveInStore is resolution against this store alone: exact answers first,
-// then inferred ones. ok is false with a nil error when nothing matched; a
-// non-nil error is a hard stop (a stray file, an ambiguity), not an
-// invitation to try the fallbacks in resolve.
-func (r *scopedIDResolver) resolveInStore(scopeID, query string) (string, resolution, bool, error) {
+// resolveByPath is resolve's tiers 1 and 2: every exact answer, then local
+// inference. ok is false with a nil error when nothing matched; a non-nil
+// error is a hard stop (a stray file, an ambiguity, an id that lives in the
+// enclosing store), not an invitation to try the fallbacks in resolve.
+func (r *scopedIDResolver) resolveByPath(scopeID, query string) (string, resolution, bool, error) {
 	if id, ok, err := r.exactInStore(scopeID, query); ok || err != nil {
 		return id, resolvedExact, ok, err
 	}
-	return r.inferInStore(scopeID, query)
+
+	// A target spelled from the enclosing store's namespace but pointing back
+	// into this one (`ai-futures/felt/debug`) names a LOCAL fiber. It is tried
+	// only after the query's own spelling, so a local fiber whose id
+	// genuinely begins with this store's own prefix still answers to it — and
+	// a miss keeps the query the caller typed in its error.
+	local, localized := r.external.Localize(query)
+	if localized {
+		if id, ok, err := r.exactInStore(scopeID, local); ok || err != nil {
+			return id, resolvedExact, ok, err
+		}
+	}
+
+	// A path naming a stray fiber file in the enclosing store means that
+	// file; the enclosing store's own slug and suffix rules must not answer
+	// it with a same-named fiber elsewhere.
+	if rel, ok := r.external.strayAt(scopeID, query); ok {
+		return "", resolvedExact, false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
+	}
+
+	// A query that is a fiber's id in the enclosing store, written out from
+	// its root, is a link out of this view. That is how a foreign id is
+	// normally written (it is what `felt ls` prints and what a user copies),
+	// and it is what lets `felt rm ai-futures/portolan/debug` reach the fiber
+	// it names. A stat pair, memoized — no walk. A spelling relative to the
+	// citing fiber's scopes out there is the enclosing store's inference,
+	// asked by resolve after this store's own.
+	if id, ok := r.external.LookupPath(query); ok {
+		return "", resolvedExact, false, r.external.err(query, id, false, false)
+	}
+
+	if id, via, ok, err := r.inferInStore(scopeID, query); ok || err != nil {
+		return id, via, ok, err
+	}
+	if localized {
+		if id, via, ok, _ := r.inferInStore(scopeID, local); ok {
+			return id, via, true, nil
+		}
+	}
+	return "", resolvedExact, false, nil
 }
 
 // exactInStore answers a query that names an id in this store outright: the
