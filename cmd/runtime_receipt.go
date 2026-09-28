@@ -30,6 +30,7 @@ const (
 	receiptStale    receiptStatus = "stale"
 	receiptMismatch receiptStatus = "mismatch"
 	receiptPartial  receiptStatus = "partial"
+	receiptBooting  receiptStatus = "booting"
 )
 
 // RuntimeReceipt is intentionally compact and stable enough for installers to
@@ -100,6 +101,7 @@ type ReceiptDaemon struct {
 	Expected any           `json:"expected,omitempty"`
 	Observed any           `json:"observed,omitempty"`
 	Contract bool          `json:"contract_ok"`
+	Ready    *bool         `json:"ready,omitempty"`
 	// Listen, HostClass, and PeerGate are the daemon's bound listener policy,
 	// from /api/v1/version; empty when unreachable or not reported.
 	Listen            string              `json:"listen,omitempty"`
@@ -220,7 +222,7 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	r.Daemon = collectDaemonReceipt()
 	r.Generation = collectGenerationReceipt(r.Bundles, r.Felt)
 	r.TmuxServer = collectTmuxServerReceipt()
-	r.Host = collectHostReceipt(r.Daemon)
+	r.Host = collectHostReceiptWhenReady(r.Daemon)
 	extra := []receiptStatus{r.Generation.Status, r.Host.Status}
 	if r.TmuxServer != nil {
 		extra = append(extra, r.TmuxServer.Status)
@@ -756,6 +758,16 @@ func codexHooksTrusted() bool {
 	return seen["session_start"] && seen["pre_tool_use"]
 }
 
+func collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
+	if daemon.Ready != nil && !*daemon.Ready {
+		// Listener configuration can be reported before all child init has
+		// completed. Defer host/socket conclusions until the bound daemon says
+		// ready; partial startup fields are not mismatch evidence.
+		return ReceiptHost{Status: receiptBooting, Repair: daemon.Repair}
+	}
+	return collectHostReceipt(daemon)
+}
+
 func collectDaemonReceipt() ReceiptDaemon {
 	base, err := daemonURL()
 	if err != nil {
@@ -773,6 +785,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 		PeerGateUID       *int                `json:"peer_gate_uid"`
 		PeerGateUIDSource string              `json:"peer_gate_uid_source"`
 		TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial"`
+		Ready             *bool               `json:"ready"`
 		Contract          struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
@@ -783,7 +796,17 @@ func collectDaemonReceipt() ReceiptDaemon {
 	d.Listen, d.HostClass, d.PeerGate = response.Listen, response.HostClass, response.PeerGate
 	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
 	d.TailnetDial = response.TailnetDial
-	if decodeErr != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
+	d.Ready = response.Ready
+	if decodeErr != nil {
+		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
+		return d
+	}
+	if response.Ready != nil && !*response.Ready {
+		d.Status = receiptBooting
+		d.Repair = "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true"
+		return d
+	}
+	if len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d
 	}
@@ -994,6 +1017,11 @@ func combineReceiptStatus(felt receiptStatus, bundles []ReceiptBundle, hooks, da
 		statuses = append(statuses, b.Status)
 	}
 	statuses = append(statuses, extra...)
+	for _, status := range statuses {
+		if status == receiptBooting {
+			return receiptBooting, receiptRepair(receiptBooting)
+		}
+	}
 	for _, status := range []receiptStatus{receiptMismatch, receiptStale} {
 		for _, got := range statuses {
 			if got == status {
@@ -1019,6 +1047,9 @@ func combineReceiptStatus(felt receiptStatus, bundles []ReceiptBundle, hooks, da
 }
 
 func receiptRepair(status receiptStatus) string {
+	if status == receiptBooting {
+		return "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true"
+	}
 	if status == receiptMismatch {
 		return "repair the mismatched felt plugin, hooks, or daemon contract, then rerun the receipt"
 	}

@@ -96,15 +96,21 @@ if [ "${1:-}" = "--loop" ]; then
     # A foreign daemon can already be answering at this host's listen address —
     # a manual `bin/shuttle start`, or a tmux session that outlived this loop's
     # own. `bin/shuttle status` probes the same address the daemon binds (a
-    # unix socket on a shared host, loopback TCP otherwise). `--force` skips
+    # unix socket on a shared host, loopback TCP otherwise) and treats a
+    # bound-but-booting version response as alive. `--force` skips
     # the health probe bare `start` does (bin/shuttle:605-618), so without this
-    # check the loop would crash-dump into :eaddrinuse every iteration. Probe
-    # first and stand down for a healthy foreign daemon instead of forcing a
-    # start; an unhealthy or absent daemon falls through to the normal start
-    # below, unchanged.
-    if ./bin/shuttle status >/dev/null 2>&1; then
-      echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon already healthy; standing down" | tee -a "$LOG" >&2
-      sleep 300
+    # check the loop would crash-dump into :eaddrinuse every iteration. A
+    # booting listener is re-probed after five seconds (so its death is noticed
+    # promptly); a ready daemon gets the slower healthy cadence. An absent or
+    # unanswering listener falls through to the normal forced start.
+    if status=$(./bin/shuttle status 2>/dev/null); then
+      if printf '%s\n' "$status" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*false([,}])'; then
+        echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon is bound but still booting; checking again in 5s" | tee -a "$LOG" >&2
+        sleep 5
+      else
+        echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon already answering; standing down" | tee -a "$LOG" >&2
+        sleep 300
+      fi
       continue
     fi
     started=$(date +%s)

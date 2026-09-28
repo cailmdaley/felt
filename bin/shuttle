@@ -89,6 +89,10 @@ api_post() {
   fi
 }
 
+version_is_booting() {
+  printf '%s\n' "$1" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*false([,}])'
+}
+
 # ── Durable keep-alive ─────────────────────────────────────────────────────
 # `install-agent` / `uninstall-agent` hand the daemon to a supervisor —
 # launchd on macOS, a systemd *user* unit on Linux — by rendering the
@@ -651,7 +655,7 @@ case "$CMD" in
   start)
     need_launcher
     [ "${1:-}" = "--force" ] || resolve_listen
-    if [ "${1:-}" != "--force" ] && api_get /api/v1/state >/dev/null 2>&1; then
+    if [ "${1:-}" != "--force" ] && api_get /api/v1/version >/dev/null 2>&1; then
       echo "Daemon already running at $ADDR." >&2
       echo "If a keep-alive supervisor owns it, cycle it there:" >&2
       echo "  launchctl kickstart -k gui/\$(id -u)/io.shuttle.daemon   (macOS)" >&2
@@ -680,14 +684,40 @@ case "$CMD" in
 
   status)
     resolve_listen
-    api_get /api/v1/state || { echo "(daemon down at $ADDR)" >&2; exit 2; }
-    echo
+    # A bound listener is alive even while its Poller and other boot work are
+    # still initializing. Surface the version/readiness receipt rather than
+    # treating its state-route 503 as a dead daemon.
+    if version=$(api_get /api/v1/version); then
+      if version_is_booting "$version"; then
+        printf '%s\n' "$version"
+        exit 0
+      fi
+    else
+      echo "(daemon down at $ADDR)" >&2
+      exit 2
+    fi
+    # This verb is also the launcher's liveness probe. If the listener answered
+    # /version but state is temporarily unavailable (for example during a child
+    # restart), report the listener receipt as alive instead of starting a second
+    # daemon beside it.
+    if state=$(api_get /api/v1/state 2>/dev/null); then
+      printf '%s\n' "$state"
+    else
+      printf '%s\n' "$version"
+    fi
     ;;
 
   release)
     resolve_listen
+    if version=$(api_get /api/v1/version 2>/dev/null) && version_is_booting "$version"; then
+      echo "daemon is still booting; retry when /api/v1/version shows ready:true" >&2
+      exit 1
+    fi
     if api_post /api/v1/quarantine/release >/dev/null; then
       echo "quarantine released — parked launches will dispatch on the next tick"
+    elif version=$(api_get /api/v1/version 2>/dev/null) && version_is_booting "$version"; then
+      echo "daemon is still booting; retry when /api/v1/version shows ready:true" >&2
+      exit 1
     else
       echo "release failed: daemon unreachable or poller not running" >&2
       exit 1
@@ -748,9 +778,9 @@ case "$CMD" in
     echo "  start                Start the daemon (refuses if already running)"
     echo "  start --force        Start even if another daemon is detected"
     echo "  snapshot             Print JSON snapshot of current state"
-    echo "  status               Same JSON (human rendering: felt shuttle ps)"
+    echo "  status               State JSON, or a live version receipt if state is unavailable"
     echo "  dispatch <fiber-id>  Ask the running daemon to dispatch a fiber"
-    echo "  release              Release the boot quarantine"
+    echo "  release              Release the boot quarantine (after ready:true)"
     echo "  reset <remote>       Reset a remote's tripped circuit breaker"
     echo "  version              Print the daemon's build stamp"
     echo "  install-agent        Install the keep-alive supervisor (launchd / systemd --user)"

@@ -200,7 +200,7 @@ func TestBinShuttleChecksTCPOwnerBeforeCurl(t *testing.T) {
 		wantErr   bool
 		wantCalls string
 	}{
-		{"owner accepted", false, false, "host-json\ncheck-owner\ncurl"},
+		{"owner accepted", false, false, "host-json\ncheck-owner\ncurl\ncheck-owner\ncurl"},
 		{"owner refused", true, true, "host-json\ncheck-owner"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

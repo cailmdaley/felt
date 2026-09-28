@@ -224,34 +224,62 @@ version_json() { # $1 = "" (local) | host
   run_on "$1" "$(daemon_call "" /api/v1/version)"
 }
 
-version_sha() { # $1 = "" (local) | host
-  version_json "$1" | sed -n 's/.*"git_short_sha":"\([^"]*\)".*/\1/p'
-}
-
-# Verify a fresh daemon boot as well as the build SHA: rebuilding a release
-# does not restart the running BEAM. A daemon is verified only when its SHA
-# matches and it booted after this deploy started. Missing booted_at is
-# treated as unverified.
-version_booted_at() { # $1 = "" | host
-  version_json "$1" | sed -n 's/.*"booted_at":"\([^"]*\)".*/\1/p'
+version_ready() { # JSON response -> true only for an explicit ready:true
+  printf '%s\n' "$1" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true([,}])'
 }
 
 release_quarantine() { # $1 = "" | host
   run_on "$1" "$(daemon_call "-X POST" /api/v1/quarantine/release)" | grep -q '"ok":true'
 }
 
-wait_for_sha() { # $1 = "" | host — poll until version reports TARGET_SHA from a FRESH boot
-  local booted
-  for _ in $(seq 1 30); do
-    if [ "$(version_sha "$1")" = "$TARGET_SHA" ]; then
-      booted="$(version_booted_at "$1")"
-      # ISO-8601 UTC compares lexicographically; DEPLOY_STARTED_AT is stamped
-      # below. Empty booted_at = pre-booted_at daemon = can't verify freshness.
-      [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ] && return 0
+wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
+  local host="$1" version sha booted ready started now elapsed next_notice
+  local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
+  local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
+
+  case "$timeout" in ''|*[!0-9]*) timeout=900 ;; esac
+  case "$interval" in ''|*[!0-9]*|0) interval=5 ;; esac
+  started="$(date +%s)"
+  next_notice=0
+
+  while :; do
+    version="$(version_json "$host" 2>/dev/null || true)"
+    sha="$(printf '%s\n' "$version" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    booted="$(printf '%s\n' "$version" | sed -n 's/.*"booted_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    if version_ready "$version"; then ready=true; else ready=false; fi
+
+    # SHA and boot time prove this is the new BEAM; ready proves synchronous
+    # child init (including Poller orphan adoption) has completed.
+    if [ "$sha" = "$TARGET_SHA" ] && [ "$ready" = true ] &&
+       [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ]; then
+      return 0
     fi
-    sleep 5
+
+    now="$(date +%s)"
+    elapsed=$((now - started))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      if [ -z "$version" ]; then
+        printf '  daemon on %s did not answer /api/v1/version within %ss\n' "${host:-local}" "$timeout" >&2
+      elif [ "$ready" != true ]; then
+        printf '  daemon on %s is still booting after %ss; /api/v1/version must report ready:true\n' "${host:-local}" "$elapsed" >&2
+      else
+        printf '  daemon on %s did not prove a fresh ready boot on %s within %ss\n' "${host:-local}" "$TARGET_SHA" "$timeout" >&2
+      fi
+      return 1
+    fi
+
+    if [ "$elapsed" -ge "$next_notice" ]; then
+      if [ -z "$version" ]; then
+        printf '  waiting for daemon on %s to answer /api/v1/version (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
+      elif [ "$ready" != true ]; then
+        printf '  daemon on %s is still booting; waiting for ready:true (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
+      else
+        printf '  daemon on %s answers but its fresh boot on %s is not verified (%ss elapsed)\n' "${host:-local}" "$TARGET_SHA" "$elapsed" >&2
+      fi
+      next_notice=$((elapsed + 30))
+    fi
+    sleep "$interval"
   done
-  return 1
 }
 
 # A host marked `"build_ui": false` is served the deploy host's bundle, so the

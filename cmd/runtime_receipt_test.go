@@ -268,6 +268,27 @@ func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
 	}
 }
 
+func TestBootingDaemonSuppressesHostMismatchAndRestartAdvice(t *testing.T) {
+	ready := false
+	daemon := ReceiptDaemon{
+		Ready:     &ready,
+		Status:    receiptBooting,
+		Repair:    "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true",
+		Listen:    "tcp://127.0.0.1:4000",
+		HostClass: "shared-multi-user",
+	}
+
+	host := collectHostReceiptWhenReady(daemon)
+	if host.Status != receiptBooting || host.Repair != daemon.Repair || host.Listen != "" || len(host.Problems) != 0 {
+		t.Fatalf("host receipt should defer listener checks until readiness: %+v", host)
+	}
+
+	status, repair := combineReceiptStatus(receiptHealthy, nil, receiptHealthy, receiptMismatch, receiptBooting)
+	if status != receiptBooting || !strings.Contains(repair, "ready:true") {
+		t.Fatalf("booting should outrank incomplete boot-time mismatches: %s (%s)", status, repair)
+	}
+}
+
 func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 	tests := []struct {
 		name string
@@ -287,6 +308,10 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
 		}, receiptHealthy},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
+		{"booting ignores incomplete contract and listener evidence", map[string]any{
+			"ready": false, "listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user",
+			"peer_gate": "none", "contract": map[string]any{"expected": 3, "observed": 4, "ok": false},
+		}, receiptBooting},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -302,6 +327,9 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}
 			if tt.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
+			}
+			if tt.want == receiptBooting && (got.Ready == nil || *got.Ready || got.Contract || got.Expected != nil || !strings.Contains(got.Repair, "ready:true")) {
+				t.Fatalf("booting receipt should defer contract judgment and advise waiting: %+v", got)
 			}
 			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid" ||
 				got.PeerGateUID == nil || *got.PeerGateUID != 1000 || got.PeerGateUIDSource != "euid") {
