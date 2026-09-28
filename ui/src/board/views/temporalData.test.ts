@@ -43,8 +43,8 @@ afterEach(() => {
 //
 // The ledger is the JOIN: a recorded fiber↔session pairing, which is a fact
 // rather than an inference and outlives the session that made it.
-// `buildSessionIndex` is the shared shape Chronicle, Day and Week consume, so
-// its edges are worth pinning precisely.
+// `buildSessionIndex` is the shape every join reads through, so its edges are
+// worth pinning precisely.
 
 function rec(over: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -172,12 +172,20 @@ describe('sessions fetcher', () => {
     expect(out).toEqual({ host: '', records: [], origins: {} })
   })
 
-  it('caches on the bound, so a repeat asks once', async () => {
+  it('collapses identical concurrent asks onto one request', async () => {
+    const calls = captureFetch(ok({ host: 'ada', records: [] }))
+    const f = createTemporalFetchers('')
+    const [a, b] = await Promise.all([f.sessions(0), f.sessions(0)])
+    expect(calls).toHaveLength(1)
+    expect(a).toBe(b)
+  })
+
+  it('holds nothing once settled — the caller owns the cadence', async () => {
     const calls = captureFetch(ok({ host: 'ada', records: [] }))
     const f = createTemporalFetchers('')
     await f.sessions(0)
     await f.sessions(0)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
   })
 })
 

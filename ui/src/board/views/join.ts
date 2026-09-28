@@ -1,10 +1,10 @@
 /**
- * WHOSE WORK WAS THIS — the one join every temporal view reads.
+ * WHOSE WORK WAS THIS — the one join the temporal feeds are read through.
  *
  * Two things arrive stamped with a tmux session or a harness session: an
  * activity bucket (a minute of work) and a commit ledger record (a commit).
  * Both answer the same question, so both are answered here, once, by the same
- * index. Day, Week and Chronicle import it; none reaches into another.
+ * index.
  *
  * RECORDED EVIDENCE ONLY. The ladder has two rungs and both are things the
  * daemon WROTE DOWN:
@@ -37,46 +37,6 @@ import {
   type SessionPairing,
 } from './TemporalData.js'
 
-/** What a raster tick can honestly say about itself. */
-export interface BucketOrigin {
-  /** The card the bucket joined. */
-  cardId: string
-  /** The fiber's name. */
-  label: string
-  /** The joined fiber carries a `shuttle:` block: constitution-driven work. */
-  shuttle: boolean
-  /**
-   * The harness session UUID this minute belongs to, when the ledger recorded
-   * one, and the host that recorded it — the pair a hover needs to ask
-   * `/api/v1/moment` for the words.
-   *
-   * The activity plane holds no text of its own; the ledger's pairing names a
-   * transcript, and a transcript does. Null when the bucket joined no recorded
-   * session, which is when a hover has to keep saying so.
-   */
-  source: MomentSource | null
-}
-
-/** Where a minute's words would be found: a session, on a host. */
-export interface MomentSource {
-  session: string
-  host: string | null
-  /**
-   * This session contributed an ATTENTION minute to the mark — it is one of
-   * the transcripts a spine is drawn from.
-   *
-   * The tooltip's words are capped (a hover must not fan out over every
-   * transcript a busy slot touched), and the cap used to cut in bucket order,
-   * which is arrival order and says nothing about who spoke. A Week slot
-   * pooling four sessions could therefore draw a red spine off session three
-   * while fetching sessions one and two — a claimed human message the tooltip
-   * had no way to surface. This flag is what the cap sorts on, so the sessions
-   * behind the spines are the ones that are always asked. See
-   * {@link MomentLoader}.
-   */
-  spoke: boolean
-}
-
 /**
  * The cards, indexed by everything a record can name them with.
  *
@@ -90,13 +50,6 @@ export interface JoinIndex {
   byWorker: Map<string, KanbanCard>
   /** The session ledger's tmux→fiber pairings, when the board has them. */
   byTmux: ReadonlyMap<string, SessionPairing>
-}
-
-/** A card is shuttle-backed iff it has a `shuttle:` block, which is exactly
- *  what `shuttleKind` is present for (KanbanTypes). Not `shuttleAgent`, which
- *  a block may omit. */
-function isShuttleBacked(card: KanbanCard | undefined): boolean {
-  return card?.shuttleKind !== undefined
 }
 
 export function buildJoinIndex(
@@ -150,36 +103,6 @@ function cardForPairing(index: JoinIndex, pairing: SessionPairing): KanbanCard |
   if (byFiber) return byFiber
   const uid = pairing.uid?.trim().toUpperCase()
   return (uid ? index.byUlid.get(uid) : undefined) ?? null
-}
-
-/** What a bucket's tick may say, or null when it joined no fiber and is
- *  therefore not drawn. */
-export function originOf(index: JoinIndex, bucket: ActivityBucket): BucketOrigin | null {
-  const card = joinBucket(index, bucket)
-  if (!card) return null
-  return {
-    cardId: card.id,
-    label: card.name,
-    shuttle: isShuttleBacked(card),
-    source: momentSource(index, bucket),
-  }
-}
-
-/**
- * The transcript a bucket points at, from the ledger pairing alone.
- *
- * The bucket's own host is preferred over the ledger's — the bucket is telling
- * us which daemon's events file this minute came out of, which is the machine
- * the transcript sits on.
- */
-export function momentSource(index: JoinIndex, bucket: ActivityBucket): MomentSource | null {
-  const pairing = lookupTmux(index.byTmux, bucket.host, bucket.s)
-  if (!pairing?.session) return null
-  return {
-    session: pairing.session,
-    host: bucket.host ?? pairing.host ?? null,
-    spoke: bucket.k === 'attention',
-  }
 }
 
 // ── The commit ledger ────────────────────────────────────────────────────────
@@ -247,13 +170,4 @@ export function buildLedgerNarration(
     fiber.deletions += record.deletions
   }
   return { byCard }
-}
-
-/** Records inside `[fromMs, toMs)`, by their recorded instant. */
-export function ledgerBetween(
-  records: readonly CommitRecord[],
-  fromMs: number,
-  toMs: number,
-): CommitRecord[] {
-  return records.filter((record) => record.at >= fromMs && record.at < toMs)
 }

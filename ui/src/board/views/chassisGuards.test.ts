@@ -5,7 +5,7 @@
 // D1 — a temporal tab with no board response painted a completely blank page:
 //      no heading, no message, no way back. A blank page and a broken app are
 //      indistinguishable, so the two states now name themselves.
-// M1 — bare hotkeys 1-4 switched views out from under an open Stash form,
+// M1 — bare view hotkeys switched views out from under an open Stash form,
 //      because the guard only knew Radix's `data-state` and StashForm is
 //      hand-rolled with `aria-modal` and no data-state.
 // S1 — `⌘,` and bare `,` both open settings, and they are guarded
@@ -17,7 +17,7 @@
 //      dead in the Chronicle's search box — the single place a person is most
 //      likely to be typing when they reach for it.
 // S2 — settings is dispatched BEFORE the view hotkeys, so every key
-//      `settingsHotkey` answers for is a key `1`-`5` never sees. A predicate
+//      `settingsHotkey` answers for is a key `1`-`3` never sees. A predicate
 //      that got generous would shadow the view strip without a word.
 //
 // KanbanModal composes S1 as `kind === 'chord' ? blockingDialogOpen() :
@@ -152,12 +152,12 @@ describe('settingsHotkey', () => {
   })
 
   it('answers for no other key, bare or chorded', () => {
-    // S2. `1`-`5` are here because the settings dispatch runs first: if this
+    // S2. `1`-`3` are here because the settings dispatch runs first: if this
     // predicate ever answered for a digit, the view strip would go dead and
     // nothing would say why. `<` is here because it is what a US layout
     // actually reports for ⇧, — the modifier check above is the second line
     // of defence, not the only one. `.` is the neighbouring key.
-    for (const key of ['.', '<', ';', '1', '2', '3', '4', '5', 't', 'Escape', 'Tab']) {
+    for (const key of ['.', '<', ';', '1', '2', '3', 'Escape', 'Tab']) {
       expect(settingsHotkey(stroke(key))).toBeNull()
       expect(settingsHotkey(stroke(key, { metaKey: true }))).toBeNull()
     }
@@ -253,7 +253,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
 
   it('DISAGREE about a focused text field — which is what makes ⌘, work', () => {
     // S1, exactly. A caret in a search box speaks for `,` (there it is a
-    // comma) and for `1`-`5`, but never for a modifier chord.
+    // comma) and for `1`-`3`, but never for a modifier chord.
     stubDOM([boardRoot], searchBox)
     expect(keystrokeIsSpokenFor()).toBe(true)
     expect(blockingDialogOpen()).toBe(false)
@@ -261,7 +261,7 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
 
   it('both see the settings sheet, with no change to the selector', () => {
     // A Radix `AppDialog` is already what `[role="dialog"][data-state="open"]`
-    // describes, so `,` and `1`-`5` go dead while settings is open — including
+    // describes, so `,` and `1`-`3` go dead while settings is open — including
     // the `,` that would otherwise stack a second sheet on the first.
     //
     // The board root is listed FIRST, as it is in the document: it matches the

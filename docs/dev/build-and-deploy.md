@@ -128,8 +128,8 @@ human is only one of them:
   exactly one cascade, and it 409s if the breaker isn't currently tripped.
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
-kanban with Stash/Capture and the fiber/file viewer, plus the Day, Week,
-Chronicle and Board views on hotkeys 2-5, served as the static `ui/dist`
+kanban with Stash/Capture and the fiber/file viewer, plus the Chronicle and
+Board views on hotkeys 2-3, served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh
 checkout that hasn't built the bundle gets a 404 with the hint

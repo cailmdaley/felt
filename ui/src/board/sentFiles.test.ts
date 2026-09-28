@@ -1,19 +1,16 @@
 /**
- * The sent-files trail: what the endpoint hands over, and which slice of it
- * belongs to a given day.
+ * The sent-files trail: what the endpoint hands over, and how its files are
+ * named.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
   disambiguateBasenames,
   normalizeSentFiles,
-  sentFilesInWindow,
   sentFilesRevision,
 } from './sentFiles.js'
 
 const at = (h: number, min = 0): number => new Date(2026, 7, 11, h, min).getTime()
-const DAY_START = at(6)
-const DAY_END = at(6) + 24 * 60 * 60 * 1000
 
 describe('normalizeSentFiles', () => {
   it('keeps a well-formed record whole', () => {
@@ -50,50 +47,6 @@ describe('sentFilesRevision', () => {
     const newer = normalizeSentFiles([{ fullPath: '/a/report.html', timestamp: 11 }])
 
     expect(sentFilesRevision(old)).not.toBe(sentFilesRevision(newer))
-  })
-})
-
-describe('sentFilesInWindow', () => {
-  const files = normalizeSentFiles([
-    { fullPath: '/a/morning.html', timestamp: at(9) },
-    { fullPath: '/a/evening.html', timestamp: at(21) },
-    { fullPath: '/a/yesterday.html', timestamp: at(9) - 24 * 60 * 60 * 1000 },
-  ])
-
-  it('keeps today and drops the days around it, newest first', () => {
-    expect(sentFilesInWindow(files, DAY_START, DAY_END).map((f) => f.basename)).toEqual([
-      'evening.html',
-      'morning.html',
-    ])
-  })
-
-  // Half-open, like the rail: 06:00 opens the day it belongs to.
-  it('puts a send at the boundary in the day that opens there', () => {
-    const edge = normalizeSentFiles([
-      { fullPath: '/a/dawn.html', timestamp: DAY_START },
-      { fullPath: '/a/dusk.html', timestamp: DAY_END },
-    ])
-    expect(sentFilesInWindow(edge, DAY_START, DAY_END).map((f) => f.basename)).toEqual([
-      'dawn.html',
-    ])
-  })
-
-  it('says nothing when nothing was sent today', () => {
-    expect(sentFilesInWindow(files, DAY_END, DAY_END + 1000)).toEqual([])
-  })
-
-  // Disambiguation runs AFTER the filter, so a label describes the set shown.
-  it('names two same-named files apart only when both are on the day', () => {
-    const twins = normalizeSentFiles([
-      { fullPath: '/a/morning-post/report.html', timestamp: at(9) },
-      { fullPath: '/a/standalone/report.html', timestamp: at(10) },
-    ])
-    expect(sentFilesInWindow(twins, DAY_START, DAY_END).map((f) => f.basename)).toEqual([
-      'standalone/report.html',
-      'morning-post/report.html',
-    ])
-    const one = sentFilesInWindow(twins, at(9, 30), DAY_END)
-    expect(one.map((f) => f.basename)).toEqual(['report.html'])
   })
 })
 

@@ -13,7 +13,6 @@ defmodule ShuttleWeb.ActivityControllerTest do
   """
   use ExUnit.Case
   import Shuttle.Test.ApiConn
-  import Plug.Conn
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
@@ -64,313 +63,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   defp buckets!(path, from_ms, to_ms) do
-    {:ok, %{buckets: buckets}} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
+    {:ok, buckets} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
     buckets
-  end
-
-  defp spawns!(path, from_ms, to_ms, opts \\ []) do
-    {:ok, %{spawns: spawns}} =
-      Shuttle.Activity.window(from_ms, to_ms, [events_file: path] ++ opts)
-
-    spawns
-  end
-
-  # One end of a delegation, on `sid`'s queue.
-  defp spawn_event(type, tool, ts, overrides \\ %{}) do
-    event(
-      Map.merge(
-        %{"type" => type, "tool" => tool, "timestamp" => ts},
-        overrides
-      )
-    )
-  end
-
-  describe "Shuttle.Activity.window/3 — delegations as intervals" do
-    test "a closed pre/post pair on a spawn tool is one interval at its true length" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0 + 1_000),
-          spawn_event("post_tool_use", "Agent", @t0 + 8 * @minute)
-        ])
-
-      assert spawns!(path, @t0, @t0 + 20 * @minute) == [
-               %{
-                 s: @session,
-                 cwd: @cwd,
-                 tool: "Agent",
-                 start_ms: @t0 + 1_000,
-                 end_ms: @t0 + 8 * @minute,
-                 open: false,
-                 # Nothing named this delegation and nothing counted it: only a
-                 # workflow carries either, and both keys travel as `nil` so the
-                 # wire shape is one shape rather than two.
-                 label: nil,
-                 agents: nil
-               }
-             ]
-    end
-
-    test "an ordinary tool's pair is not a delegation" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Bash", @t0),
-          spawn_event("post_tool_use", "Bash", @t0 + @minute)
-        ])
-
-      assert spawns!(path, @t0, @t0 + 20 * @minute) == []
-    end
-
-    test "a fan-out holds every delegation aloft at once, oldest closing first" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0),
-          spawn_event("pre_tool_use", "Task", @t0 + 1_000),
-          spawn_event("pre_tool_use", "Agent", @t0 + 2_000),
-          spawn_event("post_tool_use", "Agent", @t0 + 5 * @minute),
-          spawn_event("post_tool_use", "Agent", @t0 + 9 * @minute)
-        ])
-
-      spawns = spawns!(path, @t0, @t0 + 60 * @minute)
-
-      assert Enum.map(spawns, &{&1.start_ms - @t0, &1.end_ms - @t0, &1.open}) == [
-               {0, 5 * @minute, false},
-               {1_000, 9 * @minute, false},
-               {2_000, 2_000 + 5 * @minute, true}
-             ]
-    end
-
-    test "two sessions hold independent queues" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0),
-          spawn_event("pre_tool_use", "Agent", @t0 + 1_000, %{
-            "sessionId" => "sess-2",
-            "tmuxSession" => @other_session
-          }),
-          spawn_event("post_tool_use", "Agent", @t0 + 3 * @minute, %{
-            "sessionId" => "sess-2",
-            "tmuxSession" => @other_session
-          })
-        ])
-
-      assert [first, second] = spawns!(path, @t0, @t0 + 60 * @minute)
-      assert %{s: @session, open: true} = first
-      assert %{s: @other_session, open: false, end_ms: end_ms} = second
-      assert end_ms == @t0 + 3 * @minute
-    end
-
-    test "an unclosed delegation is a stub, not a claim about how long it ran" do
-      path = write_fixture([spawn_event("pre_tool_use", "Agent", @t0)])
-
-      assert [%{open: true, start_ms: start_ms, end_ms: end_ms}] =
-               spawns!(path, @t0, @t0 + 6 * 60 * @minute)
-
-      assert start_ms == @t0
-      assert end_ms == @t0 + 5 * @minute
-    end
-
-    test "a session restart ends every delegation it was holding" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0),
-          spawn_event("pre_tool_use", "Agent", @t0 + 1_000),
-          spawn_event("session_start", nil, @t0 + 4 * @minute)
-        ])
-
-      spawns = spawns!(path, @t0, @t0 + 60 * @minute)
-      assert Enum.map(spawns, & &1.open) == [false, false]
-      assert Enum.map(spawns, & &1.end_ms) == [@t0 + 4 * @minute, @t0 + 4 * @minute]
-    end
-
-    test "an interval spanning the window is clipped to it, and one outside is dropped" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0 - 30 * @minute),
-          spawn_event("post_tool_use", "Agent", @t0 + 30 * @minute),
-          spawn_event("pre_tool_use", "Agent", @t0 + 300 * @minute, %{"sessionId" => "sess-3"}),
-          spawn_event("post_tool_use", "Agent", @t0 + 310 * @minute, %{"sessionId" => "sess-3"})
-        ])
-
-      assert [%{start_ms: start_ms, end_ms: end_ms}] = spawns!(path, @t0, @t0 + 60 * @minute)
-      assert start_ms == @t0
-      assert end_ms == @t0 + 30 * @minute
-    end
-
-    test "a delegation contributes no buckets of its own" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Agent", @t0),
-          spawn_event("post_tool_use", "Agent", @t0 + 3 * @minute)
-        ])
-
-      assert Enum.map(buckets!(path, @t0, @t0 + 60 * @minute), & &1.k) ==
-               ["agent", "agent", "agent", "agent"]
-    end
-  end
-
-  describe "Shuttle.Activity.window/3 — workflows, named and measured" do
-    # A workflow's own launch script, as the tool received it. The name is the
-    # first thing in the meta block and the only place the caller wrote it down.
-    defp workflow_event(ts, name, overrides \\ %{}) do
-      script = """
-      export const meta = {
-        name: '#{name}',
-        description: 'a fan-out',
-        phases: [{ title: 'sweep' }],
-      }
-      """
-
-      spawn_event(
-        "pre_tool_use",
-        "Workflow",
-        ts,
-        Map.merge(%{"toolInput" => %{"script" => script}}, overrides)
-      )
-    end
-
-    # A tmp stand-in for `~/.claude/projects`, cleaned up with the test.
-    defp tmp_projects do
-      root =
-        Path.join(System.tmp_dir!(), "shuttle_projects_#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(root)
-      on_exit(fn -> File.rm_rf(root) end)
-      root
-    end
-
-    # One `wf_*` directory as the harness leaves it: `agents` meta files stamped
-    # at the launch second, and one transcript each stamped at the fleet's last
-    # movement. Those two mtimes are the whole of what the reader consults.
-    defp write_workflow_dir(root, cwd, wf, opts) do
-      dir =
-        Path.join([root, String.replace(cwd, "/", "-"), "sess-1", "subagents", "workflows", wf])
-
-      File.mkdir_p!(dir)
-
-      for i <- 1..opts[:agents] do
-        meta = Path.join(dir, "agent-#{i}.meta.json")
-        File.write!(meta, "{}")
-        File.touch!(meta, opts[:launch_s])
-
-        log = Path.join(dir, "agent-#{i}.jsonl")
-        File.write!(log, "{}\n")
-        File.touch!(log, opts[:last_s])
-      end
-
-      dir
-    end
-
-    test "reads the workflow's name out of the script it was launched with" do
-      path = write_fixture([workflow_event(@t0 + 1_000, "felt-cleanup-audit")])
-
-      assert [%{tool: "Workflow", label: "felt-cleanup-audit"}] =
-               spawns!(path, @t0, @t0 + 60 * @minute, claude_projects_dir: tmp_projects())
-    end
-
-    test "a script with no meta block names nothing, and the interval survives" do
-      path =
-        write_fixture([
-          spawn_event("pre_tool_use", "Workflow", @t0 + 1_000, %{
-            "toolInput" => %{"truncated" => true}
-          })
-        ])
-
-      assert [%{tool: "Workflow", label: nil, agents: nil}] =
-               spawns!(path, @t0, @t0 + 60 * @minute, claude_projects_dir: tmp_projects())
-    end
-
-    test "counts the fleet and redraws the interval at the extent its transcripts show" do
-      root = tmp_projects()
-
-      write_workflow_dir(root, @cwd, "wf_abc",
-        agents: 12,
-        launch_s: div(@t0, 1_000) + 3,
-        last_s: div(@t0, 1_000) + 56 * 60
-      )
-
-      path = write_fixture([workflow_event(@t0 + 1_000, "felt-cleanup-audit")])
-
-      # The events alone would have drawn a five-minute stub, still open. The
-      # directory says twelve agents worked for fifty-six minutes and stopped.
-      assert [span] = spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
-      assert span.agents == 12
-      assert span.end_ms == @t0 + 56 * @minute
-      assert span.open == false
-    end
-
-    test "a fleet that moved a minute ago is still aloft" do
-      now = System.system_time(:millisecond)
-      start_ms = now - 60 * @minute
-      root = tmp_projects()
-
-      write_workflow_dir(root, @cwd, "wf_live",
-        agents: 3,
-        launch_s: div(start_ms, 1_000) + 2,
-        last_s: div(now, 1_000) - 60
-      )
-
-      path = write_fixture([workflow_event(start_ms, "still-going")])
-
-      assert [%{agents: 3, open: true}] =
-               spawns!(path, start_ms - @minute, now, claude_projects_dir: root)
-    end
-
-    test "matches each of a session's workflows to the directory launched with it" do
-      root = tmp_projects()
-
-      write_workflow_dir(root, @cwd, "wf_second",
-        agents: 31,
-        launch_s: div(@t0, 1_000) + 40 * 60 + 2,
-        last_s: div(@t0, 1_000) + 55 * 60
-      )
-
-      write_workflow_dir(root, @cwd, "wf_first",
-        agents: 122,
-        launch_s: div(@t0, 1_000) + 3,
-        last_s: div(@t0, 1_000) + 30 * 60
-      )
-
-      path =
-        write_fixture([
-          workflow_event(@t0 + 1_000, "felt-cleanup-audit"),
-          workflow_event(@t0 + 40 * @minute, "cleanup-review")
-        ])
-
-      # Proximity, not readdir order — `wf_second` is listed first above and
-      # still belongs to the later spawn.
-      assert [first, second] = spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
-      assert {first.label, first.agents} == {"felt-cleanup-audit", 122}
-      assert {second.label, second.agents} == {"cleanup-review", 31}
-    end
-
-    test "a directory whose launch is nowhere near the spawn is not claimed" do
-      root = tmp_projects()
-
-      write_workflow_dir(root, @cwd, "wf_yesterday",
-        agents: 9,
-        launch_s: div(@t0, 1_000) - 24 * 60 * 60,
-        last_s: div(@t0, 1_000) - 23 * 60 * 60
-      )
-
-      path = write_fixture([workflow_event(@t0 + 1_000, "unrelated")])
-
-      assert [%{agents: nil, open: true, end_ms: end_ms}] =
-               spawns!(path, @t0, @t0 + 120 * @minute, claude_projects_dir: root)
-
-      # Unenriched is unchanged: the five-minute stub, exactly as before.
-      assert end_ms == @t0 + 1_000 + 5 * @minute
-    end
-
-    test "no directory at all is today's behaviour, unchanged" do
-      path = write_fixture([workflow_event(@t0 + 1_000, "on-some-other-host")])
-
-      assert [%{label: "on-some-other-host", agents: nil, open: true, end_ms: end_ms}] =
-               spawns!(path, @t0, @t0 + 60 * @minute,
-                 claude_projects_dir: Path.join(System.tmp_dir!(), "shuttle_no_such_projects")
-               )
-
-      assert end_ms == @t0 + 1_000 + 5 * @minute
-    end
   end
 
   describe "Shuttle.Activity.window/3 — aggregation" do
@@ -654,19 +348,63 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   describe "Shuttle.Activity.window/3 — window and tolerance" do
-    test "both window bounds are inclusive and events outside are dropped" do
+    test "the window names whole minutes: both bounds inclusive, every bucket complete" do
       path =
         write_fixture([
           event(%{"timestamp" => @t0 - 1}),
           event(%{"timestamp" => @t0}),
           event(%{"timestamp" => @t0 + @minute}),
-          event(%{"timestamp" => @t0 + @minute + 1})
+          event(%{"timestamp" => @t0 + @minute + 1}),
+          event(%{"timestamp" => @t0 + 2 * @minute})
         ])
 
       buckets = buckets!(path, @t0, @t0 + @minute)
 
-      assert Enum.map(buckets, & &1.m) == [@t0, @t0 + @minute]
-      assert Enum.all?(buckets, &(&1.n == 1))
+      # The minute before and the minute after are out; the last minute is
+      # served whole, not cut at the bound's millisecond.
+      assert Enum.map(buckets, &{&1.m, &1.n}) == [{@t0, 1}, {@t0 + @minute, 2}]
+    end
+
+    test "bounds inside a minute select the same minutes, so the answer is the same" do
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0 + 10_000}),
+          event(%{"timestamp" => @t0 + @minute + 10_000}),
+          event(%{"timestamp" => @t0 + 2 * @minute + 10_000}),
+          event(%{"type" => "pre_tool_use", "timestamp" => @t0 + 3 * @minute}),
+          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 7 * @minute})
+        ])
+
+      aligned = buckets!(path, @t0 + @minute, @t0 + 5 * @minute)
+
+      # A partial first minute is not served (its start precedes from_ms); the
+      # upper bound's minute is served whole wherever inside it the bound falls.
+      assert buckets!(path, @t0 + 1, @t0 + 5 * @minute) == aligned
+      assert buckets!(path, @t0 + @minute - 1, @t0 + 5 * @minute + 59_999) == aligned
+      assert buckets!(path, @t0 + 30_000, @t0 + 5 * @minute + 12_345) == aligned
+
+      # Tool-interior fills are clipped to the same canonical minutes.
+      assert Enum.map(aligned, & &1.m) ==
+               Enum.map(1..5, &(@t0 + &1 * @minute))
+    end
+
+    test "canonical_window/2 ceils the start, floors the end to its last millisecond" do
+      assert Shuttle.Activity.canonical_window(@t0, @t0) == {@t0, @t0 + 59_999}
+
+      assert Shuttle.Activity.canonical_window(@t0 + 1, @t0 + 59_999) ==
+               {@t0 + @minute, @t0 + 59_999}
+
+      assert Shuttle.Activity.canonical_window(@t0 - 1, @t0 + @minute) ==
+               {@t0, @t0 + @minute + 59_999}
+
+      # Idempotent.
+      {from, to} = Shuttle.Activity.canonical_window(@t0 + 17, @t0 + 3 * @minute + 5)
+      assert Shuttle.Activity.canonical_window(from, to) == {from, to}
+    end
+
+    test "a window inside one minute serves nothing rather than a partial minute" do
+      path = write_fixture([event(%{"timestamp" => @t0 + 20_000})])
+      assert buckets!(path, @t0 + 10_000, @t0 + 30_000) == []
     end
 
     test "skips malformed lines, blank lines, and lines missing timestamp or type" do
@@ -687,10 +425,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
 
     test "a missing events file yields no buckets (no crash)" do
-      assert {:ok, %{buckets: buckets}} =
+      assert {:ok, []} =
                Shuttle.Activity.window(@t0, @t0 + @minute, events_file: "/no/such/events.jsonl")
-
-      assert buckets == []
     end
   end
 
@@ -797,7 +533,11 @@ defmodule ShuttleWeb.ActivityControllerTest do
             "sessionId" => "sess-b",
             "tmuxSession" => @other_session
           }),
-          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 4 * @minute, "sessionId" => "sess-a"})
+          event(%{
+            "type" => "post_tool_use",
+            "timestamp" => @t0 + 4 * @minute,
+            "sessionId" => "sess-a"
+          })
         ])
 
       buckets = buckets!(path, @t0, @t0 + 10 * @minute)
@@ -822,8 +562,16 @@ defmodule ShuttleWeb.ActivityControllerTest do
       after_post =
         write_fixture([
           event(%{"type" => "pre_tool_use", "timestamp" => @t0, "sessionId" => "sess-a"}),
-          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 3 * @minute, "sessionId" => "sess-a"}),
-          event(%{"type" => "subagent_stop", "timestamp" => @t0 + @minute, "sessionId" => "sess-b"})
+          event(%{
+            "type" => "post_tool_use",
+            "timestamp" => @t0 + 3 * @minute,
+            "sessionId" => "sess-a"
+          }),
+          event(%{
+            "type" => "subagent_stop",
+            "timestamp" => @t0 + @minute,
+            "sessionId" => "sess-b"
+          })
         ])
 
       for path <- [before_post, after_post] do
@@ -865,7 +613,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   describe "GET /api/v1/activity" do
-    test "200 with the host stamp, echoed bounds, and the buckets" do
+    test "200 with the host stamp, the canonical bounds, and the buckets" do
       path =
         write_fixture([
           event(%{"type" => "user_prompt_submit"}),
@@ -882,12 +630,11 @@ defmodule ShuttleWeb.ActivityControllerTest do
       assert json_response(conn, 200) == %{
                "host" => Shuttle.Poller.own_host_id(),
                "from_ms" => @t0,
-               "to_ms" => @t0 + @minute,
+               "to_ms" => @t0 + @minute + 59_999,
                "buckets" => [
                  %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "agent", "n" => 2},
                  %{"m" => @t0, "s" => @session, "cwd" => @cwd, "k" => "attention", "n" => 1}
-               ],
-               "spawns" => []
+               ]
              }
     end
 
@@ -946,5 +693,4 @@ defmodule ShuttleWeb.ActivityControllerTest do
       end)
     end)
   end
-
 end

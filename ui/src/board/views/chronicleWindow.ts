@@ -31,8 +31,8 @@ import { railBounds, shiftCivilDay } from './railTime.js'
 
 // ── Shape ────────────────────────────────────────────────────────────────────
 
-/** A contiguous run of civil days, inclusive at both ends. Not a window of
- *  TIME — DayView's `DayRange` is that, and the two must not be confused. */
+/** A contiguous run of civil days, inclusive at both ends — days, not a
+ *  window of instants (an `ActivityChunk` is that). */
 export interface DayRange {
   first: string
   last: string
@@ -59,9 +59,9 @@ export const FUTURE_BLOCK_DAYS = 14
  *  gesture usually costs exactly one request. */
 export const CHUNK_DAYS = 28
 
-/** Rounding applied to the live chunk's right edge. Coarser than the poll on
- *  purpose: an uncapped or per-poll `to` mints a fresh entry in the fetcher's
- *  memo every single poll, so the cache never hits and never evicts. */
+/** Rounding applied to the live chunk's right edge. A quantized `to` keeps
+ *  the live chunk one key between re-reads, and lets a re-read inside the same
+ *  quantum be answered with a 304 rather than a fresh body. */
 export const LIVE_QUANTUM_MS = 5 * 60_000
 
 // ── Civil-day arithmetic ─────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ export function planExtension(
 
 export interface ActivityChunk {
   /** Stable identity — the same span always produces the same key, however the
-   *  window grew to contain it. This is what makes the fetcher's memo hit. */
+   *  window grew to contain it. This is what makes a held chunk findable. */
   key: string
   /** First and last civil day the chunk covers. */
   first: string
@@ -192,7 +192,7 @@ export interface ActivityChunk {
  * window's own edges. That is the point: a window that grew left in 28-day
  * blocks and one that grew in dribs must agree about where chunk boundaries
  * fall, or the same days get refetched under a different key every time the
- * window changes shape, and the memo never hits.
+ * window changes shape.
  */
 export function chunkIndexOf(day: string): number {
   return Math.floor(daysBetween('1970-01-01', day) / CHUNK_DAYS)
@@ -213,12 +213,10 @@ export function chunkBounds(chunkIndex: number): { first: string; last: string }
  * is capped at now rounded UP to {@link LIVE_QUANTUM_MS}, so it re-keys at most
  * every five minutes, while a settled chunk's key never changes at all.
  *
- * A STABLE KEY IS NOT A KEPT ENTRY. TemporalData prunes — entries expire at
- * their TTL and are evicted oldest-first at a ceiling — so a settled chunk's
- * memo entry is gone a minute after it is written even though its key is
- * eternal. What makes a chunk cost one request per session is the CALLER's own
- * record of what it holds: ChronicleView keeps `fetchedChunks`, keyed the same
- * way. That record is load-bearing, not an optimization.
+ * A STABLE KEY IS NOT A KEPT ENTRY. TemporalData holds nothing once a request
+ * settles, so what makes a chunk cost one request per mount is the CALLER's
+ * own record of what it holds: `ChronicleFeeds` keeps its chunks keyed the
+ * same way. That record is load-bearing, not an optimization.
  *
  * Render from ALL of these chunks, reusing the buckets you already hold; use
  * your record only to decide which ones need a round trip. Build the bucket

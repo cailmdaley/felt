@@ -51,10 +51,11 @@ defmodule Shuttle.RemoteFiberRegistry do
   feeds. Two deliberate differences from that sibling:
 
     * **Restored rows are stale by construction.** Temporal restores
-      `last_polled_at` and lets time do the work — at its ~30s cadence a
-      restored entry is essentially always past the grace window. This
-      registry's window is `stale_multiplier × poll_interval` (~10s at the
-      defaults), so a quick daemon bounce would serve restored rows as *fresh*.
+      `last_polled_at` and lets time do the work: its staleness bound is
+      minutes wide and measures the age of the data, which a restore does not
+      change. This registry's window is `stale_multiplier × poll_interval`
+      (~10s at the defaults) and claims the owner was just observed, so a quick
+      daemon bounce would serve restored rows as *fresh*.
       An entry read from disk is last-known-good, not observed, so it carries
       `restored?: true`, which forces `stale?/2` regardless of the clock, and
       only a live success clears it. `last_polled_at` is restored unfaked, so

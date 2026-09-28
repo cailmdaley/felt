@@ -105,4 +105,5 @@ views as **join rung 0** — the structural pairing that replaces an inference.
   write their own.
 
 Both are served host-scoped (`/api/v1/sessions`, `/api/v1/commits`) with a
-cross-host `/composite` sibling fed by `Shuttle.RemoteTemporalRegistry`.
+cross-host `/composite` sibling. `Shuttle.RemoteTemporalRegistry` fetches a
+remote's copy when a composite asks for it, never on a timer.

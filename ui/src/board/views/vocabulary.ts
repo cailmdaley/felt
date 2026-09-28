@@ -7,8 +7,6 @@
  * owns its own shapes: the CSS behind these marks differs per view on purpose.
  */
 
-import type { DrawnKind } from './momentTip.js'
-
 // ── Obligations ──────────────────────────────────────────────────────────────
 
 /**
@@ -121,61 +119,6 @@ export function cardState(card: StateBearing): LifecycleState {
   }
   return 'draft'
 }
-
-// ── The activity key ─────────────────────────────────────────────────────────
-
-/**
- * What the activity curve's ink means, in words. One phrasing across the board:
- * Day and Week both draw the same curve and read from this list, so the same
- * mark is never glossed two ways.
- *
- * ONE ENTRY, because the curve is one claim: this is the machines' volume. It
- * used to be two — a colour scale walking from the agents' cobalt to a teal
- * that read your engagement — and the second pole is gone with the channel.
- * Your half of the day is the spine ({@link SPINE_KEY_LABEL}), which says the
- * same thing without asking a hue to carry it.
- *
- * The wire's kind `notify` is not here and draws nothing anywhere. A notify is
- * an idle nudge, not a state of the work; an agent truly blocked on you shows
- * as the DIP on a live lane, which no pigment improves on.
- */
-export const ACTIVITY_KEY_ITEMS: Array<{ kind: DrawnKind; label: string }> = [
-  { kind: 'agent', label: 'agents working' },
-]
-
-/**
- * A KEY THAT NEEDS NO EXPLAINING is the test this line finally passes.
- *
- * It used to end "— fainter in a burst", a parenthesis apologising for a
- * falloff the reader had already noticed and correctly objected to: a message
- * in a burst is not a fainter fact than a message on its own. The falloff is
- * typographic now (`spineWidths` narrows the nib and never the strength), so
- * there is nothing left to apologise for and the label says the one thing it
- * has always meant.
- */
-export const SPINE_KEY_LABEL = 'you'
-
-/**
- * The curve's height: the machines' volume, minute by minute.
- *
- * IT WAS "agent tool calls", AND THAT WAS NOT WHAT THE MOUND MEASURES. The
- * curve is weighted by the activity plane's per-minute `n`, which counts
- * harness HOOK EVENTS — a tool call's two ends are two of them, a session start
- * is one, and a minute filled in between a long call's ends is one regardless.
- * Naming the wash after tool calls made the legend a claim the ink could not
- * support, and the same wrong noun was on the hover slip beside a list of the
- * actual calls, where the two could be read against each other and seen to
- * disagree. The wash says the agent was busy and how heavily; what it RAN is
- * the slip's tool section, which counts what it lists. Week's key has said
- * `agents working` all along; this is Day's, agreeing.
- */
-export const MOUND_KEY_LABEL = 'agents working'
-
-/** The third mark, and the only one about a SPAN rather than a moment: the
- *  session's line on the ground and one rung per agent it sent out, each
- *  spanning the interval it was actually up. */
-export const ALOFT_KEY_LABEL = 'sessions and agents aloft'
-
 
 // ── Message tallies ──────────────────────────────────────────────────────────
 

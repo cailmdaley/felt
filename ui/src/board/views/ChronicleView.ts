@@ -1,5 +1,5 @@
 /**
- * ChronicleView (hotkey 4) — the long record: what was worked on, and for how
+ * ChronicleView (hotkey 2) — the long record: what was worked on, and for how
  * long.
  *
  * THE SHAPE. Days run left to right as calendar columns (28 back, 14 ahead);
@@ -21,7 +21,7 @@
  *
  * THE JOIN. An activity bucket knows a session, not a fiber; the session
  * ledger is what pairs the two, and it is the only thing consulted (`./join.js`
- * carries the whole of it, shared with Day and Week). THE PAGE DRAWS FIBER ROWS
+ * carries the whole of it). THE PAGE DRAWS FIBER ROWS
  * ONLY: a bucket the ledger cannot place is not drawn. This page is about
  * fibers, and a row named after a working directory would teach its unit
  * wrong.
@@ -32,7 +32,7 @@
  * same drag grips settle later. See {@link eraName} and `openEraComposer`.
  */
 
-import { normalizeFocusDate, registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
+import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 import { createViewEmptyState, createViewPage } from './ViewPage.js'
 import {
   buildJoinIndex,
@@ -54,7 +54,6 @@ import {
 } from './vocabulary.js'
 import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
 import {
-  buildSessionIndex,
   foldActiveMinutes,
   isOriginStale,
   staleOrigins,
@@ -62,6 +61,7 @@ import {
   type SessionPairing,
   type TemporalOrigins,
 } from './TemporalData.js'
+import { ChronicleFeeds } from './chronicleFeeds.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
 import {
@@ -73,7 +73,6 @@ import {
   railCivilDay,
 } from '../civilDay.js'
 import {
-  activityChunks,
   daysBetween,
   planExtension,
   windowOf,
@@ -134,16 +133,10 @@ const DAY_W_MAX_PX = 56
  * anchor and the window agree by construction rather than by coincidence.
  */
 const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
-// The now-quantization that used to live here moved to
-// `chronicleWindow.LIVE_QUANTUM_MS` when the fetch became chunked. Same reason
-// as before — TemporalData keys its TTL cache on the argument tuple, so a raw
-// `Date.now()` mints a fresh key every 15s poll — but it now applies ONLY to
-// the chunk containing now. Every settled chunk keeps one stable key forever,
-// which is what makes scrolling back through a year cost nothing twice.
 
 /**
- * The page speaks in 6am RAILS, not midnights — the same day-boundary Day and
- * Week use, so the three views never disagree about which day it is.
+ * The page speaks in 6am RAILS, not midnights — the same day-boundary the rest
+ * of the board uses, so no two surfaces disagree about which day it is.
  *
  * This matters for more than the seam. A rail is "work that runs past midnight
  * belongs to the day it started", so a 01:00 push is yesterday's — and if only
@@ -187,8 +180,8 @@ function boardOrigin(): string {
 /**
  * Place each activity bucket on the fiber the session ledger recorded for it.
  *
- * The ladder and its refusals live in `./join.js`, shared with Day and Week so
- * the three pages can never disagree about whose minute a minute was. Buckets
+ * The ladder and its refusals live in `./join.js`, one place that says whose
+ * minute a minute was. Buckets
  * that join nothing are dropped here: the chronicle has no row to draw them on.
  */
 export function attributeActivity(
@@ -639,7 +632,7 @@ export function rowDiffTotals(
 
 /** Everything the gutter's figures could read off a ledger, as one string —
  *  so a second commit landing inside the same window still repaints. */
-function ledgerDigest(ledger: LedgerNarration | undefined): string {
+function ledgerDigest(ledger: LedgerNarration | null): string {
   if (!ledger) return ''
   const parts: string[] = []
   for (const [cardId, fiber] of ledger.byCard) {
@@ -1139,24 +1132,22 @@ function colLeft(idx: number): string {
 class ChronicleView implements TemporalView {
   readonly id = 'chronicle' as const
   readonly title = 'Chronicle'
-  readonly hotkey = '4'
+  readonly hotkey = '2'
 
   private root: HTMLElement | null = null
   private body: HTMLElement | null = null
   private scroller: HTMLElement | null = null
   private ctx: ViewContext | null = null
 
-  /** Bumped on every load; a resolution from an older generation is discarded
-   *  so a slow fetch can never overwrite a newer render. */
-  private generation = 0
+  /** The temporal data this mount holds, and the cadence it is re-read on.
+   *  Replaced on unmount, so a fetch landing afterwards stores into an
+   *  instance nothing reads. */
+  private feeds = new ChronicleFeeds()
   private signature = ''
   private didAnchor = false
   /** The sticky month bearing in the corner cell, and what it currently says.
    *  Held so a scroll can repaint one word without touching the grid. */
   private monthEl: HTMLElement | null = null
-  /** The cursor value the scroll is currently anchored on, so a move re-anchors
-   *  while an unrelated refresh leaves the reader where they were. */
-  private anchoredOn: string | null = null
   /** Watches the page, not the scroller: the scroller's own width is set by the
    *  page, while its CONTENT width is what we change — observing the content
    *  side could feed back on itself. */
@@ -1219,8 +1210,6 @@ class ChronicleView implements TemporalView {
    * left it. Consumed once, then cleared.
    */
   private pendingScrollDelta = 0
-  /** Activity chunks already requested, by key — see chronicleWindow. */
-  private fetchedChunks = new Map<string, readonly ActivityBucket[]>()
   private autoScrollTimer: number | null = null
 
   /** The era being read. Non-null puts the face above the grid and dims every
@@ -1228,30 +1217,22 @@ class ChronicleView implements TemporalView {
   private scopedCycleId: string | null = null
   /** Intention lines, fetched once per cycle and kept for the mount. */
   private intentions = new Map<string, string>()
-  /** The scoped span's commit trail, keyed by `id:from:to` so a re-render does
-   *  not re-ask and a different span does. */
-  private lookback: { key: string; groups: NarrationGroup[] } | null = null
-  /** What the ledger says each row changed across the WHOLE rendered window —
-   *  the look-back's twin at the grain of the gutter rather than an era. Keyed
-   *  by the window's own bounds, so scrolling the window open re-asks and a
-   *  response that lands after the reader has moved on cannot paint. */
-  private windowLedger: { key: string; ledger: LedgerNarration } | null = null
-  /** The window key currently in flight, so a paint mid-fetch does not re-ask. */
-  private ledgerInFlight: string | null = null
+  /** The scoped span's commit trail. `span` is `id:from:to`; `key` adds the
+   *  sweep it was read on, so a re-render does not re-ask, a different span
+   *  does, and a new sweep re-reads the span it is showing. */
+  private lookback: { span: string; key: string; groups: NarrationGroup[] } | null = null
+  private lookbackInFlight: string | null = null
+  /** The drawn window's commit ledger joined onto the current cards — the
+   *  look-back's twin at the grain of the gutter rather than an era. Rebuilt
+   *  on every paint, so a card that lands on a poll picks up its commits
+   *  without a fetch. */
+  private windowLedger: LedgerNarration | null = null
   /** `rowDiffTotals` for the rows currently drawn — computed once per render
    *  and read by `buildRow`, so the gutter does no joining of its own. */
   private rowDiffs: Map<string, DiffTotal> = new Map()
   private onEsc: ((e: KeyboardEvent) => void) | null = null
   private autoScrollStep = 0
-  /** Join rung 0, rebuilt each load from the session ledger. */
-  private byTmux: ReadonlyMap<string, SessionPairing> = new Map()
-  /**
-   * Per-origin freshness, as the composites report it. Activity's block wins
-   * over the ledger's where they overlap — it is the feed the ink comes from.
-   * A window served entirely from the chunk cache carries no block, so the last
-   * one seen is kept rather than being read as "everything is fresh".
-   */
-  private activityOrigins: TemporalOrigins = {}
+  /** Per-origin freshness as of the last paint — see `ChronicleFeeds.origins`. */
   private origins: TemporalOrigins = {}
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -1280,7 +1261,10 @@ class ChronicleView implements TemporalView {
     // The head's right end. `titleRow` is `space-between` with an out-of-flow
     // centre, so a third child lands at the right margin without any of the
     // three moving the others.
-    page.titleRow.append(this.buildSearch(ctx))
+    const tools = document.createElement('div')
+    tools.className = 'chr-tools'
+    tools.append(this.buildRefresh(), this.buildSearch(ctx))
+    page.titleRow.append(tools)
     host.append(page.root)
 
     this.onEsc = (e: KeyboardEvent): void => {
@@ -1300,13 +1284,18 @@ class ChronicleView implements TemporalView {
     void this.load(ctx)
   }
 
+  /**
+   * A board poll. The cards move on every one and are repainted at once; the
+   * temporal feeds are re-read on their own cadence (see ./chronicleFeeds.ts),
+   * so most polls cost no request at all.
+   */
   refresh(ctx: ViewContext): void {
     this.ctx = ctx
     void this.load(ctx)
   }
 
   unmount(): void {
-    this.generation += 1
+    this.feeds = new ChronicleFeeds()
     this.teardownDraw?.()
     this.teardownDraw = null
     if (this.onEsc) document.removeEventListener('keydown', this.onEsc, true)
@@ -1314,8 +1303,8 @@ class ChronicleView implements TemporalView {
     this.scopedCycleId = null
     this.intentions.clear()
     this.lookback = null
+    this.lookbackInFlight = null
     this.windowLedger = null
-    this.ledgerInFlight = null
     this.stopAutoScroll()
     this.draft = null
     this.editing = false
@@ -1326,7 +1315,7 @@ class ChronicleView implements TemporalView {
     this.currentDays = []
     this.window = null
     this.pendingScrollDelta = 0
-    this.fetchedChunks = new Map()
+    this.origins = {}
     this.monthEl = null
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
@@ -1342,13 +1331,7 @@ class ChronicleView implements TemporalView {
     this.scroller = null
     this.ctx = null
     this.signature = ''
-    // The anchor is TWO fields — "have we scrolled yet" and "onto which cursor
-    // value" — and they only behave if they move together. Clearing one alone
-    // would leave the next visit believing it is anchored on a cursor from the
-    // last one, so they are cleared side by side. A view is a singleton, and
-    // unmount always runs before the next mount, so this is the only clear.
     this.didAnchor = false
-    this.anchoredOn = null
     this.dayWidthPx = 0
   }
 
@@ -1565,68 +1548,87 @@ class ChronicleView implements TemporalView {
     return [...scroller.querySelectorAll<HTMLElement>(`[data-fiber="${CSS.escape(cardId)}"]`)]
   }
 
-  /** One window fetch, then a signature check, then at most one DOM rebuild. */
-  private async load(ctx: ViewContext): Promise<void> {
-    const generation = (this.generation += 1)
+  /**
+   * Bring the held temporal data up to what the window needs, then paint.
+   * `force` re-reads every feed now rather than on the cadence.
+   *
+   * A load whose window was grown out from under it (a scroll extension while
+   * its fetches were out) does not paint: the extension's own load wants
+   * chunks this one never asked for, and paints once they land.
+   */
+  private async load(ctx: ViewContext, force = false): Promise<void> {
+    const feeds = this.feeds
+    const window = this.ensureWindow(Date.now())
+    await feeds.sync(ctx, window, { force })
+    if (feeds !== this.feeds || window !== this.window || !this.body) return
+    this.paint(this.ctx ?? ctx)
+  }
+
+  /** The day range the chronicle exists over — its own state once scrolling
+   *  has grown it; the constants only seed it. */
+  private ensureWindow(nowMs: number): DayRange {
+    const today = railCivilDay(nowMs)
+    this.window ??= windowOf(shiftCivilDay(today, -PAST_DAYS), shiftCivilDay(today, FUTURE_DAYS))
+    return this.window
+  }
+
+  /** Signature check, then at most one DOM rebuild — from held data only. */
+  private paint(ctx: ViewContext): void {
+    const window = this.window
+    if (!window) return
+    // A rebuild would tear out the half-drawn band, the naming input, or an
+    // open rename under the reader's cursor. The poll's data is not worth that;
+    // the next one lands 15s later and the gesture is over in seconds.
+    if (this.draft !== null || this.editing) return
     // Two different "now"s, and conflating them costs half a day of activity.
     // The COLUMNS are laid out around the current rail (noon-anchored, possibly
-    // yesterday's date before 6am); the FETCH still has to reach the real
-    // present, or everything since noon goes unrequested.
+    // yesterday's date before 6am); the activity reaches the real present as
+    // of the last sweep.
     const nowMs = Date.now()
     const today = railCivilDay(nowMs)
-    // The window is the chronicle's own state once scrolling has grown it; the
-    // constants only seed it.
-    const window = this.window ?? windowOf(shiftCivilDay(today, -PAST_DAYS), shiftCivilDay(today, FUTURE_DAYS))
-    this.window = window
     const days = buildTimelineDays(
       daysBetween(window.first, today),
       daysBetween(today, window.last),
       railDate(nowMs),
     )
+    const buckets = this.feeds.buckets(window)
+    this.origins = this.feeds.origins()
+    const commits = this.feeds.commits
+    this.windowLedger = commits
+      ? buildLedgerNarration(commits.records, ctx.cards, this.feeds.sessionIndex.bySession)
+      : null
 
-    // Activity comes in CHUNKS on a fixed grid rather than one moving window:
-    // a settled chunk keeps one cache key forever, so scrolling back through a
-    // year re-requests nothing it already holds. Only the chunk containing now
-    // carries the 5-minute quantization. See chronicleWindow.
-    const wanted = activityChunks(window, nowMs)
-    const fresh: TemporalOrigins = {}
-    const [chunkResults, sessions] = await Promise.all([
-      Promise.all(
-        wanted.map(async (chunk) => {
-          const held = this.fetchedChunks.get(chunk.key)
-          if (held) return [chunk.key, held] as const
-          const res = await ctx.activity(chunk.fromMs, chunk.toMs)
-          Object.assign(fresh, res.origins ?? {})
-          return [chunk.key, res.buckets] as const
-        }),
-      ),
-      // `sessions(0)` asks for the whole ledger with a constant argument, so
-      // the TTL memo holds one entry for it forever rather than minting a fresh
-      // key per poll the way a moving `since` would.
-      ctx.sessions(0),
-    ])
-    if (generation !== this.generation || !this.body) return
-    // Keep only what the current window wants, so a year of scrolling does not
-    // accumulate every chunk ever visited.
-    const keep = new Map<string, readonly ActivityBucket[]>()
-    for (const [key, buckets] of chunkResults) keep.set(key, buckets)
-    this.fetchedChunks = keep
-    const activity = { buckets: chunkResults.flatMap(([, buckets]) => buckets) }
-    this.byTmux = buildSessionIndex(sessions.records).byTmux
-    if (Object.keys(fresh).length > 0) this.activityOrigins = fresh
-    this.origins = { ...(sessions.origins ?? {}), ...this.activityOrigins }
-    // The gutter's line counts want the whole drawn window, not the scoped era
-    // the look-back reads. Asked once per window rather than once per paint.
-    void this.loadWindowLedger(ctx)
-    // A rebuild would tear out the half-drawn band, the naming input, or an
-    // open rename under the reader's cursor. The poll's data is not worth that;
-    // the next one lands 15s later and the gesture is over in seconds.
-    if (this.draft !== null || this.editing) return
-
-    const signature = this.signatureOf(days, activity.buckets, ctx)
+    const signature = this.signatureOf(days, buckets, ctx)
     if (signature === this.signature) return
     this.signature = signature
-    this.render(ctx, days, activity.buckets)
+    this.render(ctx, days, buckets)
+  }
+
+  /** Re-read everything now — the head's ↻. The board's own feed comes along,
+   *  so the cards and the temporal data land as one refresh. */
+  private refetch(): void {
+    const ctx = this.ctx
+    if (!ctx) return
+    ctx.requestRefresh()
+    void this.load(ctx, true)
+  }
+
+  /** The head's ↻: a glyph, spun once per press, and nothing else. */
+  private buildRefresh(): HTMLElement {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'chr-refresh'
+    btn.textContent = '↻'
+    btn.title = 'Re-read activity, sessions and commits'
+    btn.setAttribute('aria-label', 'Refresh the chronicle')
+    btn.addEventListener('click', () => {
+      btn.classList.remove('chr-refresh-spinning')
+      void btn.offsetWidth // restart the spin on a second press
+      btn.classList.add('chr-refresh-spinning')
+      this.refetch()
+    })
+    btn.addEventListener('animationend', () => btn.classList.remove('chr-refresh-spinning'))
+    return btn
   }
 
   /**
@@ -1654,18 +1656,15 @@ class ChronicleView implements TemporalView {
       days[0].iso,
       String(buckets.length),
       String(latest),
-      // The cursor is in here so a move made in another view re-anchors this
-      // page's scroll on arrival, rather than being skipped as "no change".
-      ctx.focusDate ?? '',
       `scope:${this.scopedCycleId ?? ''}`,
-      `ledger:${this.byTmux.size}`,
+      `ledger:${this.feeds.sessionIndex.byTmux.size}`,
       // A remote falling behind (or catching up) mutes or un-mutes whole rows.
       `stale:${staleOrigins(this.origins).join(',')}`,
       `look:${this.lookback?.key ?? ''}:${this.lookback?.groups.length ?? 0}`,
       // A ledger arrival has to repaint the gutter, and the totals themselves
       // move within one window as the day's commits land — so the sum rides
       // along, not just the key and the size.
-      `diff:${this.windowLedger?.key ?? ''}:${ledgerDigest(this.windowLedger?.ledger)}`,
+      `diff:${this.feeds.commits?.key ?? ''}:${ledgerDigest(this.windowLedger)}`,
       `intent:${this.scopedCycleId ? (this.intentions.get(this.scopedCycleId) ?? '') : ''}`,
       // hostLabel's last two rungs.
       response.feltHost,
@@ -1739,7 +1738,7 @@ class ChronicleView implements TemporalView {
     // ones the daemon has since confirmed — see `overlayDueEdits`.
     const { cards, confirmed } = overlayDueEdits(ctx.cards, this.dueEdits)
     for (const id of confirmed) this.dueEdits.delete(id)
-    const attribution = attributeActivity(buckets, cards, this.byTmux)
+    const attribution = attributeActivity(buckets, cards, this.feeds.sessionIndex.byTmux)
     const resolvedTodayIdx = todayIdx < 0 ? lastIdx : todayIdx
     const rows = buildRows(
       ctx.response,
@@ -1752,7 +1751,7 @@ class ChronicleView implements TemporalView {
     )
 
     // Joined once for the page, not once per row: the gutter only looks up.
-    this.rowDiffs = this.windowLedger ? rowDiffTotals(this.windowLedger.ledger, rows) : new Map()
+    this.rowDiffs = this.windowLedger ? rowDiffTotals(this.windowLedger, rows) : new Map()
 
     if (rows.length === 0) {
       body.append(createViewEmptyState('— no hand has passed this way —'))
@@ -1774,7 +1773,7 @@ class ChronicleView implements TemporalView {
     grid.style.gridTemplateRows =
       `var(--chr-head-h) repeat(${laneCount}, var(--chr-cycle-h)) repeat(${rows.length}, var(--chr-row-h))`
 
-    grid.append(this.buildCorner(rows.length), ...this.buildHead(days, ctx))
+    grid.append(this.buildCorner(rows.length), ...this.buildHead(days))
     grid.append(...this.buildWashes(days))
     grid.append(...this.buildCycleStrip(bands, laneCount, days, ctx))
     // Fiber rows start below the cycle strip.
@@ -1820,18 +1819,12 @@ class ChronicleView implements TemporalView {
     // The grid is new; the jump the reader made is not. Re-light it.
     this.paintFound()
 
-    // The cursor decides where the page opens. Null means today — re-resolved
-    // against the clock every render, never frozen at the day we first saw. A
-    // cursor pointing outside the window falls back to today rather than
-    // scrolling to an edge that means nothing.
-    const focus = normalizeFocusDate(ctx.focusDate)
-    const focusIdx = focus === null ? null : (dayIndex.get(focus) ?? null)
-    // Entering an era takes the grid to it — otherwise the face describes a
-    // span that is scrolled off the page it sits above.
-    const anchorIdx = era ? era.startIdx : (focusIdx ?? (todayIdx < 0 ? lastIdx : todayIdx))
-    const focusMoved = focus !== this.anchoredOn
+    // The page opens on today. Entering an era takes the grid to it instead —
+    // otherwise the face describes a span that is scrolled off the page it
+    // sits above.
+    const anchorIdx = era ? era.startIdx : todayIdx < 0 ? lastIdx : todayIdx
 
-    if (this.didAnchor && !focusMoved) {
+    if (this.didAnchor) {
       // `scrollLeft` was captured in pixels before the rebuild; a prepend has
       // since displaced every one of those pixels rightward. Adding the delta
       // HERE — rather than after the assignment — is what makes the extension
@@ -1844,7 +1837,6 @@ class ChronicleView implements TemporalView {
       // into the viewport; today anchors where the window's own split puts it.
       this.anchorDay(scroller, anchorIdx, era ? 0.1 : TODAY_ANCHOR)
     }
-    this.anchoredOn = focus
     this.pendingScrollDelta = 0
   }
 
@@ -2222,10 +2214,13 @@ class ChronicleView implements TemporalView {
     memoirHead.textContent = 'the look back'
     memoir.append(memoirHead)
 
-    const key = `${band.id}:${fromDay}:${toDay}`
+    const span = `${band.id}:${fromDay}:${toDay}`
+    const key = `${span}@${this.feeds.sweptAt}`
     if (future) {
       memoir.append(this.memoirEmpty('— not yet lived —'))
-    } else if (this.lookback?.key === key) {
+    } else if (this.lookback?.span === span) {
+      // A trail read on an earlier sweep stays up while the new one is asked.
+      if (this.lookback.key !== key) void this.loadLookback(span, key, fromMs, toMs, ctx)
       const groups = this.lookback.groups
       if (groups.length === 0 && closed.length === 0) {
         memoir.append(this.memoirEmpty('— the era left no trail —'))
@@ -2268,7 +2263,7 @@ class ChronicleView implements TemporalView {
       }
     } else {
       memoir.append(this.memoirEmpty('gathering the trail…'))
-      void this.loadLookback(key, fromMs, toMs, ctx)
+      void this.loadLookback(span, key, fromMs, toMs, ctx)
     }
     face.append(memoir)
 
@@ -2312,60 +2307,25 @@ class ChronicleView implements TemporalView {
     return false
   }
 
-  /**
-   * The rendered window's commit ledger, for the gutter's line counts.
-   *
-   * The look-back's guards, at the window's grain: keyed by the drawn bounds so
-   * one window is asked for once (`ledgerInFlight` covers the paints that
-   * happen while the request is out), and a response is dropped unless the
-   * window it was asked for is still the window on screen — a reader who has
-   * scrolled the range open must not see the old range's totals painted in.
-   */
-  private async loadWindowLedger(ctx: ViewContext): Promise<void> {
-    const range = this.window
-    if (!range) return
-    const fromDay = range.first
-    const toDay = range.last
-    const key = `${fromDay}:${toDay}`
-    if (this.windowLedger?.key === key || this.ledgerInFlight === key) return
-    this.ledgerInFlight = key
-    const fromMs = civilDayToLocalDate(fromDay)?.getTime() ?? 0
-    const toMs = (civilDayToLocalDate(toDay)?.getTime() ?? 0) + 86_399_000
-    const generation = this.generation
-    try {
-      const [commits, sessions] = await Promise.all([ctx.commits(fromMs, toMs), ctx.sessions(0)])
-      if (generation !== this.generation || !this.body) return
-      // The window moved while we were out; this answer is about a range the
-      // reader is no longer looking at. Drop it rather than paint it. `window`
-      // is the view's own state — updated by the scroll BEFORE the next load,
-      // which is exactly the moment this response has to be told it is stale.
-      const now = this.window
-      if (!now || `${now.first}:${now.last}` !== key) return
-      this.windowLedger = {
-        key,
-        ledger: buildLedgerNarration(
-          commits.records,
-          ctx.cards,
-          buildSessionIndex(sessions.records).bySession,
-        ),
-      }
-      this.repaintNow()
-    } finally {
-      if (this.ledgerInFlight === key) this.ledgerInFlight = null
-    }
-  }
-
+  /** The scoped era's commit trail, joined through the held session ledger. */
   private async loadLookback(
+    span: string,
     key: string,
     fromMs: number,
     toMs: number,
     ctx: ViewContext,
   ): Promise<void> {
-    const [commits, sessions] = await Promise.all([ctx.commits(fromMs, toMs), ctx.sessions(0)])
-    if (this.scopedCycleId === null) return
-    const ledger = buildLedgerNarration(commits.records, ctx.cards, buildSessionIndex(sessions.records).bySession)
-    this.lookback = { key, groups: groupNarration(ledger, ctx.cards) }
-    this.repaintNow()
+    if (this.lookbackInFlight === key) return
+    this.lookbackInFlight = key
+    try {
+      const commits = await ctx.commits(fromMs, toMs)
+      if (this.scopedCycleId === null) return
+      const ledger = buildLedgerNarration(commits.records, ctx.cards, this.feeds.sessionIndex.bySession)
+      this.lookback = { span, key, groups: groupNarration(ledger, ctx.cards) }
+      this.repaintNow()
+    } finally {
+      if (this.lookbackInFlight === key) this.lookbackInFlight = null
+    }
   }
 
   /** The intention line, read once from the cycle fiber's body. */
@@ -3308,12 +3268,9 @@ class ChronicleView implements TemporalView {
    * The key — a caption under the grid, in the margin, naming every mark the
    * page spends.
    *
-   * The activity band is glossed in Chronicle's own words rather than from
-   * `ACTIVITY_KEY_ITEMS`: that list names channels Day and Week draw apart,
-   * and this page draws one band for both. The GLYPHS are Chronicle's own
-   * marks in miniature, which is the
-   * rule the other two pages follow: a key teaches the marks you are actually
-   * looking at, and Chronicle's segment is a day, not an hour.
+   * The GLYPHS are Chronicle's own marks in miniature: a key teaches the
+   * marks you are actually looking at, and Chronicle's segment is a day, not
+   * an hour.
    *
    * One entry is conditional: a page with no cycles should not explain bands —
    * a key for marks that are not on the page is the noise a key exists to
@@ -3349,10 +3306,8 @@ class ChronicleView implements TemporalView {
     const ramp = document.createElement('span')
     ramp.className = 'chr-key-ramp'
     for (const step of [1, 2, 3]) ramp.append(swatch(`chr-key-seg chr-key-seg-${step}`))
-    // Chronicle does NOT read from ACTIVITY_KEY_ITEMS here: Day and Week draw
-    // the agents' volume as its own channel and gloss it "agents working",
-    // while this strip sums agent and steering minutes alike. One word for one
-    // mark is the rule, so the strip gets the word that is true of it.
+    // The strip sums agent and steering minutes alike, so it is glossed as use
+    // rather than as either party's work.
     key.append(item(ramp, 'periods of use (taller = busier; busiest spell in view sets the scale)'))
     // Hollow marks: what is owed, ahead of today. Nothing solid is drawn there.
     key.append(item(glyph('chr-key-glyph chr-key-due', MARK_GLYPH.due), 'due'))
@@ -3376,20 +3331,10 @@ class ChronicleView implements TemporalView {
     return key
   }
 
-  /**
-   * The almanac head. Each day is a real `<button>`, not a tinted div: clicking
-   * a column opens the Day view on that civil day, and making it a button is
-   * what gets that gesture keyboard focus, Enter/Space, and a name in the
-   * accessibility tree for free.
-   *
-   * `day.iso` is already the bare civil day the cursor wants — it comes from
-   * `buildTimelineDays`, which strides the local calendar. No Date round trip
-   * on the way out, so nothing can lose a day here.
-   */
-  private buildHead(days: TimelineDay[], ctx: ViewContext): HTMLElement[] {
+  /** The almanac head: one label per day column, named in full on hover. */
+  private buildHead(days: TimelineDay[]): HTMLElement[] {
     return days.map((day, i) => {
-      const cell = document.createElement('button')
-      cell.type = 'button'
+      const cell = document.createElement('div')
       const classes = ['chr-head']
       if (day.isToday) classes.push('chr-head-today')
       if (day.isPast) classes.push('chr-head-past')
@@ -3422,9 +3367,7 @@ class ChronicleView implements TemporalView {
         month: 'long',
         day: 'numeric',
       })
-      cell.title = `Open ${spoken ?? day.iso} in the Day view`
-      cell.setAttribute('aria-label', cell.title)
-      cell.addEventListener('click', () => ctx.switchView('day', { focusDate: day.iso }))
+      cell.title = spoken ?? day.iso
       return cell
     })
   }

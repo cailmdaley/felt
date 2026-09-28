@@ -292,11 +292,10 @@ sibling of `/transcript` because that receipt hashes the whole file.
 
 ## Temporal read plane
 
-The feeds behind the board's time views. The five host-scoped feeds each have a
-`/composite` fan-in sibling; `/sent-files` and `/moment` are the two exceptions,
-noted below the table, and neither has one. See
-[Telemetry and the ledgers](../shuttle/telemetry.md) for what writes the files
-underneath.
+The feeds behind Chronicle and the Board canvas. The four host-scoped feeds
+each have a `/composite` fan-in sibling; `/sent-files` is owner-routed instead
+and has none. See [Telemetry and the ledgers](../shuttle/telemetry.md) for what
+writes the files underneath.
 
 | Route | Reads | Serves |
 |---|---|---|
@@ -305,18 +304,18 @@ underneath.
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
-| `GET /spend` | ledger + transcripts | Per-session and per-fiber token rollups |
-| `GET /moment` | the harness transcript | The words a session spoke inside a window |
+
+`/activity` takes `from_ms` and `to_ms` and answers
+`{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes
+(buckets are minute-stamped, so the answer is the same), and its weak `ETag` is
+that window plus the `{mtime, size}` of `events.jsonl` and its rotated sibling
+— a repeat request over an unchanged file is a `304` with no rescan.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
 `If-None-Match` with a 304 (the forwarded remote leg does not, because
 `OriginRouter.forward_get/4` carries no headers either way).
-`/sent-files/all` is the host-scoped feed with the composite. `/moment` is host-*routed* rather than host-scoped: pass `host` to
-name the machine that ran the session, or omit it and the daemon consults its
-own session ledger. A transcript is one machine's file, not a feed to merge, so
-there is deliberately no `/moment/composite`. `/spend` has no board consumer
-today — the time views count minutes from activity buckets, not tokens.
+`/sent-files/all` is the host-scoped feed with the composite.
 
 The composite siblings are:
 
@@ -325,8 +324,16 @@ The composite siblings are:
 | `GET /activity/composite` | local feed + remote caches | Cross-host activity buckets with per-origin freshness |
 | `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
-| `GET /spend/composite` | local transcripts + remote caches | Cross-host token rollups |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
+
+A composite asks each remote for that feed when it is requested, not on a
+timer: a remote already asked within the last minute is served from the
+hub's cache, and one that does not answer within five seconds is served from
+its last good copy (kept on disk under `remote-temporal/<feed>/`). `origins`
+marks a remote `stale` once its last success for that feed is more than ten
+minutes old. Each composite carries a
+weak `ETag` over its local inputs and every remote's cached copy, and answers
+`304` when none of them has moved.
 
 ## The operator files
 

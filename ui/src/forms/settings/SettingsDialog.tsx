@@ -1,10 +1,10 @@
 /**
  * The settings sheet: one surface, five sections, any host in the fleet.
  *
- * ## Why an overlay and not a sixth tab
+ * ## Why an overlay and not a fourth tab
  *
- * The board's five tabs are windows onto the work — the Desk, three time
- * windows, and the shelf of what the work produced. Configuration is not work,
+ * The board's three tabs are windows onto the work — the Desk, the chronicle,
+ * and the shelf of what the work produced. Configuration is not work,
  * and giving it a tab would say it was. It is a sheet you open, change
  * something in, and dismiss, which is what `⌘,` has meant for thirty years.
  *

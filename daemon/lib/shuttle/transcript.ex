@@ -8,7 +8,7 @@ defmodule Shuttle.Transcript do
   or the harness-specific recipes.
   """
 
-  alias Shuttle.{HarnessPaths, Moment, Poller, SessionLedger}
+  alias Shuttle.{HarnessPaths, Poller, SessionLedger}
 
   @uuid ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
@@ -45,7 +45,7 @@ defmodule Shuttle.Transcript do
     ledger_path = Keyword.get(opts, :ledger_path, SessionLedger.default_path())
     ledger = SessionLedger.latest_for_session(session, path: ledger_path)
 
-    case Moment.transcript_path(session, opts) do
+    case path(session, opts) do
       path when is_binary(path) ->
         %{
           session: session,
@@ -78,6 +78,32 @@ defmodule Shuttle.Transcript do
           byte_count: nil,
           sha256: nil
         }
+    end
+  end
+
+  @doc """
+  The transcript file for `session`, or `nil` when no harness on this host
+  wrote one.
+
+  Each harness root is globbed in turn — Claude Code first, then pi, then Codex
+  — and the first regular-file hit wins; the later roots are not globbed. Pi
+  leads its basenames with an ISO stamp, while Codex fans out by local civil
+  date; the session id is UUID-validated before any of this, so it remains the
+  only caller-supplied pattern component.
+
+  Opts (for tests): `:root`, `:pi_root`, `:codex_root`.
+  """
+  @spec path(String.t(), keyword()) :: String.t() | nil
+  def path(session, opts \\ []) when is_binary(session) do
+    if valid_session?(session) do
+      [
+        Path.join(HarnessPaths.claude_projects_root(opts), "*/#{session}.jsonl"),
+        Path.join(HarnessPaths.pi_sessions_root(opts), "*/*#{session}.jsonl"),
+        HarnessPaths.codex_session_glob(session, opts)
+      ]
+      |> Enum.find_value(fn pattern ->
+        pattern |> Path.wildcard() |> Enum.find(&File.regular?/1)
+      end)
     end
   end
 

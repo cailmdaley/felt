@@ -2,9 +2,9 @@
  * The sent-files trail — what a worker pushed with `SendUserFile`.
  *
  * A leaf module: shape and pure transforms only, no DOM and no fetch, so the
- * detail panel (which opens the trail in its accordion) and the Day page
- * (which shows the day's slice of it as chips) read the same records the same
- * way rather than growing two dialects of "a sent file".
+ * detail panel (which opens the trail in its accordion) and the Board canvas
+ * (which lays the sends out as cards) read the same records the same way
+ * rather than growing two dialects of "a sent file".
  */
 
 /**
@@ -62,24 +62,6 @@ export function normalizeSentFiles(raw: unknown): SentFile[] {
  */
 export function sentFilesRevision(files: readonly SentFile[]): string {
   return JSON.stringify(files.map((file) => [file.fullPath, file.timestamp, file.sessionId ?? '']))
-}
-
-/**
- * The files this fiber sent inside one window — half-open `[startMs, endMs)`,
- * the same convention the day's rail uses, so a send at 06:00 belongs to the
- * day that opens then and not to the one that just closed. Newest-first, and
- * disambiguated AFTER the filter so the labels describe the set actually
- * shown (two same-named files, only one of them today's, reads as one plain
- * name).
- */
-export function sentFilesInWindow(
-  files: readonly SentFile[],
-  startMs: number,
-  endMs: number,
-): SentFile[] {
-  const inside = files.filter((f) => f.timestamp >= startMs && f.timestamp < endMs)
-  inside.sort((a, b) => b.timestamp - a.timestamp)
-  return disambiguateBasenames(inside)
 }
 
 /**

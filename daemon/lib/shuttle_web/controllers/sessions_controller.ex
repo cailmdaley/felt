@@ -28,7 +28,7 @@ defmodule ShuttleWeb.SessionsController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
+    only: [integer_param: 3, json_with_validator: 3, rotating_file_tokens: 1, bad_param: 2]
 
   alias Shuttle.{Poller, SessionLedger}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -40,11 +40,11 @@ defmodule ShuttleWeb.SessionsController do
   def show(conn, params) do
     case integer_param(params, "since_ms", default: 0) do
       {:ok, since_ms} ->
-        # The ledger is append-only, so `{mtime, size}` plus the bound decides
-        # the response byte-for-byte; a hub polling this over a tunnel 304s
-        # until a session is actually paired.
+        # The ledger is append-only and rotates by rename, so both files'
+        # `{mtime, size}` plus the params decide the response byte-for-byte; a
+        # hub asking over a tunnel 304s until a session is actually paired.
         uid = uid_param(params)
-        validator = {since_ms, uid, file_token(SessionLedger.default_path())}
+        validator = {since_ms, uid, ledger_tokens()}
 
         json_with_validator(conn, validator, fn ->
           %{
@@ -64,31 +64,33 @@ defmodule ShuttleWeb.SessionsController do
   Records already carry their own `host`, so this is a concatenation sorted by
   `at` (oldest first, like the single-host endpoint) rather than a stamping
   exercise. Remote records come from `Shuttle.RemoteTemporalRegistry`, which
-  caches each remote's whole ledger; the `since_ms` bound is applied here.
+  holds each remote's whole ledger; the `since_ms` bound is applied here.
   """
   def composite(conn, params) do
     case integer_param(params, "since_ms", default: 0) do
       {:ok, since_ms} ->
-        entries = Composite.remote_entries()
+        entries = Composite.remote_entries(:sessions)
+        uid = uid_param(params)
+        validator = Composite.validator({since_ms, uid, ledger_tokens()}, entries)
 
-        records =
-          (SessionLedger.read_since(since_ms) ++
-             Enum.flat_map(entries, fn {_name, entry} ->
-               Composite.in_window(entry.sessions, :at, since_ms, nil)
-             end))
-          |> for_uid(uid_param(params))
-          |> Enum.sort_by(&(Composite.item_ms(&1, :at) || 0))
+        json_with_validator(conn, validator, fn ->
+          records =
+            (SessionLedger.read_since(since_ms) ++
+               Enum.flat_map(entries, fn {_name, entry} ->
+                 Composite.in_window(entry.items, :at, since_ms, nil)
+               end))
+            |> for_uid(uid)
+            |> Enum.sort_by(&(Composite.item_ms(&1, :at) || 0))
 
-        json(conn, %{
-          host: Composite.own_host(),
-          records: records,
-          origins: Composite.origins(entries)
-        })
+          %{host: Composite.own_host(), records: records, origins: Composite.origins(entries)}
+        end)
 
       {:error, {:bad_param, key}} ->
         bad_param(conn, key)
     end
   end
+
+  defp ledger_tokens, do: rotating_file_tokens(SessionLedger.default_path())
 
   # `uid=` narrows either read to one fiber's pairings — what a card asks for.
   defp uid_param(params) do

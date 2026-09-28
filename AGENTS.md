@@ -9,9 +9,9 @@ One repo, one checkout, three artifacts:
   through the tracked `bin/shuttle` shim, the **dispatcher**.
   Polls the felt tree, launches one terminal or app worker per eligible fiber, exposes a
   `:4000` snapshot/control API and owns a per-worker watcher.
-- **the board UI** (TypeScript, `ui/`) — the **surface**. Five full-page views
-  over the felt tree and the fleet's session/commit ledgers (Desk kanban, Day,
-  Week, Chronicle, and the Board canvas of sent work), plus a settings sheet on
+- **the board UI** (TypeScript, `ui/`) — the **surface**. Three full-page views
+  over the felt tree and the fleet's session/commit ledgers (Desk kanban,
+  Chronicle, and the Board canvas of sent work), plus a settings sheet on
   `⌘,` over every host's operator files, served by the daemon at
   `http://127.0.0.1:4000/`.
 

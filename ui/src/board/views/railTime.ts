@@ -1,10 +1,9 @@
 /**
- * The rail arithmetic the three temporal views share.
+ * The rail arithmetic behind the chronicle's day columns.
  *
  * A RAIL is a day as the board means it: 6am to 6am, because work that runs
- * past midnight belongs to the day it started. Day, Week and Chronicle all
- * page, position and fold on this boundary, and three views disagreeing about
- * which day it is, is the defect this module exists to prevent.
+ * past midnight belongs to the day it started. Chronicle positions, folds and
+ * chunks its fetches on this boundary.
  *
  * Sits on top of `../civilDay.js`, which owns the civil-day/instant primitives
  * the whole board uses; what is here is the part only the temporal views need.
@@ -41,10 +40,6 @@ export function civilDayNoon(day: string | undefined): Date | undefined {
  * itself when it is not a civil day. Strides through the noon anchor, never by
  * adding 86_400_000 — that skips a day forward in spring and repeats one in
  * autumn.
- *
- * One definition, shared: Day's chevrons, Week's ±7 and Chronicle's window
- * arithmetic are the same rule and must not drift apart. They were four
- * copies, and one had already lost the noon anchor.
  */
 export function shiftCivilDay(day: string, delta: number): string {
   const d = civilDayNoon(day)
@@ -53,7 +48,7 @@ export function shiftCivilDay(day: string, delta: number): string {
   return isoDayLocal(d.getTime())
 }
 
-export interface RailBounds {
+interface RailBounds {
   /** Local 6am on the day — the rail's left edge. */
   startMs: number
   /** Local 6am on the NEXT calendar day — the right edge. 23h, 24h or 25h. */
@@ -66,7 +61,7 @@ export interface RailBounds {
  * positioned on it by time fraction stays in the right place.
  *
  * Unparseable input yields `{0, 0}`; a caller that needs a different fallback
- * must validate before calling (see DayView's `dayWindow`).
+ * must validate before calling.
  */
 export function railBounds(day: string): RailBounds {
   const start = civilDayNoon(day)

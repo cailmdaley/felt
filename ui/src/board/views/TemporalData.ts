@@ -1,5 +1,5 @@
 /**
- * TemporalData — the read plane the temporal views share.
+ * TemporalData — the read plane of the board's temporal feeds.
  *
  * Three daemon feeds, all read-only and all OPTIONAL:
  *
@@ -34,11 +34,11 @@
  * an EMPTY result rather than rejecting. A view therefore never needs a
  * try/catch; it renders "nothing here" for a daemon that can't answer.
  *
- * Responses are cached in memory for {@link TEMPORAL_TTL_MS}, keyed on the
- * argument tuple, and the cache holds the in-flight PROMISE — so the 15s board
- * poll driving several views' refresh() at once collapses to one request per
- * window. Empty (failed) results are cached the same way, which keeps an old
- * daemon from being re-probed every poll.
+ * Nothing is cached here. HOW OFTEN a feed is read is the caller's decision —
+ * Chronicle holds what it fetched and re-reads on its own cadence — so the
+ * fetchers only collapse IDENTICAL CONCURRENT requests onto one in-flight
+ * promise: the burst of callers asking for the same window in one pass costs
+ * one round trip, and the next ask after it settles goes to the daemon.
  */
 
 
@@ -63,41 +63,11 @@ export interface ActivityBucket {
   host?: string | null
 }
 
-/**
- * One DELEGATION, as an interval — a subagent aloft between two instants.
- *
- * It carries a bucket's identity (`s`, `cwd`, `host`) rather than a fiber's,
- * so it joins to a lane through exactly the same ledger a minute does. `open`
- * marks an interval whose close was never recorded: the daemon draws those as
- * a short stub, and its length is a mark that one STARTED, not a duration.
- */
-interface SpawnSpan {
-  s: string | null
-  cwd: string | null
-  tool: string
-  start_ms: number
-  end_ms: number
-  open: boolean
-  host?: string | null
-  /** What the delegation called itself — today only a workflow, out of its own
-   *  launch script. Null for an Agent or a Task, which nobody names. */
-  label?: string | null
-  /** How many agents a workflow spawned, counted off its own directory on the
-   *  host that ran it. Null when that directory could not be read — a remote
-   *  host, another harness, a cleaned disk — which is a fact about the LOOKUP
-   *  and never a claim that the workflow was empty. */
-  agents?: number | null
-}
-
 export interface ActivityResult {
   host: string
   from_ms: number
   to_ms: number
   buckets: ActivityBucket[]
-  /** The window's delegations. Empty on a daemon that predates them, which is
-   *  indistinguishable from a window in which nobody delegated — and both draw
-   *  nothing, which is the right answer to either. */
-  spawns: SpawnSpan[]
   origins?: TemporalOrigins
 }
 
@@ -261,97 +231,36 @@ export interface CommitsResult {
 }
 
 /** What the ledger can tell you about a session: whose work it was, and which
- *  harness session it was — the id the transcript is filed under, and so the
- *  one thing that can lead a hover from a minute to the words spoken in it. */
+ *  harness session it was — the id a commit record names it by. */
 export interface SessionPairing {
   fiber: string
   uid: string | null
   /** Harness session UUID (the ledger's `session`). */
   session: string
-  /** The daemon that recorded the pairing — where the transcript is on disk. */
+  /** The daemon that recorded the pairing. */
   host: string | null
-}
-
-/** Which REGISTER an excerpt belongs to: the conversation's own voices, a
- *  delegation going out, or its report coming back. */
-type MomentKind = 'prose' | 'spawn' | 'return'
-
-/**
- * One excerpt from a harness transcript: what was said, when, and in which
- * register. `name` is the agent's, on the two delegation kinds only.
- *
- * `kind` is OPTIONAL on the type and never absent from a parsed response: a
- * daemon older than the registers sends excerpts with no kind at all, and
- * those are prose — which is what every excerpt was before this existed. The
- * renderer therefore reads a missing kind as prose rather than branching.
- */
-export interface MomentExcerpt {
-  at_ms: number
-  role: 'user' | 'assistant' | 'notification'
-  text: string
-  kind?: MomentKind
-  name?: string | null
-}
-
-export interface MomentResult {
-  host: string
-  excerpts: MomentExcerpt[]
-  /**
-   * How many messages the window held, before `excerpts` was cut to the
-   * daemon's cap. Never smaller than `excerpts.length`.
-   *
-   * THE COUNT IS WHAT MAKES THE CUT SAYABLE. A slip shown six of fourteen
-   * messages can only be honest about it if it knows there were fourteen —
-   * without this it either states a number from somewhere else (the activity
-   * plane's per-minute event tally, which counts something different) or says
-   * nothing and lets six look like all of them. Absent from a daemon older
-   * than the field, which is read as "the list is all there was".
-   */
-  excerptCount?: number
-  /** One line per tool call (`"Bash — run the tests"`), oldest first, cut to
-   *  the daemon's cap for this fetch — six on a hover, all of them on a pin. */
-  toolLines?: string[]
-  /** How many calls the window held, before `toolLines` was cut. The number a
-   *  `×N` beside that list is allowed to say, and the only one. */
-  toolCount?: number
-  /** What ran, in the older single-string form — `"Bash ×2 · Read"`, or one
-   *  call per line. Superseded by `toolLines`/`toolCount` and read only from a
-   *  daemon that sends no `tool_lines`. */
-  tools?: string
-  /** Set when the words exist but not on the daemon that answered — a remote
-   *  that is unreachable says where they live rather than pretending they are
-   *  gone. */
-  note?: string
 }
 
 /**
  * The ledger, turned into the two lookups a view actually performs.
  *
- * `byTmux` is JOIN RUNG 0 for today's views: an `ActivityBucket`'s `s` is the
+ * `byTmux` is JOIN RUNG 0 for activity: an `ActivityBucket`'s `s` is the
  * TMUX SESSION NAME (see `Shuttle.Activity` — buckets key on
  * `{minute, tmuxSession, cwd, kind}`), so this is the map a bucket joins
  * through, and it beats every existing rung because it is a recorded fact
  * rather than an inference from a name.
  *
- * `bySession` is keyed by harness session UUID. Nothing on the activity path
- * carries one today; it is here for the transcript-side joins that will, and
- * it costs nothing to build in the same pass.
+ * `bySession` is keyed by harness session UUID — the key a commit record
+ * carries, and so the commit ledger's join. It costs nothing to build in the
+ * same pass.
  */
 export interface SessionIndex {
   byTmux: Map<string, SessionPairing>
   bySession: Map<string, SessionPairing>
 }
 
-/** Cache lifetime. Comfortably longer than the board's 15s poll, so a view
- *  that refreshes on every poll hits the network at most once a minute. */
-/** Below the 15s poll interval on purpose: the memo exists to dedupe the
- *  burst of identical fetches within one render pass (many lanes, one
- *  window), not to outlive the poll — a TTL above the poll cadence made
- *  the views feel dead (new activity took up to ~75s to appear). */
-const TEMPORAL_TTL_MS = 10_000
-
-/** The pair of fetchers a {@link import('./ViewRegistry.js').ViewContext}
- *  exposes to views. KanbanModal builds one per board; the harness injects a
+/** The fetchers a {@link import('./ViewRegistry.js').ViewContext} exposes to
+ *  views. KanbanModal builds one per board; the harness injects a
  *  mock implementation of the same shape. */
 export interface TemporalFetchers {
   activity(fromMs: number, toMs: number): Promise<ActivityResult>
@@ -369,86 +278,26 @@ export interface TemporalFetchers {
    * hook never saw.
    */
   commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
-  /**
-   * The words a session spoke inside a window — the hover's payload.
-   *
-   * `host` names the daemon whose disk holds the transcript; omit it and the
-   * serving daemon consults its own session ledger. Failure of any kind — a
-   * 4xx, a dead tunnel, a body that is not a moment — resolves to an EMPTY
-   * result rather than rejecting, because the caller is a tooltip and the
-   * honest fallback (the words were not recovered) is already its default.
-   *
-   * `full` asks the daemon not to truncate each excerpt — the fetch a PINNED
-   * tooltip makes. The cut is server-side, so a pinned slip that only relaxed
-   * its CSS would still be showing an ellipsis; the two fetches are cached
-   * separately, because they are two different answers about the same minute.
-   */
-  moment(
-    session: string,
-    fromMs: number,
-    toMs: number,
-    host?: string | null,
-    full?: boolean,
-  ): Promise<MomentResult>
-}
-
-interface CacheEntry<T> {
-  at: number
-  value: Promise<T>
 }
 
 /**
- * Hard ceiling on cached windows. The TTL sweep alone is not enough: a view
- * that re-asks on a moving clock mints a NEW key every time (Day's window
- * slides, Week's `cap` tracks now), so keys arrive faster than they expire and
- * the map grows without bound over a long-lived board. Fifty is far more than
- * the handful of windows the four views hold at once, and each entry is one
- * result, so the cap costs nothing in practice — it only stops the leak.
- */
-const TEMPORAL_CACHE_MAX = 50
-
-/**
- * Build the fetch pair for one daemon base. The cache is per-instance (not
- * module-global) so two boards — or a test and a board — never share state.
+ * Build the fetchers for one daemon base. The in-flight map is per-instance
+ * (not module-global) so two boards — or a test and a board — never share
+ * state.
  *
  * @param shuttleBase daemon origin, or '' for same-origin relative fetches.
  */
 export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
-  const cache = new Map<string, CacheEntry<unknown>>()
+  const inFlight = new Map<string, Promise<unknown>>()
 
-  /**
-   * Bound the map on every access: first drop what the TTL already made
-   * worthless, then, if the map is still at the ceiling, evict oldest-first.
-   *
-   * Oldest-first is insertion order, which `Map` preserves and which matches
-   * `at` order here because an entry is only ever written once (a refresh
-   * writes a NEW key — the windows themselves move). Evicting an entry whose
-   * promise is still in flight is harmless: the awaiting caller keeps its own
-   * reference and still resolves; a later caller simply re-requests. And a
-   * pending entry is by definition among the newest, so oldest-first reaches
-   * it last.
-   */
-  const prune = (now: number): void => {
-    for (const [key, entry] of cache) {
-      if (now - entry.at >= TEMPORAL_TTL_MS) cache.delete(key)
-    }
-    while (cache.size >= TEMPORAL_CACHE_MAX) {
-      const oldest = cache.keys().next()
-      if (oldest.done) break
-      cache.delete(oldest.value)
-    }
-  }
-
-  const memo = <T>(key: string, produce: () => Promise<T>): Promise<T> => {
-    const now = Date.now()
-    const hit = cache.get(key)
-    if (hit && now - hit.at < TEMPORAL_TTL_MS) return hit.value as Promise<T>
-    // Only prune on a MISS. A hit is the common path (the 15s poll re-asking
-    // for a window it already has) and does not grow the map, so it should not
-    // pay for a full sweep.
-    prune(now)
-    const value = produce()
-    cache.set(key, { at: now, value: value as Promise<unknown> })
+  /** One request per key at a time; the entry leaves the map as it settles,
+   *  so the next ask is a fresh read. The produced promise never rejects (every
+   *  feed degrades to empty), so `finally` is the only settle to hang on. */
+  const dedupe = <T>(key: string, produce: () => Promise<T>): Promise<T> => {
+    const held = inFlight.get(key)
+    if (held) return held as Promise<T>
+    const value = produce().finally(() => inFlight.delete(key))
+    inFlight.set(key, value)
     return value
   }
 
@@ -490,13 +339,12 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
 
   return {
     activity(fromMs: number, toMs: number): Promise<ActivityResult> {
-      return memo(`activity:${fromMs}:${toMs}`, async () => {
+      return dedupe(`activity:${fromMs}:${toMs}`, async () => {
         const empty: ActivityResult = {
           host: '',
           from_ms: fromMs,
           to_ms: toMs,
           buckets: [],
-          spawns: [],
           origins: {},
         }
         try {
@@ -520,7 +368,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
      * smaller than a busy hour of `/activity`.
      */
     sessions(sinceMs: number): Promise<SessionsResult> {
-      return memo(`sessions:${sinceMs}`, async () => {
+      return dedupe(`sessions:${sinceMs}`, async () => {
         const empty: SessionsResult = { host: '', records: [], origins: {} }
         try {
           const body = await readFeed(
@@ -536,7 +384,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
 
     /**
      * The commit ledger over a window. Same composite-first read as the other
-     * three feeds, same degrade-to-empty on every failure path.
+     * two feeds, same degrade-to-empty on every failure path.
      *
      * Keyed on the window, not on a constant like `sessions(0)`: this file
      * grows one line per COMMIT rather than one per session, so a whole-history
@@ -544,7 +392,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
      * which window it is drawing.
      */
     commits(sinceMs: number, untilMs: number): Promise<CommitsResult> {
-      return memo(`commits:${sinceMs}:${untilMs}`, async () => {
+      return dedupe(`commits:${sinceMs}:${untilMs}`, async () => {
         const empty: CommitsResult = { host: '', records: [], origins: {} }
         try {
           const body = await readFeed(
@@ -558,95 +406,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
         }
       })
     },
-
-    /**
-     * There is no `/moment/composite` and there should not be: a transcript is
-     * not a feed to merge but a file on ONE machine, so the request is aimed at
-     * that machine (`host`) and the serving daemon forwards it. Hence the plain
-     * `readJson` rather than `readFeed`.
-     */
-    moment(
-      session: string,
-      fromMs: number,
-      toMs: number,
-      host?: string | null,
-      full = false,
-    ): Promise<MomentResult> {
-      const where = host ?? ''
-      return memo(`moment:${where}:${session}:${fromMs}:${toMs}:${full ? 'full' : 'brief'}`, async () => {
-        const empty: MomentResult = { host: where, excerpts: [] }
-        if (!session) return empty
-        const query =
-          `session=${encodeURIComponent(session)}` +
-          `&from_ms=${encodeURIComponent(String(fromMs))}` +
-          `&to_ms=${encodeURIComponent(String(toMs))}` +
-          (where ? `&host=${encodeURIComponent(where)}` : '') +
-          (full ? '&full=1' : '')
-        try {
-          return parseMoment(await readJson(`${shuttleBase}/api/v1/moment?${query}`), empty)
-        } catch {
-          return empty
-        }
-      })
-    },
   }
-}
-
-const MOMENT_ROLES = new Set<MomentExcerpt['role']>(['user', 'assistant', 'notification'])
-
-const MOMENT_KINDS = new Set<MomentKind>(['prose', 'spawn', 'return'])
-
-/** Coerce a wire body into a MomentResult, dropping anything malformed. A
- *  half-excerpt is dropped rather than repaired: an excerpt with no text is
- *  not a quieter excerpt, it is not one. */
-export function parseMoment(body: unknown, fallback: MomentResult): MomentResult {
-  if (!isRecord(body)) return fallback
-  const host = typeof body.host === 'string' ? body.host : fallback.host
-  const raw = Array.isArray(body.excerpts) ? body.excerpts : []
-  const excerpts: MomentExcerpt[] = []
-  for (const entry of raw) {
-    if (!isRecord(entry)) continue
-    const value = text(entry.text)
-    const role = text(entry.role)
-    if (!value || !role || !MOMENT_ROLES.has(role as MomentExcerpt['role'])) continue
-    // A daemon that predates the registers sends no `kind`; its excerpts are
-    // prose, which is exactly what they always were.
-    const kind = text(entry.kind)
-    excerpts.push({
-      at_ms: typeof entry.at_ms === 'number' && Number.isFinite(entry.at_ms) ? entry.at_ms : 0,
-      role: role as MomentExcerpt['role'],
-      text: value,
-      kind: kind && MOMENT_KINDS.has(kind as MomentKind) ? (kind as MomentKind) : 'prose',
-      name: text(entry.name),
-    })
-  }
-  const note = text(body.note)
-  const tools = text(body.tools)
-  // The per-call lines, and the two totals. Each is optional on the wire and
-  // absent from a daemon that predates them — never defaulted to zero, which
-  // would be a claim that nothing ran rather than an admission that nobody
-  // said. A total below the list it counts is a daemon disagreeing with
-  // itself; the list wins, because the list is the thing that is actually here.
-  const toolLines = Array.isArray(body.tool_lines)
-    ? body.tool_lines.filter((line): line is string => typeof line === 'string')
-    : undefined
-  const toolCount = total(body.tool_count, toolLines?.length ?? 0)
-  const excerptCount = total(body.excerpt_count, excerpts.length)
-  return {
-    host,
-    excerpts,
-    ...(excerptCount === undefined ? {} : { excerptCount }),
-    ...(toolLines ? { toolLines } : {}),
-    ...(toolCount === undefined ? {} : { toolCount }),
-    ...(note ? { note } : {}),
-    ...(tools ? { tools } : {}),
-  }
-}
-
-/** A wire total, never allowed below the list it is a total OF. */
-function total(value: unknown, atLeast: number): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
-  return Math.max(Math.floor(value), atLeast)
 }
 
 const BUCKET_KINDS = new Set<ActivityBucket['k']>(['attention', 'notify', 'agent', 'reply'])
@@ -682,50 +442,8 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
     from_ms: typeof body.from_ms === 'number' ? body.from_ms : fallback.from_ms,
     to_ms: typeof body.to_ms === 'number' ? body.to_ms : fallback.to_ms,
     buckets,
-    spawns: parseSpawns(body.spawns, host),
     origins: parseOrigins(body.origins, host),
   }
-}
-
-/**
- * Coerce the wire's `spawns`, dropping anything malformed.
- *
- * An interval with no readable pair of instants is dropped rather than
- * repaired: half an interval is not a shorter delegation, it is not one. An
- * inverted pair is dropped for the same reason.
- */
-function parseSpawns(value: unknown, host: string): SpawnSpan[] {
-  if (!Array.isArray(value)) return []
-  const out: SpawnSpan[] = []
-  for (const entry of value) {
-    if (!isRecord(entry)) continue
-    const startMs = entry.start_ms
-    const endMs = entry.end_ms
-    const tool = text(entry.tool)
-    if (typeof startMs !== 'number' || !Number.isFinite(startMs)) continue
-    if (typeof endMs !== 'number' || !Number.isFinite(endMs)) continue
-    if (endMs < startMs || !tool) continue
-    out.push({
-      s: text(entry.s),
-      cwd: text(entry.cwd),
-      tool,
-      start_ms: startMs,
-      end_ms: endMs,
-      open: entry.open === true,
-      label: text(entry.label),
-      // A count that is not a positive whole number is not a fleet size. It is
-      // dropped rather than rounded: "unknown" is a state this field already
-      // has, and it is the honest one for a value nobody can read.
-      agents:
-        typeof entry.agents === 'number' && Number.isInteger(entry.agents) && entry.agents > 0
-          ? entry.agents
-          : null,
-      // Same rule the buckets follow: the composite stamps each item, the
-      // single-host route stamps only the response.
-      host: text(entry.host) ?? (host || null),
-    })
-  }
-  return out
 }
 
 /**

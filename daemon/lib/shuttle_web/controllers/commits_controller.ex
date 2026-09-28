@@ -25,7 +25,7 @@ defmodule ShuttleWeb.CommitsController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
+    only: [integer_param: 3, json_with_validator: 3, rotating_file_tokens: 1, bad_param: 2]
 
   alias Shuttle.{CommitLedger, Poller}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -33,10 +33,10 @@ defmodule ShuttleWeb.CommitsController do
   def show(conn, params) do
     with {:ok, since_ms} <- integer_param(params, "since_ms", default: 0),
          {:ok, until_ms} <- integer_param(params, "until_ms", default: nil) do
-      # The ledger is append-only, so `{mtime, size}` plus the bounds decides
-      # the response byte-for-byte; a hub polling this over a tunnel 304s until
-      # a commit is actually made.
-      validator = {since_ms, until_ms, file_token(CommitLedger.default_path())}
+      # The ledger is append-only and rotates by rename, so both files'
+      # `{mtime, size}` plus the bounds decide the response byte-for-byte; a
+      # hub asking over a tunnel 304s until a commit is actually made.
+      validator = {since_ms, until_ms, ledger_tokens()}
 
       json_with_validator(conn, validator, fn ->
         %{
@@ -54,33 +54,33 @@ defmodule ShuttleWeb.CommitsController do
   merged.
 
   Local records are stamped with this host's id; remote records come from
-  `Shuttle.RemoteTemporalRegistry`'s cache already stamped with the origin they
-  were fetched from, and the requested window is applied here. A remote that is
-  unreachable keeps contributing its last-good commits, marked stale in
-  `origins`.
+  `Shuttle.RemoteTemporalRegistry`, stamped with the origin they were fetched
+  from, and the requested window is applied here. A remote that is unreachable
+  keeps contributing its last-good commits, marked stale in `origins`.
   """
   def composite(conn, params) do
     with {:ok, since_ms} <- integer_param(params, "since_ms", default: 0),
          {:ok, until_ms} <- integer_param(params, "until_ms", default: nil) do
-      entries = Composite.remote_entries()
-      own = Composite.own_host()
+      entries = Composite.remote_entries(:commits)
+      validator = Composite.validator({since_ms, until_ms, ledger_tokens()}, entries)
 
-      records =
-        (CommitLedger.read_between(since_ms, until_ms)
-         |> Enum.map(&Composite.stamp(&1, own))) ++
-          Enum.flat_map(entries, fn {name, entry} ->
-            entry.commits
-            |> Composite.in_window(:at, since_ms, until_ms)
-            |> Enum.map(&Composite.stamp(&1, name))
-          end)
+      json_with_validator(conn, validator, fn ->
+        own = Composite.own_host()
 
-      json(conn, %{
-        host: own,
-        records: Enum.sort_by(records, &(Composite.item_ms(&1, :at) || 0)),
-        origins: Composite.origins(entries)
-      })
+        records =
+          Enum.map(CommitLedger.read_between(since_ms, until_ms), &Composite.stamp(&1, own)) ++
+            Composite.remote_items(entries, :at, since_ms, until_ms)
+
+        %{
+          host: own,
+          records: Enum.sort_by(records, &(Composite.item_ms(&1, :at) || 0)),
+          origins: Composite.origins(entries)
+        }
+      end)
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
   end
+
+  defp ledger_tokens, do: rotating_file_tokens(CommitLedger.default_path())
 end

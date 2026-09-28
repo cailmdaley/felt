@@ -19,11 +19,10 @@
  * that owns each grammar, and there is no felt here to ask, so a refusal is
  * the one behaviour this harness cannot stand in for.
  *
- * The temporal views (chronicle / day / week, hotkeys 2-4) are exercised the
- * same way: `MOCK_TEMPORAL` below injects a deterministic activity plane and
- * the two ledgers as the `TemporalFetchers` the board would otherwise build
- * over `/api/v1/activity`, `/sessions` and `/commits`, so the views render with
- * no daemon to serve them. The mock mirrors the FETCHER contract — one-minute
+ * Chronicle (hotkey 2) is exercised the same way: `MOCK_TEMPORAL` below
+ * injects a deterministic activity plane and the two ledgers as the
+ * `TemporalFetchers` the board would otherwise build over `/api/v1/activity`,
+ * `/sessions` and `/commits`, so the page renders with no daemon to serve it. The mock mirrors the FETCHER contract — one-minute
  * buckets, and ledger records over an instant range — so what the views are
  * exercised against is the shape they really receive.
  *
@@ -35,7 +34,6 @@
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
-import { parseMoment } from '../src/board/views/TemporalData.js'
 import type {
   ActivityBucket,
   ActivityResult,
@@ -109,14 +107,14 @@ const shuttleBlock = (kind = 'oneshot') => ({
 /**
  * A block whose worker runs somewhere OTHER than the host serving this page.
  *
- * LOAD-BEARING, do not normalize away. Day prints a lane's hostname only when
- * that lane ran elsewhere (`noteFor` suppresses a note matching the page host,
+ * LOAD-BEARING, do not normalize away. Chronicle prints a row's hostname only
+ * when that row ran elsewhere (a note matching the page host is suppressed,
  * because a hostname repeated on every row is a constant pretending to be
- * information), and Chronicle does the same with its host text. With every
- * mock fiber on `ada-workstation` — which is also the mock activity's `host` —
- * those paths could never fire, and a span that never renders looks exactly
- * like a span that is correctly suppressed. Exactly one fiber wears this so
- * both branches are visible at once: one lane with a hostname, the rest bare.
+ * information). With every mock fiber on `ada-workstation` — which is also the
+ * mock activity's `host` — that path could never fire, and a note that never
+ * renders looks exactly like a note that is correctly suppressed. Exactly one
+ * fiber wears this so both branches are visible at once: one row with a
+ * hostname, the rest bare.
  */
 /** The host serving this page — what every temporal result stamps itself with,
  *  and the note a lane suppresses because it is the page's constant. */
@@ -574,10 +572,9 @@ const FEED_SPAN_MS = 3 * 86_400_000
 /**
  * ONE MINUTE, matching the wire. `Shuttle.Activity` buckets on a fixed
  * `@minute_ms 60_000` grid, unconditionally — there is no coarser mode and no
- * width field on the wire for a client to infer from. A 5-minute mock grid
- * therefore under-reported every duration by the factor between the two: the
- * raster looked dense while Week's totals read "1h 52m · quiet", which is a
- * harness artifact that any glance would blame on Week.
+ * width field on the wire for a client to infer from. A coarser mock grid
+ * would under-report every duration by the factor between the two, a harness
+ * artifact that any glance would blame on the page.
  */
 const BUCKET_MS = 60_000
 
@@ -608,23 +605,16 @@ function seedFromString(text: string): number {
  * Who was working, and where. Each entry is one (session, cwd) actor the
  * generator draws from, `weight` copies of it in the draw pool.
  *
- * All three lane labels the views can draw are exercised here, because each is
- * a different factual claim and each has its own bug:
+ * Chronicle draws only work the session ledger (join rung 0) or a live
+ * worker's tmux name (rung 1) places on a fiber, so the pool mixes both kinds
+ * of claim with the work it must NOT draw:
  *
- *   JOINED      the first four. Their session names carry a real fiber's ULID,
- *               so a bucket lands in that fiber's named lane.
- *   UNMATCHED   `scratch-shuttle`. A session id that resolves to no fiber — a
- *               worker whose fiber the view could not name.
- *   INTERACTIVE the two with `s: null`. No session at all: a human at a shell.
- *
- * THE CWD IS LOAD-BEARING FOR THE UNMATCHED ONE. `joinBucketToCard` tries four
- * rungs for a session-bearing bucket, and the LAST is the cwd's tail against
- * fiber id segments. `scratch-shuttle` used to sit in `/home/ada/dev/felt`,
- * whose tail `felt` is a segment of `loom/felt/shuttle/agent-registry-audit` —
- * so it joined on that fourth rung and quietly rendered as a fifth fiber lane,
- * and `· unmatched` never appeared offline at all. Its directory must keep a
- * tail that matches NO fiber segment. `scratch` is safe; anything named after
- * a project in the mock feed is not.
+ *   JOINED      the first four, paired by the ledger — ink on their rows.
+ *   LEDGER-ONLY `pi-2f9c41`, whose tmux name names no fiber at all; only the
+ *               ledger can say whose work it was.
+ *   UNPAIRED    `scratch-shuttle`, a session the ledger never recorded, and
+ *               the two with `s: null` (a human at a shell). None of them may
+ *               conjure a row.
  */
 const MOCK_ACTORS: Array<{
   s: string | null
@@ -632,7 +622,7 @@ const MOCK_ACTORS: Array<{
   weight: number
   /** Which daemon produced these minutes. Omitted is this host. Exactly one
    *  actor runs elsewhere — the b-mode sweep, whose fiber already carries
-   *  `shuttleBlockElsewhere` — so the cross-host register (a lane's host note,
+   *  `shuttleBlockElsewhere` — so the cross-host register (a row's host note,
    *  and the stale gray of an unreachable remote) is visible offline. */
   host?: string
 }> = [
@@ -645,14 +635,8 @@ const MOCK_ACTORS: Array<{
   { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom', weight: 4 },
   { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid', weight: 3 },
   { s: sessionFor('work/admin/conference-travel-receipts', ULID.receipts), cwd: '/home/ada/loom', weight: 2 },
-  // LEDGER-ONLY: no ULID in the name, so every name-derived rung misses it —
-  // but the session ledger pairs it, so RUNG 0 resolves it to a fiber. The
-  // one actor that demonstrates what rung 0 can do that nothing else can.
-  // Its cwd tail (`photoz`) deliberately matches NO fiber segment: with a
-  // tail like `euclid` the cwd rung would guess a fiber, and guess the WRONG
-  // one (the ledger pairs this session to photoz-systematics, not triage).
-  // So today it reads `· unmatched`, and adopting rung 0 moves it into the
-  // photoz lane — a clean before/after rather than a silent mis-join.
+  // LEDGER-ONLY: nothing in the name says whose it is; the session ledger
+  // pairs it to photoz-systematics, and that pairing is the whole join.
   { s: 'pi-2f9c41', cwd: '/home/ada/work/photoz', weight: 3 },
   { s: 'scratch-shuttle', cwd: '/home/ada/scratch', weight: 3 },
   { s: null, cwd: '/home/ada/dev/felt', weight: 3 },
@@ -683,96 +667,21 @@ function hourShape(hour: number): { spans: number; minLen: number; maxLen: numbe
  * Work is generated as SPANS, not as independently sampled minutes. Sampling
  * each minute on its own would put a 60_000ms grid at whatever per-minute
  * probability you pick and produce uniform static — no runs to merge, no
- * shape for Day's wash to draw, and a duration total that is really just a
- * coin-flip count. Instead each absolute HOUR seeds its own handful of spans
+ * spells to draw, and a duration total that is really just a coin-flip
+ * count. Instead each absolute HOUR seeds its own handful of spans
  * (start minute, length, actor), and every minute inside a span emits a
  * bucket. Density lives in how much of the hour the spans cover, which is what
  * a duration total is actually measuring.
  *
  * Generation is keyed on ABSOLUTE hour index, never on the requested window,
- * so a view asking for one day and a view asking for a week agree exactly on
- * their overlap. Generation starts SPAN_LOOKBACK_HOURS early so a span that
+ * so two chunks — or a chunk and a wider window — agree exactly on their
+ * overlap. Generation starts SPAN_LOOKBACK_HOURS early so a span that
  * began before `fromMs` still contributes the minutes that fall inside it.
  *
- * Never emits a bucket later than page load: a view whose window runs to the
- * end of the civil day (DayView's is 06:00 → 06:00) would otherwise draw work
- * the machine has not done yet, and a rail that fills past the current minute
- * reads as a rendering bug.
+ * Never emits a bucket later than page load: a window that runs to the end of
+ * the civil day would otherwise draw work the machine has not done yet, and a
+ * row inked past today reads as a rendering bug.
  */
-/**
- * The window's DELEGATIONS — the `spawns` list the ladder draws as rungs.
- *
- * Fixed, not generated: the buckets are a texture and want a generator, but a
- * delegation is a specific claim about a specific fan-out, and the cases worth
- * having on screen are the ones the layout has to survive rather than a
- * plausible average. Four of them, each here for a reason:
- *
- *   A WORKFLOW AT SCALE — 117 agents over the better part of an hour, which is
- *   the case this channel was rebuilt for. Its rung used to draw as a
- *   fourteen-pixel dash, because a workflow's tool call returns seconds after
- *   it fans out and the events knew nothing else about it.
- *
- *   A SECOND, SMALLER WORKFLOW on another lane, so two counts are on the sheet
- *   at once and can be read against each other down the column.
- *
- *   A PLAIN AGENT overlapping the big one, because a rung with no count beside
- *   a rung with one is the comparison that says what the count MEANS — and
- *   because the overlap forces a second row, which is what puts a neighbour
- *   over the label and exercises the clearance test that suppresses it.
- *
- *   ONE STILL FLYING, ending at now: a measured extent that has not finished,
- *   which is a different mark from a delegation nobody saw return.
- */
-function mockSpawns(fromMs: number, toMs: number): ActivityResult['spawns'] {
-  const endMs = Math.min(toMs, now)
-  const ago = (minutes: number) => endMs - minutes * BUCKET_MS
-  const refine = { s: sessionFor('loom/email/morning-post/refine', ULID.refine), cwd: '/home/ada/loom' }
-  const triage = { s: sessionFor('work/euclid/euclid-github/triage', ULID.triage), cwd: '/home/ada/work/euclid' }
-
-  return [
-    {
-      ...refine,
-      tool: 'Workflow',
-      label: 'felt-cleanup-audit',
-      agents: 117,
-      start_ms: ago(300),
-      end_ms: ago(244),
-      open: false,
-      host: LOCAL_HOST,
-    },
-    {
-      ...refine,
-      tool: 'Agent',
-      label: null,
-      agents: null,
-      start_ms: ago(288),
-      end_ms: ago(261),
-      open: false,
-      host: LOCAL_HOST,
-    },
-    {
-      ...triage,
-      tool: 'Workflow',
-      label: 'board-day-ladder',
-      agents: 9,
-      start_ms: ago(170),
-      end_ms: ago(148),
-      open: false,
-      host: LOCAL_HOST,
-    },
-    {
-      ...refine,
-      tool: 'Workflow',
-      label: 'wide-sweep',
-      agents: 34,
-      start_ms: ago(41),
-      end_ms: endMs,
-      open: true,
-      host: LOCAL_HOST,
-    },
-  ].filter((span) => span.start_ms <= toMs && span.end_ms >= fromMs)
-}
-
 function mockActivity(fromMs: number, toMs: number): ActivityResult {
   // Keyed exactly as the daemon keys them — {minute, session, cwd, kind} — so
   // two spans by the same actor overlapping one minute MERGE into a single
@@ -836,7 +745,6 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
     from_ms: fromMs,
     to_ms: toMs,
     buckets,
-    spawns: mockSpawns(fromMs, toMs),
     // The remote's cache covers the trailing day only, and it has not answered
     // in an hour. Both are ordinary states, not errors: its lanes keep their
     // last-good ink in the stale register, and thin out before the window it
@@ -849,12 +757,11 @@ function mockActivity(fromMs: number, toMs: number): ActivityResult {
 }
 
 /**
- * felt's commit convention is `<slug>: what happened`, and the views group the
- * trail by that prefix, then match a group to a fiber lane whose id tail is the
- * same slug. So the first five prefixes here are REAL mock-fiber slugs (they
- * join to a lane), the next two are slugs no card answers to (they render as
- * their own entries), and the last carries no prefix at all — the trailing
- * unprefixed group, which sits last and muted.
+ * felt's commit convention is `<slug>: what happened`. Chronicle attributes a
+ * commit by its recorded session, never by the prefix, and strips the prefix
+ * off the prose it sets — so the subjects mix real mock-fiber slugs, slugs no
+ * card answers to, and one with no prefix at all, and every one of them must
+ * land on the fiber its SESSION names.
  */
 const MOCK_SUBJECTS = [
   'triage: sort the open issues by milestone',
@@ -925,21 +832,19 @@ function mockCommits(fromMs: number, toMs: number): CommitRecord[] {
 
 /**
  * The session ledger — `GET /api/v1/sessions`, one line per fiber↔session
- * pairing. Views join activity buckets through it as RUNG 0.
+ * pairing. Chronicle joins activity buckets through it as RUNG 0.
  *
  * Three things it deliberately covers:
  *
- *   · the four ULID-bearing sessions, where rung 0 AGREES with the existing
- *     name-derived rungs — adopting it must not move those lanes.
- *   · `pi-2f9c41`, whose tmux name carries no ULID at all. Every name-derived
- *     rung misses it; only the ledger can say whose work it was. This is the
- *     case that justifies rung 0 existing.
- *   · a HISTORICAL pairing (`sweep`) with no activity in any window the views
- *     ask for — the ledger outliving its session, which is the whole point of
- *     the file. It must not conjure a lane on its own.
+ *   · the four ULID-bearing sessions, the ordinary case.
+ *   · `pi-2f9c41`, whose tmux name names no fiber at all; only the ledger can
+ *     say whose work it was.
+ *   · a HISTORICAL pairing (`sweep`) with no activity in any window the page
+ *     asks for — the ledger outliving its session, which is the whole point of
+ *     the file. It must not conjure a row on its own.
  *
- * `scratch-shuttle` is deliberately ABSENT, so the `· unmatched` label keeps
- * its coverage. Pairing it here would resolve it and quietly delete that path.
+ * `scratch-shuttle` is deliberately ABSENT, so unpaired work stays exercised:
+ * pairing it here would resolve it and quietly delete that path.
  */
 const MOCK_SESSIONS: SessionRecord[] = [
   {
@@ -1078,123 +983,8 @@ const MOCK_ORIGINS: TemporalOrigins = {
   },
 }
 
-/**
- * `GET /api/v1/moment` — the words and the calls behind a mark.
- *
- * The harness had none of this until the slip started COUNTING what it shows.
- * Without a moment fetcher every hover fell through to an empty result, so the
- * offline board could exercise the rows and nothing below them — which is
- * exactly the half of the slip where the claim and the list have to agree.
- *
- * Seeded off the window's first minute, so the same mark answers identically
- * on every load. Three shapes, deliberately, because they are the three the
- * contract has to survive:
- *
- *   A FAN-OUT — thirty-odd calls in one minute, far past the six a hover may
- *   list. This is the case the whole redesign exists for: the slip must say
- *   "showing 6 of 34" and the pin must then produce all thirty-four.
- *
- *   A MINUTE THAT SPOKE AND ALSO WORKED — prose and calls together, which the
- *   client used to render as prose alone, having dropped the calls on the floor
- *   after the daemon sent both.
- *
- *   A MINUTE THAT RECORDED A REPLY AND HAS NO WORDS FOR IT — the `reply` bucket
- *   without an assistant excerpt, which is what "agent" over silence looked
- *   like. It must now read `agent replied · no text recorded`.
- */
-const MOCK_TOOLS = ['Bash', 'Read', 'Edit', 'Grep', 'Write', 'Glob', 'Agent']
-const MOCK_HINTS = [
-  'run the activity tests',
-  'git status --short',
-  'DayView.ts',
-  'momentTip.ts',
-  'kbn-tip-sechead',
-  'moment.ex',
-  'railScrub.ts',
-]
-
-/**
- * ONE ANSWER PER MARK, CUT TWO WAYS.
- *
- * The `full` flag may only decide how much of a window is RETURNED, never what
- * happened in it. An earlier draft of this mock generated its excerpts inside
- * the `full` branch, so a hover claiming "1 of 6 messages" was answered by a
- * pin with a single one — a disagreement invented by the harness, in exactly
- * the register the redesign exists to eliminate, and indistinguishable from a
- * real one on screen. Everything a mark says is therefore built once, off the
- * mark alone, and the two fetches differ only in where they slice it.
- */
-function mockWindow(session: string, fromMs: number) {
-  const minute = Math.floor(fromMs / BUCKET_MS)
-  const rng = seeded(minute ^ seedFromString(session))
-  const roll = rng()
-
-  // The call count. One mark in six is a fan-out — the case the pinned panel
-  // exists for; the rest are ordinary handfuls, and one in five did no tool
-  // work at all.
-  const toolCount =
-    roll < 0.17 ? 18 + Math.floor(rng() * 40) : roll < 0.8 ? 1 + Math.floor(rng() * 6) : 0
-  const lines: string[] = []
-  for (let i = 0; i < toolCount; i += 1) {
-    const tool = MOCK_TOOLS[Math.floor(rng() * MOCK_TOOLS.length)]
-    // A call with no description is ordinary and must stay drawable: a bare
-    // tool name is a real line, not a broken one.
-    lines.push(rng() < 0.72 ? `${tool} — ${MOCK_HINTS[Math.floor(rng() * MOCK_HINTS.length)]}` : tool)
-  }
-
-  const excerpts: Array<{ at_ms: number; role: string; text: string; kind: string }> = []
-  const spoke = rng()
-  if (spoke < 0.45) {
-    excerpts.push({
-      at_ms: fromMs + 4_000,
-      role: 'user',
-      text: 'take another pass at the **b-mode** null suite — the jackknife is still wide',
-      kind: 'prose',
-    })
-  }
-  // Deliberately independent of the `reply` bucket: a recorded turn whose words
-  // were not recovered is an ordinary state, and the slip has to say so —
-  // `agent replied · no text recorded` — rather than showing a bare label.
-  if (spoke > 0.3) {
-    const count = 1 + Math.floor(rng() * 11)
-    for (let i = 0; i < count; i += 1) {
-      excerpts.push({
-        at_ms: fromMs + 9_000 + i * 900,
-        role: 'assistant',
-        text:
-          `Rebuilt the null suite and re-ran it. The jackknife width is down to ` +
-          `\`1.4σ\`, which is inside the band we agreed. Details in the report; ` +
-          `the remaining scatter is the ${MOCK_HINTS[i % MOCK_HINTS.length]} pass.`,
-        kind: 'prose',
-      })
-    }
-  }
-  return { excerpts, lines, toolCount }
-}
-
-function mockMoment(session: string, fromMs: number, host?: string | null, full?: boolean) {
-  // A remote that cannot be read from here says WHERE the words are. The mock
-  // feed's foreign host is stale by construction, so this path is reachable
-  // offline — it is the one answer a slip must never mistake for "none".
-  if (host === FOREIGN_HOST) {
-    return { host: FOREIGN_HOST, excerpts: [], note: `words live on ${FOREIGN_HOST}` }
-  }
-  const { excerpts, lines, toolCount } = mockWindow(session, fromMs)
-  return {
-    host: LOCAL_HOST,
-    // The daemon cuts server-side; a hover gets a handful, a pin gets the lot.
-    // The COUNTS are of the window, never of the cut.
-    excerpts: excerpts.slice(0, full ? 200 : 6),
-    excerpt_count: excerpts.length,
-    tool_lines: lines.slice(0, full ? 400 : 6),
-    tool_count: toolCount,
-  }
-}
-
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
-  moment: (session, fromMs, _toMs, host, full) =>
-    Promise.resolve(parseMoment(mockMoment(session, fromMs, host, full), { host: LOCAL_HOST, excerpts: [] })),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
   sessions: (sinceMs) =>
     Promise.resolve({

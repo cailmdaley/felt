@@ -20,8 +20,8 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* One sheet. Bordered like `.kbn-section-timeline` so the four views read as
-   the same substrate the Desk's sections are laid on. */
+/* One sheet. Bordered like `.kbn-section-timeline` so the views read as the
+   same substrate the Desk's sections are laid on. */
 .kbn-view-page {
   flex: 1 1 auto;
   display: flex;
@@ -41,51 +41,6 @@
   padding-bottom: 6px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
   margin-bottom: 10px;
-  /* The anchor for `.kbn-view-titlecenter` below, and the thing it measures
-     itself against: the centre slot leaves the flow only while the row is wide
-     enough to hold all three parts without them meeting. */
-  position: relative;
-  container-type: inline-size;
-}
-
-/* THE MIDDLE OF THE HEAD, and the reason every view's head is the same height.
-   Out of flow on purpose: a page that has a line to state about itself states
-   it here, and no matter how long that line is the row stays exactly as tall as
-   the illuminated title. (Day's totals lived under its date and made Day's head
-   16px taller than Week's and Chronicle's, so switching views nudged the whole
-   sheet.) Centred on the SHEET rather than between its neighbours, so the line
-   holds still while the ends change width; capped and clipped so it truncates
-   before it can ever reach them.
-
-   `bottom` matches the row's own padding, which lands the slot's box on the
-   title's box bottom — the two sit on one baseline without being flex siblings.
-   Inert to the pointer: a statement, not a control. */
-.kbn-view-titlecenter {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-}
-/* A page with nothing to say in the middle costs nothing: Chronicle and the
-   Shelf never fill this, and an empty flex item would still take a share of a
-   `space-between` row and shift what those pages DO hang off their ends. */
-.kbn-view-titlecenter:empty { display: none; }
-
-/* TRUE CENTRING IS A LUXURY OF A WIDE ROW, and it is bought by leaving the
-   flow — which means nothing stops the slot from sliding under its neighbours
-   once they grow toward it. So it only leaves the flow while the row can afford
-   it. Narrower than this, the slot stays a flex item and `space-between` sets
-   it between the two ends: no longer on the sheet's midline, but never on top
-   of the date either, and still one line high. */
-@container (min-width: 1080px) {
-  .kbn-view-titlecenter {
-    position: absolute;
-    left: 50%;
-    bottom: 6px;
-    transform: translateX(-50%);
-    max-width: 42%;
-  }
 }
 
 /* Same hand as `.kbn-col-title` — EB Garamond small caps carrying the layered
@@ -110,90 +65,11 @@
   line-height: 0.82;
 }
 
-/* ── The head's shared furniture ─────────────────────────────────────────────
-   Day and Week wear the same head — a period's NAME between two chevrons on the
-   right, the period's FIGURES in the centre — and it used to be written twice,
-   in two files, at two sizes and two greys. Two spellings of one control is how
-   a board grows a dialect: the chevrons had different weights, and only one of
-   them had a focus ring. The shape lives here now; each view keeps only what is
-   genuinely its own (the size and hand of the name it steps through). */
-
-/* ‹ name › — the cluster that pages a period. Baseline-aligned, because the
-   name is type and the chevrons are marks beside it. */
-.kbn-view-nav {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-/* A chevron. Faded until approached, then ink — the board's quiet affordance,
-   no box and no fill. */
-.kbn-view-chev {
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0 2px;
-  cursor: pointer;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(20px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: #A89B83;
-  transition: color 90ms ease-out;
-}
-.kbn-view-chev:hover { color: #1B1611; }
-.kbn-view-chev:focus-visible {
-  outline: 1px dashed rgba(27, 22, 17, 0.45);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
-/* What the period cost — messages, agent hours, lines. The head's mono
-   register, and TABULAR: the line is re-read on every poll and mostly does not
-   change, so without fixed-width figures one changed digit slides the whole
-   line, which is twice as visible on a mark centred in the head. */
-.kbn-view-headfigures {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.05em;
-  color: #7A6F5C;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
 .kbn-view-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* ── The key ─────────────────────────────────────────────────────────────────
-   Day and Week both close their rails with a caption naming the marks above it,
-   and the caption is the same object on both pages: an italic-serif line of
-   marginalia, CENTRED on the plate it captions rather than pushed against its
-   right edge, where it read as something left over. Only the GLYPHS differ per
-   view — each page's own marks in miniature — so only they stay in the view
-   sheets; the block and its items are written once, here.
-
-   Wraps rather than clips on a narrow board, and every item is `nowrap`, so a
-   break can only land between glosses and never inside one. */
-.kbn-view-key {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 5px 13px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: #7A6F5C;
-}
-.kbn-view-key-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
 }
 
 /* Empty page — `.kbn-empty`'s marginal line, centered in the sheet rather
@@ -255,92 +131,16 @@
   font-style: normal;
 }
 
-/* ── The activity curve ──────────────────────────────────────────────────────
-   Day and Week draw the same mark, so it is styled once here rather than twice
-   in the two view sheets. The grammar and its parameters live in
-   `densityCurve.ts`; this file only says how heavy each of its three channels
-   is drawn.
-
-   The `<svg>` is stretched to its rail with `preserveAspectRatio="none"`, so
-   every stroke below carries `vector-effect: non-scaling-stroke` in the markup
-   — otherwise a rail a thousand pixels wide would smear a hairline spine into a
-   ten-pixel band while leaving the edge stroke a thread. */
-.kbn-curve {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-  /* The rails catch their own pointer and snap to the nearest real minute —
-     see `showBeatTip`. The ink must not intercept that, or a pointer over a
-     spine would be answering to a different element than a pointer beside it. */
-  pointer-events: none;
-  overflow: visible;
-}
-
-/* The body of the curve: a wash, never a block. One pigment, set in the markup
-   from `CURVE_AGENT` — the colour scale that used to walk across the rail is
-   gone, and with it the per-lane gradient each `<svg>` had to carry. Alpha low enough that two
-   lanes' worth of ink under a legend still reads as paper with pigment on it,
-   high enough that a dense hour is unmistakably darker than a quiet one. */
-.kbn-curve-area { opacity: 0.34; }
-
-/* The drawn edge — the mark that actually carries the colour. It is here
-   because a 34% wash is under 3:1 against parchment: the edge is a full-weight
-   1px line of the same gradient, so the pigment clears contrast on its own and
-   the wash beneath it is free to stay quiet. */
-.kbn-curve-edge {
-  stroke-width: 1;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  opacity: 0.9;
-}
-
-/* A message from you. CINNABAR over everything: on this board cinnabar is the
-   pigment of attention demanded, and a message of yours is the one event on the
-   rail that was addressed to somebody. It clears the parchment on its own
-   (4.9:1) and reads ΔE 25 against the curve's cobalt, so the two channels can
-   never be confused for one another.
-
-   It was iron gall, which is higher contrast still — and that was the problem:
-   iron gall is also every rule, bullet, gridline and hairline on the page, so a
-   spine read as a piece of chrome that happened to stand up. A hue that appears
-   nowhere else in the rails is what makes the mark legible AS a mark.
-
-   2px, not the hairline it started as. A spine no longer runs the full height
-   of the row — it rises to the curve's own height at that minute (see
-   `spineHeights`) — and a half-height hairline was a thing you had to go
-   looking for. Twice the width buys back at a glance what the shorter mark
-   gave up, and lands the mark on the 8px-target side of hoverable besides.
-   This width is now the WHOLE of findability inside a mound: the spine stops
-   exactly at the curve's height and no longer clears it by an accent, so what
-   makes the tip catch the eye is cinnabar-over-cobalt drawn last, at 2px, and
-   nothing about standing taller than the work it annotates.
-
-   EVERY SPINE IS AT FULL STRENGTH. There is no opacity channel here at all —
-   alpha on this board means uncertainty, and a message you sent is not an
-   uncertain thing. A crowd is rationed typographically instead: the WIDTH is
-   set per spine in the markup (see `spineWidths`), so a lone message draws a
-   full 2-unit nib and a burst draws hairlines that read as texture. */
-.kbn-curve-spine {
-  stroke: var(--curve-spine);
-  stroke-linecap: butt;
-}
-
-/* Declared on the view host so both sheets and both keys read one value. */
-.kbn-view-page { --curve-spine: #BC4538; }
-
 /* ── The head on a phone ─────────────────────────────────────────────────────
    `@media (max-width: 700px)` is the board's one mobile threshold (see
-   `../mobile.ts`). At that width the three-part head cannot hold: the middle
-   and the ends squeeze the illuminated title until the dropcap breaks from its
-   own word — "D" over "AY" — which is the one thing on the page that must
-   never happen, the cap being a letter of the word and not an ornament.
+   `../mobile.ts`). At that width the view's controls squeeze the illuminated
+   title until the dropcap breaks from its own word, which is the one thing on
+   the page that must never happen, the cap being a letter of the word and not
+   an ornament.
 
    So the head stops being a row and becomes a small stack. The title takes a
-   full-width line of its own and never wraps; whatever the page hangs in the
-   centre takes the next line, full width; the view's own controls take the
-   line after that. Nothing is squeezed because nothing shares a line with
+   full-width line of its own and never wraps; the view's own controls take the
+   line after it. Nothing is squeezed because nothing shares a line with
    anything it could squeeze. Desktop (≥701px) is untouched. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-view-page { padding: 8px 10px 10px; }
@@ -355,32 +155,4 @@
     flex: 0 0 100%;
     white-space: nowrap;
   }
-  /* No longer the middle of anything — a full line under the title, reading
-     from the left like the marginalia it is. */
-  .kbn-view-titlecenter {
-    flex: 1 1 100%;
-    max-width: 100%;
-    text-overflow: clip;
-  }
-  /* The figures line is `nowrap` on a wide head so its dots never break a
-     clause; on a phone that made it a sideways-scrolling strip with the
-     diffstat hanging off the sheet, which is a line you have to go looking
-     for. Two printed lines beat one hidden one — it wraps between clauses
-     (each clause is `nowrap` in its own right, so a break can only land on a
-     separator). */
-  .kbn-view-titlecenter,
-  .kbn-view-headfigures { white-space: normal; }
-  /* The controls wrap onto the line beneath, and the period's name keeps its
-     chevrons beside it rather than breaking mid-phrase. */
-  .kbn-view-nav { white-space: nowrap; }
-
-  /* The key's glosses are `nowrap` so a break can never land inside one — but
-     Day's gesture gloss is a whole sentence, and one unbreakable 460px item
-     was what forced the rail column wider than the phone. A sentence is not a
-     gloss; on a narrow page it is allowed to wrap like the prose it is. */
-  .kbn-view-key {
-    gap: 4px 11px;
-    text-align: center;
-  }
-  .kbn-view-key-item { white-space: normal; }
 }

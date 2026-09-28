@@ -262,8 +262,8 @@ describe('folding buckets into civil days', () => {
     expectPinnedZone()
   })
 
-  // The page groups by 6am RAILS, not midnights, so that it agrees with Day and
-  // Week about which day a piece of work belongs to. Both halves of the old
+  // The page groups by 6am RAILS, not midnights, so that it agrees with the
+  // rest of the board about which day a piece of work belongs to. Both halves of the old
   // UTC-floor experiment still bite — the late-evening bucket is already
   // tomorrow in UTC west of Greenwich, the small-hours one still yesterday east
   // of it — and the rail adds its own claim on top: 01:00 is the night before.
@@ -596,8 +596,8 @@ describe('stacking overlapping cycles into lanes', () => {
 
 describe('which day the page calls today', () => {
   it('is the rail that is running, not the calendar date, before 6am', () => {
-    // 01:00 — Day and Week are still on yesterday's rail, and so must this page
-    // be, or clicking its today header opens a rail that has not started.
+    // 01:00 — the board is still on yesterday's rail, and so must this page
+    // be, or the night's work inks a column past its own today line.
     const smallHours = new Date(2026, 6, 15, 1, 0, 0).getTime()
     expect(isoDayLocal(railDate(smallHours).getTime())).toBe('2026-07-14')
   })

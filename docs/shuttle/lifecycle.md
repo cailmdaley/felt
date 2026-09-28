@@ -106,27 +106,20 @@ start fresh.
 
 ## The board
 
-The daemon serves a board at `http://127.0.0.1:4000/`: one page, five full-page
+The daemon serves a board at `http://127.0.0.1:4000/`: one page, three full-page
 views behind a hotkey row.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now — the kanban |
-| `2` | **Day** | Where today's hours went, fiber by fiber |
-| `3` | **Week** | Which days had work in them |
-| `4` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
-| `5` | **Board** | What the work produced — every file a worker sent, rendered on a canvas |
-
-The first four run from the tightest window outward, so the strip reads as a
-zoom, and they share one temporal cursor: page Day back to Tuesday, press `3`,
-and Week opens on the week containing Tuesday. The fifth is not a time window
-at all, which is why it sits after the zoom.
+| `2` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
+| `3` | **Board** | What the work produced — every file a worker sent, rendered on a canvas |
 
 The board holds no state of its own. It views the same fibers the daemon polls,
 plus tmux liveness and the host-local [ledgers](telemetry.md).
 
-[The board](board.md) covers all five in depth — column and horizon rules, the
-snooze gesture, Attach, the two-pigment activity grammar, and how to build the
+[The board](board.md) covers all three in depth — column and horizon rules, the
+snooze gesture, Attach, how Chronicle fetches its record, and how to build the
 bundle.
 
 ## Dispatch eligibility

@@ -132,11 +132,9 @@ defmodule Shuttle.Application do
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       Shuttle.Meeting.Control,
-      # Owns the ETS table the per-session token folds are cached in. Pure
-      # cache: a restart costs one re-read per session, never a wrong number.
-      Shuttle.TokenSpend,
       # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
-      # each transcript's {mtime, size}. Pure cache, like the one above.
+      # each transcript's {mtime, size}. Pure cache: a restart costs one
+      # re-read per session, never a wrong answer.
       Shuttle.SessionLink,
       ShuttleWeb.PeerGateThrottle
     ]

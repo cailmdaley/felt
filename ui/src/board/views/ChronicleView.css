@@ -12,8 +12,7 @@
    Palette is KanbanModal.css's, and the SEMANTIC pigments come from its tokens
    rather than as hexes copied down here — `--kbn-owed` (gold, now and what is
    due), `--kbn-tempered` (verdigris, the verdict mark), and `--kbn-agent`
-   (cobalt, the work spells — the same blue Day's wash and Week's spines
-   speak, so the temporal views agree about what blue means; the spell still
+   (cobalt, the work spells — the board's blue for work being done; the spell
    sums agent and human minutes into one "work happened" claim). Copying the
    hexes is how this page drifted before. Structural inks stay literal:
    iron-gall #1B1611, muted #7A6F5C, faded #A89B83, parchment #EDE2CE. */
@@ -109,12 +108,7 @@
 
 /* Weekday small-caps over an oldstyle numeral — the timeline ribbon's day
    vocabulary, stacked instead of inline because a chronicle column is a
-   quarter the width of a ribbon column.
-
-   It is a <button>: clicking a day opens the Day view on it. The affordance is
-   deliberately quiet — no chrome at rest, just a warm wash and a darkened
-   numeral under the cursor. A whole row of buttons that each announced
-   themselves would turn the almanac into a toolbar. */
+   quarter the width of a ribbon column. */
 .chr-head {
   position: sticky;
   top: 0;
@@ -124,31 +118,11 @@
   align-items: center;
   justify-content: flex-end;
   gap: 0;
-  margin: 0;
   padding: 0 0 3px;
   line-height: 1;
-  font: inherit;
-  color: inherit;
   background: #EDE2CE;
-  border: 0;
   border-right: 0.5px solid rgba(122, 111, 92, 0.16);
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
-  transition: background-color 90ms ease-out;
-}
-.chr-head:hover {
-  background: rgba(196, 147, 51, 0.20);
-}
-.chr-head:hover .chr-head-num { color: #1B1611; }
-.chr-head:hover .chr-head-dow { color: #7A6F5C; }
-/* Keyboard focus gets a real ring — the hover wash alone is too quiet to
-   locate when you are tabbing rather than pointing. */
-.chr-head:focus-visible {
-  outline: 1.5px solid #9A7B35;
-  outline-offset: -2px;
-  background: rgba(196, 147, 51, 0.20);
 }
 .chr-head-past { background: #EAE0CB; }
 /* A month opens with a rule of its own — heavier than the week's, on the LEFT
@@ -953,10 +927,9 @@ button.chr-name:hover {
    sat. Left edge and width are the clock (6am→6am across the column); height
    is the spell's work, log-scaled between 4px and 24px by the TS side
    (spellHeight), so geometry lives inline and only pigment lives here.
-   COBALT — the board's one ink for work being done, the same family Day's
-   wash and Week's spines speak — so the three temporal views agree about what
-   blue means. Chronicle still sums agent and steering minutes into one claim;
-   at strip scale the tooltip's clock, not a second color, carries the rest. */
+   COBALT — the board's one ink for work being done. Chronicle sums agent and
+   steering minutes into one claim; at strip scale the tooltip's clock, not a
+   second color, carries the rest. */
 .chr-seg {
   position: absolute;
   top: 50%;
@@ -1002,9 +975,8 @@ button.chr-name:hover {
 
 /* ── The key ────────────────────────────────────────────────────────────── */
 
-/* A caption under the grid, not a legend box — the same marginal italic serif
-   Day and Week set theirs in, and the same words for the pigments. It
-   wraps rather than scrolls: the page below the grid has room, and a key that
+/* A caption under the grid, not a legend box — the board's marginal italic
+   serif. It wraps rather than scrolls: the page below the grid has room, and a key that
    hides half of itself behind a scrollbar has failed at its one job. */
 .chr-key {
   flex: 0 0 auto;
@@ -1088,16 +1060,52 @@ button.chr-name:hover {
   overflow-y: auto;
 }
 
+/* ── The head's right end ───────────────────────────────────────────────── */
+
+.chr-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* Re-read the temporal feeds now rather than on their five-minute cadence. A
+   bare glyph in the margin's faded ink, darkening under the hand — the page's
+   quiet affordance, no box and no fill. One spin per press says it went. */
+.chr-refresh {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  color: #A89B83;
+  transition: color 90ms ease-out;
+}
+.chr-refresh:hover { color: #1B1611; }
+.chr-refresh:focus-visible {
+  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.chr-refresh-spinning { animation: chr-refresh-spin 0.65s ease-in-out; }
+@keyframes chr-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ── Searching the record ───────────────────────────────────────────────── */
 
-/* The head's right end. A rule under a line of text rather than a boxed field:
-   the page is a chronicle, and its one control should read as a margin note you
-   can type in, not as a form. The hit list hangs off it, which is why the box
-   is the positioning context. */
+/* A rule under a line of text rather than a boxed field: the page is a
+   chronicle, and its search should read as a margin note you can type in, not
+   as a form. The hit list hangs off it, which is why the box is the
+   positioning context. */
 .chr-search {
   position: relative;
   flex: 0 0 auto;
-  align-self: center;
 }
 
 .chr-search-input {
@@ -1240,6 +1248,9 @@ button.chr-name:hover {
   .chr-note,
   .chr-diff { display: none; }
 
-  .chr-search { flex: 1 1 100%; }
+  .chr-tools { flex: 1 1 100%; }
+  /* A finger's target, not a glyph's: the board's 44px floor. */
+  .chr-refresh { min-width: 44px; min-height: 44px; }
+  .chr-search { flex: 1 1 auto; }
   .chr-search-input { width: 100%; }
 }
