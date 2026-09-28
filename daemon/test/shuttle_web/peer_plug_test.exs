@@ -79,6 +79,44 @@ defmodule ShuttleWeb.PeerPlugTest do
       assert resolved.assigns.peer.uid == 4321
     end
 
+    @tag :tmp_dir
+    test "a resolved uid is remembered for the connection; an unresolved one is not",
+         %{tmp_dir: root} do
+      table = Path.join([root, "net", "tcp"])
+      File.mkdir_p!(Path.dirname(table))
+      {:ok, {:tcp, _address, listen_port}} = Shuttle.Host.parse_listen(Shuttle.listen())
+      address = proc_ipv4(@loopback)
+
+      listen_port_hex =
+        listen_port |> Integer.to_string(16) |> String.upcase() |> String.pad_leading(4, "0")
+
+      header =
+        "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+
+      row =
+        "  0: #{address}:D433 #{address}:#{listen_port_hex} 01 00000000:00000000 00:00000000 00000000 4321 0 10001 1\n"
+
+      conn =
+        conn(:get, "/") |> put_peer_data(%{address: @loopback, port: 54_323, ssl_cert: nil})
+
+      uid = fn ->
+        PeerPlug.call(conn, host_class: :shared_multi_user, proc_root: root).assigns.peer.uid
+      end
+
+      File.write!(table, header)
+      assert uid.() == nil
+
+      File.write!(table, header <> row)
+      assert uid.() == 4321
+
+      # The same connection, with the row gone from the table: still resolved.
+      File.write!(table, header)
+      assert uid.() == 4321
+
+      # Another connection (another process) reads the table afresh.
+      assert Task.async(uid) |> Task.await() == nil
+    end
+
     for header <- ["x-forwarded-for", "x-forwarded-host", "forwarded", "tailscale-user-name"] do
       test "#{header} marks the request forwarded" do
         conn = conn(:get, "/") |> Plug.Conn.put_req_header(unquote(header), "x")

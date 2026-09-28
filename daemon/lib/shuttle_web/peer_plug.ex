@@ -85,10 +85,35 @@ defmodule ShuttleWeb.PeerPlug do
           proc_root =
             Keyword.get(opts, :proc_root, Application.get_env(:shuttle, :proc_net_root, "/proc"))
 
-          Shuttle.ProcNetTcp.peer_uid(peer_data, listen, proc_root)
+          connection_uid(peer_data, listen, proc_root)
         end
     end
   end
+
+  # An HTTP/1 connection is served by one process for its whole life, and the
+  # uid on a socket's row is fixed when the socket is created, so a resolved
+  # uid is remembered in that process's dictionary, which the endpoint tells
+  # Bandit to keep across keep-alive requests (`clear_process_dict: false`,
+  # config/config.exs): keep-alive pollers (a hub behind `tailscale serve`)
+  # cost one table read per connection rather than one per request. An
+  # unresolved lookup is not remembered, so the next request on the connection
+  # reads the table again.
+  defp connection_uid(%{address: address, port: port} = peer_data, listen, proc_root) do
+    key = {__MODULE__, :uid, address, port, listen, proc_root}
+
+    case Process.get(key) do
+      uid when is_integer(uid) ->
+        uid
+
+      nil ->
+        uid = Shuttle.ProcNetTcp.peer_uid(peer_data, listen, proc_root)
+        if is_integer(uid), do: Process.put(key, uid)
+        uid
+    end
+  end
+
+  defp connection_uid(peer_data, listen, proc_root),
+    do: Shuttle.ProcNetTcp.peer_uid(peer_data, listen, proc_root)
 
   defp forwarded?(conn) do
     Enum.any?(conn.req_headers, fn {name, _value} ->

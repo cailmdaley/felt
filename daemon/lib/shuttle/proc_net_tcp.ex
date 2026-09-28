@@ -44,12 +44,12 @@ defmodule Shuttle.ProcNetTcp do
   def uid_from_data(data, peer_address, peer_port, listen_address, listen_port) do
     with {:ok, peer} <- endpoint(peer_address, peer_port),
          {:ok, listener} <- endpoint(listen_address, listen_port) do
-      needles = port_needles(peer_port)
+      needles = :binary.compile_pattern(port_needles(peer_port))
 
       data
       |> String.split("\n")
       |> Enum.find_value(fn line ->
-        case String.contains?(line, needles) and parse_row(line) do
+        case :binary.match(line, needles) != :nomatch and parse_row(line) do
           %{state: @tcp_state, local: local, remote: remote, uid: uid} ->
             if endpoint_matches?(local, peer) and endpoint_matches?(remote, listener), do: uid
 

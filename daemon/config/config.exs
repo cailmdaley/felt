@@ -39,7 +39,11 @@ config :shuttle,
 # `[]` therefore means "explicitly no remotes" — which is exactly what
 # config/test.exs sets, so the suite never reaches a real fleet file.
 
+# Bandit keeps an HTTP/1 connection's process dictionary across keep-alive
+# requests, which is where `ShuttleWeb.PeerPlug` remembers the connection's
+# resolved peer uid (one /proc/net/tcp read per connection, not per request).
 config :shuttle, ShuttleWeb.Endpoint,
+  http: [http_1_options: [clear_process_dict: false]],
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [formats: [json: ShuttleWeb.ErrorJSON], layout: false]

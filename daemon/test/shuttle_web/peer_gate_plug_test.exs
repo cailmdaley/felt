@@ -181,6 +181,96 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     assert Jason.decode!(refused_body)["error"] == "peer_refused"
   end
 
+  @tag :tmp_dir
+  test "the endpoint's Bandit options keep a resolved uid for the whole keep-alive connection",
+       %{tmp_dir: root} do
+    table = Path.join([root, "net", "tcp"])
+    File.mkdir_p!(Path.dirname(table))
+    port = unused_port()
+    keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid, :proc_net_root]
+    previous = Map.new(keys, &{&1, Application.fetch_env(:shuttle, &1)})
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
+        {key, :error} -> Application.delete_env(:shuttle, key)
+      end)
+    end)
+
+    Application.put_env(:shuttle, :listen, "tcp://127.0.0.1:#{port}")
+    Application.put_env(:shuttle, :host_class, :shared_multi_user)
+    Application.put_env(:shuttle, :peer_gate, "uid")
+    Application.put_env(:shuttle, :peer_gate_expected_uid, 4321)
+    Application.put_env(:shuttle, :proc_net_root, root)
+
+    http_1_options =
+      :shuttle
+      |> Application.fetch_env!(ShuttleWeb.Endpoint)
+      |> Keyword.fetch!(:http)
+      |> Keyword.get(:http_1_options, [])
+
+    {:ok, server} =
+      Bandit.start_link(
+        plug: ShuttleWeb.Endpoint,
+        ip: @loopback,
+        port: port,
+        http_1_options: http_1_options,
+        startup_log: false
+      )
+
+    on_exit(fn -> Process.exit(server, :normal) end)
+
+    header =
+      "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+
+    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], 2_000)
+    {:ok, {_address, client_port}} = :inet.sockname(socket)
+
+    File.write!(
+      table,
+      header <>
+        "  0: #{proc_hex(@loopback)}:#{port_hex(client_port)} #{proc_hex(@loopback)}:#{port_hex(port)} 01 00000000:00000000 00:00000000 00000000 4321 0 10001 1\n"
+    )
+
+    assert keepalive_status(socket) == 200
+
+    # The row is gone; the same connection is still admitted, a new one is not.
+    File.write!(table, header)
+    assert keepalive_status(socket) == 200
+    :ok = :gen_tcp.close(socket)
+
+    capture_log(fn ->
+      {refused_head, _body} = request_version(port)
+      assert refused_head =~ "HTTP/1.1 403"
+    end)
+  end
+
+  defp keepalive_status(socket) do
+    :ok =
+      :gen_tcp.send(socket, "GET /api/v1/version HTTP/1.1\r\nhost: localhost\r\n\r\n")
+
+    {:ok, <<"HTTP/1.1 ", status::binary-size(3), _rest::binary>>} =
+      :gen_tcp.recv(socket, 0, 2_000)
+
+    drain(socket)
+    String.to_integer(status)
+  end
+
+  defp drain(socket) do
+    case :gen_tcp.recv(socket, 0, 200) do
+      {:ok, _data} -> drain(socket)
+      {:error, :timeout} -> :ok
+    end
+  end
+
+  defp proc_hex(address) do
+    bytes = Tuple.to_list(address)
+    bytes = if :erlang.system_info(:endian) == :little, do: Enum.reverse(bytes), else: bytes
+    Enum.map_join(bytes, &(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))
+  end
+
+  defp port_hex(port), do: port |> Integer.to_string(16) |> String.pad_leading(4, "0")
+
   defp unused_port do
     {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, ip: @loopback])
     {:ok, {@loopback, port}} = :inet.sockname(socket)
