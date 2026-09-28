@@ -27,11 +27,14 @@ defmodule Shuttle.DaemonHeartbeat do
 
   Every asked-for stop — `make stop`, `bin/shuttle`'s `stop_daemon` (run before
   installing a supervisor), `bin/shuttle-deploy`'s listener kill, `systemctl
-  --user restart`, `launchctl kickstart -k` — sends SIGTERM first. SIGTERM runs
+  --user restart`, `launchctl kickstart -k` — sends SIGTERM first. Re-running
+  `bin/shuttle-launch` (and `install-agent`'s retirement of that loop) kills
+  the daemon's tmux session instead, which SIGHUPs it with no shutdown at all,
+  so both touch the marker before the kill. SIGTERM runs
   `init:stop/0`, whose first act is `Shuttle.Application.prep_stop/1`, which
   touches the stop marker (`mark_stopped/1`). A marker at least as new as the
   heartbeat writer's boot means that incarnation was stopped gracefully, and
-  the next boot holds. The three scripts touch the same marker themselves
+  the next boot holds. The stop scripts touch the same marker themselves
   before they signal, so a filesystem stall blocks the script rather than
   racing the signal. A hard kill touches nothing, so only a hard kill leaves a
   heartbeat with no later marker.

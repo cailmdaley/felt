@@ -122,8 +122,9 @@ lives in the docs site (`docs/`, published to
   gets reaped): a daemon killed hard (an rlimit SIGKILL) and back within the
   heartbeat window, on the same machine, whose previous incarnation had been
   released, with every recorded worker re-adopted and no churn, releases
-  itself (`Shuttle.DaemonHeartbeat`). A SIGTERM'd restart — every deploy and
-  operator restart — leaves a stop marker and always holds, and an unreleased
+  itself (`Shuttle.DaemonHeartbeat`). An asked-for restart — every deploy and
+  operator restart, `make stop`, re-running `bin/shuttle-launch` — leaves a
+  stop marker and always holds, and an unreleased
   hold survives hard kills. There is no `enabled` flag; steady-state resume of a worker that dies while
   the daemon is healthy and unquarantined is unaffected, and force-dispatch
   bypasses the quarantine. Tags are free-form qualitative noticings.

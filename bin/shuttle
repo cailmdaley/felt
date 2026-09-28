@@ -603,7 +603,10 @@ install_agent() {
     }
     # The respawn loop and the unit would both bind :4000, and the loop wins
     # any race (it restarts what we just stopped). Retire it first. Sequential,
-    # not ||-chained, so a miss on one socket doesn't skip the other.
+    # not ||-chained, so a miss on one socket doesn't skip the other. Killing
+    # the session SIGHUPs the daemon (no graceful shutdown), so the stop marker
+    # goes down first, as in stop_daemon.
+    touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null || true
     tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t shuttle-daemon 2>/dev/null || true
     tmux kill-session -t shuttle-daemon 2>/dev/null || true
     stop_daemon
