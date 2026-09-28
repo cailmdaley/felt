@@ -128,6 +128,63 @@ func TestClaudeNativeNoWakeAndUnknownRetry(t *testing.T) {
 	}
 }
 
+// busyReceiverRows mirrors a Claude receiver that is mid-turn when the message
+// arrives: it enqueues the prompt, finishes the running tool step, and absorbs
+// the message as a queued_command attachment rather than a new user turn.
+func busyReceiverRows(frame map[string]any, f *os.File, absorb bool) {
+	uuid := frame["uuid"].(string)
+	content := frame["message"].(map[string]any)["content"].(string)
+	rows := []map[string]any{
+		{"type": "queue-operation", "operation": "enqueue", "sessionId": "session", "content": content},
+		{"type": "assistant", "sessionId": "session", "uuid": "tool-call", "parentUuid": "earlier", "message": map[string]any{"role": "assistant", "model": "claude-test"}},
+	}
+	if absorb {
+		rows = append(rows,
+			map[string]any{"type": "user", "sessionId": "session", "uuid": "tool-result", "parentUuid": "tool-call"},
+			map[string]any{"type": "queue-operation", "operation": "remove", "reason": "absorbed_mid_turn", "sessionId": "session", "content": content},
+			map[string]any{"type": "attachment", "sessionId": "session", "uuid": "absorbed", "parentUuid": "tool-result", "attachment": map[string]any{"type": "queued_command", "source_uuid": uuid, "commandMode": "prompt", "prompt": content}},
+			map[string]any{"type": "attachment", "sessionId": "session", "uuid": "reminder", "parentUuid": "absorbed", "attachment": map[string]any{"type": "output_style"}},
+			map[string]any{"type": "assistant", "sessionId": "session", "uuid": "response", "parentUuid": "reminder", "message": map[string]any{"role": "assistant", "model": "claude-test"}},
+		)
+	}
+	for _, row := range rows {
+		b, _ := json.Marshal(row)
+		f.Write(append(b, '\n'))
+	}
+}
+
+func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
+	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, true) })
+	r, err := Send(context.Background(), "host", req)
+	if err != nil || r.Status != StatusAccepted {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestClaudeNativeQueuedBehindTurnSaysSo(t *testing.T) {
+	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false) })
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	r, err := Send(ctx, "host", req)
+	if ErrorCode(err) != "ambiguous_delivery" || r.Status != StatusUnknown || !strings.Contains(r.Detail, "queued behind the receiver's current turn") {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestClaudeNativeAbsorptionOfAnotherMessageIsNotEvidence(t *testing.T) {
+	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) {
+		frame["uuid"] = "another-message"
+		frame["message"] = map[string]any{"content": "another message"}
+		busyReceiverRows(frame, f, true)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	r, err := Send(ctx, "host", req)
+	if err == nil || r.Status != StatusUnknown || strings.Contains(r.Detail, "queued") {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
 func TestClaudeNativeSyntheticErrorIsNotStarted(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { nativeRows(frame, f, true) })
 	r, err := Send(context.Background(), "host", req)
