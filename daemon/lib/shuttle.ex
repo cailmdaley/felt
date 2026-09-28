@@ -157,6 +157,9 @@ defmodule Shuttle.Application do
       # each transcript's {mtime, size}. Pure cache: a restart costs one
       # re-read per session, never a wrong answer.
       Shuttle.SessionLink,
+      # Owns the ETS table for the session-to-fiber peer index; ledger appends
+      # invalidate it by file token without persistent_term global GC.
+      Shuttle.Messaging.SessionFiberCache,
       ShuttleWeb.PeerGateThrottle
     ]
 

@@ -1,7 +1,17 @@
 defmodule Shuttle.Messaging do
   @moduledoc "Fleet discovery and strictly host-addressed worker messaging."
 
-  alias Shuttle.{Felt, Harnesses, OriginRouter, Poller, RegistryCommon, Remote, SessionLedger}
+  alias Shuttle.Messaging.SessionFiberCache
+
+  alias Shuttle.{
+    Felt,
+    Harnesses,
+    OriginRouter,
+    Poller,
+    RegistryCommon,
+    Remote,
+    SessionLedger
+  }
 
   @local_message_timeout_ms 20_000
   @remote_message_timeout_ms 25_000
@@ -15,8 +25,6 @@ defmodule Shuttle.Messaging do
   @max_frame_bytes 32 * 1024 * 1024
   @receipt_statuses ~w(accepted context_added submitted queued unknown rejected)
   @part_pattern ~r/\A[a-z0-9._-]+\z/
-  @session_fiber_cache_key {__MODULE__, :session_fibers}
-
   def peers(local? \\ false) do
     if local? do
       local_peers()
@@ -233,14 +241,14 @@ defmodule Shuttle.Messaging do
     path = SessionLedger.default_path()
     token = {session_ledger_file_token(path), app_worker_directory_token()}
 
-    case :persistent_term.get(@session_fiber_cache_key, nil) do
+    case SessionFiberCache.lookup() do
       %{path: ^path, host: ^host, token: ^token, index: index} ->
         index
 
       _ ->
         index = read_session_fiber_index(host)
 
-        :persistent_term.put(@session_fiber_cache_key, %{
+        SessionFiberCache.store(%{
           path: path,
           host: host,
           token: token,

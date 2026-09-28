@@ -423,8 +423,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       %{"session" => "native/id", "fiber" => "work/on-disk", "host" => host, "at" => 1}
     ])
 
-    key = {Shuttle.Messaging, :session_fibers}
-    previous = :persistent_term.get(key, :missing)
+    previous = Shuttle.Messaging.SessionFiberCache.lookup()
 
     ledger_token =
       [path, path <> ".1"]
@@ -436,17 +435,9 @@ defmodule ShuttleWeb.MessagingControllerTest do
       end)
 
     app_workers_dir = Application.get_env(:shuttle, :app_workers_dir)
+    app_workers_token = {app_workers_dir, []}
 
-    app_workers_token =
-      case File.stat(app_workers_dir, time: :posix) do
-        {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} ->
-          {app_workers_dir, mtime, size, inode}
-
-        _ ->
-          {app_workers_dir, nil}
-      end
-
-    :persistent_term.put(key, %{
+    cached = %{
       path: path,
       host: host,
       token: {ledger_token, app_workers_token},
@@ -454,12 +445,14 @@ defmodule ShuttleWeb.MessagingControllerTest do
         fibers_by_session: %{"native/id" => %{"fiber" => "work/cached"}},
         app_sessions: []
       }
-    })
+    }
+
+    Shuttle.Messaging.SessionFiberCache.store(cached)
 
     on_exit(fn ->
-      if previous == :missing,
-        do: :persistent_term.erase(key),
-        else: :persistent_term.put(key, previous)
+      if previous,
+        do: Shuttle.Messaging.SessionFiberCache.store(previous),
+        else: Shuttle.Messaging.SessionFiberCache.clear()
     end)
 
     body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
