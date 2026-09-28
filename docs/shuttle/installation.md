@@ -582,7 +582,9 @@ any `--log` override. The tmux respawn loop rides that fallback by design.
 The daemon logs at `info`. Set `SHUTTLE_LOG_LEVEL` in its environment to
 change that at boot — `debug` adds a line per request and per poll, which is
 what you want while chasing load and not otherwise, since it grows the log by
-hundreds of megabytes a day. Any Elixir `Logger` level is accepted (`debug`,
+hundreds of megabytes a day. Request lines at `debug` include the request
+parameters, POST bodies among them — message text sent through the daemon
+lands in the log. Any Elixir `Logger` level is accepted (`debug`,
 `info`, `notice`, `warning`, `error`, …, plus `all` and `none`); an unknown
 value is ignored with a warning in the log.
 

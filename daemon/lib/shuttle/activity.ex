@@ -166,9 +166,14 @@ defmodule Shuttle.Activity do
   a cached remote window be filtered by `m` alone.
 
   Two windows with the same canonical pair are the same request: the response
-  is a function of the canonical pair and the stream's contents, and nothing
-  else — no wall clock enters the fold. That is the premise
-  `ShuttleWeb.ActivityController` builds its validator on.
+  is a function of the canonical pair and the stream the fold has read, and
+  nothing else — no wall clock enters the fold. That is the premise
+  `ShuttleWeb.ActivityController` builds its validator on. The stream is the
+  two files on disk, except across a rotation: the follower keeps the spells
+  still open and the tool calls still pending from the file the rotation
+  overwrote, where a fresh fold of the two files cannot know them. The
+  follower's answer is the more correct one; it can differ from a fresh fold
+  only in onsets and fills near the start of `events.jsonl.1`.
 
   An inverted window, or one wider than 120 days, is refused rather than
   served — an unbounded window means an unbounded response. A window narrower
@@ -179,7 +184,7 @@ defmodule Shuttle.Activity do
   `Shuttle.Activity.Follower` seeds the fold from both files once at boot and
   then folds only the bytes appended since (`Shuttle.FileTail`), on a timer and
   again before each read, so a read is as fresh as a full rescan. A request
-  costs one `stat` plus a range read of the tally proportional to the buckets
+  costs two `stat`s plus a range read of the tally proportional to the buckets
   it returns; the files are read once. When the follower cannot answer — it is
   following another path, or it is not running — `window/3` folds the files
   itself, which is correct and costs a full read of both.
