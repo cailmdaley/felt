@@ -85,10 +85,12 @@ The helper builds the CLI, daemon, and — on every host that is not marked
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
 Every deploy quarantines new launches and resumes until `bin/shuttle release`:
-the cycle stops the daemon with SIGTERM, and a SIGTERM'd daemon removes its
-heartbeat, so the rebuilt one has no evidence to release itself on. Only a
-daemon killed hard and back within the heartbeat window, with its workers alive
-and no churn, releases itself (see
+the cycle touches `$SHUTTLE_DATA_DIR/heartbeat.stopped` on the target host and
+then stops the daemon with SIGTERM (whose shutdown touches the marker again), so
+the rebuilt daemon sees a graceful stop and holds. Only on a host that opts in
+(host.json `"quarantine_auto_release": true`) does a daemon killed hard, and back
+within the heartbeat window with its workers alive, no churn and its previous
+incarnation already released, release itself (see
 [the boot quarantine](../shuttle/lifecycle.md#boot-quarantine)).
 
 For a manual remote build:

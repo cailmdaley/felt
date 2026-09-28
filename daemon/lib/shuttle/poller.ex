@@ -254,16 +254,18 @@ defmodule Shuttle.Poller do
       # init from the `:boot_quarantine` opt / app config (default true;
       # config/test.exs disables it).
       #
-      # ONE automatic exit exists, and it is not a timer: a daemon that was
-      # killed HARD (an rlimit SIGKILL) and is back within seconds releases
-      # itself at boot when it can prove the bounce
-      # (`Shuttle.DaemonHeartbeat.verdict/2`, evaluated in `init/1` after
-      # adoption): the heartbeat is this machine's and fresh, the recorded
-      # workers are still live BY THIS DAEMON'S OWN observation, and the
-      # previous incarnation was not in a crash loop. It fails closed. Every
-      # SIGTERM'd restart — each deploy and operator restart — deletes the
-      # heartbeat on the way down (`Shuttle.Application.prep_stop/1`) and so
-      # holds, as do a real gap, a crash loop, or no evidence at all.
+      # ONE automatic exit exists, it is not a timer, and it is per-host opt-in
+      # (`quarantine_auto_release` below): a daemon that was killed HARD (an
+      # rlimit SIGKILL) and is back within seconds releases itself at boot when
+      # it can prove the bounce (`Shuttle.DaemonHeartbeat.verdict/2`, read
+      # before adoption and judged after it): the heartbeat is this machine's,
+      # from another VM, fresh and released, the recorded workers are still
+      # live BY THIS DAEMON'S OWN observation, and the previous incarnation was
+      # not in a crash loop. It fails closed. Every SIGTERM'd restart — each
+      # deploy and operator restart — touches the stop marker
+      # (`Shuttle.Application.prep_stop/1`, and the stop scripts before they
+      # signal) and so holds, as do an unreleased hold, a real gap, a crash
+      # loop, or no evidence at all.
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
       # Where this daemon records its own liveness, how often, when THIS

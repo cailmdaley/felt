@@ -1,8 +1,8 @@
 defmodule Shuttle.DaemonHeartbeat do
   @moduledoc """
   The daemon's own liveness record on disk, and the boot-time verdict it
-  supports: *was this restart a hard kill of a healthy daemon, back within
-  seconds, or anything else?*
+  supports: *was this restart a hard kill of a healthy, released daemon, back
+  within seconds, or anything else?*
 
   ## What it is for
 
@@ -19,6 +19,10 @@ defmodule Shuttle.DaemonHeartbeat do
   running (tmux owns them, and `SessionReconciliation.adopt_orphans/1`
   re-adopts them), but all *new* work silently stops until a person notices.
 
+  Only such a host gains from an automatic release, so it is opt-in per host:
+  host.json `"quarantine_auto_release": true` (`Shuttle.Host`). Off, the
+  heartbeat is still written but `Shuttle.Poller` never asks for a verdict.
+
   ## Asked-for versus hard: the signal decides
 
   Every asked-for stop — `make stop`, `bin/shuttle`'s `stop_daemon` (run before
@@ -34,40 +38,52 @@ defmodule Shuttle.DaemonHeartbeat do
 
   ## Shape
 
-  One JSON object, rewritten whole every 10s of uptime (write-temp-then-rename,
-  so a kill mid-write leaves the previous complete file rather than a truncated
-  one):
+  One JSON object, rewritten whole every 10s of uptime and at once when the
+  hold is released (write-temp-then-rename, so a kill mid-write leaves the
+  previous complete file rather than a truncated one):
 
       {"v":1,
        "at":1764500000000,         # wall clock of THIS write, epoch ms
        "booted_at":1764499000000,  # when the writing incarnation booted
        "host":"…", "node":"…",     # its own_host_id and OS node name
-       "held":false,               # was it still quarantined (or skewed)?
        "os_pid":"12345",           # the beam's OS pid
+       "held":false,               # was it still quarantined (or skewed)?
        "workers":["fiber-uid", …], # runtime keys it had live at this write
        "boots":[…,1764499000000]}  # ring of recent boot times, newest last
 
-  Writes run off the Poller (`write_async/2`), are best-effort and never raise:
-  the Poller must not die, stall or log-spam because a filesystem misbehaved.
-  The *first* write happens at boot, which is what makes the crash-loop brake
-  work — an incarnation that dies two seconds in still leaves its own
-  `booted_at` behind.
+  Writes run in a writer linked to the Poller (`write_async/2`), are
+  best-effort and never raise: the Poller must not die, stall or log-spam
+  because a filesystem misbehaved. The *first* write happens at boot, which is
+  what makes the crash-loop brake work — an incarnation that dies two seconds
+  in still leaves its own `booted_at` behind. `Shuttle.Poller` reads the
+  previous record before adoption (before its own first write replaces it) and
+  judges it after adoption.
 
   ## The conditions for an automatic release
 
   `verdict/2` releases the quarantine only when all of these hold. Anything
-  else — a missing file, a truncated one, a key of the wrong type, a stale
-  timestamp — **holds** (fail closed: the quarantine is the safe state, and the
-  cost of holding is a human typing one command, versus a mass re-dispatch of
-  stale work if we guess wrong).
+  else — a missing file, a truncated one, a key of the wrong type or missing, a
+  stale timestamp — **holds** (fail closed: the quarantine is the safe state,
+  and the cost of holding is a human typing one command, versus a mass
+  re-dispatch of stale work if we guess wrong).
 
-  1. **Same daemon, same machine** — the record's `host` equals this daemon's
-     `own_host_id` and its `node` equals this machine's node name. `~/.shuttle`
-     can sit on a `$HOME` shared by several login nodes that all carry the same
-     fleet host id; an idle daemon on another node keeps a fresh heartbeat
-     with no workers, which says nothing about this node's restart.
+  1. **Same daemon, same machine, another VM** — the record's `host` equals
+     this daemon's `own_host_id`, its `node` equals this machine's node name,
+     and its `os_pid` is not this VM's. `~/.shuttle` can sit on a `$HOME`
+     shared by several login nodes that all carry the same fleet host id; an
+     idle daemon on another node keeps a fresh heartbeat with no workers,
+     which says nothing about this node's restart. The same pid means the
+     Poller restarted inside a live VM, which is no hard kill.
 
-  2. **Fresh** — `|now - at| <= 60_000` ms, and `at` is no older than the
+  2. **Not stopped gracefully** — no stop marker at or after the writer's boot
+     second (above).
+
+  3. **Released** — the record says `held: false`. An incarnation that booted
+     held and that nobody released keeps writing fresh records with no
+     workers, since nothing dispatches while held; a hard kill must not launder
+     that hold into a release. An unreleased hold survives hard kills.
+
+  4. **Fresh** — `|now - at| <= 60_000` ms, and `at` is no older than the
      machine's own boot (`/proc/stat` `btime`, where available). The write
      interval is 10_000 ms, so the grace is 6× the interval: it has to absorb
      the last write's lag plus the respawn plus this daemon's own boot (a `felt
@@ -75,18 +91,16 @@ defmodule Shuttle.DaemonHeartbeat do
      contention, while staying far too short to cover any restart a human
      would call an outage.
 
-  3. **Worker continuity** — every runtime key the heartbeat recorded as live
+  5. **Worker continuity** — every runtime key the heartbeat recorded as live
      is live NOW, as established by this boot's adoption, never by trusting
      the file. Workers recorded and gone means something ended the workers
      too: not a fast bounce. `Shuttle.Poller` asks for a verdict only once
-     adoption's tmux scan has completed (`adopted?`), because an empty recorded
-     set is vacuously continuous — an idle daemon that bounced in seconds has no
-     stale backlog to withhold, but a daemon that has not looked cannot claim
-     that. App workers do not count as observed: adoption re-adopts them from
-     their own JSON record, so a recorded app worker holds.
+     adoption's tmux scan has completed (`adopted?`). App workers do not count
+     as observed: adoption re-adopts them from their own JSON record, so a
+     recorded app worker holds.
 
-  4. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
-     condition 2 cannot see it. Two brakes, coarse and fine:
+  6. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
+     condition 4 cannot see it. Two brakes, coarse and fine:
 
        * the previous incarnation lived at least 90_000 ms
          (`at - booted_at`), the same number `Shuttle.Poller`'s resume-loop
