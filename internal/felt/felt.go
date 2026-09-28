@@ -874,6 +874,26 @@ func StatusIcon(status string) string {
 	}
 }
 
+// SetStatus moves the fiber to status — open, active, closed, or "" for none —
+// keeping closed-at consistent: closing stamps it at now (an already-closed
+// fiber keeps its original stamp), any other status clears it. Any other
+// value is refused and the fiber is left untouched.
+func (f *Felt) SetStatus(status string, now time.Time) error {
+	switch status {
+	case StatusOpen, StatusActive, "":
+		f.Status = status
+		f.ClosedAt = nil
+	case StatusClosed:
+		if !f.IsClosed() || f.ClosedAt == nil {
+			f.ClosedAt = &now
+		}
+		f.Status = StatusClosed
+	default:
+		return fmt.Errorf("invalid status %q (valid: open, active, closed, or empty for none)", status)
+	}
+	return nil
+}
+
 // IsOpen returns true if the felt is open.
 func (f *Felt) IsOpen() bool {
 	return f.Status == StatusOpen

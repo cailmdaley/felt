@@ -67,23 +67,8 @@ own, structured ones included.`,
 			f.Name = editName
 		}
 		if cmd.Flags().Changed("status") {
-			switch editStatus {
-			case felt.StatusOpen, felt.StatusActive:
-				if f.IsClosed() {
-					f.ClosedAt = nil
-				}
-				f.Status = editStatus
-			case felt.StatusClosed:
-				if !f.IsClosed() {
-					now := time.Now()
-					f.Status = felt.StatusClosed
-					f.ClosedAt = &now
-				}
-			case "":
-				f.Status = ""
-				f.ClosedAt = nil
-			default:
-				return fmt.Errorf("invalid status %q (valid: open, active, closed, or empty to clear)", editStatus)
+			if err := f.SetStatus(editStatus, time.Now()); err != nil {
+				return err
 			}
 		}
 		if cmd.Flags().Changed("body") {

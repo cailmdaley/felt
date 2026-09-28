@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/felt"
 )
 
 func TestAddMintsNativeUID(t *testing.T) {
@@ -108,5 +110,31 @@ func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
 	}
 	if _, err := storage.Read("games/civbench/harness-model/roles/steward"); err == nil {
 		t.Fatal("nest resolved roles to a nested fiber named roles")
+	}
+}
+
+// TestAddValidatesStatusLikeEdit: add and edit share one status rule. A bogus
+// status is refused before anything is written, and -s closed stamps
+// closed-at just as closing through edit does.
+func TestAddValidatesStatusLikeEdit(t *testing.T) {
+	dir, storage := newStore(t)
+
+	out, err := runCommand(t, dir, "add", "bogus", "Bogus", "-s", "bogus")
+	if err == nil || !strings.Contains(err.Error(), `invalid status "bogus"`) {
+		t.Fatalf("add -s bogus: err=%v out=%s; want an invalid-status refusal", err, out)
+	}
+	if _, err := storage.Read("bogus"); err == nil {
+		t.Fatalf("add -s bogus wrote the fiber anyway")
+	}
+
+	if out, err := runCommand(t, dir, "add", "done", "Done", "-s", "closed"); err != nil {
+		t.Fatalf("add -s closed: %v\n%s", err, out)
+	}
+	done, err := storage.Read("done")
+	if err != nil {
+		t.Fatalf("read done: %v", err)
+	}
+	if done.Status != felt.StatusClosed || done.ClosedAt == nil {
+		t.Fatalf("add -s closed: status=%q closed-at=%v, want closed with a stamp", done.Status, done.ClosedAt)
 	}
 }
