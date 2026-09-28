@@ -45,6 +45,8 @@ defmodule Shuttle.Host do
   so it never binds where another machine could reach it directly.
   """
 
+  require Logger
+
   @type class :: :single_user | :shared_multi_user | :exposed
   @type listen :: {:tcp, {0..255, 0..255, 0..255, 0..255}, pos_integer()} | {:unix, String.t()}
 
@@ -165,6 +167,37 @@ defmodule Shuttle.Host do
       :error ->
         raise ArgumentError,
               "#{source} must be a non-negative integer, got #{inspect(String.trim(value))}"
+    end
+  end
+
+  @doc """
+  Whether this host opts in to the boot quarantine's automatic release
+  (`Shuttle.DaemonHeartbeat`): host.json `"quarantine_auto_release": true`.
+
+  Daemon-only (the Go reader ignores the key). Only a host whose daemon gets
+  reaped — a CPU-capped cluster login node, where a hard kill is routine and
+  says nothing about the fleet — gains from it; everywhere else a hard kill is
+  an OOM or a person's `kill -9`, and the hold is the right answer. So it is
+  off unless the value is exactly `true`: an absent key, an unreadable file or
+  any other value reads as off (the last with a warning).
+  """
+  @spec quarantine_auto_release?() :: boolean()
+  def quarantine_auto_release? do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"quarantine_auto_release" => true}} ->
+        true
+
+      {:ok, %{"quarantine_auto_release" => value}} when value != false ->
+        Logger.warning(
+          ~s(#{path}: "quarantine_auto_release" must be true or false, got #{inspect(value)}; reading it as off)
+        )
+
+        false
+
+      _ ->
+        false
     end
   end
 

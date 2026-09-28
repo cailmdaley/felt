@@ -206,8 +206,12 @@ daemon_call() { # $1 = extra curl args, $2 = API path
 }
 
 # Kill whatever holds the daemon's listener; the host's supervisor restarts it.
+# The snippet runs on the target host (run_on), and touches the daemon's stop
+# marker there before the SIGTERM, so the rebuilt daemon's boot quarantine holds
+# (Shuttle.DaemonHeartbeat).
 daemon_kill() {
   listen_prelude
+  printf '%s' 'touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null; '
   printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi | xargs -r kill'
 }
 

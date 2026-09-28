@@ -39,9 +39,14 @@ defmodule Shuttle.Poller.SessionReconciliation do
       {:ok, sessions} ->
         lookup = candidate_session_lookup(state)
 
-        Enum.reduce(sessions, state, fn session, state_acc ->
-          adopt_known_orphan_session(state_acc, lookup, session)
-        end)
+        state =
+          Enum.reduce(sessions, state, fn session, state_acc ->
+            adopt_known_orphan_session(state_acc, lookup, session)
+          end)
+
+        # `state.running` is now this daemon's own observation of what is live,
+        # which the boot quarantine's auto-release requires before it judges.
+        %{state | adopted?: true}
 
       {:error, :unknown} ->
         Logger.warning("tmux session scan unavailable (unknown state); skipping boot adoption")

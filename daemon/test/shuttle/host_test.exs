@@ -67,6 +67,43 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "quarantine_auto_release?/0" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      %{host_file: Path.join(dir, "host.json")}
+    end
+
+    test "on only for an explicit true", %{host_file: file} do
+      System.put_env("FELT_HOST_FILE", file)
+      refute Host.quarantine_auto_release?()
+
+      for {body, want} <- [
+            {~s({"class":"shared-multi-user","quarantine_auto_release":true}), true},
+            {~s({"quarantine_auto_release":false}), false},
+            {~s({"class":"shared-multi-user"}), false}
+          ] do
+        File.write!(file, body)
+        assert Host.quarantine_auto_release?() == want, body
+      end
+    end
+
+    test "any other value is off, with a warning", %{host_file: file} do
+      System.put_env("FELT_HOST_FILE", file)
+      File.write!(file, ~s({"quarantine_auto_release":"yes"}))
+
+      assert capture_log(fn -> refute Host.quarantine_auto_release?() end) =~
+               "must be true or false"
+    end
+
+    test "a malformed host.json is off rather than a crash", %{host_file: file} do
+      System.put_env("FELT_HOST_FILE", file)
+      File.write!(file, "{not json")
+      refute Host.quarantine_auto_release?()
+    end
+  end
+
   describe "resolve!/1" do
     test "raises with the file's path on a malformed host.json" do
       path = Path.join(@fixture_dir, "malformed.json")

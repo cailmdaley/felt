@@ -4,6 +4,7 @@ defmodule Shuttle.PollerTest do
   import Shuttle.Test.PollerHelpers
 
   alias Shuttle.ActionQueries
+  alias Shuttle.DaemonHeartbeat
   alias Shuttle.Poller
   alias Shuttle.Poller.Snapshot
   alias Shuttle.Dispatcher
@@ -38,7 +39,7 @@ defmodule Shuttle.PollerTest do
     on_exit(fn ->
       restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
       restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
-      File.rm_rf!(data_dir)
+      rm_rf_settled!(data_dir)
     end)
 
     :ok
@@ -2380,6 +2381,505 @@ defmodule Shuttle.PollerTest do
     refute Map.has_key?(Poller.parked_index(poller), fiber_id)
   end
 
+  # The heartbeat writer is linked to its Poller, but the exit signal lands
+  # asynchronously: a write in flight can finish its `mkdir_p` while the data
+  # dir is being removed. Retry until the tree stays gone.
+  defp rm_rf_settled!(dir, tries \\ 20) do
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _, _} when tries > 0 ->
+        Process.sleep(50)
+        rm_rf_settled!(dir, tries - 1)
+
+      {:error, reason, file} ->
+        raise File.Error,
+          reason: reason,
+          action: "remove files and directories recursively from",
+          path: file
+    end
+  end
+
+  # ── Boot-quarantine auto-release (daemon heartbeat continuity) ──
+  #
+  # A kernel that kills the beam on a CPU rlimit is not a human asking for a
+  # hold, but every (re)start arms the quarantine — so a kill nobody asked for
+  # silently stopped all new work until someone noticed. `Shuttle.DaemonHeartbeat`
+  # gives the daemon evidence about its own previous incarnation, and
+  # `Poller.init/1` releases the hold IFF that evidence proves a fast bounce:
+  # fresh heartbeat, the recorded workers still live BY THIS DAEMON'S OWN
+  # adoption, and no crash loop. Everything else — a real gap, a loop, a
+  # missing/garbage file, a contract skew — still holds. These tests are the
+  # boundary in both directions; the value of the change is entirely there.
+
+  # Under this test's throwaway SHUTTLE_DATA_DIR (the suite-wide pin is dropped
+  # in setup), so it is cleaned up with the rest of the markers.
+  defp heartbeat_file, do: Path.join(System.get_env("SHUTTLE_DATA_DIR"), "heartbeat.json")
+
+  # A heartbeat that would auto-release on its own, with `fields` merged over:
+  # written 4s ago by an incarnation that had been up half an hour, one boot in
+  # the ring, and no workers recorded.
+  defp write_heartbeat!(fields \\ %{}) do
+    now = System.system_time(:millisecond)
+    booted_at = now - 1_800_000
+
+    record =
+      Map.merge(
+        %{
+          "v" => 1,
+          "host" => System.fetch_env!("SHUTTLE_HOST"),
+          "node" => Shuttle.DaemonHeartbeat.node_name(),
+          "held" => false,
+          # Not this test VM's pid: these records stand in for a previous VM.
+          "os_pid" => "0",
+          "at" => now - 4_000,
+          "booted_at" => booted_at,
+          "workers" => [],
+          "boots" => [booted_at]
+        },
+        fields
+      )
+
+    path = heartbeat_file()
+    File.write!(path, Jason.encode!(record))
+    path
+  end
+
+  defp start_quarantined_poller!(name) do
+    start_poller!(
+      name: name,
+      runner: MockRunner,
+      poll_interval_ms: 60_000,
+      felt_stores: [MockRunner.felt_root()],
+      boot_quarantine: true,
+      quarantine_auto_release: true,
+      daemon_heartbeat_file: heartbeat_file()
+    )
+  end
+
+  # The fresh candidate every test below watches: parked while the hold stands,
+  # dispatched the moment it is lifted.
+  defp fresh_candidate!(fiber_id) do
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+    fiber_id
+  end
+
+  # Every snapshot read in this section uses a generous call timeout: the poller
+  # shells felt synchronously while dispatching, and on a loaded host that pushes
+  # a default 5s `GenServer.call` past its ceiling — which fails the test for a
+  # reason that has nothing to do with the quarantine.
+  defp hb_snapshot(poller), do: Poller.snapshot(poller, 30_000)
+
+  # Did a worker actually launch for `fiber_id`? Read from the recorded commands
+  # rather than the poller's state, so the check never waits on the GenServer
+  # that is busy doing the launching. The ceiling is generous (~15s) because
+  # that GenServer shells felt synchronously per candidate, which on a loaded
+  # host takes seconds — `wait_until` returns the instant the launch lands, so
+  # the ceiling costs a passing assertion nothing.
+  defp assert_launched!(fiber_id) do
+    session = Dispatcher.session_name(fiber_id)
+
+    assert wait_until(
+             fn ->
+               Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+                 cmd == "tmux" and hd(args) == "new-session" and session in args
+               end)
+             end,
+             600
+           )
+  end
+
+  # Both directions assert on the SAME two observables, so a hold and a release
+  # can't be confused for one another: the flag, and whether the fresh candidate
+  # actually launched.
+  defp assert_held!(poller, fiber_id) do
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id}] = hb_snapshot(poller).pending_launch
+    end)
+
+    snap = hb_snapshot(poller)
+    assert snap.boot_quarantine == true
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+
+    snap
+  end
+
+  test "a fast bounce with its workers still alive auto-releases the boot quarantine" do
+    # The whole point: the daemon was killed seconds ago, its worker is still in
+    # tmux and gets adopted, so the fresh candidate launches without a human.
+    live_id = "tests/hb-live"
+    session = Dispatcher.session_name(live_id)
+    MockRunner.set_shuttle(live_id, oneshot_shuttle())
+    MockRunner.add_tmux_session(session)
+
+    fresh_id = fresh_candidate!("tests/hb-fresh")
+    write_heartbeat!(%{"workers" => [live_id]})
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_fast_bounce)
+    # Nudge a cycle rather than relying on the boot tick alone, and nudge it
+    # with a message rather than a call: the assertions below must not queue
+    # behind the poller while it is shelling felt to launch.
+    send(poller, :run_poll_cycle)
+
+    # The launch itself is the proof the hold is off, and reading it from the
+    # recorded commands never waits on the busy poller.
+    assert_launched!(fresh_id)
+
+    snap = hb_snapshot(poller)
+    assert snap.boot_quarantine == false
+    assert snap.pending_launch == []
+  end
+
+  test "an idle fast bounce (no workers recorded) auto-releases" do
+    # Nothing was running and the previous incarnation had been released, so
+    # an empty recorded set is continuous.
+    fresh_id = fresh_candidate!("tests/hb-idle")
+    write_heartbeat!()
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_idle)
+    send(poller, :run_poll_cycle)
+
+    assert_launched!(fresh_id)
+    assert hb_snapshot(poller).boot_quarantine == false
+  end
+
+  test "an unreleased hold survives a hard kill (a held incarnation's heartbeat never releases)" do
+    # The laundering case: an incarnation boots held (after an outage or a
+    # deploy) and nobody releases it. It keeps writing fresh heartbeats with no
+    # workers, since nothing dispatches while held. A hard kill after a long run
+    # must not turn that into a release of the work it was holding back.
+    fiber_id = fresh_candidate!("tests/hb-launder")
+    refute File.exists?(heartbeat_file())
+
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_launder_1)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    # Stand in for a long, healthy-looking uptime right up to the kill.
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{
+        hb
+        | "at" => now - 4_000,
+          "booted_at" => now - 1_800_000,
+          # A different VM, so the pid check is not what holds here.
+          "os_pid" => "0"
+      })
+    )
+
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_launder_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
+  test "work parked behind a contract skew survives a human release and a hard kill" do
+    # The quarantine was released by a human, but the skew kept parking fresh
+    # work, so the incarnation was still holding it back. Once the CLI is fixed
+    # the next boot must not release that backlog on a hard kill.
+    MockRunner.set_contract_level("4")
+    fiber_id = fresh_candidate!("tests/hb-skew-release")
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_skew_release_1)
+    assert :ok = Poller.release_boot_quarantine(first)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{
+        hb
+        | "at" => now - 4_000,
+          "booted_at" => now - 1_800_000,
+          "os_pid" => "0"
+      })
+    )
+
+    MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_skew_release_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
+  test "a Poller restart inside a live VM holds, even after a human release" do
+    # No hard kill happened: the supervisor restarted the Poller. The record
+    # is released, fresh and long-run, but its OS pid is this VM's.
+    fiber_id = fresh_candidate!("tests/hb-poller-restart")
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_restart_1)
+    assert :ok = Poller.release_boot_quarantine(first)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
+    )
+
+    MockRunner.reset()
+    fresh_candidate!(fiber_id)
+
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_restart_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
+  test "a human release is recorded in the heartbeat at once" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_hb_release_write,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        daemon_heartbeat_file: heartbeat_file(),
+        daemon_heartbeat_interval_ms: 3_600_000
+      )
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    assert :ok = Poller.release_boot_quarantine(poller)
+    # The hour-long interval rules out the timer: only the release wrote this.
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+  end
+
+  test "a gracefully stopped previous incarnation (stop marker) still quarantines" do
+    # A deploy or operator restart: fresh, released, long-run — everything a
+    # hard kill would look like, except the stop marker its SIGTERM left.
+    fiber_id = fresh_candidate!("tests/hb-stopped")
+    path = write_heartbeat!()
+    :ok = DaemonHeartbeat.mark_stopped(path)
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stopped)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a host that has not opted in holds even a provable hard-kill bounce" do
+    fiber_id = fresh_candidate!("tests/hb-opt-out")
+    write_heartbeat!()
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_hb_opt_out,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        quarantine_auto_release: false,
+        daemon_heartbeat_file: heartbeat_file()
+      )
+
+    send(poller, :run_poll_cycle)
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a stale heartbeat (a real outage) still quarantines" do
+    fiber_id = fresh_candidate!("tests/hb-stale")
+    now = System.system_time(:millisecond)
+    # Five minutes of silence: far past the 60s grace, so the daemon has no
+    # evidence the gap was short.
+    write_heartbeat!(%{"at" => now - 300_000})
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stale)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a crash loop (fresh heartbeat, short-lived previous incarnation) still quarantines" do
+    # The case freshness CANNOT catch: a daemon dying every few seconds has a
+    # heartbeat that is always fresh. The recorded boot time is what exposes it.
+    fiber_id = fresh_candidate!("tests/hb-crash-loop")
+    now = System.system_time(:millisecond)
+    at = now - 2_000
+    write_heartbeat!(%{"at" => at, "booted_at" => at - 10_000, "boots" => [at - 10_000]})
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_crash_loop)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "too many recent boots still quarantines even when each incarnation looked healthy" do
+    # The coarse brake: every incarnation lived just past the healthy-run
+    # threshold, so the per-incarnation check passes — but the daemon has come
+    # back five times in ten minutes (this boot included), which is a human's problem, not new work's.
+    fiber_id = fresh_candidate!("tests/hb-churn")
+    now = System.system_time(:millisecond)
+    at = now - 3_000
+
+    write_heartbeat!(%{
+      "at" => at,
+      "booted_at" => at - 100_000,
+      "boots" => [at - 400_000, at - 300_000, at - 200_000, at - 100_000]
+    })
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_churn)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a heartbeat whose recorded workers are gone still quarantines" do
+    # Fresh and loop-free, but the workers it vouched for are not in tmux — so
+    # something ended them too, and this is not the fast bounce it looks like.
+    # Continuity is established by adoption, never by trusting the file.
+    fiber_id = fresh_candidate!("tests/hb-ghost-workers")
+    write_heartbeat!(%{"workers" => ["tests/hb-ghost"]})
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_ghost)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a missing heartbeat file still quarantines (fail closed)" do
+    fiber_id = fresh_candidate!("tests/hb-missing")
+    refute File.exists?(heartbeat_file())
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_missing)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a boot whose tmux scan is unknown holds even with a releasable heartbeat" do
+    # An empty recorded set is vacuously continuous, so the verdict alone would
+    # release. It must not: without a completed adoption scan the daemon has not
+    # observed what is live, and the `adopted?` guard fails the release closed.
+    MockRunner.set_tmux_server_missing(true)
+    MockRunner.set_ps_result({"ps: boom", 1})
+    fiber_id = fresh_candidate!("tests/hb-scan-unknown")
+    write_heartbeat!()
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
+    refute :sys.get_state(poller).adopted?
+
+    # Force a cycle and wait for it to park the candidate: the hold is observed
+    # doing its job, not merely set.
+    send(poller, :run_poll_cycle)
+    assert_held!(poller, fiber_id)
+  end
+
+  test "a truncated or malformed heartbeat file still quarantines without crashing the poller" do
+    # A kill mid-write is exactly what this daemon is exposed to, so the parse
+    # has to survive garbage — and a file that says the right keys with the wrong
+    # types is no better evidence than one that says nothing.
+    for {label, body} <- [
+          {:truncated, ~s({"v":1,"at":17)},
+          {:not_an_object, ~s(["at", 17])},
+          {:wrong_types, ~s({"v":1,"at":"soon","booted_at":null,"workers":"nope"})},
+          {:empty, ""}
+        ] do
+      MockRunner.reset()
+      fiber_id = fresh_candidate!("tests/hb-malformed-#{label}")
+      File.write!(heartbeat_file(), body)
+
+      {:ok, poller} = start_quarantined_poller!(:"test_poller_hb_malformed_#{label}")
+      send(poller, :run_poll_cycle)
+
+      assert_held!(poller, fiber_id)
+      assert Process.alive?(poller)
+    end
+  end
+
+  test "a contract skew holds even with an otherwise-auto-releasable heartbeat" do
+    # Skew has no release endpoint by design: every shelled write is suspect, so
+    # the auto-release must not become a back door into dispatching under one.
+    MockRunner.set_contract_level("4")
+    fiber_id = fresh_candidate!("tests/hb-skew")
+    write_heartbeat!()
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_skew)
+    send(poller, :run_poll_cycle)
+
+    assert_eventually(fn ->
+      assert [%{fiber_id: ^fiber_id, reason: reason}] = hb_snapshot(poller).pending_launch
+      assert reason =~ "contract skew"
+    end)
+
+    snap = hb_snapshot(poller)
+    assert snap.contract.ok == false
+    assert snap.boot_quarantine == true
+  end
+
+  test "the daemon writes its own heartbeat while healthy" do
+    # The other half of the contract: the evidence the next boot reads is
+    # written by this one, at boot and then on its own interval, carrying this
+    # incarnation's boot time, its live workers, and the boot ring it inherited.
+    live_id = "tests/hb-writer-live"
+    session = Dispatcher.session_name(live_id)
+    MockRunner.set_shuttle(live_id, oneshot_shuttle())
+    MockRunner.add_tmux_session(session)
+
+    previous_boot = System.system_time(:millisecond) - 1_800_000
+    write_heartbeat!(%{"boots" => [previous_boot]})
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_hb_writer,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()],
+        daemon_heartbeat_file: heartbeat_file(),
+        daemon_heartbeat_interval_ms: 25
+      )
+
+    assert_eventually(fn ->
+      assert {:ok, hb} = Shuttle.DaemonHeartbeat.read(heartbeat_file())
+      # This incarnation's own boot time, appended to the inherited ring.
+      assert hb["boots"] == [previous_boot, :sys.get_state(poller).daemon_booted_at]
+      assert hb["booted_at"] == :sys.get_state(poller).daemon_booted_at
+      assert live_id in hb["workers"]
+      # Stamped with this daemon's fleet identity and this machine's node name.
+      assert hb["host"] == :sys.get_state(poller).own_host_id
+      assert hb["node"] == Shuttle.DaemonHeartbeat.node_name()
+      assert hb["os_pid"] == System.pid()
+      # And it keeps writing: `at` advances past the boot write.
+      assert hb["at"] > hb["booted_at"]
+    end)
+  end
+
   # ── S2: boot-time CLI/daemon contract handshake ──
   #
   # `Shuttle.Poller.init/1` shells `felt shuttle contract` once and compares it
@@ -2391,7 +2891,7 @@ defmodule Shuttle.PollerTest do
   # tests exercise the skew gate in isolation from it.
 
   test "a matching contract level dispatches normally and reports ok in the snapshot" do
-    MockRunner.set_contract_level("3")
+    MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
     fiber_id = "tests/contract-match"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
