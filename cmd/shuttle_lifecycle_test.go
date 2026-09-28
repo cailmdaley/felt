@@ -254,6 +254,38 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 	}
 }
 
+// TestShuttleReopen_RequiresProjectDir: a closed fiber whose block has no
+// project_dir is requeued by reopen, not resume, so the refusal — from reopen
+// and from edit -s active alike — names reopen --project-dir, and that call
+// arms it. (The daemon's force-dispatch shells reopen and relays this.)
+func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "old", felt.StatusClosed, map[string]any{"kind": "oneshot", "agent": "claude-opus"}, nil)
+
+	for _, args := range [][]string{
+		{"shuttle", "reopen", "old"},
+		{"edit", "old", "-s", "active"},
+	} {
+		_, err := runCommand(t, dir, args...)
+		if err == nil || !strings.Contains(err.Error(), "felt shuttle reopen old --project-dir <dir>") {
+			t.Fatalf("%v with no project_dir: err=%v, want a refusal naming reopen --project-dir", args, err)
+		}
+		if got := mustRead(t, storage, "old").Status; got != felt.StatusClosed {
+			t.Fatalf("%v armed it anyway: status=%q", args, got)
+		}
+	}
+
+	work := t.TempDir()
+	if out, err := runCommand(t, dir, "shuttle", "reopen", "old", "--project-dir", work); err != nil {
+		t.Fatalf("reopen --project-dir: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "old")
+	b, _, err := f.ShuttleBlock()
+	if err != nil || f.Status != felt.StatusActive || b.ProjectDir != work {
+		t.Fatalf("after reopen --project-dir: status=%q block=%#v err=%v", f.Status, b, err)
+	}
+}
+
 // TestEditOfArmedFiberWithoutProjectDirIsNotArming: the gate is on the act
 // of arming, not on an armed fiber. A standing role armed before project_dir
 // was required still takes a tag or an outcome — from the board, or from the

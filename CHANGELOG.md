@@ -11,11 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `felt check --json` exits non-zero when it reports an error-level issue, as plain `felt check` does.
   Scripts that read the JSON and judge it themselves should expect exit status 1 on a store with errors.
 - Arming requires a `project_dir` on every verb that arms a fiber (`felt shuttle resume`, `reopen`, `accept`, `felt edit -s active`), not only on `install` and `repeat`.
-  `felt shuttle resume <fiber> --project-dir <dir>` sets it on a draft installed without one and arms it in one step.
+  `felt shuttle resume` and `reopen` take `--project-dir <dir>` to set it and arm in one step; the refusal names the one that applies.
+  An edit that leaves an already-armed fiber active arms nothing and is not gated, so a role armed without a `project_dir` still takes tags and outcomes.
+  The daemon's force-dispatch of a closed fiber shells `reopen`, so it is refused for a block without a `project_dir` until one is set.
 - An `inputs:` entry with a `from:` is a data-flow edge whether or not it has an `id:`.
   `felt check` and `show --consumers` now see unlabelled entries, which `nest` already rewrote; check locates them as `inputs[<n>].from`.
 - `felt shuttle set-model` validates the surface with the agent, as `set-agent` does: a `surface: app` block moves off Codex only through `set-agent <fiber> <agent> --surface cli`.
-- `felt shuttle status <fiber>` reports where an armed fiber is eligible for dispatch, reading host ownership and `project_dir` as well as status, and no longer promises a launch the boot quarantine could hold.
+- `felt shuttle status <fiber>` reports where an armed fiber is eligible for dispatch, reading host ownership as well as status, notes a block with no `project_dir` (its worker starts in the felt store), and no longer promises a launch the boot quarantine could hold.
 - `show --citations` and `--consumers` print one line per edge instead of a YAML dump; `--json` output is unchanged.
 
 ### Fixed

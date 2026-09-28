@@ -459,7 +459,14 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			status:       felt.StatusActive,
 			own:          "testhost",
 			noProjectDir: true,
-			want:         []string{"no project_dir", "felt shuttle resume role --project-dir"},
+			want:         []string{"→ Armed; eligible for dispatch on this host", "no project_dir, so its worker starts in the felt store", "felt shuttle resume role --project-dir <dir>"},
+		},
+		{
+			name:         "closed, no project_dir",
+			status:       felt.StatusClosed,
+			own:          "testhost",
+			noProjectDir: true,
+			want:         []string{"→ Fiber is closed", "felt shuttle reopen role --project-dir <dir>"},
 		},
 		{
 			name:   "closed",

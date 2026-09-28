@@ -143,7 +143,7 @@ own, structured ones included.`,
 			if block, ok, err := f.ShuttleBlock(); err != nil {
 				return err
 			} else if ok {
-				if err := checkArmable(f.ID, block); err != nil {
+				if err := checkArmable(f.ID, armVerb(statusBefore, f, block), block); err != nil {
 					return err
 				}
 			}

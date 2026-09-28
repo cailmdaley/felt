@@ -191,17 +191,10 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			return err
 		}
 		defer unlock()
-		if cmd.Flags().Changed("project-dir") {
-			projectDir, err := resolveProjectDirFlag(resumeProjectDir)
-			if err != nil {
-				return err
-			}
-			if err := f.SetShuttleField("project_dir", projectDir); err != nil {
-				return err
-			}
-			block.ProjectDir = projectDir
+		if err := setProjectDirFlag(cmd, resumeProjectDir, f, block); err != nil {
+			return err
 		}
-		if err := checkArmable(args[0], block); err != nil {
+		if err := checkArmable(args[0], "resume", block); err != nil {
 			return err
 		}
 
@@ -257,14 +250,17 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 
 // checkArmable is the arming gate: every verb that makes a fiber dispatchable
 // (resume, reopen, accept, edit -s active) holds the block to what an armed
-// install requires. It needs a project_dir — without one the poller
-// disqualifies the fiber, so it would sit armed and silently never dispatch —
+// install requires. It needs a project_dir — without one the daemon still
+// dispatches the fiber but starts its worker in the felt store instead of the
+// checkout the work belongs to, the fallback an armed install never takes —
 // and an agent the registry resolves, so a retired id (kept on closed fibers
 // as history — content edits never check it) is refused with the registry's
-// list rather than failing later inside the daemon.
-func checkArmable(fiberID string, block *shuttle.Block) error {
+// list rather than failing later inside the daemon. verb is the lifecycle
+// verb that arms this fiber from where it stands (armVerb), which the refusal
+// names with the --project-dir that satisfies it.
+func checkArmable(fiberID, verb string, block *shuttle.Block) error {
 	if strings.TrimSpace(block.ProjectDir) == "" {
-		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it and arm: felt shuttle resume %s --project-dir <dir>)", fiberID, fiberID)
+		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it as you arm it: felt shuttle %s %s --project-dir <dir>)", fiberID, verb, fiberID)
 	}
 	reg, err := shuttle.LoadAgentRegistry()
 	if err != nil {
@@ -280,6 +276,34 @@ func checkArmable(fiberID string, block *shuttle.Block) error {
 			return fmt.Errorf("cannot arm: %s (felt shuttle set-agent to pick a current one)", e.Message)
 		}
 	}
+	return nil
+}
+
+// armVerb names the lifecycle verb that arms a fiber standing at status:
+// reopen for a closed fiber, except a standing role awaiting review, which
+// resume re-arms through its daemon (concluding the run); resume otherwise.
+func armVerb(status string, f *felt.Felt, block *shuttle.Block) string {
+	if status == felt.StatusClosed && !(block.Kind == "standing" && readTempered(f) == nil) {
+		return "reopen"
+	}
+	return "resume"
+}
+
+// setProjectDirFlag applies an arming verb's --project-dir, when given, to
+// f's shuttle: block and to block, so the arming gate reads the block as it
+// will be written.
+func setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shuttle.Block) error {
+	if !cmd.Flags().Changed("project-dir") {
+		return nil
+	}
+	projectDir, err := resolveProjectDirFlag(raw)
+	if err != nil {
+		return err
+	}
+	if err := f.SetShuttleField("project_dir", projectDir); err != nil {
+		return err
+	}
+	block.ProjectDir = projectDir
 	return nil
 }
 
@@ -337,14 +361,20 @@ awaiting review).`,
 
 // ---- reopen ----------------------------------------------------------------
 
-var reopenAsDraft bool
+var (
+	reopenAsDraft    bool
+	reopenProjectDir string
+)
 
 var reopenCmd = &cobra.Command{
 	Use:   "reopen <fiber>",
 	Short: "Requeue a closed or reviewed fiber back into active work",
 	Long: `Sets status = active and clears tempered / closed-at so a closed card
 re-enters the in-flight loop. status is the fiber's only dispatch switch.
-Arming refuses an agent the registry cannot resolve.
+
+Arming needs what an armed install needs: an agent the registry resolves and a
+project_dir. A block without one is refused; --project-dir sets it (an
+existing directory on this machine, stored absolute) in the same step.
 
 With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
@@ -356,10 +386,13 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 		}
 		defer unlock()
 
+		if err := setProjectDirFlag(cmd, reopenProjectDir, f, block); err != nil {
+			return err
+		}
 		status := felt.StatusActive
 		if reopenAsDraft {
 			status = felt.StatusOpen
-		} else if err := checkArmable(args[0], block); err != nil {
+		} else if err := checkArmable(args[0], "reopen", block); err != nil {
 			return err
 		}
 		statusBefore := f.Status
@@ -510,7 +543,7 @@ falls back to a local document write when the daemon is down.`,
 		// the offline local write both arm the fiber (status: active), so
 		// both need a resolvable agent up front (the daemon resolves again
 		// at dispatch; that's fine, this just fails fast and offline too).
-		if err := checkArmable(args[0], block); err != nil {
+		if err := checkArmable(args[0], "resume", block); err != nil {
 			return err
 		}
 
@@ -926,6 +959,7 @@ func registerShuttleLifecycleFlags() {
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
+	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
