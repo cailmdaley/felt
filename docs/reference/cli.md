@@ -133,8 +133,8 @@ untouched by any of this.
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
-| `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native harness sessions addressable across the fleet (`--host`, `--harness`, `--json`). With a fiber or session, preserve the provenance view: discover the composite session ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, and transcript availability. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition through the ledgers; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `felt shuttle message <address> [text\|-]` | Send text and files to the exact session address returned by `sessions` (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). `-` and `--file -` read multiline message text; repeat `--attach <path>` to include binary files. Receipts report the transport result and the message ID needed for a safe explicit retry |
+| `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
+| `felt shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `felt shuttle agents [resolve <agent>]` | List (or resolve) the effective agent registry (`--source builtin\|user`) |
 | `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
@@ -181,7 +181,9 @@ explicit endpoint configuration, durable launch setup, and acceptance checks.
 No-argument `sessions` may report a Claude, Codex, or Pi receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in
-Unix milliseconds. An abnormal exit can leave a registration behind.
+Unix milliseconds. An abnormal exit can leave a registration behind. Peer JSON
+rows include the fiber path when the session ledger records its pairing, and
+provenance rows include a canonical `address` when the host and harness are known.
 Messages wake idle receivers or steer ongoing work by default:
 
 ```bash
@@ -189,6 +191,12 @@ felt shuttle sessions --json
 felt shuttle message <address> "Please review the results" --attach results.csv
 felt shuttle message <address> "Background for your next task" --context-only
 ```
+
+`felt shuttle message` accepts that address, a unique native session ID, or a
+Shuttle fiber path, slug, or UID with a recorded worker. The fiber target uses
+`shuttle.runtime.session_uuid`; ambiguous session IDs fail with their candidate
+addresses. Addresses use `claude`, `codex`, and `pi`; the ledger spelling
+`claude-code` normalizes to `claude`.
 
 `--context-only` queues or adds context without starting a turn or invoking native
 steering. Hooks offer queued context when the receiver next prompts or uses a

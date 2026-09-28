@@ -179,12 +179,18 @@ harness processes sharing one transcript.
 `GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
 configured daemon once with `local=true`; an offline, old, timed-out, or
 malformed peer becomes an explicit `{host, error}` gap while successful peers
-remain usable. Returned addresses use the configured routing alias:
-`shuttle://HOST/HARNESS/NATIVE_ID`.
+remain usable. A session row includes `fiber` when its host's session ledger
+records the pairing. Returned addresses use the configured routing alias and
+canonical harness name: `shuttle://HOST/HARNESS/NATIVE_ID`, where `HARNESS` is
+`claude`, `codex`, or `pi`.
 
-`POST /messages` accepts `{address, text, from, wake, message_id}`. Omitting
-`wake` requests an active task turn; set `wake: false` explicitly for
-context-only delivery. A failed wake remains a failure in the receipt and is
+`POST /messages` accepts `{address, text, from, wake, message_id}` with a full
+`shuttle://` address. The parser accepts known ledger or registry spellings,
+such as `claude-code`, and normalizes the routed address and receipt to the
+canonical harness name. The CLI also resolves unique native session IDs and
+fiber paths, slugs, or UIDs before calling this endpoint. Omitting `wake`
+requests an active task turn; set `wake: false` explicitly for context-only
+delivery. A failed wake remains a failure in the receipt and is
 never silently downgraded to context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports only submission state (`accepted`,

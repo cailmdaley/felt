@@ -94,7 +94,7 @@ Only the human sets `tempered`. Leave the shuttle block in place when you close;
 
 ## Other sessions and the human
 
-`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about. Message one by its address:
+`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about; rows include `fiber` when the host's session ledger records the pairing. `felt shuttle sessions <fiber>` shows the session history and each addressable row's canonical address. Send to that address, a unique native session ID, or a fiber path, slug, or UID with a recorded worker; a fiber resolves through `shuttle.runtime.session_uuid`. Ambiguous session IDs fail with their candidate addresses. Addresses use `claude`, `codex`, and `pi`; the session-ledger spelling `claude-code` normalizes to `claude`.
 
 ```bash
 felt shuttle message <address> "Please investigate this"
