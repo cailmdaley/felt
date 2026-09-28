@@ -34,13 +34,31 @@ export interface JoinMeetingInput {
 
 /**
  * What a join came to. `joined` names how the constitution's worker received
- * the meeting (`message`, `resume` or `dispatch`); `recording` means hark is
- * recording but the worker did not receive it, and says why.
+ * the meeting (`message`, `resume` or `dispatch`); `unconfirmed` means the
+ * meeting was sent but the worker has not been seen taking it up yet, and says
+ * what is known; `recording` means hark is recording but the worker did not
+ * receive it, and says why.
  */
 export type JoinMeetingOutcome =
   | { kind: 'joined'; delivery: string }
+  | { kind: 'unconfirmed'; detail: string }
   | { kind: 'recording'; error: string }
   | { kind: 'error'; message: string }
+
+/**
+ * An unconfirmed delivery: `delivered: null`, or a message receipt of status
+ * `unknown` (sent, arrival unconfirmed) whatever HTTP status carried it.
+ */
+function unconfirmedDetail(delivery: Record<string, unknown>): string | null {
+  const receipt = delivery.receipt && typeof delivery.receipt === 'object'
+    ? delivery.receipt as Record<string, unknown>
+    : null
+  if (delivery.delivered !== null && receipt?.status !== 'unknown') return null
+  for (const detail of [delivery.detail, receipt?.detail]) {
+    if (typeof detail === 'string' && detail) return detail
+  }
+  return 'the message was sent; its arrival is unconfirmed'
+}
 
 export function joinMeetingBody(input: JoinMeetingInput): Record<string, unknown> {
   const note = input.note?.trim() ?? ''
@@ -72,6 +90,8 @@ export async function joinMeeting(
   const delivery = payload.delivery && typeof payload.delivery === 'object'
     ? payload.delivery as Record<string, unknown>
     : null
+  const unconfirmed = delivery && unconfirmedDetail(delivery)
+  if (unconfirmed) return { kind: 'unconfirmed', detail: unconfirmed }
   if (response.ok && delivery) {
     return { kind: 'joined', delivery: typeof delivery.delivery === 'string' ? delivery.delivery : 'message' }
   }

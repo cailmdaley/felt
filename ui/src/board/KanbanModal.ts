@@ -386,6 +386,8 @@ export class KanbanModal {
     }
     if (outcome.kind === 'joined') {
       this.showBanner(`Recording — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
+    } else if (outcome.kind === 'unconfirmed') {
+      this.showBanner(`Recording — sent to “${card.name}”, not yet confirmed: ${outcome.detail}`, 'info')
     } else {
       this.showBanner(`Recording, but “${card.name}” didn't receive the meeting: ${outcome.error}`, 'error')
     }

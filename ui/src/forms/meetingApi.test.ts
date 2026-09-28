@@ -38,6 +38,42 @@ describe('joinMeeting', () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({ fiber_id: 'loom/shear', meeting: { mode: 'call' } })
   })
 
+  it('reports a sent but unconfirmed delivery as unconfirmed, not as a failure', async () => {
+    const detail = "native message queued behind the receiver's current turn; no model response to it observed yet"
+    const current = vi.fn<typeof fetch>().mockResolvedValue(
+      reply({ meeting: { state: 'live' }, delivery: { delivered: null, delivery: 'message', detail, receipt: { status: 'unknown', detail } } }, 202),
+    )
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, current))
+      .resolves.toEqual({ kind: 'unconfirmed', detail })
+
+    // A daemon that still renders an unknown receipt as a failure: the receipt decides.
+    const older = vi.fn<typeof fetch>().mockResolvedValue(
+      reply({
+        recording: true,
+        error: 'native message sent; no correlated receiver turn observed: context deadline exceeded',
+        meeting: { state: 'live' },
+        delivery: {
+          delivered: false,
+          delivery: 'message',
+          receipt: { status: 'unknown', detail: 'native message sent; no correlated receiver turn observed: context deadline exceeded' },
+        },
+      }, 400),
+    )
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, older))
+      .resolves.toEqual({ kind: 'unconfirmed', detail: 'native message sent; no correlated receiver turn observed: context deadline exceeded' })
+
+    const refused = vi.fn<typeof fetch>().mockResolvedValue(
+      reply({
+        recording: true,
+        error: 'receiver native inbox denied this message; no turn started',
+        meeting: { state: 'live' },
+        delivery: { delivered: false, delivery: 'message', receipt: { status: 'rejected' } },
+      }, 400),
+    )
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, refused))
+      .resolves.toEqual({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started' })
+  })
+
   it('keeps a recording that the worker did not receive distinct from a failed start', async () => {
     const recording = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ recording: true, error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } }, 422),
