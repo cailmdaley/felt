@@ -139,6 +139,31 @@ func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
 	}
 }
 
+// TestShuttleReshapeVerb_TZDefaultIsTheBlocks: --tz registers no default of
+// its own, so help does not advertise UTC beside "the block's existing tz";
+// omitted, a re-time keeps the block's tz, and a block with none gets UTC.
+func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
+	help, _, err := executeCLI(t, "", "shuttle", "reshape", "--help")
+	if err != nil {
+		t.Fatalf("reshape --help: %v", err)
+	}
+	if strings.Contains(help, `(default "UTC")`) {
+		t.Fatalf("reshape --help advertises a UTC default for --tz:\n%s", help)
+	}
+
+	withOwnHost(t, "testhost")
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "host": "testhost", "project_dir": t.TempDir(), "agent": "claude-sonnet",
+	}, nil)
+	if out, err := runCommand(t, dir, "shuttle", "reshape", "role", "standing", "--schedule", "0 7 * * *"); err != nil {
+		t.Fatalf("reshape to standing: %v\n%s", err, out)
+	}
+	if b, _, _ := mustRead(t, storage, "role").ShuttleBlock(); b.Schedule == nil || b.Schedule.TZ != "UTC" {
+		t.Fatalf("schedule = %+v, want tz=UTC for a block that had none", b.Schedule)
+	}
+}
+
 // TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds: a schedule-less
 // target must not be handed a recurrence it would silently ignore.
 func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {

@@ -806,11 +806,11 @@ pause / resume / close / reopen for that.`,
 				return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
 			}
 			tz := reshapeTZ
-			if !cmd.Flags().Changed("tz") {
+			if tz == "" && block.Schedule != nil {
+				tz = block.Schedule.TZ
+			}
+			if tz == "" {
 				tz = "UTC"
-				if block.Schedule != nil && block.Schedule.TZ != "" {
-					tz = block.Schedule.TZ
-				}
 			}
 			candidate.Schedule = &shuttle.Schedule{Expr: expr, TZ: tz}
 		} else {
@@ -932,7 +932,7 @@ func registerShuttleLifecycleFlags() {
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
-	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "UTC", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
+	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
 }
 
 func init() {
