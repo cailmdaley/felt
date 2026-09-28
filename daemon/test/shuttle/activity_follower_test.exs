@@ -166,6 +166,33 @@ defmodule Shuttle.ActivityFollowerTest do
            ]
   end
 
+  test "a rotation racing the seed is not counted twice", %{path: path} do
+    append(path <> ".1", [ev("stop", 0, %{"tmuxSession" => "a"})])
+    append(path, Enum.map(1..5, &ev("stop", &1, %{"tmuxSession" => "b"})))
+
+    # Rotate once, between the seed's read of the live file and its fold of
+    # `.1`, and give the new live file lines of its own.
+    once = :counters.new(1, [])
+
+    hook = fn ->
+      if :counters.get(once, 1) == 0 do
+        :counters.add(once, 1, 1)
+        File.rename!(path, path <> ".1")
+        append(path, Enum.map(6..7, &ev("stop", &1, %{"tmuxSession" => "c"})))
+      end
+    end
+
+    name = :"activity_follower_#{System.unique_integer([:positive])}"
+
+    start_supervised!(
+      {Follower, events_file: path, poll_interval_ms: 3_600_000, name: name, seed_hook: hook}
+    )
+
+    assert all(name, path) == fresh(path)
+    assert :counters.get(once, 1) == 1
+    assert Enum.all?(all(name, path), &(&1.n == 1))
+  end
+
   test "a replacement it cannot account for rebuilds from the files", %{path: path} do
     append(path, [ev("stop", 0)])
     name = start(path)

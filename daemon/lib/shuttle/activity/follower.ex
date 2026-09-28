@@ -61,7 +61,9 @@ defmodule Shuttle.Activity.Follower do
   defmodule State do
     @moduledoc false
     # `offset` and `inode` describe how far into which live file `acc` has read.
-    defstruct [:events_file, :poll_interval_ms, :acc, :inode, offset: 0]
+    # `seed_hook` runs between reading the live file and folding the rotated
+    # one — the window a racing rotation lands in. Tests rotate there.
+    defstruct [:events_file, :poll_interval_ms, :acc, :inode, :seed_hook, offset: 0]
   end
 
   # ── Client ──
@@ -96,7 +98,8 @@ defmodule Shuttle.Activity.Follower do
   def init(opts) do
     state = %State{
       events_file: Keyword.get(opts, :events_file, Activity.default_events_file()),
-      poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @poll_interval_ms)
+      poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @poll_interval_ms),
+      seed_hook: Keyword.get(opts, :seed_hook, fn -> :ok end)
     }
 
     {:ok, state, {:continue, :seed}}
@@ -128,13 +131,22 @@ defmodule Shuttle.Activity.Follower do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Both files from scratch. The inode is taken before the read, so a rotation
-  # racing the seed shows up on the next poll as an inode change.
+  # Both files from scratch, as a consistent pair: the live file first — its
+  # lines, offset and inode all from one open file — then its predecessor. If
+  # `.1` now carries the inode just read, a rotation landed in between and
+  # `.1` IS that file; folding both would count it twice, so start over. A
+  # rotation after `.1` is folded is an ordinary one, and the next poll
+  # follows it.
   defp seed(%State{events_file: path} = state) do
-    inode = FileTail.inode(path)
+    {lines, offset, inode} = FileTail.snapshot(path)
+    state.seed_hook.()
     acc = Activity.fold_file(Activity.new_acc(), rotated(path))
-    {lines, offset} = FileTail.seed(path)
-    settle(%{state | acc: Activity.fold_lines(acc, lines), offset: offset, inode: inode})
+
+    if inode != nil and FileTail.inode(rotated(path)) == inode do
+      seed(state)
+    else
+      settle(%{state | acc: Activity.fold_lines(acc, lines), offset: offset, inode: inode})
+    end
   end
 
   defp follow(%State{events_file: path, inode: followed} = state) do
@@ -144,7 +156,7 @@ defmodule Shuttle.Activity.Follower do
       nil -> state
       ^followed -> append(state)
       inode when is_nil(followed) -> append(%{state | inode: inode})
-      inode -> rotate(state, inode)
+      _moved -> rotate(state)
     end
   end
 
@@ -162,7 +174,7 @@ defmodule Shuttle.Activity.Follower do
     end
   end
 
-  defp rotate(%State{events_file: path, inode: followed, offset: offset} = state, inode) do
+  defp rotate(%State{events_file: path, inode: followed, offset: offset} = state) do
     rotated = rotated(path)
 
     if FileTail.inode(rotated) == followed do
@@ -171,7 +183,9 @@ defmodule Shuttle.Activity.Follower do
         |> Activity.fold_lines(FileTail.drain(rotated, offset))
         |> Activity.drop_before(Activity.first_timestamp(rotated))
 
-      {lines, new_offset} = FileTail.seed(path)
+      # The inode comes from the open file, so it names the file these lines
+      # came from even if another rotation lands mid-read.
+      {lines, new_offset, inode} = FileTail.snapshot(path)
 
       settle(%{
         state

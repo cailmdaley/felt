@@ -53,9 +53,44 @@ defmodule Shuttle.FileTail do
   """
   @spec seed(Path.t()) :: {[String.t()], offset()}
   def seed(path) do
-    case File.read(path) do
-      {:ok, contents} -> split_complete(contents)
-      _ -> {[], 0}
+    {lines, offset, _inode} = snapshot(path)
+    {lines, offset}
+  end
+
+  @doc """
+  `seed/1` plus the inode the lines were read from, taken from the open file
+  rather than the path — so it names the file that was read even when a
+  rotation renames it mid-read. `nil` for a missing or unreadable file.
+  """
+  @spec snapshot(Path.t()) :: {[String.t()], offset(), non_neg_integer() | nil}
+  def snapshot(path) do
+    with {:ok, file} <- :file.open(path, [:read, :binary, :raw]) do
+      try do
+        with {:ok, info} <- :file.read_file_info(file),
+             %File.Stat{inode: inode, size: size} = File.Stat.from_record(info),
+             {:ok, contents} <- read_all(file, size) do
+          {lines, offset} = split_complete(contents)
+          {lines, offset, inode}
+        else
+          _ -> {[], 0, nil}
+        end
+      after
+        :file.close(file)
+      end
+    else
+      _ -> {[], 0, nil}
+    end
+  end
+
+  # `size` is the file's size when opened; an append since is picked up by the
+  # next `advance/2` like any other.
+  defp read_all(_file, 0), do: {:ok, ""}
+
+  defp read_all(file, size) do
+    case :file.read(file, size) do
+      {:ok, data} -> {:ok, data}
+      :eof -> {:ok, ""}
+      other -> other
     end
   end
 
