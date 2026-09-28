@@ -8,7 +8,10 @@ defmodule ShuttleWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :shuttle
 
   plug(Plug.RequestId)
-  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+  # Per-request lines at debug: every board and hub polls several routes a
+  # second, so at info they would be most of the log. Failures log themselves
+  # (the peer gate's refusals, crash reports).
+  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint], log: :debug)
   plug(ShuttleWeb.PeerPlug)
   plug(ShuttleWeb.PeerGatePlug)
 

@@ -1,0 +1,26 @@
+## Flags given to the VM: https://www.erlang.org/doc/apps/erts/erl_cmd.html
+## -mode/-name/-sname/-setcookie are configured via env vars, do not set them here.
+
+## Schedulers: a few, and none of them spinning.
+##
+## The daemon's work is waiting — on HTTP, on the felt and tmux subprocesses it
+## shells out to, on files — so a handful of schedulers carry it on every host,
+## a laptop or a many-core login node alike. Left to the defaults, the VM sizes
+## its thread pools to the machine's logical CPUs (128 on an HPC login node,
+## whatever cgroup quota actually applies) and each idle scheduler busy-waits
+## before sleeping. On a shared login node that spin is most of the daemon's
+## CPU time, and CPU time is what a per-process limit kills it for.
+##
+##   +S 2:2       two normal schedulers, both online
+##   +SDcpu 2:2   two dirty-CPU schedulers (JSON and TLS bursts are short)
+##   +SDio 4      four dirty-IO schedulers for file operations, which the
+##                poller issues in bursts across every store
+##   +sbwt*       no busy-wait on any scheduler class: an idle thread sleeps
+##                at once, trading microseconds of wake-up latency the daemon
+##                cannot notice for CPU it would otherwise burn.
++S 2:2
++SDcpu 2:2
++SDio 4
++sbwt none
++sbwtdcpu none
++sbwtdio none

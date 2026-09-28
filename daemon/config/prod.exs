@@ -10,3 +10,7 @@ config :shuttle, ShuttleWeb.Endpoint,
   code_reloader: false,
   # Required for the daemon to actually bind the TCP port.
   server: true
+
+# The release logs at info: debug lines (every poll, every request) grow a
+# long-running daemon's log by hundreds of MB a day.
+config :logger, level: :info
