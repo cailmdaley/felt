@@ -879,9 +879,7 @@ and a live worker is left running.`,
 	},
 }
 
-// registerShuttleLifecycleFlags binds the lifecycle verbs' flags. Exposed so
-// tests can ResetFlags() + re-register to clear Changed state between runs (the
-// cobra flag-state-persists-across-Execute gotcha).
+// registerShuttleLifecycleFlags binds the lifecycle verbs' flags.
 func registerShuttleLifecycleFlags() {
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")

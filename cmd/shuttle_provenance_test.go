@@ -39,7 +39,6 @@ func jsonBody(body string) http.HandlerFunc {
 }
 
 func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
-	defer saveShuttleGlobals()()
 	daemonStub(t, map[string]http.HandlerFunc{
 		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -77,7 +76,6 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 }
 
 func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
-	defer saveShuttleGlobals()()
 	body := []byte("{\"type\":\"response_item\"}\n")
 	digest := sha256.Sum256(body)
 	daemonStub(t, map[string]http.HandlerFunc{
@@ -109,7 +107,6 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 }
 
 func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T) {
-	defer saveShuttleGlobals()()
 	digest := sha256.Sum256(nil)
 	daemonStub(t, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
@@ -134,7 +131,6 @@ func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T)
 }
 
 func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) {
-	defer saveShuttleGlobals()()
 	old := []byte("old\n")
 	current := []byte("old\nnew\n")
 	oldDigest := sha256.Sum256(old)
@@ -163,7 +159,6 @@ func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) 
 }
 
 func TestShuttleTranscript_RejectsNonUUIDBeforeHTTP(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	if _, err := runCommand(t, t.TempDir(), "shuttle", "transcript", "not-a-session"); err == nil || !strings.Contains(err.Error(), "invalid session ID") {
 		t.Fatalf("expected UUID validation error, got %v", err)
@@ -171,7 +166,6 @@ func TestShuttleTranscript_RejectsNonUUIDBeforeHTTP(t *testing.T) {
 }
 
 func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
-	defer saveShuttleGlobals()()
 	good := []byte("previous verified transcript\n")
 	bad := []byte("truncated transfer\n")
 	goodDigest := sha256.Sum256(good)
@@ -210,7 +204,6 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 }
 
 func TestShuttleTranscript_LocalJSONCarriesBothPaths(t *testing.T) {
-	defer saveShuttleGlobals()()
 	native := "/Users/cail/.codex/sessions/rollout.jsonl"
 	daemonStub(t, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(`{"records":[{"session":"` + provenanceSession + `","host":"local"}]}`),
@@ -251,7 +244,6 @@ func TestIdentityPendingAppendsAlongsideHistoricalSessions(t *testing.T) {
 }
 
 func TestCompositeFiberRuntimePendingRequiresMissingSession(t *testing.T) {
-	defer saveShuttleGlobals()()
 	daemonStub(t, map[string]http.HandlerFunc{
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[{"fiber":{"id":"01UID","slug":"remote/name","shuttle":{"runtime":{"dispatched_at":"2026-08-23T18:00:00Z"}}}}]}`),
 	})
@@ -270,12 +262,6 @@ func TestApplyOriginFreshnessDoesNotChangeAvailability(t *testing.T) {
 	got := applyOriginFreshness(rows, map[string]any{"cineca": map[string]any{"stale": true}})
 	if !got[0].Stale || got[0].Transcript.Availability != "available_remote" {
 		t.Fatalf("origin freshness and transcript availability were conflated: %#v", got[0])
-	}
-}
-
-func resetSessionsFlags() func() {
-	return func() {
-		sessionsCommitSHA, sessionsMaterialize, sessionsDir = "", false, ""
 	}
 }
 
@@ -301,8 +287,6 @@ func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
 }
 
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	server := provenanceDaemon(t, []byte("x\n"))
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", provenanceSession, "--json")
@@ -328,8 +312,6 @@ func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupByCommit(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	server := provenanceDaemon(t, []byte("x\n"))
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "79def80", "--json")
@@ -348,8 +330,6 @@ func TestShuttleSessions_ReverseLookupByCommit(t *testing.T) {
 }
 
 func TestShuttleSessions_UnrecordedCommitIsHonest(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	server := provenanceDaemon(t, []byte("x\n"))
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 	_, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "--commit", "deadbeef")
@@ -359,8 +339,6 @@ func TestShuttleSessions_UnrecordedCommitIsHonest(t *testing.T) {
 }
 
 func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	body := []byte("{\"type\":\"response_item\"}\n")
 	server := provenanceDaemon(t, body)
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
@@ -404,8 +382,6 @@ func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	// Fiber-less ledger rows: path round-tripping would match the first
 	// fiber-less row (01OTHER); keying on the ledger's own UID must not.
 	daemonStub(t, map[string]http.HandlerFunc{
@@ -435,8 +411,6 @@ func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
 }
 
 func TestShuttleSessions_AmbiguousCommitPrefixErrors(t *testing.T) {
-	defer saveShuttleGlobals()()
-	defer resetSessionsFlags()()
 	daemonStub(t, map[string]http.HandlerFunc{
 		"/api/v1/commits/composite": jsonBody(`{"records":[
               {"sha":"79def80aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"s1"},

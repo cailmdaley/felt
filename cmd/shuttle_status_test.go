@@ -58,8 +58,6 @@ func TestComputeState(t *testing.T) {
 // ---- status ----------------------------------------------------------------
 
 func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
-	defer saveShuttleGlobals()()
-	statusIncludeOrphans = false
 	dir, storage := newStore(t)
 	// An active oneshot with a live worker, an active standing (idle/scheduled),
 	// a paused (open) role, a closed role, and a pure note (no shuttle facet).
@@ -109,8 +107,6 @@ func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 }
 
 func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
-	defer saveShuttleGlobals()()
-	statusIncludeOrphans = false
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	withStubbedLiveSessions(t, map[string]bool{})
@@ -130,9 +126,6 @@ func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
 // The table hides closed rows by default and says so; --closed restores them;
 // the JSON arm is never filtered.
 func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
-	defer saveShuttleGlobals()()
-	statusIncludeOrphans = false
-	statusClosed = false
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "live", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "done", felt.StatusClosed, oneshot(), nil)
@@ -164,8 +157,6 @@ func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
 }
 
 func TestShuttleStatus_IncludeOrphans(t *testing.T) {
-	defer saveShuttleGlobals()()
-	statusIncludeOrphans = false
 	dir, _ := newStore(t)
 	// A live shuttle session that maps to no shuttle: facet in the store.
 	withStubbedLiveSessions(t, map[string]bool{"ghost-shuttle": true})
@@ -192,7 +183,6 @@ func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 // ---- ps --------------------------------------------------------------------
 
 func TestShuttlePs_AttributesOwner(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/worker", "01WORKERUID0000000000000001", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/worker")
@@ -213,7 +203,6 @@ func TestShuttlePs_AttributesOwner(t *testing.T) {
 }
 
 func TestShuttlePs_Empty(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, _ := newStore(t)
 	withStubbedLiveSessions(t, map[string]bool{})
 
@@ -229,7 +218,6 @@ func TestShuttlePs_Empty(t *testing.T) {
 // ---- session-name ----------------------------------------------------------
 
 func TestShuttleSessionName(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/task", "01SESSIONUID000000000000001", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/task")
@@ -250,7 +238,6 @@ func TestShuttleSessionName(t *testing.T) {
 // ---- attach (error branch; the exec path can't be unit-tested) --------------
 
 func TestShuttleAttach_NoLiveSession(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	withStubbedTmux(t, map[string]bool{}) // nothing live
@@ -466,7 +453,6 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer saveShuttleGlobals()()
 			withStubbedTmux(t, nil)
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", tc.status, map[string]any{
@@ -493,7 +479,6 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 func TestShuttleStatus_SingleFiberRejectsTableFlags(t *testing.T) {
 	for _, flag := range []string{"--all", "--include-orphans"} {
 		t.Run(flag, func(t *testing.T) {
-			defer saveShuttleGlobals()()
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
@@ -511,7 +496,6 @@ func TestShuttleStatus_SingleFiberRejectsTableFlags(t *testing.T) {
 // TestShuttleStatus_SingleFiberWithoutBlock: status reports shuttle roles, so a
 // plain fiber is an error that names the verbs that would make it one.
 func TestShuttleStatus_SingleFiberWithoutBlock(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "note", felt.StatusOpen)
 

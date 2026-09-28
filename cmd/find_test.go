@@ -10,36 +10,12 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-func saveFindGlobals() func() {
-	prevStatus, prevTags, prevBody := findStatus, findTags, findBody
-	prevExact, prevRegex, prevHasFields := findExact, findRegex, findHasFields
-	prevVerbose, prevLimit, prevJSON := findVerbose, findLimit, jsonOutput
-
-	findStatus, findTags, findBody = "", nil, false
-	findExact, findRegex, findHasFields = false, false, nil
-	findVerbose, findLimit, jsonOutput = false, findOuterCap, false
-
-	for _, name := range []string{"status", "tag", "body", "exact", "regex", "has-field", "verbose", "limit"} {
-		if f := findCmd.Flags().Lookup(name); f != nil {
-			f.Changed = false
-		}
-	}
-
-	return func() {
-		findStatus, findTags, findBody = prevStatus, prevTags, prevBody
-		findExact, findRegex, findHasFields = prevExact, prevRegex, prevHasFields
-		findVerbose, findLimit, jsonOutput = prevVerbose, prevLimit, prevJSON
-	}
-}
-
 // TestFindSearchesTheWholeStore: find is the verb whose whole job is finding
 // things, so it crosses the view boundary — local hits first under their local
 // ids, the rest of the store under a separator naming it, each by its full id
 // there. This store's own subtree never appears twice.
 func TestFindSearchesTheWholeStore(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveFindGlobals()()
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "find", "debug")
 	if err != nil {
@@ -79,7 +55,6 @@ func TestFindAcceptsSearchShapedFilters(t *testing.T) {
 	} {
 		t.Run(strings.Join(filter, " "), func(t *testing.T) {
 			_, subProj := newCrossStoreFixture(t)
-			defer saveFindGlobals()()
 
 			out, err := runCommand(t, subProj, append([]string{"find"}, filter...)...)
 			if err != nil {
@@ -103,7 +78,6 @@ func TestFindCapsTheOuterBlock(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		writeFixtureFelt(t, loom, fmt.Sprintf("swarm-%02d", i), fmt.Sprintf("Swarm %d", i))
 	}
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, subProj, "find", "swarm-")
 	if err != nil {
@@ -134,7 +108,6 @@ func TestFindInTopLevelStoreIsALocalSearch(t *testing.T) {
 	dir, storage := newStore(t)
 	writeFixtureFelt(t, storage, "kanban", "Kanban board")
 	writeFixtureFelt(t, storage, "unrelated", "Unrelated")
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, dir, "find", "kanban")
 	if err != nil {
@@ -155,7 +128,6 @@ func TestFindInTopLevelStoreIsALocalSearch(t *testing.T) {
 // wrong; say so rather than dumping the loom.
 func TestFindNeedsSomethingToSearchFor(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, subProj, "find")
 	if err == nil {
@@ -178,7 +150,6 @@ func TestFindClosedHintCountsBothStores(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write closed fiber: %v", err)
 	}
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, subProj, "find", "debug")
 	if err != nil {
@@ -209,7 +180,6 @@ func TestFindJSONIsOneMergedArray(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		writeFixtureFelt(t, loom, fmt.Sprintf("debug-%02d", i), fmt.Sprintf("Debug %d", i))
 	}
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, subProj, "find", "debug", "--json")
 	if err != nil {
@@ -259,7 +229,6 @@ func TestFindJSONIsOneMergedArray(t *testing.T) {
 // contrast with something above it. With no local hits there is nothing above.
 func TestFindWithoutLocalHitsNamesTheStorePlainly(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveFindGlobals()()
 
 	out, err := runCommand(t, subProj, "find", "commons")
 	if err != nil {

@@ -9,11 +9,6 @@ import (
 func TestAddMintsNativeUID(t *testing.T) {
 	dir, storage := newStore(t)
 
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
-	resetLs := saveLsGlobals()
-	defer resetLs()
-
 	out, err := runCommand(t, dir, "add", "project/federated", "Federated")
 	if err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
@@ -56,9 +51,6 @@ func TestAddMintsNativeUID(t *testing.T) {
 func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
 	dir, storage := newStore(t)
 
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
-
 	out, err := runCommand(t, dir, "add", "born", "Born")
 	if err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
@@ -79,40 +71,6 @@ func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
 	}
 }
 
-func saveAddGlobals() func() {
-	prevBody := addBody
-	prevStatus := addStatus
-	prevDue := addDue
-	prevTags := addTags
-	prevOutcome := addOutcome
-	prevTopLevel := addTopLevel
-	prevJSON := jsonOutput
-
-	addBody = ""
-	addStatus = ""
-	addDue = ""
-	addTags = nil
-	addOutcome = ""
-	addTopLevel = false
-	jsonOutput = false
-
-	for _, name := range []string{"body", "status", "due", "tag", "outcome", "top-level", "json"} {
-		if f := addCmd.Flags().Lookup(name); f != nil {
-			f.Changed = false
-		}
-	}
-
-	return func() {
-		addBody = prevBody
-		addStatus = prevStatus
-		addDue = prevDue
-		addTags = prevTags
-		addOutcome = prevOutcome
-		addTopLevel = prevTopLevel
-		jsonOutput = prevJSON
-	}
-}
-
 func looksLikeULID(value string) bool {
 	if len(value) != 26 {
 		return false
@@ -130,8 +88,6 @@ func looksLikeULID(value string) bool {
 // path or created at the top level and nested there afterwards.
 func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
 	dir, storage := newStore(t)
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
 
 	for _, args := range [][]string{
 		{"add", "games/civbench/harness-model/roles", "Harness roles"},

@@ -16,106 +16,6 @@ import (
 
 // ---- shared lifecycle test helpers -----------------------------------------
 
-// saveShuttleGlobals resets the lifecycle verbs' flag globals and Changed state
-// between runs (cobra persists both across Execute), restoring on cleanup.
-func saveShuttleGlobals() func() {
-	prev := struct {
-		jsonOutput           bool
-		statusIncludeOrphans bool
-		statusClosed         bool
-		pauseNoKill          bool
-		closeTempered        string
-		reopenAsDraft        bool
-		setOutcomeValue      string
-		acceptKeepOutcome    bool
-		setAgentEffort       string
-		setAgentChrome       bool
-		setAgentSurface      string
-		reshapeSchedule      string
-		reshapeTZ            string
-		installModel         string
-		installProjectDir    string
-		installHost          string
-		installDisabled      bool
-		installSurface       string
-		repeatSchedule       string
-		repeatTZ             string
-		repeatModel          string
-		repeatProjectDir     string
-		repeatHost           string
-		repeatSurface        string
-		pinModel             string
-		pinProjectDir        string
-		pinHost              string
-		pinSurface           string
-	}{
-		jsonOutput, statusIncludeOrphans, statusClosed,
-		pauseNoKill, closeTempered, reopenAsDraft, setOutcomeValue, acceptKeepOutcome, setAgentEffort, setAgentChrome, setAgentSurface,
-		reshapeSchedule, reshapeTZ,
-		installModel, installProjectDir, installHost, installDisabled, installSurface,
-		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost, repeatSurface,
-		pinModel, pinProjectDir, pinHost, pinSurface,
-	}
-
-	// --json is a root persistent flag bound to jsonOutput; cobra only sets it on
-	// parse, so a prior `--json` run leaves it true. Reset to the default so a test
-	// that omits the flag gets text output.
-	jsonOutput = false
-	statusIncludeOrphans = false
-	statusClosed = false
-	pauseNoKill = false
-	closeTempered = ""
-	reopenAsDraft = false
-	setOutcomeValue = ""
-	acceptKeepOutcome = false
-	setAgentEffort = ""
-	setAgentChrome = false
-	setAgentSurface = ""
-	reshapeSchedule, reshapeTZ = "", ""
-	installModel, installProjectDir, installHost, installDisabled = "", "", "", false
-	installSurface = ""
-	repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = "", "", "", "", ""
-	repeatSurface = ""
-	pinModel, pinProjectDir, pinHost = "", "", ""
-	pinSurface = ""
-
-	pauseCmd.ResetFlags()
-	closeCmd.ResetFlags()
-	reopenCmd.ResetFlags()
-	setOutcomeCmd.ResetFlags()
-	acceptCmd.ResetFlags()
-	setAgentCmd.ResetFlags()
-	reshapeCmd.ResetFlags()
-	registerShuttleLifecycleFlags()
-	installCmd.ResetFlags()
-	repeatCmd.ResetFlags()
-	pinCmd.ResetFlags()
-	registerShuttleCreateFlags()
-	statusCmd.ResetFlags()
-	registerShuttleStatusFlags()
-
-	return func() {
-		jsonOutput = prev.jsonOutput
-		statusIncludeOrphans = prev.statusIncludeOrphans
-		statusClosed = prev.statusClosed
-		pauseNoKill = prev.pauseNoKill
-		closeTempered = prev.closeTempered
-		reopenAsDraft = prev.reopenAsDraft
-		setOutcomeValue = prev.setOutcomeValue
-		acceptKeepOutcome = prev.acceptKeepOutcome
-		setAgentEffort = prev.setAgentEffort
-		setAgentChrome = prev.setAgentChrome
-		setAgentSurface = prev.setAgentSurface
-		reshapeSchedule, reshapeTZ = prev.reshapeSchedule, prev.reshapeTZ
-		installModel, installProjectDir, installHost, installDisabled = prev.installModel, prev.installProjectDir, prev.installHost, prev.installDisabled
-		installSurface = prev.installSurface
-		repeatSchedule, repeatTZ, repeatModel, repeatProjectDir, repeatHost = prev.repeatSchedule, prev.repeatTZ, prev.repeatModel, prev.repeatProjectDir, prev.repeatHost
-		repeatSurface = prev.repeatSurface
-		pinModel, pinProjectDir, pinHost = prev.pinModel, prev.pinProjectDir, prev.pinHost
-		pinSurface = prev.pinSurface
-	}
-}
-
 func newStore(t *testing.T) (string, *felt.Storage) {
 	t.Helper()
 	dir := t.TempDir()
@@ -181,7 +81,6 @@ func oneshot() map[string]any {
 // ---- close -----------------------------------------------------------------
 
 func TestShuttleClose_Tempered(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
@@ -201,7 +100,6 @@ func TestShuttleClose_Tempered(t *testing.T) {
 }
 
 func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), &yes)
@@ -221,7 +119,6 @@ func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 // ---- pause -----------------------------------------------------------------
 
 func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, oneshot(), nil)
 	f0 := mustRead(t, storage, "proj/task")
@@ -241,7 +138,6 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 }
 
 func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	killed := withStubbedTmux(t, map[string]bool{"task-shuttle": true})
@@ -260,7 +156,6 @@ func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 // ---- reopen ----------------------------------------------------------------
 
 func TestShuttleReopen_ToActive(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), &yes)
@@ -278,7 +173,6 @@ func TestShuttleReopen_ToActive(t *testing.T) {
 }
 
 func TestShuttleReopen_AsDraft(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
@@ -303,7 +197,6 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 // ---- resume ----------------------------------------------------------------
 
 func TestShuttleResume_DraftToActive(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, oneshot(), nil)
 
@@ -316,7 +209,6 @@ func TestShuttleResume_DraftToActive(t *testing.T) {
 }
 
 func TestShuttleResume_RefusesClosed(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
@@ -326,7 +218,6 @@ func TestShuttleResume_RefusesClosed(t *testing.T) {
 }
 
 func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
@@ -350,7 +241,6 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("a root caller cannot distinguish a root listener from an unaccepted socket")
 	}
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
 	withOwnHost(t, "test-host")
 
@@ -385,7 +275,6 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 // ---- set-outcome -----------------------------------------------------------
 
 func TestShuttleSetOutcome(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
@@ -400,7 +289,6 @@ func TestShuttleSetOutcome(t *testing.T) {
 // ---- accept ----------------------------------------------------------------
 
 func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	// Awaiting review: standing, closed, untempered, with a prior outcome.
@@ -440,7 +328,6 @@ func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 // very next poll — while this command just printed "next due: tomorrow
 // morning" to the user.
 func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 
@@ -499,7 +386,6 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 }
 
 func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	// Active (not awaiting) standing role → accept refuses.
@@ -514,7 +400,6 @@ func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
 }
 
 func TestShuttleAccept_RejectsOneshot(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
@@ -525,7 +410,6 @@ func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 }
 
 func TestShuttleAccept_PinnedReParks(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	// Awaiting review: pinned, closed, untempered — the arc finished and is
@@ -560,7 +444,6 @@ func TestShuttleAccept_PinnedReParks(t *testing.T) {
 // ---- set-model / set-agent -------------------------------------------------
 
 func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "h") // block is host-pinned; own-host must match for the guard to pass
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
@@ -593,7 +476,6 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 	for _, status := range []string{felt.StatusOpen, felt.StatusActive, felt.StatusClosed} {
 		for _, verb := range []string{"set-agent", "set-model"} {
 			t.Run(status+"/"+verb, func(t *testing.T) {
-				defer saveShuttleGlobals()()
 				dir, storage := newStore(t)
 				seedShuttleRole(t, storage, "f", status, map[string]any{
 					"kind": "oneshot", "agent": "claude-opus",
@@ -623,7 +505,6 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 }
 
 func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
@@ -633,7 +514,6 @@ func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
 }
 
 func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus",
@@ -658,7 +538,6 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 }
 
 func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "codex-sol", "surface": "cli",
@@ -691,7 +570,6 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 // ---- uninstall -------------------------------------------------------------
 
 func TestShuttleUninstall_RemovesBlock(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
@@ -710,7 +588,6 @@ func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 // ---- ownership guard -------------------------------------------------------
 
 func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
@@ -732,7 +609,6 @@ func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 }
 
 func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "cineca")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "owned", felt.StatusActive, map[string]any{
@@ -753,7 +629,6 @@ func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 // dispatch: content edits go through; arming verbs refuse until the agent is
 // changed to a current one.
 func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
 
@@ -787,7 +662,6 @@ func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
 // content edit (no status flip, or a flip to a non-arming status) must still
 // pass untouched.
 func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent"}, nil)
 
@@ -812,7 +686,6 @@ func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
 // a standing role awaiting review with a retired agent must refuse rather
 // than silently re-arm.
 func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{

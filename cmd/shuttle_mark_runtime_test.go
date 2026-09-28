@@ -49,7 +49,6 @@ func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
 // mark-runtime never depends on a live daemon for either the flags
 // themselves or the ownership check.
 func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1") // closed port: any round-trip fails loudly
 	withOwnHost(t, "candide")
 
@@ -88,7 +87,6 @@ func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
 // Same daemon-down + host-file-only identity setup as the dispatch test; no
 // `--host` override (see that test's comment for why).
 func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	withOwnHost(t, "candide")
 
@@ -115,7 +113,6 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 //
 //	felt shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --meeting <launch>
 func TestShuttleMarkRuntime_ClaimMeetingArgv(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	withOwnHost(t, "candide")
 
@@ -144,7 +141,6 @@ func TestShuttleMarkRuntime_ClaimMeetingArgv(t *testing.T) {
 // down) drives the ownership guard, so a fiber owned by a DIFFERENT host is
 // refused rather than silently landing on the wrong daemon's mirror.
 func TestShuttleMarkRuntime_AliasGuardWithoutOverride(t *testing.T) {
-	defer saveShuttleGlobals()()
 	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	withOwnHost(t, "candide")
 

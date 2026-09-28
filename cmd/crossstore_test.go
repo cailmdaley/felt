@@ -68,7 +68,6 @@ func loomRoot(t *testing.T, subProj string) string {
 // that names one real fiber out there is shown, not refused.
 func TestShowReachesEnclosingStore(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", "ai-futures/portolan/debug", "--detail", "name")
 	if err != nil {
@@ -83,7 +82,6 @@ func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
 	if err != nil {
@@ -99,7 +97,6 @@ func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
 	seedFiber(t, felt.NewStorage(subProj), "local-copy", uid, "", nil, nil)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous fiber UID") {
@@ -135,7 +132,6 @@ func TestRmReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 // names where it wrote.
 func TestEditReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveEditGlobals()()
 
 	out, err := runCommand(t, subProj, "edit", "ai-futures/portolan/debug", "--name", "Renamed out there")
 	if err != nil {
@@ -207,7 +203,6 @@ func TestUnnestAcrossBoundaryPromotesInEnclosingStore(t *testing.T) {
 // a filtered ls in a substore says so on a trailer line.
 func TestLsStaysInTheView(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls", "debug")
 	if err != nil {
@@ -228,7 +223,6 @@ func TestLsStaysInTheView(t *testing.T) {
 // read; a human-facing hint has no place in it.
 func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls", "debug", "--json")
 	if err != nil {
@@ -243,7 +237,6 @@ func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 // and must not pay for — or print — the enclosing store.
 func TestLsBareStaysLocal(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls")
 	if err != nil {
@@ -267,7 +260,6 @@ func TestLsBareStaysLocal(t *testing.T) {
 // resolution reaches the enclosing store on every local miss.
 func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 
 	// A second local `debug` twin: under the old gate this ambiguity switched
 	// the probe off and the foreign path stopped resolving.
@@ -289,7 +281,6 @@ func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 // named, where it lives, and says where — the same contract rm and edit keep.
 func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShuttleGlobals()()
 
 	loom := felt.NewStorage(loomProj)
 	seedShuttleRole(t, loom, "ai-futures/portolan/debug", felt.StatusActive, oneshot(), nil)
@@ -321,7 +312,6 @@ func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 // a suggestion; the same-named fiber survives. `show` stays forgiving.
 func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
 	dir, storage := newStore(t)
-	defer saveShowGlobals()()
 	for _, id := range []string{"a", "b", "b/zzz", "b/notes"} {
 		writeFixtureFelt(t, storage, id, id)
 	}
@@ -381,7 +371,6 @@ func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
 // as in rm, rather than resolving to its same-named twin.
 func TestRmThroughViewRefusesEnclosingStoreGuesses(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 	loom := felt.NewStorage(loomProj)
 	writeFixtureFelt(t, loom, "commons/x", "X")
 	writeFixtureFelt(t, loom, "commons/y/foo", "Twin foo")

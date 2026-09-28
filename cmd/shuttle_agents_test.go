@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,41 +14,7 @@ import (
 // stderr or the browser's agent picker breaks.
 func runAgents(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-
-	prevJSON, prevSource, prevPath, prevForce, prevReset := jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset
-	prevArgs, prevChangeDir, prevStdout := os.Args, changeDir, os.Stdout
-	defer func() {
-		jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset = prevJSON, prevSource, prevPath, prevForce, prevReset
-		os.Args, changeDir, os.Stdout = prevArgs, prevChangeDir, prevStdout
-		rootCmd.SetArgs(nil)
-		rootCmd.SetOut(io.Discard)
-		rootCmd.SetErr(io.Discard)
-	}()
-
-	// Cobra only assigns flag values on parse, so a prior --json run leaves them
-	// set. Reset to defaults.
-	jsonOutput, agentsSourceFilter, agentsInitPath, agentsInitForce, agentsEffortReset = false, "", "", false, false
-
-	var errBuf bytes.Buffer
-	rootCmd.SetErr(&errBuf)
-	rootCmd.SetArgs(args)
-
-	r, w, pipeErr := os.Pipe()
-	if pipeErr != nil {
-		t.Fatalf("os.Pipe: %v", pipeErr)
-	}
-	os.Stdout = w
-	runErr := rootCmd.Execute()
-	if err := w.Close(); err != nil {
-		t.Fatalf("close write pipe: %v", err)
-	}
-	var outBuf bytes.Buffer
-	if _, err := io.Copy(&outBuf, r); err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	_ = r.Close()
-
-	return outBuf.String(), errBuf.String(), runErr
+	return executeCLI(t, "", args...)
 }
 
 // userRegistry writes a user registry and points $FELT_AGENTS_FILE at it.
@@ -276,7 +240,6 @@ func TestShuttleAgentsInit_WritesRefusesAndForces(t *testing.T) {
 // against whatever registry it is handed, so a user-registry agent is installable
 // with no change to the create path.
 func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()

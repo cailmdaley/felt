@@ -11,18 +11,6 @@ const assignTestUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 const assignTestRoleUID = "01BX5ZZKBKACTAV9WEVGEMMVRZ"
 const assignTestOtherUID = "01D7QH6R8X9M2Q8D6Y0D5Q4C1A"
 
-func resetAssignFlags() {
-	assignCollaborators = nil
-	assignRoles = nil
-	assignClear = false
-	assignJSON = ""
-	assignCmd.ResetFlags()
-	assignCmd.Flags().StringArrayVar(&assignRoles, "role", nil, "Role")
-	assignCmd.Flags().StringArrayVar(&assignCollaborators, "collaborator", nil, "Collaborator")
-	assignCmd.Flags().BoolVar(&assignClear, "clear", false, "Clear")
-	assignCmd.Flags().StringVar(&assignJSON, "json-assignment", "", "Replace")
-}
-
 func decodeAssignment(t *testing.T, storage *felt.Storage) map[string][]string {
 	t.Helper()
 	var assignment map[string][]string
@@ -33,7 +21,6 @@ func decodeAssignment(t *testing.T, storage *felt.Storage) map[string][]string {
 }
 
 func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing.T) {
-	defer resetAssignFlags()
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable", assignTestUID, "", nil, nil)
@@ -56,11 +43,9 @@ func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing
 		t.Fatal("assignment changed lifecycle status")
 	}
 
-	resetAssignFlags()
 	if _, err := runCommand(t, dir, "shuttle", "assign", "work", "--role", "research"); err == nil {
 		t.Fatal("assignment accepted nonexistent role")
 	}
-	resetAssignFlags()
 	if _, err := runCommand(t, dir, "shuttle", "assign", "work", "--role", "vizier", "--collaborator", "astra"); err != nil {
 		t.Fatalf("idempotent patch: %v", err)
 	}
@@ -71,7 +56,6 @@ func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing
 }
 
 func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
-	defer resetAssignFlags()
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/role", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/collaborator", assignTestOtherUID, "", nil, nil)
@@ -83,7 +67,6 @@ func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
 		t.Fatalf("role-only assignment = %#v", got)
 	}
 
-	resetAssignFlags()
 	// These valid role slugs also name fields used by the legacy representation.
 	json := `{"role":[],"collaborator":[]}`
 	if _, err := runCommand(t, dir, "shuttle", "assign", "work", "--json-assignment", json); err != nil {
@@ -93,7 +76,6 @@ func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
 		t.Fatalf("JSON roster = %#v", got)
 	}
 
-	resetAssignFlags()
 	if _, err := runCommand(t, dir, "shuttle", "assign", "work", "--clear"); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -103,7 +85,6 @@ func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
 }
 
 func TestShuttleAssign_RejectsAmbiguousUIDAndNestedNotesIdentity(t *testing.T) {
-	defer resetAssignFlags()
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/other", assignTestOtherUID, "", nil, nil)
@@ -117,7 +98,6 @@ func TestShuttleAssign_RejectsAmbiguousUIDAndNestedNotesIdentity(t *testing.T) {
 		{"--collaborator", "outside/fable"},
 		{"--role", "vizier", "--collaborator", "01C7QH6R8X9M2Q8D6Y0D5Q4C1B"},
 	} {
-		resetAssignFlags()
 		args := append([]string{"shuttle", "assign", "work"}, flags...)
 		if out, err := runCommand(t, dir, args...); err == nil {
 			t.Fatalf("assign %v unexpectedly succeeded: %s", flags, out)
@@ -126,7 +106,6 @@ func TestShuttleAssign_RejectsAmbiguousUIDAndNestedNotesIdentity(t *testing.T) {
 }
 
 func TestShuttleAssign_JSONValidatesCanonicalSlugPaths(t *testing.T) {
-	defer resetAssignFlags()
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable-alias", assignTestUID, "", nil, nil)
@@ -142,7 +121,6 @@ func TestShuttleAssign_JSONValidatesCanonicalSlugPaths(t *testing.T) {
 }
 
 func TestShuttleAssign_ProjectViewUsesEnclosingRoleStore(t *testing.T) {
-	defer resetAssignFlags()
 	loom, project := newCrossStoreFixture(t)
 	root := felt.NewStorage(loom)
 	seedFiber(t, root, "roles/vizier", assignTestRoleUID, "", nil, nil)
@@ -158,7 +136,6 @@ func TestShuttleAssign_ProjectViewUsesEnclosingRoleStore(t *testing.T) {
 }
 
 func TestShuttleAssign_EditingLegacyPairWritesReadableMapping(t *testing.T) {
-	defer resetAssignFlags()
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable", assignTestUID, "", nil, nil)

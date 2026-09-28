@@ -21,9 +21,6 @@ func TestEditValidatesShuttleFacet(t *testing.T) {
 	seedShuttleFiber(t, storage, "good", map[string]any{"kind": "oneshot", "agent": "claude-opus"})
 	seedShuttleFiber(t, storage, "bad", map[string]any{"kind": "bogus"})
 
-	reset := saveEditGlobals()
-	defer reset()
-
 	// A fiber whose shuttle: block is valid edits normally.
 	if out, err := runCommand(t, dir, "edit", "good", "--status", "active"); err != nil {
 		t.Fatalf("edit good: %v\n%s", err, out)

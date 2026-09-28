@@ -427,8 +427,7 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 	},
 }
 
-// registerShuttleCreateFlags binds the create verbs' flags. Exposed so tests can
-// ResetFlags() + re-register to clear Changed state between runs.
+// registerShuttleCreateFlags binds the create verbs' flags.
 func registerShuttleCreateFlags() {
 	installCmd.Flags().StringVarP(&installModel, "model", "m", "", "Agent ID (default: registry default)")
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required unless --disabled")

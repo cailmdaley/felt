@@ -253,8 +253,7 @@ func init() {
 	initEditFlags()
 }
 
-// initEditFlags registers (or re-registers) edit's flag set. Exposed so tests
-// can ResetFlags() between invocations to clear Changed state.
+// initEditFlags registers edit's flag set.
 func initEditFlags() {
 	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed; empty clears)")
