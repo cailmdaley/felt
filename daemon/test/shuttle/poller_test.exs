@@ -2594,6 +2594,43 @@ defmodule Shuttle.PollerTest do
     assert_held!(second, fiber_id)
   end
 
+  test "work parked behind a contract skew survives a human release and a hard kill" do
+    # The quarantine was released by a human, but the skew kept parking fresh
+    # work, so the incarnation was still holding it back. Once the CLI is fixed
+    # the next boot must not release that backlog on a hard kill.
+    MockRunner.set_contract_level("4")
+    fiber_id = fresh_candidate!("tests/hb-skew-release")
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_skew_release_1)
+    assert :ok = Poller.release_boot_quarantine(first)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{
+        hb
+        | "at" => now - 4_000,
+          "booted_at" => now - 1_800_000,
+          "os_pid" => "0"
+      })
+    )
+
+    MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_skew_release_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
   test "a Poller restart inside a live VM holds, even after a human release" do
     # No hard kill happened: the supervisor restarted the Poller. The record
     # is released, fresh and long-run, but its OS pid is this VM's.
@@ -2861,7 +2898,7 @@ defmodule Shuttle.PollerTest do
   # tests exercise the skew gate in isolation from it.
 
   test "a matching contract level dispatches normally and reports ok in the snapshot" do
-    MockRunner.set_contract_level("3")
+    MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
     fiber_id = "tests/contract-match"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
