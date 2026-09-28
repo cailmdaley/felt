@@ -14,6 +14,8 @@ defmodule Shuttle.Poller.Snapshot do
   here. `standing_role_snapshots/3` lives in `Shuttle.Poller.StandingRoles`.
   """
 
+  require Shuttle.Dispatcher
+
   alias Shuttle.Poller
   alias Shuttle.Poller.StandingRoles
   alias Shuttle.Poller.State
@@ -348,10 +350,8 @@ defmodule Shuttle.Poller.Snapshot do
   # A dispatch preflight refusal carries its own operator-facing message — the
   # one thing a stranger needs on the board to fix their install. Show the
   # message, not the tuple.
-  defp format_block_reason({tag, message})
-       when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-              is_binary(message),
-       do: message
+  defp format_block_reason({tag, message}) when Shuttle.Dispatcher.refusal?(tag, message),
+    do: message
 
   defp format_block_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp format_block_reason(reason) when is_binary(reason), do: reason

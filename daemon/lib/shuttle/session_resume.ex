@@ -43,7 +43,7 @@ defmodule Shuttle.SessionResume do
 
   require Logger
 
-  alias Shuttle.{Agents, Dispatcher, Moment, SessionLedger, Transcript, TmuxServer}
+  alias Shuttle.{Agents, Dispatcher, Moment, SessionLedger, Transcript, TmuxServer, WorkerProcess}
 
   @prefix "resume-"
 
@@ -95,8 +95,10 @@ defmodule Shuttle.SessionResume do
   @doc """
   Start the resume of `session` in its tmux session, unless it is already
   running there. `{:ok, %{tmux_session: name, created: boolean}}`;
-  `{:error, {:live, message}}` when the session is a running worker's (two
-  harness processes must not share a transcript); or `{:error, reason}`.
+  `{:error, {:live, message}}` when the session is a running worker's, or
+  another live process holds it (two harness processes must not share a
+  transcript); or `{:error, reason}`, including a process scan that could not
+  run.
 
   Opts: as `plan/2`, plus `:live_sessions` (a 0-arity function standing in for
   `live_sessions/0`).
@@ -165,9 +167,9 @@ defmodule Shuttle.SessionResume do
   end
 
   defp start(plan, runner) do
-    with :ok <- tmux_server(runner) do
-      script =
-        Path.join(System.tmp_dir!(), "shuttle-resume-#{System.unique_integer([:positive])}.sh")
+    with :ok <- not_held(plan.session, runner),
+         :ok <- tmux_server(runner) do
+      script = WorkerProcess.script_path(plan.tmux)
 
       File.write!(script, run_script(plan))
       File.chmod!(script, 0o755)
@@ -189,6 +191,16 @@ defmodule Shuttle.SessionResume do
             do: {:ok, %{tmux_session: plan.tmux, created: false}},
             else: {:error, "tmux failed: #{output}"}
       end
+    end
+  end
+
+  # No tmux session shows this conversation, yet a process tmux cannot see
+  # (a worker whose tmux socket was deleted) may still hold it open.
+  defp not_held(session, runner) do
+    case WorkerProcess.check_free(runner, session) do
+      :ok -> :ok
+      {:error, {:held, message}} -> {:error, {:live, message}}
+      {:error, {:unknown, message}} -> {:error, message}
     end
   end
 

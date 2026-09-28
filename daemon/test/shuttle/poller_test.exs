@@ -3102,6 +3102,129 @@ defmodule Shuttle.PollerTest do
     assert script =~ "stored-standing-session-id"
   end
 
+  test "a worker's run script is named for its tmux session" do
+    fiber_id = "tests/script-named"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_script_named,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
+    script = new_session_scripts() |> List.last() |> Path.basename()
+    assert script =~ ~r/^shuttle-run-#{Regex.escape(session)}\.\d+\.sh$/
+  end
+
+  describe "a resume onto a transcript a live process tmux cannot see still holds" do
+    setup do
+      fiber_id = "tests/transcript-held"
+      MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
+      MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+      write_dispatch_marker(fiber_id, "held-session-uuid-0001")
+
+      {:ok, poller} =
+        start_poller!(
+          name: :test_poller_transcript_held,
+          runner: MockRunner,
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      %{fiber_id: fiber_id, poller: poller}
+    end
+
+    test "is refused and parks the fiber blocked with what is true and what to do", ctx do
+      # The pre-socket-loss worker: an old-style run script under an orphaned
+      # tmux server, its claude still holding the session.
+      MockRunner.set_ps_result(
+        {"""
+           700     1 tmux new-session -d -s shuttle-anchor
+           812   700 bash -l /tmp/shuttle-run-9859.sh
+           813   812 claude --resume held-session-uuid-0001
+         """, 0}
+      )
+
+      assert {:error, {:transcript_held, message}} =
+               Poller.dispatch_fiber(ctx.poller, ctx.fiber_id,
+                 force: true,
+                 resume_mode: "previous"
+               )
+
+      assert message =~ "pid 813"
+      assert message =~ "kill -USR1 700"
+      assert new_session_scripts() == []
+
+      blocked = Enum.find(Poller.snapshot(ctx.poller).blocked, &(&1.fiber_id == ctx.fiber_id))
+      assert blocked.reason == message
+
+      # Once that process is gone, the resume proceeds.
+      MockRunner.set_ps_result({"", 0})
+
+      assert {:ok, _} =
+               Poller.dispatch_fiber(ctx.poller, ctx.fiber_id,
+                 force: true,
+                 resume_mode: "previous"
+               )
+
+      assert File.read!(List.last(new_session_scripts())) =~ "held-session-uuid-0001"
+    end
+
+    test "is held back when the process scan cannot run", ctx do
+      # Uncertainty counts as present: with tmux answering "can't find session"
+      # and no process scan, the fiber's own session may still be running, so
+      # the dispatch reads as already running (and is adopted) — nothing spawns.
+      MockRunner.set_ps_result({"ps: boom", 1})
+
+      assert {:error, :already_running} =
+               Poller.dispatch_fiber(ctx.poller, ctx.fiber_id,
+                 force: true,
+                 resume_mode: "previous"
+               )
+
+      assert new_session_scripts() == []
+    end
+  end
+
+  describe "list_shuttle_sessions/1" do
+    @live_script """
+      700     1 tmux: server
+      812   700 bash -l /tmp/shuttle-run-orphan-01ABC-shuttle.3.sh
+      900   700 bash -l /tmp/shuttle-run-resume-held-uuid.4.sh
+    """
+
+    test "unites tmux's listing with sessions whose run script still runs" do
+      MockRunner.add_tmux_session("visible-shuttle")
+      MockRunner.set_ps_result({@live_script, 0})
+
+      assert {:ok, sessions} = Poller.list_shuttle_sessions(%{runner: MockRunner})
+      assert Enum.sort(sessions) == ["orphan-01ABC-shuttle", "visible-shuttle"]
+    end
+
+    test "a server tmux cannot reach still lists its live workers" do
+      MockRunner.set_tmux_server_missing(true)
+      MockRunner.set_ps_result({@live_script, 0})
+
+      assert Poller.list_shuttle_sessions(%{runner: MockRunner}) ==
+               {:ok, ["orphan-01ABC-shuttle"]}
+    end
+
+    test "tmux absence the process scan cannot check is unknown, not empty" do
+      MockRunner.set_tmux_server_missing(true)
+      MockRunner.set_ps_result({"ps: boom", 1})
+      assert Poller.list_shuttle_sessions(%{runner: MockRunner}) == {:error, :unknown}
+
+      MockRunner.set_ps_result({"", 0})
+      assert Poller.list_shuttle_sessions(%{runner: MockRunner}) == {:ok, []}
+    end
+  end
+
   test "force-dispatch runs a closed fiber while leaving its status untouched" do
     # Manual "New session" / "Resume" buttons on a closed kanban card must
     # spawn a worker even though the fiber is closed (composted/tempered).

@@ -1,28 +1,40 @@
 defmodule Shuttle.Tmux do
   @moduledoc """
-  Shared classification of a tmux session's liveness from `tmux has-session`.
+  Shared classification of a tmux session's liveness.
 
-  The naive read — "exit 0 means alive, ANY non-zero means dead" — conflates two
-  very different outcomes: the session is genuinely *gone* (the worker exited),
-  versus the `has-session` command *failed for an environmental reason* (tmux
-  binary not on PATH, a transient server hiccup, a fork/exec failure under load).
-  Treating the second as death is how a *live* worker gets declared dead and then
-  re-dispatched — the resume storm this module exists to prevent.
+  A worker is its processes; tmux is the view humans and the daemon reach them
+  through. So `tmux has-session` is asked first and the process table
+  (`Shuttle.WorkerProcess`) settles what tmux cannot. The naive read — "exit 0
+  means alive, ANY non-zero means dead" — conflates three outcomes: the worker
+  genuinely exited; `has-session` failed for an environmental reason (tmux not
+  on PATH, a server hiccup, a fork failure under load); or tmux's server lost
+  its socket file (`/tmp/tmux-<uid>/default` deleted) and answers "no server
+  running" while every worker under it still runs. Reading the second or
+  third as death re-dispatches a live worker — a resume onto the transcript it
+  still holds.
 
   So we classify three ways:
 
     * `:alive`   — exit 0; the session exists.
-    * `:gone`    — non-zero AND the output is tmux's own absence message
-                   ("can't find session", "no server running", …). A real worker
-                   death. The only result that should count toward declaring a
-                   worker dead or freeing its name for a fresh dispatch.
-    * `:unknown` — non-zero for any other reason. Uncertain — treated as
-                   still-present everywhere it matters (the watcher holds instead
-                   of striking; dispatch refuses-and-adopts instead of resuming),
-                   so uncertainty never kills a live worker. A genuinely-dead
-                   worker still emits `:gone` on its next check, so this never
-                   strands a dead worker for long.
+    * `:gone`    — tmux's own absence message ("can't find session", "no
+                   server running", …) AND no live process of this daemon's
+                   uid runs the session's run script. A real worker death, and
+                   the only result that counts toward declaring a worker dead
+                   or frees its name for a fresh dispatch.
+    * `:unknown` — anything else: a non-zero exit without an absence message,
+                   an absence message while the session's run script is still
+                   running (the worker is alive but tmux cannot reach it), or
+                   an absence message the process scan could not check.
+                   Treated as still-present everywhere it matters (the watcher
+                   holds instead of striking; dispatch refuses-and-adopts
+                   instead of resuming), so uncertainty never kills a live
+                   worker. A dead worker has neither tmux session nor process,
+                   so it reads `:gone` on its next check — unless `ps` itself
+                   cannot run on the host, which holds every absent session as
+                   `:unknown`.
   """
+
+  alias Shuttle.WorkerProcess
 
   @type status :: :alive | :gone | :unknown
 
@@ -40,15 +52,37 @@ defmodule Shuttle.Tmux do
   ]
 
   @doc """
-  Classifies the named session via `tmux has-session`. `runner` is any module
-  exposing `cmd/3` (the `Shuttle.Runner` behaviour); the `=` exact-match prefix
-  is applied here so callers pass the bare session name.
+  Classifies the named session via `tmux has-session`, consulting the process
+  table when tmux reports it absent. `runner` is any module exposing `cmd/3`
+  (the `Shuttle.Runner` behaviour); the `=` exact-match prefix is applied here
+  so callers pass the bare session name.
   """
   @spec session_status(module(), String.t()) :: status()
   def session_status(runner, session) do
     case runner.cmd("tmux", ["has-session", "-t", "=" <> session], stderr_to_stdout: true) do
       {_, 0} -> :alive
-      {output, _} -> if absent?(output), do: :gone, else: :unknown
+      {output, _} -> if absent?(output), do: absent_status(runner, session), else: :unknown
+    end
+  end
+
+  # tmux says the session is not there; the process table says whether its
+  # worker is.
+  defp absent_status(runner, session) do
+    with {:ok, procs} <- WorkerProcess.scan(runner),
+         %{} = proc <- WorkerProcess.session_process(procs, session) do
+      server = WorkerProcess.tmux_server(procs, proc)
+
+      WorkerProcess.warn_once({:unreachable, session}, fn ->
+        "tmux cannot see session #{session}, but its worker is running " <>
+          "(bash pid #{proc.pid}, parent #{proc.ppid}) — the tmux socket was likely " <>
+          "deleted under a live server. Holding it as present; to recover, " <>
+          WorkerProcess.recovery_hint(server)
+      end)
+
+      :unknown
+    else
+      {:error, :unknown} -> :unknown
+      nil -> :gone
     end
   end
 

@@ -22,6 +22,7 @@ defmodule ShuttleWeb.CaptureController do
     only: [app_server_unavailable_message: 0, relay_json: 3, present?: 1]
 
   alias Shuttle.{Meeting, OriginRouter}
+  require Shuttle.Dispatcher
 
   def create(conn, params) do
     case Map.fetch(params, "meeting") do
@@ -126,9 +127,7 @@ defmodule ShuttleWeb.CaptureController do
           {:error, {:invalid_axes, msg}} ->
             capture_error(conn, 422, %{spawned: false, reason: msg}, meeting_row)
 
-          {:error, {tag, msg}}
-          when tag in [:wrapper_unresolved, :work_dir_missing, :tmux_server_unavailable] and
-                 is_binary(msg) ->
+          {:error, {tag, msg}} when Shuttle.Dispatcher.refusal?(tag, msg) ->
             capture_error(
               conn,
               422,

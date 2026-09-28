@@ -235,6 +235,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_tmux_ls_timeout(enabled),
     do: Agent.update(__MODULE__, &Map.put(&1, :tmux_ls_timeout, enabled))
 
+  # What the process scan (`ps -o pid=,ppid=,args= -U <uid>`,
+  # `Shuttle.WorkerProcess`) answers. Defaults to no processes.
+  def set_ps_result(result),
+    do: Agent.update(__MODULE__, &Map.put(&1, :ps_result, result))
+
   def add_tmux_session(session),
     do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
@@ -421,6 +426,9 @@ defmodule Shuttle.Test.FeltStoreRunner do
           nil -> {"fiber not found", 1}
           fiber -> {Jason.encode!(with_resolved_agent(fiber)), 0}
         end
+
+      command == "ps" ->
+        Agent.get(__MODULE__, &Map.get(&1, :ps_result, {"", 0}))
 
       command == "tmux" and hd(args) == "has-session" ->
         session = Enum.at(args, 2)

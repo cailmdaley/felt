@@ -97,6 +97,22 @@ defmodule Shuttle.DispatchIntegrationTest do
       {"", 0}
     end
 
+    # The process scan's answers, in order; the last one repeats. Defaults to
+    # no processes.
+    def set_ps_results(results) when is_list(results) and results != [],
+      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
+
+    def cmd("ps", args, _opts) do
+      Agent.get_and_update(__MODULE__, fn s ->
+        s = %{s | commands: s.commands ++ [{"ps", args}]}
+
+        case Map.get(s, :ps_results, [{"", 0}]) do
+          [last] -> {last, s}
+          [next | rest] -> {next, Map.put(s, :ps_results, rest)}
+        end
+      end)
+    end
+
     def cmd(cmd, args, _opts) do
       Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
       {"", 0}
@@ -526,6 +542,68 @@ defmodule Shuttle.DispatchIntegrationTest do
                felt_store: host,
                resume_mode: "fresh"
              )
+  end
+
+  describe "a resume onto a session a live process holds" do
+    setup %{host: host} do
+      write_fiber(host, "tests/held", """
+      ---
+      name: Held by an orphaned worker
+      status: active
+      tags:
+        - constitution
+      shuttle:
+        kind: oneshot
+        agent: claude-sonnet
+      ---
+      A fiber whose worker kept running after its tmux socket was deleted.
+      """)
+
+      write_dispatch_marker(host, "tests/held", "held-session-uuid-0002")
+      :ok
+    end
+
+    defp resume_held(host),
+      do:
+        Dispatcher.dispatch("tests/held",
+          runner: IntegrationRunner,
+          felt_store: host,
+          resume_mode: "previous"
+        )
+
+    defp spawned?,
+      do: Enum.any?(IntegrationRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+    test "is refused with the holding pid and the tmux server to signal", %{host: host} do
+      IntegrationRunner.set_ps_results([
+        {"""
+           4430     1 /opt/homebrew/bin/tmux new-session -d -s shuttle-anchor
+           8698  4430 bash -l /var/folders/T/shuttle-run-9859.sh
+           8699  8698 claude --effort high --resume held-session-uuid-0002
+         """, 0}
+      ])
+
+      assert {:error, {:transcript_held, message}} = resume_held(host)
+      assert message =~ "pid 8699"
+      assert message =~ "kill -USR1 4430"
+      refute spawned?()
+      assert read_ledger() == []
+    end
+
+    test "is refused when the scan cannot run", %{host: host} do
+      # First scan: the already-running check (tmux: "can't find session")
+      # finds no run script. Second: the transcript check cannot run.
+      IntegrationRunner.set_ps_results([{"", 0}, {"ps: boom", 1}])
+
+      assert {:error, {:transcript_held, message}} = resume_held(host)
+      assert message =~ "could not check"
+      refute spawned?()
+    end
+
+    test "proceeds when no process holds it", %{host: host} do
+      assert {:ok, _} = resume_held(host)
+      assert spawned?()
+    end
   end
 
   # Regression for the launch deadlock (the CNRS own-words fiber): a resume whose

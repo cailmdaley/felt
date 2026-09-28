@@ -81,9 +81,12 @@ prior transcript.
 - **The daemon** — an Elixir/OTP release that bundles its own Erlang runtime,
   started through the `bin/shuttle` shim. One process, bound to
   `127.0.0.1:4000`. It polls, dispatches, and serves an HTTP API.
-- **tmux** — hosts the worker process and reports its liveness. Not optional.
+- **tmux** — hosts the worker process and is the view onto it. Not optional.
   tmux owns the worker process; shuttle owns only the watcher. So restarting the
-  daemon leaves live workers running — the daemon re-adopts them on boot.
+  daemon leaves live workers running — the daemon re-adopts them on boot. A
+  worker's liveness is its process: when tmux reports a session absent, the
+  daemon checks the process table before believing it (see
+  [Operating](../dev/operating.md#a-worker-tmux-cannot-see)).
 - **The board** — a TypeScript UI, served by the daemon at
   `http://127.0.0.1:4000/`. A kanban desk plus four more views (Day, Week,
   Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
