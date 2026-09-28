@@ -729,6 +729,8 @@ defmodule Shuttle.TailnetDialTest do
     data_dir = Path.join(base, "data")
     dial_dir = Path.join([data_dir, "sock", "dial"])
     File.mkdir_p!(dial_dir)
+    File.chmod!(data_dir, 0o755)
+    File.chmod!(Path.dirname(dial_dir), 0o755)
     File.chmod!(dial_dir, 0o755)
     localapi = Path.join(base, "localapi.sock")
     remote = remote(@host, 443)
@@ -755,6 +757,7 @@ defmodule Shuttle.TailnetDialTest do
 
     assert {:tailnet_dial, :listen, reason} = TailnetDial.last_error(remote.name)
     assert inspect(reason) =~ "refusing to listen in socket directory"
+    assert inspect(reason) =~ "sock/dial"
     assert inspect(reason) =~ "0755"
   end
 
