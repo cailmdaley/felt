@@ -279,6 +279,11 @@ defmodule Shuttle.Poller do
       daemon_heartbeat_interval_ms: nil,
       daemon_booted_at: nil,
       daemon_boots: [],
+      # True once boot adoption has scanned tmux and rebuilt `running` from what
+      # it found. The auto-release judges worker continuity against `running`,
+      # so it holds while this is false: a reorder that ran the verdict before
+      # adoption, or a boot whose tmux scan came back unknown, fails closed.
+      adopted?: false,
       # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1` (S2): the
       # daemon shells `felt shuttle contract` and compares it to
       # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
@@ -765,6 +770,11 @@ defmodule Shuttle.Poller do
   # daemon restarted. Nothing here touches `contract_check`, so even a released
   # quarantine keeps parking fresh launches while skewed.
   defp maybe_auto_release_boot_quarantine(%State{boot_quarantine: false} = state, _hb), do: state
+
+  defp maybe_auto_release_boot_quarantine(%State{adopted?: false} = state, _hb) do
+    Logger.info("boot quarantine held: boot adoption has not established the live workers")
+    state
+  end
 
   defp maybe_auto_release_boot_quarantine(%State{contract_check: %{ok: false}} = state, _hb) do
     Logger.info("boot quarantine held: contract skew is not auto-releasable")

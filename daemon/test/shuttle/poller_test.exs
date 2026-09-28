@@ -2610,6 +2610,27 @@ defmodule Shuttle.PollerTest do
     assert_held!(poller, fiber_id)
   end
 
+  test "a boot whose tmux scan is unknown holds even with a releasable heartbeat" do
+    # An empty recorded set is vacuously continuous, so the verdict alone would
+    # release. It must not: without a completed adoption scan the daemon has not
+    # observed what is live, and the `adopted?` guard fails the release closed.
+    MockRunner.set_tmux_server_missing(true)
+    MockRunner.set_ps_result({"ps: boom", 1})
+    fiber_id = fresh_candidate!("tests/hb-scan-unknown")
+    write_heartbeat!()
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
+
+    snap = hb_snapshot(poller)
+    assert snap.boot_quarantine == true
+    refute :sys.get_state(poller).adopted?
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session" and
+               Dispatcher.session_name(fiber_id) in args
+           end)
+  end
+
   test "a truncated or malformed heartbeat file still quarantines without crashing the poller" do
     # A kill mid-write is exactly what this daemon is exposed to, so the parse
     # has to survive garbage — and a file that says the right keys with the wrong
