@@ -85,15 +85,12 @@ defmodule Shuttle.Activity do
   neither field falls into a single unattributed spell rather than crossing
   wires with a named session.
 
-  Spell state is carried by *every* line the scan reads, including lines
-  **before `from_ms`**. Those lines are already decoded (the window test comes
-  after the parse), so a spell that opened an hour before the window is known
-  to be open at its first minute, and a window that starts mid-spell shows no
-  spurious onset. The one gap is deliberate: when the rotated sibling is
-  skipped by the mtime gate below, its lines cannot seed state, and a spell
-  spanning the rotation reopens at its first in-window notification. That
-  over-counts by one mark, once, at a file boundary — the conservative
-  direction, and cheaper than the 64 MB read that would fix it.
+  Spell state is a function of the lines before an event, never of the
+  window being asked for: the fold runs over the whole stream (see "One fold,
+  sliced at read time" below), so a spell that opened an hour before a window
+  is known to be open at its first minute, and a window that starts mid-spell
+  shows no spurious onset. That holds across rotation too — a spell that
+  opened in `events.jsonl.1` is still open at the first line of the live file.
 
   `n` on a `"notify"` bucket therefore counts spell **onsets** in that minute,
   not notifications; `n` on the other two kinds still counts events.
@@ -126,26 +123,35 @@ defmodule Shuttle.Activity do
       filled minute always reads `n: 1` — it is a statement that the minute was
       busy, not a count of anything.
 
-  Pairing state, like spell state, is carried by lines before `from_ms`, so a
-  call that began before the window still fills its in-window minutes; fills
-  are clipped to the window.
+  Pairing state, like spell state, does not depend on the window: a call that
+  began before a window still fills that window's minutes, and a call that
+  returns after it fills the minutes inside it.
 
-  ## Which files, and why the rotated one is conditional
+  ## One fold, sliced at read time
+
+  The fold is window-independent: `new_acc/0`, then `fold_line/2` over every
+  line in file order, gives a tally whose content is a function of the stream
+  prefix alone, and `slice/3` reads a window out of it by minute. A bucket's
+  count never depends on which window asks for it, which is what the
+  whole-minutes rule below promises.
 
   `felt hook event` rotates the stream at 64 MB: the live file is renamed to
-  `events.jsonl.1` and a fresh one starts (`cmd/shuttle_events.go`). A window
-  that reaches back past the last rotation is served only by reading both.
+  `events.jsonl.1` and a fresh one starts (`cmd/shuttle_events.go`). The fold
+  reads the rotated sibling first and the live file second, always — a window
+  that reaches back past the last rotation is served from both, and a window
+  that does not still gets the spell and pairing state the rotated file leaves
+  behind. `Shuttle.Activity.Follower` holds this fold in memory and continues
+  it across a rotation rather than starting over; see its moduledoc for what a
+  rotation drops.
 
-  The rotated sibling is read when its **mtime is at or after `from_ms`**.
-  Rotation is a rename followed by no further writes, so that mtime is the
-  timestamp of the newest line the file can hold: an earlier mtime is proof
-  the window cannot overlap it, and one `stat` buys skipping a 64 MB scan.
-  The live file is read whenever it exists.
+  The fold is in **file order**, not timestamp order: a line moves spell and
+  pairing state where it sits in the file, whatever its stamp — including a
+  line stamped after the window being read. Writers stamp an event as they
+  append it, so the two orders differ only by the milliseconds in which
+  concurrent writers interleave.
 
-  Both files are **streamed** line by line, never slurped — the live one is
-  tens of megabytes between rollovers. Malformed lines, lines missing a
-  `timestamp`/`type`, and lines outside the window are skipped silently; a
-  single bad line never breaks a response.
+  Malformed lines and lines missing a `timestamp`/`type` are skipped silently;
+  a single bad line never breaks a response.
 
   ## Window bounds: whole minutes
 
@@ -154,35 +160,34 @@ defmodule Shuttle.Activity do
   `from_ms..to_ms`, and every bucket served is complete. `canonical_window/2`
   is that rule as a pair of bounds — `from_ms` ceiled to its minute, `to_ms`
   floored to its minute and widened to that minute's last millisecond — and
-  the scan runs over the canonical pair. A partial first or last minute is
+  `slice/3` reads the canonical pair. A partial first or last minute is
   therefore never served: the same `{m, s, cwd, k}` key cannot carry two
   different counts for two requests that both include `m`, which is what lets
   a cached remote window be filtered by `m` alone.
 
   Two windows with the same canonical pair are the same request: the response
-  is a function of the canonical pair and the two files' contents, and nothing
+  is a function of the canonical pair and the stream's contents, and nothing
   else — no wall clock enters the fold. That is the premise
   `ShuttleWeb.ActivityController` builds its validator on.
 
   An inverted window, or one wider than 120 days, is refused rather than
-  served — an unbounded window means an unbounded scan. A window narrower than
-  one whole minute canonicalizes to an empty one and serves no buckets.
+  served — an unbounded window means an unbounded response. A window narrower
+  than one whole minute canonicalizes to an empty one and serves no buckets.
 
-  ## Known cost: every request rescans the whole file
+  ## Cost: the stream is folded once, not per request
 
-  There is no index and no in-memory tally. A request for the last ten minutes
-  still streams every line of a stream that grows to 64 MB between rollovers.
-  What bounds the cost is the request rate, not the scan: the endpoint answers
-  a conditional request against unchanged files with a 304 before scanning,
-  hubs ask for a window quantized so that validator can match, and they ask
-  only while someone is looking (`Shuttle.RemoteTemporalRegistry`). The shape
-  of the fix, if the rate ever stops being enough: keep the tally in a
-  GenServer that follows the stream with `Shuttle.FileTail` the way
-  `Shuttle.WaitingTracker` and `Shuttle.SentFiles.Follower` do (seed once, then
-  read forward from a byte offset) and serve buckets from memory.
+  `Shuttle.Activity.Follower` seeds the fold from both files once at boot and
+  then folds only the bytes appended since (`Shuttle.FileTail`), on a timer and
+  again before each read, so a read is as fresh as a full rescan. A request
+  costs one `stat` plus a range read of the tally proportional to the buckets
+  it returns; the files are read once. When the follower cannot answer — it is
+  following another path, or it is not running — `window/3` folds the files
+  itself, which is correct and costs a full read of both.
   """
 
   require Logger
+
+  alias Shuttle.Activity.Follower
 
   @minute_ms 60_000
   # The widest tool call whose interior is drawn. See the moduledoc's cap note.
@@ -200,17 +205,37 @@ defmodule Shuttle.Activity do
           n: pos_integer()
         }
 
+  @typedoc """
+  The fold's state after some prefix of the stream. `tally` maps
+  `{m, s, cwd, k}` to a count, or to `:fill` for a minute that exists only
+  because a tool call's interior was drawn; it is a `:gb_trees` so a window is
+  a range read in key order, which is also the order buckets are served in.
+  `spells` holds the identities inside an unanswered waiting spell, `pending`
+  each session's open tool call, and `names` one copy of every identity seen
+  (see `fold_line/2`).
+  """
+  @opaque acc :: %{
+            tally: :gb_trees.tree(),
+            spells: map(),
+            pending: map(),
+            names: map()
+          }
+
   @doc """
   The buckets for the minutes in the inclusive window `from_ms..to_ms`, sorted
   by `{m, s, cwd, k}`. The window is read through `canonical_window/2` (see the
   moduledoc's whole-minutes rule).
+
+  Served from `Shuttle.Activity.Follower` when it is following the requested
+  path; otherwise a one-off fold of that path and its rotated sibling.
 
   Returns `{:error, :inverted_range}` when `to_ms < from_ms` and
   `{:error, :range_too_wide}` past #{@max_range_days} days. A missing events
   file is not an error — it yields an empty list.
 
   Opts (for tests): `:events_file`, the live stream path (its rotated sibling
-  is that path plus `.1`, exactly as the writer names it).
+  is that path plus `.1`, exactly as the writer names it); `:follower`, the
+  follower process to ask.
   """
   @spec window(integer(), integer(), keyword()) ::
           {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
@@ -218,7 +243,7 @@ defmodule Shuttle.Activity do
     case check_range(from_ms, to_ms) do
       :ok ->
         {from_ms, to_ms} = canonical_window(from_ms, to_ms)
-        {:ok, scan(from_ms, to_ms, opts)}
+        {:ok, buckets(from_ms, to_ms, opts)}
 
       error ->
         error
@@ -229,7 +254,7 @@ defmodule Shuttle.Activity do
   The event-time bounds that serve exactly the minutes whose start lies in
   `from_ms..to_ms`: `from_ms` ceiled to a minute, `to_ms` floored to one and
   widened to its last millisecond. Idempotent. A window narrower than one whole
-  minute comes back inverted, and scanning it yields nothing.
+  minute comes back inverted, and slicing it yields nothing.
   """
   @spec canonical_window(integer(), integer()) :: {integer(), integer()}
   def canonical_window(from_ms, to_ms) when is_integer(from_ms) and is_integer(to_ms) do
@@ -240,7 +265,7 @@ defmodule Shuttle.Activity do
   Validates a window without reading anything.
 
   Split out of `window/3` so the endpoint can refuse a bad window — and settle
-  a conditional fetch — before paying for the scan.
+  a conditional fetch — before touching the tally.
   """
   @spec check_range(integer(), integer()) :: :ok | {:error, :inverted_range | :range_too_wide}
   def check_range(from_ms, to_ms) when is_integer(from_ms) and is_integer(to_ms) do
@@ -259,117 +284,210 @@ defmodule Shuttle.Activity do
   @spec max_range_days() :: pos_integer()
   def max_range_days, do: @max_range_days
 
-  defp scan(from_ms, to_ms, opts) do
-    live = Keyword.get(opts, :events_file, Shuttle.WaitingTracker.default_events_file())
+  @doc "The live stream this host's hook recorder appends to."
+  @spec default_events_file() :: Path.t()
+  def default_events_file, do: Shuttle.WaitingTracker.default_events_file()
 
-    live
-    |> files_to_scan(from_ms)
-    |> Enum.reduce(new_acc(), &tally_file(&1, from_ms, to_ms, &2))
-    |> emit()
-  end
+  defp buckets(from_ms, to_ms, opts) do
+    path = Keyword.get(opts, :events_file, default_events_file())
 
-  # `tally` counts buckets; `spells` remembers which identities sit inside an
-  # unanswered waiting spell; `pending` holds each session's open tool call;
-  # `filled` names the buckets that exist only because an interval was drawn.
-  defp new_acc, do: %{tally: %{}, spells: %{}, pending: %{}, filled: MapSet.new()}
+    case Follower.slice(Keyword.get(opts, :follower, Follower), path, from_ms, to_ms) do
+      {:ok, buckets} ->
+        buckets
 
-  # Rotated (older) first, live second. Oldest-first is load-bearing, not
-  # just cache-friendly: spell state is a forward fold, so the files must be
-  # read in the order they were written.
-  defp files_to_scan(live, from_ms) do
-    rotated = if rotated_overlaps?(live <> ".1", from_ms), do: [live <> ".1"], else: []
-    rotated ++ if File.regular?(live), do: [live], else: []
-  end
+      :miss ->
+        if path == default_events_file() do
+          Shuttle.FileTail.warn_miss("activity", Follower, path)
+        end
 
-  # An mtime before `from_ms` proves every line predates the window: rotation
-  # renames the file and never writes it again. `+ 999` because mtime lands on
-  # a whole second and the window bound does not.
-  defp rotated_overlaps?(path, from_ms) do
-    case File.stat(path, time: :posix) do
-      {:ok, %File.Stat{type: :regular, mtime: mtime}} -> mtime * 1_000 + 999 >= from_ms
-      _ -> false
+        path |> fold_stream() |> slice(from_ms, to_ms)
     end
   end
 
-  defp tally_file(path, from_ms, to_ms, acc) do
-    path
-    |> File.stream!()
-    |> Enum.reduce(acc, &tally_line(&1, from_ms, to_ms, &2))
+  # ── The fold ───────────────────────────────────────────────────────────────
+
+  @doc "The fold before any line."
+  @spec new_acc() :: acc()
+  def new_acc, do: %{tally: :gb_trees.empty(), spells: %{}, pending: %{}, names: %{}}
+
+  @doc """
+  The whole stream at `live` folded from scratch: the rotated sibling
+  (`live <> ".1"`) first, then the live file. Oldest-first is load-bearing:
+  spell and pairing state are a forward fold, so the files are read in the
+  order they were written. A missing file contributes nothing.
+  """
+  @spec fold_stream(Path.t()) :: acc()
+  def fold_stream(live), do: new_acc() |> fold_file(live <> ".1") |> fold_file(live)
+
+  @doc """
+  Every line of `path` folded onto `acc`, streamed rather than slurped. A
+  missing or unreadable file leaves `acc` as it was.
+  """
+  @spec fold_file(acc(), Path.t()) :: acc()
+  def fold_file(acc, path) do
+    if File.regular?(path) do
+      fold_lines(acc, File.stream!(path))
+    else
+      acc
+    end
   rescue
-    # The file vanished or became unreadable between the stat and the stream —
-    # a rotation racing this scan. Serve what the other file gave us, but leave
-    # a trace: a silently-swallowed read is otherwise indistinguishable from a
-    # genuinely quiet hour, which is a miserable thing to debug from a graph.
+    # The file vanished or became unreadable between the check and the stream —
+    # a rotation racing this read. Keep what was folded, but leave a trace: a
+    # silently-swallowed read is otherwise indistinguishable from a genuinely
+    # quiet hour, which is a miserable thing to debug from a graph.
     error ->
       Logger.debug("activity: skipped #{path} — #{Exception.message(error)}")
       acc
   end
 
-  # Several folds in one pass. Lines before `from_ms` advance `spells` and
-  # `pending` only — that is what makes a window opening mid-spell, or
-  # mid-tool-call, honest.
-  defp tally_line(line, from_ms, to_ms, acc) do
-    case Jason.decode(line) do
-      # Past `to_ms` only one thing still matters: a tool that returns after the
-      # window closes was nonetheless running inside it, and its fill is
-      # clipped to the window. Nothing else — no kinds, no spell transition —
-      # can reach back across the boundary.
-      {:ok, %{"timestamp" => ts, "type" => type} = event}
-      when is_integer(ts) and is_binary(type) and ts > to_ms ->
-        track_span(acc, type, event, ts, from_ms, to_ms)
+  @doc "`lines`, in file order, folded onto `acc`."
+  @spec fold_lines(acc(), Enumerable.t()) :: acc()
+  def fold_lines(acc, lines), do: Enum.reduce(lines, acc, &fold_line(&2, &1))
 
+  @doc """
+  One line folded onto `acc`: the spell machine, the tool-call pairing and the
+  tally advance together. Malformed lines and lines missing a
+  `timestamp`/`type` leave `acc` untouched.
+
+  The strings the fold keeps are copied out of `line` once per distinct value
+  (`names`), so the tally never pins the buffer a line was split from.
+  """
+  @spec fold_line(acc(), String.t()) :: acc()
+  def fold_line(acc, line) do
+    case Jason.decode(line) do
       {:ok, %{"timestamp" => ts, "type" => type} = event}
       when is_integer(ts) and is_binary(type) ->
-        identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
+        {identity, acc} = identity(acc, event)
         {kinds, spells} = classify(type, event, identity, acc.spells)
-        acc = %{acc | spells: spells}
-
-        acc =
-          track_span(acc, type, event, ts, from_ms, to_ms)
-
-        if kinds == [] or ts < from_ms do
-          acc
-        else
-          minute = floor_minute(ts)
-          Enum.reduce(kinds, acc, &bump(&2, minute, identity, &1))
-        end
+        acc = track_span(%{acc | spells: spells}, type, event, identity, ts)
+        minute = floor_minute(ts)
+        Enum.reduce(kinds, acc, &bump(&2, minute, identity, &1))
 
       _ ->
         acc
     end
   end
 
+  @doc """
+  The buckets whose minute lies in the canonical window of `from_ms..to_ms`,
+  sorted by `{m, s, cwd, k}` — a range read of the tally, so its cost follows
+  the buckets served, not the buckets held.
+  """
+  @spec slice(acc(), integer(), integer()) :: [bucket()]
+  def slice(%{tally: tally}, from_ms, to_ms) do
+    {from_ms, to_ms} = canonical_window(from_ms, to_ms)
+    # A number sorts before every atom and binary, so `{from_ms, 0, 0, 0}`
+    # precedes every key of the minute `from_ms`, `nil`-attributed ones included.
+    {from_ms, 0, 0, 0}
+    |> :gb_trees.iterator_from(tally)
+    |> :gb_trees.next()
+    |> take_through(to_ms, [])
+  end
+
+  defp take_through({{m, s, cwd, k}, n, iter}, to_ms, acc) when m <= to_ms do
+    bucket = %{m: m, s: s, cwd: cwd, k: k, n: if(n == :fill, do: 1, else: n)}
+    take_through(:gb_trees.next(iter), to_ms, [bucket | acc])
+  end
+
+  defp take_through(_, _to_ms, acc), do: Enum.reverse(acc)
+
+  @doc """
+  `acc` without the buckets whose minute starts before `ts`'s, nor the pending
+  tool calls that began before `ts`. After a rotation `ts` is the first
+  timestamp of the new rotated file, so what remains is what the two files
+  hold, and the tally stays bounded by them. `nil` drops nothing.
+  """
+  @spec drop_before(acc(), integer() | nil) :: acc()
+  def drop_before(acc, nil), do: acc
+
+  def drop_before(%{tally: tally, pending: pending} = acc, ts) do
+    %{
+      acc
+      | tally: drop_minutes_before(tally, floor_minute(ts)),
+        pending: Map.reject(pending, fn {_sid, {start_ts, _identity}} -> start_ts < ts end)
+    }
+  end
+
+  defp drop_minutes_before(tally, cutoff) do
+    case :gb_trees.is_empty(tally) or :gb_trees.smallest(tally) do
+      {{m, _, _, _}, _} when m < cutoff ->
+        {_key, _n, rest} = :gb_trees.take_smallest(tally)
+        drop_minutes_before(rest, cutoff)
+
+      _ ->
+        tally
+    end
+  end
+
+  @doc "How many buckets `acc` holds — for diagnostics."
+  @spec size(acc()) :: non_neg_integer()
+  def size(%{tally: tally}), do: :gb_trees.size(tally)
+
+  @doc """
+  The timestamp of the first foldable line of `path`, or `nil` when it has
+  none or cannot be read. Reads only as far as that line.
+  """
+  @spec first_timestamp(Path.t()) :: integer() | nil
+  def first_timestamp(path) do
+    path
+    |> File.stream!()
+    |> Enum.find_value(fn line ->
+      case Jason.decode(line) do
+        {:ok, %{"timestamp" => ts, "type" => type}} when is_integer(ts) and is_binary(type) -> ts
+        _ -> nil
+      end
+    end)
+  rescue
+    _ -> nil
+  end
+
   defp floor_minute(ts), do: Integer.floor_div(ts, @minute_ms) * @minute_ms
   defp ceil_minute(ts), do: -floor_minute(-ts)
 
+  # `{tmuxSession, cwd}`, as the one copy `names` holds of it.
+  defp identity(%{names: names} = acc, event) do
+    raw = {presence(event["tmuxSession"]), presence(event["cwd"])}
+
+    case names do
+      %{^raw => identity} ->
+        {identity, acc}
+
+      _ ->
+        {session, cwd} = raw
+        identity = {copy(session), copy(cwd)}
+        {identity, %{acc | names: Map.put(names, identity, identity)}}
+    end
+  end
+
+  defp copy(nil), do: nil
+  defp copy(binary), do: :binary.copy(binary)
+
   # A real event owns its bucket outright. If an interval fill got there first,
   # the fill's mark is replaced rather than added to — see the moduledoc.
-  defp bump(acc, minute, {session, cwd}, kind) do
+  defp bump(%{tally: tally} = acc, minute, {session, cwd}, kind) do
     key = {minute, session, cwd, kind}
 
-    if MapSet.member?(acc.filled, key) do
-      %{acc | tally: Map.put(acc.tally, key, 1), filled: MapSet.delete(acc.filled, key)}
-    else
-      %{acc | tally: Map.update(acc.tally, key, 1, &(&1 + 1))}
-    end
+    n =
+      case :gb_trees.lookup(key, tally) do
+        {:value, n} when is_integer(n) -> n + 1
+        _none_or_fill -> 1
+      end
+
+    %{acc | tally: :gb_trees.enter(key, n, tally)}
   end
 
   # ── Tool calls as intervals ────────────────────────────────────────────────
 
   # One pending pre per session: a second pre abandons the first, which is what
   # "the most recent unmatched pre" means when nesting is not modelled.
-  defp track_span(acc, "pre_tool_use", event, ts, _from_ms, _to_ms) do
+  defp track_span(acc, "pre_tool_use", event, identity, ts) do
     case presence(event["sessionId"]) do
-      nil ->
-        acc
-
-      sid ->
-        identity = {presence(event["tmuxSession"]), presence(event["cwd"])}
-        %{acc | pending: Map.put(acc.pending, sid, {ts, identity})}
+      nil -> acc
+      sid -> %{acc | pending: Map.put(acc.pending, copy(sid), {ts, identity})}
     end
   end
 
-  defp track_span(acc, "post_tool_use", event, ts, from_ms, to_ms) do
+  defp track_span(acc, "post_tool_use", event, _identity, ts) do
     case presence(event["sessionId"]) do
       nil ->
         acc
@@ -377,7 +495,7 @@ defmodule Shuttle.Activity do
       sid ->
         case Map.pop(acc.pending, sid) do
           {{start_ts, identity}, pending} when start_ts <= ts ->
-            fill_interior(%{acc | pending: pending}, start_ts, ts, identity, from_ms, to_ms)
+            fill_interior(%{acc | pending: pending}, start_ts, ts, identity)
 
           _ ->
             acc
@@ -386,33 +504,30 @@ defmodule Shuttle.Activity do
   end
 
   # A restarted session is not still inside whatever tool it was running.
-  defp track_span(acc, "session_start", event, _ts, _from_ms, _to_ms) do
+  defp track_span(acc, "session_start", event, _identity, _ts) do
     case presence(event["sessionId"]) do
       nil -> acc
       sid -> %{acc | pending: Map.delete(acc.pending, sid)}
     end
   end
 
-  defp track_span(acc, _type, _event, _ts, _from_ms, _to_ms), do: acc
+  defp track_span(acc, _type, _event, _identity, _ts), do: acc
 
-  # The minutes strictly between the two stamped ones, capped and clipped.
-  defp fill_interior(acc, start_ts, end_ts, {session, cwd}, from_ms, to_ms) do
+  # The minutes strictly between the two stamped ones, capped.
+  defp fill_interior(acc, start_ts, end_ts, {session, cwd}) do
     first = floor_minute(start_ts) + @minute_ms
     last = min(floor_minute(end_ts), floor_minute(start_ts + @max_fill_ms)) - @minute_ms
 
-    first
-    |> max(floor_minute(from_ms))
-    |> Stream.iterate(&(&1 + @minute_ms))
-    |> Stream.take_while(&(&1 <= min(last, to_ms)))
-    |> Enum.reduce(acc, fn minute, acc ->
-      key = {minute, session, cwd, "agent"}
+    tally =
+      first
+      |> Stream.iterate(&(&1 + @minute_ms))
+      |> Stream.take_while(&(&1 <= last))
+      |> Enum.reduce(acc.tally, fn minute, tally ->
+        key = {minute, session, cwd, "agent"}
+        if :gb_trees.is_defined(key, tally), do: tally, else: :gb_trees.insert(key, :fill, tally)
+      end)
 
-      if Map.has_key?(acc.tally, key) do
-        acc
-      else
-        %{acc | tally: Map.put(acc.tally, key, 1), filled: MapSet.put(acc.filled, key)}
-      end
-    end)
+    %{acc | tally: tally}
   end
 
   # The spell state machine. Returns the bucket kinds this event contributes —
@@ -458,13 +573,4 @@ defmodule Shuttle.Activity do
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil
-
-  # Sorted so a polling client can diff two responses positionally. `nil` is an
-  # atom and atoms precede binaries in Erlang term order, so unattributed
-  # buckets lead their minute — arbitrary, but stable.
-  defp emit(%{tally: tally}) do
-    tally
-    |> Enum.map(fn {{m, s, cwd, k}, n} -> %{m: m, s: s, cwd: cwd, k: k, n: n} end)
-    |> Enum.sort_by(&{&1.m, &1.s, &1.cwd, &1.k})
-  end
 end

@@ -1,8 +1,8 @@
 defmodule Shuttle.FileTailTest do
   @moduledoc """
-  The byte mechanics both `events.jsonl` followers share: seed to the last
-  newline, read only what was appended, never consume a partial line, and
-  report a shrink rather than deciding what it means.
+  The byte mechanics the `events.jsonl` followers share: seed to the last
+  newline, read only what was appended, never consume a partial line, report
+  a shrink rather than deciding what it means, and drain a rotated file.
   """
   use ExUnit.Case, async: true
 
@@ -61,5 +61,27 @@ defmodule Shuttle.FileTailTest do
   test "blank lines are dropped, not surfaced as empty records", %{path: path} do
     File.write!(path, "a\n\n\nb\n")
     assert {["a", "b"], 6} = FileTail.seed(path)
+  end
+
+  test "drain reads a finished file from an offset, unterminated last line included",
+       %{path: path} do
+    File.write!(path, "a\nb\nc")
+    assert FileTail.drain(path, 2) == ["b", "c"]
+    assert FileTail.drain(path, 5) == []
+    assert FileTail.drain(path <> ".missing", 0) == []
+  end
+
+  test "inode survives an append and moves with a rename", %{path: path} do
+    assert FileTail.inode(path) == nil
+    File.write!(path, "a\n")
+    inode = FileTail.inode(path)
+    File.write!(path, "b\n", [:append])
+    assert FileTail.inode(path) == inode
+
+    File.rename!(path, path <> ".1")
+    on_exit(fn -> File.rm(path <> ".1") end)
+    File.write!(path, "c\n")
+    assert FileTail.inode(path <> ".1") == inode
+    refute FileTail.inode(path) == inode
   end
 end
