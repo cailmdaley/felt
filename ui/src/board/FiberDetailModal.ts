@@ -3139,10 +3139,18 @@ export class FiberDetailModal {
         closeSearch()
       }
     })
+    // A press on a result keeps focus where it is. WebKit gives a clicked
+    // button no focus, so without this pressing a result blurs the search to
+    // the body, the focusout below closes the list, and the result vanishes
+    // from under the pointer before its click lands.
+    dropdown.addEventListener('mousedown', (e) => e.preventDefault())
+    // Focus settling outside the picker — Tab away, a press elsewhere —
+    // closes it. Checked a tick later: switching windows fires focusout too,
+    // but leaves the search as the document's active element.
     wrap.addEventListener('focusout', () => {
       window.setTimeout(() => {
         if (!wrap.contains(document.activeElement)) closeSearch()
-      }, 150)
+      }, 0)
     })
 
     wrap.append(shown, search, dropdown)

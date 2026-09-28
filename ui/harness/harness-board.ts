@@ -1359,6 +1359,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   // The board's composite feed and the local-only meeting control plane.
   if (url.includes('/api/v1/fibers/composite')) return json(MOCK_FEED)
+  // The parent picker's index: the feed's rows plus a sibling of the null-test
+  // run, so its picker offers a parent before anything is typed.
+  if (url.endsWith('/api/v1/fibers')) {
+    return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
+  }
   if (url.endsWith('/api/v1/meeting/stop')) {
     if (!mockMeeting) return json({ error: 'No meeting to stop' }, 404)
     mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
