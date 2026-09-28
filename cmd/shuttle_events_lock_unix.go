@@ -14,11 +14,15 @@ const eventsRotationLockWait = 2 * time.Second
 
 // lockEventsRotation takes an exclusive flock on the rotation lock file,
 // polling without blocking for at most eventsRotationLockWait. ok is false
-// when the lock could not be opened or taken in time.
+// only when another writer holds the lock past that wait. A lock that cannot
+// be used at all — the file won't open, or the filesystem refuses flock
+// (a network mount without lock support answers ENOSYS or EOPNOTSUPP) —
+// returns ok with a no-op unlock, so rotation proceeds unguarded rather than
+// never happening and letting the stream grow without bound.
 func lockEventsRotation(lockPath string) (unlock func(), ok bool) {
 	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return nil, false
+		return func() {}, true
 	}
 	deadline := time.Now().Add(eventsRotationLockWait)
 	for {
@@ -29,7 +33,11 @@ func lockEventsRotation(lockPath string) (unlock func(), ok bool) {
 				_ = file.Close()
 			}, true
 		}
-		if err != syscall.EWOULDBLOCK || time.Now().After(deadline) {
+		if err != syscall.EWOULDBLOCK {
+			_ = file.Close()
+			return func() {}, true
+		}
+		if time.Now().After(deadline) {
 			_ = file.Close()
 			return nil, false
 		}
