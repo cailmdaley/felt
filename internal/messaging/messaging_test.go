@@ -125,7 +125,13 @@ func TestDedupReplayAndConflict(t *testing.T) {
 
 func TestDedupConcurrentFirstSendersSendOnce(t *testing.T) {
 	for iteration := 0; iteration < 50; iteration++ {
-		t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+		dir, err := os.MkdirTemp("/tmp", "felt-dedup-race-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanupDir := dir
+		t.Cleanup(func() { _ = os.RemoveAll(cleanupDir) })
+		t.Setenv("SHUTTLE_DATA_DIR", dir)
 		req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "race"}
 		var calls atomic.Int32
 		var wg sync.WaitGroup
@@ -162,7 +168,7 @@ func TestDedupPublishesOwnerDeadlineBeforeSend(t *testing.T) {
 	deadline := time.Now().Add(17 * time.Second)
 	var observed int64
 	r, err := withDedupDetailed(context.Background(), req, func(ctx context.Context) dedupSendResult {
-		if err := publishOwnerObservationDeadline(ctx, deadline); err != nil {
+		if err := publishOwnerDeadline(ctx, deadline); err != nil {
 			return dedupSendResult{Err: err}
 		}
 		name := sha256.Sum256([]byte(req.MessageID))

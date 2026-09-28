@@ -69,7 +69,7 @@ func reserveDedupRecord(path string, reservation record, write func(string, []by
 
 type reservationDeadlinePublisherKey struct{}
 
-func publishOwnerObservationDeadline(ctx context.Context, deadline time.Time) error {
+func publishOwnerDeadline(ctx context.Context, deadline time.Time) error {
 	publish, _ := ctx.Value(reservationDeadlinePublisherKey{}).(func(time.Time) error)
 	if publish == nil {
 		return nil
@@ -77,9 +77,9 @@ func publishOwnerObservationDeadline(ctx context.Context, deadline time.Time) er
 	return publish(deadline)
 }
 
-// Native senders replace the ceiling with their exact observation deadline
-// before writing. The 28s ceiling plus the 1.5s waiter margin fits the 32s
-// local daemon shell-out timeout even before that update arrives.
+// The reservation starts with its owner-context deadline; transports publish
+// narrower RPC or observation deadlines before their side effects. The 28s
+// ceiling plus the 1.5s waiter margin fits the 32s local shell-out timeout.
 const (
 	duplicateWaitTimeout       = 15 * time.Second
 	duplicatePollInterval      = 150 * time.Millisecond
@@ -138,19 +138,24 @@ func withDedupDetailedTimingUsing(ctx context.Context, req Request, send func(co
 	path := filepath.Join(dir, hex.EncodeToString(nameHash[:])+".json")
 	hash := requestHash(req)
 
+	ownerDeadline := time.Now().Add(reservationDeadlineCeiling)
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		ownerDeadline = ctxDeadline
+	}
+	ownerCtx, cancelOwner := context.WithDeadline(ctx, ownerDeadline)
+	defer cancelOwner()
+
 	nonce, err := newReservationNonce()
 	if err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create reservation nonce: %v", err)
 	}
 	reservation := record{
-		Hash:       hash,
-		State:      "reserved",
-		OwnerPID:   os.Getpid(),
-		OwnerStart: currentProcessStartTime(),
-		Nonce:      nonce,
-	}
-	if address, err := ParseAddress(req.Address); err == nil && address.Harness == "claude" && req.Wake {
-		reservation.OwnerDeadlineUnixNano = time.Now().Add(reservationDeadlineCeiling).UnixNano()
+		Hash:                  hash,
+		State:                 "reserved",
+		OwnerPID:              os.Getpid(),
+		OwnerStart:            currentProcessStartTime(),
+		OwnerDeadlineUnixNano: ownerDeadline.UnixNano(),
+		Nonce:                 nonce,
 	}
 	// Publish a complete reservation atomically: an O_EXCL-created empty file
 	// would let a concurrent duplicate mistake the brief write window for a
@@ -171,7 +176,7 @@ func withDedupDetailedTimingUsing(ctx context.Context, req Request, send func(co
 		if !owned {
 			return Receipt{}, errCode("dedup_unavailable", "message reservation was not published")
 		}
-		return sendReserved(ctx, dir, path, hash, req, nonce, send)
+		return sendReserved(ownerCtx, dir, path, hash, req, nonce, send)
 	}
 }
 
@@ -427,10 +432,6 @@ func mergeClaudeReceiptRefreshWithChange(current record, candidate claudeReceipt
 	}
 	if candidate.ErrorCode == "receiver_turn_failed" {
 		if current.Receipt.Status == StatusUnknown && current.ErrorCode == candidate.ErrorCode && current.ErrorMessage == candidate.ErrorMessage && current.Receipt.Detail == candidate.Receipt.Detail {
-			return current, false
-		}
-	} else if candidate.ErrorCode == "ambiguous_delivery" {
-		if current.Receipt.Status == StatusUnknown && current.ErrorCode == candidate.ErrorCode && current.Receipt.Detail == candidate.Receipt.Detail {
 			return current, false
 		}
 	} else if claudeStageRank(candidate.Receipt.Status) <= claudeStageRank(current.Receipt.Status) {

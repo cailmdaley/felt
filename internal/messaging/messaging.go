@@ -68,6 +68,10 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		return rejected(req, "none", err.Error()), err
 	}
 	return withDedupDetailed(ctx, req, func(sendCtx context.Context) dedupSendResult {
+		if err := sendCtx.Err(); err != nil {
+			receipt := rejected(req, "validation", err.Error())
+			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
+		}
 		files, err := materializeAttachments(req.MessageID, req.Attachments)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
@@ -77,6 +81,10 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "%v", err)}
+		}
+		if err := sendCtx.Err(); err != nil {
+			receipt := rejected(req, "validation", err.Error())
+			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
 		}
 		delivery := req
 		delivery.Text = text

@@ -181,6 +181,9 @@ func sendPiNative(ctx context.Context, a Address, req Request) (Receipt, error) 
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
+	if err := publishOwnerDeadline(ctx, deadline); err != nil {
+		return rejected(req, piNativeTransport, "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi native delivery deadline")
+	}
 	_ = conn.SetDeadline(deadline)
 	requestID := fmt.Sprintf("shuttle-pi-%d", time.Now().UnixNano())
 	if err := json.NewEncoder(conn).Encode(map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}); err != nil {

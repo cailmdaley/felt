@@ -77,6 +77,9 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
+	if err := publishOwnerDeadline(ctx, deadline); err != nil {
+		return err
+	}
 	r.c.SetWriteDeadline(deadline)
 	if err := r.c.WriteJSON(map[string]any{"id": id, "method": method, "params": params}); err != nil {
 		return err

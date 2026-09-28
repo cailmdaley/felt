@@ -210,26 +210,17 @@ func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record)
 	if err != nil || address.Harness != "claude" || stored.TranscriptOffset == nil || *stored.TranscriptOffset < 0 || stored.ClaudeQueueContentHash == "" {
 		return claudeReceiptRefresh{}, false
 	}
-	unknown := func(detail string) (claudeReceiptRefresh, bool) {
-		receipt := stored.Receipt
-		receipt.Status = StatusUnknown
-		receipt.Detail = detail
-		return claudeReceiptRefresh{Receipt: receipt, ErrorCode: "ambiguous_delivery", ErrorMessage: detail}, true
-	}
 	registration, err := readClaudeNative(address.ID)
 	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
-		if err == nil {
-			err = errors.New("Claude receiver registration no longer matches this address")
-		}
-		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
+		return claudeReceiptRefresh{}, false
 	}
 	f, err := openClaudeTranscript(registration.Transcript, false)
 	if err != nil {
-		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
+		return claudeReceiptRefresh{}, false
 	}
 	defer f.Close()
 	if _, err := f.Seek(*stored.TranscriptOffset, io.SeekStart); err != nil {
-		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
+		return claudeReceiptRefresh{}, false
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
 	defer cancel()
@@ -242,7 +233,7 @@ func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record)
 		return claudeReceiptRefresh{Receipt: receipt, ErrorCode: "receiver_turn_failed", ErrorMessage: detail}, true
 	}
 	if observeErr != nil && !errors.Is(observeErr, context.DeadlineExceeded) && !errors.Is(observeErr, context.Canceled) {
-		return unknown("native message sent; no correlated receiver turn observed: " + observeErr.Error())
+		return claudeReceiptRefresh{}, false
 	}
 	if claudeStageRank(stage) <= claudeStageRank(stored.Receipt.Status) {
 		return claudeReceiptRefresh{}, false
@@ -298,7 +289,7 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	}
 	f, err := openClaudeTranscript(r.Transcript, true)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return preflight("Claude receiver transcript cannot be observed: " + err.Error())
+		return preflight("Claude receiver transcript cannot be observed")
 	}
 	if f != nil {
 		defer f.Close()
@@ -307,13 +298,13 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	conn, err := connectClaudeNative(preflightCtx, r)
 	cancelPreflight()
 	if err != nil {
-		return preflight(err.Error())
+		return preflight("Claude native receiver endpoint is unavailable")
 	}
 	defer conn.Close()
 	uuid := claudeNativeUUID(req)
 	from, verdicts, closeReceipts, err := listenClaudeNativeReceipts(ctx, r, uuid)
 	if err != nil {
-		return preflight("cannot listen for native Claude policy receipts: " + err.Error())
+		return preflight("cannot listen for native Claude policy receipts")
 	}
 	defer closeReceipts()
 	body := struct {
@@ -339,7 +330,7 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	if f != nil {
 		position, seekErr := f.Seek(0, io.SeekEnd)
 		if seekErr != nil {
-			return preflight("Claude receiver transcript cannot be positioned: " + seekErr.Error())
+			return preflight("Claude receiver transcript cannot be positioned")
 		}
 		offset = &position
 	}
@@ -347,8 +338,8 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	observationCtx, cancelObservation := context.WithTimeout(ctx, claudeNativeObservationTimeout)
 	defer cancelObservation()
 	if deadline, ok := observationCtx.Deadline(); ok {
-		if err := publishOwnerObservationDeadline(observationCtx, deadline); err != nil {
-			return preflight("cannot persist Claude observation deadline: " + err.Error())
+		if err := publishOwnerDeadline(observationCtx, deadline); err != nil {
+			return preflight("cannot persist Claude observation deadline")
 		}
 		_ = conn.SetWriteDeadline(deadline)
 	}
@@ -374,10 +365,13 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 			const detail = "the receiver took the message but its turn ended in an error without a model reply"
 			return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: detail}, errCode("receiver_turn_failed", "%s", detail), metadata
 		}
-		if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) && (stage == StatusQueued || stage == StatusSubmitted) {
-			return claudeStageReceipt(req, stage), nil, metadata
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			if stage == StatusQueued || stage == StatusSubmitted {
+				return claudeStageReceipt(req, stage), nil, metadata
+			}
+			return unknown("native message sent; no correlated receiver turn observed before the observation window ended")
 		}
-		return unknown("native message sent; no correlated receiver turn observed: " + err.Error())
+		return unknown("native message sent; receiver evidence could not be read within the bounded scan")
 	}
 	receipt := claudeStageReceipt(req, stage)
 	if stage == StatusUnknown {

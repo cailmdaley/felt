@@ -144,9 +144,10 @@ daemon to the owning host. The text is the second argument, '-' for stdin, or
 
 By default the addressed session is woken; --context-only (or --wake=false)
 adds the message as context without starting or steering a model turn. Prints
-the receipt status and message id. Exit 0 means accepted, submitted, queued, or
-context_added; exit 1 means rejected, unknown, or another command error. Retry
-an unknown receipt with the same --message-id to re-check without resending.`,
+"sending <message-id> to <address>" to stderr before delivery, then prints the
+receipt status and message id. If interrupted, retry with the printed id using
+--message-id <id>. Exit 0 means accepted, submitted, queued, or context_added;
+exit 1 means rejected, unknown, or another command error.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if messageRequestJSON {
 			if !messageLocal {
@@ -180,6 +181,9 @@ an unknown receipt with the same --message-id to re-check without resending.`,
 			}
 		}
 		id := request.MessageID
+		if !messageRequestJSON {
+			fmt.Fprintf(cmd.ErrOrStderr(), "sending %s to %s\n", id, request.Address)
+		}
 		var receipt messaging.Receipt
 		var receiptProduced bool
 		feltErrorCode := ""

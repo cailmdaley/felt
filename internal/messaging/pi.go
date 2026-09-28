@@ -207,6 +207,9 @@ func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error
 	if x, ok := ctx.Deadline(); ok && x.Before(deadline) {
 		deadline = x
 	}
+	if err := publishOwnerDeadline(ctx, deadline); err != nil {
+		return rejected(r, "pi-rpc+unix-socket", "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi delivery deadline")
+	}
 	c.SetDeadline(deadline)
 	if err = json.NewEncoder(c).Encode(map[string]any{"type": "msg", "message": labeled(r)}); err != nil {
 		return Receipt{}, err

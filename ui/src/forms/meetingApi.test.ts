@@ -68,7 +68,7 @@ describe('joinMeeting', () => {
         error: 'receiver native inbox denied this message; no turn started',
         meeting: { state: 'live' },
         delivery: { delivered: false, delivery: 'message', receipt: { status: 'rejected' } },
-      }, 400),
+      }, 502),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, refused))
       .resolves.toEqual({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started' })

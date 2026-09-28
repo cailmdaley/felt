@@ -307,6 +307,53 @@ func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T
 	}
 }
 
+func TestClaudeNativeRetryKeepsSubmittedReceiptWhenRegistrationIsGone(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SHUTTLE_DATA_DIR", dir)
+	req := Request{Address: "shuttle://h/claude/0f7c3b1e-1111-2222-3333-444455556666", Text: "hi", MessageID: "m-sub", Wake: true}
+	offset := int64(0)
+	stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
+	writeDedupRecord(t, dir, req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: "known-content-hash"})
+
+	got, err := Send(context.Background(), "h", req)
+	if err != nil || !reflect.DeepEqual(got, stored) || strings.Contains(got.Detail, dir) {
+		t.Fatalf("failed recheck replaced evidence or leaked a path: %+v err=%v", got, err)
+	}
+}
+
+func TestClaudeNativeRetryKeepsReceiptWhenTranscriptCannotBeRescanned(t *testing.T) {
+	for _, failure := range []string{"open", "scan-bound"} {
+		t.Run(failure, func(t *testing.T) {
+			req, sent := nativeClaudeFixture(t, func(map[string]any, *os.File) {})
+			registration, err := readClaudeNative("session")
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "open":
+				if err := os.Remove(registration.Transcript); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), registration.Transcript); err != nil {
+					t.Fatal(err)
+				}
+			case "scan-bound":
+				if err := os.WriteFile(registration.Transcript, make([]byte, 9<<20), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			offset := int64(0)
+			stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
+			writeDedupRecord(t, dataDir(), req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: claudeContentHash(labeled(req))})
+
+			got, err := Send(context.Background(), "host", req)
+			if err != nil || !reflect.DeepEqual(got, stored) || sent.Load() != 0 || strings.Contains(got.Detail, dataDir()) {
+				t.Fatalf("failed %s recheck replaced evidence, sent, or leaked a path: %+v err=%v writes=%d", failure, got, err, sent.Load())
+			}
+		})
+	}
+}
+
 func TestClaudeNativeRetryWithoutOffsetKeepsStoredReceipt(t *testing.T) {
 	req, sent := nativeClaudeFixture(t, func(map[string]any, *os.File) {})
 	frame := map[string]any{"uuid": claudeNativeUUID(req)}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,11 +12,29 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
 )
+
+type synchronizedMessageBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *synchronizedMessageBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func (b *synchronizedMessageBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
 
 func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
 	reader, writer := io.Pipe()
@@ -200,10 +219,53 @@ func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
 }
 
 func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
-	for _, detail := range []string{"Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown", "same --message-id"} {
+	for _, detail := range []string{"sending <message-id> to <address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown"} {
 		if !strings.Contains(shuttleMessageCmd.Long, detail) {
 			t.Errorf("message help omits %q", detail)
 		}
+	}
+}
+
+func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
+	oldID, oldFile, oldFrom := messageID, messageFile, messageFrom
+	oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON := messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput
+	oldIn, oldOut, oldErr := shuttleMessageCmd.InOrStdin(), shuttleMessageCmd.OutOrStdout(), shuttleMessageCmd.ErrOrStderr()
+	oldAttachments := messageAttachments
+	t.Cleanup(func() {
+		messageID, messageFile, messageFrom = oldID, oldFile, oldFrom
+		messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput = oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON
+		messageAttachments = oldAttachments
+		shuttleMessageCmd.SetIn(oldIn)
+		shuttleMessageCmd.SetOut(oldOut)
+		shuttleMessageCmd.SetErr(oldErr)
+	})
+	messageID, messageFile, messageFrom = "msg-interrupted", "", "test sender"
+	messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput = true, false, false, false, false
+	var stderr synchronizedMessageBuffer
+	shuttleMessageCmd.SetIn(strings.NewReader(""))
+	shuttleMessageCmd.SetOut(io.Discard)
+	shuttleMessageCmd.SetErr(&stderr)
+
+	address := "shuttle://host/codex/thread"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(stderr.String(), "sending msg-interrupted to "+address) {
+			t.Errorf("request reached daemon before retry ID was printed: %q", stderr.String())
+		}
+		var request messaging.Request
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "peer"})
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	if err := shuttleMessageCmd.RunE(shuttleMessageCmd, []string{address, "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(stderr.String(), "sending msg-interrupted to "+address+"\n") {
+		t.Fatalf("announcement = %q", stderr.String())
 	}
 }
 
