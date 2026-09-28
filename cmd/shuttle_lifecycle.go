@@ -162,6 +162,8 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 
 // ---- resume ----------------------------------------------------------------
 
+var resumeProjectDir string
+
 var resumeCmd = &cobra.Command{
 	Use:   "resume <fiber>",
 	Short: "Arm a paused fiber (status: active)",
@@ -175,7 +177,13 @@ awaiting marker and recomputes due-ness from the schedule), falling back to a
 local document write when the daemon is unreachable. A draft (status: open) is
 armed straight to active. Every other closed fiber — a oneshot or pinned role,
 or any accepted or discarded close — is refused; use 'felt shuttle reopen' to
-requeue it. Arming refuses an agent the registry cannot resolve.`,
+requeue it.
+
+Arming needs what an armed install needs: an agent the registry resolves and a
+project_dir. A draft installed without one is refused; --project-dir sets it
+(an existing directory on this machine, stored absolute) and arms in one step.`,
+	Example: `  felt shuttle resume analysis/scratch
+  felt shuttle resume analysis/scratch --project-dir "$PWD"   # a draft installed without one`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
@@ -183,15 +191,25 @@ requeue it. Arming refuses an agent the registry cannot resolve.`,
 			return err
 		}
 		defer unlock()
-		if err := resolveBlockAgent(block); err != nil {
+		if err := setProjectDirFlag(cmd, resumeProjectDir, f, block); err != nil {
+			return err
+		}
+		if err := checkArmable(args[0], "resume", block); err != nil {
 			return err
 		}
 
 		// A standing role awaiting review (status:closed + untempered) re-arms
 		// through the owning daemon, which clears the awaiting marker and
 		// recomputes due-ness. Falls back to a local write when the daemon is down.
+		// A --project-dir lands in the document first, so the daemon arms the
+		// block as it now stands.
 		docAwaiting := f.Status == felt.StatusClosed && readTempered(f) == nil
 		if block.Kind == "standing" && docAwaiting {
+			if cmd.Flags().Changed("project-dir") {
+				if err := st.Write(f); err != nil {
+					return fmt.Errorf("writing fiber: %w", err)
+				}
+			}
 			if output, err := postLifecycle("resume", map[string]any{"fiber": f.ID}); err == nil {
 				fmt.Print(output)
 				return nil
@@ -230,11 +248,20 @@ requeue it. Arming refuses an agent the registry cannot resolve.`,
 	},
 }
 
-// resolveBlockAgent is the arming gate: a verb that makes a fiber dispatchable
-// resolves its agent against the registry first, so a retired id (kept on
-// closed fibers as history — content edits never check it) is refused with the
-// registry's list rather than failing later inside the daemon.
-func resolveBlockAgent(block *shuttle.Block) error {
+// checkArmable is the arming gate: every verb that makes a fiber dispatchable
+// (resume, reopen, accept, edit -s active) holds the block to what an armed
+// install requires. It needs a project_dir — without one the daemon still
+// dispatches the fiber but starts its worker in the felt store instead of the
+// checkout the work belongs to, the fallback an armed install never takes —
+// and an agent the registry resolves, so a retired id (kept on closed fibers
+// as history — content edits never check it) is refused with the registry's
+// list rather than failing later inside the daemon. verb is the lifecycle
+// verb that arms this fiber from where it stands (armVerb), which the refusal
+// names with the --project-dir that satisfies it.
+func checkArmable(fiberID, verb string, block *shuttle.Block) error {
+	if strings.TrimSpace(block.ProjectDir) == "" {
+		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it as you arm it: felt shuttle %s %s --project-dir <dir>)", fiberID, verb, fiberID)
+	}
 	reg, err := shuttle.LoadAgentRegistry()
 	if err != nil {
 		return err
@@ -249,6 +276,34 @@ func resolveBlockAgent(block *shuttle.Block) error {
 			return fmt.Errorf("cannot arm: %s (felt shuttle set-agent to pick a current one)", e.Message)
 		}
 	}
+	return nil
+}
+
+// armVerb names the lifecycle verb that arms a fiber standing at status:
+// reopen for a closed fiber, except a standing role awaiting review, which
+// resume re-arms through its daemon (concluding the run); resume otherwise.
+func armVerb(status string, f *felt.Felt, block *shuttle.Block) string {
+	if status == felt.StatusClosed && !(block.Kind == "standing" && readTempered(f) == nil) {
+		return "reopen"
+	}
+	return "resume"
+}
+
+// setProjectDirFlag applies an arming verb's --project-dir, when given, to
+// f's shuttle: block and to block, so the arming gate reads the block as it
+// will be written.
+func setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shuttle.Block) error {
+	if !cmd.Flags().Changed("project-dir") {
+		return nil
+	}
+	projectDir, err := resolveProjectDirFlag(raw)
+	if err != nil {
+		return err
+	}
+	if err := f.SetShuttleField("project_dir", projectDir); err != nil {
+		return err
+	}
+	block.ProjectDir = projectDir
 	return nil
 }
 
@@ -306,14 +361,20 @@ awaiting review).`,
 
 // ---- reopen ----------------------------------------------------------------
 
-var reopenAsDraft bool
+var (
+	reopenAsDraft    bool
+	reopenProjectDir string
+)
 
 var reopenCmd = &cobra.Command{
 	Use:   "reopen <fiber>",
 	Short: "Requeue a closed or reviewed fiber back into active work",
 	Long: `Sets status = active and clears tempered / closed-at so a closed card
 re-enters the in-flight loop. status is the fiber's only dispatch switch.
-Arming refuses an agent the registry cannot resolve.
+
+Arming needs what an armed install needs: an agent the registry resolves and a
+project_dir. A block without one is refused; --project-dir sets it (an
+existing directory on this machine, stored absolute) in the same step.
 
 With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
@@ -325,10 +386,13 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 		}
 		defer unlock()
 
+		if err := setProjectDirFlag(cmd, reopenProjectDir, f, block); err != nil {
+			return err
+		}
 		status := felt.StatusActive
 		if reopenAsDraft {
 			status = felt.StatusOpen
-		} else if err := resolveBlockAgent(block); err != nil {
+		} else if err := checkArmable(args[0], "reopen", block); err != nil {
 			return err
 		}
 		statusBefore := f.Status
@@ -479,7 +543,7 @@ falls back to a local document write when the daemon is down.`,
 		// the offline local write both arm the fiber (status: active), so
 		// both need a resolvable agent up front (the daemon resolves again
 		// at dispatch; that's fine, this just fails fast and offline too).
-		if err := resolveBlockAgent(block); err != nil {
+		if err := checkArmable(args[0], "resume", block); err != nil {
 			return err
 		}
 
@@ -535,10 +599,10 @@ var setModelCmd = &cobra.Command{
 	Short: "Change only the dispatch agent for a fiber",
 	Long: `Updates shuttle.agent to the given agent ID, validated against the agent
 registry (together with the block's existing effort/chrome axes) before writing.
-The single field is set surgically so the daemon-owned runtime keys are
-preserved; effort, chrome, and surface stay as they are — use set-agent to
-change them with the agent. This saves the next-launch agent without starting
-or replacing a worker.`,
+Effort, chrome and surface stay as they are — use set-agent to change them
+with the agent; a block on surface: app can only move to another Codex agent
+here. Daemon-owned runtime keys are preserved. This saves the next-launch
+agent without starting or replacing a worker.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -551,22 +615,15 @@ or replacing a worker.`,
 		}
 		defer unlock()
 
-		agentID := args[1]
-		// Resolve the new base agent together with the block's existing axes:
-		// switching to an agent that can't carry the current effort/chrome fails
-		// loud here rather than silently at dispatch.
-		if _, _, err := reg.Resolve(agentID, block.Effort, block.Chrome); err != nil {
-			return err
-		}
-
-		if err := f.SetShuttleField("agent", agentID); err != nil {
+		axes := agentAxes{agent: args[1], effort: block.Effort, chrome: block.Chrome, surface: block.Surface}
+		if err := axes.write(f, reg); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.location(), agentID)
+		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.location(), args[1])
 		return nil
 	},
 }
@@ -591,9 +648,10 @@ writes them to the shuttle: block after validating the combination against the
 agent registry's per-harness constraints. The base agent argument is optional:
 omit it to mutate only the axes of the current agent; an omitted flag keeps
 that axis as it is. Pass --effort "" to clear effort back to the harness
-default, --chrome=false to drop chrome. --surface app is Codex-only. Settings
-apply to the next launch; this command does not start, stop, resume, or replace
-a worker.`,
+default, --chrome=false to drop chrome. --surface app is Codex-only: moving a
+block on the app to another harness takes --surface cli in the same call.
+Settings apply to the next launch; this command does not start, stop, resume,
+or replace a worker.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reg, err := shuttle.LoadAgentRegistry()
@@ -623,40 +681,8 @@ a worker.`,
 			surface = setAgentSurface
 		}
 
-		// Validate the full composition before writing.
-		name := agentID
-		if name == "" {
-			if def, err := reg.Default(); err == nil {
-				name = def.ID
-			}
-		}
-		base, _, err := reg.Resolve(name, effort, chrome)
-		if err != nil {
-			return err
-		}
-		if surface != "" && surface != "cli" && surface != "app" {
-			return fmt.Errorf("surface must be cli or app, got %q", surface)
-		}
-		if surface == "app" && base.CLI != "codex" {
-			return fmt.Errorf("surface app is supported only by Codex agents, got %q", base.ID)
-		}
-
-		// Surgical, omitempty-aware writes: a cleared agent/effort drops its key,
-		// chrome is written as a real bool (or dropped when false).
-		if err := f.SetShuttleNodeField("agent", axisValue(agentID)); err != nil {
-			return err
-		}
-		if err := f.SetShuttleNodeField("effort", axisValue(effort)); err != nil {
-			return err
-		}
-		if chrome {
-			if err := f.SetShuttleNodeField("chrome", true); err != nil {
-				return err
-			}
-		} else if err := f.SetShuttleNodeField("chrome", nil); err != nil {
-			return err
-		}
-		if err := f.SetShuttleNodeField("surface", axisValue(surface)); err != nil {
+		axes := agentAxes{agent: agentID, effort: effort, chrome: chrome, surface: surface}
+		if err := axes.write(f, reg); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {
@@ -673,6 +699,54 @@ a worker.`,
 		fmt.Println()
 		return nil
 	},
+}
+
+// agentAxes is one composition of a block's dispatch axes: base agent (empty
+// for the registry default), effort, chrome and surface.
+type agentAxes struct {
+	agent   string
+	effort  string
+	chrome  bool
+	surface string
+}
+
+// write validates the composition against the registry and sets it on f's
+// shuttle: block — surgically, so the daemon-owned runtime keys survive: a
+// cleared agent or effort drops its key, chrome is a real bool or absent.
+// set-model and set-agent both write through here, so neither can leave a
+// block naming a surface its agent cannot run on.
+func (a agentAxes) write(f *felt.Felt, reg *shuttle.AgentRegistry) error {
+	name := a.agent
+	if name == "" {
+		if def, err := reg.Default(); err == nil {
+			name = def.ID
+		}
+	}
+	base, _, err := reg.Resolve(name, a.effort, a.chrome)
+	if err != nil {
+		return err
+	}
+	if a.surface != "" && a.surface != "cli" && a.surface != "app" {
+		return fmt.Errorf("surface must be cli or app, got %q", a.surface)
+	}
+	if a.surface == "app" && base.CLI != "codex" {
+		return fmt.Errorf("surface app is supported only by Codex agents, got %q (to move this block off the app: felt shuttle set-agent <fiber> %s --surface cli)", base.ID, name)
+	}
+
+	if err := f.SetShuttleNodeField("agent", axisValue(a.agent)); err != nil {
+		return err
+	}
+	if err := f.SetShuttleNodeField("effort", axisValue(a.effort)); err != nil {
+		return err
+	}
+	var chrome any
+	if a.chrome {
+		chrome = true
+	}
+	if err := f.SetShuttleNodeField("chrome", chrome); err != nil {
+		return err
+	}
+	return f.SetShuttleNodeField("surface", axisValue(a.surface))
 }
 
 // axisValue maps a string axis to a typed-set value: an empty string deletes the
@@ -765,11 +839,11 @@ pause / resume / close / reopen for that.`,
 				return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
 			}
 			tz := reshapeTZ
-			if !cmd.Flags().Changed("tz") {
+			if tz == "" && block.Schedule != nil {
+				tz = block.Schedule.TZ
+			}
+			if tz == "" {
 				tz = "UTC"
-				if block.Schedule != nil && block.Schedule.TZ != "" {
-					tz = block.Schedule.TZ
-				}
 			}
 			candidate.Schedule = &shuttle.Schedule{Expr: expr, TZ: tz}
 		} else {
@@ -879,20 +953,20 @@ and a live worker is left running.`,
 	},
 }
 
-// registerShuttleLifecycleFlags binds the lifecycle verbs' flags. Exposed so
-// tests can ResetFlags() + re-register to clear Changed state between runs (the
-// cobra flag-state-persists-across-Execute gotcha).
+// registerShuttleLifecycleFlags binds the lifecycle verbs' flags.
 func registerShuttleLifecycleFlags() {
+	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none)")
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
+	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
 	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
-	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "UTC", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
+	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
 }
 
 func init() {

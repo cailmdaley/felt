@@ -385,7 +385,7 @@ defmodule Shuttle.LifecycleStoreTest do
     System.put_env("FELT_STORES", loom)
 
     try do
-      fun.("science/cmbx/cmbx", path, original)
+      fun.("science/cmbx", path, original)
     after
       restore_env("FELT_STORES", prev_loom)
       File.rm_rf(loom)

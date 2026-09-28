@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/felt"
 )
 
 func TestAddMintsNativeUID(t *testing.T) {
 	dir, storage := newStore(t)
-
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
-	resetLs := saveLsGlobals()
-	defer resetLs()
 
 	out, err := runCommand(t, dir, "add", "project/federated", "Federated")
 	if err != nil {
@@ -56,9 +53,6 @@ func TestAddMintsNativeUID(t *testing.T) {
 func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
 	dir, storage := newStore(t)
 
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
-
 	out, err := runCommand(t, dir, "add", "born", "Born")
 	if err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
@@ -79,40 +73,6 @@ func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
 	}
 }
 
-func saveAddGlobals() func() {
-	prevBody := addBody
-	prevStatus := addStatus
-	prevDue := addDue
-	prevTags := addTags
-	prevOutcome := addOutcome
-	prevTopLevel := addTopLevel
-	prevJSON := jsonOutput
-
-	addBody = ""
-	addStatus = ""
-	addDue = ""
-	addTags = nil
-	addOutcome = ""
-	addTopLevel = false
-	jsonOutput = false
-
-	for _, name := range []string{"body", "status", "due", "tag", "outcome", "top-level", "json"} {
-		if f := addCmd.Flags().Lookup(name); f != nil {
-			f.Changed = false
-		}
-	}
-
-	return func() {
-		addBody = prevBody
-		addStatus = prevStatus
-		addDue = prevDue
-		addTags = prevTags
-		addOutcome = prevOutcome
-		addTopLevel = prevTopLevel
-		jsonOutput = prevJSON
-	}
-}
-
 func looksLikeULID(value string) bool {
 	if len(value) != 26 {
 		return false
@@ -130,8 +90,6 @@ func looksLikeULID(value string) bool {
 // path or created at the top level and nested there afterwards.
 func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
 	dir, storage := newStore(t)
-	resetAdd := saveAddGlobals()
-	defer resetAdd()
 
 	for _, args := range [][]string{
 		{"add", "games/civbench/harness-model/roles", "Harness roles"},
@@ -152,5 +110,31 @@ func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
 	}
 	if _, err := storage.Read("games/civbench/harness-model/roles/steward"); err == nil {
 		t.Fatal("nest resolved roles to a nested fiber named roles")
+	}
+}
+
+// TestAddValidatesStatusLikeEdit: add and edit share one status rule. A bogus
+// status is refused before anything is written, and -s closed stamps
+// closed-at just as closing through edit does.
+func TestAddValidatesStatusLikeEdit(t *testing.T) {
+	dir, storage := newStore(t)
+
+	out, err := runCommand(t, dir, "add", "bogus", "Bogus", "-s", "bogus")
+	if err == nil || !strings.Contains(err.Error(), `invalid status "bogus"`) {
+		t.Fatalf("add -s bogus: err=%v out=%s; want an invalid-status refusal", err, out)
+	}
+	if _, err := storage.Read("bogus"); err == nil {
+		t.Fatalf("add -s bogus wrote the fiber anyway")
+	}
+
+	if out, err := runCommand(t, dir, "add", "done", "Done", "-s", "closed"); err != nil {
+		t.Fatalf("add -s closed: %v\n%s", err, out)
+	}
+	done, err := storage.Read("done")
+	if err != nil {
+		t.Fatalf("read done: %v", err)
+	}
+	if done.Status != felt.StatusClosed || done.ClosedAt == nil {
+		t.Fatalf("add -s closed: status=%q closed-at=%v, want closed with a stamp", done.Status, done.ClosedAt)
 	}
 }

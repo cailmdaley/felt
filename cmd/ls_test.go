@@ -54,9 +54,6 @@ func TestTreeDisplayID(t *testing.T) {
 func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 	dir, _ := newStore(t)
 
-	reset := saveLsGlobals()
-	defer reset()
-
 	for _, args := range [][]string{
 		{"ls", "-j"},
 		{"ls", "-j", "-s", "active"},
@@ -83,9 +80,6 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-
-	reset := saveLsGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "ls", "--body", "body-only needle")
 	if err != nil {
@@ -115,9 +109,6 @@ func TestLsJSONReportPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".felt", "project", "reported", "report.html"), []byte("<html></html>"), 0644); err != nil {
 		t.Fatalf("writing report.html: %v", err)
 	}
-
-	reset := saveLsGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "ls", "-j", "--json-field", "id,report_path")
 	if err != nil {
@@ -152,14 +143,6 @@ func TestLsJSONReportPath(t *testing.T) {
 		t.Fatalf("project/plain unexpectedly has report_path: %v", plain)
 	}
 
-	// --json-field is a repeatable pflag StringArrayVar: it appends across
-	// Execute() calls rather than resetting, so the prior --json-field value
-	// would otherwise leak into this second, unprojected call.
-	lsJSONFields = nil
-	if f := lsCmd.Flags().Lookup("json-field"); f != nil {
-		f.Changed = false
-	}
-
 	// Full --json output (no field projection) carries the same contract.
 	out, err = runCommand(t, dir, "ls", "-j")
 	if err != nil {
@@ -187,9 +170,6 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 		}
 	}
 
-	reset := saveLsGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "ls", "swarm")
 	if err != nil {
 		t.Fatalf("ls swarm: %v\n%s", err, out)
@@ -206,7 +186,6 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 	}
 
 	// Re-arm: cobra's per-flag Changed state must not leak between invocations.
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-v", "swarm")
 	if err != nil {
@@ -220,8 +199,6 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 	if strings.Contains(out, "matching descendants") {
 		t.Fatalf("-v should not annotate:\n%s", out)
 	}
-
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-j", "swarm")
 	if err != nil {
@@ -249,9 +226,6 @@ func TestLsCollapseKeepsExactMatch(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-
-	reset := saveLsGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "ls", "swarm")
 	if err != nil {
@@ -283,9 +257,6 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 		}
 	}
 
-	reset := saveLsGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "ls", "shear")
 	if err != nil {
 		t.Fatalf("ls shear: %v\n%s", err, out)
@@ -305,7 +276,6 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 	}
 
 	// Re-arm: cobra's per-flag Changed state must not leak between invocations.
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-s", "closed", "shear")
 	if err != nil {
@@ -317,8 +287,6 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 	if strings.Contains(out, "add -s closed") {
 		t.Fatalf("explicit -s should not print the hint:\n%s", out)
 	}
-
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-s", "all", "shear")
 	if err != nil {
@@ -332,7 +300,6 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 
 	// -n ranks by closed-at: it exists to surface recently finished work, so it
 	// keeps the old all-statuses behavior.
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-n", "10")
 	if err != nil {
@@ -344,7 +311,6 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 
 	// --json is the wire the daemon poll, the hook, and the board read: it must
 	// still carry every status the filter widened to.
-	saveLsGlobals()
 
 	out, err = runCommand(t, dir, "ls", "-j", "shear")
 	if err != nil {
@@ -375,9 +341,6 @@ func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
 		}
 	}
 
-	reset := saveLsGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "ls", "swarm")
 	if err != nil {
 		t.Fatalf("ls swarm: %v\n%s", err, out)
@@ -404,9 +367,6 @@ func TestTreeDepthLimit(t *testing.T) {
 		}
 	}
 
-	reset := saveLsGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "tree", "-L", "1")
 	if err != nil {
 		t.Fatalf("tree -L 1: %v\n%s", err, out)
@@ -421,8 +381,6 @@ func TestTreeDepthLimit(t *testing.T) {
 		t.Fatalf("missing elision indicator:\n%s", out)
 	}
 
-	saveLsGlobals()
-
 	full, err := runCommand(t, dir, "tree")
 	if err != nil {
 		t.Fatalf("tree: %v\n%s", err, full)
@@ -432,58 +390,5 @@ func TestTreeDepthLimit(t *testing.T) {
 	}
 	if strings.Contains(full, "more below") {
 		t.Fatalf("unflagged tree showed elision indicator:\n%s", full)
-	}
-}
-
-func saveLsGlobals() func() {
-	prevStatus := lsStatus
-	prevTags := lsTags
-	prevRecent := lsRecent
-	prevBody := lsBody
-	prevExact := lsExact
-	prevRegex := lsRegex
-	prevHasFields := lsHasFields
-	prevJSONFields := lsJSONFields
-	prevVerbose := lsVerbose
-	prevJSON := jsonOutput
-	prevTreeDepth := treeDepth
-
-	lsStatus = ""
-	lsTags = nil
-	lsRecent = 0
-	lsBody = false
-	lsExact = false
-	lsRegex = false
-	lsHasFields = nil
-	lsJSONFields = nil
-	lsVerbose = false
-	jsonOutput = false
-	treeDepth = 0
-
-	// Reset cobra's per-flag Changed bookkeeping. Without this, a prior test
-	// that passed e.g. `-s active` leaves Changed("status") == true, and
-	// subsequent tests inspecting `cmd.Flags().Changed("status")` see stale
-	// state even though the underlying string variable was reset above.
-	for _, name := range []string{"status", "tag", "recent", "body", "exact", "regex", "has-field", "json-field", "json", "verbose"} {
-		if f := lsCmd.Flags().Lookup(name); f != nil {
-			f.Changed = false
-		}
-	}
-	if f := treeCmd.Flags().Lookup("depth"); f != nil {
-		f.Changed = false
-	}
-
-	return func() {
-		lsStatus = prevStatus
-		lsTags = prevTags
-		lsRecent = prevRecent
-		lsBody = prevBody
-		lsExact = prevExact
-		lsRegex = prevRegex
-		lsHasFields = prevHasFields
-		lsJSONFields = prevJSONFields
-		lsVerbose = prevVerbose
-		jsonOutput = prevJSON
-		treeDepth = prevTreeDepth
 	}
 }

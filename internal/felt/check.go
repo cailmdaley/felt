@@ -245,7 +245,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 			// The same classification is what rm, nest and unnest refuse.
 			where := "body"
 			if r.Kind == refKindDataFlow {
-				where = "inputs." + r.InputID + ".from"
+				where = r.InputPath
 			}
 			issues = append(issues, CheckIssue{
 				Level:   CheckLevelWarning,
@@ -276,7 +276,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 			return nil
 		}
 		// data-flow reference
-		path := "inputs." + r.InputID + ".from"
+		path := r.InputPath
 		if r.ResolveErr != nil {
 			issues = append(issues, CheckIssue{
 				Level:   CheckLevelError,

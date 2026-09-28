@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,9 +47,11 @@ type ReceiptHost struct {
 	// Listeners are the fleet processes listening on TCP; ListenersFrom names
 	// the tool that enumerated them ("ss", "proc", "lsof"), empty when none
 	// could.
-	Listeners     []ReceiptListener `json:"listeners"`
-	ListenersFrom string            `json:"listeners_from,omitempty"`
-	HTTPSProxy    string            `json:"https_proxy,omitempty"`
+	Listeners             []ReceiptListener     `json:"listeners"`
+	ListenersFrom         string                `json:"listeners_from,omitempty"`
+	HTTPSProxy            string                `json:"https_proxy,omitempty"`
+	TailscaleSocket       string                `json:"tailscale_socket,omitempty"`
+	TailnetSocketEvidence *ReceiptTailnetSocket `json:"tailscale_socket_evidence,omitempty"`
 	// Problems are the individual findings behind a non-healthy status, one
 	// line each, for the human path.
 	Problems []string `json:"problems,omitempty"`
@@ -81,6 +84,22 @@ type ReceiptSocketDir struct {
 	BadAncestor string `json:"bad_ancestor,omitempty"`
 }
 
+// ReceiptTailnetSocket records the filesystem boundary around tailscaled's
+// LocalAPI socket.
+type ReceiptTailnetSocket struct {
+	Path        string `json:"path"`
+	Exists      bool   `json:"exists"`
+	Socket      bool   `json:"is_socket"`
+	Symlink     bool   `json:"symlink,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	OwnerUID    *int   `json:"owner_uid,omitempty"`
+	OwnerOK     bool   `json:"owner_ok"`
+	Private     bool   `json:"private"`
+	PrivateDir  string `json:"private_dir,omitempty"`
+	BadAncestor string `json:"bad_ancestor,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 type ReceiptListener struct {
 	Process string `json:"process"`
 	PID     int    `json:"pid,omitempty"`
@@ -104,17 +123,24 @@ type rawListener struct {
 // hostEvidence is everything the status rules read, gathered separately so
 // the rules can be tested with fake inputs.
 type hostEvidence struct {
-	settings    hostSettings
-	settingsErr error
-	users       *int
-	socketDir   *ReceiptSocketDir
-	listeners   []rawListener
-	listenFrom  string
-	daemonPorts []int
-	tunnelPorts []int
-	httpsProxy  string
+	settings              hostSettings
+	settingsErr           error
+	users                 *int
+	socketDir             *ReceiptSocketDir
+	listeners             []rawListener
+	listenFrom            string
+	daemonPorts           []int
+	tunnelPorts           []int
+	tailnetRemoteNames    []string
+	httpsProxy            string
+	tailscaleSocket       string
+	tailscaleConfigError  string
+	remotesConfigError    string
+	tailnetSocketEvidence *ReceiptTailnetSocket
 	// daemonListen and daemonClass are what the running daemon reports on
 	// /api/v1/version; empty when it was not reached.
+	daemonTailnetDial       *ReceiptTailnetDial
+	daemonVersionReported   bool
 	daemonListen            string
 	daemonClass             string
 	daemonPeerGate          string
@@ -129,6 +155,8 @@ type hostEvidence struct {
 
 func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
 	ev := gatherHostEvidence()
+	ev.daemonTailnetDial = daemon.TailnetDial
+	ev.daemonVersionReported = daemon.Listen != ""
 	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
 	ev.daemonPeerGateUID, ev.daemonPeerGateUIDSource = daemon.PeerGateUID, daemon.PeerGateUIDSource
 	ev.daemonPortOwner, ev.daemonPortListen = observedDaemonPortOwner(ev, os.Geteuid())
@@ -171,7 +199,33 @@ func gatherHostEvidence() hostEvidence {
 		}
 		if doc.Defaults != nil {
 			ev.httpsProxy = strings.TrimSpace(doc.Defaults.HTTPSProxy)
+			ev.tailscaleSocket = strings.TrimSpace(doc.Defaults.TailscaleSocket)
+			proxy, proxyErr := doc.Defaults.normalizedHTTPSProxy()
+			socket, socketErr := doc.Defaults.normalizedTailscaleSocket()
+			switch {
+			case proxyErr != nil:
+				ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.https_proxy: %v", proxyErr)
+			case socketErr != nil:
+				ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.tailscale_socket: %v", socketErr)
+			case proxy.configured() && socket != "":
+				ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
+			case socket != "":
+				ev.tailscaleSocket = socket
+			}
+			if ev.tailscaleSocket != "" && socketErr == nil {
+				ev.tailnetSocketEvidence = inspectTailnetSocket(ev.tailscaleSocket, os.Geteuid())
+			}
+			if socket != "" && socketErr == nil && !proxy.configured() {
+				for _, remote := range doc.Remotes {
+					parsed, err := url.Parse(remote.URL)
+					if remote.enabledOr() && err == nil && strings.EqualFold(parsed.Scheme, "https") {
+						ev.tailnetRemoteNames = append(ev.tailnetRemoteNames, remote.Name)
+					}
+				}
+			}
 		}
+	} else {
+		ev.remotesConfigError = err.Error()
 	}
 	return ev
 }
@@ -308,6 +362,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	}
 	h.Class, h.ClassSource, h.Listen = ev.settings.Class, ev.settings.ClassSource, ev.settings.Listen
 	h.UsersLoggedIn, h.SocketDir, h.ListenersFrom, h.HTTPSProxy = ev.users, ev.socketDir, ev.listenFrom, ev.httpsProxy
+	h.TailscaleSocket, h.TailnetSocketEvidence = ev.tailscaleSocket, ev.tailnetSocketEvidence
 	h.Listeners = classifyFleetListeners(ev.listeners, ev.daemonPorts, ev.tunnelPorts, ev.isDaemonCommand)
 
 	var repairs []string
@@ -356,6 +411,79 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		h.PeerGate = &ReceiptPeerGate{
 			Mode:   "uid",
 			Reason: "the daemon uses /proc/net/tcp{,6} to admit loopback peers with its exact uid",
+		}
+	}
+	if ev.remotesConfigError != "" {
+		mismatch(fmt.Sprintf("cannot read or parse the remotes file: %s", ev.remotesConfigError),
+			"repair the fleet file and rerun `felt shuttle remotes list` before trusting this receipt")
+	}
+	if ev.tailscaleConfigError != "" {
+		mismatch(ev.tailscaleConfigError,
+			"fix the fleet defaults so exactly one valid HTTPS dial transport is configured, then rerun `felt shuttle remotes list`")
+	}
+	if ev.daemonVersionReported && h.TailscaleSocket != "" && ev.daemonTailnetDial == nil {
+		mismatch("the running daemon does not report private Tailscale dial support configured in remotes.json",
+			"upgrade or restart the daemon so /api/v1/version reports tailnet_dial")
+	}
+	if ev.daemonTailnetDial != nil {
+		fileConfigured := h.TailscaleSocket != ""
+		if fileConfigured != ev.daemonTailnetDial.Configured ||
+			(fileConfigured && h.TailscaleSocket != ev.daemonTailnetDial.Socket) {
+			daemonSocket := ev.daemonTailnetDial.Socket
+			if daemonSocket == "" {
+				daemonSocket = "(none)"
+			}
+			fileSocket := h.TailscaleSocket
+			if fileSocket == "" {
+				fileSocket = "(none)"
+			}
+			mismatch(fmt.Sprintf("the daemon uses Tailscale LocalAPI socket %s; remotes.json configures %s", daemonSocket, fileSocket),
+				"remove the daemon-only tailscale_socket override or update remotes.json, then restart the daemon")
+		}
+		bridges := make(map[string]ReceiptTailnetBridge, len(ev.daemonTailnetDial.Bridges))
+		for _, bridge := range ev.daemonTailnetDial.Bridges {
+			bridges[bridge.Name] = bridge
+			if bridge.Status != "ready" {
+				problem := fmt.Sprintf("private HTTPS bridge %s is %s", bridge.Name, bridge.Status)
+				if bridge.ErrorStage != "" {
+					problem += " at " + bridge.ErrorStage
+				}
+				if bridge.Error != "" {
+					problem += ": " + bridge.Error
+				}
+				mismatch(problem, "inspect the daemon's /api/v1/version tailnet_dial report and repair the LocalAPI dial")
+			}
+		}
+		for _, name := range ev.tailnetRemoteNames {
+			if _, ok := bridges[name]; !ok {
+				mismatch(fmt.Sprintf("the daemon does not report a private HTTPS bridge for configured remote %s", name),
+					"restart the daemon and verify its /api/v1/version tailnet_dial report")
+			}
+		}
+	}
+	if h.TailscaleSocket != "" {
+		socket := h.TailnetSocketEvidence
+		if socket == nil {
+			socket = inspectTailnetSocket(h.TailscaleSocket, os.Geteuid())
+			h.TailnetSocketEvidence = socket
+		}
+		switch {
+		case !socket.Exists:
+			mismatch(fmt.Sprintf("configured Tailscale LocalAPI socket %s is unavailable: %s", socket.Path, socket.Error),
+				"start tailscaled with the configured LocalAPI socket path and rerun `felt setup receipt`")
+		case socket.Symlink || !socket.Socket:
+			mismatch(fmt.Sprintf("configured Tailscale LocalAPI path %s is not a Unix socket", socket.Path),
+				"set defaults.tailscale_socket to the actual tailscaled Unix socket path")
+		case hostClass(h.Class).usesSocket() && (!socket.OwnerOK || !socket.Private || socket.BadAncestor != ""):
+			problem := fmt.Sprintf("Tailscale LocalAPI socket %s is not confined to a private directory owned by uid %d", socket.Path, os.Geteuid())
+			if socket.BadAncestor != "" {
+				problem += "; " + socket.BadAncestor
+			}
+			repair := "run tailscaled with its LocalAPI socket under a directory owned by the daemon uid and inaccessible to other users"
+			if socket.PrivateDir != "" {
+				repair = fmt.Sprintf("protect the Tailscale LocalAPI socket path under %s from other users, then rerun `felt setup receipt`", socket.PrivateDir)
+			}
+			mismatch(problem, repair)
 		}
 	}
 	if ev.daemonClass != "" && ev.daemonClass != h.Class {
@@ -949,6 +1077,90 @@ func inspectSocketDir(dir string, euid int) *ReceiptSocketDir {
 	}
 	d.BadAncestor = firstUnsafeAncestor(filepath.Dir(dir), euid)
 	return d
+}
+
+func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
+	socket := &ReceiptTailnetSocket{Path: path}
+	info, err := os.Lstat(path)
+	if err != nil {
+		socket.Error = err.Error()
+		return socket
+	}
+	socket.Exists = true
+	socket.Symlink = info.Mode()&os.ModeSymlink != 0
+	socket.Socket = info.Mode()&os.ModeSocket != 0
+	socket.Mode = fmt.Sprintf("%04o", info.Mode().Perm())
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		uid := int(st.Uid)
+		socket.OwnerUID, socket.OwnerOK = &uid, uid == euid
+	}
+	if socket.Symlink || !socket.Socket {
+		return socket
+	}
+
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		socket.BadAncestor = fmt.Sprintf("%s (unresolvable: %v)", filepath.Dir(path), err)
+		return socket
+	}
+	socket.PrivateDir, socket.BadAncestor = privateSocketDirectory(parent, euid)
+	if socket.PrivateDir == "" {
+		if socket.BadAncestor == "" {
+			socket.BadAncestor = "no ancestor directory owned by the daemon uid blocks traversal by other users"
+		}
+		return socket
+	}
+	socket.BadAncestor = firstUnsafeAncestor(filepath.Dir(socket.PrivateDir), euid)
+	socket.Private = socket.OwnerOK && socket.BadAncestor == ""
+	return socket
+}
+
+func privateSocketDirectory(dir string, euid int) (string, string) {
+	for current := dir; ; current = filepath.Dir(current) {
+		info, err := os.Stat(current)
+		if err == nil && info.IsDir() {
+			st, ok := info.Sys().(*syscall.Stat_t)
+			mode := info.Mode().Perm()
+			if ok && int(st.Uid) == euid && mode&0o100 != 0 && mode&0o011 == 0 {
+				searchACL, err := directoryHasSearchACL(current)
+				if err != nil {
+					return "", fmt.Sprintf("%s (ACL inspection failed: %v)", current, err)
+				}
+				if searchACL {
+					return "", fmt.Sprintf("%s (ACL grants directory search access)", current)
+				}
+				return current, ""
+			}
+		}
+		if parent := filepath.Dir(current); parent == current {
+			return "", ""
+		}
+	}
+}
+
+// Darwin ACLs can grant directory traversal without changing FileMode.Perm.
+func directoryHasSearchACL(path string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, nil
+	}
+	output, err := exec.Command("/bin/ls", "-lde", path).CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("ls -lde: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	for _, line := range strings.Split(string(output), "\n")[1:] {
+		_, rights, found := strings.Cut(line, " allow ")
+		if !found {
+			continue
+		}
+		for _, right := range strings.Split(rights, ",") {
+			right = strings.TrimSpace(right)
+			if right == "search" || right == "execute" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // firstUnsafeAncestor walks from dir up to "/" — through the real path, as

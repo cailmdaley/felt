@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -454,6 +456,277 @@ func TestEvaluateHost(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
+	one := 1
+	listen := "unix:///srv/s/sock/daemon.sock"
+	dir := shortPrivateTempDir(t)
+	tailscaleSocket := filepath.Join(dir, "tailscaled.sock")
+	listener, err := net.Listen("unix", tailscaleSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+		},
+		users:           &one,
+		socketDir:       &ReceiptSocketDir{Path: "/srv/s/sock", Exists: true, Mode: "0700", OwnerOK: true},
+		listenFrom:      "ss",
+		tailscaleSocket: tailscaleSocket,
+	})
+
+	if got.Status != receiptHealthy || got.TailscaleSocket != tailscaleSocket || got.HTTPSProxy != "" ||
+		got.TailnetSocketEvidence == nil || !got.TailnetSocketEvidence.Private {
+		t.Fatalf("private Tailscale socket receipt = %+v", got)
+	}
+}
+
+func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
+	dir := shortPrivateTempDir(t)
+	path := filepath.Join(dir, "tailscaled.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	fleet := filepath.Join(dir, "remotes.json")
+	contents := fmt.Sprintf(`{"defaults":{"tailscale_socket":%q},"remotes":[{"name":"hub-a","url":"https://hub-a.example.ts.net"}]}`, path)
+	if err := os.WriteFile(fleet, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FELT_REMOTES_FILE", fleet)
+
+	got := gatherHostEvidence()
+	if got.tailscaleSocket != path || got.tailscaleConfigError != "" ||
+		got.tailnetSocketEvidence == nil || !got.tailnetSocketEvidence.Private ||
+		!slices.Equal(got.tailnetRemoteNames, []string{"hub-a"}) {
+		t.Fatalf("gathered tailnet socket evidence = %+v", got)
+	}
+}
+
+func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
+	dir := t.TempDir()
+	fleet := filepath.Join(dir, "remotes.json")
+	if err := os.WriteFile(fleet, []byte(`{"defaults":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FELT_REMOTES_FILE", fleet)
+
+	ev := gatherHostEvidence()
+	if ev.remotesConfigError == "" || ev.tailscaleSocket != "" {
+		t.Fatalf("malformed remotes file evidence = %+v", ev)
+	}
+
+	listen := "unix:///tmp/shuttle.sock"
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "single-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/tmp/shuttle.sock"},
+		},
+		remotesConfigError: ev.remotesConfigError,
+	})
+	if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "cannot read or parse the remotes file") {
+		t.Fatalf("malformed remotes file receipt = %+v", got)
+	}
+}
+
+func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
+	listen := "unix:///srv/s/sock/daemon.sock"
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+		},
+		tailscaleSocket: "/run/from-file/tailscaled.sock",
+		tailnetSocketEvidence: &ReceiptTailnetSocket{
+			Path: "/run/from-file/tailscaled.sock", Exists: true, Socket: true, OwnerOK: true, Private: true,
+		},
+		daemonTailnetDial: &ReceiptTailnetDial{Configured: true, Socket: "/run/from-daemon/tailscaled.sock"},
+	})
+	if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "daemon uses Tailscale LocalAPI socket") {
+		t.Fatalf("daemon/fleet socket mismatch receipt = %+v", got)
+	}
+
+	got = evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+		},
+		tailscaleSocket:       "/run/from-file/tailscaled.sock",
+		daemonVersionReported: true,
+	})
+	if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "does not report private Tailscale dial support") {
+		t.Fatalf("old daemon tailnet support receipt = %+v", got)
+	}
+}
+
+func TestEvaluateHostReportsUnreadyTailnetBridge(t *testing.T) {
+	listen := "unix:///srv/s/sock/daemon.sock"
+	got := evaluateHost(hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+		},
+		tailscaleSocket:    "/run/tailscaled.sock",
+		tailnetRemoteNames: []string{"hub-a"},
+		daemonTailnetDial: &ReceiptTailnetDial{
+			Configured: true,
+			Socket:     "/run/tailscaled.sock",
+			Bridges:    []ReceiptTailnetBridge{{Name: "hub-a", Status: "error", ErrorStage: "localapi_connect", Error: "permission denied"}},
+		},
+	})
+	problems := strings.Join(got.Problems, "\n")
+	if got.Status != receiptMismatch || !strings.Contains(problems, "private HTTPS bridge hub-a is error at localapi_connect") {
+		t.Fatalf("unready bridge receipt = %+v", got)
+	}
+}
+
+func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *testing.T) {
+	listen := "unix:///srv/s/sock/daemon.sock"
+	base := hostEvidence{
+		settings: hostSettings{
+			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
+			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+		},
+		socketDir:  &ReceiptSocketDir{Path: "/srv/s/sock", Exists: true, Mode: "0700", OwnerOK: true},
+		listenFrom: "ss",
+	}
+
+	t.Run("unconfined socket", func(t *testing.T) {
+		path := "/run/tailscaled.sock"
+		ev := base
+		ev.tailscaleSocket = path
+		ev.tailnetSocketEvidence = &ReceiptTailnetSocket{
+			Path: path, Exists: true, Socket: true, OwnerOK: true,
+			BadAncestor: "no ancestor directory owned by the daemon uid blocks traversal by other users",
+		}
+		got := evaluateHost(ev)
+		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "not confined to a private directory") {
+			t.Fatalf("unconfined LocalAPI socket receipt = %+v", got)
+		}
+	})
+
+	t.Run("conflicting defaults", func(t *testing.T) {
+		ev := base
+		ev.httpsProxy = "localhost:1055"
+		ev.tailscaleSocket = "/run/tailscaled.sock"
+		ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
+		got := evaluateHost(ev)
+		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "mutually exclusive") {
+			t.Fatalf("conflicting dial defaults receipt = %+v", got)
+		}
+	})
+}
+
+// Negative control: a traversable temp directory makes this probe red; mode 0700 restores it.
+func TestInspectTailnetSocketPrivateDirectoryBoundary(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "felt-tailnet-socket-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "tailscaled.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	if got := inspectTailnetSocket(path, os.Geteuid()); got.Private {
+		t.Fatalf("traversable parent reported private: %+v", got)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := inspectTailnetSocket(path, os.Geteuid()); !got.Private {
+		t.Fatalf("private parent not recognized: %+v", got)
+	}
+}
+
+// Negative control: remove the ACL grant below; the receipt must then report the directory private.
+func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS ACLs can grant traversal without changing mode bits")
+	}
+
+	dir := shortPrivateTempDir(t)
+	path := filepath.Join(dir, "tailscaled.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	output, err := exec.Command("/bin/chmod", "+a", "everyone allow search", dir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("grant ACL search permission: %v: %s", err, output)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Fatalf("ACL changed the directory mode to %04o", mode)
+	}
+
+	got := inspectTailnetSocket(path, os.Geteuid())
+	if got.Private || !strings.Contains(got.BadAncestor, "ACL") {
+		t.Fatalf("ACL-accessible socket directory was reported private: %+v", got)
+	}
+}
+
+func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *testing.T) {
+	dir := shortPrivateTempDir(t)
+	missing := inspectTailnetSocket(filepath.Join(dir, "missing.sock"), os.Geteuid())
+	if missing.Exists || missing.Error == "" {
+		t.Fatalf("missing socket evidence = %+v", missing)
+	}
+
+	regular := filepath.Join(dir, "regular")
+	if err := os.WriteFile(regular, []byte("not a socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := inspectTailnetSocket(regular, os.Geteuid()); !got.Exists || got.Socket || got.Symlink {
+		t.Fatalf("regular file evidence = %+v", got)
+	}
+
+	socketPath := filepath.Join(dir, "actual.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	link := filepath.Join(dir, "alias.sock")
+	if err := os.Symlink(socketPath, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := inspectTailnetSocket(link, os.Geteuid()); !got.Symlink || got.Socket {
+		t.Fatalf("symlink evidence = %+v", got)
+	}
+	if got := inspectTailnetSocket(socketPath, os.Geteuid()); !got.Socket || !got.Private {
+		t.Fatalf("unix socket evidence = %+v", got)
+	}
+}
+
+func shortPrivateTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "td-private-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {

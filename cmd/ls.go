@@ -171,9 +171,9 @@ felt find searches the rest of it.`,
 
 		if len(shown) == 0 {
 			if query != "" {
-				fmt.Printf("No felts matching %q\n", query)
+				fmt.Printf("No fibers matching %q\n", query)
 			} else {
-				fmt.Println("No felts found")
+				fmt.Println("No fibers found")
 			}
 		} else {
 			for _, f := range shown {

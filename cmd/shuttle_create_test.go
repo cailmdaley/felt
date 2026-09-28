@@ -18,7 +18,6 @@ func seedPlainFiber(t *testing.T, storage *felt.Storage, id, status string) {
 // ---- install ---------------------------------------------------------------
 
 func TestShuttleInstall_Armed(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
@@ -41,7 +40,6 @@ func TestShuttleInstall_Armed(t *testing.T) {
 }
 
 func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	pdir := t.TempDir()
 	seedPlainFiber(t, storage, "app", "")
@@ -65,7 +63,6 @@ func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
 }
 
 func TestShuttleInstall_Disabled(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 
@@ -84,7 +81,6 @@ func TestShuttleInstall_Disabled(t *testing.T) {
 // would arm a role on resume that the poller disqualifies for having no usable
 // project_dir — armed, and silently never dispatched.
 func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
@@ -102,7 +98,6 @@ func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
 }
 
 func TestShuttleInstall_RequiresProjectDirWhenArmed(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 
@@ -126,7 +121,6 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 		{"pin", []string{"pin", "task"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer saveShuttleGlobals()()
 			withOwnHost(t, "testhost")
 			dir, storage := newStore(t)
 			pdir := t.TempDir()
@@ -157,7 +151,6 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 // ---- repeat ----------------------------------------------------------------
 
 func TestShuttleRepeat_Standing(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "role", "")
 	pdir := t.TempDir()
@@ -184,7 +177,6 @@ func TestShuttleRepeat_Standing(t *testing.T) {
 }
 
 func TestShuttleRepeat_RejectsBadCron(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "role", "")
 	pdir := t.TempDir()
@@ -198,7 +190,6 @@ func TestShuttleRepeat_RejectsBadCron(t *testing.T) {
 // ---- pin -------------------------------------------------------------------
 
 func TestShuttlePin_Parked(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "hub", "")
 	pdir := t.TempDir()
@@ -229,7 +220,6 @@ func TestShuttlePin_Parked(t *testing.T) {
 // clean error (not a nil-deref panic) on a shuttle: value that is a mapping but
 // fails the typed decode — e.g. a hand-edited schedule written as a scalar.
 func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
-	defer saveShuttleGlobals()()
 	dir, storage := newStore(t)
 	pdir := t.TempDir()
 	seedShuttleRole(t, storage, "bad", felt.StatusActive, map[string]any{
@@ -253,7 +243,6 @@ func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
 // macbook gets the truer error (the edit verbs it would be pointed at would
 // refuse on the same grounds), and the mirror stays byte-identical.
 func TestShuttleRepeat_RefusesRemoteOwned(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
 	dir, storage := newStore(t)
 	pdir := t.TempDir()

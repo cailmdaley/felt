@@ -143,7 +143,9 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 5. No worker is already running or claimed for it.
 6. The resume-loop circuit breaker is closed.
 7. The boot quarantine is released.
-8. `shuttle.project_dir` exists on this host.
+8. `shuttle.project_dir`, when the block declares one, exists on this host. A
+   block without one still dispatches, with the felt store as the worker's
+   directory; felt's arming verbs refuse to arm such a block.
 
 `depends_on` is not on this list. It is an ordering annotation for the board
 ("this is filed after that") and carries no dispatch meaning.

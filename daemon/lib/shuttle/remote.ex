@@ -115,7 +115,7 @@ defmodule Shuttle.Remote do
          {:ok, poll_interval_ms} <- positive_integer(fetch(entry, :poll_interval_ms), 5_000),
          {:ok, request_timeout_ms} <- positive_integer(fetch(entry, :request_timeout_ms), 2_000),
          {:ok, stale_multiplier} <- positive_integer(fetch(entry, :stale_multiplier), 4),
-         true <- is_binary(name) and name != "" and is_binary(url) and url != "" do
+         true <- is_binary(name) and name != "" and valid_url?(url) do
       %__MODULE__{
         name: name,
         url: url,
@@ -141,6 +141,28 @@ defmodule Shuttle.Remote do
 
   def from_config(_), do: nil
 
+  @doc false
+  def valid_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> valid_url_host?(host)
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  def valid_url?(_), do: false
+
+  @doc false
+  def valid_url_host?(host) when is_binary(host) do
+    Regex.match?(~r/\A[A-Za-z0-9.-]+\z/, host) or
+      match?({:ok, _address}, :inet.parse_address(String.to_charlist(host)))
+  rescue
+    _ -> false
+  end
+
+  def valid_url_host?(_), do: false
+
   defp derived_url({:ok, port}) when is_integer(port), do: "http://127.0.0.1:#{port}"
   defp derived_url(_), do: nil
 
@@ -165,13 +187,16 @@ defmodule Shuttle.Remote do
 
   defp normalize_remote_port(_, nil), do: :error
 
-  defp normalize_remote_socket(nil), do: {:ok, nil}
+  defp normalize_remote_socket(value), do: normalize_socket_path(value)
 
   # The Go reader's rule, byte for byte: an absolute, clean path of characters
   # that survive `ssh -L`, the launchd plist and the systemd unit unquoted.
   @remote_socket ~r{\A/[A-Za-z0-9._/@+-]+\z}
 
-  defp normalize_remote_socket(value) when is_binary(value) do
+  @doc false
+  def normalize_socket_path(nil), do: {:ok, nil}
+
+  def normalize_socket_path(value) when is_binary(value) do
     case String.trim(value) do
       "" ->
         {:ok, nil}
@@ -181,7 +206,7 @@ defmodule Shuttle.Remote do
     end
   end
 
-  defp normalize_remote_socket(_), do: :error
+  def normalize_socket_path(_), do: :error
 
   # Go's `filepath.Clean(path) == path` for an absolute path: no `.` or `..`
   # segment, no `//`, no trailing `/`.

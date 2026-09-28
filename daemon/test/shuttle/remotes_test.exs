@@ -12,18 +12,21 @@ defmodule Shuttle.RemotesTest do
     prev_env = Application.get_env(:shuttle, :remotes)
     prev_prefix = Application.get_env(:shuttle, :launchd_label_prefix)
     prev_proxy = Application.get_env(:shuttle, :https_proxy)
+    prev_tailscale_socket = Application.get_env(:shuttle, :tailscale_socket)
 
     # The whole suite runs with `remotes: []` from config/test.exs — that `[]` is
     # the shield that stops a developer's real fleet file from leaking into the
     # tests. These cases are about the FILE, so they clear it and restore it.
     Application.delete_env(:shuttle, :remotes)
     Application.delete_env(:shuttle, :https_proxy)
+    Application.delete_env(:shuttle, :tailscale_socket)
 
     on_exit(fn ->
       restore_env("FELT_REMOTES_FILE", prev_file)
       restore_app_env(:remotes, prev_env)
       restore_app_env(:launchd_label_prefix, prev_prefix)
       restore_app_env(:https_proxy, prev_proxy)
+      restore_app_env(:tailscale_socket, prev_tailscale_socket)
     end)
 
     :ok
@@ -55,6 +58,7 @@ defmodule Shuttle.RemotesTest do
           end
 
         assert proxy == @want["https_proxy"]
+        assert Remotes.tailscale_socket() == @want["tailscale_socket"]
 
         got =
           Remotes.registered()
@@ -95,11 +99,16 @@ defmodule Shuttle.RemotesTest do
       @fixture fixture
       @remote remote
 
-      test "#{fixture}: the daemon never uses #{remote} (bad #{field})" do
+      test "#{fixture}: the daemon rejects #{field}" do
         System.put_env("FELT_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
         names = Enum.map(Remotes.registered(), & &1.name)
-        refute @remote in names
-        assert names != [], "the fixture's valid remotes should still read"
+
+        if @remote == "" do
+          assert names == [], "invalid fleet defaults reject the whole file"
+        else
+          refute @remote in names
+          assert names != [], "the fixture's other valid remotes should still read"
+        end
       end
     end
   end
@@ -111,6 +120,23 @@ defmodule Shuttle.RemotesTest do
       Map.put(got, "manager", to_string(remote.tunnel.manager))
     else
       got
+    end
+  end
+
+  describe "defaults.tailscale_socket" do
+    test "invalid paths reject the fleet instead of enabling an unsafe dial" do
+      for path <- ["relative/tailscaled.sock", "/run/../tailscaled.sock", "/run/tailscale/"] do
+        file =
+          Jason.encode!(%{
+            "defaults" => %{"tailscale_socket" => path},
+            "remotes" => [%{"name" => "hub-a", "port" => 4001}]
+          })
+          |> write_remotes()
+
+        System.put_env("FELT_REMOTES_FILE", file)
+        assert Remotes.tailscale_socket() == nil
+        assert Remotes.registered() == []
+      end
     end
   end
 

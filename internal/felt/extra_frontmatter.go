@@ -86,26 +86,30 @@ func (f *Felt) ExtraFieldsYAML() string {
 	return strings.TrimSpace(string(data))
 }
 
-// DataFlowInputs returns generic input refs extracted from an opaque
-// top-level `inputs:` field when present. felt treats these only as a data-flow
-// convention, not as a native semantic schema.
+// DataFlowInputs returns the data-flow edges in an opaque top-level `inputs:`
+// field when present: every entry that names a source in `from:`, labelled by
+// its `id:` when it has one. felt treats these only as a data-flow
+// convention, not as a native semantic schema. The set is exactly the set
+// RewriteDataFlowRefs rewrites, so what check and --consumers see is what a
+// move keeps pointing at the right fiber.
 func (f *Felt) DataFlowInputs() []DataFlowInputRef {
 	node := extraFieldNode(f.ExtraFields, "inputs")
 	if node == nil || node.Kind != yaml.SequenceNode {
 		return nil
 	}
 	out := make([]DataFlowInputRef, 0, len(node.Content))
-	for _, item := range node.Content {
+	for i, item := range node.Content {
 		if item == nil || item.Kind != yaml.MappingNode {
 			continue
 		}
-		inputID := strings.TrimSpace(mappingScalar(item, "id"))
-		if inputID == "" {
+		from := strings.TrimSpace(mappingScalar(item, "from"))
+		if from == "" {
 			continue
 		}
 		out = append(out, DataFlowInputRef{
-			InputID: inputID,
-			From:    strings.TrimSpace(mappingScalar(item, "from")),
+			InputID: strings.TrimSpace(mappingScalar(item, "id")),
+			From:    from,
+			Index:   i,
 		})
 	}
 	return out

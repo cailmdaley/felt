@@ -383,7 +383,7 @@ defmodule Shuttle.FeltStores do
   end
 
   defp felt_show_json(host, identifier) do
-    # Never fold stderr into stdout: felt prints "no felt found matching …" to
+    # Never fold stderr into stdout: felt prints "no fiber found matching …" to
     # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
     # A `:timeout` from the bounded runner is kept distinct from a miss: the
     # store never answered, so "not found" is not established.

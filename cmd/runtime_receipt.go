@@ -102,11 +102,30 @@ type ReceiptDaemon struct {
 	Contract bool          `json:"contract_ok"`
 	// Listen, HostClass, and PeerGate are the daemon's bound listener policy,
 	// from /api/v1/version; empty when unreachable or not reported.
-	Listen            string `json:"listen,omitempty"`
-	HostClass         string `json:"host_class,omitempty"`
-	PeerGate          string `json:"peer_gate,omitempty"`
-	PeerGateUID       *int   `json:"peer_gate_uid,omitempty"`
-	PeerGateUIDSource string `json:"peer_gate_uid_source,omitempty"`
+	Listen            string              `json:"listen,omitempty"`
+	HostClass         string              `json:"host_class,omitempty"`
+	PeerGate          string              `json:"peer_gate,omitempty"`
+	PeerGateUID       *int                `json:"peer_gate_uid,omitempty"`
+	PeerGateUIDSource string              `json:"peer_gate_uid_source,omitempty"`
+	TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
+}
+
+// ReceiptTailnetDial is the daemon's live per-remote LocalAPI bridge report.
+type ReceiptTailnetDial struct {
+	Configured bool                   `json:"configured"`
+	Socket     string                 `json:"socket,omitempty"`
+	Bridges    []ReceiptTailnetBridge `json:"bridges"`
+}
+
+// ReceiptTailnetBridge reports a private HTTP socket and its TLS dial state.
+type ReceiptTailnetBridge struct {
+	Name       string `json:"name"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Socket     string `json:"socket"`
+	Status     string `json:"status"`
+	ErrorStage string `json:"error_stage,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // ReceiptGenerationReceipt is the receipt-side view of the promoted source
@@ -162,8 +181,7 @@ compatibility, and the running shuttle daemon's contract. It exits non-zero
 unless every component enabled on this host is present and compatible and
 exactly one felt build is on PATH. -j prints the machine-readable receipt that
 setup and deployment checks read.`,
-	SilenceUsage: true,
-	Args:         cobra.NoArgs,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		receipt := collectRuntimeReceipt()
 		if jsonOutput {
@@ -177,6 +195,7 @@ setup and deployment checks read.`,
 		}
 		fmt.Printf("runtime %s\n", receipt.Status)
 		printHostReceipt(receipt.Host)
+		printTailnetDialReceipt(receipt.Daemon.TailnetDial)
 		if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
 			fmt.Printf("tmux server: daemon-born — %s\n", receipt.TmuxServer.Repair)
 		}
@@ -257,8 +276,48 @@ func printHostReceipt(h ReceiptHost) {
 	if h.Class != "" {
 		fmt.Printf("host %s (%s)\n", h.Class, h.Listen)
 	}
+	if h.TailscaleSocket != "" {
+		fmt.Printf("tailscale LocalAPI socket: %s", h.TailscaleSocket)
+		if h.TailnetSocketEvidence != nil {
+			evidence := h.TailnetSocketEvidence
+			fmt.Printf(" (unix=%t, owner_ok=%t, private=%t", evidence.Socket, evidence.OwnerOK, evidence.Private)
+			if evidence.Mode != "" {
+				fmt.Printf(", mode=%s", evidence.Mode)
+			}
+			fmt.Print(")")
+		}
+		fmt.Println()
+	}
 	for _, p := range h.Problems {
 		fmt.Printf("  host: %s\n", p)
+	}
+}
+
+func printTailnetDialReceipt(dial *ReceiptTailnetDial) {
+	if dial == nil || !dial.Configured {
+		return
+	}
+
+	ready := 0
+	for _, bridge := range dial.Bridges {
+		if bridge.Status == "ready" {
+			ready++
+		}
+	}
+	fmt.Printf("tailnet dial: %d/%d remote bridges ready\n", ready, len(dial.Bridges))
+
+	for _, bridge := range dial.Bridges {
+		if bridge.Status == "ready" {
+			continue
+		}
+		fmt.Printf("  remote %s (%s:%d): %s", bridge.Name, bridge.Host, bridge.Port, bridge.Status)
+		if bridge.ErrorStage != "" {
+			fmt.Printf(" at %s", bridge.ErrorStage)
+		}
+		if bridge.Error != "" {
+			fmt.Printf(": %s", bridge.Error)
+		}
+		fmt.Println()
 	}
 }
 
@@ -708,11 +767,12 @@ func collectDaemonReceipt() ReceiptDaemon {
 		return daemonReceiptOnTransportError(d, err)
 	}
 	var response struct {
-		Listen            string `json:"listen"`
-		HostClass         string `json:"host_class"`
-		PeerGate          string `json:"peer_gate"`
-		PeerGateUID       *int   `json:"peer_gate_uid"`
-		PeerGateUIDSource string `json:"peer_gate_uid_source"`
+		Listen            string              `json:"listen"`
+		HostClass         string              `json:"host_class"`
+		PeerGate          string              `json:"peer_gate"`
+		PeerGateUID       *int                `json:"peer_gate_uid"`
+		PeerGateUIDSource string              `json:"peer_gate_uid_source"`
+		TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial"`
 		Contract          struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
@@ -722,6 +782,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 	decodeErr := json.Unmarshal(data, &response)
 	d.Listen, d.HostClass, d.PeerGate = response.Listen, response.HostClass, response.PeerGate
 	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
+	d.TailnetDial = response.TailnetDial
 	if decodeErr != nil || len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d

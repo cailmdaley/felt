@@ -155,7 +155,8 @@ type resolvedRef struct {
 	Kind      string // refKindReference | refKindDataFlow
 	RawTarget string // body ref target, or the data-flow target fiber
 	Fragment  string
-	InputID   string // data-flow input id; empty for body refs
+	InputID   string // data-flow input id; empty for body refs and unlabelled inputs
+	InputPath string // where a data-flow ref's from: sits (DataFlowInputRef.Path)
 	// Label is the human-facing reference rendering used in broken-ref
 	// messages: BodyRef.String() for references, and the data-flow source
 	// spelling (full `input.From` when it carries a fragment, else the bare
@@ -210,6 +211,7 @@ func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(reso
 				RawTarget:  targetFiber,
 				Fragment:   fragment,
 				InputID:    input.InputID,
+				InputPath:  input.Path(),
 				Label:      label,
 				ResolvedID: resolved,
 				Via:        via,

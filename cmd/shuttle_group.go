@@ -33,7 +33,7 @@ socket; see felt shuttle host).
 
 Common paths:
   felt shuttle install <fiber> --project-dir "$PWD"   dispatch a fiber once
-  felt shuttle status <fiber>                         its block, and whether status arms it
+  felt shuttle status <fiber>                         its block, and where it is eligible to dispatch
   felt shuttle attach <fiber>                         the worker's live tmux session
   felt shuttle sessions                               addressable sessions across the fleet
   felt shuttle message <address> "text"               deliver to a session and wake it
@@ -43,14 +43,6 @@ Common paths:
 	// daemon's `--felt-store <store>` invocations resolve through felt's existing
 	// store-resolution path unchanged.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Suppress cobra's usage block on a RunE error for every dispatch verb,
-		// matching felt's own automation verbs (check, hook). The daemon shells
-		// these verbs (transition.ex / lifecycle_controller.ex / dispatcher.ex) and
-		// logs their stderr; a full usage dump on every operational error is noise.
-		// Setting it here on the executing leaf cmd is the single-point equivalent of
-		// the per-command `SilenceUsage: true` check/hook use. (Errors themselves
-		// still print — only the usage wall is silenced.)
-		cmd.SilenceUsage = true
 		if shuttleFeltStore != "" && changeDir == "" {
 			changeDir = shuttleFeltStore
 		}

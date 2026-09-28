@@ -914,6 +914,8 @@ defmodule ShuttleWeb.APIControllerTest do
     assert is_binary(body["git_short_sha"])
     assert is_binary(body["built_at"])
     assert body["mix_vsn"] == Shuttle.version()
+    assert is_boolean(body["tailnet_dial"]["configured"])
+    assert is_list(body["tailnet_dial"]["bridges"])
 
     if body["git_sha"] != "unknown" do
       assert String.length(body["git_short_sha"]) == 7

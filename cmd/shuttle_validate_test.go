@@ -18,11 +18,8 @@ func seedShuttleFiber(t *testing.T, storage *felt.Storage, id string, block map[
 
 func TestEditValidatesShuttleFacet(t *testing.T) {
 	dir, storage := newStore(t)
-	seedShuttleFiber(t, storage, "good", map[string]any{"kind": "oneshot", "agent": "claude-opus"})
+	seedShuttleFiber(t, storage, "good", map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/srv/work"})
 	seedShuttleFiber(t, storage, "bad", map[string]any{"kind": "bogus"})
-
-	reset := saveEditGlobals()
-	defer reset()
 
 	// A fiber whose shuttle: block is valid edits normally.
 	if out, err := runCommand(t, dir, "edit", "good", "--status", "active"); err != nil {

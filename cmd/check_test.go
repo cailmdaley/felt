@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,51 +132,12 @@ Body.
 	}
 }
 
+// runCommand runs one `felt …` invocation against dir and returns its stdout
+// (see executeCLI).
 func runCommand(t *testing.T, dir string, args ...string) (string, error) {
 	t.Helper()
-
-	oldArgs := os.Args
-	oldChangeDir := changeDir
-	oldJSON := jsonOutput
-	oldStdout := os.Stdout
-	defer func() {
-		os.Args = oldArgs
-		changeDir = oldChangeDir
-		jsonOutput = oldJSON
-		os.Stdout = oldStdout
-	}()
-
-	// cobra leaves a parsed flag's variable set across Execute calls, so a
-	// previous test's --json would otherwise leak into this run.
-	jsonOutput = false
-	changeDir = dir
-	rootCmd.SetArgs(args)
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-
-	runErr := rootCmd.Execute()
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close write pipe: %v", err)
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("read command output: %v", err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatalf("close read pipe: %v", err)
-	}
-
-	rootCmd.SetArgs(nil)
-	rootCmd.SetOut(io.Discard)
-	rootCmd.SetErr(io.Discard)
-	os.Args = []string{filepath.Base(oldArgs[0])}
-
-	return buf.String(), runErr
+	stdout, _, err := executeCLI(t, dir, args...)
+	return stdout, err
 }
 
 // TestCheckCommandCountsUnparseableFiberFirst pins the fix for a store where a

@@ -277,6 +277,13 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 		{"healthy", map[string]any{
 			"listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user", "peer_gate": "uid",
 			"peer_gate_uid": 1000, "peer_gate_uid_source": "euid",
+			"tailnet_dial": map[string]any{
+				"configured": true, "socket": "/run/tailscale.sock",
+				"bridges": []any{map[string]any{
+					"name": "hub-a", "host": "hub-a.example.ts.net", "port": 443,
+					"socket": "/run/shuttle/sock/dial-name-hub-a.sock", "status": "ready",
+				}},
+			},
 			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
 		}, receiptHealthy},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
@@ -299,6 +306,12 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			if tt.name == "healthy" && (got.Listen != "tcp://127.0.0.1:4000" || got.HostClass != "shared-multi-user" || got.PeerGate != "uid" ||
 				got.PeerGateUID == nil || *got.PeerGateUID != 1000 || got.PeerGateUIDSource != "euid") {
 				t.Fatalf("version listener fields = listen %q, class %q, peer_gate %q, uid %v from %q", got.Listen, got.HostClass, got.PeerGate, got.PeerGateUID, got.PeerGateUIDSource)
+			}
+			if tt.name == "healthy" && (got.TailnetDial == nil || !got.TailnetDial.Configured ||
+				got.TailnetDial.Socket != "/run/tailscale.sock" || len(got.TailnetDial.Bridges) != 1 ||
+				got.TailnetDial.Bridges[0].Socket != "/run/shuttle/sock/dial-name-hub-a.sock" ||
+				got.TailnetDial.Bridges[0].Status != "ready") {
+				t.Fatalf("version tailnet dial fields = %+v", got.TailnetDial)
 			}
 		})
 	}

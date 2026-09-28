@@ -23,8 +23,7 @@ var checkCmd = &cobra.Command{
     root, which belongs at <dir>/<slug>/<slug>.md (felt migrate folds it)
   - a shuttle host: naming this machine by a pre-normalization spelling
     (a warning)`,
-	Args:         cobra.NoArgs,
-	SilenceUsage: true,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := requireStore()
 		if err != nil {

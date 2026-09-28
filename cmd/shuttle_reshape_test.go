@@ -32,7 +32,6 @@ func standingRole(pdir string) map[string]any {
 // closes: a role parked in Awaiting review changes kind in place, keeps its
 // verdict and its runtime keys, and sheds the now-meaningless schedule.
 func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	yes := true
@@ -77,7 +76,6 @@ func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
 // TestShuttleReshapeVerb_ToStandingRequiresSchedule: nothing to echo, so the
 // standing target must ask for one rather than write an invalid block.
 func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
@@ -98,7 +96,6 @@ func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 // TestShuttleReshapeVerb_ToStandingWithSchedule: the schedule lands, tz falls
 // back to UTC when the block has none to echo, and the next occurrence prints.
 func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
@@ -125,7 +122,6 @@ func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 // TestShuttleReshapeVerb_ScheduleOnlyEdit: no kind argument re-times a standing
 // role in place, keeping both its kind and (with --tz omitted) its timezone.
 func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
@@ -143,12 +139,36 @@ func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
 	}
 }
 
+// TestShuttleReshapeVerb_TZDefaultIsTheBlocks: --tz registers no default of
+// its own, so help does not advertise UTC beside "the block's existing tz";
+// omitted, a re-time keeps the block's tz, and a block with none gets UTC.
+func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
+	help, _, err := executeCLI(t, "", "shuttle", "reshape", "--help")
+	if err != nil {
+		t.Fatalf("reshape --help: %v", err)
+	}
+	if strings.Contains(help, `(default "UTC")`) {
+		t.Fatalf("reshape --help advertises a UTC default for --tz:\n%s", help)
+	}
+
+	withOwnHost(t, "testhost")
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "host": "testhost", "project_dir": t.TempDir(), "agent": "claude-sonnet",
+	}, nil)
+	if out, err := runCommand(t, dir, "shuttle", "reshape", "role", "standing", "--schedule", "0 7 * * *"); err != nil {
+		t.Fatalf("reshape to standing: %v\n%s", err, out)
+	}
+	if b, _, _ := mustRead(t, storage, "role").ShuttleBlock(); b.Schedule == nil || b.Schedule.TZ != "UTC" {
+		t.Fatalf("schedule = %+v, want tz=UTC for a block that had none", b.Schedule)
+	}
+}
+
 // TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds: a schedule-less
 // target must not be handed a recurrence it would silently ignore.
 func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 	for _, kind := range []string{"oneshot", "pinned"} {
 		t.Run(kind, func(t *testing.T) {
-			defer saveShuttleGlobals()()
 			withOwnHost(t, "testhost")
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
@@ -171,7 +191,6 @@ func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 // TestShuttleReshapeVerb_RequiresExistingBlock: reshape edits, it never
 // creates — and says which verb does.
 func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "note", felt.StatusOpen)
@@ -191,7 +210,6 @@ func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
 // TestShuttleRepeat_RefusesRemoteOwned: a mutator never writes a fiber another
 // daemon owns.
 func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "macbook")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
@@ -216,7 +234,6 @@ func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
 // TestShuttleReshapeVerb_InvalidKind: the kind enum is the verb's whole
 // subject, so a bogus value fails before the write.
 func TestShuttleReshapeVerb_InvalidKind(t *testing.T) {
-	defer saveShuttleGlobals()()
 	withOwnHost(t, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
@@ -247,7 +264,6 @@ func TestShuttleCreate_FreshInstallStillRefusesClosed(t *testing.T) {
 		{"repeat", "role", "--schedule", "0 9 * * 1-5"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
-			defer saveShuttleGlobals()()
 			dir, storage := newStore(t)
 			pdir := t.TempDir()
 			seedPlainFiber(t, storage, "role", felt.StatusClosed)

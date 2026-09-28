@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "defaults": {
+    "https_proxy": "http://localhost:1055",
+    "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+  },
+  "remotes": [
+    {"name": "hub-a", "url": "https://hub-a.example.ts.net"}
+  ]
+}

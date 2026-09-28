@@ -32,9 +32,22 @@ const (
 	StatusClosed = "closed"
 )
 
+// DataFlowInputRef is one data-flow edge: an `inputs:` entry naming its
+// source in `from:`. The entry's `id:` is an optional label; Index is its
+// position in the sequence, which locates an unlabelled entry.
 type DataFlowInputRef struct {
 	InputID string
 	From    string
+	Index   int
+}
+
+// Path locates the entry's `from:` for an issue: by its id when it has one,
+// else by its position.
+func (r DataFlowInputRef) Path() string {
+	if r.InputID != "" {
+		return "inputs." + r.InputID + ".from"
+	}
+	return fmt.Sprintf("inputs[%d].from", r.Index)
 }
 
 type BodyRef struct {
@@ -872,6 +885,26 @@ func StatusIcon(status string) string {
 	default:
 		return "?"
 	}
+}
+
+// SetStatus moves the fiber to status — open, active, closed, or "" for none —
+// keeping closed-at consistent: closing stamps it at now (an already-closed
+// fiber keeps its original stamp), any other status clears it. Any other
+// value is refused and the fiber is left untouched.
+func (f *Felt) SetStatus(status string, now time.Time) error {
+	switch status {
+	case StatusOpen, StatusActive, "":
+		f.Status = status
+		f.ClosedAt = nil
+	case StatusClosed:
+		if !f.IsClosed() || f.ClosedAt == nil {
+			f.ClosedAt = &now
+		}
+		f.Status = StatusClosed
+	default:
+		return fmt.Errorf("invalid status %q (valid: open, active, closed, or empty for none)", status)
+	}
+	return nil
 }
 
 // IsOpen returns true if the felt is open.

@@ -78,8 +78,8 @@ resolution and uses <slug> as spelled.`,
 		if addBody != "" {
 			f.Body = addBody
 		}
-		if addStatus != "" {
-			f.Status = addStatus
+		if err := f.SetStatus(addStatus, f.CreatedAt); err != nil {
+			return err
 		}
 		for _, tag := range splitListFlag(addTags) {
 			f.AddTag(tag)

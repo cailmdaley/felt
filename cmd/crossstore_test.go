@@ -68,7 +68,6 @@ func loomRoot(t *testing.T, subProj string) string {
 // that names one real fiber out there is shown, not refused.
 func TestShowReachesEnclosingStore(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", "ai-futures/portolan/debug", "--detail", "name")
 	if err != nil {
@@ -83,7 +82,6 @@ func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
 	if err != nil {
@@ -99,7 +97,6 @@ func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
 	seedFiber(t, felt.NewStorage(subProj), "local-copy", uid, "", nil, nil)
-	defer saveShowGlobals()()
 
 	out, err := runCommand(t, subProj, "show", uid, "--detail", "name")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous fiber UID") {
@@ -135,7 +132,6 @@ func TestRmReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 // names where it wrote.
 func TestEditReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveEditGlobals()()
 
 	out, err := runCommand(t, subProj, "edit", "ai-futures/portolan/debug", "--name", "Renamed out there")
 	if err != nil {
@@ -207,7 +203,6 @@ func TestUnnestAcrossBoundaryPromotesInEnclosingStore(t *testing.T) {
 // a filtered ls in a substore says so on a trailer line.
 func TestLsStaysInTheView(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls", "debug")
 	if err != nil {
@@ -228,7 +223,6 @@ func TestLsStaysInTheView(t *testing.T) {
 // read; a human-facing hint has no place in it.
 func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls", "debug", "--json")
 	if err != nil {
@@ -243,7 +237,6 @@ func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 // and must not pay for — or print — the enclosing store.
 func TestLsBareStaysLocal(t *testing.T) {
 	_, subProj := newCrossStoreFixture(t)
-	defer saveLsGlobals()()
 
 	out, err := runCommand(t, subProj, "ls")
 	if err != nil {
@@ -267,7 +260,6 @@ func TestLsBareStaysLocal(t *testing.T) {
 // resolution reaches the enclosing store on every local miss.
 func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 
 	// A second local `debug` twin: under the old gate this ambiguity switched
 	// the probe off and the foreign path stopped resolving.
@@ -289,7 +281,6 @@ func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 // named, where it lives, and says where — the same contract rm and edit keep.
 func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShuttleGlobals()()
 
 	loom := felt.NewStorage(loomProj)
 	seedShuttleRole(t, loom, "ai-futures/portolan/debug", felt.StatusActive, oneshot(), nil)
@@ -321,7 +312,6 @@ func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 // a suggestion; the same-named fiber survives. `show` stays forgiving.
 func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
 	dir, storage := newStore(t)
-	defer saveShowGlobals()()
 	for _, id := range []string{"a", "b", "b/zzz", "b/notes"} {
 		writeFixtureFelt(t, storage, id, id)
 	}
@@ -381,7 +371,6 @@ func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
 // as in rm, rather than resolving to its same-named twin.
 func TestRmThroughViewRefusesEnclosingStoreGuesses(t *testing.T) {
 	loomProj, subProj := newCrossStoreFixture(t)
-	defer saveShowGlobals()()
 	loom := felt.NewStorage(loomProj)
 	writeFixtureFelt(t, loom, "commons/x", "X")
 	writeFixtureFelt(t, loom, "commons/y/foo", "Twin foo")
@@ -451,5 +440,149 @@ func TestGettingStartedNestSequence(t *testing.T) {
 	}
 	if _, err := felt.NewStorage(dir).Read("covariance-estimation/jackknife-patches/binning"); err != nil {
 		t.Fatalf("subtree did not come back under its parent: %v", err)
+	}
+}
+
+// TestExactOutsideIDBeatsLocalPrefixCompletion: an id written out in full
+// names that fiber, even from a view holding a local id that merely begins
+// with the same letters. `ai-futures/portolan/charted` exists out in the loom;
+// the view holds `ai-futures/portolan/chartedx`. edit and show must reach the
+// loom's fiber, and rm must act on it rather than call the query a guess.
+func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	sub := felt.NewStorage(subProj)
+	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
+
+	out, err := runCommand(t, subProj, "show", "ai-futures/portolan/charted")
+	if err != nil {
+		t.Fatalf("show: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Name:     Charted") {
+		t.Fatalf("show answered with the local prefix completion:\n%s", out)
+	}
+
+	out, err = runCommand(t, subProj, "edit", "ai-futures/portolan/charted", "-s", "active")
+	if err != nil {
+		t.Fatalf("edit: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Updated ai-futures/portolan/charted (in "+loomRoot(t, subProj)+")") {
+		t.Fatalf("edit output = %q, want the loom's fiber", out)
+	}
+	if local, err := sub.Read("ai-futures/portolan/chartedx"); err != nil || local.Status != felt.StatusOpen {
+		t.Fatalf("local lookalike was edited: %v %+v", err, local)
+	}
+
+	out, err = runCommand(t, subProj, "rm", "ai-futures/portolan/charted")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	if _, err := felt.NewStorage(loomProj).Read("ai-futures/portolan/charted"); err == nil {
+		t.Fatalf("rm did not delete the loom's fiber")
+	}
+	if _, err := sub.Read("ai-futures/portolan/chartedx"); err != nil {
+		t.Fatalf("rm deleted the local lookalike: %v", err)
+	}
+}
+
+// TestNestFromViewLeavesExactOutsideLinkAlone: a link that names the loom's
+// `ai-futures/portolan/charted` outright is a link out of the view, however a
+// local id begins. Moving the local lookalike must not rewrite it to follow
+// the lookalike: the move plan reads paths by the same tiers resolution does.
+func TestNestFromViewLeavesExactOutsideLinkAlone(t *testing.T) {
+	_, subProj := newCrossStoreFixture(t)
+	sub := felt.NewStorage(subProj)
+	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
+	citer := &felt.Felt{ID: "citer", Name: "Citer", Status: felt.StatusOpen, CreatedAt: time.Now(), Body: "see [[ai-futures/portolan/charted]]\n"}
+	if err := sub.Write(citer); err != nil {
+		t.Fatalf("write citer: %v", err)
+	}
+
+	if out, err := runCommand(t, subProj, "nest", "ai-futures/portolan/chartedx", "debug"); err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	got, err := sub.Read("citer")
+	if err != nil {
+		t.Fatalf("read citer: %v", err)
+	}
+	if !strings.Contains(got.Body, "[[ai-futures/portolan/charted]]") {
+		t.Fatalf("nest rewrote a link to the enclosing store's fiber:\n%s", got.Body)
+	}
+}
+
+// writeConsumer writes a loom fiber whose inputs name from, once with an
+// input id and once without: an entry with `from:` is a data-flow edge either
+// way.
+func writeConsumer(t *testing.T, s *felt.Storage, id, from string) {
+	t.Helper()
+	f := &felt.Felt{ID: id, Name: id, Status: felt.StatusOpen, CreatedAt: time.Now()}
+	if err := f.SetExtraField("inputs", []map[string]any{
+		{"id": "catalog", "from": from},
+		{"from": from},
+	}); err != nil {
+		t.Fatalf("SetExtraField: %v", err)
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("write %s: %v", id, err)
+	}
+}
+
+func inputFroms(t *testing.T, s *felt.Storage, id string) []string {
+	t.Helper()
+	f, err := s.Read(id)
+	if err != nil {
+		t.Fatalf("read %s: %v", id, err)
+	}
+	var froms []string
+	for _, item := range f.ExtraFields["inputs"].Content {
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			if item.Content[i].Value == "from" {
+				froms = append(froms, item.Content[i+1].Value)
+			}
+		}
+	}
+	return froms
+}
+
+// TestNestFromViewRewritesOutsideInputs: nest and unnest run inside a view
+// rewrite inputs.from in the enclosing store's fibers outside the view, with
+// or without an input id, in the enclosing store's coordinates.
+func TestNestFromViewRewritesOutsideInputs(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/notes/runbook")
+
+	if out, err := runCommand(t, subProj, "nest", "notes/runbook", "debug"); err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	for _, from := range inputFroms(t, loom, "commons/reader") {
+		if from != "ai-futures/felt/debug/runbook" {
+			t.Fatalf("after nest, outside inputs = %v, want both at ai-futures/felt/debug/runbook", inputFroms(t, loom, "commons/reader"))
+		}
+	}
+
+	if out, err := runCommand(t, subProj, "unnest", "debug/runbook"); err != nil {
+		t.Fatalf("unnest: %v\n%s", err, out)
+	}
+	for _, from := range inputFroms(t, loom, "commons/reader") {
+		if from != "ai-futures/felt/runbook" {
+			t.Fatalf("after unnest, outside inputs = %v, want both at ai-futures/felt/runbook", inputFroms(t, loom, "commons/reader"))
+		}
+	}
+}
+
+// TestCheckFlagsStaleInputFromWithoutID: a stale inputs.from held up only by
+// its last segment is warned on from the store root — the entry's input id
+// is not what makes it an edge.
+func TestCheckFlagsStaleInputFromWithoutID(t *testing.T) {
+	loomProj, _ := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/old/runbook")
+
+	out, _ := runCommand(t, loomProj, "check")
+	if got := strings.Count(out, `stale path in reference "ai-futures/felt/old/runbook"`); got != 2 {
+		t.Fatalf("check warned on %d stale inputs.from, want 2 (with and without an id):\n%s", got, out)
+	}
+	if !strings.Contains(out, "inputs.catalog.from") || !strings.Contains(out, "inputs[1].from") {
+		t.Fatalf("check should locate each entry, by id or by position:\n%s", out)
 	}
 }

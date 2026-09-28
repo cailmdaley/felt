@@ -65,9 +65,13 @@ scheduled (a standing role), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
 With a fiber, prints the block's key fields, any running worker, and whether
-its status arms it for dispatch, naming the verb that would when it does not.
-That verdict reads status alone; host ownership, project_dir, and the boot
-quarantine are the daemon's to judge.
+it is eligible for dispatch, naming the verb that would make it so when it is
+not. Eligibility is status active and a host: the owning host's daemon
+dispatches it — this one only when the host is this machine's (felt shuttle
+host). A block without a project_dir is eligible, but its worker starts in the
+felt store and no verb arms it again until it has one; the verdict says so.
+The daemon's boot quarantine can still hold an eligible fiber until
+'bin/shuttle release'; that is the daemon's to report.
 
   felt shuttle status                 # the table
   felt shuttle status <fiber>         # one fiber`,
@@ -242,7 +246,7 @@ func runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": dispatchAssessment(f.ID, statusNow),
+			"dispatch": dispatchAssessment(f.ID, statusNow, block),
 		}
 		if block.Agent != "" {
 			out["agent"] = block.Agent
@@ -265,25 +269,49 @@ func runStatusOneFiber(query string) error {
 		fmt.Printf("  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Println("")
-	fmt.Println(dispatchAssessment(f.ID, statusNow))
+	fmt.Println(dispatchAssessment(f.ID, statusNow, block))
 	return nil
 }
 
 // dispatchAssessment renders the one line a single-fiber report is really for:
-// whether the daemon will pick this fiber up, and the verb that changes the
-// answer when it won't. Dispatch is gated by the felt-native status alone.
-func dispatchAssessment(fiberID, statusNow string) string {
+// whether the fiber is eligible for dispatch, on which host, and the verb that
+// changes the answer when it is not. It promises eligibility, not a launch:
+// the owning daemon's boot quarantine can hold an eligible fiber. A block
+// without a project_dir still dispatches — its worker starts in the felt
+// store — but no verb arms it again until it has one, so every call named
+// here carries the --project-dir it would need.
+func dispatchAssessment(fiberID, statusNow string, block *shuttle.Block) string {
+	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
+	arm := func(verb string) string {
+		if noProjectDir {
+			return fmt.Sprintf("felt shuttle %s %s --project-dir <dir>", verb, fiberID)
+		}
+		return fmt.Sprintf("felt shuttle %s %s", verb, fiberID)
+	}
 	switch statusNow {
 	case felt.StatusActive:
-		return "→ Daemon will dispatch on next poll. No action needed."
+		own, _ := resolveOwnHost("")
+		var verdict string
+		switch {
+		case block.Host == "":
+			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `felt shuttle uninstall` then install / repeat / pin, which stamp this host."
+		case block.Host != own:
+			verdict = fmt.Sprintf("→ Armed; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", block.Host, own)
+		default:
+			verdict = fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`bin/shuttle release`).", own)
+		}
+		if noProjectDir {
+			verdict += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `%s` sets one.", arm("resume"))
+		}
+		return verdict
 	case felt.StatusClosed:
-		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `felt shuttle reopen %s` to clear verdict fields and requeue it.", fiberID)
+		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `%s` to clear verdict fields and requeue it.", arm("reopen"))
 	case felt.StatusOpen:
-		return fmt.Sprintf("→ Draft (status: open). Use `felt shuttle resume %s` to arm it.", fiberID)
+		return fmt.Sprintf("→ Draft (status: open). Use `%s` to arm it.", arm("resume"))
 	case "":
-		return fmt.Sprintf("→ Status missing — daemon will NOT dispatch. Use `felt shuttle resume %s` or set status: active in the markdown.", fiberID)
+		return fmt.Sprintf("→ Status missing — daemon will NOT dispatch. Use `%s` or set status: active in the markdown.", arm("resume"))
 	default:
-		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `felt shuttle resume %s` to set status: active.", statusNow, fiberID)
+		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `%s` to set status: active.", statusNow, arm("resume"))
 	}
 }
 

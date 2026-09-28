@@ -4,6 +4,33 @@ All notable changes to felt are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- `felt check --json` exits non-zero when it reports an error-level issue, as plain `felt check` does.
+  Scripts that read the JSON and judge it themselves should expect exit status 1 on a store with errors.
+- Arming requires a `project_dir` on every verb that arms a fiber (`felt shuttle resume`, `reopen`, `accept`, `felt edit -s active`), not only on `install` and `repeat`.
+  `felt shuttle resume` and `reopen` take `--project-dir <dir>` to set it and arm in one step; the refusal names the one that applies.
+  An edit that leaves an already-armed fiber active arms nothing and is not gated, so a role armed without a `project_dir` still takes tags and outcomes.
+  The daemon's force-dispatch of a closed fiber shells `reopen`, so it is refused for a block without a `project_dir` until one is set.
+- An `inputs:` entry with a `from:` is a data-flow edge whether or not it has an `id:`.
+  `felt check` and `show --consumers` now see unlabelled entries, which `nest` already rewrote; check locates them as `inputs[<n>].from`.
+- `felt shuttle set-model` validates the surface with the agent, as `set-agent` does: a `surface: app` block moves off Codex only through `set-agent <fiber> <agent> --surface cli`.
+- `felt shuttle status <fiber>` reports where an armed fiber is eligible for dispatch, reading host ownership as well as status, notes a block with no `project_dir` (its worker starts in the felt store), and no longer promises a launch the boot quarantine could hold.
+- `show --citations` and `--consumers` print one line per edge instead of a YAML dump; `--json` output is unchanged.
+
+### Fixed
+
+- An id written out in full resolves to that fiber before any prefix completion.
+  From a project view, `felt edit other/deep` no longer edits a local `other/deepx` when `other/deep` exists in the enclosing store, and `felt rm` no longer calls the exact id a guess.
+- A query spelling a fiber's own file as an id (`science/cmbx/cmbx` for `.felt/science/cmbx/cmbx.md`) is a stale path the slug rescue answers, not a stray file to migrate.
+- `felt add -s <status>` validates the status as `felt edit` does, and `-s closed` stamps `closed-at`.
+- `felt shuttle set-model` can no longer leave a Claude or Pi agent on `surface: app`, a block `set-agent` then refused.
+- Run-time errors print the error without the usage block; only a command line cobra cannot accept (an unknown flag, a wrong argument count, a missing required flag, exclusive flags together) shows usage.
+- `felt shuttle reshape --help` no longer shows a UTC default for `--tz`; omitting it keeps the block's timezone.
+- Messages say "fiber" where they said "felt" (`No fibers matching`, `no fiber found matching`), and `install --disabled` confirms "(draft, status: open)".
+
 ## [1.1.0] — 2026-09-08
 
 Shuttle joins felt in its first stable release: an agent dispatcher, a browser board, and a markdown work journal in one repository.

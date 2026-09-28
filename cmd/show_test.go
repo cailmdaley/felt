@@ -42,9 +42,6 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "fiber-a", "--body")
 	if err != nil {
 		t.Fatalf("show --body: %v\n%s", err, out)
@@ -67,9 +64,6 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "fiber-a", "--body", "--json")
 	if err != nil {
@@ -100,9 +94,6 @@ func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "fiber-a", "-d", "compact")
 	if err != nil {
 		t.Fatalf("show -d compact: %v\n%s", err, out)
@@ -132,11 +123,7 @@ func TestShowReportsBodySize(t *testing.T) {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	for _, detail := range []string{"compact", "summary"} {
-		saveShowGlobals()
 		out, err := runCommand(t, dir, "show", "with-body", "-d", detail)
 		if err != nil {
 			t.Fatalf("show -d %s: %v\n%s", detail, err, out)
@@ -145,7 +132,6 @@ func TestShowReportsBodySize(t *testing.T) {
 			t.Fatalf("show -d %s missing body size:\n%s", detail, out)
 		}
 
-		saveShowGlobals()
 		out, err = runCommand(t, dir, "show", "no-body", "-d", detail)
 		if err != nil {
 			t.Fatalf("show -d %s: %v\n%s", detail, err, out)
@@ -166,9 +152,6 @@ func TestShowDefaultRendersBody(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "fiber-a")
 	if err != nil {
@@ -223,8 +206,6 @@ Body here.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reset := saveShowGlobals()
-			defer reset()
 			out, err := runCommand(t, dir, "show", "fiber-a", "--field", tc.field)
 			if err != nil {
 				t.Fatalf("show --field %s: %v\n%s", tc.field, err, out)
@@ -241,9 +222,6 @@ func TestShowSelectorsAreMutuallyExclusive(t *testing.T) {
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "fiber-a", "--body", "--field", "status")
 	if err == nil {
@@ -334,9 +312,6 @@ func consumerStore(t *testing.T, outputType string) string {
 func TestShowIncludesCitations(t *testing.T) {
 	dir := citationStore(t)
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "project/question")
 	if err != nil {
 		t.Fatalf("show with citations: %v\n%s", err, out)
@@ -349,9 +324,6 @@ func TestShowIncludesCitations(t *testing.T) {
 func TestShowIncludesConsumers(t *testing.T) {
 	dir := consumerStore(t, "data")
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "project/question")
 	if err != nil {
 		t.Fatalf("show with consumers: %v\n%s", err, out)
@@ -361,32 +333,26 @@ func TestShowIncludesConsumers(t *testing.T) {
 	}
 }
 
-func TestShowConsumersSelectorOutputsStructuredResults(t *testing.T) {
+func TestShowConsumersSelectorPrintsOneLinePerConsumer(t *testing.T) {
 	dir := consumerStore(t, "")
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "project/question", "--consumers")
 	if err != nil {
 		t.Fatalf("show --consumers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "inputid: catalog") || !strings.Contains(out, "outputid: posterior") {
+	if strings.TrimSpace(out) != "posterior \u2192 project/analysis#catalog  Analysis" {
 		t.Fatalf("show --consumers output mismatch:\n%s", out)
 	}
 }
 
-func TestShowCitationsSelectorOutputsStructuredResults(t *testing.T) {
+func TestShowCitationsSelectorPrintsOneLinePerCitation(t *testing.T) {
 	dir := citationStore(t)
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "project/question", "--citations")
 	if err != nil {
 		t.Fatalf("show --citations: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") || !strings.Contains(out, "sourcename: Analysis") {
+	if strings.TrimSpace(out) != "project/analysis  Analysis" {
 		t.Fatalf("show --citations output mismatch:\n%s", out)
 	}
 }
@@ -397,14 +363,11 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 	// broken fiber without failing the whole walk.
 	writeBrokenFiber(t, dir, "broken", []byte("---\nname: Broken\n"))
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "project/question", "--citations")
 	if err != nil {
 		t.Fatalf("show --citations should not sync unrelated malformed fibers: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sourceid: project/analysis") {
+	if !strings.Contains(out, "project/analysis  Analysis") {
 		t.Fatalf("show --citations missing source:\n%s", out)
 	}
 }
@@ -419,9 +382,6 @@ func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
 	if err := storage.Write(fiber); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "fiber-a", "-d", "full")
 	if err != nil {
@@ -474,40 +434,12 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 	// every fiber should trip on it.
 	writeBrokenFiber(t, dir, "broken-yaml", []byte("---\nname: [\n---\nThis should only fail if the command walks every fiber.\n"))
 
-	reset := saveShowGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "show", "project/analysis")
 	if err != nil {
 		t.Fatalf("show should not walk unrelated malformed fibers: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "Refs:     project/question, project/analysis/sub/method, missing") {
 		t.Fatalf("show refs mismatch:\n%s", out)
-	}
-}
-
-func saveShowGlobals() func() {
-	prevBodyOnly := showBodyOnly
-	prevDetail := showDetail
-	prevCitations := showCitations
-	prevConsumers := showConsumers
-	prevField := showField
-	prevJSON := jsonOutput
-
-	showBodyOnly = false
-	showDetail = ""
-	showCitations = false
-	showConsumers = false
-	showField = ""
-	jsonOutput = false
-
-	return func() {
-		showBodyOnly = prevBodyOnly
-		showDetail = prevDetail
-		showCitations = prevCitations
-		showConsumers = prevConsumers
-		showField = prevField
-		jsonOutput = prevJSON
 	}
 }
 
@@ -525,9 +457,6 @@ func TestShowFieldRefusesJSON(t *testing.T) {
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", Status: "active", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
-
-	reset := saveShowGlobals()
-	defer reset()
 
 	out, err := runCommand(t, dir, "show", "fiber-a", "--field", "status", "--json")
 	if err == nil {

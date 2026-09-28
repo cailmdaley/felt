@@ -207,7 +207,7 @@ func TestIntegration(t *testing.T) {
 	}
 	// Exact match on wrong slug should return nothing
 	out = mustFelt(t, dir, "ls", "-e", "test-fiber-nope")
-	if !strings.Contains(out, "No felts") {
+	if !strings.Contains(out, "No fibers") {
 		t.Fatalf("ls --exact should not match wrong slug, got: %s", out)
 	}
 	// Regex match on id

@@ -2054,7 +2054,7 @@ func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
 // TestExternalPathLookupNeedsNoWalk pins the cheap half on its own: a bare
 // foreign slug that exists at the enclosing store's root is found by a stat,
 // with no local same-slug fiber to make the gate open. Without this,
-// `felt rm <foreign-slug>` would report "no felt found" for a fiber that is
+// `felt rm <foreign-slug>` would report "no fiber found" for a fiber that is
 // plainly there.
 func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
 	_, subProj := newSubstoreFixture(t)
@@ -2109,7 +2109,7 @@ func TestResolveScopedIDUnknownPathIsOrdinaryMiss(t *testing.T) {
 	if errors.Is(err, ErrExternalReference) {
 		t.Fatalf("error = %v, want an ordinary miss, not ErrExternalReference", err)
 	}
-	if !strings.Contains(err.Error(), "no felt found") {
+	if !strings.Contains(err.Error(), "no fiber found") {
 		t.Fatalf("error = %v, want a no-felt-found message", err)
 	}
 }
@@ -2730,5 +2730,85 @@ func TestCheckFromViewLocalizedLinkToStrayIsBroken(t *testing.T) {
 		!strings.Contains(messages[0], `"ai-futures/felt/a/bar": .felt/a/bar.md is a stray fiber file`) ||
 		!strings.Contains(messages[1], filepath.Join("commons", "x", "foo.md")+" is a stray fiber file") {
 		t.Fatalf("citer issues = %q", messages)
+	}
+}
+
+// TestResolveScopedIDExactOuterScopeBeatsInnerPrefix: every exact answer
+// outranks every completion. From scope a/b, [[c]] names a/c exactly; a/b/cx
+// only begins with the same letter.
+func TestResolveScopedIDExactOuterScopeBeatsInnerPrefix(t *testing.T) {
+	ids := []string{"a", "a/b", "a/b/cx", "a/c"}
+	for _, tc := range []struct{ scope, query, want string }{
+		{"a/b", "c", "a/c"},
+		{"a/b", "b/c", "a/b/cx"}, // no exact a/b/c anywhere: completion still works
+		{"a/b", "cx", "a/b/cx"},
+	} {
+		got, err := ResolveScopedIDIn(ids, tc.scope, tc.query, nil)
+		if err != nil || got != tc.want {
+			t.Errorf("resolve(%q from %q) = %q, %v; want %q", tc.query, tc.scope, got, err, tc.want)
+		}
+	}
+}
+
+// TestDataFlowEdgeNeedsFromNotID: an inputs entry is an edge when it names a
+// source in from:, labelled or not — the same set a move rewrites — so
+// --consumers and check see an unlabelled entry too, and an id without a
+// from is no edge.
+func TestDataFlowEdgeNeedsFromNotID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*Felt{{ID: "source", Name: "Source"}, {ID: "reader", Name: "Reader"}} {
+		if f.ID == "reader" {
+			if err := f.SetExtraField("inputs", []map[string]any{
+				{"id": "labelled", "from": "source"},
+				{"from": "source"},
+				{"id": "dangling"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader, err := s.Read("reader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := reader.DataFlowInputs()
+	if len(inputs) != 2 || inputs[0].Path() != "inputs.labelled.from" || inputs[1].Path() != "inputs[1].from" {
+		t.Fatalf("DataFlowInputs() = %+v, want the two entries with a from", inputs)
+	}
+	_, consumers, err := s.ScanRelationships("source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(consumers) != 2 {
+		t.Fatalf("consumers of source = %+v, want both entries", consumers)
+	}
+}
+
+// TestFiberFileSpelledAsIDIsNotStray: `science/cmbx/cmbx` spells the path of
+// the fiber science/cmbx's own file. That file is in the layout, so the query
+// is an ordinary stale path — show rescues it by its slug — and never a
+// stray to migrate.
+func TestFiberFileSpelledAsIDIsNotStray(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(&Felt{ID: "science/cmbx", Name: "cmbx", Status: StatusOpen}); err != nil {
+		t.Fatal(err)
+	}
+	if rel, ok := s.strayAt("science/cmbx/cmbx"); ok {
+		t.Fatalf("strayAt(science/cmbx/cmbx) = %q, want no stray", rel)
+	}
+	f, err := s.FindInScope("", "science/cmbx/cmbx")
+	if err != nil || f.ID != "science/cmbx" {
+		t.Fatalf("FindInScope = %v, %v; want science/cmbx", f, err)
 	}
 }

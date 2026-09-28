@@ -169,8 +169,8 @@ felt shuttle reshape <fiber> standing --schedule "0 9 * * 1" --tz UTC
 
 `kind` is optional — omit it to leave the current kind alone and edit only the
 schedule (`felt shuttle reshape <fiber> --schedule "0 7 * * *"`). Reshape
-rewrites `agent`, `host`, and `project_dir` when passed, and leaves the rest of
-the block — including the daemon-owned `runtime:` keys — untouched. It never
+changes only `kind` and the schedule, and leaves the rest of the block —
+including the daemon-owned `runtime:` keys — untouched. It never
 touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a role
 sitting in Awaiting review can be reshaped in place without being requeued. A
 `standing` target needs a schedule, from `--schedule` or echoed from the

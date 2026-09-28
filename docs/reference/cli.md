@@ -115,12 +115,12 @@ untouched by any of this.
 | Command | Purpose |
 |---|---|
 | `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`) |
+| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed, any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `felt shuttle accept <fiber>` | Resolve a human verdict on a role awaiting review (kind-aware re-arm/re-park; `--keep-outcome`) |
-| `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead) |
+| `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`); leaves the current session running |
-| `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
+| `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
 | `felt shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `felt shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `felt shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
@@ -129,7 +129,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report including a status-based dispatch verdict |
+| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
 | `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
@@ -263,7 +263,7 @@ the existing owner-served file surface.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle remotes list` | List the configured remote daemons; also the validator (parse errors, duplicate names, port collisions) |
+| `felt shuttle remotes list` | List the configured remote daemons and document defaults; validates paths, proxy/dial exclusivity, duplicate names, and port collisions |
 | `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |

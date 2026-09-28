@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "defaults": {
+    "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+  },
+  "remotes": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub_b.example.ts.net"
+    }
+  ]
+}

@@ -18,9 +18,6 @@ func TestEditMetadataFlags(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	reset := saveEditGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "edit", "fiber-a",
 		"--name", "Renamed",
 		"--status", "active",
@@ -60,9 +57,6 @@ func TestEditStampsUpdatedAt(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	reset := saveEditGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "edit", "fiber-a", "--outcome", "Landed.")
 	if err != nil {
 		t.Fatalf("edit: %v\n%s", err, out)
@@ -94,9 +88,6 @@ func TestEditBodyOverwriteDetection(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	reset := saveEditGlobals()
-	defer reset()
-
 	out, err := runCommand(t, dir, "edit", "fiber-a", "--body", "replacement body")
 	if err != nil {
 		t.Fatalf("edit body: %v\n%s", err, out)
@@ -119,9 +110,6 @@ func TestEditSetUnsetExtraScalars(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-
-	reset := saveEditGlobals()
-	defer reset()
 
 	if out, err := runCommand(t, dir, "edit", "fiber-a",
 		"--set", "horizon=stashed",
@@ -149,11 +137,7 @@ func TestEditSetUnsetExtraScalars(t *testing.T) {
 		t.Fatalf("cold node tag = %v, want !!bool", node)
 	}
 
-	// Unsetting both keys returns the frontmatter to clean. saveEditGlobals
-	// re-zeroes the flag globals and ResetFlags() clears cobra's accumulated
-	// StringArray state between Execute() calls; the outer defer still restores
-	// the originals.
-	saveEditGlobals()
+	// Unsetting both keys returns the frontmatter to clean.
 	if out, err := runCommand(t, dir, "edit", "fiber-a",
 		"--unset", "horizon",
 		"--unset", "cold",
@@ -203,8 +187,6 @@ func TestEditSetUnsetGuards(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			reset := saveEditGlobals()
-			defer reset()
 			out, err := runCommand(t, dir, append([]string{"edit", "fiber-a"}, tc.args...)...)
 			if err == nil {
 				t.Fatalf("expected error, got success: %s", out)
@@ -213,46 +195,5 @@ func TestEditSetUnsetGuards(t *testing.T) {
 				t.Fatalf("error %q does not mention %q", err.Error(), tc.want)
 			}
 		})
-	}
-}
-
-func saveEditGlobals() func() {
-	prev := struct {
-		name    string
-		status  string
-		due     string
-		tags    []string
-		untag   []string
-		body    string
-		outcome string
-		set     []string
-		unset   []string
-	}{
-		editName, editStatus, editDue, editTags, editUntag, editBody, editOutcome, editSet, editUnset,
-	}
-
-	editName = ""
-	editStatus = ""
-	editDue = ""
-	editTags = nil
-	editUntag = nil
-	editBody = ""
-	editOutcome = ""
-	editSet = nil
-	editUnset = nil
-
-	editCmd.ResetFlags()
-	initEditFlags()
-
-	return func() {
-		editName = prev.name
-		editStatus = prev.status
-		editDue = prev.due
-		editTags = prev.tags
-		editUntag = prev.untag
-		editBody = prev.body
-		editOutcome = prev.outcome
-		editSet = prev.set
-		editUnset = prev.unset
 	}
 }

@@ -79,6 +79,11 @@ looser matches are **guesses**:
 From a project view, the enclosing store's answer is also a guess when it
 comes by tail, prefix or last segment rather than by the path itself.
 
+An exact address always wins over a completion: an id or scoped path that
+names a fiber outright — including, from a project view, an id written out
+from the enclosing store's root — is never answered by some other fiber that
+merely begins with the same letters.
+
 `show` and `edit` accept a guess. `rm`, `nest` and `unnest` refuse it and name
 the fiber it would have reached:
 

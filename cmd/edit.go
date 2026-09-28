@@ -28,8 +28,9 @@ var editCmd = &cobra.Command{
 	Short: "Change a fiber's native fields or scalar frontmatter",
 	Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
 stamps closed-at; -s open or -s active clears it. Setting active on a fiber
-with a shuttle: block arms it for dispatch, so its agent must resolve. For a
-change smaller than the whole body, edit the file.
+with a shuttle: block that is not already active arms it for dispatch, so the
+block needs what every arming verb requires: an agent the registry resolves
+and a project_dir. For a change smaller than the whole body, edit the file.
 
 --set writes a top-level scalar to frontmatter felt does not own, read as
 YAML so true and 12 keep their types; native keys, empty values, and keys
@@ -66,24 +67,10 @@ own, structured ones included.`,
 		if cmd.Flags().Changed("name") {
 			f.Name = editName
 		}
+		statusBefore := f.Status
 		if cmd.Flags().Changed("status") {
-			switch editStatus {
-			case felt.StatusOpen, felt.StatusActive:
-				if f.IsClosed() {
-					f.ClosedAt = nil
-				}
-				f.Status = editStatus
-			case felt.StatusClosed:
-				if !f.IsClosed() {
-					now := time.Now()
-					f.Status = felt.StatusClosed
-					f.ClosedAt = &now
-				}
-			case "":
-				f.Status = ""
-				f.ClosedAt = nil
-			default:
-				return fmt.Errorf("invalid status %q (valid: open, active, closed, or empty to clear)", editStatus)
+			if err := f.SetStatus(editStatus, time.Now()); err != nil {
+				return err
 			}
 		}
 		if cmd.Flags().Changed("body") {
@@ -147,14 +134,16 @@ own, structured ones included.`,
 		}
 
 		// A status write that arms the fiber (status: active on a fiber
-		// carrying a shuttle: block) must resolve the agent, same as every
-		// other arming verb — otherwise `edit -s active` can arm a fiber
-		// whose shuttle.agent has since been retired from the registry.
-		if f.Status == felt.StatusActive {
+		// carrying a shuttle: block that was not active) passes the same gate
+		// as every other arming verb — otherwise `edit -s active` could arm a
+		// fiber with no project_dir, or whose shuttle.agent has since been
+		// retired. Any other edit of an active fiber — a tag, an outcome, a
+		// worker writing to its own fiber — arms nothing, so it is not gated.
+		if f.Status == felt.StatusActive && statusBefore != felt.StatusActive {
 			if block, ok, err := f.ShuttleBlock(); err != nil {
 				return err
 			} else if ok {
-				if err := resolveBlockAgent(block); err != nil {
+				if err := checkArmable(f.ID, armVerb(statusBefore, f, block), block); err != nil {
 					return err
 				}
 			}
@@ -253,8 +242,7 @@ func init() {
 	initEditFlags()
 }
 
-// initEditFlags registers (or re-registers) edit's flag set. Exposed so tests
-// can ResetFlags() between invocations to clear Changed state.
+// initEditFlags registers edit's flag set.
 func initEditFlags() {
 	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
 	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed; empty clears)")
