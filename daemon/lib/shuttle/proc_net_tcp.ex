@@ -2,14 +2,35 @@ defmodule Shuttle.ProcNetTcp do
   @moduledoc """
   Resolves a TCP peer's uid from Linux's `/proc/net/tcp` and `/proc/net/tcp6`.
 
-  A connection is identified by its established client-side row: the local
-  endpoint is the peer address and ephemeral port, while the remote endpoint
-  is the daemon listener. The mirror server-side row has the daemon's uid and
-  must not be used. Address words are decoded in the host's native byte order,
-  and IPv4-mapped IPv6 loopback addresses normalize to IPv4.
+  A connection is identified by its client-side row: the local endpoint is the
+  peer address and ephemeral port, while the remote endpoint is the daemon
+  listener. The mirror server-side row has the daemon's uid and must not be
+  used. Address words are decoded in the host's native byte order, and
+  IPv4-mapped IPv6 loopback addresses normalize to IPv4.
+
+  ## Which TCP states carry a uid
+
+  Only a row backed by a real `struct sock` has an owning process, and only
+  those rows are trusted. `TIME_WAIT` (06) and `SYN_RECV` (03) are not: a
+  timewait entry is an `inet_timewait_sock` and a SYN_RECV entry a request
+  sock, neither of which has an owner, so the kernel prints uid 0 for both
+  (measured: 414 of 414 `TIME_WAIT` rows on a busy multi-user host). Trusting
+  them would authorize nobody on a daemon running as an ordinary user — and
+  *everybody* on one running as root, which is precisely the configuration
+  `ShuttleWeb.PeerGatePlug` treats as uid-0-allowed.
+
+  Accepting only `ESTABLISHED` was too narrow in the other direction. A client
+  that shuts down its write side right after sending — an ordinary
+  `Connection: close` pattern — moves its own socket to `FIN_WAIT1`/`FIN_WAIT2`
+  before the plug reads the table, so its row was invisible and the owner's own
+  request was refused as "peer uid unresolved" (reproduced 30/30). Those states,
+  and the closing states that follow them, still name one uniquely-bound live
+  connection and carry its owner's true uid, so accepting them does not weaken
+  the four-tuple match.
   """
 
-  @tcp_state "01"
+  # Rows whose socket has an owning process. See "Which TCP states carry a uid".
+  @uid_bearing_states ~w(01 04 05 08 09 0B)
 
   @doc "Whether `/proc/net/tcp` can be read under `proc_root`."
   @spec readable?(String.t()) :: boolean()
@@ -50,7 +71,8 @@ defmodule Shuttle.ProcNetTcp do
       |> String.split("\n")
       |> Enum.find_value(fn line ->
         case :binary.match(line, needles) != :nomatch and parse_row(line) do
-          %{state: @tcp_state, local: local, remote: remote, uid: uid} ->
+          %{state: state, local: local, remote: remote, uid: uid}
+          when state in @uid_bearing_states ->
             if endpoint_matches?(local, peer) and endpoint_matches?(remote, listener), do: uid
 
           _ ->
