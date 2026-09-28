@@ -132,6 +132,21 @@ defmodule Shuttle.SessionLedgerTest do
              }
     end
 
+    test "records a Codex App thread separately from its transcript id", %{path: path} do
+      SessionLedger.record(
+        path: path,
+        fiber: "work/worker",
+        uid: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        session: "transcript-42",
+        thread_id: "thread-42",
+        harness: "codex",
+        kind: :claim
+      )
+
+      assert [%{"session" => "transcript-42", "thread_id" => "thread-42", "harness" => "codex"}] =
+               decoded(path)
+    end
+
     test "derives the fiber uid from the tmux session name", %{path: path} do
       SessionLedger.record(
         path: path,

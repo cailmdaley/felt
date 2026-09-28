@@ -52,14 +52,15 @@ type TranscriptReceipt struct {
 // predecessor/children fields are optional because old ledger rows predate
 // explicit lineage; absence is not interpreted as proof of no lineage.
 type SessionProvenance struct {
-	Fiber   string `json:"fiber,omitempty"`
-	FiberID string `json:"fiber_id,omitempty"`
-	UID     string `json:"uid,omitempty"`
-	Session string `json:"session"`
-	Address string `json:"address,omitempty"`
-	Harness string `json:"harness,omitempty"`
-	Host    string `json:"host,omitempty"`
-	Tmux    string `json:"tmux,omitempty"`
+	Fiber    string `json:"fiber,omitempty"`
+	FiberID  string `json:"fiber_id,omitempty"`
+	UID      string `json:"uid,omitempty"`
+	Session  string `json:"session"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Address  string `json:"address,omitempty"`
+	Harness  string `json:"harness,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Tmux     string `json:"tmux,omitempty"`
 	// Collaboration snapshots the configured participants, not session authorship.
 	// Agent and Model record execution settings. These launch-time values are not
 	// reconstructed from the fiber's current assignment.
@@ -89,6 +90,13 @@ func (s SessionProvenance) fiber() string {
 		return s.Fiber
 	}
 	return s.FiberID
+}
+
+func (s SessionProvenance) nativeSessionID() string {
+	if s.ThreadID != "" {
+		return s.ThreadID
+	}
+	return s.Session
 }
 
 type sessionLedgerResponse struct {
@@ -224,11 +232,15 @@ func filterProvenanceRows(uid string, records []SessionProvenance) []SessionProv
 }
 
 func provenanceSessionKey(row SessionProvenance) string {
-	return row.Host + "\x00" + messaging.NormalizeHarness(row.Harness) + "\x00" + row.Session
+	native := row.ThreadID
+	if native == "" {
+		native = row.Session
+	}
+	return row.Host + "\x00" + messaging.NormalizeHarness(row.Harness) + "\x00" + native
 }
 
 func provenanceAddress(row SessionProvenance) string {
-	address, err := messaging.FormatAddress(row.Host, row.Harness, row.Session)
+	address, err := messaging.FormatAddress(row.Host, row.Harness, row.nativeSessionID())
 	if err != nil {
 		return ""
 	}
@@ -413,13 +425,13 @@ func commitSession(sha string) (string, error) {
 	return "", fmt.Errorf("commit %s is not recorded in the commit ledger (commits before the hook existed, or outside a harness session, are not covered)", sha)
 }
 
-// sessionOwningFiber finds the ledger rows for a session UUID and returns the
-// most recent fiber path plus the intrinsic UID.
+// sessionOwningFiber finds ledger rows by transcript or Codex App thread id
+// and returns the most recent fiber path plus the intrinsic UID.
 func sessionOwningFiber(records []SessionProvenance, session string) (string, string, error) {
 	fiber, uid := "", ""
 	var at int64 = -1
 	for _, row := range records {
-		if row.Session != session {
+		if row.Session != session && row.ThreadID != session {
 			continue
 		}
 		if row.At >= at {

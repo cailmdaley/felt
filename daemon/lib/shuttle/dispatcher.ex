@@ -1184,7 +1184,8 @@ defmodule Shuttle.Dispatcher do
           thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
           Keyword.merge(opts,
             harness: "codex",
-            ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume)
+            ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume),
+            thread_id: id
           )
         )
 
@@ -1675,6 +1676,7 @@ defmodule Shuttle.Dispatcher do
       # invisible to latest_for_uid forever (the claim path already passes it).
       uid: Keyword.get(opts, :uid),
       session: uuid,
+      thread_id: Keyword.get(opts, :thread_id),
       tmux: Keyword.get(opts, :tmux),
       harness: Keyword.get(opts, :harness),
       kind: Keyword.get(opts, :ledger_kind, :dispatch),

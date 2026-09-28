@@ -561,6 +561,13 @@ func (s *Storage) FindMetadataWithoutGuessing(scopeID, query string) (*Felt, err
 	return f, nil
 }
 
+// NoFiberMatchError reports that a lookup found no fiber for its exact query.
+type NoFiberMatchError struct{ Query string }
+
+func (e *NoFiberMatchError) Error() string {
+	return fmt.Sprintf("no fiber found matching %q", e.Query)
+}
+
 // GuessError is a query that only a guess resolves — to Guess, in the
 // enclosing store at Root when set (see FindMetadataWithoutGuessing).
 type GuessError struct {
@@ -1468,7 +1475,7 @@ func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode P
 		// slug rescue — would answer with a different fiber that `rm` or
 		// `nest` then acts on.
 		if rel, stray := s.strayAt(candidate); stray {
-			return nil, false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
+			return nil, false, strayHintError(&NoFiberMatchError{Query: query}, rel)
 		}
 	}
 	return nil, false, nil
@@ -1919,7 +1926,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", resolvedExact, fmt.Errorf("no fiber found matching %q", query)
+		return "", resolvedExact, &NoFiberMatchError{Query: query}
 	}
 
 	if id, via, ok, err := r.resolveByPath(scopeID, query); ok || err != nil {
@@ -1963,7 +1970,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 		return ids[0], resolvedBySlug, nil
 	}
 
-	return "", resolvedExact, fmt.Errorf("no fiber found matching %q", query)
+	return "", resolvedExact, &NoFiberMatchError{Query: query}
 }
 
 // ResolvePath is the answer a reference's PATH gives, as opposed to the one
@@ -2008,7 +2015,7 @@ func (r *scopedIDResolver) resolveByPath(scopeID, query string) (string, resolut
 	// file; the enclosing store's own slug and suffix rules must not answer
 	// it with a same-named fiber elsewhere.
 	if rel, ok := r.external.strayAt(scopeID, query); ok {
-		return "", resolvedExact, false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
+		return "", resolvedExact, false, strayHintError(&NoFiberMatchError{Query: query}, rel)
 	}
 
 	// A query that is a fiber's id in the enclosing store, written out from
@@ -2049,7 +2056,7 @@ func (r *scopedIDResolver) exactInStore(scopeID, query string) (string, bool, er
 		}
 		if r.strayAt != nil {
 			if rel, ok := r.strayAt(candidate); ok {
-				return "", false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
+				return "", false, strayHintError(&NoFiberMatchError{Query: query}, rel)
 			}
 		}
 	}

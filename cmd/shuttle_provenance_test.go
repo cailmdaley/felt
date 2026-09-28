@@ -320,6 +320,26 @@ func TestShuttleSessions_ProvenanceTablePrintsCanonicalHarness(t *testing.T) {
 	}
 }
 
+func TestShuttleSessions_AppTranscriptAddressUsesThreadID(t *testing.T) {
+	const transcriptID = "22222222-2222-4222-8222-222222222222"
+	const threadID = "11111111-1111-4111-8111-111111111111"
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + transcriptID + `","thread_id":"` + threadID + `","host":"node","harness":"codex","kind":"claim","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
+		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
+	})
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "work/worker", "--json")
+	if err != nil {
+		t.Fatalf("sessions: %v\n%s", err, out)
+	}
+	var rows []SessionProvenance
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Session != transcriptID || rows[0].Address != "shuttle://node/codex/"+threadID {
+		t.Fatalf("app transcript/thread pairing = %#v", rows)
+	}
+}
+
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
 	server := provenanceDaemon(t, []byte("x\n"))
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
@@ -342,6 +362,30 @@ func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
 	}
 	if len(result.Sessions) != 1 || len(result.Sessions[0].Events) != 2 {
 		t.Fatalf("owning fiber's session rows missing: %#v", result.Sessions)
+	}
+}
+
+func TestShuttleSessions_ReverseLookupByCodexThreadID(t *testing.T) {
+	const transcriptID = "22222222-2222-4222-8222-222222222222"
+	const threadID = "11111111-1111-4111-8111-111111111111"
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + transcriptID + `","thread_id":"` + threadID + `","host":"node","harness":"codex","kind":"claim","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
+		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
+	})
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", threadID, "--json")
+	if err != nil {
+		t.Fatalf("sessions: %v\n%s", err, out)
+	}
+	var result struct {
+		Owner sessionOwner        `json:"owner"`
+		Rows  []SessionProvenance `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Owner.Session != threadID || result.Owner.Fiber != "work/worker" || len(result.Rows) != 1 ||
+		result.Rows[0].Address != "shuttle://node/codex/"+threadID {
+		t.Fatalf("thread-id lookup did not preserve the peer address: %#v", result)
 	}
 }
 

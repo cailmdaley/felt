@@ -77,8 +77,9 @@ defmodule Shuttle.SessionLedger do
   @doc """
   Append one pairing.
 
-  Required: `:fiber`, `:session`, `:kind`. Optional: `:tmux`, `:harness`,
-  `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
+  Required: `:fiber`, `:session`, `:kind`. Optional: `:thread_id` (the Codex
+  App Server address id; `:session` may name a different transcript id), `:tmux`,
+  `:harness`, `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
   own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
   and `:collaboration` (the exact launch-time participation snapshot). `:model`
   records the configured model passed to a launch command, not a claim about a
@@ -125,6 +126,7 @@ defmodule Shuttle.SessionLedger do
           "at" => Keyword.get(fields, :at) || System.system_time(:millisecond),
           "kind" => kind
         }
+        |> maybe_put("thread_id", presence(Keyword.get(fields, :thread_id)))
         |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
         |> maybe_put("model", presence(Keyword.get(fields, :model)))
         |> maybe_put("collaboration", collaboration(Keyword.get(fields, :collaboration)))

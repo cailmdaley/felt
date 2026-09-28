@@ -3003,6 +3003,7 @@ defmodule Shuttle.Poller do
               fiber: fiber_id,
               uid: fiber["uid"],
               session: Shuttle.AppWorkers.transcript_id(id),
+              thread_id: id,
               harness: "codex",
               kind: :claim,
               agent: app_claim_agent(id, opts),

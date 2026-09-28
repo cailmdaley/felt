@@ -99,7 +99,7 @@ defmodule Shuttle.Messaging do
             if Enum.all?(sessions, &valid_session?/1) and valid_gaps?(gaps),
               do: %{
                 host: host,
-                sessions: sessions |> attach_session_fibers(host) |> alias_sessions(host),
+                sessions: sessions |> alias_sessions(host) |> attach_session_fibers(host),
                 gaps: alias_gaps(gaps, host)
               },
               else: malformed_local_directory(host)
@@ -108,7 +108,7 @@ defmodule Shuttle.Messaging do
             if Enum.all?(sessions, &valid_session?/1),
               do: %{
                 host: host,
-                sessions: sessions |> attach_session_fibers(host) |> alias_sessions(host),
+                sessions: sessions |> alias_sessions(host) |> attach_session_fibers(host),
                 gaps: []
               },
               else: malformed_local_directory(host)
@@ -181,26 +181,46 @@ defmodule Shuttle.Messaging do
   end
 
   defp attach_session_fibers(sessions, host) do
-    fibers_by_session = cached_session_fiber_index(host)
+    index = cached_session_fiber_index(host)
+    fibers_by_session = index.fibers_by_session
 
-    Enum.map(sessions, fn session ->
-      session = stringify_keys(session)
+    annotated =
+      Enum.map(sessions, fn session ->
+        session = stringify_keys(session)
 
-      case Map.get(session, "address") do
-        address when is_binary(address) ->
-          case parse_address(address) do
-            {:ok, %{native: native}} ->
-              case Map.get(fibers_by_session, native) do
-                fiber when is_binary(fiber) -> Map.put(session, "fiber", fiber)
-                _ -> session
-              end
+        case Map.get(session, "address") do
+          address when is_binary(address) ->
+            case parse_address(address) do
+              {:ok, %{native: native}} ->
+                case Map.get(fibers_by_session, native) do
+                  %{"fiber" => fiber} = pairing ->
+                    Map.merge(session, Map.take(pairing, ["fiber", "fiber_uid", "transcript_id"]))
+                    |> Map.put("fiber", fiber)
 
-            _ ->
-              session
-          end
+                  _ ->
+                    session
+                end
 
-        _ ->
-          session
+              _ ->
+                session
+            end
+
+          _ ->
+            session
+        end
+      end)
+
+    Enum.reduce(index.app_sessions, annotated, fn app_worker, sessions ->
+      address = app_worker["address"]
+
+      case Enum.find_index(sessions, &(&1["address"] == address)) do
+        nil ->
+          sessions ++ [app_worker]
+
+        index ->
+          List.update_at(sessions, index, fn session ->
+            Map.merge(session, Map.take(app_worker, ["fiber", "fiber_uid", "transcript_id"]))
+          end)
       end
     end)
   end
@@ -211,23 +231,23 @@ defmodule Shuttle.Messaging do
   # second.
   defp cached_session_fiber_index(host) do
     path = SessionLedger.default_path()
-    token = session_ledger_file_token(path)
+    token = {session_ledger_file_token(path), app_worker_directory_token()}
 
     case :persistent_term.get(@session_fiber_cache_key, nil) do
-      %{path: ^path, host: ^host, token: ^token, fibers: fibers} ->
-        fibers
+      %{path: ^path, host: ^host, token: ^token, index: index} ->
+        index
 
       _ ->
-        fibers = read_session_fiber_index(host)
+        index = read_session_fiber_index(host)
 
         :persistent_term.put(@session_fiber_cache_key, %{
           path: path,
           host: host,
           token: token,
-          fibers: fibers
+          index: index
         })
 
-        fibers
+        index
     end
   end
 
@@ -242,22 +262,88 @@ defmodule Shuttle.Messaging do
   end
 
   defp read_session_fiber_index(host) do
-    SessionLedger.read_since(0)
-    |> Enum.reduce(%{}, fn record, acc ->
-      session = record["session"]
-      fiber = record["fiber"]
-      at = if is_integer(record["at"]), do: record["at"], else: 0
+    ledger_index =
+      SessionLedger.read_since(0)
+      |> Enum.reduce(%{}, fn record, acc ->
+        session = record["session"]
+        native = record["thread_id"] || session
+        fiber = record["fiber"]
+        at = if is_integer(record["at"]), do: record["at"], else: 0
 
-      if record["host"] == host and is_binary(session) and session != "" and
-           is_binary(fiber) and fiber != "" do
-        Map.update(acc, session, {at, fiber}, fn {previous_at, previous_fiber} ->
-          if at >= previous_at, do: {at, fiber}, else: {previous_at, previous_fiber}
-        end)
+        if record["host"] == host and is_binary(session) and session != "" and
+             is_binary(native) and native != "" and is_binary(fiber) and fiber != "" do
+          entry = session_fiber_entry(record["uid"], fiber, if(native != session, do: session))
+
+          Map.update(acc, native, {at, entry}, fn {previous_at, previous_entry} ->
+            if at >= previous_at, do: {at, entry}, else: {previous_at, previous_entry}
+          end)
+        else
+          acc
+        end
+      end)
+      |> Map.new(fn {native, {_at, entry}} -> {native, entry} end)
+
+    app_index = app_worker_fiber_index()
+
+    %{
+      fibers_by_session:
+        Map.merge(ledger_index, app_index, fn _native, ledger, app_worker ->
+          Map.merge(ledger, app_worker)
+        end),
+      app_sessions: app_worker_peer_rows(app_index, host)
+    }
+  end
+
+  defp app_worker_peer_rows(app_index, host) do
+    app_index
+    |> Enum.map(fn {native, pairing} ->
+      %{
+        "address" => address(host, "codex", native),
+        "host" => host,
+        "harness" => "codex",
+        "id" => native,
+        "fiber" => pairing["fiber"],
+        "state" => "unknown",
+        "capabilities" => []
+      }
+      |> Map.merge(Map.take(pairing, ["fiber_uid", "transcript_id", "cwd"]))
+    end)
+    |> Enum.sort_by(& &1["address"])
+  end
+
+  defp app_worker_fiber_index do
+    Shuttle.AppWorkers.active()
+    |> Enum.reduce(%{}, fn record, acc ->
+      thread = record["session_uuid"] || record["thread_id"]
+      transcript = record["transcript_session_uuid"] || thread
+      fiber = record["fiber_id"]
+
+      if is_binary(thread) and thread != "" and is_binary(fiber) and fiber != "" do
+        entry =
+          session_fiber_entry(record["uid"], fiber, if(transcript != thread, do: transcript))
+          |> Map.put("app_worker", true)
+          |> maybe_map_put("cwd", record["cwd"])
+
+        Map.put(acc, thread, entry)
       else
         acc
       end
     end)
-    |> Map.new(fn {session, {_at, fiber}} -> {session, fiber} end)
+  end
+
+  defp session_fiber_entry(uid, fiber, transcript) do
+    %{"fiber" => fiber}
+    |> maybe_map_put("fiber_uid", uid)
+    |> maybe_map_put("transcript_id", transcript)
+  end
+
+  defp app_worker_directory_token do
+    path = Shuttle.AppWorkers.root()
+
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} -> {path, mtime, size, inode}
+      _ -> {path, nil}
+    end
   end
 
   defp alias_sessions(sessions, host) do
@@ -650,6 +736,9 @@ defmodule Shuttle.Messaging do
     |> String.to_charlist()
     |> Enum.any?(&(&1 < 32 or &1 == 127))
   end
+
+  defp maybe_map_put(map, _key, value) when not is_binary(value) or value == "", do: map
+  defp maybe_map_put(map, key, value), do: Map.put(map, key, value)
 
   defp stringify_keys(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
   defp render_error(reason) when is_binary(reason), do: reason

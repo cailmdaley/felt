@@ -269,7 +269,8 @@ defmodule Shuttle.AppWorkersTest do
 
     assert Enum.any?(Shuttle.SessionLedger.read_since(0), fn entry ->
              entry["kind"] == "claim" and entry["fiber"] == id and
-               entry["session"] == "native-transcript"
+               entry["session"] == "native-transcript" and
+               entry["thread_id"] == "existing-thread"
            end)
   end
 
@@ -1085,6 +1086,12 @@ defmodule Shuttle.AppWorkersTest do
 
     assert get_in(Runner.fiber("tests/app"), ["shuttle", "runtime", "session_uuid"]) ==
              "app-session-1"
+
+    assert Enum.any?(Shuttle.SessionLedger.read_since(0), fn entry ->
+             entry["fiber"] == "tests/app" and entry["kind"] == "dispatch" and
+               entry["session"] == "native-transcript-id" and
+               entry["thread_id"] == "app-session-1"
+           end)
 
     assert {"", 0} = WorkerBackend.stop(Runner, session)
     assert {:ok, ^session} = dispatch("tests/app", resume_mode: "previous")

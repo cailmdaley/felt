@@ -23,6 +23,8 @@ type Session struct {
 	Harness      string   `json:"harness"`
 	ID           string   `json:"id"`
 	Fiber        string   `json:"fiber,omitempty"`
+	FiberUID     string   `json:"fiber_uid,omitempty"`
+	TranscriptID string   `json:"transcript_id,omitempty"`
 	Title        string   `json:"title"`
 	CWD          string   `json:"cwd"`
 	State        string   `json:"state"`

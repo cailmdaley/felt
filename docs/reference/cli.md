@@ -142,6 +142,9 @@ untouched by any of this.
 | `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
 | `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 
+`attach`, `session-name`, and fiber message targets require one exact match across
+configured stores; they refuse guessed paths and duplicate matches.
+
 ### Codex desktop bridge
 
 `felt shuttle codex-desktop-bridge` adapts the desktop application's JSONL
@@ -196,9 +199,10 @@ felt shuttle message <address> "Background for your next task" --context-only
 Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
 one exact match across configured stores; they refuse guesses and duplicate
 matches. The target checks `shuttle.runtime.session_uuid` against the newest
-dispatch or resume in the session ledger and refuses a disagreement; sync the
-store or pass an explicit address. Ambiguous session IDs fail with their
-candidate addresses. Addresses
+dispatch, resume, or claim pairing and refuses a disagreement; sync the store
+or pass an explicit address. A Codex App ledger row keeps its transcript id in
+`session` and its address id in `thread_id`. Ambiguous session IDs fail with
+their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 

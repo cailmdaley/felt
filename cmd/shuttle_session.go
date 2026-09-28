@@ -58,7 +58,8 @@ func lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
 			lookup.Guesses = append(lookup.Guesses, guessedAddressFiber{Guess: guess, Store: store})
 			continue
 		}
-		if strings.Contains(err.Error(), "no fiber found matching") {
+		var missing *felt.NoFiberMatchError
+		if errors.As(err, &missing) {
 			continue
 		}
 		return lookup, fmt.Errorf("resolving fiber %q in store %s: %w", query, store, err)

@@ -170,6 +170,7 @@ func TestResolveMessageTargetFiberPathSlugAndUID(t *testing.T) {
 		Host:    "worker-node",
 		Harness: "claude-code",
 		Fiber:   "work/worker",
+		Kind:    "dispatch",
 	}})
 
 	for _, target := range []string{"work/worker", "worker", messageTargetFiberUID} {
@@ -203,6 +204,66 @@ func TestResolveMessageTargetFiberRequiresLedgerEvidence(t *testing.T) {
 	}
 }
 
+func TestResolveMessageTargetCodexAppUsesPeerThreadAddress(t *testing.T) {
+	const threadID = "11111111-1111-4111-8111-111111111111"
+	const transcriptID = "22222222-2222-4222-8222-222222222222"
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "codex-luna",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": threadID},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, []messaging.Session{{
+		Address: "shuttle://worker-node/codex/" + threadID,
+		Host:    "worker-node", Harness: "codex", ID: threadID,
+		Fiber: "work/worker", FiberUID: messageTargetFiberUID, TranscriptID: transcriptID,
+	}}, []SessionProvenance{{
+		Fiber: "work/worker", UID: messageTargetFiberUID, Session: transcriptID,
+		Host: "worker-node", Harness: "codex", At: 2, Kind: "claim",
+	}})
+
+	for _, target := range []string{"work/worker", transcriptID, threadID} {
+		got, err := resolveMessageTarget(target)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", target, err)
+		}
+		if want := "shuttle://worker-node/codex/" + threadID; got != want {
+			t.Errorf("resolve %q = %q, want peer-view address %q", target, got, want)
+		}
+	}
+}
+
+func TestResolveMessageTargetCodexAppUsesLedgerThreadID(t *testing.T) {
+	const threadID = "11111111-1111-4111-8111-111111111111"
+	const transcriptID = "22222222-2222-4222-8222-222222222222"
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "codex-luna",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": threadID},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, []messaging.Session{{
+		Address: "shuttle://worker-node/codex/" + threadID,
+		Host:    "worker-node", Harness: "codex", ID: threadID,
+		Fiber: "work/worker", FiberUID: messageTargetFiberUID, TranscriptID: transcriptID,
+	}}, []SessionProvenance{{
+		Fiber: "work/worker", UID: messageTargetFiberUID, Session: transcriptID,
+		ThreadID: threadID, Host: "worker-node", Harness: "codex", At: 2, Kind: "claim",
+	}})
+
+	got, err := resolveMessageTarget("work/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "shuttle://worker-node/codex/" + threadID; got != want {
+		t.Fatalf("resolved address = %q, want peer-view address %q", got, want)
+	}
+}
+
 func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
 	store := writeMessageTargetFiber(t, map[string]any{
 		"kind":        "oneshot",
@@ -231,9 +292,10 @@ func TestResolveMessageTargetNotFound(t *testing.T) {
 func TestResolveMessageTargetCanUseLedgerWhenDiscoveryFails(t *testing.T) {
 	isolateMessageFiberStore(t, "")
 	ledger, err := json.Marshal(sessionLedgerResponse{Records: []SessionProvenance{{
-		Session: messageTargetSession,
-		Host:    "ledger-node",
-		Harness: "codex",
+		Session:  messageTargetSession,
+		ThreadID: messageTargetSession,
+		Host:     "ledger-node",
+		Harness:  "codex",
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +366,7 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 		},
 		{
 			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-session",
-			Host: "new-node", Harness: "codex", At: 2, Kind: "resume",
+			Host: "new-node", Harness: "codex", At: 2, Kind: "claim",
 		},
 	})
 
@@ -313,6 +375,30 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 		!strings.Contains(err.Error(), "new-session") || !strings.Contains(err.Error(), "sync the store") ||
 		!strings.Contains(err.Error(), "explicit shuttle:// address") {
 		t.Fatalf("expected stale-runtime refusal naming both sessions and remedies, got %v", err)
+	}
+}
+
+func TestResolveMessageTargetIgnoresEmptyBackfillRow(t *testing.T) {
+	const runtimeID = "7b57d3d9-92c8-4d22-b0bd-3a2db1c56ea0"
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": runtimeID},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, []SessionProvenance{
+		{Fiber: "work/worker", UID: messageTargetFiberUID, Session: runtimeID, Host: "worker-node", Harness: "claude-code", At: 1, Kind: "dispatch"},
+		{Fiber: "work/worker", UID: messageTargetFiberUID, Host: "worker-node", Harness: "codex", At: 2, Kind: "dispatch"},
+	})
+
+	got, err := resolveMessageTarget("work/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "shuttle://worker-node/claude/" + runtimeID; got != want {
+		t.Fatalf("resolved address = %q, want %q", got, want)
 	}
 }
 

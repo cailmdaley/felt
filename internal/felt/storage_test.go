@@ -18,6 +18,19 @@ func TestNewStorage(t *testing.T) {
 	}
 }
 
+func TestFindMetadataWithoutGuessingUsesTypedNotFound(t *testing.T) {
+	storage := NewStorage(t.TempDir())
+	if err := storage.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := storage.FindMetadataWithoutGuessing("", "missing")
+	var missing *NoFiberMatchError
+	if !errors.As(err, &missing) || missing.Query != "missing" {
+		t.Fatalf("not-found error = %v, want typed NoFiberMatchError", err)
+	}
+}
+
 func TestStorageInit(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStorage(dir)

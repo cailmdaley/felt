@@ -108,7 +108,8 @@ Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 `tmux_session: null`. For app workers, `session_uuid` is the resumable
 conversation identity (the same value as `thread_id`);
 `transcript_session_uuid` is the native transcript identity, which can differ
-for a fork. Session ledgers use the transcript identity. CLI responses carry
+for a fork. Session ledgers keep the transcript identity in `session` and carry
+`thread_id` as the Codex App address identity. CLI responses carry
 `surface: "cli"` and their real `tmux_session`. A claim can attach an existing
 native Codex conversation only after the connected App Server read-verifies its
 exact id and active or idle state. The claim records ownership without starting,
@@ -179,9 +180,11 @@ harness processes sharing one transcript.
 `GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
 configured daemon once with `local=true`; an offline, old, timed-out, or
 malformed peer becomes an explicit `{host, error}` gap while successful peers
-remain usable. A session row includes `fiber` when its host's session ledger
-records the pairing. Returned addresses use the configured routing alias and
-canonical harness name: `shuttle://HOST/HARNESS/NATIVE_ID`, where `HARNESS` is
+remain usable. A session row includes `fiber` and `fiber_uid` when its host
+knows the pairing. A Codex App row also includes `transcript_id` when the
+addressed thread and native transcript have different ids. Returned addresses
+use the configured routing alias and canonical harness name:
+`shuttle://HOST/HARNESS/NATIVE_ID`, where `HARNESS` is
 `claude`, `codex`, or `pi`.
 
 `POST /messages` accepts `{address, text, from, wake, message_id}` with a full
@@ -306,7 +309,7 @@ writes the files underneath.
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
-| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; `uid=` narrows to one fiber |
+| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; Codex App rows may carry a separate `thread_id`; `uid=` narrows to one fiber |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
