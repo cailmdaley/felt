@@ -20,6 +20,7 @@ func sendFileTestEnv(t *testing.T) (string, string) {
 	t.Setenv("TMUX", "")
 	t.Setenv("CODEX_THREAD_ID", "codex-session")
 	t.Setenv("CLAUDE_SESSION_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("SHUTTLE_SESSIONS_FILE", filepath.Join(dir, "sessions.jsonl"))
 	artifact := filepath.Join(dir, "report with spaces.html")
 	if err := os.WriteFile(artifact, []byte("hello"), 0600); err != nil {
@@ -114,7 +115,7 @@ func TestSendFilesIdentityPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sink, artifact := sendFileTestEnv(t)
 			t.Setenv("CODEX_THREAD_ID", tc.codex)
-			t.Setenv("CLAUDE_SESSION_ID", tc.claude)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
 			cwd, _ := os.Getwd()
 			relative, err := filepath.Rel(cwd, artifact)
 			if err != nil {

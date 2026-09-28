@@ -19,7 +19,7 @@ var shuttleSendFileCmd = &cobra.Command{
 host and Shuttle serves them through its existing owner-routed file surface.
 All paths must be readable regular files; validation completes before recording.
 
-Session attribution uses --session, CODEX_THREAD_ID, CLAUDE_SESSION_ID, or
+Session attribution uses --session, CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID, or
 this tmux session's latest local session-ledger entry. A Shuttle worker's tmux
 name also associates the delivery with its fiber. Outside a harness, supply
 --session explicitly. Recording works while the daemon is offline; it does not
@@ -81,10 +81,7 @@ func sendFiles(paths []string, session string) ([]string, error) {
 	tmux := currentTmuxSession()
 	session = strings.TrimSpace(session)
 	if session == "" {
-		session = strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
-	}
-	if session == "" {
-		session = strings.TrimSpace(os.Getenv("CLAUDE_SESSION_ID"))
+		_, session = harnessSessionFromEnv()
 	}
 	if session == "" {
 		session = sendFileLedgerSession(tmux)

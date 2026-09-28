@@ -326,7 +326,7 @@ paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.
 
-Session identity comes from `--session`, `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`,
+Session identity comes from `--session`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`,
 or the current tmux session's local ledger. A worker's tmux name identifies its
 fiber. Outside a harness, pass `--session <native-session-id>`.
 The event stream uses the same configuration as `felt hook event`; recording

@@ -351,22 +351,35 @@ func resolveMessageSender(explicit string) string {
 	if explicit = strings.TrimSpace(explicit); explicit != "" {
 		return explicit
 	}
-	for _, candidate := range []struct {
-		key, label string
-	}{
-		{"CODEX_THREAD_ID", "codex"},
-		{"CLAUDE_SESSION_ID", "claude"},
-	} {
-		if value := strings.TrimSpace(os.Getenv(candidate.key)); value != "" {
-			if host, err := resolveOwnHost(""); err == nil {
-				if address, err := messaging.FormatAddress(host, candidate.label, value); err == nil {
-					return address
-				}
+	if harness, value := harnessSessionFromEnv(); value != "" {
+		if host, err := resolveOwnHost(""); err == nil {
+			if address, err := messaging.FormatAddress(host, harness, value); err == nil {
+				return address
 			}
-			return candidate.label + ":" + value
 		}
+		return harness + ":" + value
 	}
 	return "external"
+}
+
+// harnessSessionEnv lists, in precedence order, the environment variables a
+// harness exports with its native session id. Claude Code exports
+// CLAUDE_CODE_SESSION_ID; CLAUDE_SESSION_ID is accepted for wrappers that set it.
+var harnessSessionEnv = []struct{ key, harness string }{
+	{"CODEX_THREAD_ID", "codex"},
+	{"CLAUDE_CODE_SESSION_ID", "claude"},
+	{"CLAUDE_SESSION_ID", "claude"},
+}
+
+// harnessSessionFromEnv returns the calling harness and its native session id,
+// or empty strings outside a recognised harness session.
+func harnessSessionFromEnv() (harness, id string) {
+	for _, candidate := range harnessSessionEnv {
+		if value := strings.TrimSpace(os.Getenv(candidate.key)); value != "" {
+			return candidate.harness, value
+		}
+	}
+	return "", ""
 }
 
 func postMessage(request messaging.Request) (messaging.Receipt, error) {

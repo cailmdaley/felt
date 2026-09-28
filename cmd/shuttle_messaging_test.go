@@ -434,6 +434,22 @@ func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
 	}
 }
 
+// Claude Code exports CLAUDE_CODE_SESSION_ID; a Claude sender must get a
+// reply address, not "external".
+func TestResolveMessageSenderFromClaudeCodeSession(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "sender")
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7")
+	if got := resolveMessageSender(""); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
+		t.Fatalf("sender = %q", got)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if got := resolveMessageSender(""); got != "external" {
+		t.Fatalf("sender outside a harness = %q", got)
+	}
+}
+
 func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
 	directory := messaging.Directory{
 		Host: "hub",
