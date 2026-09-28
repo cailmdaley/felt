@@ -3,12 +3,16 @@ package messaging
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -86,6 +90,78 @@ func nativeRows(frame map[string]any, f *os.File, synthetic bool) {
 	}
 }
 
+func TestObserveClaudeTurnReportsFurthestObservedStage(t *testing.T) {
+	const (
+		uuid    = "message-uuid"
+		content = "the queued content"
+	)
+	tests := []struct {
+		name  string
+		rows  []map[string]any
+		stage string
+	}{
+		{
+			name:  "queue operation is queued",
+			rows:  []map[string]any{{"type": "queue-operation", "operation": "enqueue", "sessionId": "session", "content": content}},
+			stage: StatusQueued,
+		},
+		{
+			name:  "native user row is submitted",
+			rows:  []map[string]any{{"type": "user", "sessionId": "session", "uuid": uuid}},
+			stage: StatusSubmitted,
+		},
+		{
+			name:  "queued command attachment is submitted",
+			rows:  []map[string]any{{"type": "attachment", "sessionId": "session", "uuid": "queued", "attachment": map[string]any{"type": "queued_command", "source_uuid": uuid}}},
+			stage: StatusSubmitted,
+		},
+		{
+			name: "real correlated assistant row is accepted",
+			rows: []map[string]any{
+				{"type": "user", "sessionId": "session", "uuid": uuid},
+				{"type": "assistant", "sessionId": "session", "uuid": "assistant", "parentUuid": uuid, "message": map[string]any{"role": "assistant", "model": "claude-test"}},
+			},
+			stage: StatusAccepted,
+		},
+		{name: "no evidence stays unknown", stage: StatusUnknown},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "transcript.jsonl")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range tc.rows {
+				if err := json.NewEncoder(f).Encode(row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
+			f, err = os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+			defer cancel()
+			stage, err := observeClaudeTurn(ctx, f, path, "session", uuid, claudeContentHash(content), nil)
+			if stage != tc.stage {
+				t.Fatalf("stage = %q, want %q (err %v)", stage, tc.stage, err)
+			}
+			if tc.stage == StatusAccepted {
+				if err != nil {
+					t.Fatalf("accepted row: %v", err)
+				}
+			} else if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("incomplete stage error = %v, want deadline", err)
+			}
+		})
+	}
+}
+
 func TestClaudeNativeWakeAndAttachmentRetry(t *testing.T) {
 	req, sent := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 	req.Attachments = []Attachment{{Name: "notes.bin", Data: []byte{0, 1, 255}}}
@@ -153,6 +229,68 @@ func busyReceiverRows(frame map[string]any, f *os.File, absorb bool) {
 	}
 }
 
+func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
+	frameCh := make(chan map[string]any, 1)
+	req, sent := nativeClaudeFixture(t, func(frame map[string]any, _ *os.File) { frameCh <- frame })
+	registration, err := readClaudeNative("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := make([]byte, 9<<20)
+	if err := os.WriteFile(registration.Transcript, prefix, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	first, firstErr := Send(ctx, "host", req)
+	cancel()
+	if first.Status != StatusUnknown || ErrorCode(firstErr) != "ambiguous_delivery" {
+		t.Fatalf("first receipt: %+v %v", first, firstErr)
+	}
+	frame := <-frameCh
+	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busyReceiverRows(frame, transcript, true)
+	if err := transcript.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Send(context.Background(), "host", req)
+	if err != nil || upgraded.Status != StatusAccepted || sent.Load() != 1 {
+		t.Fatalf("retry: %+v %v socket writes=%d", upgraded, err, sent.Load())
+	}
+	name := sha256.Sum256([]byte(req.MessageID))
+	stored, err := readDedupRecord(filepath.Join(dataDir(), "messages", hex.EncodeToString(name[:])+".json"))
+	if err != nil || stored.Receipt.Status != StatusAccepted || stored.ErrorCode != "" || stored.TranscriptOffset == nil || *stored.TranscriptOffset != int64(len(prefix)) {
+		t.Fatalf("stored upgrade: %+v err=%v", stored, err)
+	}
+}
+
+func TestClaudeNativeRetryWithoutOffsetKeepsStoredReceipt(t *testing.T) {
+	req, sent := nativeClaudeFixture(t, func(map[string]any, *os.File) {})
+	frame := map[string]any{"uuid": claudeNativeUUID(req)}
+	registration, err := readClaudeNative("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeRows(frame, transcript, false)
+	if err := transcript.Close(); err != nil {
+		t.Fatal(err)
+	}
+	storedReceipt := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"}
+	writeDedupRecord(t, dataDir(), req, record{Hash: requestHash(req), State: "complete", Receipt: storedReceipt, ErrorCode: "ambiguous_delivery", ErrorMessage: "stored unknown"})
+
+	receipt, err := Send(context.Background(), "host", req)
+	if ErrorCode(err) != "ambiguous_delivery" || !reflect.DeepEqual(receipt, storedReceipt) || sent.Load() != 0 {
+		t.Fatalf("retry changed an offset-less record or wrote to socket: %+v %v writes=%d", receipt, err, sent.Load())
+	}
+}
+
 func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, true) })
 	r, err := Send(context.Background(), "host", req)
@@ -161,12 +299,12 @@ func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 	}
 }
 
-func TestClaudeNativeQueuedBehindTurnSaysSo(t *testing.T) {
+func TestClaudeNativeQueuedBehindTurnReportsQueueAdmission(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false) })
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
-	if ErrorCode(err) != "ambiguous_delivery" || r.Status != StatusUnknown || !strings.Contains(r.Detail, "queued behind the receiver's current turn") {
+	if err != nil || r.Status != StatusQueued || r.Detail != "queued behind the receiver's current turn; it runs when that turn ends" {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
@@ -185,10 +323,10 @@ func TestClaudeNativeAbsorptionOfAnotherMessageIsNotEvidence(t *testing.T) {
 	}
 }
 
-func TestClaudeNativeSyntheticErrorIsNotStarted(t *testing.T) {
+func TestClaudeNativeSyntheticErrorStillReportsSubmission(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { nativeRows(frame, f, true) })
 	r, err := Send(context.Background(), "host", req)
-	if err == nil || r.Status != StatusUnknown || !strings.Contains(r.Detail, "assistant error") {
+	if err != nil || r.Status != StatusSubmitted || r.Detail != "the receiver took this message as a user turn; no model reply observed yet" {
 		t.Fatalf("%+v %v", r, err)
 	}
 }

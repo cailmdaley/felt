@@ -80,8 +80,14 @@ func stringField(m map[string]any, keys ...string) string {
 	return ""
 }
 func (claudeAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
+	receipt, err, _ := (claudeAdapter{}).sendWithDedupMetadata(ctx, a, r)
+	return receipt, err
+}
+
+func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, a Address, r Request) (Receipt, error, dedupMetadata) {
 	if r.Wake {
-		return sendClaudeNative(ctx, a, r)
+		return sendClaudeNativeWithMetadata(ctx, a, r)
 	}
-	return QueueMailbox(a, r)
+	receipt, err := QueueMailbox(a, r)
+	return receipt, err, dedupMetadata{}
 }

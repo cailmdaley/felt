@@ -67,23 +67,28 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedup(ctx, req, func() (Receipt, error) {
+	return withDedupDetailed(ctx, req, func() dedupSendResult {
 		files, err := materializeAttachments(req.MessageID, req.Attachments)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
-			return receipt, errCode("preflight_failed", "cannot store attachments: %v", err)
+			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "cannot store attachments: %v", err)}
 		}
 		text, err := renderAttachmentText(req.Text, files)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
-			return receipt, errCode("preflight_failed", "%v", err)
+			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "%v", err)}
 		}
 		delivery := req
 		delivery.Text = text
 		delivery.Attachments = nil
-		receipt, sendErr := a.send(ctx, addr, delivery)
-		receipt.Files = files
-		return receipt, sendErr
+		var result dedupSendResult
+		if detailed, ok := a.(dedupMetadataSender); ok {
+			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(ctx, addr, delivery)
+		} else {
+			result.Receipt, result.Err = a.send(ctx, addr, delivery)
+		}
+		result.Receipt.Files = files
+		return result
 	})
 }
 

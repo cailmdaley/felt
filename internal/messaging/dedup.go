@@ -8,17 +8,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
 type record struct {
-	Hash         string  `json:"hash"`
-	State        string  `json:"state"`
-	Receipt      Receipt `json:"receipt"`
-	ErrorCode    string  `json:"error_code,omitempty"`
-	ErrorMessage string  `json:"error_message,omitempty"`
-	OwnerPID     int     `json:"owner_pid,omitempty"`
-	OwnerStart   string  `json:"owner_start_time,omitempty"`
+	Hash                   string  `json:"hash"`
+	State                  string  `json:"state"`
+	Receipt                Receipt `json:"receipt"`
+	ErrorCode              string  `json:"error_code,omitempty"`
+	ErrorMessage           string  `json:"error_message,omitempty"`
+	OwnerPID               int     `json:"owner_pid,omitempty"`
+	OwnerStart             string  `json:"owner_start_time,omitempty"`
+	TranscriptOffset       *int64  `json:"transcript_offset,omitempty"`
+	ClaudeQueueContentHash string  `json:"claude_queue_content_hash,omitempty"`
 }
 
 func requestHash(r Request) string {
@@ -36,8 +39,23 @@ const (
 	duplicatePollInterval = 150 * time.Millisecond
 )
 
+type dedupMetadata struct {
+	ClaudeTranscriptOffset *int64
+	ClaudeQueueContentHash string
+}
+
+type dedupSendResult struct {
+	Receipt  Receipt
+	Err      error
+	Metadata dedupMetadata
+}
+
 func withDedup(ctx context.Context, req Request, send func() (Receipt, error)) (Receipt, error) {
 	return withDedupTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
+}
+
+func withDedupDetailed(ctx context.Context, req Request, send func() dedupSendResult) (Receipt, error) {
+	return withDedupDetailedTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
 }
 
 // withDedupTimeout permits tests to exercise the bounded wait without waiting
@@ -47,6 +65,13 @@ func withDedupTimeout(ctx context.Context, req Request, send func() (Receipt, er
 }
 
 func withDedupTiming(ctx context.Context, req Request, send func() (Receipt, error), timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
+	return withDedupDetailedTiming(ctx, req, func() dedupSendResult {
+		receipt, err := send()
+		return dedupSendResult{Receipt: receipt, Err: err}
+	}, timeout, pollInterval, onWait)
+}
+
+func withDedupDetailedTiming(ctx context.Context, req Request, send func() dedupSendResult, timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
 	dir := filepath.Join(dataDir(), "messages")
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
@@ -79,8 +104,9 @@ func withDedupTiming(ctx context.Context, req Request, send func() (Receipt, err
 	}
 }
 
-func sendReserved(dir, path, hash string, req Request, send func() (Receipt, error)) (Receipt, error) {
-	receipt, sendErr := send()
+func sendReserved(dir, path, hash string, req Request, send func() dedupSendResult) (Receipt, error) {
+	result := send()
+	receipt, sendErr := result.Receipt, result.Err
 	if ErrorCode(sendErr) == "preflight_failed" {
 		// No bytes capable of delivering the message were written. Releasing the
 		// reservation makes an explicit retry safe.
@@ -98,7 +124,17 @@ func sendReserved(dir, path, hash string, req Request, send func() (Receipt, err
 		return receipt, errCode("dedup_unavailable", "delivery completed but receipt could not be saved: %v", err)
 	}
 	tmp.Chmod(0600)
-	stored := record{Hash: hash, State: "complete", Receipt: receipt}
+	metadata := result.Metadata
+	if receipt.Transport != claudeNativeTransport || (receipt.Status != StatusQueued && receipt.Status != StatusSubmitted && receipt.Status != StatusUnknown) {
+		metadata = dedupMetadata{}
+	}
+	stored := record{
+		Hash:                   hash,
+		State:                  "complete",
+		Receipt:                receipt,
+		TranscriptOffset:       metadata.ClaudeTranscriptOffset,
+		ClaudeQueueContentHash: metadata.ClaudeQueueContentHash,
+	}
 	if sendErr != nil {
 		stored.ErrorCode = ErrorCode(sendErr)
 		stored.ErrorMessage = sendErr.Error()
@@ -143,6 +179,7 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, timeou
 		return rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request"), false
 	}
 	if old.State == "complete" {
+		old = refreshCompletedClaudeReceipt(ctx, req, path, hash, old)
 		receipt, storedErr := storedResult(old)
 		return receipt, storedErr, false
 	}
@@ -196,6 +233,7 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, timeou
 			return rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request"), false
 		}
 		if old.State == "complete" {
+			old = refreshCompletedClaudeReceipt(ctx, req, path, hash, old)
 			receipt, storedErr := storedResult(old)
 			return receipt, storedErr, false
 		}
@@ -220,6 +258,45 @@ func readDedupRecord(path string) (record, error) {
 		return record{}, nil
 	}
 	return old, nil
+}
+
+func refreshCompletedClaudeReceipt(ctx context.Context, req Request, path, hash string, old record) record {
+	if old.State != "complete" || old.Hash != hash || old.Receipt.Transport != claudeNativeTransport || old.TranscriptOffset == nil || old.ClaudeQueueContentHash == "" || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
+		return old
+	}
+	candidate, ok := refreshClaudeNativeReceipt(ctx, req, old)
+	if !ok || claudeStageRank(candidate.Status) <= claudeStageRank(old.Receipt.Status) {
+		return old
+	}
+
+	lock, err := os.OpenFile(path+".refresh.lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return old
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if current, readErr := readDedupRecord(path); readErr == nil && current.Hash == hash && current.State == "complete" {
+			return current
+		}
+		return old
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	current, err := readDedupRecord(path)
+	if err != nil || current.Hash != hash || current.State != "complete" {
+		return old
+	}
+	if claudeStageRank(candidate.Status) <= claudeStageRank(current.Receipt.Status) {
+		return current
+	}
+	current.Receipt = candidate
+	current.ErrorCode = ""
+	current.ErrorMessage = ""
+	b, err := json.Marshal(current)
+	if err == nil {
+		_ = mailboxWrite(path, b, false)
+	}
+	return current
 }
 
 func storedResult(old record) (Receipt, error) {

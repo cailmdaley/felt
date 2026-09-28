@@ -154,3 +154,7 @@ type adapter interface {
 	discover(context.Context, string) ([]Session, error)
 	send(context.Context, Address, Request) (Receipt, error)
 }
+
+type dedupMetadataSender interface {
+	sendWithDedupMetadata(context.Context, Address, Request) (Receipt, error, dedupMetadata)
+}
