@@ -253,5 +253,12 @@ defmodule ShuttleWeb.RelayHelpers do
   not exist. A missing file's `nil` is itself a stable token — a host that has
   never written the file 304s forever, correctly.
   """
-  defdelegate file_token(path), to: Shuttle.TokenSpend
+  defdelegate file_token(path), to: Shuttle.FileToken, as: :of
+
+  @doc """
+  The change tokens of a file that rotates by rename to a `.1` sibling — the
+  hook stream and both ledgers. Their readers stream both files, so a
+  validator over the live file alone would miss the sibling vanishing.
+  """
+  def rotating_file_tokens(path), do: {file_token(path), file_token(path <> ".1")}
 end

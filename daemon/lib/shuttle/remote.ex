@@ -336,7 +336,7 @@ defmodule Shuttle.Remote do
 
   @doc """
   The full `GET /api/v1/activity` URL for this remote, over the inclusive
-  window `from_ms..to_ms`. Host-scoped, like the two builders below it: the
+  window `from_ms..to_ms`. Host-scoped, like the builders below it: the
   temporal feeds are each daemon's own telemetry, so the hub fans out and
   merges on the origin name rather than owner-routing.
   """
@@ -352,14 +352,6 @@ defmodule Shuttle.Remote do
   """
   @spec sessions_url(t()) :: String.t()
   def sessions_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/sessions?since_ms=0"
-
-  @doc """
-  The full `GET /api/v1/spend` URL for this remote. One row per ledgered
-  session, so the hub asks for the whole ledger the way it does for
-  `/sessions`; the far side caps the window at 90 days on its own.
-  """
-  @spec spend_url(t()) :: String.t()
-  def spend_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/spend?since_ms=0"
 
   @doc """
   The full `GET /api/v1/commits` URL for this remote. One line per commit, so

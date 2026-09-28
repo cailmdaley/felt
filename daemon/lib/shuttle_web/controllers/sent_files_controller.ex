@@ -33,7 +33,14 @@ defmodule ShuttleWeb.SentFilesController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [relay_bytes: 2, integer_param: 3, json_with_validator: 3, file_token: 1, bad_param: 2]
+    only: [
+      relay_bytes: 2,
+      integer_param: 3,
+      json_with_validator: 3,
+      file_token: 1,
+      rotating_file_tokens: 1,
+      bad_param: 2
+    ]
 
   alias Shuttle.{OriginRouter, Poller, SentFiles, SessionLedger, WaitingTracker}
   alias ShuttleWeb.TemporalComposite, as: Composite
@@ -84,29 +91,28 @@ defmodule ShuttleWeb.SentFilesController do
   merged.
 
   Local entries are stamped with this host's id; remote entries come from
-  `Shuttle.RemoteTemporalRegistry`'s cache already stamped with the origin they
-  were fetched from, and the requested window is applied here — same shape as
+  `Shuttle.RemoteTemporalRegistry`, stamped with the origin they were fetched
+  from, and the requested window is applied here — same shape as
   `CommitsController.composite/2`.
   """
   def composite_all(conn, params) do
     with {:ok, since_ms} <- integer_param(params, "since_ms", default: 0) do
-      entries = Composite.remote_entries()
-      own = Composite.own_host()
+      entries = Composite.remote_entries(:sent_files)
+      validator = Composite.validator({since_ms, sent_files_tokens()}, entries)
 
-      files =
-        (SentFiles.all_since(since_ms)
-         |> Enum.map(&Composite.stamp(&1, own))) ++
-          Enum.flat_map(entries, fn {name, entry} ->
-            entry.sent_files
-            |> Composite.in_window(:timestamp, since_ms, nil)
-            |> Enum.map(&Composite.stamp(&1, name))
-          end)
+      json_with_validator(conn, validator, fn ->
+        own = Composite.own_host()
 
-      json(conn, %{
-        host: own,
-        files: Enum.sort_by(files, &(Composite.item_ms(&1, :timestamp) || 0)),
-        origins: Composite.origins(entries)
-      })
+        files =
+          Enum.map(SentFiles.all_since(since_ms), &Composite.stamp(&1, own)) ++
+            Composite.remote_items(entries, :timestamp, since_ms, nil)
+
+        %{
+          host: own,
+          files: Enum.sort_by(files, &(Composite.item_ms(&1, :timestamp) || 0)),
+          origins: Composite.origins(entries)
+        }
+      end)
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
@@ -117,13 +123,9 @@ defmodule ShuttleWeb.SentFilesController do
   # also includes its rotated sibling during the retention window; include
   # that token so rotation cannot leave a stale 304 behind.
   defp sent_files_tokens do
-    events = WaitingTracker.default_events_file()
-    ledger = SessionLedger.default_path()
-
     %{
-      events: file_token(events),
-      ledger: file_token(ledger),
-      ledger_rotated: file_token(ledger <> ".1")
+      events: file_token(WaitingTracker.default_events_file()),
+      ledger: rotating_file_tokens(SessionLedger.default_path())
     }
   end
 end

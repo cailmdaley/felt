@@ -43,7 +43,7 @@ defmodule Shuttle.SessionResume do
 
   require Logger
 
-  alias Shuttle.{Agents, Dispatcher, Moment, SessionLedger, Transcript, TmuxServer, WorkerProcess}
+  alias Shuttle.{Agents, Dispatcher, SessionLedger, Transcript, TmuxServer, WorkerProcess}
 
   @prefix "resume-"
 
@@ -65,7 +65,7 @@ defmodule Shuttle.SessionResume do
   What resuming `session` on this host would run, without running it.
 
   Opts: `:runner` (for the registry lookup), the transcript roots
-  `Shuttle.Moment.transcript_path/2` takes, and `:ledger_path`.
+  `Shuttle.Transcript.path/2` takes, and `:ledger_path`.
   """
   @spec plan(String.t(), keyword()) :: {:ok, plan()} | {:error, String.t()}
   def plan(session, opts \\ []) do
@@ -73,7 +73,7 @@ defmodule Shuttle.SessionResume do
 
     with true <- Transcript.valid_session?(session) || {:error, "session must be a UUID"},
          path when is_binary(path) <-
-           Moment.transcript_path(session, opts) ||
+           Transcript.path(session, opts) ||
              {:error, "no transcript for #{session} on this host"},
          harness when is_binary(harness) <-
            Transcript.harness_for(path, opts) || {:error, "unknown harness for #{path}"},

@@ -6,8 +6,11 @@ defmodule ShuttleWeb.ActivityController do
        "buckets": [{"m": …, "s": "…-shuttle", "cwd": "/repo", "k": "attention", "n": 3}]}
 
   `Shuttle.Activity` does the reading; this controller parses the window and
-  stamps the host. Keys are short because a browser view polls this endpoint
-  and a busy day is thousands of buckets.
+  stamps the host. Keys are short because a busy day is thousands of buckets.
+
+  The window is served in whole minutes (`Shuttle.Activity.canonical_window/2`):
+  the echoed `from_ms`/`to_ms` are the canonical bounds, and the buckets are
+  exactly those whose minute lies in the requested window.
 
   **Deliberately NOT owner-routed.** Every other per-host read here
   (`/sent-files`, `/file`) routes to the fiber's owner; this one cannot, because
@@ -23,24 +26,25 @@ defmodule ShuttleWeb.ActivityController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 2, epoch_ms_message: 1, json_with_validator: 3, file_token: 1]
+    only: [integer_param: 2, epoch_ms_message: 1, json_with_validator: 3, rotating_file_tokens: 1]
 
   alias Shuttle.{Activity, Poller}
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   def show(conn, params) do
-    with {:ok, from_ms} <- integer_param(params, "from_ms"),
-         {:ok, to_ms} <- integer_param(params, "to_ms"),
-         :ok <- Activity.check_range(from_ms, to_ms) do
-      json_with_validator(conn, validator(from_ms, to_ms), fn ->
-        {:ok, %{buckets: buckets, spawns: spawns}} = Activity.window(from_ms, to_ms)
-
+    with {:ok, requested, {from_ms, to_ms}} <- window_params(params) do
+      # The canonical window plus both event files' `{mtime, size}`. The
+      # response is a function of exactly those (see `Shuttle.Activity`'s
+      # whole-minutes note): `felt hook event` appends to the live file and
+      # rotates by rename, so either operation moves the tokens, and two
+      # requests whose bounds differ inside a minute share one validator. A 304
+      # skips the full-file rescan, which is the expensive half.
+      json_with_validator(conn, {from_ms, to_ms, events_tokens()}, fn ->
         %{
           host: Poller.own_host_id(),
           from_ms: from_ms,
           to_ms: to_ms,
-          buckets: buckets,
-          spawns: spawns
+          buckets: buckets!(requested)
         }
       end)
     else
@@ -48,83 +52,65 @@ defmodule ShuttleWeb.ActivityController do
     end
   end
 
-  # The window plus both event files' `{mtime, size}`. `felt hook event` appends
-  # to the live file and rotates by rename, so either operation moves this token
-  # — and nothing else can change what a past window buckets to. A 304 therefore
-  # skips the full-file rescan, which is the expensive half of this endpoint
-  # (see `Shuttle.Activity`'s note on the missing index).
-  defp validator(from_ms, to_ms) do
-    live = Shuttle.WaitingTracker.default_events_file()
-    {from_ms, to_ms, file_token(live), file_token(live <> ".1")}
-  end
-
   @doc """
   `GET /api/v1/activity/composite?from_ms=…&to_ms=…` — the cross-host histogram.
 
   This host's buckets are read live and stamped with its own id; each remote's
-  come from `Shuttle.RemoteTemporalRegistry`'s cache, filtered to the requested
-  sub-window and stamped with the remote's name. A remote that is unreachable
-  keeps contributing its last-good buckets, marked stale in `origins`.
+  come from `Shuttle.RemoteTemporalRegistry`, filtered to the requested window
+  and stamped with the remote's name. A remote that is unreachable keeps
+  contributing its last-good buckets, marked stale in `origins`.
 
   Each origin's entry reports the `window` it can actually answer for. Ask for
-  more than a remote has cached and you get what it has — the mismatch between
-  that window and the one you asked for is the view's cue to mark the rest as
+  more than a remote holds and you get what it has — the mismatch between that
+  window and the one you asked for is the view's cue to mark the rest as
   unknown rather than empty.
   """
   def composite(conn, params) do
-    with {:ok, from_ms} <- integer_param(params, "from_ms"),
-         {:ok, to_ms} <- integer_param(params, "to_ms"),
-         :ok <- Activity.check_range(from_ms, to_ms) do
-      entries = Composite.remote_entries()
-      own = Composite.own_host()
-      {:ok, %{buckets: local, spawns: local_spawns}} = Activity.window(from_ms, to_ms)
+    with {:ok, requested, {from_ms, to_ms}} <- window_params(params) do
+      entries = Composite.remote_entries(:activity)
+      validator = Composite.validator({from_ms, to_ms, events_tokens()}, entries)
 
-      buckets =
-        Enum.map(local, &Map.put(&1, :host, own)) ++
-          Enum.flat_map(entries, fn {name, entry} ->
-            entry.activity_buckets
-            |> Composite.in_window(:m, from_ms, to_ms)
-            |> Enum.map(&Composite.stamp(&1, name))
-          end)
+      json_with_validator(conn, validator, fn ->
+        own = Composite.own_host()
 
-      # A delegation is windowed by OVERLAP, not by an instant: one that opened
-      # before this window and closed inside it belongs to it. `in_window/4`
-      # tests a single stamp, so the remote spans are filtered here.
-      spawns =
-        Enum.map(local_spawns, &Map.put(&1, :host, own)) ++
-          Enum.flat_map(entries, fn {name, entry} ->
-            entry.activity_spawns
-            |> Enum.filter(&overlaps?(&1, from_ms, to_ms))
-            |> Enum.map(&Composite.stamp(&1, name))
-          end)
-
-      json(conn, %{
-        host: own,
-        from_ms: from_ms,
-        to_ms: to_ms,
-        buckets: buckets,
-        spawns: spawns,
-        origins:
-          Composite.origins(
-            entries,
-            %{window: window_pair({from_ms, to_ms})},
-            fn _name, entry -> %{window: window_pair(entry.activity_window)} end
-          )
-      })
+        %{
+          host: own,
+          from_ms: from_ms,
+          to_ms: to_ms,
+          buckets:
+            Enum.map(buckets!(requested), &Map.put(&1, :host, own)) ++
+              Composite.remote_items(entries, :m, from_ms, to_ms),
+          origins:
+            Composite.origins(
+              entries,
+              %{window: window_pair({from_ms, to_ms})},
+              fn _name, entry -> %{window: window_pair(entry.window)} end
+            )
+        }
+      end)
     else
       {:error, reason} -> conn |> put_status(400) |> json(%{error: message(reason)})
     end
   end
 
-  # A remote's cached span, decoded from JSON, carries string keys; a span that
-  # cannot say when it ran is kept, exactly as `in_window/4` keeps an item with
-  # no readable stamp.
-  defp overlaps?(span, from_ms, to_ms) do
-    start_ms = Composite.item_ms(span, :start_ms)
-    end_ms = Composite.item_ms(span, :end_ms)
-
-    is_nil(start_ms) or is_nil(end_ms) or (start_ms <= to_ms and end_ms >= from_ms)
+  # Both bounds as requested (range-checked; `Shuttle.Activity.window/3`
+  # canonicalizes them itself) and their canonical pair, which is what the
+  # validator, the echo and the remote filter use — so all of them see the one
+  # window the scan reads.
+  defp window_params(params) do
+    with {:ok, from_ms} <- integer_param(params, "from_ms"),
+         {:ok, to_ms} <- integer_param(params, "to_ms"),
+         :ok <- Activity.check_range(from_ms, to_ms) do
+      {:ok, {from_ms, to_ms}, Activity.canonical_window(from_ms, to_ms)}
+    end
   end
+
+  defp buckets!({from_ms, to_ms}) do
+    {:ok, buckets} = Activity.window(from_ms, to_ms)
+    buckets
+  end
+
+  defp events_tokens, do: rotating_file_tokens(Shuttle.WaitingTracker.default_events_file())
 
   # The covered window, as the object the UI reads. `nil` when a remote has
   # never been polled successfully — "no idea", which is not the same claim as

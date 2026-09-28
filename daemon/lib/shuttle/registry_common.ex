@@ -1,10 +1,11 @@
 defmodule Shuttle.RegistryCommon do
   @moduledoc """
   Plumbing shared by the remote registries (`Shuttle.RemoteRegistry`,
-  `Shuttle.RemoteFiberRegistry`, `Shuttle.RemoteTemporalRegistry`). Each polls
-  the same `:remotes` config on a self-rescheduling tick and exposes a read call
-  guarded by liveness, so the config normalization, tick scheduling, liveness
-  check, and read timeout live here once rather than verbatim in each.
+  `Shuttle.RemoteFiberRegistry`, `Shuttle.RemoteTemporalRegistry`). Each reads
+  the same `:remotes` config and exposes a read call guarded by liveness; the
+  first two poll on a self-rescheduling tick, the third fetches on demand. So
+  the config normalization, tick scheduling, liveness check, conditional fetch,
+  disk cache and read timeout live here once rather than verbatim in each.
   `configured_remotes/1` is additionally the fleet chokepoint for
   `Shuttle.OriginRouter` and the felt-stores controller.
   """

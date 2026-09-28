@@ -396,6 +396,39 @@ defmodule Shuttle.SessionLedgerTest do
     end
   end
 
+  describe "host_for_session/2" do
+    @session "a3edf873-cb1c-40ab-a891-f26f5333b320"
+
+    test "names the host of the newest line for a session, nil otherwise", %{path: path} do
+      at = 1_762_000_000_000
+
+      SessionLedger.record(
+        fiber: "work/a",
+        session: @session,
+        kind: "dispatch",
+        host: "candide",
+        at: at,
+        path: path
+      )
+
+      SessionLedger.record(
+        fiber: "work/a",
+        session: @session,
+        kind: "resume",
+        host: "hub-mac",
+        at: at + 1,
+        path: path
+      )
+
+      assert SessionLedger.host_for_session(@session, path: path) == "hub-mac"
+
+      assert SessionLedger.host_for_session("fef866ba-b397-4277-a01b-16fcecc2b256", path: path) ==
+               nil
+
+      assert SessionLedger.host_for_session(nil, path: path) == nil
+    end
+  end
+
   describe "harness_for_cli/1" do
     test "maps the registry's cli to the harness name, and refuses to guess" do
       assert SessionLedger.harness_for_cli("claude") == "claude-code"

@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.TemporalCompositeTest do
   @moduledoc """
-  The three cross-host temporal composites, plus the conditional-fetch support
-  the hub's polling depends on.
+  The cross-host temporal composites, plus the conditional-fetch support the
+  hub and the board depend on.
 
   A live `Shuttle.RemoteTemporalRegistry` under its default name backs the
   composites; its cache is filled synchronously from a scripted HTTP stub, so
@@ -28,15 +28,21 @@ defmodule ShuttleWeb.TemporalCompositeTest do
 
     def start_link(_ \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
     def set(path, body), do: Agent.update(__MODULE__, &Map.put(&1, path, body))
+    def calls, do: Agent.get(__MODULE__, &Map.get(&1, :calls, 0))
 
     @impl true
     def get(url, _timeout_ms) do
       path = URI.parse(url).path
 
-      case Agent.get(__MODULE__, &Map.get(&1, path)) do
-        nil -> {:error, :not_set}
-        body -> {:ok, body}
-      end
+      Agent.get_and_update(__MODULE__, fn state ->
+        response =
+          case Map.get(state, path) do
+            nil -> {:error, :not_set}
+            body -> {:ok, body}
+          end
+
+        {response, Map.update(state, :calls, 1, &(&1 + 1))}
+      end)
     end
   end
 
@@ -46,8 +52,15 @@ defmodule ShuttleWeb.TemporalCompositeTest do
   end
 
   # A registry under the DEFAULT name, so the controllers find it, primed with
-  # whatever the caller scripted. Returns after one synchronous refresh.
-  defp with_remote(feeds) do
+  # whatever the caller scripted. Returns after one synchronous refresh, which
+  # also starts every feed's freshness gate: the composites below read memory.
+  defp with_remote(feeds, opts \\ []) do
+    start_remote(feeds, opts)
+    :ok = RemoteTemporalRegistry.refresh_now()
+  end
+
+  # The same registry, unprimed: its first composite request is what fetches.
+  defp start_remote(feeds, opts \\ []) do
     Enum.each(feeds, fn {path, body} -> MockClient.set(path, Jason.encode!(body)) end)
 
     dir = Path.join(System.tmp_dir!(), "shuttle-composite-#{System.unique_integer([:positive])}")
@@ -55,23 +68,21 @@ defmodule ShuttleWeb.TemporalCompositeTest do
 
     start_supervised!(
       {RemoteTemporalRegistry,
-       name: RemoteTemporalRegistry,
-       remotes: [%Remote{name: "candide", url: "http://localhost:4001"}],
-       client: MockClient,
-       store_dir: dir,
-       auto_poll: false}
+       [
+         name: RemoteTemporalRegistry,
+         remotes: [%Remote{name: "candide", url: "http://localhost:4001"}],
+         client: MockClient,
+         store_dir: dir
+       ] ++ opts}
     )
-
-    :ok = RemoteTemporalRegistry.refresh_now()
   end
 
   defp own_host, do: Shuttle.Poller.own_host_id()
 
-
   # Point the readers at throwaway files, clearing SHUTTLE_DATA_DIR so nothing
   # can fall through to a dev machine's real ~/.shuttle.
   defp with_data_files(events_lines, session_lines) do
-    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_SESSIONS_FILE SHUTTLE_DATA_DIR)
+    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_SESSIONS_FILE SHUTTLE_COMMITS_FILE SHUTTLE_DATA_DIR)
     previous = Map.new(keys, &{&1, System.get_env(&1)})
     Enum.each(keys, &System.delete_env/1)
 
@@ -84,6 +95,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
 
     System.put_env("SHUTTLE_EVENTS_FILE", events)
     System.put_env("SHUTTLE_SESSIONS_FILE", sessions)
+    System.put_env("SHUTTLE_COMMITS_FILE", Path.join(dir, "commits.jsonl"))
 
     on_exit(fn ->
       File.rm_rf(dir)
@@ -109,6 +121,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
       items = [%{at: @t0}, %{at: @t0 + @minute}, %{at: @t0 + 2 * @minute}]
 
       assert Composite.in_window(items, :at, @t0, @t0 + 2 * @minute) == items
+
       assert Composite.in_window(items, :at, @t0 + @minute, @t0 + @minute) ==
                [%{at: @t0 + @minute}]
     end
@@ -116,7 +129,10 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     test "an item with no readable timestamp is kept, not silently dropped" do
       items = [%{at: @t0 - @day}, %{other: "no stamp"}, %{at: nil}]
 
-      assert Composite.in_window(items, :at, @t0, @t0 + @day) == [%{other: "no stamp"}, %{at: nil}]
+      assert Composite.in_window(items, :at, @t0, @t0 + @day) == [
+               %{other: "no stamp"},
+               %{at: nil}
+             ]
     end
 
     test "string keys read the same as atom keys" do
@@ -187,7 +203,8 @@ defmodule ShuttleWeb.TemporalCompositeTest do
       assert cached_to - cached_from == 14 * @day
       assert cached_from > from_ms
 
-      assert origins[own_host()]["window"] == %{"from_ms" => from_ms, "to_ms" => @t0}
+      # The local origin covers the canonical window: whole minutes.
+      assert origins[own_host()]["window"] == %{"from_ms" => from_ms, "to_ms" => @t0 + 59_999}
     end
 
     test "a local-only fleet returns local data and a local origin" do
@@ -247,100 +264,23 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     end
   end
 
-  describe "GET /api/v1/spend/composite" do
-    # /spend caps its ledger walk at 90 days, so these rows are dated relative
-    # to now rather than to the fixed @t0 the bucket feeds use.
-    @recent System.system_time(:millisecond) - 86_400_000
-
-    test "merges each host's rows and re-rolls a fiber worked from both" do
-      # Local: one ledgered session with no transcript on this disk, so it
-      # contributes a found:false row — the shape a hub sees most often.
-      with_data_files([], [
-        %{
-          "fiber" => "shared/fiber",
-          "session" => "s1",
-          "host" => "test-host",
-          "at" => @recent + 10
-        }
-      ])
-
-      with_remote(%{
-        "/api/v1/spend" => %{
-          "sessions" => [
-            %{
-              "fiber" => "shared/fiber",
-              "session" => "s0",
-              "at" => @recent,
-              "found" => true,
-              "input" => 5,
-              "output" => 50,
-              "cache_read" => 500,
-              "cache_write" => 25,
-              "messages" => 3
-            },
-            %{
-              "fiber" => "candide/only",
-              "session" => "s2",
-              "at" => @recent + 20,
-              "found" => true,
-              "input" => 1,
-              "output" => 1,
-              "cache_read" => 1,
-              "cache_write" => 1,
-              "messages" => 1
-            }
-          ],
-          "fibers" => []
-        }
-      })
-
-      conn = get(api_conn(), "/api/v1/spend/composite?since_ms=0")
-
-      assert %{"sessions" => sessions, "fibers" => fibers, "origins" => origins} =
-               json_response(conn, 200)
-
-      assert Enum.map(sessions, & &1["session"]) == ["s0", "s1", "s2"]
-      assert Enum.find(sessions, &(&1["session"] == "s0"))["host"] == "candide"
-
-      shared = Enum.find(fibers, &(&1["fiber"] == "shared/fiber"))
-      assert shared["sessions"] == 2
-      assert shared["measured"] == 1
-      assert shared["output"] == 50
-      assert shared["cache_read"] == 500
-
-      assert origins["candide"]["kind"] == "remote"
-      assert origins[own_host()]["kind"] == "local"
-    end
-
-    test "a remote that has gone away keeps its spend on screen, marked stale" do
+  describe "demand" do
+    test "a composite request is what fetches the remote's feed" do
       with_data_files([], [])
 
-      with_remote(%{
-        "/api/v1/spend" => %{
-          "sessions" => [
-            %{
-              "fiber" => "candide/work",
-              "session" => "s0",
-              "at" => @recent,
-              "found" => true,
-              "input" => 1,
-              "output" => 2,
-              "cache_read" => 3,
-              "cache_write" => 4,
-              "messages" => 1
-            }
-          ]
-        }
+      start_remote(%{
+        "/api/v1/commits" => %{"records" => [%{"at" => @t0, "sha" => "abc", "kind" => "commit"}]}
       })
 
-      Agent.update(MockClient, fn _ -> %{} end)
-      :ok = RemoteTemporalRegistry.refresh_now()
+      assert MockClient.calls() == 0
 
-      conn = get(api_conn(), "/api/v1/spend/composite?since_ms=0")
+      conn = get(api_conn(), "/api/v1/commits/composite?since_ms=0")
 
-      assert %{"fibers" => fibers, "origins" => origins} = json_response(conn, 200)
-      assert Enum.find(fibers, &(&1["fiber"] == "candide/work"))["output"] == 2
-      assert origins["candide"]["last_error"] == "not_set"
+      assert %{"records" => [record], "origins" => origins} = json_response(conn, 200)
+      assert record["host"] == "candide"
+      assert origins["candide"]["stale"] == false
+      # Only the commits feed was asked for.
+      assert MockClient.calls() == 1
     end
   end
 
@@ -398,6 +338,110 @@ defmodule ShuttleWeb.TemporalCompositeTest do
       File.touch!(events, future)
 
       assert etag(get(api_conn(), url)) != before
+    end
+  end
+
+  describe "conditional fetch on /activity" do
+    test "bounds that differ inside a minute share a validator, and the scan is skipped" do
+      with_data_files([%{"timestamp" => @t0 + 5_000, "type" => "pre_tool_use"}], [])
+
+      first = get(api_conn(), "/api/v1/activity?from_ms=#{@t0}&to_ms=#{@t0 + @minute}")
+      assert first.status == 200
+      tag = etag(first)
+
+      # Same canonical window: from ceils to @t0, to floors to @t0 + @minute.
+      nudged = "/api/v1/activity?from_ms=#{@t0 - 59_999}&to_ms=#{@t0 + @minute + 42_000}"
+      assert etag(get(api_conn(), nudged)) == tag
+
+      conditional = api_conn() |> put_req_header("if-none-match", tag) |> get(nudged)
+      assert conditional.status == 304
+      assert conditional.resp_body == ""
+    end
+
+    test "an append to the events file turns the same validator into a 200" do
+      %{events: events} =
+        with_data_files([%{"timestamp" => @t0 + 5_000, "type" => "pre_tool_use"}], [])
+
+      url = "/api/v1/activity?from_ms=#{@t0}&to_ms=#{@t0 + @minute}"
+      tag = etag(get(api_conn(), url))
+
+      File.write!(
+        events,
+        Jason.encode!(%{"timestamp" => @t0 + 6_000, "type" => "stop"}) <> "\n",
+        [
+          :append
+        ]
+      )
+
+      conn = api_conn() |> put_req_header("if-none-match", tag) |> get(url)
+
+      assert conn.status == 200
+      assert etag(conn) != tag
+      assert Enum.any?(json_response(conn, 200)["buckets"], &(&1["k"] == "reply"))
+    end
+  end
+
+  describe "conditional fetch on the composites" do
+    test "an unchanged activity composite 304s; an append or a remote change does not" do
+      %{events: events} =
+        with_data_files([%{"timestamp" => @t0, "type" => "pre_tool_use", "cwd" => "/local"}], [])
+
+      with_remote(
+        %{"/api/v1/activity" => %{"buckets" => [%{"m" => @t0, "k" => "agent", "n" => 1}]}},
+        freshness_ms: 60_000
+      )
+
+      url = "/api/v1/activity/composite?from_ms=#{@t0}&to_ms=#{@t0 + @minute}"
+      first = get(api_conn(), url)
+      assert first.status == 200
+      tag = etag(first)
+
+      assert (api_conn() |> put_req_header("if-none-match", tag) |> get(url)).status == 304
+
+      # The local stream moves.
+      File.write!(events, Jason.encode!(%{"timestamp" => @t0, "type" => "stop"}) <> "\n", [
+        :append
+      ])
+
+      after_append = api_conn() |> put_req_header("if-none-match", tag) |> get(url)
+      assert after_append.status == 200
+      tag = etag(after_append)
+      assert (api_conn() |> put_req_header("if-none-match", tag) |> get(url)).status == 304
+
+      # The remote's data moves.
+      MockClient.set(
+        "/api/v1/activity",
+        Jason.encode!(%{"buckets" => [%{"m" => @t0, "k" => "agent", "n" => 9}]})
+      )
+
+      :ok = RemoteTemporalRegistry.refresh_now()
+
+      after_refresh = api_conn() |> put_req_header("if-none-match", tag) |> get(url)
+      assert after_refresh.status == 200
+      assert Enum.any?(json_response(after_refresh, 200)["buckets"], &(&1["n"] == 9))
+    end
+
+    test "the ledger composites 304 while nothing moved" do
+      with_data_files([], [%{"fiber" => "a", "session" => "s", "at" => @t0}])
+
+      with_remote(%{
+        "/api/v1/sessions" => %{"records" => [%{"fiber" => "remote", "at" => @t0}]},
+        "/api/v1/commits" => %{"records" => []},
+        "/api/v1/sent-files/all" => %{"files" => []}
+      })
+
+      for url <- [
+            "/api/v1/sessions/composite?since_ms=0",
+            "/api/v1/sessions/composite?since_ms=0&uid=01KTS261GJMMRDRHS2QDMEFV3K",
+            "/api/v1/commits/composite?since_ms=0",
+            "/api/v1/sent-files/all/composite?since_ms=0"
+          ] do
+        assert_etag_round_trip(url)
+      end
+
+      sessions = etag(get(api_conn(), "/api/v1/sessions/composite?since_ms=0"))
+      narrowed = etag(get(api_conn(), "/api/v1/sessions/composite?since_ms=0&uid=x"))
+      assert sessions != narrowed
     end
   end
 

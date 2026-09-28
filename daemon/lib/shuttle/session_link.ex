@@ -35,7 +35,7 @@ defmodule Shuttle.SessionLink do
 
   use GenServer
 
-  alias Shuttle.{Moment, TokenSpend, Transcript}
+  alias Shuttle.{FileToken, Transcript}
 
   @table :shuttle_session_links
 
@@ -68,7 +68,7 @@ defmodule Shuttle.SessionLink do
   Nothing is guessed: a missing transcript is `:transcript_missing` with no
   link, whatever the ledger says the harness was.
 
-  Opts (for tests): the transcript roots `Shuttle.Moment.transcript_path/2`
+  Opts (for tests): the transcript roots `Shuttle.Transcript.path/2`
   takes, and `cache: false` to bypass the table.
   """
   @spec resolve(String.t(), keyword()) :: link()
@@ -80,14 +80,14 @@ defmodule Shuttle.SessionLink do
         link
 
       _ ->
-        case Moment.transcript_path(session, opts) do
+        case Transcript.path(session, opts) do
           nil ->
             link = missing(session)
             if cache?, do: store(session, :missing, deadline(), link)
             link
 
           path ->
-            token = TokenSpend.file_token(path)
+            token = FileToken.of(path)
             link = read_link(session, path, opts)
             if cache? and not is_nil(token), do: store(session, path, token, link)
             link
@@ -132,7 +132,7 @@ defmodule Shuttle.SessionLink do
         if System.monotonic_time(:millisecond) < deadline, do: {:ok, link}, else: :miss
 
       [{^session, path, token, link}] ->
-        if TokenSpend.file_token(path) == token, do: {:ok, link}, else: :miss
+        if FileToken.of(path) == token, do: {:ok, link}, else: :miss
 
       _ ->
         :miss
@@ -168,11 +168,11 @@ defmodule Shuttle.SessionLink do
   The bridge URL for `session` (a harness UUID), or `nil` when the transcript
   is not on this host or carries no bridge record.
 
-  `opts` are forwarded to `Shuttle.Moment.transcript_path/2` (`:root` for tests).
+  `opts` are forwarded to `Shuttle.Transcript.path/2` (`:root` for tests).
   """
   @spec remote_url(String.t(), keyword()) :: String.t() | nil
   def remote_url(session, opts \\ []) when is_binary(session) do
-    with path when is_binary(path) <- Moment.transcript_path(session, opts) do
+    with path when is_binary(path) <- Transcript.path(session, opts) do
       last_url(path)
     end
   end

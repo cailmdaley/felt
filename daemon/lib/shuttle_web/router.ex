@@ -116,28 +116,24 @@ defmodule ShuttleWeb.Router do
     get("/sent-files", SentFilesController, :show)
     # The global sent-files feed, HOST-scoped like /commits (not owner-routed):
     # every fiber's SendUserFile sends recorded on this host's events.jsonl, no
-    # uid filter — the composite counterpart fans in each remote's cached feed
+    # uid filter — the composite counterpart fans in each remote's feed
     # (Shuttle.RemoteTemporalRegistry) the same way /commits/composite does.
     get("/sent-files/all/composite", SentFilesController, :composite_all)
     get("/sent-files/all", SentFilesController, :show_all)
-    # The temporal view's read plane, HOST-scoped rather than owner-routed
-    # (see the controller): /activity buckets this host's events.jsonl per
-    # minute. A cross-host view fans out and merges.
+    # The temporal read plane, HOST-scoped rather than owner-routed (see the
+    # controller): /activity buckets this host's events.jsonl per minute. A
+    # cross-host view fans out and merges.
     get("/activity", ActivityController, :show)
     # The cross-host counterparts: each fans this host's live read together with
-    # the cached remote reads (Shuttle.RemoteTemporalRegistry) and reports
-    # per-origin freshness in the same `origins` block the kanban composite
-    # serves. A disconnected remote's history stays on screen, marked stale.
+    # each remote's feed as Shuttle.RemoteTemporalRegistry holds it — fetched on
+    # demand, behind a freshness gate — and reports per-origin freshness in the
+    # same `origins` block the kanban composite serves. A disconnected remote's
+    # history stays on screen, marked stale.
     get("/activity/composite", ActivityController, :composite)
     get("/sessions/composite", SessionsController, :composite)
-    # What the ledgered sessions cost, folded out of their transcripts and
-    # rolled up per fiber. Host-scoped for the same reason as its neighbours —
-    # a transcript lives on the machine that wrote it.
-    get("/spend/composite", SpendController, :composite)
-    get("/spend", SpendController, :show)
     # Join rung 0 for the temporal views: the structural fiber↔session pairing
-    # this host recorded at dispatch / claim / resume. Host-scoped like its two
-    # neighbours above.
+    # this host recorded at dispatch / claim / resume. Host-scoped like
+    # /activity.
     get("/sessions", SessionsController, :show)
     # What the host that ran ledgered sessions knows of them — transcript present,
     # harness, a bridged Claude session's claude.ai URL — for the card's History.
@@ -147,11 +143,6 @@ defmodule ShuttleWeb.Router do
     # the commit strip. Host-scoped like /sessions.
     get("/commits/composite", CommitsController, :composite)
     get("/commits", CommitsController, :show)
-    # The words behind a minute: excerpts from a session's harness transcript,
-    # for the temporal views' hover. HOST-routed rather than owner-routed — a
-    # transcript lives on the machine that ran the session, named by `host` or
-    # by this host's session ledger.
-    get("/moment", MomentController, :show)
     # Native transcript provenance: JSON receipt, with host routing selected
     # from the session ledger or an explicit `host` query parameter.
     get("/transcript", TranscriptController, :show)
