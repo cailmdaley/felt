@@ -220,14 +220,19 @@ for context delivery, and use a supported live native endpoint for wake.
 A failed wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
 
-Receipts describe delivery evidence, not task completion. If delivery is
-uncertain, retry the identical request with the same `--message-id`; this returns
-the recorded result without repeating the turn or copying attachments again. A
-concurrent identical attempt waits up to 15 seconds for that result. If the
-original attempt is still running or its owner stopped before saving a result,
-the receipt is `unknown`; retry with the same ID rather than creating a new one.
-Changed content requires a new message ID. There is no automatic retry of an
-uncertain send.
+Receipts describe delivery evidence, not task completion. HTTP 200 carries any
+well-formed receipt status; 4xx reports invalid or unsupported requests and
+preflight refusals, while 5xx means the daemon cannot provide a valid receipt.
+`felt shuttle message` exits 0 for `accepted`, `submitted`, `queued`, and
+`context_added`; it exits 1 for `rejected`, `unknown`, or another command error.
+
+Retry an uncertain delivery with the identical request and the same
+`--message-id`, never a fresh ID. A concurrent attempt waits up to 15 seconds
+for the first result. A later Claude-native retry of a completed `queued`,
+`submitted`, or `unknown` receipt briefly rechecks the transcript from its saved
+offset and upgrades the status when it finds later evidence; it never resends
+the message. Records without an offset return their stored receipt unchanged.
+Changed content requires a new message ID.
 
 Claude preserves its native inbound hold/refuse policy. Its adapter waits for a
 correlated real model response; if that evidence does not arrive within the
@@ -239,11 +244,12 @@ has enabled or trusted them; discovery reflects receiver registration.
 
 | Receipt | Evidence |
 |---|---|
-| `queued` | Stored in the receiver's host-local hook mailbox; no turn started |
+| `queued` | Receiver queue or hook mailbox accepted context; Claude detail identifies a message queued behind the current turn |
+| `submitted` | Claude transcript shows the native user row or `queued_command`; no model reply is observed yet |
 | `context_added` | Codex acknowledged adding persistent context; no turn started |
-| `accepted` | The native runtime acknowledged a steer, turn start, or Pi message |
-| `unknown` | A delivery attempt may have succeeded; do not resend under a new ID |
-| `rejected` | Validation or the receiving transport refused this request |
+| `accepted` | Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
+| `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
+| `rejected` | The request or receiving transport refused delivery |
 
 No receipt proves that a model read, acted on, or integrated the message.
 Hook offers can repeat if the receiver crashes after writing context but before

@@ -196,14 +196,26 @@ requests an active task turn; set `wake: false` explicitly for context-only
 delivery. A failed wake remains a failure in the receipt and is
 never silently downgraded to context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
-receipt reports only submission state (`accepted`,
+receipt reports the furthest observed submission stage (`accepted`,
 `context_added`, `submitted`, `queued`, `unknown`, or `rejected`), transport, and detail;
-it does not claim that the recipient read or acted on the message. Reusing a
-`message_id` with the same request returns the durable receipt. A concurrent
-identical request waits up to 15 seconds for the first result; if it remains in
+it does not claim that the recipient acted on the message. For Claude-native
+delivery, `queued` means the receiver queues it behind its current turn,
+`submitted` means the transcript shows it admitted as a user turn, and `accepted`
+means a correlated real assistant reply appears. Native admission alone never
+means a model reply.
+
+A well-formed receipt returns HTTP 200 regardless of status. HTTP 4xx reports a
+request the receiver cannot process, including invalid or unsupported addresses
+and preflight refusals that release the message ID; 5xx reports that no valid
+receipt is available, such as a timeout or unreachable owner. Reusing a
+`message_id` with the same request returns its durable receipt. A concurrent
+identical request waits up to 15 seconds for the first result. If it remains in
 progress or its owner stops before saving a result, felt returns `unknown`
-without resending. Reusing the ID for changed content is rejected by the local
-felt adapter.
+without resending. A later retry of a completed Claude-native `queued`,
+`submitted`, or `unknown` receipt briefly rechecks the transcript from its saved
+offset and upgrades the receipt if it finds later evidence; it never sends to
+the receiver again. Receipts without a saved offset remain unchanged. Reusing
+the ID for changed content is rejected by the local felt adapter.
 
 `POST /messages/files` accepts the same envelope plus one to eight
 `attachments`, each `{name, data, sha256}`. `name` is a portable basename,
