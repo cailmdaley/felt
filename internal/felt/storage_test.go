@@ -2054,7 +2054,7 @@ func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
 // TestExternalPathLookupNeedsNoWalk pins the cheap half on its own: a bare
 // foreign slug that exists at the enclosing store's root is found by a stat,
 // with no local same-slug fiber to make the gate open. Without this,
-// `felt rm <foreign-slug>` would report "no felt found" for a fiber that is
+// `felt rm <foreign-slug>` would report "no fiber found" for a fiber that is
 // plainly there.
 func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
 	_, subProj := newSubstoreFixture(t)
@@ -2109,7 +2109,7 @@ func TestResolveScopedIDUnknownPathIsOrdinaryMiss(t *testing.T) {
 	if errors.Is(err, ErrExternalReference) {
 		t.Fatalf("error = %v, want an ordinary miss, not ErrExternalReference", err)
 	}
-	if !strings.Contains(err.Error(), "no felt found") {
+	if !strings.Contains(err.Error(), "no fiber found") {
 		t.Fatalf("error = %v, want a no-felt-found message", err)
 	}
 }

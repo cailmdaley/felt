@@ -143,7 +143,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # actually owns the file sees `ai-futures/lightcone/lightcone/desk`. The board
   # sends whichever id served the card's row. Before the fix, the pin-to-the-
   # strip write forwarded that id raw against the default store and died with
-  # `no felt found matching "lightcone/desk"`, stranding a de-pinned fiber in
+  # `no fiber found matching "lightcone/desk"`, stranding a de-pinned fiber in
   # Awaiting review. The controller must resolve to the OWNING store and rewrite
   # the id owner-relative — the gesture now posts `reshape pinned`, so the
   # id-rewrite guard rides that verb.
@@ -351,7 +351,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     )
 
     install_fake_felt!("""
-    printf 'Error: no felt found matching "science/cmbx/explorations/spt-talk-push"\\nno felt found matching "science/cmbx/explorations/spt-talk-push"\\n'
+    printf 'Error: no fiber found matching "science/cmbx/explorations/spt-talk-push"\\nno fiber found matching "science/cmbx/explorations/spt-talk-push"\\n'
     exit 1
     """)
 
@@ -369,7 +369,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 422
 
     assert conn.resp_body ==
-             ~s(shuttle exited 1: no felt found matching "science/cmbx/explorations/spt-talk-push")
+             ~s(shuttle exited 1: no fiber found matching "science/cmbx/explorations/spt-talk-push")
   end
 
   test "accept for standing roles re-arms from the doc and evicts runtime frontmatter" do

@@ -431,22 +431,40 @@ func TestListShuttleFibers_SkipsNotesAndMalformed(t *testing.T) {
 func TestShuttleStatus_SingleFiber(t *testing.T) {
 	pdir := t.TempDir()
 	for _, tc := range []struct {
-		name   string
-		status string
-		want   []string
+		name         string
+		status       string
+		own          string // this machine's host id; the block's is testhost
+		noProjectDir bool
+		want         []string
 	}{
 		{
 			name:   "armed",
 			status: felt.StatusActive,
+			own:    "testhost",
 			want: []string{
 				"kind:        standing", "host:        testhost", "agent:       claude-opus",
 				pdir, `schedule:    "0 8 * * *" tz=UTC`, "status:      active (armed)",
-				"→ Daemon will dispatch on next poll.",
+				"→ Armed; eligible for dispatch on this host (testhost)", "boot quarantine",
 			},
+		},
+		{
+			// Status alone does not dispatch: another host's daemon owns it.
+			name:   "armed, owned elsewhere",
+			status: felt.StatusActive,
+			own:    "laptop",
+			want:   []string{"→ Armed; owned by host testhost", "not this one (laptop)"},
+		},
+		{
+			name:         "armed, no project_dir",
+			status:       felt.StatusActive,
+			own:          "testhost",
+			noProjectDir: true,
+			want:         []string{"no project_dir", "felt shuttle resume role --project-dir"},
 		},
 		{
 			name:   "closed",
 			status: felt.StatusClosed,
+			own:    "testhost",
 			want: []string{
 				"status:      closed (NOT armed", "→ Fiber is closed", "felt shuttle reopen role",
 			},
@@ -454,11 +472,16 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withStubbedTmux(t, nil)
+			withOwnHost(t, tc.own)
 			dir, storage := newStore(t)
-			seedShuttleRole(t, storage, "role", tc.status, map[string]any{
+			block := map[string]any{
 				"kind": "standing", "host": "testhost", "agent": "claude-opus", "project_dir": pdir,
 				"schedule": map[string]any{"expr": "0 8 * * *", "tz": "UTC"},
-			}, nil)
+			}
+			if tc.noProjectDir {
+				delete(block, "project_dir")
+			}
+			seedShuttleRole(t, storage, "role", tc.status, block, nil)
 
 			out, err := runCommand(t, dir, "shuttle", "status", "role")
 			if err != nil {

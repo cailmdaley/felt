@@ -38,7 +38,7 @@ func shuttleAddressFiber(query string) (*felt.Felt, error) {
 		}
 	}
 	if firstErr == nil {
-		firstErr = fmt.Errorf("no felt found matching %q", query)
+		firstErr = fmt.Errorf("no fiber found matching %q", query)
 	}
 	return nil, firstErr
 }

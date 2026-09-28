@@ -184,7 +184,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 
 		state := "armed"
 		if installDisabled {
-			state = "draft (status: open)"
+			state = "draft, status: open"
 		}
 		fmt.Printf("installed %s as oneshot role (%s)\n", args[0], state)
 		fmt.Printf("  host: %s\n", block.Host)

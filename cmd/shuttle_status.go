@@ -65,9 +65,11 @@ scheduled (a standing role), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
 With a fiber, prints the block's key fields, any running worker, and whether
-its status arms it for dispatch, naming the verb that would when it does not.
-That verdict reads status alone; host ownership, project_dir, and the boot
-quarantine are the daemon's to judge.
+it is eligible for dispatch, naming the verb that would make it so when it is
+not. Eligibility is status active, a project_dir, and a host: the owning
+host's daemon dispatches it — this one only when the host is this machine's
+(felt shuttle host). The daemon's boot quarantine can still hold an eligible
+fiber until 'bin/shuttle release'; that is the daemon's to report.
 
   felt shuttle status                 # the table
   felt shuttle status <fiber>         # one fiber`,
@@ -242,7 +244,7 @@ func runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": dispatchAssessment(f.ID, statusNow),
+			"dispatch": dispatchAssessment(f.ID, statusNow, block),
 		}
 		if block.Agent != "" {
 			out["agent"] = block.Agent
@@ -265,17 +267,27 @@ func runStatusOneFiber(query string) error {
 		fmt.Printf("  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Println("")
-	fmt.Println(dispatchAssessment(f.ID, statusNow))
+	fmt.Println(dispatchAssessment(f.ID, statusNow, block))
 	return nil
 }
 
 // dispatchAssessment renders the one line a single-fiber report is really for:
-// whether the daemon will pick this fiber up, and the verb that changes the
-// answer when it won't. Dispatch is gated by the felt-native status alone.
-func dispatchAssessment(fiberID, statusNow string) string {
+// whether the fiber is eligible for dispatch, on which host, and the verb that
+// changes the answer when it is not. It promises eligibility, not a launch:
+// the owning daemon's boot quarantine can hold an eligible fiber.
+func dispatchAssessment(fiberID, statusNow string, block *shuttle.Block) string {
 	switch statusNow {
 	case felt.StatusActive:
-		return "→ Daemon will dispatch on next poll. No action needed."
+		switch own, _ := resolveOwnHost(""); {
+		case block.Host == "":
+			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `felt shuttle uninstall` then install / repeat / pin, which stamp this host."
+		case strings.TrimSpace(block.ProjectDir) == "":
+			return fmt.Sprintf("→ Armed, but the block has no project_dir — the daemon will NOT dispatch it. Use `felt shuttle resume %s --project-dir <dir>` to set one.", fiberID)
+		case block.Host != own:
+			return fmt.Sprintf("→ Armed; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", block.Host, own)
+		default:
+			return fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`bin/shuttle release`).", own)
+		}
 	case felt.StatusClosed:
 		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `felt shuttle reopen %s` to clear verdict fields and requeue it.", fiberID)
 	case felt.StatusOpen:

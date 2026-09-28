@@ -224,7 +224,7 @@ defmodule Shuttle.FiberDocuments do
     # response still matches the list endpoint's body=… contract.
     #
     # Same stderr discipline as list_store: never fold stderr into stdout — felt
-    # prints "no felt found matching …" (and parse warnings) to stderr while
+    # prints "no fiber found matching …" (and parse warnings) to stderr while
     # emitting JSON on stdout. A missing fiber exits non-zero with empty stdout,
     # which we treat as "not in this store" and fall through to the next.
     #

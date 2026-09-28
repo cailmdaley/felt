@@ -33,7 +33,7 @@ socket; see felt shuttle host).
 
 Common paths:
   felt shuttle install <fiber> --project-dir "$PWD"   dispatch a fiber once
-  felt shuttle status <fiber>                         its block, and whether status arms it
+  felt shuttle status <fiber>                         its block, and where it is eligible to dispatch
   felt shuttle attach <fiber>                         the worker's live tmux session
   felt shuttle sessions                               addressable sessions across the fleet
   felt shuttle message <address> "text"               deliver to a session and wake it

@@ -702,7 +702,7 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 		}
 	}
 	if !movedAny {
-		return nil, fmt.Errorf("no felt found at %s", oldID)
+		return nil, fmt.Errorf("no fiber found at %s", oldID)
 	}
 
 	external := s.ExternalRefs()
@@ -1468,7 +1468,7 @@ func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode P
 		// slug rescue — would answer with a different fiber that `rm` or
 		// `nest` then acts on.
 		if rel, stray := s.strayAt(candidate); stray {
-			return nil, false, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
+			return nil, false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
 		}
 	}
 	return nil, false, nil
@@ -1919,7 +1919,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 	query = cleanLookupQuery(query)
 	scopeID = cleanLookupScope(scopeID)
 	if query == "" {
-		return "", resolvedExact, fmt.Errorf("no felt found matching %q", query)
+		return "", resolvedExact, fmt.Errorf("no fiber found matching %q", query)
 	}
 
 	if id, ok, err := r.exactInStore(scopeID, query); ok || err != nil {
@@ -1942,7 +1942,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 	// file; the enclosing store's own slug and suffix rules must not answer
 	// it with a same-named fiber elsewhere.
 	if rel, ok := r.external.strayAt(scopeID, query); ok {
-		return "", resolvedExact, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
+		return "", resolvedExact, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
 	}
 
 	// A query that is a fiber's id in the enclosing store, written out from
@@ -2002,7 +2002,7 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 		return ids[0], resolvedBySlug, nil
 	}
 
-	return "", resolvedExact, fmt.Errorf("no felt found matching %q", query)
+	return "", resolvedExact, fmt.Errorf("no fiber found matching %q", query)
 }
 
 // ResolvePath is the answer a reference's PATH gives, as opposed to the one
@@ -2057,7 +2057,7 @@ func (r *scopedIDResolver) exactInStore(scopeID, query string) (string, bool, er
 		}
 		if r.strayAt != nil {
 			if rel, ok := r.strayAt(candidate); ok {
-				return "", false, strayHintError(fmt.Errorf("no felt found matching %q", query), rel)
+				return "", false, strayHintError(fmt.Errorf("no fiber found matching %q", query), rel)
 			}
 		}
 	}
