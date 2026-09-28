@@ -6,6 +6,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
   import Shuttle.Test.EnvHelpers
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.PollerHelpers
+  import Shuttle.Test.TranscriptHelpers
 
   alias Shuttle.Poller
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
@@ -83,22 +84,79 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "Meeting mode (call)."
   end
 
-  test "a constitution with a previous conversation resumes it with the text" do
-    put_constitution("tests/deliver-resume")
-    MockRunner.put_shuttle_fields("tests/deliver-resume", %{"session_uuid" => "prior-session-1"})
-    Poller.refresh_document("tests/deliver-resume")
+  # A previous run of `fiber_id` under `session`, dispatched a minute ago
+  # unless `extra` says otherwise, with `extra` runtime fields (a handoff, say).
+  defp put_previous_run(fiber_id, session, extra \\ %{}) do
+    put_constitution(fiber_id)
 
-    body =
-      api_conn()
-      |> post(
-        "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/deliver-resume", "text" => "join the meeting"})
+    MockRunner.put_shuttle_fields(
+      fiber_id,
+      Map.merge(
+        %{
+          "session_uuid" => session,
+          "dispatched_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -60))
+        },
+        extra
       )
-      |> json_response(200)
+    )
 
-    assert %{"delivered" => true, "delivery" => "resume"} = body
+    Poller.refresh_document(fiber_id)
+  end
+
+  defp deliver(fiber_id, text) do
+    api_conn()
+    |> post("/api/v1/deliver", Jason.encode!(%{"fiber_id" => fiber_id, "text" => text}))
+    |> json_response(200)
+  end
+
+  test "a conversation cut off moments ago is resumed with the text" do
+    session = "de11ae00-0000-4000-8000-000000000001"
+    put_previous_run("tests/deliver-resume", session)
+    write_transcript(session, 30)
+
+    assert %{"delivered" => true, "delivery" => "resume"} =
+             deliver("tests/deliver-resume", "join the meeting")
+
     script = run_script()
-    assert script =~ "prior-session-1"
+    assert script =~ "--resume '#{session}'"
+    assert script =~ "join the meeting"
+  end
+
+  test "a conversation cut off long ago is not resumed: a fresh launch names it" do
+    session = "de11ae00-0000-4000-8000-000000000002"
+    # Dispatched three hours ago; its transcript last written two hours ago.
+    put_previous_run("tests/deliver-cold", session, %{
+      "dispatched_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -3 * 3600))
+    })
+
+    path = write_transcript(session, 2 * 3600)
+
+    assert %{"delivered" => true, "delivery" => "dispatch"} =
+             deliver("tests/deliver-cold", "join the meeting")
+
+    script = run_script()
+    refute script =~ "--resume"
+    assert script =~ "Previous session: #{session}"
+    assert script =~ path
+    assert script =~ "join the meeting"
+  end
+
+  test "after a clean handoff a message launches fresh carrying it" do
+    session = "de11ae00-0000-4000-8000-000000000003"
+
+    put_previous_run("tests/deliver-handed-off", session, %{
+      "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
+    })
+
+    write_transcript(session, 30)
+
+    assert %{"delivered" => true, "delivery" => "dispatch"} =
+             deliver("tests/deliver-handed-off", "join the meeting")
+
+    script = run_script()
+    refute script =~ "--resume"
+    refute script =~ "ended without a handoff"
+    assert script =~ "From User"
     assert script =~ "join the meeting"
   end
 

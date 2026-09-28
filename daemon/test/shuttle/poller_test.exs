@@ -1,5 +1,7 @@
 defmodule Shuttle.PollerTest do
   use ExUnit.Case
+
+  import Shuttle.Test.TranscriptHelpers
   import Shuttle.Test.EnvHelpers
   import Shuttle.Test.PollerHelpers
 
@@ -128,29 +130,6 @@ defmodule Shuttle.PollerTest do
     MockRunner.commands()
     |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
     |> Enum.map(fn {_cmd, args} -> List.last(args) end)
-  end
-
-  # A Claude transcript for `session` last written `age_s` seconds ago, under a
-  # per-test projects root (`SHUTTLE_CLAUDE_PROJECTS_DIR`). The continuation
-  # decision resumes a dirty death only while this file is warm.
-  defp write_transcript(session, age_s \\ 0) do
-    root = Path.join(System.tmp_dir!(), "shuttle-transcripts-#{System.unique_integer([:positive])}")
-    prior = System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
-
-    ExUnit.Callbacks.on_exit(fn ->
-      if prior,
-        do: System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", prior),
-        else: System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-
-      File.rm_rf!(root)
-    end)
-
-    path = Path.join([root, "-work", "#{session}.jsonl"])
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, "{}\n")
-    File.touch!(path, System.os_time(:second) - age_s)
-    path
   end
 
   # Mirror the dispatcher's at-spawn dispatch stamp: `session_uuid` +

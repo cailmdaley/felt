@@ -629,7 +629,7 @@ defmodule Shuttle.DispatcherTest do
       )
 
     assert prompt =~
-             "Previous session: #{uuid} (claude-code) ended without a handoff, likely a host outage.\n" <>
+             "Previous session: #{uuid} (claude-code) ended without a handoff (host outage, kill, or crash).\n" <>
                "Its transcript, to consult as needed after reading Status: #{path}"
 
     missing =
@@ -638,7 +638,7 @@ defmodule Shuttle.DispatcherTest do
       )
 
     assert missing =~
-             "Previous session: #{uuid} ended without a handoff, likely a host outage; " <>
+             "Previous session: #{uuid} ended without a handoff (host outage, kill, or crash); " <>
                "its transcript is not on this host."
 
     # A resume never names a predecessor, cut off or not.
@@ -1600,7 +1600,34 @@ defmodule Shuttle.DispatcherTest do
       assert {:previous, "aaaa-bbbb-cccc-dddd"} =
                intent(dispatched_fiber(ctx), nil, resume_mode: "previous")
 
-      assert :fresh = intent(dispatched_fiber(ctx), 60, resume_mode: "fresh")
+      refute match?({:previous, _}, intent(dispatched_fiber(ctx), 60, resume_mode: "fresh"))
+    end
+
+    test "a transcript older than the dispatch is not this dispatch's session", ctx do
+      # dispatched_at is 18:00; a transcript last written at 17:59:59 belongs to
+      # a predecessor whose id a codex/pi launch never replaced. Plain fresh, no
+      # cut-off note — the marker's id says nothing about the latest run.
+      assert :fresh = intent(dispatched_fiber(ctx), 3601)
+      assert :fresh = intent(dispatched_fiber(ctx), 3601, resume_mode: "fresh")
+      assert :fresh = intent(dispatched_fiber(ctx), 3601, resume_mode: "continue")
+
+      # Written in the dispatch's own second still counts as this session's.
+      assert {:cold, _, _} = intent(dispatched_fiber(ctx), 3600)
+    end
+
+    test "resume_mode=continue applies the no-handoff rule to every kind", ctx do
+      pinned = dispatched_fiber(ctx, %{"kind" => "pinned"})
+      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(pinned, 60, resume_mode: "continue")
+      assert {:cold, _, _} = intent(pinned, 45 * 60 + 1, resume_mode: "continue")
+
+      handed_off =
+        dispatched_fiber(ctx, %{"kind" => "standing", "handed_off_at" => "2026-06-20T18:05:00Z"})
+
+      assert :fresh = intent(handed_off, 60, resume_mode: "continue")
+
+      # Nothing to resume is fresh, never the Resume button's missing-id error.
+      assert :fresh =
+               intent(%{"shuttle" => %{"kind" => "oneshot"}}, 60, resume_mode: "continue")
     end
 
     test "resolve_resume_intent passes the transcript lookup through", ctx do
@@ -1619,16 +1646,19 @@ defmodule Shuttle.DispatcherTest do
       assert :fresh = Dispatcher.check_resume_intent(fiber)
     end
 
-    test "an explicit resume_mode=fresh directive overrides the dirty-death resume", ctx do
-      # A dispatch stamp with no handoff after it — the dirty-death state
-      # decide_continuation reads as "resume". But the human clicked "New
-      # session", carrying resume_mode=fresh as a dispatch parameter. That
-      # explicit directive must win over the autonomous heuristic: "New session"
-      # always means a new session, never resume. This is the remote-machine bug —
-      # workers there die without a handoff, so every "New session" silently
-      # resumed the dead transcript.
-      assert :fresh =
-               Dispatcher.check_resume_intent(dispatched_fiber(ctx), resume_mode: "fresh")
+    test "resume_mode=fresh never resumes, but names a cut-off session", ctx do
+      # "New session" always means a new session — even over a warm transcript
+      # the autonomous rule would resume. The prompt still names what was cut off.
+      assert {:cold, "aaaa-bbbb-cccc-dddd", "/t/aaaa-bbbb-cccc-dddd.jsonl"} =
+               intent(dispatched_fiber(ctx), 60, resume_mode: "fresh")
+
+      assert {:cold, _, nil} = intent(dispatched_fiber(ctx), nil, resume_mode: "fresh")
+
+      clean = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
+      assert :fresh = intent(clean, 60, resume_mode: "fresh")
+
+      app = dispatched_fiber(ctx, %{"surface" => "app"})
+      assert :fresh = intent(app, 60, resume_mode: "fresh")
     end
 
     test "resume_mode=previous resumes the shuttle block's session", ctx do
@@ -1668,6 +1698,7 @@ defmodule Shuttle.DispatcherTest do
   test "resume reloads current constitution and skills" do
     prompt = Dispatcher.render_resume_prompt("tests/haiku")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
+    assert prompt =~ "Mode: resume\nSync and re-read the fiber before continuing.\n"
     assert prompt =~ "Mode: resume"
     assert prompt =~ "Fiber: tests/haiku"
     refute prompt =~ "Exit Contract"

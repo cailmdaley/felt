@@ -103,15 +103,25 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   transcript's age decides: last written within the warm window (45 minutes,
   `config :shuttle, :resume_warm_window_s`) → resume `session_uuid`; older, or
   not on this host → fresh, with the prompt naming the cut-off session and its
-  transcript path. A resume replays the whole transcript into the model, which
-  is cheap only while the harness's prompt cache still holds it, so a worker
-  killed by a host outage hours ago costs less as a fresh worker reading
-  `## Status` — whatever the transcript's size. The lookup is one resolve
-  through `Shuttle.Transcript.path/2` and one stat, taken only on that
-  no-handoff branch. An explicit `resume_mode` from the board wins over all of
-  this. Pinned and standing roles always start fresh. A `surface: app`
-  conversation is exempt from the transcript check: it keeps its identity in
-  the Codex App Server, so it resumes whenever it did not hand off.
+  transcript path. A transcript last written before `dispatched_at` is not
+  that dispatch's session — a codex/pi launch stamps `dispatched_at` at once
+  but its own id only when the scrape backfills it, so the marker can still
+  name the predecessor — and that dispatch goes plain fresh. A resume replays
+  the whole transcript into the model, which is cheap only while the
+  harness's prompt cache still holds it, so a worker killed by a host outage
+  hours ago costs less as a fresh worker reading `## Status` — whatever the
+  transcript's size. The lookup is one resolve through
+  `Shuttle.Transcript.path/2` and one stat, taken only on that no-handoff
+  branch. A `surface: app` conversation is exempt from the transcript check:
+  it keeps its identity in the Codex App Server, so it resumes whenever it did
+  not hand off. Pinned and standing roles start fresh on the autonomous loop.
+
+  `resume_mode` overrides the autonomous rule: `"previous"` (the board's
+  Resume) resumes unconditionally; `"fresh"` (New session) never resumes but
+  still names a cut-off session; `"continue"` (`Shuttle.Delivery`, a message
+  to a fiber with no live worker) applies the same no-handoff rule to every
+  kind of fiber, so a message after a clean handoff or to a cold session
+  launches fresh carrying it.
 
   A clean handoff therefore *is* the end of that conversation: the next worker
   lands on the rewritten `## Status`, and `resume`/`reopen` on a closed or
@@ -194,11 +204,12 @@ Launch messages open with `You are a Shuttle worker. Activate the felt and
 shuttle skills.` and otherwise carry only this dispatch's facts:
 
 - `Fiber:` and `Felt store:`; kind, surface, and headless mode.
-- `Mode: resume` on a resumed session.
+- `Mode: resume` and `Sync and re-read the fiber before continuing.` on a
+  resumed session, which may have slept for any length of time.
 - Standing run ID and scheduled/ad-hoc mode when applicable.
 - On fresh launches, `Previous session: <uuid> (<harness>)` when there was
-  one. When the previous session died without a handoff and was too cold to
-  resume, the line says so and gives its transcript path.
+  one. When the previous session ended without a handoff and is not resumed,
+  the line says so and gives its transcript path.
 - `Collaboration:` — the assigned role and collaborator (named when the
   roster has exactly one of each) and the shared role store, when the fiber
   carries a roster.

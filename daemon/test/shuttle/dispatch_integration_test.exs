@@ -1,6 +1,8 @@
 defmodule Shuttle.DispatchIntegrationTest do
   use ExUnit.Case, async: false
 
+  import Shuttle.Test.TranscriptHelpers
+
   alias Shuttle.{Dispatcher, Poller}
   import Shuttle.Test.PollerHelpers
 
@@ -203,30 +205,6 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # ── Continuation helpers (the felt-history replacement) ──
 
-  # A Claude transcript for `session` last written `age_s` seconds ago, under a
-  # per-test projects root (`SHUTTLE_CLAUDE_PROJECTS_DIR`). The continuation
-  # decision resumes a dirty death only while this file is warm.
-  defp write_transcript(session, age_s \\ 0) do
-    root = Path.join(System.tmp_dir!(), "shuttle-transcripts-#{System.unique_integer([:positive])}")
-    prior = System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
-
-    ExUnit.Callbacks.on_exit(fn ->
-      if prior,
-        do: System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", prior),
-        else: System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-
-      File.rm_rf!(root)
-    end)
-
-    path = Path.join([root, "-work", "#{session}.jsonl"])
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, "{}\n")
-    File.touch!(path, System.os_time(:second) - age_s)
-    path
-  end
-
-
   # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at`
   # into the fiber's `shuttle.runtime` block (the real .md under `host`), by
   # shelling the REAL `felt shuttle mark-runtime` — the actual production
@@ -234,6 +212,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # hand-rolled text surgery can't produce here — shelling the CLI can). `at` lets a
   # test order a later handoff against it. The fiber must already exist
   # (write_fiber).
+  defp ago(seconds), do: DateTime.add(DateTime.utc_now(), -seconds, :second)
+
   defp write_dispatch_marker(_host, id, session_id, at \\ DateTime.utc_now()) do
     {_output, 0} =
       IntegrationRunner.cmd(
@@ -448,7 +428,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     # The prior session id lives ONLY in the dispatch marker (the daemon wrote it
     # at spawn; the worker never knew its own UUID). No handoff after it → resume.
     session = "c1a0e5e0-0000-4000-8000-000000000001"
-    write_dispatch_marker(host, "tests/cli-resume-fixed", session)
+    write_dispatch_marker(host, "tests/cli-resume-fixed", session, ago(120))
     write_transcript(session, 60)
 
     assert {:ok, _} =
@@ -483,7 +463,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     """)
 
     session = "c1a0e5e0-0000-4000-8000-000000000002"
-    write_dispatch_marker(host, "tests/cli-cold", session)
+    write_dispatch_marker(host, "tests/cli-cold", session, ago(4 * 3600))
     path = write_transcript(session, 3 * 3600)
 
     assert {:ok, _} =
@@ -491,12 +471,47 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     refute script =~ "--resume"
-    assert script =~ "--session-id"
+    assert [_, launched] = Regex.run(~r/--session-id '?([0-9a-f-]{36})/, script)
+    refute launched == session
 
     assert script =~
-             "Previous session: #{session} (claude-code) ended without a handoff, likely a host outage."
+             "Previous session: #{session} (claude-code) ended without a handoff " <>
+               "(host outage, kill, or crash)."
 
     assert script =~ "Its transcript, to consult as needed after reading Status: #{path}"
+  end
+
+  test "dirty death with no transcript on this host → fresh launch saying so", %{host: host} do
+    write_fiber(host, "tests/cli-elsewhere", """
+    ---
+    name: CLI elsewhere
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: claude-sonnet
+    ---
+    A fiber whose worker's transcript is not on this host.
+    """)
+
+    session = "c1a0e5e0-0000-4000-8000-000000000004"
+    write_dispatch_marker(host, "tests/cli-elsewhere", session)
+    # An empty projects root: no harness here wrote this session.
+    write_transcript("c1a0e5e0-0000-4000-8000-00000000ffff")
+
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/cli-elsewhere",
+               runner: IntegrationRunner,
+               felt_store: host
+             )
+
+    script = read_run_script()
+    refute script =~ "--resume"
+
+    assert script =~
+             "Previous session: #{session} ended without a handoff (host outage, kill, or crash); " <>
+               "its transcript is not on this host."
   end
 
   # Kanban resume: resume_mode=previous (a dispatch parameter, STORE 3) triggers

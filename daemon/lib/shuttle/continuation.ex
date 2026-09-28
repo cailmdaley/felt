@@ -19,8 +19,8 @@ defmodule Shuttle.Continuation do
   The fields are **per-host by nature** but safe in git: only the owning host
   (`shuttle.host`) dispatches or resumes a fiber, so `session_uuid` is written
   and read by the same host; the git-sync to other hosts is inert (they ignore
-  non-owned fibers). Reassigning `host` degrades gracefully to a failed resume →
-  fresh.
+  non-owned fibers). Reassigning `host` leaves the session's transcript on the
+  old host, so the new owner finds none and starts fresh.
 
   ## felt owns the nested write
 
@@ -106,10 +106,28 @@ defmodule Shuttle.Continuation do
   """
   @spec warm?(%{mtime: DateTime.t()} | nil, DateTime.t(), non_neg_integer()) :: boolean()
   def warm?(transcript, now, window_s \\ warm_window_s())
+
   def warm?(%{mtime: %DateTime{} = mtime}, now, window_s),
     do: DateTime.diff(now, mtime, :second) <= window_s
 
   def warm?(_transcript, _now, _window_s), do: false
+
+  @doc """
+  True iff `transcript` was last written before the fiber's `dispatched_at`
+  (compared to the second, the precision of a file mtime): the session id in
+  the marker is not the one that dispatch launched. A codex/pi launch stamps
+  `dispatched_at` at once but its own session id only when the scrape
+  backfills it, so until then the marker still names the predecessor.
+  """
+  @spec predates_dispatch?(%{mtime: DateTime.t()} | nil, map()) :: boolean()
+  def predates_dispatch?(%{mtime: %DateTime{} = mtime}, fiber) do
+    case dispatched_at(fiber) do
+      nil -> false
+      dispatched -> DateTime.compare(mtime, DateTime.truncate(dispatched, :second)) == :lt
+    end
+  end
+
+  def predates_dispatch?(_transcript, _fiber), do: false
 
   # ── readers (pure, over the polled fiber map) ────────────────────────────────
 
@@ -163,7 +181,8 @@ defmodule Shuttle.Continuation do
 
   Defaults to clean (true) when there is no `dispatched_at` — uncertainty never
   forces a surprising mid-transcript resume. With a `dispatched_at` but no newer
-  `handed_off_at` → false (died mid-thought → resume).
+  `handed_off_at` → false: the session ended without a handoff, and the
+  dispatcher weighs its transcript (`Dispatcher.check_resume_intent/2`).
   """
   @spec clean_handoff_since_dispatch?(map()) :: boolean()
   def clean_handoff_since_dispatch?(fiber) do

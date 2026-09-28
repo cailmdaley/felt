@@ -4,11 +4,14 @@ defmodule Shuttle.Delivery do
 
   A live worker receives it through session messaging (`Shuttle.Messaging`),
   woken as for any task request. A fiber with no live worker launches with the
-  message as its From User: it resumes its previous conversation when it has
-  one and dispatches fresh when it has never run.
+  message as its From User, under the dispatcher's `"continue"` rule: it
+  resumes a previous conversation that ended without a handoff while its
+  transcript is still warm, and otherwise starts fresh — after a clean
+  handoff, a cold or missing transcript, or no previous run at all. Only the
+  board's explicit Resume forces a resume.
   """
 
-  alias Shuttle.{Messaging, Poller}
+  alias Shuttle.{Messaging, Poller, SessionLedger}
 
   @type result ::
           {:message, pos_integer(), map()}
@@ -26,33 +29,40 @@ defmodule Shuttle.Delivery do
   end
 
   defp launch(fiber_id, text, from) do
+    since = System.system_time(:millisecond)
+
+    # The dispatcher reads the fiber itself, so it alone decides whether there
+    # is a conversation worth resuming.
     result =
-      case dispatch(fiber_id, text, "previous") do
-        {:error, :missing_session_id} -> {"fresh", dispatch(fiber_id, text, "fresh")}
-        result -> {"previous", result}
-      end
+      Poller.dispatch_fiber(fiber_id,
+        force: true,
+        ad_hoc: true,
+        user_message: text,
+        resume_mode: "continue"
+      )
 
     # A worker that appeared between the look and the launch takes the message.
-    with {_mode, {:error, :already_running}} <- result,
+    with {:error, :already_running} <- result,
          worker when is_map(worker) <- Poller.live_worker(fiber_id) do
       message(worker, text, from)
     else
-      _ ->
-        {mode, result} = result
-        {:launch, mode, result}
+      _ -> {:launch, launch_mode(result, fiber_id, since), result}
     end
   end
 
-  # The dispatcher reads the fiber itself, so it alone decides whether there is
-  # a conversation to resume.
-  defp dispatch(fiber_id, text, mode) do
-    Poller.dispatch_fiber(fiber_id,
-      force: true,
-      ad_hoc: true,
-      user_message: text,
-      resume_mode: mode
-    )
+  # Which launch the dispatcher chose, from the session ledger: a resume
+  # records its `resume` row before the dispatch returns.
+  defp launch_mode({:ok, session}, fiber_id, since) do
+    resumed? =
+      SessionLedger.read_since(since)
+      |> Enum.any?(fn row ->
+        row["kind"] == "resume" and (row["tmux"] == session or row["fiber"] == fiber_id)
+      end)
+
+    if resumed?, do: "previous", else: "fresh"
   end
+
+  defp launch_mode(_result, _fiber_id, _since), do: "fresh"
 
   defp message(%{session_uuid: native, cli: cli}, text, from) do
     case harness(cli) do

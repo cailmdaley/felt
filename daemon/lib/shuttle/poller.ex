@@ -2162,8 +2162,8 @@ defmodule Shuttle.Poller do
   #
   #   - Members re-dispatch: they are the sanctioned continuation of work that
   #     was demonstrably alive moments ago, so they flow out as the returned
-  #     dispatchable list and the reduce launches them (resume-vs-fresh decided
-  #     downstream by `continuation.ex`, unchanged). Once running they leave the
+  #     dispatchable list and the reduce launches them (resume-vs-fresh is
+  #     `Dispatcher.check_resume_intent/2`'s). Once running they leave the
   #     candidate set, so there is no repeated dispatch.
   #   - Non-members park into `parked_launches` for the snapshot's
   #     `pending_launch` rows (and the board's `held` indicator).
@@ -3428,7 +3428,8 @@ defmodule Shuttle.Poller do
             # The daemon does NOT write the handoff marker — the WORKER does,
             # via `felt shuttle handoff`, as its second-to-last act. A worker
             # that dies without handing off leaves no handoff marker, so the
-            # next dispatch reads dirty-death → resume. The clean/dirty-death
+            # next dispatch resumes its transcript while warm and starts fresh
+            # once cold (`Dispatcher.check_resume_intent/2`). The clean/dirty
             # distinction lives entirely in the presence (and timestamp) of
             # the worker-written handoff marker; this exit path only drives
             # the document state machine below.

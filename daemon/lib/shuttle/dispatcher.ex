@@ -147,23 +147,16 @@ defmodule Shuttle.Dispatcher do
   Decides whether this dispatch should resume a prior worker session or start
   fresh, given the prompt context and the user's continuation directive.
 
-  - Ad-hoc standing-role dispatches default to fresh. Resuming would land
-    the worker in a transcript whose last assistant turn was "Run accepted.
-    Exiting" — they'd idle ("nothing new on the fiber") instead of doing the
-    new run. The kanban modal's manual "Resume" button overrides this by
-    passing `force: true`, which routes back through `check_resume_intent`
-    so the carried `resume_mode` is honored.
-  - All other contexts defer to `check_resume_intent/2`, which honors the
-    `resume_mode` dispatch parameter (`"previous"` / `"fresh"`), falling back
-    to the continuation heuristic (read off the fiber's `shuttle:` block) when no
-    directive is carried.
+  - Ad-hoc standing-role dispatches start fresh. Resuming would land the
+    worker in a transcript whose last assistant turn was "Run accepted.
+    Exiting" — it would idle instead of doing the new run. A forced dispatch
+    (the board's Resume button, a delivered message) skips this and goes
+    through `check_resume_intent/2`.
+  - All other contexts defer to `check_resume_intent/2`.
 
   Options:
-    * `:force` — when true, the ad-hoc short-circuit is skipped and the carried
-      `resume_mode` wins. Set by manual kanban dispatches.
-    * `:resume_mode` — the user's continuation directive (`"previous"` /
-      `"fresh"` / absent), carried with the dispatch call.
-    * `:transcript`, `:now` — passed through to `check_resume_intent/2`.
+    * `:force` — when true, the ad-hoc short-circuit is skipped.
+    * `:resume_mode`, `:transcript`, `:now` — passed to `check_resume_intent/2`.
   """
   @spec resolve_resume_intent(any(), map(), keyword()) :: continuation()
   def resolve_resume_intent(prompt_context, fiber, opts \\ []) do
@@ -179,32 +172,39 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc """
-  Resolves the continuation intent from the carried `resume_mode` directive and,
-  when absent, the per-host markers.
+  Resolves the continuation intent from the carried `resume_mode` directive and
+  the fiber's `shuttle.runtime` markers.
 
   Returns one of:
-  - `:fresh` — no resume requested, or a fresh run was explicitly requested.
-  - `{:previous, session_id}` — resume requested, or the previous session died
-    without a handoff while its transcript is still warm. The dispatcher
-    invokes the harness-appropriate resume command.
-  - `{:cold, session_id, transcript_path | nil}` — the previous session died
-    without a handoff and its transcript is cold or not on this host. The
-    dispatcher starts fresh and names the cut-off session in the prompt.
-  - `{:error, :missing_session_id}` — `resume_mode == "previous"` but the
-    dispatch marker has no usable session id. The caller surfaces this instead
-    of silently starting fresh; "New session" is the explicit fresh path.
+  - `:fresh` — start a new session.
+  - `{:previous, session_id}` — resume that session with the harness's resume
+    command.
+  - `{:cold, session_id, transcript_path | nil}` — start a new session; the
+    previous one ended without a handoff, and the prompt names it and where
+    its transcript is (`nil`: not on this host).
+  - `{:error, :missing_session_id}` — `resume_mode == "previous"` but the fiber
+    carries no session id. The caller surfaces this rather than starting fresh.
 
-  `resume_mode` is the user's directive (a transient dispatch parameter, no
-  longer a persisted felt event). The session id comes ONLY from the fiber's
-  `shuttle.session_uuid` (`Shuttle.Continuation`) — the worker never knew its own
-  UUID, the daemon stamped it at dispatch.
+  `resume_mode`:
+    * `"previous"` — the board's Resume button: resume `session_uuid`,
+      unconditionally.
+    * `"fresh"` — the board's New session: always a new session, naming the
+      previous one when it ended without a handoff.
+    * `"continue"` — a message delivered to a fiber with no live worker
+      (`Shuttle.Delivery`): the no-handoff rule below, for any kind of fiber.
+    * absent — the autonomous loop: the no-handoff rule for oneshots; pinned
+      and standing roles start fresh (a pinned role only redispatches itself
+      after a clean handoff, and standing roles run discrete occurrences).
+
+  The no-handoff rule: with no session, or a clean handoff since dispatch
+  (`handed_off_at >= dispatched_at`), start fresh. A `surface: app`
+  conversation keeps its identity in the Codex App Server, so it resumes.
+  Otherwise the session's transcript decides — see `continue_or_cold/3`.
 
   Options:
-    * `:resume_mode` — `"previous"` / `"fresh"` / absent.
+    * `:resume_mode` — as above.
     * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
       transcript lookup (default `Shuttle.Continuation.transcript_stat/1`).
-      `surface: app` fibers never consult it: an app conversation resumes
-      whenever it did not hand off.
     * `:now` — the `DateTime` the transcript's age is measured against.
   """
   @type continuation ::
@@ -215,78 +215,69 @@ defmodule Shuttle.Dispatcher do
 
   @spec check_resume_intent(map(), keyword()) :: continuation()
   def check_resume_intent(fiber, opts \\ []) do
-    resume_mode = Keyword.get(opts, :resume_mode)
     session_id = Shuttle.Continuation.resumable_session_id(fiber)
 
-    cond do
-      # A human explicitly asked to resume (kanban Resume button passes
-      # resume_mode:previous). Honor it, or surface the missing-id error.
-      resume_mode == "previous" ->
-        if is_binary(session_id) and session_id != "",
-          do: {:previous, session_id},
-          else: {:error, :missing_session_id}
+    case Keyword.get(opts, :resume_mode) do
+      "previous" ->
+        if session_id, do: {:previous, session_id}, else: {:error, :missing_session_id}
 
-      # A human explicitly asked for a new session ("New session" / "Requeue
-      # fresh" passes resume_mode:fresh). This directive is UNCONDITIONAL — it
-      # wins over the autonomous dirty-death heuristic below. Without it, a
-      # oneshot whose prior worker died WITHOUT a clean handoff (routine on
-      # remote machines, where SSH drops and kills cut workers off mid-thought)
-      # falls through to decide_continuation and gets resumed — so "New session"
-      # silently reopened the dead transcript. "New session" means new, always.
-      resume_mode == "fresh" ->
-        :fresh
+      "fresh" ->
+        # Never a resume (an app conversation's `{:previous, _}` included), but
+        # a cut-off terminal session is still named.
+        case continuation(fiber, session_id, opts, :fresh_only) do
+          {:previous, _} -> :fresh
+          other -> other
+        end
 
-      # No directive (resume_mode absent): decide fresh-vs-resume by whether the
-      # previous worker handed off cleanly. The autonomous-loop path.
-      true ->
-        decide_continuation(fiber, session_id, opts)
+      "continue" ->
+        continuation(fiber, session_id, opts, :resume_if_warm)
+
+      _ ->
+        if fiber_kind(fiber) == "oneshot",
+          do: continuation(fiber, session_id, opts, :resume_if_warm),
+          else: :fresh
     end
   end
 
-  # The autonomous fresh-vs-resume decision when there is no human resume
-  # directive. A long-running oneshot loops across sessions: a worker exits, the
-  # next poll re-dispatches and continues. A worker that handed off cleanly
-  # (`shuttle.runtime.handed_off_at` newer than `dispatched_at`) is followed by
-  # a fresh one that reads `## Status`. A worker that died without handing off
-  # loses its in-flight reasoning unless its transcript is resumed — but a
-  # resume re-reads the whole transcript, which is only cheap while the
-  # harness's prompt cache is warm. So a dirty death resumes only when the
-  # transcript was written within the warm window; a colder (or absent)
-  # transcript goes fresh, and the prompt points the new worker at it.
-  #
-  # Scoped to oneshots: pinned and standing roles always start fresh. A pinned
-  # role only autonomously redispatches after a CLEAN handoff (a dirty death
-  # parks it instead), and standing roles dispatch discrete scheduled
-  # occurrences. First run / no prior session → fresh (nothing to resume).
-  #
-  # The transcript lookup (one resolve + one stat) runs only on the dirty-death
-  # branch of a terminal worker; `:transcript` and `:now` inject it for tests.
-  defp decide_continuation(fiber, session_id, opts) do
+  # The no-handoff rule; its transcript lookup runs only past the first three
+  # clauses.
+  defp continuation(fiber, session_id, opts, want) do
     cond do
-      fiber_kind(fiber) != "oneshot" ->
+      is_nil(session_id) -> :fresh
+      Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) -> :fresh
+      app?(fiber) -> {:previous, session_id}
+      true -> continue_or_cold(fiber, session_id, opts, want)
+    end
+  end
+
+  # A session that ended without a handoff, judged by its transcript (one
+  # resolve + one stat):
+  #   - last written before this dispatch's `dispatched_at` → the id is not
+  #     this dispatch's session (a codex/pi launch whose own id was never
+  #     scraped leaves its predecessor's in the marker) → plain fresh;
+  #   - written within the warm window → resume, while the prompt cache still
+  #     holds it (unless the caller only wants fresh);
+  #   - older, or not on this host → fresh, naming the cut-off session. Past the
+  #     window a resume replays the whole transcript uncached, which costs more
+  #     than a fresh worker reading `## Status`, whatever its size.
+  defp continue_or_cold(fiber, session_id, opts, want) do
+    lookup = Keyword.get(opts, :transcript, &Shuttle.Continuation.transcript_stat/1)
+    transcript = lookup.(session_id)
+    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+
+    cond do
+      Shuttle.Continuation.predates_dispatch?(transcript, fiber) ->
         :fresh
 
-      not (is_binary(session_id) and session_id != "") ->
-        :fresh
-
-      Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) ->
-        :fresh
-
-      # An app conversation keeps its identity in the Codex App Server whether
-      # or not its cache is warm, so it resumes as before.
-      get_in(fiber, ["shuttle", "surface"]) == "app" ->
+      want == :resume_if_warm and Shuttle.Continuation.warm?(transcript, now) ->
         {:previous, session_id}
 
       true ->
-        lookup = Keyword.get(opts, :transcript, &Shuttle.Continuation.transcript_stat/1)
-        transcript = lookup.(session_id)
-        now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
-
-        if Shuttle.Continuation.warm?(transcript, now),
-          do: {:previous, session_id},
-          else: {:cold, session_id, transcript && transcript.path}
+        {:cold, session_id, transcript && transcript.path}
     end
   end
+
+  defp app?(fiber), do: get_in(fiber, ["shuttle", "surface"]) == "app"
 
   # The previous-session record for a fresh launch after a cut-off session.
   defp cut_off_session(previous, session_id, transcript) do
@@ -341,11 +332,13 @@ defmodule Shuttle.Dispatcher do
 
   defp render_cut_off(%{cut_off: true, transcript: path}) when is_binary(path),
     do:
-      " ended without a handoff, likely a host outage.\n" <>
+      " ended without a handoff (host outage, kill, or crash).\n" <>
         "Its transcript, to consult as needed after reading Status: #{path}"
 
   defp render_cut_off(%{cut_off: true}),
-    do: " ended without a handoff, likely a host outage; its transcript is not on this host."
+    do:
+      " ended without a handoff (host outage, kill, or crash); " <>
+        "its transcript is not on this host."
 
   defp render_cut_off(_), do: ""
 
@@ -353,7 +346,7 @@ defmodule Shuttle.Dispatcher do
   @spec render_resume_prompt(String.t(), keyword()) :: String.t()
   def render_resume_prompt(fiber_id, opts \\ []) do
     compose_prompt(
-      "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nSync and re-read the fiber before continuing.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
       Keyword.delete(opts, :previous_session)
     )
   end

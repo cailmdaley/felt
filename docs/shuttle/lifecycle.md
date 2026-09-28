@@ -96,13 +96,19 @@ uninstalling are separate decisions, and the block stays as historical record.
 
 ### Resume vs fresh
 
-Workers start fresh by default. Resuming a transcript happens in exactly two
-cases: you press Resume on the board, or a oneshot died dirty. A death counts as
-dirty when `handed_off_at` is missing or older than `dispatched_at`. Nothing
-else feeds that test, which is why the handoff verb matters.
+Workers start fresh by default. Resuming a transcript happens in three cases:
+you press Resume on the board; a oneshot died dirty and its transcript is still
+warm; or you send a message to a fiber whose worker died dirty while its
+transcript is still warm. A death counts as dirty when `handed_off_at` is
+missing or older than `dispatched_at`, which is why the handoff verb matters.
+A transcript is warm when it was written in the last 45 minutes, while the
+model's prompt cache still holds it; resuming a colder one would replay it
+uncached, so the worker starts fresh instead and its prompt names the cut-off
+session and its transcript. A Codex app conversation (`surface: app`) that
+died dirty resumes whatever its transcript's age.
 
-Scheduled runs, ad-hoc standing runs, daemon recovery, and orphan adoption all
-start fresh.
+New session on the board always starts fresh. Scheduled runs, ad-hoc standing
+runs, daemon recovery, and orphan adoption start fresh too.
 
 ## The board
 
