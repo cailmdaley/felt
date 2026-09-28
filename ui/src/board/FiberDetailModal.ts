@@ -1254,7 +1254,7 @@ export class FiberDetailModal {
   ): Promise<void> {
     const preserveContent = opts.preserveContent === true
     const requestToken = ++this.bodyRequestToken
-    const pageScroll = this.bodyPage?.scrollTop ?? 0
+    const pageScroll = this.bodyScroller()?.scrollTop ?? 0
 
     if (!preserveContent) {
       // Render the outcome (the card already carries it) IMMEDIATELY, so the
@@ -1631,8 +1631,13 @@ export class FiberDetailModal {
     )
   }
 
+  /** What scrolls the body: the page pane in a window, the whole sheet on a phone. */
+  private bodyScroller(): HTMLElement | null {
+    return this.isSheet() ? this.overlay : this.bodyPage
+  }
+
   private restoreBodyScroll(scrollTop: number, overlay: HTMLElement): void {
-    const page = this.bodyPage
+    const page = this.bodyScroller()
     if (!page) return
     page.scrollTop = scrollTop
     window.requestAnimationFrame(() => {
@@ -2402,6 +2407,15 @@ export class FiberDetailModal {
       body.hidden = !opening
       toggle.setAttribute('aria-expanded', String(opening))
       wrap.classList.toggle('kbn-detail-controls-open', opening)
+      // On a phone sheet the unfolded drawer leaves the bottom edge for the
+      // flow at the page's end; bring its strip up under the title bar, so the
+      // drawer opens where the thumb is and the page stays one scroll above.
+      const sheet = wrap.closest<HTMLElement>('.kbn-detail-sheet')
+      if (opening && sheet) {
+        const head = sheet.querySelector('.kbn-detail-header')
+        const edge = (head ?? sheet).getBoundingClientRect()
+        sheet.scrollTop += wrap.getBoundingClientRect().top - (head ? edge.bottom : edge.top)
+      }
     })
 
     wrap.append(toggle, body)
