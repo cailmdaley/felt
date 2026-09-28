@@ -4,6 +4,7 @@ defmodule Shuttle.PollerTest do
   import Shuttle.Test.PollerHelpers
 
   alias Shuttle.ActionQueries
+  alias Shuttle.DaemonHeartbeat
   alias Shuttle.Poller
   alias Shuttle.Poller.Snapshot
   alias Shuttle.Dispatcher
@@ -2420,6 +2421,7 @@ defmodule Shuttle.PollerTest do
           "v" => 1,
           "host" => System.fetch_env!("SHUTTLE_HOST"),
           "node" => Shuttle.DaemonHeartbeat.node_name(),
+          "held" => false,
           "at" => now - 4_000,
           "booted_at" => booted_at,
           "workers" => [],
@@ -2522,9 +2524,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "an idle fast bounce (no workers recorded) auto-releases" do
-    # Nothing was running, so there is no continuity to establish — and a
-    # seconds-long gap has no stale backlog, which is the only thing the
-    # quarantine exists to withhold. Vacuously continuous, so: release.
+    # Nothing was running and the previous incarnation had been released, so
+    # an empty recorded set is continuous.
     fresh_id = fresh_candidate!("tests/hb-idle")
     write_heartbeat!()
 
@@ -2533,6 +2534,63 @@ defmodule Shuttle.PollerTest do
 
     assert_launched!(fresh_id)
     assert hb_snapshot(poller).boot_quarantine == false
+  end
+
+  test "an unreleased hold survives a hard kill (a held incarnation's heartbeat never releases)" do
+    # The laundering case: an incarnation boots held (after an outage or a
+    # deploy) and nobody releases it. It keeps writing fresh heartbeats with no
+    # workers, since nothing dispatches while held. A hard kill after a long run
+    # must not turn that into a release of the work it was holding back.
+    fiber_id = fresh_candidate!("tests/hb-launder")
+    refute File.exists?(heartbeat_file())
+
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_launder_1)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    # Stand in for a long, healthy-looking uptime right up to the kill.
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
+    )
+
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_launder_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
+  test "a human release is recorded in the heartbeat at once" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_hb_release_write,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        daemon_heartbeat_file: heartbeat_file(),
+        daemon_heartbeat_interval_ms: 3_600_000
+      )
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    assert :ok = Poller.release_boot_quarantine(poller)
+    # The hour-long interval rules out the timer: only the release wrote this.
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
   end
 
   test "a stale heartbeat (a real outage) still quarantines" do

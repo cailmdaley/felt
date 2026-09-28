@@ -809,16 +809,26 @@ defmodule Shuttle.Poller do
   # stalls the Poller. After a graceful shutdown has retired the file, the writer
   # declines to re-create it (`DaemonHeartbeat.retire/2`).
   defp write_daemon_heartbeat(%State{} = state) do
+    record_daemon_heartbeat(state)
+    schedule_daemon_heartbeat(state)
+  end
+
+  # One write, no rescheduling — for the tick above and for the moment a hold
+  # comes off, so a hard kill seconds after a human release is not judged by a
+  # record that still says "held". `held` covers a contract skew too: fresh work
+  # parked behind a skew is as unreleased as work parked behind the quarantine.
+  defp record_daemon_heartbeat(%State{} = state) do
     :ok =
       DaemonHeartbeat.write_async(state.daemon_heartbeat_file,
         booted_at: state.daemon_booted_at,
         host: state.own_host_id,
         node: DaemonHeartbeat.node_name(),
+        held: state.boot_quarantine or not state.contract_check.ok,
         workers: Map.keys(state.running),
         boots: state.daemon_boots
       )
 
-    schedule_daemon_heartbeat(state)
+    state
   end
 
   defp schedule_daemon_heartbeat(%State{daemon_heartbeat_interval_ms: interval} = state)
@@ -1331,7 +1341,7 @@ defmodule Shuttle.Poller do
 
   def handle_call(:release_boot_quarantine, _from, state) do
     Logger.info("boot quarantine released; fresh dispatch resumes on the next tick")
-    state = %{state | boot_quarantine: false, parked_launches: %{}}
+    state = record_daemon_heartbeat(%{state | boot_quarantine: false, parked_launches: %{}})
 
     # Tick now so parked fibers dispatch immediately, not a poll interval later.
     {:reply, :ok, schedule_tick(state, 0)}

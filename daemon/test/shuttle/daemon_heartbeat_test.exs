@@ -92,6 +92,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
          "v" => 1,
          "host" => "fleet-host",
          "node" => "login01",
+         "held" => false,
          "at" => @now - 4_000,
          "booted_at" => booted_at,
          "workers" => [],
@@ -135,6 +136,13 @@ defmodule Shuttle.DaemonHeartbeatTest do
       # about this node's restart.
       assert {:hold, reason} = judge(hb(), %{node: "login02"})
       assert reason =~ "login01"
+    end
+
+    test "a heartbeat written while still held, or with no held stamp, holds" do
+      assert {:hold, reason} = judge(hb(%{"held" => true}))
+      assert reason =~ "still quarantined"
+      {:ok, record} = hb()
+      assert {:hold, _} = judge({:ok, Map.delete(record, "held")})
     end
 
     test "a heartbeat stamped with another host id holds" do

@@ -41,6 +41,7 @@ defmodule Shuttle.DaemonHeartbeat do
        "at":1764500000000,         # wall clock of THIS write, epoch ms
        "booted_at":1764499000000,  # when the writing incarnation booted
        "host":"…", "node":"…",     # its own_host_id and OS node name
+       "held":false,               # was it still quarantined (or skewed)?
        "workers":["fiber-uid", …], # runtime keys it had live at this write
        "boots":[…,1764499000000]}  # ring of recent boot times, newest last
 
@@ -178,6 +179,7 @@ defmodule Shuttle.DaemonHeartbeat do
          "booted_at" => booted_at,
          "host" => string_or_nil(json["host"]),
          "node" => string_or_nil(json["node"]),
+         "held" => json["held"],
          "workers" => string_list(json["workers"]),
          "boots" => ms_list(json["boots"])
        }}
@@ -206,6 +208,7 @@ defmodule Shuttle.DaemonHeartbeat do
       "booted_at" => Keyword.fetch!(opts, :booted_at),
       "host" => Keyword.get(opts, :host),
       "node" => Keyword.get(opts, :node),
+      "held" => Keyword.get(opts, :held),
       "workers" => opts |> Keyword.get(:workers, []) |> Enum.to_list() |> Enum.map(&to_string/1),
       "boots" => Keyword.get(opts, :boots, [])
     }
@@ -352,6 +355,12 @@ defmodule Shuttle.DaemonHeartbeat do
          "daemon heartbeat was written by host #{inspect(hb["host"])} on node " <>
            "#{inspect(hb["node"])}, not this daemon (host #{inspect(Map.get(observed, :host))} " <>
            "on node #{inspect(Map.get(observed, :node))})"}
+
+      # An incarnation that was still held when it wrote this never had its
+      # parked work released by anyone; a hard kill must not release it either.
+      # A record without the stamp holds too.
+      hb["held"] != false ->
+        {:hold, "the previous incarnation was still quarantined (held: #{inspect(hb["held"])})"}
 
       age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
         {:hold, "daemon heartbeat is #{age_ms}ms old (grace #{@default_grace_ms}ms)"}
