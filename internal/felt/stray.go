@@ -116,10 +116,12 @@ func foldBlocker(file looseFile, dir, target string) string {
 // relative to `.felt/`. It is the per-id form of the walk's classification: a
 // bare `<dir>/<slug>.md` below the root, outside hidden paths, not the
 // entry point of a store mounted at `<dir>`, carrying fiber frontmatter.
+// `<dir>/<slug>/<slug>.md` is the fiber `<dir>/<slug>` in its own place, not a
+// stray, however the id naming it is spelled.
 func (s *Storage) strayAt(id string) (string, bool) {
 	id = path.Clean(filepath.ToSlash(id))
 	dir := path.Dir(id)
-	if dir == "." || !validLookupID(id) || hiddenPath(id) {
+	if dir == "." || path.Base(dir) == path.Base(id) || !validLookupID(id) || hiddenPath(id) {
 		return "", false
 	}
 	parent := filepath.Join(s.root, filepath.FromSlash(dir))

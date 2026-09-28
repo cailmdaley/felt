@@ -2790,3 +2790,25 @@ func TestDataFlowEdgeNeedsFromNotID(t *testing.T) {
 		t.Fatalf("consumers of source = %+v, want both entries", consumers)
 	}
 }
+
+// TestFiberFileSpelledAsIDIsNotStray: `science/cmbx/cmbx` spells the path of
+// the fiber science/cmbx's own file. That file is in the layout, so the query
+// is an ordinary stale path — show rescues it by its slug — and never a
+// stray to migrate.
+func TestFiberFileSpelledAsIDIsNotStray(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(&Felt{ID: "science/cmbx", Name: "cmbx", Status: StatusOpen}); err != nil {
+		t.Fatal(err)
+	}
+	if rel, ok := s.strayAt("science/cmbx/cmbx"); ok {
+		t.Fatalf("strayAt(science/cmbx/cmbx) = %q, want no stray", rel)
+	}
+	f, err := s.FindInScope("", "science/cmbx/cmbx")
+	if err != nil || f.ID != "science/cmbx" {
+		t.Fatalf("FindInScope = %v, %v; want science/cmbx", f, err)
+	}
+}
