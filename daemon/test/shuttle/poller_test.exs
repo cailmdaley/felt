@@ -2762,15 +2762,12 @@ defmodule Shuttle.PollerTest do
     write_heartbeat!()
 
     {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
-
-    snap = hb_snapshot(poller)
-    assert snap.boot_quarantine == true
     refute :sys.get_state(poller).adopted?
 
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session" and
-               Dispatcher.session_name(fiber_id) in args
-           end)
+    # Force a cycle and wait for it to park the candidate: the hold is observed
+    # doing its job, not merely set.
+    send(poller, :run_poll_cycle)
+    assert_held!(poller, fiber_id)
   end
 
   test "a truncated or malformed heartbeat file still quarantines without crashing the poller" do
