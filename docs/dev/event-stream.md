@@ -27,7 +27,8 @@ in Go, which is what makes it work on a bare remote login node.
 directory is the opt-in, and the hook never creates it, so a felt-only install
 grows no stream. `SHUTTLE_EVENTS_FILE` overrides the gate (and creates its
 parent); `SHUTTLE_EVENTS=off` disables recording. The live file rotates to
-`.jsonl.1` past `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB), and a `toolInput` over
+`.jsonl.1` past `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB) — once, under a flock of
+the `.lock` sidecar, however many hooks see it full at the same moment — and a `toolInput` over
 8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
 `Write` parks a whole file body in the stream.
 

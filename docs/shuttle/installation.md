@@ -1125,7 +1125,9 @@ The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
 renamed to `events.jsonl.1` and a fresh stream starts. The activity histogram
 is folded from both files, the rotated one first, and the daemon keeps that
 fold in memory and carries it across a rotation rather than re-reading. Only
-`events.jsonl.1` is kept; an older rotation is overwritten. A `toolInput` over 8 KiB is trimmed to its
+`events.jsonl.1` is kept; an older rotation is overwritten. Writers that find
+the stream full at the same moment serialize the rename on a flock of
+`events.jsonl.lock`, so it rotates once. A `toolInput` over 8 KiB is trimmed to its
 file paths plus `truncated: true`, so a `Write` of a large file does not park
 the whole body in the stream.
 
