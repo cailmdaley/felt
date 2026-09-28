@@ -9,6 +9,11 @@ defmodule Shuttle.FileTail do
   once from the whole file, then read *only what was appended*, and say so
   when the file shrank or was rotated away.
 
+  Every read opens the file `:raw`, in the calling process. A plain
+  `File.read/1` goes through the `file_server_2` process, which then holds the
+  whole file's binary until it next collects — 50 MB pinned in a process that
+  rarely does.
+
   ## Why an offset is sound here
 
   The stream is append-only between rotations, so the bytes below a given
@@ -205,7 +210,7 @@ defmodule Shuttle.FileTail do
   end
 
   defp read_range(path, offset, length) do
-    with {:ok, file} <- File.open(path, [:read, :binary]) do
+    with {:ok, file} <- :file.open(path, [:read, :binary, :raw]) do
       try do
         :file.position(file, offset)
 
@@ -214,7 +219,7 @@ defmodule Shuttle.FileTail do
           other -> other
         end
       after
-        File.close(file)
+        :file.close(file)
       end
     end
   end
