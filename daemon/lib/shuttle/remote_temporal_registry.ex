@@ -11,9 +11,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
   "an error never clears data" rule, and differs from them in three ways:
 
     * **No background polling.** Nothing here drives recovery or a badge that
-      must flip in seconds, and a remote's `/activity` rescans its whole event
-      stream on every non-304 request. So nothing is fetched until a composite
-      asks: `entries/2` names one feed, and only that feed is refreshed, only
+      must flip in seconds, and a fleet's worth of 14-day windows is real
+      bandwidth. So nothing is fetched until a composite asks: `entries/2` names one feed, and only that feed is refreshed, only
       for the remotes whose last attempt at it is older than the freshness
       gate. A board nobody is looking at costs its remotes nothing.
 
