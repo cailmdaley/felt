@@ -15,13 +15,31 @@ import (
 const messageTargetSession = "a2a08d94-7da5-4bb7-b083-933487a19b8f"
 const messageTargetFiberUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
+// messageTargetFreshHosts are the hosts the test fibers name; the stub ledger
+// reports them, and every host in its records, as fresh origins.
+var messageTargetFreshHosts = []string{"old-node", "new-node", "worker-node"}
+
 func messageTargetDaemon(t *testing.T, sessions []messaging.Session, records []SessionProvenance) *httptest.Server {
+	t.Helper()
+	origins := map[string]any{}
+	for _, host := range messageTargetFreshHosts {
+		origins[host] = map[string]any{"stale": false, "last_error": nil}
+	}
+	for _, record := range records {
+		if record.Host != "" {
+			origins[record.Host] = map[string]any{"stale": false, "last_error": nil}
+		}
+	}
+	return messageTargetDaemonWithOrigins(t, sessions, records, origins)
+}
+
+func messageTargetDaemonWithOrigins(t *testing.T, sessions []messaging.Session, records []SessionProvenance, origins map[string]any) *httptest.Server {
 	t.Helper()
 	peers, err := json.Marshal(messaging.Directory{Sessions: sessions, Gaps: []messaging.Gap{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledger, err := json.Marshal(sessionLedgerResponse{Records: records})
+	ledger, err := json.Marshal(sessionLedgerResponse{Records: records, Origins: origins})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +368,9 @@ func TestResolveMessageTargetRefusesGuessedFiberSlug(t *testing.T) {
 	}
 }
 
-func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T) {
+// The owning host's ledger is authoritative over the fiber's git runtime field,
+// which lags until that host pushes: a newer ledger worker wins.
+func TestResolveMessageTargetPrefersNewestLedgerOverStaleRuntime(t *testing.T) {
 	store := writeMessageTargetFiber(t, map[string]any{
 		"kind":        "oneshot",
 		"host":        "old-node",
@@ -361,12 +381,8 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, []messaging.Session{
 		{
-			Address: "shuttle://peer-node/pi/live-peer",
+			Address: "shuttle://old-node/claude/old-session",
 			Fiber:   "work/worker", FiberUID: messageTargetFiberUID,
-		},
-		{
-			Address: "shuttle://peer-node/pi/unrelated-peer",
-			Fiber:   "work/other", FiberUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
 		},
 	}, []SessionProvenance{
 		{
@@ -375,17 +391,81 @@ func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T
 		},
 		{
 			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-session",
+			Host: "new-node", Harness: "claude-code", At: 2, Kind: "dispatch",
+		},
+	})
+
+	address, err := resolveMessageTarget("work/worker")
+	if err != nil || address != "shuttle://new-node/claude/new-session" {
+		t.Fatalf("expected the ledger's newest worker, got %q, %v", address, err)
+	}
+}
+
+// The composite ledger is a polled cache: when the feed from the worker's host
+// or the fiber's owning host is stale or failing, a newer worker there could be
+// missing, so the fiber target is refused rather than sent to an older one.
+func TestResolveMessageTargetRefusesWhenOwningLedgerIsNotFresh(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		origin map[string]any
+		want   string
+	}{
+		{"stale", map[string]any{"stale": true, "last_error": nil}, "is stale"},
+		{"failing", map[string]any{"stale": false, "last_error": "http_status 404"}, "is failing"},
+		{"missing", nil, "not part of the composite"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := writeMessageTargetFiber(t, map[string]any{
+				"kind":        "oneshot",
+				"host":        "new-node",
+				"agent":       "claude-opus",
+				"project_dir": t.TempDir(),
+				"runtime":     map[string]any{"session_uuid": "old-session"},
+			})
+			isolateMessageFiberStore(t, store)
+			origins := map[string]any{"old-node": map[string]any{"stale": false, "last_error": nil}}
+			if tc.origin != nil {
+				origins["new-node"] = tc.origin
+			}
+			messageTargetDaemonWithOrigins(t, nil, []SessionProvenance{{
+				Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
+				Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
+			}}, origins)
+
+			_, err := resolveMessageTarget("work/worker")
+			if err == nil || !strings.Contains(err.Error(), `host "new-node"`) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected refusal for a %s owning-host ledger, got %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// A Codex claim row carries a transcript id, not the addressable thread id;
+// without a peer or ledger thread mapping the target is refused, never guessed.
+func TestResolveMessageTargetRefusesCodexTranscriptWithoutThread(t *testing.T) {
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "old-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": "old-session"},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, []SessionProvenance{
+		{
+			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
+			Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
+		},
+		{
+			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-transcript",
 			Host: "new-node", Harness: "codex", At: 2, Kind: "claim",
 		},
 	})
 
 	_, err := resolveMessageTarget("work/worker")
-	if err == nil || !strings.Contains(err.Error(), "old-session") ||
-		!strings.Contains(err.Error(), "new-session") || !strings.Contains(err.Error(), "sync the store") ||
-		!strings.Contains(err.Error(), "explicit shuttle:// address") ||
-		!strings.Contains(err.Error(), "shuttle://peer-node/pi/live-peer") ||
-		strings.Contains(err.Error(), "unrelated-peer") {
-		t.Fatalf("expected stale-runtime refusal naming the live peer candidate and remedies, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "thread id is not yet known") ||
+		!strings.Contains(err.Error(), "new-transcript") || !strings.Contains(err.Error(), "explicit shuttle:// address") {
+		t.Fatalf("expected Codex transcript refusal, got %v", err)
 	}
 }
 

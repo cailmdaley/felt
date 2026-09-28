@@ -94,7 +94,7 @@ Only the human sets `tempered`. Leave the shuttle block in place when you close;
 
 ## Other sessions and the human
 
-`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about, with `fiber` when the host's session ledger records the pairing; `felt shuttle sessions <fiber>` shows a fiber's session history with each row's canonical address. `felt shuttle message` takes that address, a unique native session ID, or a fiber path, slug, or UID with a recorded worker. Resolution fails closed: a fiber needs one exact match across configured stores and a `shuttle.runtime.session_uuid` that agrees with its newest session-ledger pairing, and an ambiguous session ID lists its candidate addresses. Sync the store or pass an explicit address.
+`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about, with `fiber` when the host's session ledger records the pairing; `felt shuttle sessions <fiber>` shows a fiber's session history with each row's canonical address. `felt shuttle message` takes that address, a unique native session ID, or a fiber path, slug, or UID with a recorded worker. A fiber resolves to the worker in its newest session-ledger row, which the owning host writes. Resolution fails closed: a fiber needs one exact match across configured stores and a ledger row, and an ambiguous session ID lists its candidate addresses; pass an explicit address instead.
 
 ```bash
 felt shuttle message <address> "Please investigate this"

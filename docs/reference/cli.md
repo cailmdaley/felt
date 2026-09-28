@@ -198,10 +198,15 @@ felt shuttle message <address> "Background for your next task" --context-only
 `felt shuttle message` accepts that address, a unique native session ID, or a
 Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
 one exact match across configured stores; they refuse guesses and duplicate
-matches. The target checks `shuttle.runtime.session_uuid` against the newest
-dispatch, resume, or claim pairing and refuses a disagreement; sync the store
-or pass an explicit address. A Codex App ledger row keeps its transcript id in
-`session` and its address id in `thread_id`. Ambiguous session IDs fail with
+matches. A fiber resolves to the worker in its newest dispatch, resume, or
+claim ledger row, which the owning host writes. When the fiber's
+`shuttle.runtime.session_uuid` or another live session registered for the
+fiber differs, the command notes it on stderr and still uses the ledger's
+worker. A fiber with no ledger row, an unavailable ledger, or a stale or
+failing ledger feed from the worker's host or the fiber's owning host is
+refused, since a newer worker there could be missing.
+A Codex App ledger row keeps its transcript id in `session` and its address id
+in `thread_id`; a Codex row whose thread id cannot be established is refused. Ambiguous session IDs fail with
 their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
@@ -231,7 +236,7 @@ provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `felt shuttle message` exits 0 for
 `accepted`, `submitted`, `queued`, and `context_added`; it exits 1 for
 `rejected`, `unknown`, or another command error. A target that does not
-resolve, is ambiguous, or disagrees with the session ledger fails before any
+resolve, is ambiguous, or has no session-ledger worker fails before any
 request is sent, with exit 1 and no receipt. Once resolved, it prints
 `sending <id> to <resolved address>` to stderr before delivery; if interrupted,
 retry with `--message-id <printed id>`.
