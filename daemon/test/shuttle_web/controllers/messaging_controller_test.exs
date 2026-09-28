@@ -21,17 +21,31 @@ defmodule ShuttleWeb.MessagingControllerTest do
       if request["message_id"] == "malformed-local" do
         {Jason.encode!(%{error: "receipt lost"}), 0}
       else
+        {status, error_code, exit_status} =
+          case request["message_id"] do
+            "unknown" -> {"unknown", "ambiguous_delivery", 1}
+            "refused" -> {"rejected", "wake_refused", 1}
+            "preflight" -> {"rejected", "preflight_failed", 1}
+            "unproduced" -> {"unknown", "internal", 1}
+            id when id in ["queued", "context_added", "submitted"] -> {id, nil, 0}
+            _ -> {"accepted", nil, 0}
+          end
+
         receipt = %{
           message_id: request["message_id"],
           address: request["address"],
-          status:
-            if(request["message_id"] in ["queued", "context_added", "submitted"],
-              do: request["message_id"],
-              else: "accepted"
-            ),
+          status: status,
           transport: "codex",
           detail: nil
         }
+
+        receipt =
+          if error_code, do: Map.put(receipt, "_felt_error_code", error_code), else: receipt
+
+        receipt =
+          if request["message_id"] == "unproduced",
+            do: Map.put(receipt, "_felt_receipt_produced", false),
+            else: receipt
 
         files =
           Enum.map(request["attachments"] || [], fn attachment ->
@@ -51,7 +65,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
           end
 
         receipt = if files == [], do: receipt, else: Map.put(receipt, :files, files)
-        {Jason.encode!(receipt), 0}
+        {Jason.encode!(receipt), exit_status}
       end
     end
   end
@@ -109,13 +123,23 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
       case request["message_id"] do
         "rejected" ->
-          {:ok, 400,
+          {:ok, 200,
            Jason.encode!(%{
              message_id: "rejected",
              address: request["address"],
              status: "rejected",
              transport: "validation",
              detail: "refused"
+           })}
+
+        "preflight" ->
+          {:ok, 400,
+           Jason.encode!(%{
+             message_id: "preflight",
+             address: request["address"],
+             status: "rejected",
+             transport: "claude-native",
+             detail: "receiver endpoint unavailable"
            })}
 
         "malformed" ->
@@ -590,7 +614,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["status"] == "accepted"
   end
 
-  test "wake cannot succeed with a context-only acknowledgement from local or remote peers", %{
+  test "wake receipts preserve every well-formed admission stage locally and remotely", %{
     host: host
   } do
     for target <- [host, "edge"], status <- ["queued", "context_added", "submitted"] do
@@ -602,10 +626,33 @@ defmodule ShuttleWeb.MessagingControllerTest do
       }
 
       receipt =
-        api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
+        api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
 
-      assert receipt["status"] == "unknown"
+      assert receipt["status"] == status
       assert receipt["message_id"] == status
+    end
+  end
+
+  test "a valid non-zero felt receipt stays 200, while a preflight refusal stays 400", %{
+    host: host
+  } do
+    for {message_id, expected_status, expected_http} <- [
+          {"unknown", "unknown", 200},
+          {"refused", "rejected", 200},
+          {"preflight", "rejected", 400},
+          {"unproduced", "unknown", 502}
+        ] do
+      request = %{
+        address: "shuttle://#{host}/claude/session",
+        text: "begin work",
+        wake: true,
+        message_id: message_id
+      }
+
+      conn = api_conn() |> post("/api/v1/messages", Jason.encode!(request))
+      receipt = json_response(conn, expected_http)
+      assert receipt["status"] == expected_status
+      refute Map.has_key?(receipt, "_felt_error_code")
     end
   end
 
@@ -822,10 +869,18 @@ defmodule ShuttleWeb.MessagingControllerTest do
     rejected =
       api_conn()
       |> post("/api/v1/messages", Jason.encode!(Map.put(base, "message_id", "rejected")))
-      |> json_response(400)
+      |> json_response(200)
 
     assert rejected["address"] == base["address"]
     assert rejected["status"] == "rejected"
+
+    preflight =
+      api_conn()
+      |> post("/api/v1/messages", Jason.encode!(Map.put(base, "message_id", "preflight")))
+      |> json_response(400)
+
+    assert preflight["address"] == base["address"]
+    assert preflight["status"] == "rejected"
 
     unknown =
       api_conn()

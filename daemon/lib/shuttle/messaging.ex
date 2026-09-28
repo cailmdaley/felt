@@ -422,7 +422,13 @@ defmodule Shuttle.Messaging do
           {:ok, receipt} when is_map(receipt) ->
             case validate_receipt(receipt, request, forwarded["address"]) do
               :ok ->
-                {:ok, status, Map.put(receipt, "address", request.address)}
+                status = receipt_http_status(status, receipt)
+
+                {:ok, status,
+                 receipt
+                 |> Map.delete("_felt_error_code")
+                 |> Map.delete("_felt_receipt_produced")
+                 |> Map.put("address", request.address)}
 
               :error ->
                 {:ok, 502,
@@ -471,7 +477,7 @@ defmodule Shuttle.Messaging do
         case Jason.decode(output) do
           {:ok, receipt} when is_map(receipt) ->
             if validate_receipt(receipt, request, payload["address"]) == :ok,
-              do: {:ok, 200, receipt},
+              do: local_receipt_response(receipt, request),
               else:
                 {:ok, 502,
                  unknown_receipt(
@@ -496,7 +502,7 @@ defmodule Shuttle.Messaging do
       {:command_error, _, output} ->
         case decode_receipt_line(output, request, payload["address"]) do
           {:ok, receipt} ->
-            {:ok, 400, receipt}
+            local_receipt_response(receipt, request)
 
           :error ->
             {:ok, 502,
@@ -672,12 +678,36 @@ defmodule Shuttle.Messaging do
   defp format_address(host, harness, native),
     do: "shuttle://#{host}/#{harness}/#{URI.encode(native, &go_path_segment_char?/1)}"
 
+  defp local_receipt_response(receipt, request) do
+    if Map.get(receipt, "_felt_receipt_produced", true) == false do
+      {:ok, 502,
+       unknown_receipt(
+         request,
+         "daemon",
+         "felt failed without a valid receipt; outcome is unknown"
+       )}
+    else
+      status = receipt_http_status(200, receipt)
+      {:ok, status, Map.drop(receipt, ["_felt_error_code", "_felt_receipt_produced"])}
+    end
+  end
+
+  defp receipt_http_status(status, receipt) do
+    if Map.get(receipt, "_felt_error_code") in [
+         "invalid_address",
+         "wrong_host",
+         "invalid_request",
+         "unsupported_harness",
+         "preflight_failed"
+       ],
+       do: 400,
+       else: status
+  end
+
   defp validate_receipt(receipt, request, expected_address) do
     if Map.get(receipt, "message_id") == request.raw["message_id"] and
          Map.get(receipt, "address") == expected_address and
          Map.get(receipt, "status") in @receipt_statuses and
-         (not Map.get(request.raw, "wake", false) or
-            receipt["status"] in ["accepted", "rejected", "unknown"]) and
          is_binary(Map.get(receipt, "transport")) and
          Map.get(receipt, "transport") != "" and
          (is_nil(Map.get(receipt, "detail")) or is_binary(Map.get(receipt, "detail"))) and

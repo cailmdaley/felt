@@ -38,6 +38,12 @@ var (
 const maxMessageRequestFrame = messaging.MaxRequestFrame
 const maxMessageReceiptBytes = 512 << 10
 
+type messageRequestReceipt struct {
+	messaging.Receipt
+	FeltErrorCode       string `json:"_felt_error_code,omitempty"`
+	FeltReceiptProduced bool   `json:"_felt_receipt_produced"`
+}
+
 func runShuttleSessionDiscovery(ctx context.Context) error {
 	var (
 		directory messaging.Directory
@@ -138,8 +144,9 @@ daemon to the owning host. The text is the second argument, '-' for stdin, or
 
 By default the addressed session is woken; --context-only (or --wake=false)
 adds the message as context without starting or steering a model turn. Prints
-the receipt status and message id, and exits non-zero when delivery is
-rejected or unknown; reuse --message-id to retry safely.`,
+the receipt status and message id. Exit 0 means accepted, submitted, queued, or
+context_added; exit 1 means rejected, unknown, or another command error. Retry
+an unknown receipt with the same --message-id to re-check without resending.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if messageRequestJSON {
 			if !messageLocal {
@@ -174,15 +181,21 @@ rejected or unknown; reuse --message-id to retry safely.`,
 		}
 		id := request.MessageID
 		var receipt messaging.Receipt
+		var receiptProduced bool
+		feltErrorCode := ""
 		if messageLocal {
 			host, hostErr := resolveOwnHost("")
 			if hostErr != nil {
 				return hostErr
 			}
 			receipt, err = messaging.Send(cmd.Context(), host, request)
+			if messageRequestJSON && err != nil {
+				feltErrorCode = messaging.ErrorCode(err)
+			}
 		} else {
 			receipt, err = postMessage(request)
 		}
+		receiptProduced = receipt.MessageID != "" && receipt.Address == request.Address && receipt.Status != "" && receipt.Transport != ""
 		if receipt.MessageID == "" {
 			receipt.MessageID = id
 		}
@@ -199,7 +212,8 @@ rejected or unknown; reuse --message-id to retry safely.`,
 			}
 		}
 		if messageRequestJSON {
-			if outputErr := json.NewEncoder(cmd.OutOrStdout()).Encode(receipt); outputErr != nil {
+			response := messageRequestReceipt{Receipt: receipt, FeltErrorCode: feltErrorCode, FeltReceiptProduced: receiptProduced}
+			if outputErr := json.NewEncoder(cmd.OutOrStdout()).Encode(response); outputErr != nil {
 				return outputErr
 			}
 		} else if jsonOutput {
@@ -209,14 +223,25 @@ rejected or unknown; reuse --message-id to retry safely.`,
 		} else {
 			fmt.Printf("%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
 		}
+		return messageReceiptError(id, receipt, err)
+	},
+}
+
+func messageReceiptError(id string, receipt messaging.Receipt, err error) error {
+	switch receipt.Status {
+	case messaging.StatusAccepted, messaging.StatusSubmitted, messaging.StatusQueued, messaging.StatusContextAdded:
+		return nil
+	case messaging.StatusUnknown, messaging.StatusRejected:
 		if err != nil {
 			return fmt.Errorf("message %s: %w", id, err)
 		}
-		if receipt.Status == "unknown" || receipt.Status == "rejected" || receipt.Status == "" {
-			return fmt.Errorf("message %s: %s", id, receipt.Status)
+		return fmt.Errorf("message %s: %s", id, receipt.Status)
+	default:
+		if err != nil {
+			return fmt.Errorf("message %s: %w", id, err)
 		}
-		return nil
-	},
+		return fmt.Errorf("message %s: unsupported receipt status %q", id, receipt.Status)
+	}
 }
 
 func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, error) {
@@ -385,9 +410,6 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	case messaging.StatusQueued, messaging.StatusAccepted, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusUnknown, messaging.StatusRejected:
 	default:
 		return messaging.Receipt{}, fmt.Errorf("daemon returned an unsupported receipt status %q; delivery is unknown", receipt.Status)
-	}
-	if request.Wake && receipt.Status != messaging.StatusAccepted && receipt.Status != messaging.StatusRejected && receipt.Status != messaging.StatusUnknown {
-		return messaging.Receipt{}, fmt.Errorf("daemon did not acknowledge the requested wake (status %q); delivery is unknown", receipt.Status)
 	}
 	if !validMessageFilesReceipt(request, receipt) {
 		return messaging.Receipt{}, fmt.Errorf("daemon returned mismatched or incomplete file receipts; delivery is unknown")

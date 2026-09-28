@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,8 +146,8 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 	}
 }
 
-func TestWakeRequiresExecutionAcknowledgement(t *testing.T) {
-	for _, status := range []string{messaging.StatusQueued, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusAccepted} {
+func TestPostMessageAcceptsWellFormedWakeReceiptStages(t *testing.T) {
+	for _, status := range []string{messaging.StatusQueued, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusAccepted, messaging.StatusUnknown, messaging.StatusRejected} {
 		t.Run(status, func(t *testing.T) {
 			request := messaging.Request{Address: "shuttle://host/codex/thread", MessageID: "wake-check", Wake: true}
 			calls := 0
@@ -157,17 +158,31 @@ func TestWakeRequiresExecutionAcknowledgement(t *testing.T) {
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 			receipt, err := postMessage(request)
-			if calls != 1 {
-				t.Fatalf("wake retried automatically: %d", calls)
-			}
-			if status == messaging.StatusAccepted {
-				if err != nil || receipt.Status != status {
-					t.Fatalf("valid wake rejected: %+v %v", receipt, err)
-				}
-			} else if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
-				t.Fatalf("context-only delivery counted as wake: %+v %v", receipt, err)
+			if calls != 1 || err != nil || receipt.Status != status {
+				t.Fatalf("well-formed %s receipt rejected: %+v %v calls=%d", status, receipt, err, calls)
 			}
 		})
+	}
+}
+
+func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
+	for _, status := range []string{messaging.StatusAccepted, messaging.StatusSubmitted, messaging.StatusQueued, messaging.StatusContextAdded} {
+		if err := messageReceiptError("message-id", messaging.Receipt{Status: status}, errors.New("stale transport error")); err != nil {
+			t.Errorf("%s should exit successfully after a valid receipt: %v", status, err)
+		}
+	}
+	for _, status := range []string{messaging.StatusRejected, messaging.StatusUnknown} {
+		if err := messageReceiptError("message-id", messaging.Receipt{Status: status}, nil); err == nil {
+			t.Errorf("%s should exit non-zero", status)
+		}
+	}
+}
+
+func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
+	for _, detail := range []string{"Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown", "same --message-id"} {
+		if !strings.Contains(shuttleMessageCmd.Long, detail) {
+			t.Errorf("message help omits %q", detail)
+		}
 	}
 }
 
