@@ -15,6 +15,7 @@ defmodule Shuttle.Messaging do
   @max_frame_bytes 32 * 1024 * 1024
   @receipt_statuses ~w(accepted context_added submitted queued unknown rejected)
   @part_pattern ~r/\A[a-z0-9._-]+\z/
+  @session_fiber_cache_key {__MODULE__, :session_fibers}
 
   def peers(local? \\ false) do
     if local? do
@@ -180,23 +181,7 @@ defmodule Shuttle.Messaging do
   end
 
   defp attach_session_fibers(sessions, host) do
-    fibers_by_session =
-      SessionLedger.read_since(0)
-      |> Enum.reduce(%{}, fn record, acc ->
-        session = record["session"]
-        fiber = record["fiber"]
-        at = if is_integer(record["at"]), do: record["at"], else: 0
-
-        if record["host"] == host and is_binary(session) and session != "" and
-             is_binary(fiber) and fiber != "" do
-          Map.update(acc, session, {at, fiber}, fn {previous_at, previous_fiber} ->
-            if at >= previous_at, do: {at, fiber}, else: {previous_at, previous_fiber}
-          end)
-        else
-          acc
-        end
-      end)
-      |> Map.new(fn {session, {_at, fiber}} -> {session, fiber} end)
+    fibers_by_session = cached_session_fiber_index(host)
 
     Enum.map(sessions, fn session ->
       session = stringify_keys(session)
@@ -218,6 +203,61 @@ defmodule Shuttle.Messaging do
           session
       end
     end)
+  end
+
+  # Peer discovery is polled. Re-read the ledger only when either the live or
+  # rotated file changes; steady-state calls pay two stats instead of a full
+  # JSONL scan. The size and inode catch appends and rotation within one mtime
+  # second.
+  defp cached_session_fiber_index(host) do
+    path = SessionLedger.default_path()
+    token = session_ledger_file_token(path)
+
+    case :persistent_term.get(@session_fiber_cache_key, nil) do
+      %{path: ^path, host: ^host, token: ^token, fibers: fibers} ->
+        fibers
+
+      _ ->
+        fibers = read_session_fiber_index(host)
+
+        :persistent_term.put(@session_fiber_cache_key, %{
+          path: path,
+          host: host,
+          token: token,
+          fibers: fibers
+        })
+
+        fibers
+    end
+  end
+
+  defp session_ledger_file_token(path) do
+    [path, path <> ".1"]
+    |> Enum.map(fn file ->
+      case File.stat(file, time: :posix) do
+        {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} -> {mtime, size, inode}
+        _ -> nil
+      end
+    end)
+  end
+
+  defp read_session_fiber_index(host) do
+    SessionLedger.read_since(0)
+    |> Enum.reduce(%{}, fn record, acc ->
+      session = record["session"]
+      fiber = record["fiber"]
+      at = if is_integer(record["at"]), do: record["at"], else: 0
+
+      if record["host"] == host and is_binary(session) and session != "" and
+           is_binary(fiber) and fiber != "" do
+        Map.update(acc, session, {at, fiber}, fn {previous_at, previous_fiber} ->
+          if at >= previous_at, do: {at, fiber}, else: {previous_at, previous_fiber}
+        end)
+      else
+        acc
+      end
+    end)
+    |> Map.new(fn {session, {_at, fiber}} -> {session, fiber} end)
   end
 
   defp alias_sessions(sessions, host) do

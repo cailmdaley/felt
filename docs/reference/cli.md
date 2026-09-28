@@ -193,10 +193,14 @@ felt shuttle message <address> "Background for your next task" --context-only
 ```
 
 `felt shuttle message` accepts that address, a unique native session ID, or a
-Shuttle fiber path, slug, or UID with a recorded worker. The fiber target uses
-`shuttle.runtime.session_uuid`; ambiguous session IDs fail with their candidate
-addresses. Addresses use `claude`, `codex`, and `pi`; the ledger spelling
-`claude-code` normalizes to `claude`.
+Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
+one exact match across configured stores; they refuse guesses and duplicate
+matches. The target checks `shuttle.runtime.session_uuid` against the newest
+dispatch or resume in the session ledger and refuses a disagreement; sync the
+store or pass an explicit address. Ambiguous session IDs fail with their
+candidate addresses. Addresses
+use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
+to `claude`.
 
 `--context-only` queues or adds context without starting a turn or invoking native
 steering. Hooks offer queued context when the receiver next prompts or uses a

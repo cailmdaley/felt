@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -15,32 +18,92 @@ import (
 // worker's tmux session name. Ported from shuttle-ctl's session_name.go /
 // attach.go.
 
-// shuttleAddressFiber resolves a single fiber for the from-anywhere address verbs.
-// It searches the configured stores cwd-insensitively — the -C / --felt-store
-// store when set, otherwise every configured store (FELT_STORES env → registry)
-// until one resolves the query, so these verbs work from any directory whenever a
-// store is configured. The scope is the whole store ("") rather
-// than the cwd subtree: an operator addressing a worker by id should not have
-// resolution depend on where they happen to stand.
-func shuttleAddressFiber(query string) (*felt.Felt, error) {
+// addressFiberLookup keeps exact matches and rejected guesses separate so a
+// caller never turns a storage hint into a recipient choice.
+type addressFiberLookup struct {
+	Fibers  []*felt.Felt
+	Guesses []guessedAddressFiber
+}
+
+type guessedAddressFiber struct {
+	Guess *felt.GuessError
+	Store string
+}
+
+// lookupShuttleAddressFibers searches every configured store without prefix,
+// tail, or last-segment guessing. Physical copies reached through views collapse
+// by their symlink-resolved path; distinct files remain distinct candidates.
+func lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
 	stores, err := shuttleStores()
+	if err != nil {
+		return addressFiberLookup{}, err
+	}
+	lookup := addressFiberLookup{}
+	seen := map[string]bool{}
+	for _, store := range stores {
+		f, err := felt.NewStorage(store).FindMetadataWithoutGuessing("", query)
+		if err == nil {
+			key := f.Path
+			if key == "" {
+				key = store + "\x00" + f.ID
+			}
+			if !seen[key] {
+				seen[key] = true
+				lookup.Fibers = append(lookup.Fibers, f)
+			}
+			continue
+		}
+		var guess *felt.GuessError
+		if errors.As(err, &guess) {
+			lookup.Guesses = append(lookup.Guesses, guessedAddressFiber{Guess: guess, Store: store})
+			continue
+		}
+		if strings.Contains(err.Error(), "no fiber found matching") {
+			continue
+		}
+		return lookup, fmt.Errorf("resolving fiber %q in store %s: %w", query, store, err)
+	}
+	return lookup, nil
+}
+
+func (lookup addressFiberLookup) candidateLabels() []string {
+	labels := make([]string, 0, len(lookup.Fibers)+len(lookup.Guesses))
+	for _, f := range lookup.Fibers {
+		label := f.ID
+		if f.Path != "" {
+			label += " (" + f.Path + ")"
+		}
+		labels = append(labels, label)
+	}
+	for _, candidate := range lookup.Guesses {
+		label := candidate.Guess.Guess
+		where := candidate.Guess.Root
+		if where == "" {
+			where = candidate.Store
+		}
+		if where != "" {
+			label += " (guessed in " + where + ")"
+		}
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+// shuttleAddressFiber resolves a unique exact fiber from anywhere. Addressing a
+// worker cannot safely inherit the read commands' prefix and tail completion.
+func shuttleAddressFiber(query string) (*felt.Felt, error) {
+	lookup, err := lookupShuttleAddressFibers(query)
 	if err != nil {
 		return nil, err
 	}
-	var firstErr error
-	for _, store := range stores {
-		f, err := felt.NewStorage(store).FindMetadataInScope("", query)
-		if err == nil {
-			return f, nil
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
+	if len(lookup.Fibers) == 1 && len(lookup.Guesses) == 0 {
+		return lookup.Fibers[0], nil
 	}
-	if firstErr == nil {
-		firstErr = fmt.Errorf("no fiber found matching %q", query)
+	if len(lookup.Fibers) > 1 || len(lookup.Guesses) > 0 {
+		return nil, fmt.Errorf("fiber target %q is ambiguous or only resolves by guessing; candidates: %s", query, strings.Join(lookup.candidateLabels(), ", "))
 	}
-	return nil, firstErr
+	return nil, fmt.Errorf("no fiber found matching %q", query)
 }
 
 var sessionNameCmd = &cobra.Command{

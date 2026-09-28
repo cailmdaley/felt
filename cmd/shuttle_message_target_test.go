@@ -43,9 +43,13 @@ func isolateMessageFiberStore(t *testing.T, store string) {
 }
 
 func writeMessageTargetFiber(t *testing.T, block map[string]any) string {
+	return writeMessageTargetFiberWithID(t, "work/worker", messageTargetFiberUID, block)
+}
+
+func writeMessageTargetFiberWithID(t *testing.T, id, uid string, block map[string]any) string {
 	t.Helper()
 	store, storage := newStore(t)
-	fiber := &felt.Felt{ID: "work/worker", UID: messageTargetFiberUID, Name: "Worker"}
+	fiber := &felt.Felt{ID: id, UID: uid, Name: id}
 	if err := fiber.SetExtraField("shuttle", block); err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +91,10 @@ func TestResolveMessageTargetBareSessionFromDiscoveryPrintsResolvedReceipt(t *te
 		},
 	})
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	messageDir, _ := newStore(t)
+	isolateMessageFiberStore(t, "")
 
-	out, err := runCommand(t, t.TempDir(), "shuttle", "message", "session-42", "hello")
+	out, err := runCommand(t, messageDir, "shuttle", "message", "session-42", "hello")
 	if err != nil {
 		t.Fatalf("message: %v\n%s", err, out)
 	}
@@ -98,6 +104,7 @@ func TestResolveMessageTargetBareSessionFromDiscoveryPrintsResolvedReceipt(t *te
 }
 
 func TestResolveMessageTargetBareSessionAmbiguityNamesCandidates(t *testing.T) {
+	isolateMessageFiberStore(t, "")
 	messageTargetDaemon(t, []messaging.Session{
 		{Address: "shuttle://node-a/claude/session-42", Fiber: "work/one"},
 		{Address: "shuttle://node-b/codex/session-42", Fiber: "work/two"},
@@ -112,6 +119,7 @@ func TestResolveMessageTargetBareSessionAmbiguityNamesCandidates(t *testing.T) {
 }
 
 func TestResolveMessageTargetBareSessionUsesLedgerAndNormalizesHarness(t *testing.T) {
+	isolateMessageFiberStore(t, "")
 	messageTargetDaemon(t, nil, []SessionProvenance{{
 		Session: messageTargetSession,
 		Host:    "ledger-node",
@@ -129,6 +137,7 @@ func TestResolveMessageTargetBareSessionUsesLedgerAndNormalizesHarness(t *testin
 }
 
 func TestResolveMessageTargetAmbiguityCombinesDiscoveryAndLedger(t *testing.T) {
+	isolateMessageFiberStore(t, "")
 	messageTargetDaemon(t, []messaging.Session{
 		{Address: "shuttle://live-node/claude/session-42"},
 	}, []SessionProvenance{{
@@ -177,7 +186,7 @@ func TestResolveMessageTargetFiberPathSlugAndUID(t *testing.T) {
 	}
 }
 
-func TestResolveMessageTargetFiberUsesRegistryWhenLedgerHasNoHarness(t *testing.T) {
+func TestResolveMessageTargetFiberRequiresLedgerEvidence(t *testing.T) {
 	store := writeMessageTargetFiber(t, map[string]any{
 		"kind":        "oneshot",
 		"host":        "worker-node",
@@ -188,12 +197,9 @@ func TestResolveMessageTargetFiberUsesRegistryWhenLedgerHasNoHarness(t *testing.
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, nil, nil)
 
-	got, err := resolveMessageTarget("work/worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "shuttle://worker-node/claude/"+messageTargetSession {
-		t.Fatalf("resolved address = %q", got)
+	_, err := resolveMessageTarget("work/worker")
+	if err == nil || !strings.Contains(err.Error(), "no session-ledger pairing") {
+		t.Fatalf("expected missing ledger evidence error, got %v", err)
 	}
 }
 
@@ -223,6 +229,7 @@ func TestResolveMessageTargetNotFound(t *testing.T) {
 }
 
 func TestResolveMessageTargetCanUseLedgerWhenDiscoveryFails(t *testing.T) {
+	isolateMessageFiberStore(t, "")
 	ledger, err := json.Marshal(sessionLedgerResponse{Records: []SessionProvenance{{
 		Session: messageTargetSession,
 		Host:    "ledger-node",
@@ -245,5 +252,116 @@ func TestResolveMessageTargetCanUseLedgerWhenDiscoveryFails(t *testing.T) {
 	}
 	if got != "shuttle://ledger-node/codex/"+messageTargetSession {
 		t.Fatalf("resolved address = %q", got)
+	}
+}
+
+func TestResolveMessageTargetRejectsFiberSlugAcrossStores(t *testing.T) {
+	writeBareFiber := func() string {
+		store, storage := newStore(t)
+		if err := storage.Write(&felt.Felt{ID: "review", Name: "Review"}); err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	first, second := writeBareFiber(), writeBareFiber()
+	isolateMessageFiberStore(t, first+","+second)
+	messageTargetDaemon(t, nil, nil)
+
+	_, err := resolveMessageTarget("review")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
+		!strings.Contains(err.Error(), filepath.Base(first)) || !strings.Contains(err.Error(), filepath.Base(second)) {
+		t.Fatalf("expected both store candidates %q and %q, got %q", first, second, err)
+	}
+}
+
+func TestResolveMessageTargetRefusesGuessedFiberSlug(t *testing.T) {
+	store, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{ID: "worker", Name: "Worker"}); err != nil {
+		t.Fatal(err)
+	}
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, nil)
+
+	_, err := resolveMessageTarget("proj/typo/worker")
+	if err == nil || !strings.Contains(err.Error(), "guessed") || !strings.Contains(err.Error(), "worker") {
+		t.Fatalf("expected guessed fiber refusal, got %v", err)
+	}
+}
+
+func TestResolveMessageTargetRejectsStaleRuntimeAgainstNewestLedger(t *testing.T) {
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "old-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": "old-session"},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, []SessionProvenance{
+		{
+			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
+			Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
+		},
+		{
+			Fiber: "work/worker", UID: messageTargetFiberUID, Session: "new-session",
+			Host: "new-node", Harness: "codex", At: 2, Kind: "resume",
+		},
+	})
+
+	_, err := resolveMessageTarget("work/worker")
+	if err == nil || !strings.Contains(err.Error(), "old-session") ||
+		!strings.Contains(err.Error(), "new-session") || !strings.Contains(err.Error(), "sync the store") ||
+		!strings.Contains(err.Error(), "explicit shuttle:// address") {
+		t.Fatalf("expected stale-runtime refusal naming both sessions and remedies, got %v", err)
+	}
+}
+
+func TestResolveMessageTargetFiberFailsClosedWhenLedgerUnavailable(t *testing.T) {
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": messageTargetSession},
+	})
+	isolateMessageFiberStore(t, store)
+	server := daemonStub(t, map[string]http.HandlerFunc{
+		"/api/v1/peers": jsonBody(`{"sessions":[],"gaps":[]}`),
+		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "ledger unavailable", http.StatusServiceUnavailable)
+		},
+	})
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	_, err := resolveMessageTarget("work/worker")
+	if err == nil || !strings.Contains(err.Error(), "session ledger is unavailable") ||
+		!strings.Contains(err.Error(), "ledger unavailable") {
+		t.Fatalf("expected ledger-unavailable refusal, got %v", err)
+	}
+}
+
+func TestResolveMessageTargetRejectsBareIDThatNamesSessionAndFiber(t *testing.T) {
+	store := writeMessageTargetFiberWithID(t, "session-42", messageTargetFiberUID, map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": messageTargetSession},
+	})
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, []messaging.Session{{
+		Address: "shuttle://session-node/claude/session-42",
+		ID:      "session-42",
+		Fiber:   "session-42",
+	}}, []SessionProvenance{{
+		Fiber: "session-42", UID: messageTargetFiberUID, Session: messageTargetSession,
+		Host: "worker-node", Harness: "claude-code", At: 1, Kind: "dispatch",
+	}})
+
+	_, err := resolveMessageTarget("session-42")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
+		!strings.Contains(err.Error(), "shuttle://session-node/claude/session-42") ||
+		!strings.Contains(err.Error(), "fiber session-42") {
+		t.Fatalf("expected session/fiber collision refusal, got %v", err)
 	}
 }

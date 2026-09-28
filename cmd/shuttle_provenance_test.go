@@ -304,6 +304,22 @@ func TestShuttleSessions_ProvenanceTableIncludesAddress(t *testing.T) {
 	}
 }
 
+func TestShuttleSessions_ProvenanceTablePrintsCanonicalHarness(t *testing.T) {
+	const session = "d8c9c483-4c45-4e67-85fd-9d21f92417ee"
+	daemonStub(t, map[string]http.HandlerFunc{
+		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + session + `","host":"node","harness":"claude-code","kind":"dispatch","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
+		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
+	})
+	out, err := runCommand(t, t.TempDir(), "shuttle", "sessions", "work/worker")
+	if err != nil {
+		t.Fatalf("sessions: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "claude-code") || !strings.Contains(out, "claude") ||
+		!strings.Contains(out, "shuttle://node/claude/"+session) {
+		t.Fatalf("provenance table did not use canonical harness addressing: %s", out)
+	}
+}
+
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
 	server := provenanceDaemon(t, []byte("x\n"))
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)

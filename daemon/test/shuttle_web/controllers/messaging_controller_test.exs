@@ -189,6 +189,81 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert body["gaps"] == []
   end
 
+  test "peer discovery refreshes fiber links when the session ledger changes", %{
+    host: host,
+    ledger_path: path
+  } do
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/first", "host" => host, "at" => 1}
+    ])
+
+    first = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert hd(first["sessions"])["fiber"] == "work/first"
+
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/second", "host" => host, "at" => 2}
+    ])
+
+    second = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert hd(second["sessions"])["fiber"] == "work/second"
+  end
+
+  test "peer discovery uses the cached fiber index while the ledger token is unchanged", %{
+    host: host,
+    ledger_path: path
+  } do
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/on-disk", "host" => host, "at" => 1}
+    ])
+
+    key = {Shuttle.Messaging, :session_fibers}
+    previous = :persistent_term.get(key, :missing)
+
+    token =
+      [path, path <> ".1"]
+      |> Enum.map(fn file ->
+        case File.stat(file, time: :posix) do
+          {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} -> {mtime, size, inode}
+          _ -> nil
+        end
+      end)
+
+    :persistent_term.put(key, %{
+      path: path,
+      host: host,
+      token: token,
+      fibers: %{"native/id" => "work/cached"}
+    })
+
+    on_exit(fn ->
+      if previous == :missing,
+        do: :persistent_term.erase(key),
+        else: :persistent_term.put(key, previous)
+    end)
+
+    body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert hd(body["sessions"])["fiber"] == "work/cached"
+  end
+
+  test "peer discovery refreshes its fiber index after a ledger append", %{
+    host: host,
+    ledger_path: path
+  } do
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/first", "host" => host, "at" => 1}
+    ])
+
+    first = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert hd(first["sessions"])["fiber"] == "work/first"
+
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/second-longer", "host" => host, "at" => 2}
+    ])
+
+    second = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert hd(second["sessions"])["fiber"] == "work/second-longer"
+  end
+
   test "fleet discovery aliases a remote's claimed identity" do
     body = api_conn() |> get("/api/v1/peers") |> json_response(200)
 

@@ -695,7 +695,8 @@ and availability.`,
 			if row.Stale {
 				fiberName += " [stale]"
 			}
-			fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, row.Harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
+			harness := messaging.NormalizeHarness(row.Harness)
+			fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
 		}
 		return nil
 	},
