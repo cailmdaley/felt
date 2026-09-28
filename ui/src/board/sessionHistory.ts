@@ -5,8 +5,8 @@
  * kitty tab on this machine — attached to the live worker, or resuming a past
  * session in its own tmux on the host that ran it (`POST /api/v1/attach`). A
  * bridged Claude session also links the conversation itself — `app ↗` in the
- * Claude desktop app and `web ↗` on claude.ai, or on a phone its claude.ai
- * page alone; otherwise a phone copies the session id.
+ * Claude desktop app, or on a phone its claude.ai page; otherwise a phone
+ * copies the session id.
  * {@link sessionTargets} makes that choice.
  *
  * Nothing is read until the first unfold. Then two reads: this fiber's
@@ -74,7 +74,7 @@ export type SessionTarget =
   | { kind: 'app'; href: string; label: string; title: string }
   | { kind: 'copy'; label: string; title: string; copy: string }
 
-/** A row's action, and the small links beside it (`app ↗`, `web ↗`). */
+/** A row's action, and the small link beside it (`app ↗`, or `web ↗` when there is no app route). */
 export interface SessionTargets {
   primary: SessionTarget
   extras: SessionTarget[]
@@ -112,8 +112,8 @@ export interface TargetContext {
  *     whose host found no transcript.
  *   · A bridged Claude session also carries links to the conversation: at a
  *     desktop `app ↗` (the Claude desktop app, `claude://claude.ai/code/…`)
- *     and `web ↗` beside the terminal; on a phone its claude.ai page alone,
- *     which the Claude app there answers.
+ *     beside the terminal — `web ↗` only when the URL has no app route; on a
+ *     phone its claude.ai page, which the Claude app there answers.
  *   · Anything else offers its id to copy.
  */
 export function sessionTargets(
@@ -149,7 +149,7 @@ export function sessionTargets(
 
   const links: SessionTarget[] = []
   if (app) links.push(app)
-  if (web) links.push(web)
+  else if (web) links.push(web)
   if (terminal) return { primary: terminal, extras: links }
   if (web) return ctx.desktop ? { primary: links[0], extras: links.slice(1) } : { primary: { ...web, label: 'claude.ai' }, extras: [] }
   return {

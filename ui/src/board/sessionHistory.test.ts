@@ -95,13 +95,12 @@ describe('sessionTargets', () => {
     expect(sessionTargets(rec({ session: CODEX }), entry({ session: CODEX, harness: 'codex' }), app).primary.kind).toBe('copy')
   })
 
-  it('a bridged Claude session: resume, then the desktop app and the web page; on a phone the web page alone', () => {
+  it('a bridged Claude session: resume, then the desktop app; on a phone the web page alone', () => {
     const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
     const targets = sessionTargets(rec({}), link, desk)
     expect(targets.primary.kind).toBe('terminal')
     expect(targets.extras).toEqual([
       { kind: 'app', href: 'claude://claude.ai/code/session_01X', label: 'app', title: 'claude://claude.ai/code/session_01X' },
-      { kind: 'web', href: BRIDGE, label: 'web', title: BRIDGE },
     ])
     expect(sessionTargets(rec({}), link, phone)).toEqual({
       primary: { kind: 'web', href: BRIDGE, label: 'claude.ai', title: BRIDGE },
@@ -112,7 +111,7 @@ describe('sessionTargets', () => {
   it('a live app conversation that was bridged still links its chat, with no terminal', () => {
     const targets = sessionTargets(rec({}), entry({ session: CLAUDE, url: BRIDGE }), { ...desk, liveSession: CLAUDE })
     expect(targets.primary).toMatchObject({ kind: 'app', href: 'claude://claude.ai/code/session_01X' })
-    expect(targets.extras.map((t) => t.kind)).toEqual(['web'])
+    expect(targets.extras).toEqual([])
   })
 
   it('the app route is built only from a URL naming exactly one session', () => {

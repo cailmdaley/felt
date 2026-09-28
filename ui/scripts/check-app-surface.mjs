@@ -101,7 +101,7 @@ try {
     }
   })
   const claimRow = page.locator('.kbn-ctl-session[data-session="f466597a-56d0-4047-8585-2159281ca18b"]')
-  await claimRow.locator('a.kbn-ctl-session-web').waitFor()
+  await claimRow.locator('a.kbn-ctl-session-app').waitFor()
   const liveRow = sessionRows.nth(0)
   assert.equal(await liveRow.getAttribute('data-session'), '01a0be38-6c36-7cd1-aec9-53a680d1f693', 'newest first')
   assert.equal(await liveRow.locator('.kbn-ctl-session-live').count(), 1, 'the running session is marked live')
@@ -117,15 +117,10 @@ try {
   assert.equal(await claimApp.innerText(), 'app ↗')
   assert.equal(await claimApp.getAttribute('href'), 'claude://claude.ai/code/session_01F466597A', 'a bridged session opens in the Claude desktop app')
   assert.equal(await claimApp.getAttribute('target'), null)
-  const claimWeb = claimRow.locator('a.kbn-ctl-session-alt.kbn-ctl-session-web')
-  assert.equal(await claimWeb.innerText(), 'web ↗')
-  assert.equal(await claimWeb.getAttribute('href'), 'https://claude.ai/code/session_01F466597A')
-  assert.equal(await claimWeb.getAttribute('target'), '_blank', 'its web page opens in a new tab')
-  for (const link of [claimWeb, claimApp]) {
-    await link.evaluate(a => a.addEventListener('click', e => e.preventDefault()))
-    await link.click()
-  }
-  assert.deepEqual(await page.evaluate(() => window.attaches), [], 'the app and web links open no terminal')
+  assert.equal(await claimRow.locator('.kbn-ctl-session-web').count(), 0, 'with an app route there is no web link')
+  await claimApp.evaluate(a => a.addEventListener('click', e => e.preventDefault()))
+  await claimApp.click()
+  assert.deepEqual(await page.evaluate(() => window.attaches), [], 'the app link opens no terminal')
   const unbridged = page.locator('.kbn-ctl-session[data-session="b69296a4-1023-4231-b372-270d7b3c4a9b"]')
   assert.equal(await unbridged.locator('a').count(), 0, 'an unbridged session has no web page')
   await unbridged.locator('.kbn-ctl-session-when').click()
@@ -346,7 +341,7 @@ try {
   )
   await phone.close()
 
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, web, copy; desktop and phone), Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }
