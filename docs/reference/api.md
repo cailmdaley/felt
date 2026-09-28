@@ -266,13 +266,17 @@ optional `host=<name>`, and answers `{host, links}` with one entry per session
 in request order: `session`, `availability` (`available_local`,
 `transcript_missing` or `host_unreachable`), `harness`, `url` and
 `desktop_link`. A Claude Code transcript yields `url`, the last
-`remote_session_change` bridge URL it recorded; a Codex rollout yields
-`desktop_link`, `codex://threads/<uuid>`, which only the Codex app on that
-host can open; pi and unbridged sessions yield neither. The board's card
+`remote_session_change` bridge URL it recorded, and only when that is a
+`https://claude.ai/` address; a Codex rollout yields `desktop_link`,
+`codex://threads/<uuid>` for that same session, which only the Codex app on
+that host can open; pi and unbridged sessions yield neither. A remote's answer
+is re-checked by the daemon that relays it: entries for sessions not asked
+about are dropped, and a link of any other shape is nulled. The board's card
 drawer asks for the sessions it lists, one request per host. Each answer is
 cached against the transcript's `{mtime, size}`, so an ended session is read
-once. It is a sibling of `/transcript` because that receipt hashes the whole
-file.
+once, and a session with no transcript on the host is remembered as missing
+for a minute. It is a sibling of `/transcript` because that receipt hashes the
+whole file.
 
 ## Temporal read plane
 
@@ -285,7 +289,7 @@ underneath.
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
-| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to |
+| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; `uid=` narrows to one fiber |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
@@ -307,7 +311,7 @@ The composite siblings are:
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity/composite` | local feed + remote caches | Cross-host activity buckets with per-origin freshness |
-| `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings |
+| `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /spend/composite` | local transcripts + remote caches | Cross-host token rollups |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |

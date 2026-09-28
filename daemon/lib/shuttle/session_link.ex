@@ -26,8 +26,11 @@ defmodule Shuttle.SessionLink do
   transcript's `{mtime, size}` — a repeat costs one `stat` of the remembered
   file rather than a glob across the harness roots and a read of the
   transcript, so an unbridged ended session is read once, and a session still
-  running is re-read only when its file has grown. Without the GenServer the
+  running is re-read only when its file has grown. A session with no transcript
+  here is remembered as missing for a minute. Without the GenServer the
   resolution still happens, uncached.
+
+  Only a `https://claude.ai/` address counts as a bridge URL, for both readers.
   """
 
   use GenServer
@@ -84,13 +87,9 @@ defmodule Shuttle.SessionLink do
       _ ->
         case Moment.transcript_path(session, opts) do
           nil ->
-            %{
-              session: session,
-              availability: :transcript_missing,
-              harness: nil,
-              url: nil,
-              desktop_link: nil
-            }
+            link = missing(session)
+            if cache?, do: store(session, :missing, deadline(), link)
+            link
 
           path ->
             token = TokenSpend.file_token(path)
@@ -99,6 +98,23 @@ defmodule Shuttle.SessionLink do
             link
         end
     end
+  end
+
+  # A transcript that is not here costs three globs to establish, and the
+  # answer can change only when a harness writes one, so it is remembered
+  # briefly rather than re-established on every open of the card.
+  @missing_ttl_ms 60_000
+
+  defp deadline, do: System.monotonic_time(:millisecond) + @missing_ttl_ms
+
+  defp missing(session) do
+    %{
+      session: session,
+      availability: :transcript_missing,
+      harness: nil,
+      url: nil,
+      desktop_link: nil
+    }
   end
 
   defp read_link(session, path, opts) do
@@ -115,9 +131,13 @@ defmodule Shuttle.SessionLink do
 
   # A hit needs the remembered file to still carry the remembered
   # `{mtime, size}` — one stat, and no glob across the harness roots. A file
-  # that moved, grew or vanished is a miss and is looked up afresh.
+  # that moved, grew or vanished is a miss and is looked up afresh. A missing
+  # transcript is remembered until its deadline instead.
   defp lookup(session) do
     case :ets.lookup(@table, session) do
+      [{^session, :missing, deadline, link}] ->
+        if System.monotonic_time(:millisecond) < deadline, do: {:ok, link}, else: :miss
+
       [{^session, path, token, link}] ->
         if TokenSpend.file_token(path) == token, do: {:ok, link}, else: :miss
 
@@ -133,6 +153,10 @@ defmodule Shuttle.SessionLink do
   rescue
     ArgumentError -> :ok
   end
+
+  @doc "True for a claude.ai address — the only kind of bridge URL this module hands out."
+  @spec claude_url?(term()) :: boolean()
+  def claude_url?(url), do: is_binary(url) and String.starts_with?(url, "https://claude.ai/")
 
   @doc "The installed desktop app's native thread route; not a phone universal link."
   def desktop_url(thread_id) when is_binary(thread_id) do
@@ -233,7 +257,7 @@ defmodule Shuttle.SessionLink do
   defp decode_url(line) do
     case Jason.decode(line) do
       {:ok, %{"attachment" => %{"type" => @marker, "url" => url}}} when is_binary(url) ->
-        if String.starts_with?(url, "https://"), do: url
+        if claude_url?(url), do: url
 
       _ ->
         nil

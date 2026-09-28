@@ -15,7 +15,9 @@ defmodule ShuttleWeb.SessionLinksController do
   lives on that machine, so `host` names it (absent, `local` or this host's id
   means here) and a remote host is asked over the same forwarding as other
   host-local reads. A remote that cannot be reached answers every session
-  `host_unreachable` with no link; a link is never inferred from the ledger.
+  `host_unreachable` with no link; a link is never inferred from the ledger,
+  and a remote's answer is re-checked here — only the sessions asked for, and
+  only a `https://claude.ai/` URL or the thread route for that very session.
 
   A sibling of `/api/v1/transcript` rather than a field on its receipt: the
   receipt hashes the whole transcript, which is the wrong price for a list of
@@ -37,14 +39,10 @@ defmodule ShuttleWeb.SessionLinksController do
     with {:ok, sessions} <- sessions_param(params) do
       host = Map.get(params, "host")
 
-      case OriginRouter.route(if(present?(host), do: host)) do
-        :local ->
-          if host in [nil, "", "local", Poller.own_host_id()],
-            do: json(conn, local(sessions)),
-            else: json(conn, unreachable(sessions, host))
-
-        {:remote, %Remote{} = remote} ->
-          json(conn, remote(sessions, remote))
+      case OriginRouter.route_host(if(present?(host), do: host)) do
+        :local -> json(conn, local(sessions))
+        {:remote, %Remote{} = remote} -> json(conn, remote(sessions, remote))
+        {:error, _unknown} -> json(conn, unreachable(sessions, host))
       end
     else
       {:error, message} -> conn |> put_status(400) |> json(%{error: message})
@@ -61,31 +59,61 @@ defmodule ShuttleWeb.SessionLinksController do
     }
   end
 
+  # The remote answers for its own disk, but what it relays is re-checked
+  # here: one entry per REQUESTED session, in request order, and only a link
+  # of the shape this daemon would itself have produced for that session.
   defp remote(sessions, %Remote{} = remote) do
     query = %{"sessions" => Enum.join(sessions, ","), "host" => "local"}
 
     with {:forwarded, 200, _type, body} <-
            OriginRouter.forward_get(remote, "/api/v1/sessions/links", query),
          {:ok, %{"links" => links}} when is_list(links) <- Jason.decode(body) do
-      %{host: remote.name, links: links}
+      relayed = for %{"session" => id} = entry <- links, into: %{}, do: {id, entry}
+
+      %{
+        host: remote.name,
+        links:
+          Enum.map(sessions, fn session ->
+            case Map.get(relayed, session) do
+              nil -> unreachable_entry(session)
+              entry -> relayed_entry(session, entry)
+            end
+          end)
+      }
     else
       _ -> unreachable(sessions, remote.name)
     end
   end
 
-  defp unreachable(sessions, host) do
+  defp relayed_entry(session, entry) do
+    url = entry["url"]
+    desktop = entry["desktop_link"]
+    availability = entry["availability"]
+    harness = entry["harness"]
+
     %{
-      host: host,
-      links:
-        Enum.map(sessions, fn session ->
-          %{
-            session: session,
-            availability: "host_unreachable",
-            harness: nil,
-            url: nil,
-            desktop_link: nil
-          }
-        end)
+      session: session,
+      availability:
+        if(availability in ["available_local", "transcript_missing"],
+          do: availability,
+          else: "transcript_missing"
+        ),
+      harness: if(is_binary(harness), do: harness),
+      url: if(SessionLink.claude_url?(url), do: url),
+      desktop_link: if(desktop == SessionLink.desktop_url(session), do: desktop)
+    }
+  end
+
+  defp unreachable(sessions, host),
+    do: %{host: host, links: Enum.map(sessions, &unreachable_entry/1)}
+
+  defp unreachable_entry(session) do
+    %{
+      session: session,
+      availability: "host_unreachable",
+      harness: nil,
+      url: nil,
+      desktop_link: nil
     }
   end
 

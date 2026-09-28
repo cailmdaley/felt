@@ -110,6 +110,8 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
           %{},
           %{"sessions" => ""},
           %{"sessions" => "#{@bridged},../etc"},
+          # A trailing newline is not a UUID, however `$` would read it.
+          %{"sessions" => @bridged <> "\n"},
           %{"sessions" => Enum.map_join(1..51, ",", &uuid/1)}
         ] do
       assert %{"error" => _} =
@@ -155,6 +157,41 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
       assert body == %{"host" => "hub-a", "links" => remote_links}
       assert StubGetFileClient.last().url =~ "/api/v1/sessions/links?"
       assert StubGetFileClient.last().url =~ "host=local"
+    end
+
+    test "a remote's answer is re-checked: requested sessions only, and only well-formed links" do
+      StubGetFileClient.set_response(
+        {:ok, 200, "application/json",
+         Jason.encode!(%{
+           "links" => [
+             %{
+               "session" => @bridged,
+               "availability" => "available_local",
+               "harness" => "claude-code",
+               "url" => "https://evil.example/claude.ai/"
+             },
+             %{
+               "session" => @codex,
+               "availability" => "available_local",
+               "harness" => "codex",
+               "desktop_link" => "codex://threads/" <> @pi
+             },
+             %{
+               "session" => @missing,
+               "availability" => "available_local",
+               "url" => @url
+             }
+           ]
+         })}
+      )
+
+      body = links(%{"sessions" => "#{@bridged},#{@codex},#{@pi}", "host" => "hub-a"})
+
+      assert [bridged, codex, pi] = body["links"]
+      assert %{"session" => @bridged, "url" => nil} = bridged
+      assert %{"session" => @codex, "desktop_link" => nil} = codex
+      # Asked for but not answered: no link, and said so.
+      assert %{"session" => @pi, "availability" => "host_unreachable", "url" => nil} = pi
     end
 
     test "an unreachable remote answers every session host_unreachable, with no link" do

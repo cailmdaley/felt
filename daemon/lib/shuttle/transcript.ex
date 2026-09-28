@@ -10,7 +10,7 @@ defmodule Shuttle.Transcript do
 
   alias Shuttle.{HarnessPaths, Moment, Poller, SessionLedger}
 
-  @uuid ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+  @uuid ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
   @typedoc "A session availability receipt, with string keys at the HTTP edge."
   @type receipt :: %{

@@ -71,6 +71,23 @@ defmodule ShuttleWeb.SessionsControllerTest do
     assert Enum.map(json_response(conn, 200)["records"], & &1["fiber"]) == ["edge", "new"]
   end
 
+  test "uid narrows the ledger to one fiber's pairings, here and on the composite", %{path: path} do
+    other = "01KTS261GJMMRDRHS2QDMEFV3Z"
+
+    write_jsonl!(path, [
+      record(%{"fiber" => "mine", "at" => 100}),
+      record(%{"fiber" => "theirs", "at" => 200, "uid" => other})
+    ])
+
+    for route <- ["/api/v1/sessions", "/api/v1/sessions/composite"] do
+      conn = get(api_conn(), "#{route}?uid=#{other}")
+      assert Enum.map(json_response(conn, 200)["records"], & &1["fiber"]) == ["theirs"]
+    end
+
+    conn = get(api_conn(), "/api/v1/sessions?uid=")
+    assert length(json_response(conn, 200)["records"]) == 2
+  end
+
   test "200 with an empty list when this host has no ledger yet" do
     conn = get(api_conn(), "/api/v1/sessions?since_ms=0")
     assert json_response(conn, 200)["records"] == []

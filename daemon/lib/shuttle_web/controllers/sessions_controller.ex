@@ -11,7 +11,9 @@ defmodule ShuttleWeb.SessionsController do
   `Shuttle.SessionLedger` does the reading; this controller parses the bound
   and stamps the host. Records come back oldest-first.
 
-  `since_ms` is optional and defaults to the whole ledger. Unlike `/activity`
+  `since_ms` is optional and defaults to the whole ledger. `uid` is optional
+  too and narrows the records to one fiber's pairings (both here and on the
+  composite). Unlike `/activity`
   there is no width cap, because the file holds one line per *session* rather
   than one per hook event — the whole history is smaller than a single busy
   hour of activity. A `since_ms` that is present but not an integer is a 400;
@@ -41,12 +43,13 @@ defmodule ShuttleWeb.SessionsController do
         # The ledger is append-only, so `{mtime, size}` plus the bound decides
         # the response byte-for-byte; a hub polling this over a tunnel 304s
         # until a session is actually paired.
-        validator = {since_ms, file_token(SessionLedger.default_path())}
+        uid = uid_param(params)
+        validator = {since_ms, uid, file_token(SessionLedger.default_path())}
 
         json_with_validator(conn, validator, fn ->
           %{
             host: Poller.own_host_id(),
-            records: SessionLedger.read_since(since_ms)
+            records: since_ms |> SessionLedger.read_since() |> for_uid(uid)
           }
         end)
 
@@ -73,6 +76,7 @@ defmodule ShuttleWeb.SessionsController do
              Enum.flat_map(entries, fn {_name, entry} ->
                Composite.in_window(entry.sessions, :at, since_ms, nil)
              end))
+          |> for_uid(uid_param(params))
           |> Enum.sort_by(&(Composite.item_ms(&1, :at) || 0))
 
         json(conn, %{
@@ -85,4 +89,19 @@ defmodule ShuttleWeb.SessionsController do
         bad_param(conn, key)
     end
   end
+
+  # `uid=` narrows either read to one fiber's pairings — what a card asks for.
+  defp uid_param(params) do
+    case Map.get(params, "uid") do
+      uid when is_binary(uid) and uid != "" -> uid
+      _ -> nil
+    end
+  end
+
+  defp for_uid(records, nil), do: records
+  defp for_uid(records, uid), do: Enum.filter(records, &(record_uid(&1) == uid))
+
+  defp record_uid(%{"uid" => uid}), do: uid
+  defp record_uid(%{uid: uid}), do: uid
+  defp record_uid(_), do: nil
 end

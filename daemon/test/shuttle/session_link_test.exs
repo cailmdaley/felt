@@ -217,6 +217,35 @@ defmodule Shuttle.SessionLinkTest do
       assert %{url: @first} = SessionLink.resolve(session, root: root, cache: false)
     end
 
+    test "a missing transcript is remembered briefly, not re-globbed on every open" do
+      root = default_tree()
+
+      session =
+        "5eedcafe-0000-4000-8000-" <>
+          String.pad_leading("#{System.unique_integer([:positive])}", 12, "0")
+
+      assert %{availability: :transcript_missing} = SessionLink.resolve(session, root: root)
+
+      File.write!(
+        Path.join([root, "-Users-cail-felt", "#{session}.jsonl"]),
+        Jason.encode!(bridge(@first)) <> "\n"
+      )
+
+      assert %{availability: :transcript_missing} = SessionLink.resolve(session, root: root)
+      assert %{url: @first} = SessionLink.resolve(session, root: root, cache: false)
+    end
+
+    test "only a claude.ai address is a bridge URL" do
+      root =
+        write_tree([
+          {@session, [bridge("https://evil.example/code/session_01X")]},
+          {@unbridged, [bridge("https://claude.ai.evil.example/x")]}
+        ])
+
+      assert SessionLink.remote_url(@session, root: root) == nil
+      assert SessionLink.remote_url(@unbridged, root: root) == nil
+    end
+
     test "no transcript on this host is transcript_missing, with no link" do
       assert %{availability: :transcript_missing, url: nil, desktop_link: nil, harness: nil} =
                SessionLink.resolve("00000000-0000-0000-0000-000000000000", root: default_tree())
