@@ -19,6 +19,11 @@ defmodule ShuttleWeb.SentFilesController do
   A missing `uid` is a 400; a missing/empty events file yields `{"files": []}`,
   not a 500.
 
+  **Neither leg rescans the stream.** `Shuttle.SentFiles` reads an in-memory
+  projection kept by `Shuttle.SentFiles.Follower`, which seeds once at boot and
+  then reads only appended bytes. That, not the ETag below, is what makes the
+  detail panel's poll and the unconditional remote leg affordable.
+
   **The local leg carries a weak `ETag`** over the request and both source
   files' change tokens: `events.jsonl` and the session ledger. The ledger
   matters for native sessions whose event predates the fiber↔session claim; its
@@ -27,7 +32,10 @@ defmodule ShuttleWeb.SentFilesController do
   changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
   forwards no request headers and drops response headers, so a client's
   `If-None-Match` never reaches the owning daemon and its `ETag` never comes
-  back.
+  back — which is exactly why the reader itself, not the conditional request,
+  has to be the cheap thing. `events.jsonl` is the live hook stream for every
+  session on the host, so its token moves every few seconds and a 304 could
+  never have defended this endpoint anyway.
   """
 
   use Phoenix.Controller, formats: [:json]

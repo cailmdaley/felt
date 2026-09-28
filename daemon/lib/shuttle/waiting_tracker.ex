@@ -190,23 +190,18 @@ defmodule Shuttle.WaitingTracker do
   # Single forward pass over the whole file building last-event-per-session
   # (last-event-wins, so the plain reduce naturally keeps the final event),
   # pruning sessions whose last event is older than @max_age_ms. Returns the
-  # seeded sessions and the byte offset to resume tailing from (EOF). Reuses
+  # seeded sessions and the byte offset to resume tailing from. Reuses
   # `apply_event`, so blank/malformed lines are ignored the same way the tail
-  # ignores them — one parse path.
+  # ignores them — one parse path. `Shuttle.FileTail` owns the bytes.
   defp seed_from_file(path, now) do
-    case File.read(path) do
-      {:ok, contents} ->
-        sessions =
-          contents
-          |> String.split("\n", trim: true)
-          |> Enum.reduce(%{}, &apply_event(&1, &2, now))
-          |> prune_old(now)
+    {lines, offset} = Shuttle.FileTail.seed(path)
 
-        {sessions, byte_size(contents)}
+    sessions =
+      lines
+      |> Enum.reduce(%{}, &apply_event(&1, &2, now))
+      |> prune_old(now)
 
-      _ ->
-        {%{}, 0}
-    end
+    {sessions, offset}
   end
 
   @impl true
@@ -256,60 +251,24 @@ defmodule Shuttle.WaitingTracker do
 
   defp schedule_poll(ms), do: Process.send_after(self(), :poll, ms)
 
-  # Read bytes appended since the last offset; reset to 0 if the file shrank
-  # (truncation / rotation). A missing file leaves state untouched.
+  # Fold the lines appended since the last offset into the session map.
+  # `Shuttle.FileTail` owns the offset arithmetic, the partial-trailing-line
+  # rule, and the shrink report; what to DO about a shrink is this projection's
+  # call — last-event-wins keeps what it already knows and simply resumes at
+  # the new end, because a truncated file cannot make a remembered session
+  # wrong, only unrefreshed. A missing file leaves state untouched.
   defp ingest_new_lines(%State{events_file: path, offset: offset} = state) do
-    case File.stat(path) do
-      {:ok, %{size: size}} when size > offset ->
-        case read_range(path, offset, size - offset) do
-          {:ok, chunk} ->
-            # Consume only up to the last newline; a trailing partial line (a
-            # record still being written) is left unconsumed so the next poll
-            # re-reads it whole. Advancing past it would silently drop the event.
-            case :binary.matches(chunk, "\n") do
-              [] ->
-                state
+    case Shuttle.FileTail.advance(path, offset) do
+      {:append, lines, new_offset} ->
+        now = now_ms(state)
+        sessions = Enum.reduce(lines, state.sessions, &apply_event(&1, &2, now))
+        %{state | offset: new_offset, sessions: sessions}
 
-              matches ->
-                {last_nl, _} = List.last(matches)
-                consumed = last_nl + 1
-                complete = binary_part(chunk, 0, consumed)
-                now = now_ms(state)
-
-                sessions =
-                  Enum.reduce(
-                    String.split(complete, "\n", trim: true),
-                    state.sessions,
-                    &apply_event(&1, &2, now)
-                  )
-
-                %{state | offset: offset + consumed, sessions: sessions}
-            end
-
-          _ ->
-            state
-        end
-
-      {:ok, %{size: size}} when size < offset ->
+      {:reset, size} ->
         %{state | offset: size}
 
-      _ ->
+      :noop ->
         state
-    end
-  end
-
-  defp read_range(path, offset, length) do
-    with {:ok, file} <- File.open(path, [:read, :binary]) do
-      try do
-        :file.position(file, offset)
-
-        case :file.read(file, length) do
-          {:ok, data} -> {:ok, data}
-          other -> other
-        end
-      after
-        File.close(file)
-      end
     end
   end
 
