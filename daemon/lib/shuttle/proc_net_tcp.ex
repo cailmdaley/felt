@@ -44,10 +44,12 @@ defmodule Shuttle.ProcNetTcp do
   def uid_from_data(data, peer_address, peer_port, listen_address, listen_port) do
     with {:ok, peer} <- endpoint(peer_address, peer_port),
          {:ok, listener} <- endpoint(listen_address, listen_port) do
+      needles = port_needles(peer_port)
+
       data
       |> String.split("\n")
       |> Enum.find_value(fn line ->
-        case parse_row(line) do
+        case String.contains?(line, needles) and parse_row(line) do
           %{state: @tcp_state, local: local, remote: remote, uid: uid} ->
             if endpoint_matches?(local, peer) and endpoint_matches?(remote, listener), do: uid
 
@@ -58,6 +60,14 @@ defmodule Shuttle.ProcNetTcp do
     else
       _ -> nil
     end
+  end
+
+  # A login node's table holds thousands of rows and the gate reads it on every
+  # request, so a row is parsed only when its text carries the peer's ephemeral
+  # port as an endpoint port (`:XXXX ` in the kernel's hex; either case).
+  defp port_needles(port) do
+    hex = port |> Integer.to_string(16) |> String.pad_leading(4, "0")
+    Enum.uniq([":" <> String.upcase(hex) <> " ", ":" <> String.downcase(hex) <> " "])
   end
 
   defp read_tables(proc_root) do

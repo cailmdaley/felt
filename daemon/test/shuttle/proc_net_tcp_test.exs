@@ -33,6 +33,18 @@ defmodule Shuttle.ProcNetTcpTest do
     assert ProcNetTcp.uid_from_data(data, @loopback, other_port, @loopback, 4000) == nil
   end
 
+  test "matches a row whose hex fields are lowercase" do
+    data = Path.join(@fixture_root, "tcp") |> File.read!() |> String.downcase()
+
+    {native_port, native_uid} =
+      case :erlang.system_info(:endian) do
+        :little -> {54_321, 1234}
+        :big -> {54_322, 2345}
+      end
+
+    assert ProcNetTcp.uid_from_data(data, @loopback, native_port, @loopback, 4000) == native_uid
+  end
+
   test "returns nil when the established client row is absent" do
     data = File.read!(Path.join(@fixture_root, "tcp"))
 
