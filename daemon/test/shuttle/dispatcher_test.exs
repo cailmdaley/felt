@@ -456,8 +456,8 @@ defmodule Shuttle.DispatcherTest do
   test "worker entrypoint carries invocation data without duplicated workflow" do
     prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/store")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "read its current body and Status"
     assert prompt =~ "Fiber: tests/haiku"
+    assert prompt =~ "Felt store: /tmp/store"
     assert prompt =~ "Kind: oneshot; surface: cli; headless: false"
     refute prompt =~ "Exit Contract"
     refute prompt =~ "felt shuttle handoff"
@@ -584,7 +584,7 @@ defmodule Shuttle.DispatcherTest do
     end
   end
 
-  test "all worker prompt entrypoints sync before reading current fibers" do
+  test "worker prompt entrypoints carry this dispatch's facts and no static instructions" do
     prompts = [
       Dispatcher.render_prompt("tests/a", felt_store: "/tmp/shared loom"),
       Dispatcher.render_resume_prompt("tests/a", felt_store: "/tmp/shared loom"),
@@ -592,13 +592,58 @@ defmodule Shuttle.DispatcherTest do
     ]
 
     Enum.each(prompts, fn prompt ->
-      sync = :binary.match(prompt, "felt -C '/tmp/shared loom' sync") |> elem(0)
-      read = :binary.match(prompt, "read its current body and Status") |> elem(0)
-      assert sync < read
-      assert prompt =~ "Do not select a side mechanically"
-      assert prompt =~ "do not claim sync succeeded"
-      assert prompt =~ "felt -C <store> show <UID>"
+      assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills."
+      assert prompt =~ "Fiber: tests/a"
+      assert prompt =~ "Felt store: /tmp/shared loom"
+      # Syncing and reading the fiber are the skill's Survey step.
+      refute prompt =~ "sync"
+      refute prompt =~ "felt -C"
+      refute prompt =~ "show <UID>"
+      refute prompt =~ "standing-roles.md"
     end)
+  end
+
+  test "the fresh prompt is exactly its dispatch facts" do
+    assert Dispatcher.render_prompt("tests/a",
+             felt_store: "/tmp/store",
+             previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: "pi"}
+           ) ==
+             String.trim_trailing("""
+             You are a Shuttle worker. Activate the felt and shuttle skills.
+             Fiber: tests/a
+             Felt store: /tmp/store
+             Kind: oneshot; surface: cli; headless: false
+             Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (pi)
+             """)
+  end
+
+  test "a cut-off previous session is named with its transcript" do
+    uuid = "0883ade1-08e0-4457-94c6-7ac12137eb0f"
+    path = "/home/u/.claude/projects/-x/#{uuid}.jsonl"
+
+    prompt =
+      Dispatcher.render_prompt("tests/a",
+        felt_store: "/tmp/store",
+        previous_session: %{uuid: uuid, harness: "claude-code", cut_off: true, transcript: path}
+      )
+
+    assert prompt =~
+             "Previous session: #{uuid} (claude-code) ended without a handoff, likely a host outage.\n" <>
+               "Its transcript, to consult as needed after reading Status: #{path}"
+
+    missing =
+      Dispatcher.render_prompt("tests/a",
+        previous_session: %{uuid: uuid, harness: nil, cut_off: true, transcript: nil}
+      )
+
+    assert missing =~
+             "Previous session: #{uuid} ended without a handoff, likely a host outage; " <>
+               "its transcript is not on this host."
+
+    # A resume never names a predecessor, cut off or not.
+    refute Dispatcher.render_resume_prompt("tests/a",
+             previous_session: %{uuid: uuid, cut_off: true, transcript: path}
+           ) =~ "Previous session"
   end
 
   test "dispatch snapshots collaboration and selected execution recipe into its ledger row" do
@@ -1414,9 +1459,8 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Resume prompt rendering ──
 
-  test "standing launch carries run identity and reference" do
+  test "standing launch carries run identity" do
     prompt = Dispatcher.render_standing_run_prompt("tests/haiku", "run-2026-05-06")
-    assert prompt =~ "references/standing-roles.md"
     assert prompt =~ "Fiber: tests/haiku"
     assert prompt =~ "Run: run-2026-05-06"
     assert prompt =~ "Run mode: scheduled"
@@ -1485,11 +1529,70 @@ defmodule Shuttle.DispatcherTest do
       %{dispatched_at: dispatched_at, session_uuid: "aaaa-bbbb-cccc-dddd"}
     end
 
-    test "resumes the prior session when the worker died without a handoff", ctx do
-      # A dispatch stamp but no `handed_off_at` after it → died mid-thought →
-      # resume the transcript rather than loop a fresh worker.
+    @now ~U[2026-06-20 19:00:00Z]
+
+    # An injected transcript lookup: a file last written `age_s` seconds before
+    # @now, or none (`nil`).
+    defp transcript(nil), do: fn _session -> nil end
+
+    defp transcript(age_s) do
+      fn session ->
+        %{path: "/t/#{session}.jsonl", mtime: DateTime.add(@now, -age_s, :second)}
+      end
+    end
+
+    defp intent(fiber, age_s, opts \\ []),
+      do:
+        Dispatcher.check_resume_intent(
+          fiber,
+          Keyword.merge([transcript: transcript(age_s), now: @now], opts)
+        )
+
+    test "a died-without-handoff session with a warm transcript is resumed", ctx do
+      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(dispatched_fiber(ctx), 60)
+
+      # The window's edge is still warm (45 minutes by default).
+      assert {:previous, _} = intent(dispatched_fiber(ctx), 45 * 60)
+    end
+
+    test "a died-without-handoff session with a cold transcript goes fresh, naming it", ctx do
+      assert {:cold, "aaaa-bbbb-cccc-dddd", "/t/aaaa-bbbb-cccc-dddd.jsonl"} =
+               intent(dispatched_fiber(ctx), 45 * 60 + 1)
+    end
+
+    test "a died-without-handoff session with no transcript on this host goes fresh", ctx do
+      assert {:cold, "aaaa-bbbb-cccc-dddd", nil} = intent(dispatched_fiber(ctx), nil)
+    end
+
+    test "the warm window is one application setting", ctx do
+      Application.put_env(:shuttle, :resume_warm_window_s, 10)
+      on_exit(fn -> Application.delete_env(:shuttle, :resume_warm_window_s) end)
+
+      assert {:previous, _} = intent(dispatched_fiber(ctx), 10)
+      assert {:cold, _, _} = intent(dispatched_fiber(ctx), 11)
+    end
+
+    test "a clean handoff goes fresh without looking at the transcript", ctx do
+      fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
+      assert :fresh = intent(fiber, 60, transcript: fn _ -> flunk("looked up") end)
+    end
+
+    test "explicit resume_mode wins over the transcript's temperature", ctx do
       assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               Dispatcher.check_resume_intent(dispatched_fiber(ctx))
+               intent(dispatched_fiber(ctx), 10 * 3600, resume_mode: "previous")
+
+      assert {:previous, "aaaa-bbbb-cccc-dddd"} =
+               intent(dispatched_fiber(ctx), nil, resume_mode: "previous")
+
+      assert :fresh = intent(dispatched_fiber(ctx), 60, resume_mode: "fresh")
+    end
+
+    test "resolve_resume_intent passes the transcript lookup through", ctx do
+      assert {:cold, _, nil} =
+               Dispatcher.resolve_resume_intent(:constitution, dispatched_fiber(ctx),
+                 transcript: transcript(nil),
+                 now: @now
+               )
     end
 
     test "starts fresh when the worker left a clean handoff (handed_off_at >= dispatched_at)",
@@ -1549,7 +1652,6 @@ defmodule Shuttle.DispatcherTest do
   test "resume reloads current constitution and skills" do
     prompt = Dispatcher.render_resume_prompt("tests/haiku")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "read its current body and Status"
     assert prompt =~ "Mode: resume"
     assert prompt =~ "Fiber: tests/haiku"
     refute prompt =~ "Exit Contract"

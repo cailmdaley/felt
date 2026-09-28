@@ -203,6 +203,30 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # ── Continuation helpers (the felt-history replacement) ──
 
+  # A Claude transcript for `session` last written `age_s` seconds ago, under a
+  # per-test projects root (`SHUTTLE_CLAUDE_PROJECTS_DIR`). The continuation
+  # decision resumes a dirty death only while this file is warm.
+  defp write_transcript(session, age_s \\ 0) do
+    root = Path.join(System.tmp_dir!(), "shuttle-transcripts-#{System.unique_integer([:positive])}")
+    prior = System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
+    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if prior,
+        do: System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", prior),
+        else: System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
+
+      File.rm_rf!(root)
+    end)
+
+    path = Path.join([root, "-work", "#{session}.jsonl"])
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "{}\n")
+    File.touch!(path, System.os_time(:second) - age_s)
+    path
+  end
+
+
   # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at`
   # into the fiber's `shuttle.runtime` block (the real .md under `host`), by
   # shelling the REAL `felt shuttle mark-runtime` — the actual production
@@ -279,11 +303,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "claude"
     assert script =~ "<<<"
     assert script =~ "Fiber: tests/fresh-oneshot"
-    assert script =~ "felt -C"
-    assert script =~ host
-    {sync_at, _} = :binary.match(script, " sync")
-    {read_at, _} = :binary.match(script, "read its current body and Status")
-    assert sync_at < read_at
+    assert script =~ "Felt store: #{host}"
+    refute script =~ "read its current body and Status"
 
     # Fresh dispatch: no resume flag, no dismiss block.
     refute script =~ "--resume"
@@ -426,7 +447,9 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     # The prior session id lives ONLY in the dispatch marker (the daemon wrote it
     # at spawn; the worker never knew its own UUID). No handoff after it → resume.
-    write_dispatch_marker(host, "tests/cli-resume-fixed", "cli-resume-session-uuid")
+    session = "c1a0e5e0-0000-4000-8000-000000000001"
+    write_dispatch_marker(host, "tests/cli-resume-fixed", session)
+    write_transcript(session, 60)
 
     assert {:ok, _} =
              Dispatcher.dispatch("tests/cli-resume-fixed",
@@ -435,10 +458,45 @@ defmodule Shuttle.DispatchIntegrationTest do
              )
 
     script = read_run_script()
-    assert script =~ "--resume 'cli-resume-session-uuid'"
+    assert script =~ "--resume '#{session}'"
     # Claude's dismiss-warning block is present on resume.
     assert script =~ "send-keys"
     assert script =~ "sleep 2"
+  end
+
+  # The cold half: the same dirty death, but the transcript was last written
+  # past the warm window (a host outage, say) — a fresh worker, told what was
+  # cut off and where its transcript is.
+  test "dirty death with a cold transcript → fresh launch naming the cut-off session",
+       %{host: host} do
+    write_fiber(host, "tests/cli-cold", """
+    ---
+    name: CLI cold
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: claude-sonnet
+    ---
+    A fiber whose worker died hours ago without a clean handoff.
+    """)
+
+    session = "c1a0e5e0-0000-4000-8000-000000000002"
+    write_dispatch_marker(host, "tests/cli-cold", session)
+    path = write_transcript(session, 3 * 3600)
+
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/cli-cold", runner: IntegrationRunner, felt_store: host)
+
+    script = read_run_script()
+    refute script =~ "--resume"
+    assert script =~ "--session-id"
+
+    assert script =~
+             "Previous session: #{session} (claude-code) ended without a handoff, likely a host outage."
+
+    assert script =~ "Its transcript, to consult as needed after reading Status: #{path}"
   end
 
   # Kanban resume: resume_mode=previous (a dispatch parameter, STORE 3) triggers
@@ -488,11 +546,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     # fallback whose full dispatch prompt is exercised in the deadlock test below).
     assert script =~ "Mode: resume"
     assert script =~ "Fiber: tests/kanban-resume"
-    assert script =~ "felt -C"
-    assert script =~ host
-    {sync_at, _} = :binary.match(script, " sync")
-    {read_at, _} = :binary.match(script, "read its current body and Status")
-    assert sync_at < read_at
+    assert script =~ "Felt store: #{host}"
+    refute script =~ "read its current body and Status"
 
     # F2: resuming is a dispatch boundary too — a fresh `dispatched_at` must be
     # stamped synchronously (same session id, since resuming doesn't change
@@ -750,7 +805,9 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     # Dispatch marker on file with no handoff after it (dirty death) — the
     # autonomous continuation resumes the marker's session, no directive needed.
-    write_dispatch_marker(host, "tests/poller-history-resume", "history-resume-session-uuid")
+    session = "c1a0e5e0-0000-4000-8000-000000000003"
+    write_dispatch_marker(host, "tests/poller-history-resume", session)
+    write_transcript(session)
 
     {:ok, poller} =
       start_poller!(
@@ -764,7 +821,7 @@ defmodule Shuttle.DispatchIntegrationTest do
              Poller.dispatch_fiber(poller, "tests/poller-history-resume", [])
 
     script = read_run_script()
-    assert script =~ "--resume 'history-resume-session-uuid'"
+    assert script =~ "--resume '#{session}'"
     assert script =~ "Mode: resume"
   end
 
@@ -1751,14 +1808,10 @@ defmodule Shuttle.DispatchIntegrationTest do
     script = read_run_script()
     # Standing-role framing.
     assert script =~ "Run mode: scheduled"
-    assert script =~ "references/standing-roles.md"
     assert script =~ "Fiber: tests/standing-dispatch"
     assert script =~ "run-2026-05-07"
-    assert script =~ "felt -C"
-    assert script =~ host
-    {sync_at, _} = :binary.match(script, " sync")
-    {read_at, _} = :binary.match(script, "read its current body and Status")
-    assert sync_at < read_at
+    assert script =~ "Felt store: #{host}"
+    refute script =~ "read its current body and Status"
     # NOT the fresh-dispatch orientation paragraph.
     refute script =~ "The orchestration system Shuttle dispatched you on this fiber"
   end

@@ -95,18 +95,29 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   run id) and preserves `next_due_at`; worker exit flips state to
   `awaiting`, and `felt shuttle accept` advances `next_due_at` only for
   scheduled runs.
-- **A finished run is finished — there is no reopen.** When a worker's tmux
-  session is gone, `Shuttle.Continuation` decides between resuming the
-  transcript and starting fresh from one comparison: a `handed_off_at` newer
-  than `dispatched_at` (the worker's own `felt shuttle handoff`) means fresh;
-  no newer handoff means the session died mid-thought and its `session_uuid`
-  is resumed. A clean handoff therefore *is* the end of that conversation: the
-  next worker lands on the rewritten `## Status`, and `resume`/`reopen` on a
-  closed or awaiting fiber re-arm the document for a fresh dispatch rather
-  than reattaching. The only reattach window is while the run is live
-  (`felt shuttle attach`); a worker that wants a human's word before it ends
-  stays alive at the checkpoint instead of handing off (the pinned-role
-  contract). This is the contract, not a gap.
+- **A finished run is finished — there is no reopen.** When a oneshot's
+  worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
+  its transcript and starting fresh. A `handed_off_at` newer than
+  `dispatched_at` (the worker's own `felt shuttle handoff`) means fresh. No
+  newer handoff means the session died without handing off, and then its
+  transcript's age decides: last written within the warm window (45 minutes,
+  `config :shuttle, :resume_warm_window_s`) → resume `session_uuid`; older, or
+  not on this host → fresh, with the prompt naming the cut-off session and its
+  transcript path. A resume replays the whole transcript into the model, which
+  is cheap only while the harness's prompt cache still holds it, so a worker
+  killed by a host outage hours ago costs less as a fresh worker reading
+  `## Status` — whatever the transcript's size. The lookup is one resolve
+  through `Shuttle.Transcript.path/2` and one stat, taken only on that
+  no-handoff branch. An explicit `resume_mode` from the board wins over all of
+  this. Pinned and standing roles always start fresh.
+
+  A clean handoff therefore *is* the end of that conversation: the next worker
+  lands on the rewritten `## Status`, and `resume`/`reopen` on a closed or
+  awaiting fiber re-arm the document for a fresh dispatch rather than
+  reattaching. The only reattach window is while the run is live (`felt
+  shuttle attach`); a worker that wants a human's word before it ends stays
+  alive at the checkpoint instead of handing off (the pinned-role contract).
+  This is the contract, not a gap.
 
 ## tmux server ownership (macOS)
 
@@ -177,13 +188,21 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 
 Prompt rendering lives in `Shuttle.Dispatcher`.
 
-Launch messages contain a short instruction to activate the felt and shuttle
-skills and read the current constitution and Status, followed by invocation data:
+Launch messages open with `You are a Shuttle worker. Activate the felt and
+shuttle skills.` and otherwise carry only this dispatch's facts:
 
-- Fiber and felt store; kind, surface, and headless mode.
+- `Fiber:` and `Felt store:`; kind, surface, and headless mode.
+- `Mode: resume` on a resumed session.
 - Standing run ID and scheduled/ad-hoc mode when applicable.
-- Optional previous-session provenance on fresh launches.
+- On fresh launches, `Previous session: <uuid> (<harness>)` when there was
+  one. When the previous session died without a handoff and was too cold to
+  resume, the line says so and gives its transcript path.
+- The collaboration assignment, when the fiber carries one.
 - `From User:` followed by the exact user message, when nonblank.
+
+Syncing the store, reading the fiber and its `## Status`, and what to do with
+a predecessor's transcript are static instructions, so they live in the shuttle
+skill's Survey step rather than in every prompt.
 
 Capture launches point to the shuttle skill's `references/capture.md` and carry
 JSON install metadata and the exact claim endpoint/body. That reference owns the

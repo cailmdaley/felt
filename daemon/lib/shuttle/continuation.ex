@@ -48,12 +48,18 @@ defmodule Shuttle.Continuation do
   ## Continuation decision
 
   When a fiber's tmux session is gone, the daemon reads these fields off the
-  freshly-polled fiber (no file IO — `felt show -j` already carries the whole
-  `shuttle:` block):
+  freshly-polled fiber (`felt show -j` already carries the whole `shuttle:`
+  block):
 
     * `handed_off_at` present AND `handed_off_at >= dispatched_at` → **fresh**.
-    * otherwise (dispatched, no newer handoff) → **resume `session_uuid`**.
     * absent `dispatched_at` → treat as **fresh** (safe default).
+    * otherwise (dispatched, no newer handoff) the session died without handing
+      off, and its transcript's age decides: written within the warm window
+      (`warm_window_s/0`) → **resume `session_uuid`**; older, or not on this
+      host → **fresh**, with the prompt naming the cut-off session and its
+      transcript. A resume replays the whole transcript into the model, which
+      is cheap only while the harness's prompt cache still holds it; past
+      that window a fresh worker reading `## Status` costs less at any size.
 
   A fresh `dispatched_at` at redispatch naturally supersedes a stale
   `handed_off_at` (the new dispatch is newer than the old handoff), so nothing
@@ -67,6 +73,41 @@ defmodule Shuttle.Continuation do
   """
 
   require Logger
+
+  @warm_window_s 45 * 60
+
+  @doc """
+  How long, in seconds, a session's transcript stays warm enough to resume:
+  the `:resume_warm_window_s` application setting, else 45 minutes.
+  """
+  @spec warm_window_s() :: pos_integer()
+  def warm_window_s, do: Application.get_env(:shuttle, :resume_warm_window_s, @warm_window_s)
+
+  @doc """
+  The transcript of `session` on this host, as `%{path, mtime}` (`mtime` a UTC
+  `DateTime`), or `nil` when no harness here wrote one. One resolve through
+  `Shuttle.Transcript.path/2` and one stat.
+  """
+  @spec transcript_stat(String.t(), keyword()) :: %{path: String.t(), mtime: DateTime.t()} | nil
+  def transcript_stat(session, opts \\ []) when is_binary(session) do
+    with path when is_binary(path) <- Shuttle.Transcript.path(session, opts),
+         {:ok, %File.Stat{mtime: mtime}} <- File.stat(path, time: :posix) do
+      %{path: path, mtime: DateTime.from_unix!(mtime)}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  True iff `transcript` (as `transcript_stat/2` returns it) was written within
+  `window_s` seconds of `now`. A missing transcript is never warm.
+  """
+  @spec warm?(%{mtime: DateTime.t()} | nil, DateTime.t(), non_neg_integer()) :: boolean()
+  def warm?(transcript, now, window_s \\ warm_window_s())
+  def warm?(%{mtime: %DateTime{} = mtime}, now, window_s),
+    do: DateTime.diff(now, mtime, :second) <= window_s
+
+  def warm?(_transcript, _now, _window_s), do: false
 
   # ── readers (pure, over the polled fiber map) ────────────────────────────────
 

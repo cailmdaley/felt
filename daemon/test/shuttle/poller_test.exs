@@ -130,6 +130,29 @@ defmodule Shuttle.PollerTest do
     |> Enum.map(fn {_cmd, args} -> List.last(args) end)
   end
 
+  # A Claude transcript for `session` last written `age_s` seconds ago, under a
+  # per-test projects root (`SHUTTLE_CLAUDE_PROJECTS_DIR`). The continuation
+  # decision resumes a dirty death only while this file is warm.
+  defp write_transcript(session, age_s \\ 0) do
+    root = Path.join(System.tmp_dir!(), "shuttle-transcripts-#{System.unique_integer([:positive])}")
+    prior = System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
+    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if prior,
+        do: System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", prior),
+        else: System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
+
+      File.rm_rf!(root)
+    end)
+
+    path = Path.join([root, "-work", "#{session}.jsonl"])
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "{}\n")
+    File.touch!(path, System.os_time(:second) - age_s)
+    path
+  end
+
   # Mirror the dispatcher's at-spawn dispatch stamp: `session_uuid` +
   # `dispatched_at` into the fiber's `shuttle:` block. The optional `at` lets a
   # test back-date the dispatch so a later handoff can be ordered relative to it.
@@ -4259,7 +4282,9 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n")
 
-    write_dispatch_marker(fiber_id, "old-session-id")
+    session = "d1ed0000-0000-4000-8000-000000000001"
+    write_dispatch_marker(fiber_id, session)
+    write_transcript(session)
 
     {:ok, poller} =
       start_poller!(
@@ -4274,7 +4299,7 @@ defmodule Shuttle.PollerTest do
 
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "--resume"
-    assert script =~ "old-session-id"
+    assert script =~ session
   end
 
   test "poller continuation re-dispatches FRESH when the worker left a clean handoff" do

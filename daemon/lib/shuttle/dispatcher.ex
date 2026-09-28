@@ -110,6 +110,17 @@ defmodule Shuttle.Dispatcher do
           resume_mode: Keyword.get(opts, :resume_mode)
         )
 
+      previous_session = previous_session_info(fiber, uid)
+
+      {resume_intent, previous_session} =
+        case resume_intent do
+          {:cold, session_id, transcript} ->
+            {:fresh, cut_off_session(previous_session, session_id, transcript)}
+
+          intent ->
+            {intent, previous_session}
+        end
+
       case resume_intent do
         {:error, _} = error ->
           error
@@ -123,7 +134,7 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
-            previous_session: previous_session_info(fiber, uid),
+            previous_session: previous_session,
             collaboration: Collaboration.snapshot(fiber),
             agent: agent.id,
             model: agent.model
@@ -152,9 +163,9 @@ defmodule Shuttle.Dispatcher do
       `resume_mode` wins. Set by manual kanban dispatches.
     * `:resume_mode` — the user's continuation directive (`"previous"` /
       `"fresh"` / absent), carried with the dispatch call.
+    * `:transcript`, `:now` — passed through to `check_resume_intent/2`.
   """
-  @spec resolve_resume_intent(any(), map(), keyword()) ::
-          :fresh | {:previous, String.t()} | {:error, :missing_session_id}
+  @spec resolve_resume_intent(any(), map(), keyword()) :: continuation()
   def resolve_resume_intent(prompt_context, fiber, opts \\ []) do
     force? = Keyword.get(opts, :force, false)
 
@@ -163,7 +174,7 @@ defmodule Shuttle.Dispatcher do
         :fresh
 
       _ ->
-        check_resume_intent(fiber, resume_mode: Keyword.get(opts, :resume_mode))
+        check_resume_intent(fiber, Keyword.delete(opts, :force))
     end
   end
 
@@ -173,8 +184,12 @@ defmodule Shuttle.Dispatcher do
 
   Returns one of:
   - `:fresh` — no resume requested, or a fresh run was explicitly requested.
-  - `{:previous, session_id}` — resume requested and the dispatch marker holds a
-    session UUID. The dispatcher invokes the harness-appropriate resume command.
+  - `{:previous, session_id}` — resume requested, or the previous session died
+    without a handoff while its transcript is still warm. The dispatcher
+    invokes the harness-appropriate resume command.
+  - `{:cold, session_id, transcript_path | nil}` — the previous session died
+    without a handoff and its transcript is cold or not on this host. The
+    dispatcher starts fresh and names the cut-off session in the prompt.
   - `{:error, :missing_session_id}` — `resume_mode == "previous"` but the
     dispatch marker has no usable session id. The caller surfaces this instead
     of silently starting fresh; "New session" is the explicit fresh path.
@@ -186,9 +201,18 @@ defmodule Shuttle.Dispatcher do
 
   Options:
     * `:resume_mode` — `"previous"` / `"fresh"` / absent.
+    * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
+      transcript lookup (default `Shuttle.Continuation.transcript_stat/1`,
+      through the app-worker record for `surface: app`).
+    * `:now` — the `DateTime` the transcript's age is measured against.
   """
-  @spec check_resume_intent(map(), keyword()) ::
-          :fresh | {:previous, String.t()} | {:error, :missing_session_id}
+  @type continuation ::
+          :fresh
+          | {:previous, String.t()}
+          | {:cold, String.t(), String.t() | nil}
+          | {:error, :missing_session_id}
+
+  @spec check_resume_intent(map(), keyword()) :: continuation()
   def check_resume_intent(fiber, opts \\ []) do
     resume_mode = Keyword.get(opts, :resume_mode)
     session_id = Shuttle.Continuation.resumable_session_id(fiber)
@@ -214,39 +238,68 @@ defmodule Shuttle.Dispatcher do
       # No directive (resume_mode absent): decide fresh-vs-resume by whether the
       # previous worker handed off cleanly. The autonomous-loop path.
       true ->
-        decide_continuation(fiber, session_id)
+        decide_continuation(fiber, session_id, opts)
     end
   end
 
   # The autonomous fresh-vs-resume decision when there is no human resume
   # directive. A long-running oneshot loops across sessions: a worker exits, the
-  # next poll re-dispatches and continues. The question is whether the previous
-  # session ended CLEANLY (it stamped `shuttle.handed_off_at` via `felt shuttle
-  # handoff` as its last act — then the next worker starts fresh and reads the
-  # `## Status` block) or DIED mid-thought (no handoff — the process was killed,
-  # common on remote machines — then the fresh worker loses the in-flight
-  # reasoning and loops). On a dirty death we resume the prior transcript instead;
-  # the `resume || fresh-same-id` self-heal makes resume safe even if the
-  # transcript is gone.
-  #
-  # The whole decision is now read straight off the fiber's `shuttle:` block
-  # (`Shuttle.Continuation`, no file IO — `felt show -j` already carried it):
-  # `handed_off_at` present AND `>= dispatched_at` → fresh, else resume
-  # `session_uuid`. Store-agnostic — no work_dir/aggregate federation, no
-  # `SQLITE_BUSY` append-drop that could make a clean exit look dirty.
+  # next poll re-dispatches and continues. A worker that handed off cleanly
+  # (`shuttle.runtime.handed_off_at` newer than `dispatched_at`) is followed by
+  # a fresh one that reads `## Status`. A worker that died without handing off
+  # loses its in-flight reasoning unless its transcript is resumed — but a
+  # resume re-reads the whole transcript, which is only cheap while the
+  # harness's prompt cache is warm. So a dirty death resumes only when the
+  # transcript was written within the warm window; a colder (or absent)
+  # transcript goes fresh, and the prompt points the new worker at it.
   #
   # Scoped to oneshots: pinned and standing roles always start fresh. A pinned
-  # role only autonomously redispatches after a CLEAN handoff (the worker asked
-  # for a fresh session; a dirty death parks it instead), and standing roles
-  # dispatch discrete scheduled occurrences — both fresh. First run / no prior
-  # session → fresh (nothing to resume).
-  defp decide_continuation(fiber, session_id) do
+  # role only autonomously redispatches after a CLEAN handoff (a dirty death
+  # parks it instead), and standing roles dispatch discrete scheduled
+  # occurrences. First run / no prior session → fresh (nothing to resume).
+  #
+  # The transcript lookup (one resolve + one stat) runs only on the dirty-death
+  # branch; `:transcript` and `:now` inject it for tests.
+  defp decide_continuation(fiber, session_id, opts) do
     cond do
-      fiber_kind(fiber) != "oneshot" -> :fresh
-      not (is_binary(session_id) and session_id != "") -> :fresh
-      Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) -> :fresh
-      true -> {:previous, session_id}
+      fiber_kind(fiber) != "oneshot" ->
+        :fresh
+
+      not (is_binary(session_id) and session_id != "") ->
+        :fresh
+
+      Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) ->
+        :fresh
+
+      true ->
+        lookup = Keyword.get_lazy(opts, :transcript, fn -> default_transcript_lookup(fiber) end)
+        transcript = lookup.(session_id)
+        now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+
+        if Shuttle.Continuation.warm?(transcript, now),
+          do: {:previous, session_id},
+          else: {:cold, session_id, transcript && transcript.path}
     end
+  end
+
+  # An app conversation's resume id is its thread id; its transcript lives
+  # under the harness session id the app-worker record carries.
+  defp default_transcript_lookup(fiber) do
+    if get_in(fiber, ["shuttle", "surface"]) == "app",
+      do: &(&1 |> Shuttle.AppWorkers.transcript_id() |> Shuttle.Continuation.transcript_stat()),
+      else: &Shuttle.Continuation.transcript_stat/1
+  end
+
+  # The previous-session record for a fresh launch after a cut-off session.
+  defp cut_off_session(previous, session_id, transcript) do
+    harness =
+      cond do
+        is_binary(transcript) -> Shuttle.Transcript.harness_for(transcript)
+        match?(%{uuid: ^session_id}, previous) -> previous[:harness]
+        true -> nil
+      end
+
+    %{uuid: session_id, harness: harness, cut_off: true, transcript: transcript}
   end
 
   @doc """
@@ -270,7 +323,8 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Optional provenance for fresh workers; current instructions live in the
-  # constitution and this dispatch's user message.
+  # constitution and this dispatch's user message. A session that died without
+  # handing off (`cut_off`) is named as such, with where its transcript is.
   defp render_previous_session_line(opts) do
     case Keyword.get(opts, :previous_session) do
       %{uuid: uuid} = prev when is_binary(uuid) and uuid != "" ->
@@ -280,12 +334,22 @@ defmodule Shuttle.Dispatcher do
             _ -> ""
           end
 
-        "Previous session: #{uuid}#{harness}\n"
+        "Previous session: #{uuid}#{harness}" <> render_cut_off(prev)
 
       _ ->
         ""
     end
   end
+
+  defp render_cut_off(%{cut_off: true, transcript: path}) when is_binary(path),
+    do:
+      " ended without a handoff, likely a host outage.\n" <>
+        "Its transcript, to consult as needed after reading Status: #{path}"
+
+  defp render_cut_off(%{cut_off: true}),
+    do: " ended without a handoff, likely a host outage; its transcript is not on this host."
+
+  defp render_cut_off(_), do: ""
 
   @doc "Renders a resumed worker's skill entrypoint and current launch data."
   @spec render_resume_prompt(String.t(), keyword()) :: String.t()
@@ -320,13 +384,9 @@ defmodule Shuttle.Dispatcher do
   @doc """
   Renders a standing-role run prompt for one scheduled occurrence.
 
-  Mirrors the fresh dispatch prompt's shape (orientation paragraph +
-  optional From User block). Standing roles are recurring fibers — this
-  framing makes the run feel like one due occurrence of a durable
-  responsibility rather than a new constitution. The awaiting-review
-  handoff specifics (frontmatter shape on exit) live in the shuttle
-  skill's "Standing Roles" section, not the prompt — keeping the prompt
-  oriented and the practice in one place.
+  The fresh dispatch prompt plus the run id and whether the run is scheduled
+  or ad-hoc. How a standing run proceeds and hands off for review lives in the
+  shuttle skill's `references/standing-roles.md`, not the prompt.
   """
   @spec render_standing_run_prompt(String.t(), String.t(), keyword()) :: String.t()
   def render_standing_run_prompt(fiber_id, run_id, opts \\ []) do
@@ -378,34 +438,21 @@ defmodule Shuttle.Dispatcher do
     _ -> :error
   end
 
-  # Prompts carry identity and invocation data; the skill owns worker behavior.
+  # Prompts carry only this dispatch's facts; the shuttle skill owns worker
+  # behavior (sync, reading the fiber, the loop, exiting).
   defp compose_prompt(header, opts) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     [
       header,
-      "Felt store: #{felt_store}",
-      render_sync_and_read_instructions(felt_store),
+      if(felt_store, do: "Felt store: #{felt_store}", else: ""),
       "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
-      String.trim_trailing(render_previous_session_line(opts)),
+      render_previous_session_line(opts),
       Collaboration.prompt_section(Keyword.get(opts, :collaboration), felt_store)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
     |> append_user_message(opts)
-  end
-
-  defp render_sync_and_read_instructions(store) do
-    sync_command =
-      case store do
-        path when is_binary(path) and path != "" ->
-          "felt -C #{shell_single_quote(path)} sync"
-
-        _ ->
-          "felt sync"
-      end
-
-    "Before substantive work, run `#{sync_command}`. If sync fails for a reason other than merge conflicts, stop and report the exact error in Status; do not claim sync succeeded or that the store is current. If conflicts remain, inspect and resolve relevant files using this assignment and any readable current task or role context. Do not select a side mechanically. Complete the merge, rerun `#{sync_command}`, and proceed only after it succeeds. Then resolve this task's UID from its Fiber path and read its current body and Status with `felt -C <store> show <UID>`. Read referenced role or collaborator fibers the same way; for standing work, read the current `references/standing-roles.md` instructions too."
   end
 
   defp append_user_message(header, opts) do
