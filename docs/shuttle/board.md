@@ -1,33 +1,24 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-five full-page views behind a hotkey row, `1`–`5`, and a settings sheet on
+three full-page views behind a hotkey row, `1`–`3`, and a settings sheet on
 `⌘,`. Everything on it is a view over fibers the daemon already polls, plus
 the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
-| `2` | **Day** | Where today's hours went, fiber by fiber |
-| `3` | **Week** | Which days had work in them |
-| `4` | **Chronicle** | What a stretch of weeks was about |
-| `5` | **Board** | What the work produced |
+| `2` | **Chronicle** | What a stretch of weeks was about |
+| `3` | **Board** | What the work produced |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-The first four run from the tightest window outward, so the strip reads as a
-zoom: today, this week, the whole record. The fifth is not a time window at
-all — it orders sent files by a lens rather than by the clock, which is why it
-sits after the zoom rather than inside it.
-
-One temporal cursor is shared across the four time views. Page Day back to
-Tuesday, press `3`, and Week opens on the week containing Tuesday. `?view=day`
-(or `week`, `chronicle`, `shelf`) deep-links a view.
+`?view=chronicle` (or `shelf`) deep-links a view.
 
 !!! note "The tab named Board, and the board"
-    Hotkey `5` is titled **Board** for the reader. Internally it is the
+    Hotkey `3` is titled **Board** for the reader. Internally it is the
     *shelf* — the view id, the storage keys and the module names all say
     `shelf`, and `?view=shelf` is what deep-links it. This page uses "the
-    board" for the whole surface at `:4000` and "the Board tab" for the fifth
+    board" for the whole surface at `:4000` and "the Board tab" for the third
     view.
 
 ## Desk — the kanban
@@ -119,44 +110,16 @@ mac-specific part is the `osascript` call that raises the kitty window, and
 that is already a no-op elsewhere. `felt shuttle attach <fiber>` reaches
 any worker on any platform.
 
-## Day, Week, Chronicle — where the time went
+## Chronicle — where the time went
 
-Three windows over the same substrate: the activity stream bucketed per minute,
-joined to fibers through the session and commit ledgers. See
-[Telemetry](telemetry.md) for what feeds them and what happens when a ledger is
-absent.
+The activity stream bucketed per minute, joined to fibers through the session
+and commit ledgers. See [Telemetry](telemetry.md) for what feeds it and what
+happens when a ledger is absent.
 
-- **Day** lays fibers out as lanes over a 6am→6am axis, with the rail zoomed to
-  first-action→now rather than the full 24 hours.
-- **Week** rows past days as ink rasters; today's row carries a gold seam and
-  future rows are hollow.
-- **Chronicle** draws fibers as multi-day lifelines across calendar days, under
-  a strip of [cycle](cycles.md) bands.
-
-![The Day view: one fiber per lane across a day's axis, each lane's filled
-curve showing agent work and red ticks showing where the human weighed in,
-above a two-column "The day, by fiber" digest of per-fiber outcomes, several
-blurred.](../assets/board-day.jpg)
-
-*The day at lane resolution: one lane per fiber rather than one row per day.
-The digest below turns every peak in the rail into the outcome text that
-produced it.*
-
-![The Week view: seven day rows over a 6am-to-6am axis, each showing a filled
-curve where agents were working and red ticks where the human was steering,
-with per-day totals in the right margin.](../assets/board-week.jpg)
-
-*Week, reading two clocks at once: the filled curve is agents working, the red
-ticks are you. A day's marginalia gives its total, whether it ran full or half,
-and the lines changed. The era label runs across the header.*
-
-**Two pigments, and no third.** Every raster spends exactly two: solid for
-human steering, wash for agent work. There is no "attention called" state — an
-idle nudge is not a state of the work, and an agent blocked on you reads as the
-*gap* on a live lane, which no pigment improves on. Effort is counted in the
-unit each side actually spends: human effort in messages (`you 14 · 9 back`),
-agent effort in minutes. Hover any mark for the actual words, fetched as
-transcript excerpts from `/api/v1/moment`.
+Chronicle draws fibers as multi-day lifelines across calendar days, under a
+strip of [cycle](cycles.md) bands. Activity is inked on each lifeline, one mark
+per civil day; ahead of today a row carries only hollow marks for what is due
+and what is armed.
 
 ![The Chronicle view: dozens of fibers as horizontal lifelines running from
 first day to last across a calendar of weeks, tick marks marking periods of
@@ -164,19 +127,26 @@ use, a status glyph on each row, and a header strip of named eras such as "the
 temporal-ui push" and "recovery week"; a few rows are
 blurred.](../assets/board-chronicle.jpg)
 
-*Chronicle trades the raster for a timeline: no fill, just marks on a line
-per fiber, so decades of fibers stack without drowning each other. The era
-strip is the same [cycle](cycles.md) data that fences the Desk's Cycles
-column.*
+*No fill, just marks on a line per fiber, so months of fibers stack without
+drowning each other. The era strip is the same [cycle](cycles.md) data that
+fences the Desk's Cycles column.*
 
-Everything on these pages is joined through the ledgers. A minute or a commit
+Everything on the page is joined through the ledgers. A minute or a commit
 that does not resolve to a fiber the board carries is not drawn at all, so work
 started outside shuttle is invisible here — and nothing is ever attributed by
 reading a `slug:` prefix out of a commit subject or a directory name.
 
+**The record is fetched on demand.** The Desk's cards refresh every 15 s, and
+Chronicle redraws its rows from them, but its temporal feeds — activity, the
+session ledger, the commit ledger — are fetched when the view opens, again at
+most every five minutes while it stays open, and whenever you ask with the
+refresh control. Days already past are fetched once per open; scrolling back
+fetches only the days newly in view. Nothing on the board asks for temporal
+data while Chronicle is closed.
+
 ## Board — what the work produced
 
-Hotkey `5`. Every file a worker pushed with `felt shuttle send-file <path> [path...]` in the last 30 days,
+Hotkey `3`. Every file a worker pushed with `felt shuttle send-file <path> [path...]` in the last 30 days,
 laid out on a canvas as cards that render their own contents: the report
 renders inside its frame, the plot draws, the page is the thing itself rather
 than a link to it. A list of filenames is an index of work; a wall of rendered
@@ -229,8 +199,8 @@ bundle against a changed route table fails silently as a 404.
 `⌘,` opens the settings sheet, and so does a bare `,`: the board's own idiom
 is bare keys, and a phone has no `⌘`. The ⚙︎ closing the tab strip does the
 same with a pointer, pinned to the right edge on a phone so it never scrolls
-out of reach. `Esc` closes it. It is an overlay rather than a sixth tab — the
-five tabs are windows onto the work, and configuration is not work.
+out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
+three tabs are windows onto the work, and configuration is not work.
 
 **A host picker is the first control, and everything below it is addressed to
 that host.** The board is reachable from a phone and from a second hub, so the

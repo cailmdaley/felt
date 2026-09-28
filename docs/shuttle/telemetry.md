@@ -1,8 +1,7 @@
 # Telemetry and the ledgers
 
-The Desk needs only fibers and tmux. The time views —
-[Day, Week, Chronicle](board.md#day-week-chronicle-where-the-time-went) and the
-Board canvas — need a record of what happened, and that record is three
+The Desk needs only fibers and tmux. [Chronicle](board.md#chronicle-where-the-time-went)
+and the Board canvas need a record of what happened, and that record is three
 append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
@@ -25,8 +24,8 @@ syncing it — which is why every temporal endpoint is host-scoped with a
 
 The raw material. `felt hook event` appends one JSON line per harness hook
 event; `Shuttle.Activity` folds those lines into a **per-minute histogram** —
-one bucket per `{minute, tmux session, cwd, kind}` — which is what the time
-views draw.
+one bucket per `{minute, tmux session, cwd, kind}` — which is what Chronicle
+draws.
 
 The seven hook types collapse into three kinds, plus one facet laid over them:
 
@@ -41,8 +40,8 @@ The seven hook types collapse into three kinds, plus one facet laid over them:
   than disappearing.
 - **reply** — a *facet*, not a fourth slice: a `stop` hook (one finished agent
   turn) emits both an `agent` bucket and a `reply` bucket for the same minute.
-  It is what makes a conversation countable in messages — the `9 back` in the
-  Week view's `you 14 · 9 back`. **Summing `n` across every bucket therefore
+  It is what makes a conversation countable in messages — the `9 back` in a
+  cycle's era face, `you 14 · 9 back`. **Summing `n` across every bucket therefore
   counts each finished turn twice**; fold `agent` for effort, `reply` for
   message counts, never both.
 
@@ -75,7 +74,7 @@ disappears the moment the session ends, so nothing downstream could answer
 "which sessions has this card had?" after the fact. The ledger makes the
 association structural, and the line outlives the session.
 
-Everything on the time views is joined through it. A minute that does not
+Everything on Chronicle is joined through it. A minute that does not
 resolve to a fiber the board carries is not drawn at all, so work started
 outside shuttle is invisible there.
 
@@ -116,18 +115,16 @@ Every temporal feed is optional, and every failure path resolves to an empty
 result rather than an error. A view with nothing to draw says so and moves on;
 it does not break, and neither does the rest of the board.
 
-That is also the first thing to check when a time view is blank: the event
+That is also the first thing to check when Chronicle is blank: the event
 stream only grows once `~/.shuttle` exists, because `felt hook event` refuses to
 create its own directory. Bootstrap step 3 creates it, so a bootstrapped host is
 already enabled — a felt-only install is not.
 
 ## The endpoints
 
-All but `/moment` are host-scoped with a `/composite` sibling that merges every
-configured remote's cached feed, reporting per-origin freshness so a disconnected
-host grays out rather than silently drawing an empty day. `/moment` has no
-composite: a transcript is one file on one machine, so the request names that
-machine with `host` and the serving daemon forwards it.
+Every feed is host-scoped with a `/composite` sibling that merges this host's
+read with every configured remote's, reporting per-origin freshness so a
+disconnected host grays out rather than silently drawing an empty day.
 
 | Route | Reads | Serves |
 |---|---|---|
@@ -135,12 +132,21 @@ machine with `host` and the serving daemon forwards it.
 | `/api/v1/sessions` | session ledger | fiber↔session pairings |
 | `/api/v1/commits` | commit ledger | commit↔session pairings |
 | `/api/v1/sent-files/all` | events | `SendUserFile` pushes |
-| `/api/v1/spend` | session ledger + transcripts | per-session and per-fiber token rollups |
-| `/api/v1/moment` | the harness transcript | the words a session spoke in a window |
 
-`/spend` is the one with no board consumer today: the time views derive their
-minutes from activity buckets, not from token counts. It is a tested API
-surface, reachable by hand.
+**Nothing is fetched until someone looks.** A hub does not poll its remotes'
+feeds in the background. A composite request is what asks each remote for its
+copy of that feed, and a remote asked within the last minute is served from
+the hub's cache instead. Each remote's last good answer is kept on disk under
+`$SHUTTLE_DATA_DIR/remote-temporal/`, so an unreachable host keeps
+contributing what it last said, and is marked stale once that answer is more
+than ten minutes old. The hub asks for a remote's
+activity over a trailing 14-day window whose end is quantized, so an unchanged
+events file answers `304` without rescanning.
+
+**Every route answers `304` when its inputs have not moved.** `/activity`'s
+validator is its window, quantized to the minute, plus the `{mtime, size}` of
+the events file and its rotated sibling; the ledgers validate on their files.
+A composite's validator adds each remote's cached copy of the feed.
 
 For the design behind the joins, see the [Architecture
 notes](https://github.com/cailmdaley/felt/blob/main/AGENTS.md).
