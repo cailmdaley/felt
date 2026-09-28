@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // This file is the Go half of the host-local state contract: where the hook
@@ -137,19 +136,16 @@ func appendEventLine(path, line string) error {
 // history it had just replaced.
 //
 // Only a writer that saw the threshold crossed takes the lock, so the common
-// append stays lock-free. If the lock cannot be taken the rotation is skipped
-// and the next append tries again; the stream runs a line over, never loses
-// one.
+// append stays lock-free. The wait for the lock is bounded, because this runs
+// inside a hook the agent harness blocks on: if the lock cannot be taken in
+// time the rotation is skipped and the next append tries again; the stream
+// runs a line over, never loses one.
 func rotateEvents(path string) {
-	lock, err := os.OpenFile(path+eventsLockSuffix, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
+	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
+	if !ok {
 		return
 	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer unlock()
 
 	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
 		_ = os.Rename(path, path+eventsRotatedSuffix)
