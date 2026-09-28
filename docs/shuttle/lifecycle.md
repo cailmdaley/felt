@@ -193,7 +193,7 @@ hold:
 2. every worker it recorded is live **now**, established by this daemon's own
    tmux adoption rather than by trusting the file;
 3. the previous incarnation ran at least 90 seconds, and the daemon has booted
-   at most 3 times in the last 10 minutes.
+   at most 3 times in the last 10 minutes, counting this boot.
 
 Anything else holds: a stale heartbeat (a real outage), a crash loop, a missing
 or malformed file, or a CLI/daemon contract skew — which has no release path at

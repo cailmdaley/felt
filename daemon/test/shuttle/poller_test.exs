@@ -2570,7 +2570,7 @@ defmodule Shuttle.PollerTest do
   test "too many recent boots still quarantines even when each incarnation looked healthy" do
     # The coarse brake: every incarnation lived just past the healthy-run
     # threshold, so the per-incarnation check passes — but the daemon has come
-    # back four times in ten minutes, which is a human's problem, not new work's.
+    # back five times in ten minutes (this boot included), which is a human's problem, not new work's.
     fiber_id = fresh_candidate!("tests/hb-churn")
     now = System.system_time(:millisecond)
     at = now - 3_000

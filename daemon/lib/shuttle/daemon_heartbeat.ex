@@ -67,9 +67,9 @@ defmodule Shuttle.DaemonHeartbeat do
          (`at - booted_at`), the same number `Shuttle.Poller`'s resume-loop
          breaker calls a healthy run: below it, the daemon is dying faster than
          it can do useful work and a human should look;
-       * at most 3 boots in the preceding
-         600_000 ms (the resume-loop cooldown's window), counted from the
-         `boots` ring. Condition 3's first brake only measures the incarnation
+       * at most 3 boots, this one included, in the preceding 600_000 ms
+         (the resume-loop cooldown's window), counted from the `boots` ring
+         plus the boot being judged. Condition 3's first brake only measures the incarnation
          that wrote last; the ring bounds churn across several, including the
          pattern where each incarnation lives just over the threshold.
 
@@ -98,12 +98,14 @@ defmodule Shuttle.DaemonHeartbeat do
   # the beam has burned its CPU budget, which takes minutes of wall clock.
   @min_healthy_run_ms 90_000
 
-  # Churn bound: at most 3 boots in 10 minutes. The window is the resume-loop
-  # cooldown (@resume_loop_cooldown_ms), for the same reason it was chosen
-  # there — long enough that a genuine loop cannot hide inside it, short enough
-  # that yesterday's incident does not hold today's work. Three allows the
-  # ordinary case (a deploy, or one rlimit kill, plus this boot) while refusing
-  # a daemon that is coming back every few minutes.
+  # Churn bound: at most 3 boots in 10 minutes, counting the boot being judged
+  # (the ring holds only previous boots; this one is appended after the
+  # verdict). The window is the resume-loop cooldown (@resume_loop_cooldown_ms),
+  # for the same reason it was chosen there — long enough that a genuine loop
+  # cannot hide inside it, short enough that yesterday's incident does not hold
+  # today's work. Three allows this boot plus two earlier ones (say a deploy and
+  # one rlimit kill) while refusing a daemon that is coming back every few
+  # minutes.
   @crash_loop_window_ms 600_000
   @max_boots_in_window 3
 
@@ -308,7 +310,7 @@ defmodule Shuttle.DaemonHeartbeat do
     previous_run_ms = hb["at"] - hb["booted_at"]
     recorded = MapSet.new(hb["workers"] || [])
     live = MapSet.new(live_workers)
-    recent_boots = Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
+    recent_boots = 1 + Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
 
     cond do
       age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
@@ -326,7 +328,8 @@ defmodule Shuttle.DaemonHeartbeat do
 
       recent_boots > @max_boots_in_window ->
         {:hold,
-         "#{recent_boots} daemon boots in the last #{div(@crash_loop_window_ms, 60_000)}m " <>
+         "#{recent_boots} daemon boots, this one included, in the last " <>
+           "#{div(@crash_loop_window_ms, 60_000)}m " <>
            "(> #{@max_boots_in_window}); looks like a crash loop"}
 
       true ->

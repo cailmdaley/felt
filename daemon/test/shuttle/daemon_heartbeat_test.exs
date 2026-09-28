@@ -76,4 +76,56 @@ defmodule Shuttle.DaemonHeartbeatTest do
       :global.unregister_name(name)
     end
   end
+
+  # ── verdict ──
+  #
+  # A heartbeat that releases on its own, judged at `@now`: written 4s ago by
+  # an incarnation up half an hour, one boot in the ring, no workers.
+  @now 1_800_000_000_000
+
+  defp hb(fields \\ %{}) do
+    booted_at = @now - 1_800_000
+
+    {:ok,
+     Map.merge(
+       %{
+         "v" => 1,
+         "at" => @now - 4_000,
+         "booted_at" => booted_at,
+         "workers" => [],
+         "boots" => [booted_at]
+       },
+       fields
+     )}
+  end
+
+  defp judge(read_result, live \\ []), do: DaemonHeartbeat.verdict(read_result, @now, live)
+
+  describe "verdict" do
+    test "the baseline heartbeat releases" do
+      assert {:release, _} = judge(hb())
+    end
+
+    test "three boots in the window, this one included, release; four hold" do
+      at = @now - 3_000
+
+      two_before = %{
+        "at" => at,
+        "booted_at" => at - 100_000,
+        "boots" => [at - 200_000, at - 100_000]
+      }
+
+      assert {:release, _} = judge(hb(two_before))
+
+      three_before = %{two_before | "boots" => [at - 300_000, at - 200_000, at - 100_000]}
+      assert {:hold, reason} = judge(hb(three_before))
+      assert reason =~ "4 daemon boots"
+    end
+
+    test "boots older than the window do not count" do
+      at = @now - 3_000
+      old = for k <- 1..5, do: @now - 600_001 - k
+      assert {:release, _} = judge(hb(%{"at" => at, "booted_at" => at - 100_000, "boots" => old}))
+    end
+  end
 end
