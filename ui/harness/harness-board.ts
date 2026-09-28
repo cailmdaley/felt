@@ -1009,8 +1009,8 @@ const MOCK_SESSIONS: SessionRecord[] = [
 /**
  * The App-conversation card's own history, for the drawer's Sessions row:
  * more than the row shows folded (so "all N" has something to unfold), every
- * link shape the daemon answers — a bridged Claude session, an unbridged one,
- * the live Codex app thread, a Codex CLI thread, a pi session — and one run on
+ * shape a row takes — a bridged Claude session, an unbridged one, the live
+ * Codex app thread (no tmux), a Codex CLI thread, a pi session — and one run on
  * the foreign host, which names its host and, that host being stale in
  * MOCK_ORIGINS, is not asked for its link.
  */
@@ -1055,7 +1055,6 @@ function mockSessionLinks(url: string) {
           harness === 'claude-code' && session !== unbridged
             ? `https://claude.ai/code/session_01${session.slice(0, 8).toUpperCase()}`
             : null,
-        desktop_link: harness === 'codex' ? `codex://threads/${session}` : null,
       }
     }),
   }

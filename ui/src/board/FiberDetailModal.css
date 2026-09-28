@@ -2371,3 +2371,7 @@ a.kbn-detail-aloft { text-decoration: none; }
   cursor: pointer;
 }
 .kbn-ctl-session-more:hover { color: #1B1611; }
+/* A row that opens a terminal is itself the button, as the Aloft pill is. */
+.kbn-ctl-session-opens { cursor: pointer; }
+.kbn-ctl-session-opens:hover { background: rgba(61, 91, 160, 0.06); }
+.kbn-ctl-session-opens:hover .kbn-ctl-session-terminal { text-decoration: underline; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claudeTargets, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
+import { fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'
@@ -52,7 +52,7 @@ describe('parseSessionLinks', () => {
     })
     expect([...links.keys()]).toEqual([CLAUDE, CODEX])
     expect(links.get(CLAUDE)?.url).toBe('https://claude.ai/code/session_01X')
-    expect(links.get(CODEX)?.desktopLink).toBe(`codex://threads/${CODEX}`)
+    expect(links.get(CODEX)?.harness).toBe('codex')
     expect(parseSessionLinks(null).size).toBe(0)
   })
 })
@@ -62,63 +62,64 @@ describe('sessionTargets', () => {
     parseSessionLinks({ links: [{ session: over.session, availability: 'available_local', ...over }] }).get(
       over.session as string,
     )
-  const primary = (...args: Parameters<typeof sessionTargets>) => sessionTargets(...args).primary
+  const BRIDGE = 'https://claude.ai/code/session_01X'
+  const desk = { desktop: true, fiberHost: 'ada' }
+  const phone = { desktop: false, fiberHost: 'ada' }
 
-  const BRIDGE = 'https://claude.ai/code/session_01X-y_Z'
-
-  it('a bridged Claude session opens in the desktop app with the web page beside it, from any desktop', () => {
-    const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
-    for (const host of ['ada', 'elsewhere']) {
-      const targets = sessionTargets(rec({}), link, host, true)
-      expect(targets).toEqual(claudeTargets(BRIDGE, true))
-      expect(targets.primary).toMatchObject({ kind: 'app', href: 'claude://claude.ai/code/session_01X-y_Z', label: 'claude' })
-      expect(targets.secondary).toMatchObject({ kind: 'web', href: BRIDGE, label: 'web' })
+  it('at a desktop a past session resumes in a terminal on the host that ran it', () => {
+    for (const [session, harness, host] of [[CLAUDE, 'claude-code', 'ada'], [CODEX, 'codex', 'hub'], [PI, 'pi', 'ada']] as const) {
+      expect(sessionTargets(rec({ session, host }), entry({ session, harness }), desk)).toEqual({
+        primary: expect.objectContaining({ kind: 'terminal', label: 'resume', body: { session, shuttle_host: host } }),
+      })
     }
   })
 
-  it('on a phone the bridged session opens its claude.ai page, alone', () => {
+  it('before any host answers, a past row already resumes; a host with no transcript does not', () => {
+    expect(sessionTargets(rec({}), undefined, desk).primary).toMatchObject({ kind: 'terminal', body: { session: CLAUDE } })
+    const missing = parseSessionLinks({ links: [{ session: CLAUDE, availability: 'transcript_missing' }] }).get(CLAUDE)
+    expect(sessionTargets(rec({}), missing, desk).primary).toMatchObject({ kind: 'copy', copy: CLAUDE })
+  })
+
+  it('the live worker row attaches to its tmux on the fiber host, exactly as Aloft does', () => {
+    const live = { ...desk, liveSession: CLAUDE, liveTmux: 'debug-U-shuttle' }
+    expect(sessionTargets(rec({ host: 'ada' }), entry({ session: CLAUDE }), live).primary).toMatchObject({
+      kind: 'terminal',
+      label: 'attach',
+      body: { tmux_session: 'debug-U-shuttle', shuttle_host: 'ada' },
+    })
+  })
+
+  it('a live app conversation (no tmux) is not taken into a terminal', () => {
+    const app = { ...desk, liveSession: CODEX }
+    expect(sessionTargets(rec({ session: CODEX }), entry({ session: CODEX, harness: 'codex' }), app).primary.kind).toBe('copy')
+  })
+
+  it('a bridged Claude session carries its web page beside the terminal, and alone on a phone', () => {
     const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
-    expect(sessionTargets(rec({}), link, 'ada', false)).toEqual({
+    const targets = sessionTargets(rec({}), link, desk)
+    expect(targets.primary.kind).toBe('terminal')
+    expect(targets.secondary).toEqual({ kind: 'web', href: BRIDGE, label: 'web', title: BRIDGE })
+    expect(sessionTargets(rec({}), link, phone)).toEqual({
       primary: { kind: 'web', href: BRIDGE, label: 'claude.ai', title: BRIDGE },
     })
   })
 
-  it('a claude.ai URL that names no session opens on the web only', () => {
-    expect(claudeTargets('https://claude.ai/code/', true)).toEqual({
-      primary: { kind: 'web', href: 'https://claude.ai/code/', label: 'claude.ai', title: 'https://claude.ai/code/' },
-    })
-    expect(claudeTargets('https://claude.ai/code/session_01X?next=evil', true).secondary).toBeUndefined()
+  it('on a phone anything unbridged copies its id', () => {
+    for (const [session, harness] of [[CLAUDE, 'claude-code'], [CODEX, 'codex'], [PI, 'pi']] as const) {
+      expect(sessionTargets(rec({ session }), entry({ session, harness }), phone).primary).toMatchObject({
+        kind: 'copy',
+        label: session.slice(0, 8),
+        copy: session,
+      })
+    }
   })
 
-  it('an unbridged Claude session resumes in the desktop app only from a desktop on its host', () => {
-    const link = entry({ session: CLAUDE, harness: 'claude-code' })
-    const row = rec({ host: 'ada' })
-    expect(primary(row, link, 'ada', true)).toMatchObject({ kind: 'app', href: `claude://resume?session=${CLAUDE}` })
-    expect(primary(row, link, 'ada', false).kind).toBe('copy')
-    expect(primary(row, link, 'hub', true).kind).toBe('copy')
-    // A transcript the daemon did not find is not resumable.
-    const missing = parseSessionLinks({ links: [{ session: CLAUDE, availability: 'transcript_missing' }] }).get(CLAUDE)
-    expect(primary(row, missing, 'ada', true).kind).toBe('copy')
-  })
-
-  it('a Codex thread opens in the app only from a desktop on the host that ran it', () => {
-    const link = entry({ session: CODEX, harness: 'codex', desktop_link: `codex://threads/${CODEX}` })
-    const row = rec({ session: CODEX, harness: 'codex', host: 'ada' })
-    expect(primary(row, link, 'ada', true)).toMatchObject({ kind: 'app', href: `codex://threads/${CODEX}` })
-    expect(primary(row, link, 'ada', false)).toMatchObject({ kind: 'copy', copy: CODEX })
-    expect(primary(row, link, 'hub', true)).toMatchObject({ kind: 'copy', copy: CODEX })
-  })
-
-  it('never links what the daemon did not read for this very session', () => {
-    expect(primary(rec({ session: PI }), entry({ session: PI, harness: 'pi' }), 'ada', true).kind).toBe('copy')
-    expect(primary(rec({}), entry({ session: CLAUDE, harness: 'claude-code' }), 'hub', true).kind).toBe('copy')
-    expect(primary(rec({ session: CODEX, harness: 'codex' }), undefined, 'ada', true).kind).toBe('copy')
-    // Not claude.ai, a forged scheme, and another session's thread.
-    expect(primary(rec({}), entry({ session: CLAUDE, url: 'https://evil.example/claude.ai/' }), 'ada', true).kind).toBe('copy')
-    const forged = entry({ session: CODEX, url: 'javascript:alert(1)', desktop_link: 'codex://threads/x?y' })
-    expect(primary(rec({ session: CODEX }), forged, 'ada', true)).toMatchObject({ kind: 'copy', label: CODEX.slice(0, 8) })
-    const other = entry({ session: CODEX, desktop_link: `codex://threads/${PI}` })
-    expect(primary(rec({ session: CODEX }), other, 'ada', true).kind).toBe('copy')
+  it('only a claude.ai address is ever linked', () => {
+    for (const url of ['https://evil.example/claude.ai/', 'javascript:alert(1)', 'https://claude.ai.evil.example/']) {
+      const link = entry({ session: CLAUDE, url })
+      expect(sessionTargets(rec({}), link, desk).secondary).toBeUndefined()
+      expect(sessionTargets(rec({}), link, phone).primary.kind).toBe('copy')
+    }
   })
 })
 

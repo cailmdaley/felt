@@ -2457,15 +2457,20 @@ export class FiberDetailModal {
     }
     foot.append(errorEl, statusEl, discard, temper)
 
-    // The fiber's past sessions, each opening its own chat — folded, and
-    // read only when first unfolded.
+    // The fiber's sessions, each opening its own terminal as Aloft does —
+    // folded, and read only when first unfolded.
     const history = card.uid
       ? buildSessionHistory({
           shuttleBase: this.shuttleBase,
           uid: card.uid,
           fiberHost: card.shuttleHost,
           liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
+          liveTmux: card.runningWorker,
           desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
+          onError: (message) => {
+            errorEl.textContent = message
+            errorEl.style.display = ''
+          },
         })
       : null
     if (history) swallow(history)

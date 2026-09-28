@@ -1,19 +1,20 @@
 /**
  * The card drawer's History: a folded line (`HISTORY 38 ▾`) that unfolds to
  * every harness session the fleet's ledgers paired with this fiber, newest
- * first, each with the link that opens exactly that chat — in the Claude
- * desktop app (or on claude.ai, from a phone) for a Claude Code session, in the
- * Codex app for a Codex one — or, where no link exists, its short id to copy.
+ * first. A row acts like the Aloft pill: at a desktop, clicking it opens a
+ * kitty tab on this machine — attached to the live worker, or resuming a past
+ * session in its own tmux on the host that ran it (`POST /api/v1/attach`). A
+ * bridged Claude session also offers its claude.ai page (`web ↗`), which is
+ * all a phone gets; otherwise a phone copies the session id.
  * {@link sessionTargets} makes that choice.
  *
  * Nothing is read until the first unfold. Then two reads: this fiber's
  * pairings from the composite session ledger (`/api/v1/sessions/composite?uid=`),
- * drawn at once with copy-id targets; then `/api/v1/sessions/links` for only
- * the rows on screen, one request per host that ran them (a transcript lives
- * on that host), each host's links swapped in as it answers. A host the
- * composite reports stale is not asked.
+ * drawn at once; then `/api/v1/sessions/links` for only the rows on screen, one
+ * request per host that ran them (a transcript lives on that host), each
+ * host's answers swapped in as they arrive. A host the composite reports stale
+ * is not asked.
  */
-import { validDesktopThreadLink } from './appConversation.js'
 import { isoDayLocal } from './civilDay.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
@@ -27,7 +28,6 @@ export interface SessionLinkEntry {
   availability: string
   harness: string | null
   url: string | null
-  desktopLink: string | null
 }
 
 /** One ledger row per session, newest first. A session paired twice (a
@@ -57,85 +57,82 @@ export function parseSessionLinks(body: unknown): Map<string, SessionLinkEntry> 
       availability: str(entry.availability) ?? 'transcript_missing',
       harness: str(entry.harness),
       url: str(entry.url),
-      desktopLink: str(entry.desktop_link),
     })
   }
   return out
 }
 
+/** What `POST /api/v1/attach` is sent: a live worker's tmux, or a session to resume. */
+export type AttachBody =
+  | { tmux_session: string; shuttle_host: string | null }
+  | { session: string; shuttle_host: string | null }
+
 export type SessionTarget =
+  | { kind: 'terminal'; body: AttachBody; label: string; title: string }
   | { kind: 'web'; href: string; label: string; title: string }
-  | { kind: 'app'; href: string; label: string; title: string }
   | { kind: 'copy'; label: string; title: string; copy: string }
 
-/** A row's way back in, and optionally a second one beside it (`web ↗`). */
+/** A row's action, and optionally a second one beside it (`web ↗`). */
 export interface SessionTargets {
   primary: SessionTarget
   secondary?: SessionTarget
 }
 
 const CLAUDE_WEB = 'https://claude.ai/'
-/** A bridge URL naming one session: `https://claude.ai/code/session_<id>`. */
-const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/((?:cse|session)_[A-Za-z0-9_-]+)$/
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/**
- * Where a bridged Claude chat opens. At a desktop, in the Claude app —
- * `claude://claude.ai/code/session_<id>` opens the local twin of the session
- * where there is one, else the bridge viewer, from any machine with the app —
- * with the web page beside it; on a phone, the web page, which the Claude app
- * there answers as a universal link. A claude.ai URL of any other shape opens
- * on the web only.
- */
-export function claudeTargets(url: string, desktop: boolean): SessionTargets {
-  const web: SessionTarget = { kind: 'web', href: url, label: 'claude.ai', title: url }
-  const id = CLAUDE_SESSION.exec(url)?.[1]
-  if (!desktop || !id) return { primary: web }
-  const app = `claude://claude.ai/code/${id}`
-  return {
-    primary: { kind: 'app', href: app, label: 'claude', title: app },
-    secondary: { ...web, label: 'web' },
-  }
+export interface TargetContext {
+  /** A viewer a kitty tab can be opened for (not a phone). */
+  desktop: boolean
+  /** The live worker's session and tmux, when one is running. */
+  liveSession?: string
+  liveTmux?: string
+  /** The fiber's host — where its live worker runs. */
+  fiberHost?: string
 }
 
 /**
- * What a row's links do — the one place the choice is made.
+ * What a row does — the one place the choice is made.
  *
- *   · a bridged Claude session → {@link claudeTargets};
- *   · an unbridged Claude session whose transcript the daemon found →
- *     `claude://resume?session=<uuid>`, which imports the CLI session into the
- *     desktop app. It needs the transcript on the viewer's machine, so it is
- *     offered only at a desktop on the host that ran it;
- *   · a Codex thread → its `codex://threads/<id>` route, under the same gate,
- *     and only when the route names this very session;
- *   · anything else — a pi session, a host that has not answered — offers its
- *     id to copy.
- *
- * "The host that ran it" is read as the board's own host: a viewer at that
- * daemon's desktop.
+ *   · At a desktop, the live worker's row attaches to its tmux, exactly as
+ *     Aloft does, and any other row resumes that session in a terminal on the
+ *     host that ran it. Not offered: a live worker with no tmux (a Codex app
+ *     conversation, which a terminal must not take from its app), and a session
+ *     whose host found no transcript.
+ *   · A bridged Claude session also carries its claude.ai page — beside the
+ *     terminal at a desktop, alone on a phone.
+ *   · Anything else offers its id to copy.
  */
 export function sessionTargets(
   record: Pick<SessionRecord, 'session' | 'host'>,
   link: SessionLinkEntry | undefined,
-  boardHost: string,
-  desktop: boolean,
+  ctx: TargetContext,
 ): SessionTargets {
   const url = link?.url
-  if (url && url.startsWith(CLAUDE_WEB)) return claudeTargets(url, desktop)
-  const local = desktop && record.host === boardHost
-  if (
-    local &&
-    link?.harness === 'claude-code' &&
-    link.availability === 'available_local' &&
-    UUID.test(record.session)
-  ) {
-    const resume = `claude://resume?session=${record.session}`
-    return { primary: { kind: 'app', href: resume, label: 'claude', title: resume } }
+  const web: SessionTarget | undefined =
+    url && url.startsWith(CLAUDE_WEB) ? { kind: 'web', href: url, label: 'web', title: url } : undefined
+
+  let terminal: SessionTarget | undefined
+  if (ctx.desktop) {
+    const live = record.session === ctx.liveSession
+    if (live && ctx.liveTmux) {
+      terminal = {
+        kind: 'terminal',
+        body: { tmux_session: ctx.liveTmux, shuttle_host: ctx.fiberHost ?? null },
+        label: 'attach',
+        title: `Attach to ${ctx.liveTmux}`,
+      }
+    } else if (!live && link?.availability !== 'transcript_missing') {
+      terminal = {
+        kind: 'terminal',
+        body: { session: record.session, shuttle_host: record.host },
+        label: 'resume',
+        title: `Resume ${record.session}${record.host ? ` on ${record.host}` : ''} in a terminal`,
+      }
+    }
   }
-  const thread = validDesktopThreadLink(link?.desktopLink)
-  if (local && thread === `codex://threads/${record.session}`) {
-    return { primary: { kind: 'app', href: thread, label: 'codex', title: thread } }
-  }
+
+  if (terminal) return web ? { primary: terminal, secondary: web } : { primary: terminal }
+  if (web) return { primary: { ...web, label: 'claude.ai' } }
   return {
     primary: {
       kind: 'copy',
@@ -176,48 +173,13 @@ export function linkRequests(
   return byHost
 }
 
-export interface SessionHistoryContext {
+export interface SessionHistoryContext extends TargetContext {
   shuttleBase: string
   uid: string
-  /** The fiber's own host; a session run elsewhere names its host. */
-  fiberHost?: string
-  /** The session a worker is running now, marked live. */
-  liveSession?: string
-  desktop: boolean
+  /** Where a failed terminal open is said. */
+  onError?: (message: string) => void
   fetch?: typeof fetch
   now?: () => number
-}
-
-function targetEl(target: SessionTarget, cls: string): HTMLElement {
-  if (target.kind === 'copy') {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = `${cls} kbn-ctl-session-copy`
-    btn.textContent = target.label
-    btn.title = target.title
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      void navigator.clipboard?.writeText(target.copy).then(
-        () => {
-          btn.textContent = 'copied'
-          setTimeout(() => (btn.textContent = target.label), 1200)
-        },
-        () => undefined,
-      )
-    })
-    return btn
-  }
-  const a = document.createElement('a')
-  a.className = `${cls} kbn-ctl-session-${target.kind}`
-  a.href = target.href
-  a.textContent = `${target.label} ↗`
-  a.title = target.title
-  if (target.kind === 'web') {
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-  }
-  a.addEventListener('click', (e) => e.stopPropagation())
-  return a
 }
 
 /**
@@ -255,10 +217,64 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   body.append(list)
   el.append(toggle, body)
 
-  let boardHost = ''
   let origins: TemporalOrigins = {}
   const links = new Map<string, SessionLinkEntry>()
   const drawn = new Map<string, { record: SessionRecord; li: HTMLLIElement }>()
+
+  /** `POST /api/v1/attach`, as the Aloft pill does: success raises kitty, a
+   *  failure is said. */
+  const openTerminal = async (attach: AttachBody): Promise<void> => {
+    try {
+      const res = await doFetch(`${ctx.shuttleBase}/api/v1/attach`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(attach),
+      })
+      if (!res.ok) {
+        const detail = await res
+          .json()
+          .then((b: { error?: unknown }) => (typeof b?.error === 'string' ? b.error : ''))
+          .catch(() => '')
+        ctx.onError?.(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal')
+      }
+    } catch {
+      ctx.onError?.('Couldn’t reach the daemon to open the terminal')
+    }
+  }
+
+  const targetEl = (target: SessionTarget, cls: string): HTMLElement => {
+    if (target.kind === 'web') {
+      const a = document.createElement('a')
+      a.className = `${cls} kbn-ctl-session-web`
+      a.href = target.href
+      a.textContent = `${target.label} ↗`
+      a.title = target.title
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.addEventListener('click', (e) => e.stopPropagation())
+      return a
+    }
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = `${cls} kbn-ctl-session-${target.kind}`
+    btn.textContent = target.kind === 'terminal' ? `${target.label} ▸` : target.label
+    btn.title = target.title
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (target.kind === 'terminal') {
+        void openTerminal(target.body)
+        return
+      }
+      void navigator.clipboard?.writeText(target.copy).then(
+        () => {
+          btn.textContent = 'copied'
+          setTimeout(() => (btn.textContent = target.label), 1200)
+        },
+        () => undefined,
+      )
+    })
+    return btn
+  }
 
   const row = (record: SessionRecord): HTMLLIElement => {
     const li = document.createElement('li')
@@ -277,9 +293,20 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     if (record.kind !== 'dispatch') put('kbn-ctl-session-kind', record.kind)
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)
     if (record.session === ctx.liveSession) put('kbn-ctl-session-live', 'live')
-    const targets = sessionTargets(record, links.get(record.session), boardHost, ctx.desktop)
-    li.append(targetEl(targets.primary, 'kbn-ctl-session-link'))
+
+    const targets = sessionTargets(record, links.get(record.session), ctx)
+    const primary = targetEl(targets.primary, 'kbn-ctl-session-link')
+    li.append(primary)
     if (targets.secondary) li.append(targetEl(targets.secondary, 'kbn-ctl-session-alt'))
+    // The whole row is its primary action, as the Aloft pill is.
+    if (targets.primary.kind === 'terminal') {
+      li.classList.add('kbn-ctl-session-opens')
+      li.title = targets.primary.title
+      li.addEventListener('click', (e) => {
+        e.stopPropagation()
+        primary.click()
+      })
+    }
     return li
   }
 
@@ -309,7 +336,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
             for (const [id, entry] of answered) if (asked.has(id)) links.set(id, entry)
             draw(batch.map((id) => drawn.get(id)?.record).filter((r): r is SessionRecord => !!r))
           } catch {
-            /* a host that cannot answer leaves its rows as ids to copy */
+            /* a host that cannot answer leaves its rows as they were drawn */
           }
         })
       }),
@@ -323,7 +350,6 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
       )
       if (res.ok) {
         const parsed = parseSessions(await res.json(), { host: '', records: [] })
-        boardHost = parsed.host
         origins = parsed.origins ?? {}
         records = parsed.records
       }
