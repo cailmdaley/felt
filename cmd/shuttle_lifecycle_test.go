@@ -567,6 +567,42 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 	}
 }
 
+// TestShuttleSetModel_KeepsSurfaceConsistentWithAgent: set-model and set-agent
+// share one composition rule, so set-model cannot move a surface: app block to
+// a non-Codex agent either — which used to leave a block set-agent then
+// refused. The refusal names the call that does move it.
+func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "codex-sol", "surface": "app",
+	}, nil)
+
+	_, err := runCommand(t, dir, "shuttle", "set-model", "f", "claude-opus")
+	if err == nil || !strings.Contains(err.Error(), "--surface cli") {
+		t.Fatalf("set-model to Claude on an app block: err=%v, want a refusal naming --surface cli", err)
+	}
+	b, _, err := mustRead(t, storage, "f").ShuttleBlock()
+	if err != nil || b.Agent != "codex-sol" || b.Surface != "app" {
+		t.Fatalf("refused set-model still wrote: %#v, %v", b, err)
+	}
+
+	// Within Codex, set-model keeps the surface.
+	if out, err := runCommand(t, dir, "shuttle", "set-model", "f", "codex-luna"); err != nil {
+		t.Fatalf("set-model within Codex: %v\n%s", err, out)
+	}
+	if b, _, err := mustRead(t, storage, "f").ShuttleBlock(); err != nil || b.Agent != "codex-luna" || b.Surface != "app" {
+		t.Fatalf("after set-model codex-luna: %#v, %v", b, err)
+	}
+
+	// The named repair works, and leaves a block set-agent accepts.
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "claude-opus", "--surface", "cli"); err != nil {
+		t.Fatalf("set-agent --surface cli: %v\n%s", err, out)
+	}
+	if out, err := runCommand(t, dir, "shuttle", "set-agent", "f", "--effort", "high"); err != nil {
+		t.Fatalf("set-agent after the move: %v\n%s", err, out)
+	}
+}
+
 // ---- uninstall -------------------------------------------------------------
 
 func TestShuttleUninstall_RemovesBlock(t *testing.T) {
