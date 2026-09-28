@@ -335,6 +335,9 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("a root caller cannot distinguish a root listener from an unaccepted socket")
 	}
+	if !kernelShowsUnacceptedRowAsUIDZero(t) {
+		t.Skip("this kernel stamps an unaccepted connection with our own uid, so a non-root test cannot stage a refused owner")
+	}
 	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
 	withOwnHost(t, "test-host")
 
@@ -353,7 +356,8 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "host": "test-host", "agent": "claude-sonnet",
-		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+		"project_dir": t.TempDir(),
+		"schedule":    map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
 	out, err := runCommand(t, dir, "shuttle", "resume", "f")

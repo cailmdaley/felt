@@ -202,11 +202,11 @@ func execNativeInPlace(o bridgeOptions, socket string) error {
 	if err != nil {
 		return fmt.Errorf("open native stdio sink: %w", err)
 	}
-	if err := syscall.Dup2(int(devNull.Fd()), 0); err != nil {
+	if err := dupOnto(int(devNull.Fd()), 0); err != nil {
 		devNull.Close()
 		return fmt.Errorf("redirect native stdin: %w", err)
 	}
-	if err := syscall.Dup2(int(devNull.Fd()), 1); err != nil {
+	if err := dupOnto(int(devNull.Fd()), 1); err != nil {
 		devNull.Close()
 		return fmt.Errorf("redirect native stdout: %w", err)
 	}

@@ -187,6 +187,9 @@ func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
 	}
 	const callerUID = 1 // Exercise the non-root refusal even when the test process is root.
 	wait := 100 * time.Millisecond
+	if !kernelShowsUnacceptedRowAsUIDZero(t) {
+		t.Skip("this kernel stamps an unaccepted connection with the listener's uid; there is no pending window to wait out")
+	}
 	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, network, address)
@@ -997,5 +1000,38 @@ func TestFoldComponentRepair(t *testing.T) {
 				t.Errorf("repair = %q, want %q", r.Repair, tc.want)
 			}
 		})
+	}
+}
+
+// kernelShowsUnacceptedRowAsUIDZero reports whether the server-side row of a
+// connection the listener has not accept()ed carries uid 0 in /proc/net/tcp.
+// Some kernels stamp it with the listener's uid from the handshake instead,
+// which answers the owner check at once and leaves no pending window.
+func kernelShowsUnacceptedRowAsUIDZero(t *testing.T) bool {
+	t.Helper()
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	conn, err := net.Dial("tcp4", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := checkProcTCPConnectionOwner("/proc", conn.RemoteAddr().String(), conn.LocalAddr().String(), -1)
+		var owner *daemonTCPOwnerCheckError
+		if errors.As(err, &owner) && owner.uidKnown {
+			return owner.pending
+		}
+		if errors.As(err, &owner) && owner.foreign {
+			return false
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cannot observe the unaccepted connection's row: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
