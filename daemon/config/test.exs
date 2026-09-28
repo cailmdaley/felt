@@ -7,9 +7,11 @@ config :shuttle,
   # true` to Poller.start_link explicitly.
   boot_quarantine: false,
   start_waiting_tracker: false,
-  # Same discipline: the sent-files follower is started explicitly by the tests
-  # that exercise it, against a tmp fixture rather than the developer's stream.
+  # Same discipline: the sent-files and activity followers are started
+  # explicitly by the tests that exercise them, against a tmp fixture rather
+  # than the developer's stream.
   start_sent_files_follower: false,
+  start_activity_follower: false,
   # Left off in the suite so no test run can copytruncate the developer's real
   # ~/Library/Logs/shuttle.log. log_rotator_test starts its own against tmp_dir.
   start_log_rotator: false,

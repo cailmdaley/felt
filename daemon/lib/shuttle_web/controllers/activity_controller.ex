@@ -5,8 +5,14 @@ defmodule ShuttleWeb.ActivityController do
       {"host": "hub-mac", "from_ms": …, "to_ms": …,
        "buckets": [{"m": …, "s": "…-shuttle", "cwd": "/repo", "k": "attention", "n": 3}]}
 
-  `Shuttle.Activity` does the reading; this controller parses the window and
-  stamps the host. Keys are short because a busy day is thousands of buckets.
+  `Shuttle.Activity` does the reading — a slice of the fold
+  `Shuttle.Activity.Follower` keeps in memory; this controller parses the
+  window and stamps the host. Keys are short because a busy day is thousands
+  of buckets.
+
+  The weak `ETag` saves bandwidth, not work: it covers `events.jsonl`, which
+  moves every few seconds on a busy host, and answering without it costs a
+  range read of the in-memory tally.
 
   The window is served in whole minutes (`Shuttle.Activity.canonical_window/2`):
   the echoed `from_ms`/`to_ms` are the canonical bounds, and the buckets are
@@ -38,7 +44,7 @@ defmodule ShuttleWeb.ActivityController do
       # whole-minutes note): `felt hook event` appends to the live file and
       # rotates by rename, so either operation moves the tokens, and two
       # requests whose bounds differ inside a minute share one validator. A 304
-      # skips the full-file rescan, which is the expensive half.
+      # skips re-sending an unchanged body.
       json_with_validator(conn, {from_ms, to_ms, events_tokens()}, fn ->
         %{
           host: Poller.own_host_id(),
@@ -96,7 +102,7 @@ defmodule ShuttleWeb.ActivityController do
   # Both bounds as requested (range-checked; `Shuttle.Activity.window/3`
   # canonicalizes them itself) and their canonical pair, which is what the
   # validator, the echo and the remote filter use — so all of them see the one
-  # window the scan reads.
+  # window the slice reads.
   defp window_params(params) do
     with {:ok, from_ms} <- integer_param(params, "from_ms"),
          {:ok, to_ms} <- integer_param(params, "to_ms"),

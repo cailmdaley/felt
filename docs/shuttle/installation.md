@@ -577,6 +577,17 @@ back to the platform default (`~/Library/Logs/shuttle.log`,
 `~/.shuttle/shuttle.log`), which is right for a default install and wrong for
 any `--log` override. The tmux respawn loop rides that fallback by design.
 
+### Log level
+
+The daemon logs at `info`. Set `SHUTTLE_LOG_LEVEL` in its environment to
+change that at boot — `debug` adds a line per request and per poll, which is
+what you want while chasing load and not otherwise, since it grows the log by
+hundreds of megabytes a day. Request lines at `debug` include the request
+parameters, POST bodies among them — message text sent through the daemon
+lands in the log. Any Elixir `Logger` level is accepted (`debug`,
+`info`, `notice`, `warning`, `error`, …, plus `all` and `none`); an unknown
+value is ignored with a warning in the log.
+
 ### Linux without systemd (tmux respawn loop)
 
 Plenty of Linux hosts have no systemd user session — an HPC login node typically
@@ -1111,12 +1122,12 @@ echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl fel
 ```
 
 The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
-renamed to `events.jsonl.1` and a fresh stream starts. A reader whose window
-reaches back past the last rotation reads the sibling too, but only when the
-sibling's mtime is at or after the window's start — rotation is a rename with no
-writes after it, so that mtime is the newest line the file can hold, and an
-earlier one proves the window cannot overlap it. Only `events.jsonl.1` is kept;
-an older rotation is overwritten. A `toolInput` over 8 KiB is trimmed to its
+renamed to `events.jsonl.1` and a fresh stream starts. The activity histogram
+is folded from both files, the rotated one first, and the daemon keeps that
+fold in memory and carries it across a rotation rather than re-reading. Only
+`events.jsonl.1` is kept; an older rotation is overwritten. Writers that find
+the stream full at the same moment serialize the rename on a flock of
+`events.jsonl.lock`, so it rotates once. A `toolInput` over 8 KiB is trimmed to its
 file paths plus `truncated: true`, so a `Write` of a large file does not park
 the whole body in the stream.
 

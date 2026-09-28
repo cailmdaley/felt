@@ -309,7 +309,11 @@ writes the files underneath.
 `{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes
 (buckets are minute-stamped, so the answer is the same), and its weak `ETag` is
 that window plus the `{mtime, size}` of `events.jsonl` and its rotated sibling
-— a repeat request over an unchanged file is a `304` with no rescan.
+— a repeat request over an unchanged file is a `304`. As with the sent-files
+routes below, that validator almost never matches on a busy host and is not
+what keeps the route cheap: `Shuttle.Activity.Follower` holds the histogram
+in memory, folded once from both files and then only over appended bytes, and
+a request reads its window out of that.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors

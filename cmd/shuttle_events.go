@@ -23,6 +23,8 @@ const (
 	// costs nothing either reader depends on.
 	eventsDefaultMaxBytes = 64 << 20
 	eventsRotatedSuffix   = ".1"
+	// eventsLockSuffix names the sidecar file writers flock around a rotation.
+	eventsLockSuffix = ".lock"
 )
 
 // shuttleStatePath resolves one host-local state file the way the Elixir side
@@ -121,11 +123,33 @@ func eventsMaxBytes() int64 {
 // appendEventLine rotates if needed, then appends one line.
 func appendEventLine(path, line string) error {
 	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
-		// Best-effort: if the rename loses a race with another hook process,
-		// the loser just appends to whichever file now holds the name.
-		_ = os.Rename(path, path+eventsRotatedSuffix)
+		rotateEvents(path)
 	}
 	return appendLine(path, line)
+}
+
+// rotateEvents renames a full stream to <path>.1, once, however many hooks
+// found it full at the same moment. Each takes an exclusive flock on a sidecar
+// lock file and re-checks the size under it: the first renames, and the rest
+// find a fresh file below the threshold and leave it alone. Without the lock
+// a second rename would move that fresh file over .1, discarding the full
+// history it had just replaced.
+//
+// Only a writer that saw the threshold crossed takes the lock, so the common
+// append stays lock-free. The wait for the lock is bounded, because this runs
+// inside a hook the agent harness blocks on: if the lock cannot be taken in
+// time the rotation is skipped and the next append tries again; the stream
+// runs a line over, never loses one.
+func rotateEvents(path string) {
+	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
+	if !ok {
+		return
+	}
+	defer unlock()
+
+	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
+		_ = os.Rename(path, path+eventsRotatedSuffix)
+	}
 }
 
 // appendLine appends one line, creating the file if it does not exist.

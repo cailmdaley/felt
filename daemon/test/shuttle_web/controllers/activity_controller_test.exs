@@ -6,8 +6,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
   The reader (`Shuttle.Activity`) is exercised against fixture `events.jsonl`
   files covering bucket aggregation, the three-way kind mapping, waiting-spell
   collapse (a `"notify"` mark is the onset of an ask, not a repeat of it),
-  window bounds, nil session/cwd, malformed-line tolerance, and the mtime gate
-  that decides whether the rotated `events.jsonl.1` is read at all. The
+  window bounds, nil session/cwd, malformed-line tolerance, and reading the
+  rotated `events.jsonl.1` ahead of the live file. The
   controller's tests point `$SHUTTLE_EVENTS_FILE` at those fixtures and cover
   the 400s.
   """
@@ -55,8 +55,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
     path
   end
 
-  # Write the rotated sibling of `path` and stamp its mtime, which is what the
-  # reader's overlap gate consults.
+  # Write the rotated sibling of `path` with a given mtime. The reader never
+  # consults it; the tests stamp one far from the window to show that.
   defp write_rotated(path, lines, mtime_s) do
     File.write!(path <> ".1", Enum.join(lines, "\n") <> "\n")
     File.touch!(path <> ".1", mtime_s)
@@ -431,7 +431,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   describe "Shuttle.Activity.window/3 — rotated sibling" do
-    test "reads events.jsonl.1 when its mtime falls inside the window" do
+    test "reads events.jsonl.1 ahead of the live file" do
       path = write_fixture([event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"})])
 
       write_rotated(
@@ -446,21 +446,23 @@ defmodule ShuttleWeb.ActivityControllerTest do
              ]
     end
 
-    test "skips events.jsonl.1 when its mtime predates the window" do
-      # The gate is deliberately coarse: rotation renames the file and never
-      # writes it again, so an mtime before from_ms proves every line predates
-      # the window. The in-range line below is unreachable in production for
-      # exactly that reason; the test asserts the 64 MB scan really is skipped.
-      path = write_fixture([event(%{"timestamp" => @t0, "type" => "post_tool_use"})])
+    test "reads events.jsonl.1 whatever its mtime, so its state reaches the live file" do
+      # A spell opened in the rotated file is still open when the live file
+      # repeats the ask, however long ago the rotation was: no second onset.
+      path =
+        write_fixture([
+          event(%{"timestamp" => @t0, "type" => "notification"}),
+          event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"})
+        ])
 
       write_rotated(
         path,
-        [event(%{"timestamp" => @t0, "type" => "user_prompt_submit"})],
+        [event(%{"timestamp" => @t0 - 3_600_000, "type" => "notification"})],
         div(@t0, 1_000) - 3_600
       )
 
       assert buckets!(path, @t0, @t0 + @minute) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
+               %{m: @t0 + @minute, s: @session, cwd: @cwd, k: "agent", n: 1}
              ]
     end
   end

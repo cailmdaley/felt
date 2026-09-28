@@ -12,5 +12,6 @@ config :shuttle, ShuttleWeb.Endpoint,
   server: true
 
 # The release logs at info: debug lines (every poll, every request) grow a
-# long-running daemon's log by hundreds of MB a day.
+# long-running daemon's log by hundreds of MB a day. `SHUTTLE_LOG_LEVEL`
+# overrides it at boot (`Shuttle.Application.configure_log_level/1`).
 config :logger, level: :info
