@@ -192,7 +192,7 @@ func TestClaudeNativeNoWakeAndUnknownRetry(t *testing.T) {
 	}
 	req.Wake = true
 	req.MessageID = "wake-timeout"
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err = Send(ctx, "host", req)
 	if err == nil || r.Status != StatusUnknown {
@@ -240,7 +240,7 @@ func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
 	if err := os.WriteFile(registration.Transcript, prefix, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	first, firstErr := Send(ctx, "host", req)
 	cancel()
 	if first.Status != StatusUnknown || ErrorCode(firstErr) != "ambiguous_delivery" {
@@ -264,6 +264,46 @@ func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
 	stored, err := readDedupRecord(filepath.Join(dataDir(), "messages", hex.EncodeToString(name[:])+".json"))
 	if err != nil || stored.Receipt.Status != StatusAccepted || stored.ErrorCode != "" || stored.TranscriptOffset == nil || *stored.TranscriptOffset != int64(len(prefix)) {
 		t.Fatalf("stored upgrade: %+v err=%v", stored, err)
+	}
+}
+
+func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T) {
+	req, sent := nativeClaudeFixture(t, func(map[string]any, *os.File) {})
+	registration, err := readClaudeNative("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.OpenFile(registration.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewEncoder(transcript).Encode(map[string]any{"type": "user", "sessionId": "session", "uuid": claudeNativeUUID(req)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := transcript.Close(); err != nil {
+		t.Fatal(err)
+	}
+	offset := int64(0)
+	stored := record{
+		Hash: requestHash(req), State: "complete",
+		Receipt:   Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"},
+		ErrorCode: "ambiguous_delivery", ErrorMessage: "stored unknown",
+		TranscriptOffset: &offset, ClaudeQueueContentHash: claudeContentHash(labeled(req)),
+	}
+	writeDedupRecord(t, dataDir(), req, stored)
+	lock, err := os.OpenFile(filepath.Join(dataDir(), "messages", ".refresh.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	receipt, err := Send(context.Background(), "host", req)
+	if err != nil || receipt.Status != StatusSubmitted || sent.Load() != 0 {
+		t.Fatalf("retry returned stale receipt or resent: %+v %v writes=%d", receipt, err, sent.Load())
 	}
 }
 
@@ -301,7 +341,7 @@ func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 
 func TestClaudeNativeQueuedBehindTurnReportsQueueAdmission(t *testing.T) {
 	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false) })
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
 	if err != nil || r.Status != StatusQueued || r.Detail != "queued behind the receiver's current turn; it runs when that turn ends" {
@@ -315,7 +355,7 @@ func TestClaudeNativeAbsorptionOfAnotherMessageIsNotEvidence(t *testing.T) {
 		frame["message"] = map[string]any{"content": "another message"}
 		busyReceiverRows(frame, f, true)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
 	if err == nil || r.Status != StatusUnknown || strings.Contains(r.Detail, "queued") {
@@ -323,11 +363,31 @@ func TestClaudeNativeAbsorptionOfAnotherMessageIsNotEvidence(t *testing.T) {
 	}
 }
 
-func TestClaudeNativeSyntheticErrorStillReportsSubmission(t *testing.T) {
-	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { nativeRows(frame, f, true) })
+func TestClaudeNativeSyntheticErrorIsNotStarted(t *testing.T) {
+	req, sent := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) { nativeRows(frame, f, true) })
+	first, err := Send(context.Background(), "host", req)
+	const detail = "the receiver took the message but its turn ended in an error without a model reply"
+	if first.Status != StatusUnknown || first.Detail != detail || ErrorCode(err) != "receiver_turn_failed" {
+		t.Fatalf("first receipt: %+v %v", first, err)
+	}
+	retry, err := Send(context.Background(), "host", req)
+	if retry.Status != StatusUnknown || retry.Detail != detail || ErrorCode(err) != "receiver_turn_failed" || sent.Load() != 1 {
+		t.Fatalf("retry upgraded a failed turn or resent: %+v %v writes=%d", retry, err, sent.Load())
+	}
+}
+
+func TestClaudeNativeScanFailureAfterQueueIsUnknown(t *testing.T) {
+	req, _ := nativeClaudeFixture(t, func(frame map[string]any, f *os.File) {
+		content := frame["message"].(map[string]any)["content"].(string)
+		row := map[string]any{"type": "queue-operation", "operation": "enqueue", "sessionId": "session", "content": content}
+		if err := json.NewEncoder(f).Encode(row); err != nil {
+			return
+		}
+		_, _ = io.WriteString(f, strings.Repeat("x", 9<<20))
+	})
 	r, err := Send(context.Background(), "host", req)
-	if err != nil || r.Status != StatusSubmitted || r.Detail != "the receiver took this message as a user turn; no model reply observed yet" {
-		t.Fatalf("%+v %v", r, err)
+	if r.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" || !strings.Contains(r.Detail, "bounded scan") {
+		t.Fatalf("scan failure was reported as successful admission: %+v %v", r, err)
 	}
 }
 
@@ -349,7 +409,7 @@ func TestClaudeNativeEvidenceIgnoresUnrelatedAndMalformed(t *testing.T) {
 		frame["uuid"] = "unrelated"
 		nativeRows(frame, f, false)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
 	if err == nil || r.Status != StatusUnknown {
@@ -406,7 +466,7 @@ func TestClaudeNativeEvidenceRequiresExactSession(t *testing.T) {
 		json.NewEncoder(f).Encode(map[string]any{"type": "user", "sessionId": "other-session", "uuid": uuid})
 		json.NewEncoder(f).Encode(map[string]any{"type": "assistant", "sessionId": "session", "uuid": "assistant", "parentUuid": uuid, "message": map[string]any{"role": "assistant", "model": "claude-test"}})
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
 	if err == nil || r.Status != StatusUnknown {
@@ -493,7 +553,7 @@ func TestClaudeNativeRejectsUncorrelatedPolicyReceipt(t *testing.T) {
 		json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": "denied", "from": "uds:" + reg.Socket, "orig_msg_id": "wrong-id"})
 		io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	r, err := Send(ctx, "host", req)
 	if err == nil || r.Status != StatusUnknown {

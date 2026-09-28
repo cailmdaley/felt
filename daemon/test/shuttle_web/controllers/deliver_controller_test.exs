@@ -191,7 +191,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
         "/api/v1/deliver",
         Jason.encode!(%{"fiber_id" => "tests/deliver-refused", "text" => "Meeting mode."})
       )
-      |> json_response(400)
+      |> json_response(200)
 
     assert %{"delivered" => false, "error" => "receiver native inbox denied" <> _} = body
   end

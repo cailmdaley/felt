@@ -289,3 +289,36 @@ func mailboxWrite(path string, b []byte, exclusive bool) error {
 	}
 	return syncDir(filepath.Dir(path))
 }
+
+// mailboxWriteReservation treats a successful hard link as the reservation
+// commit point. Cleanup and directory-sync failures cannot revoke ownership of
+// the published path, especially when a network filesystem acknowledges a
+// retried link ambiguously.
+func mailboxWriteReservation(path string, b []byte) (bool, error) {
+	return mailboxWriteReservationWith(path, b, os.Link, os.Remove, syncDir)
+}
+
+func mailboxWriteReservationWith(path string, b []byte, link func(string, string) error, removeTemp func(string) error, syncDirectory func(string) error) (bool, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), ".reservation-")
+	if err != nil {
+		return false, err
+	}
+	tempPath := f.Name()
+	defer os.Remove(tempPath)
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := link(tempPath, path); err != nil {
+		return false, err
+	}
+	_ = removeTemp(tempPath)
+	_ = syncDirectory(filepath.Dir(path))
+	return true, nil
+}

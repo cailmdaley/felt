@@ -73,7 +73,7 @@ defmodule ShuttleWeb.DeliverController do
         {status, Map.put(body, :delivered, true)}
 
       true ->
-        {if(status < 300, do: 502, else: status),
+        {status,
          Map.merge(body, %{
            delivered: false,
            error: receipt["detail"] || "the worker did not accept the message"

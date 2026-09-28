@@ -123,6 +123,109 @@ func TestDedupReplayAndConflict(t *testing.T) {
 	}
 }
 
+func TestDedupConcurrentFirstSendersSendOnce(t *testing.T) {
+	for iteration := 0; iteration < 50; iteration++ {
+		t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+		req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "race"}
+		var calls atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make([]error, 16)
+		for g := 0; g < len(errs); g++ {
+			wg.Add(1)
+			go func(g int) {
+				defer wg.Done()
+				<-start
+				_, errs[g] = withDedup(context.Background(), req, func() (Receipt, error) {
+					calls.Add(1)
+					time.Sleep(5 * time.Millisecond)
+					return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
+				})
+			}(g)
+		}
+		close(start)
+		wg.Wait()
+		if calls.Load() != 1 {
+			t.Fatalf("iteration %d: send ran %d times", iteration, calls.Load())
+		}
+		for g, err := range errs {
+			if err != nil {
+				t.Fatalf("iteration %d sender %d: %v", iteration, g, err)
+			}
+		}
+	}
+}
+
+func TestDedupPublishesOwnerDeadlineBeforeSend(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	req := Request{Address: "shuttle://h/claude/session", Text: "hello", MessageID: "deadline-publish", Wake: true}
+	deadline := time.Now().Add(17 * time.Second)
+	var observed int64
+	r, err := withDedupDetailed(context.Background(), req, func(ctx context.Context) dedupSendResult {
+		if err := publishOwnerObservationDeadline(ctx, deadline); err != nil {
+			return dedupSendResult{Err: err}
+		}
+		name := sha256.Sum256([]byte(req.MessageID))
+		reservation, err := readDedupRecord(filepath.Join(dataDir(), "messages", hex.EncodeToString(name[:])+".json"))
+		if err != nil {
+			return dedupSendResult{Err: err}
+		}
+		observed = reservation.OwnerDeadlineUnixNano
+		return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport}}
+	})
+	if err != nil || r.Status != StatusSubmitted || observed != deadline.UnixNano() {
+		t.Fatalf("deadline not published before send: receipt=%+v err=%v deadline=%d", r, err, observed)
+	}
+}
+
+func TestDedupOwnNonceEEXISTIsTreatedAsReservationSuccess(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "nfs-replay"}
+	var calls atomic.Int32
+	writer := func(path string, b []byte) (bool, error) {
+		linked, err := mailboxWriteReservation(path, b)
+		if err != nil {
+			return linked, err
+		}
+		// Simulate NFS completing link(2) while losing its reply, so the retry
+		// reports EEXIST for our just-published nonce.
+		return false, os.ErrExist
+	}
+	result, err := withDedupDetailedTimingUsing(context.Background(), req, func(context.Context) dedupSendResult {
+		calls.Add(1)
+		return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}}
+	}, time.Second, time.Millisecond, nil, writer)
+	if err != nil || result.Status != StatusAccepted || calls.Load() != 1 {
+		t.Fatalf("own-nonce EEXIST: %+v %v sends=%d", result, err, calls.Load())
+	}
+}
+
+func TestDedupWaitDeadlineAddsOwnerMargin(t *testing.T) {
+	ownerDeadline := time.Now().Add(5 * time.Second)
+	got := duplicateOwnerWaitDeadline(ownerDeadline.UnixNano(), 10*time.Millisecond)
+	want := time.Unix(0, ownerDeadline.UnixNano()).Add(duplicateWaitMargin)
+	if !got.Equal(want) {
+		t.Fatalf("wait deadline = %s, want owner deadline plus margin %s", got, want)
+	}
+}
+
+func TestDedupWaitUsesPublishedOwnerDeadlineAndCapsAtContext(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("SHUTTLE_DATA_DIR", d)
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "owner-deadline"}
+	writeDedupRecord(t, d, req, record{
+		Hash: requestHash(req), State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime(),
+		OwnerDeadlineUnixNano: time.Now().Add(40 * time.Millisecond).UnixNano(),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	r, err := withDedupTimeout(ctx, req, func() (Receipt, error) { return Receipt{}, nil }, 10*time.Millisecond)
+	if time.Since(start) < 200*time.Millisecond || r.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
+		t.Fatalf("owner wait did not honor recorded deadline/context cap: %+v %v elapsed=%s", r, err, time.Since(start))
+	}
+}
+
 func writeDedupRecord(t *testing.T, dir string, req Request, rec record) {
 	t.Helper()
 	messages := filepath.Join(dir, "messages")

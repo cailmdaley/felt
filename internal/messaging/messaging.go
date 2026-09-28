@@ -67,7 +67,7 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedupDetailed(ctx, req, func() dedupSendResult {
+	return withDedupDetailed(ctx, req, func(sendCtx context.Context) dedupSendResult {
 		files, err := materializeAttachments(req.MessageID, req.Attachments)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
@@ -83,9 +83,9 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		delivery.Attachments = nil
 		var result dedupSendResult
 		if detailed, ok := a.(dedupMetadataSender); ok {
-			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(ctx, addr, delivery)
+			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(sendCtx, addr, delivery)
 		} else {
-			result.Receipt, result.Err = a.send(ctx, addr, delivery)
+			result.Receipt, result.Err = a.send(sendCtx, addr, delivery)
 		}
 		result.Receipt.Files = files
 		return result

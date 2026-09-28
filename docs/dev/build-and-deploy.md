@@ -97,6 +97,11 @@ with `bin/shuttle-launch` touches the same marker before it kills the old
 session (see
 [the boot quarantine](../shuttle/lifecycle.md#boot-quarantine)).
 
+Message receipt changes require a fleet-wide CLI and daemon upgrade. An older
+daemon treats Claude-native wake receipts with `queued` or `submitted` as
+malformed and returns HTTP 502, so do not roll out the new CLI ahead of the
+matching daemon version.
+
 For a manual remote build:
 
 ```bash

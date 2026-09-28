@@ -201,21 +201,30 @@ receipt reports the furthest observed submission stage (`accepted`,
 it does not claim that the recipient acted on the message. For Claude-native
 delivery, `queued` means the receiver queues it behind its current turn,
 `submitted` means the transcript shows it admitted as a user turn, and `accepted`
-means a correlated real assistant reply appears. Native admission alone never
-means a model reply.
+means a correlated real assistant reply appears. Hook-mailbox `queued` is
+context-only and starts no turn. With `wake: true`, only Claude-native
+`queued`/`submitted` receipts are valid; `context_added` is never a wake result.
+Native admission alone never means a model reply.
 
-A well-formed receipt returns HTTP 200 regardless of status. HTTP 4xx reports a
-request the receiver cannot process, including invalid or unsupported addresses
-and preflight refusals that release the message ID; 5xx reports that no valid
-receipt is available, such as a timeout or unreachable owner. Reusing a
-`message_id` with the same request returns its durable receipt. A concurrent
-identical request waits up to 15 seconds for the first result. If it remains in
+A processed delivery returns HTTP 200 for any receipt status, including
+`rejected` and `unknown`. HTTP 400 corresponds to `invalid_address`,
+`wrong_host`, `invalid_request`, `unsupported_harness`, and `preflight_failed`
+(which releases the message ID), even when Felt supplies a rejection receipt.
+A `message_id_conflict` returns 409. Other rejected receipts—including
+`session_unavailable`, `session_not_found`, `wake_required`, and `wake_refused`—
+return 200. HTTP 5xx means Felt did not provide a valid receipt or the owner
+could not be reached; the daemon may include a synthetic `unknown` receipt.
+
+Reusing a `message_id` with the same request returns its durable receipt. A
+concurrent identical request waits until the owner's recorded observation
+deadline plus 1.5 seconds, capped by the request deadline. If it remains in
 progress or its owner stops before saving a result, felt returns `unknown`
 without resending. A later retry of a completed Claude-native `queued`,
-`submitted`, or `unknown` receipt briefly rechecks the transcript from its saved
-offset and upgrades the receipt if it finds later evidence; it never sends to
-the receiver again. Receipts without a saved offset remain unchanged. Reusing
-the ID for changed content is rejected by the local felt adapter.
+`submitted`, or `unknown` receipt rechecks the transcript for up to two seconds
+from its saved offset and upgrades the receipt if it finds later evidence; it
+never sends to the receiver again. Receipts without a saved offset remain
+unchanged. Reusing the ID for changed content is rejected by the local felt
+adapter.
 
 `POST /messages/files` accepts the same envelope plus one to eight
 `attachments`, each `{name, data, sha256}`. `name` is a portable basename,

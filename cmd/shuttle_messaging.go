@@ -375,7 +375,7 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	if err != nil {
 		return receipt, err
 	}
-	timeout := 30 * time.Second
+	timeout := 52 * time.Second
 	if len(request.Attachments) > 0 {
 		// A distinct route makes old daemons refuse the entire send instead of
 		// accepting text while silently discarding unsupported attachments.
@@ -410,6 +410,16 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	case messaging.StatusQueued, messaging.StatusAccepted, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusUnknown, messaging.StatusRejected:
 	default:
 		return messaging.Receipt{}, fmt.Errorf("daemon returned an unsupported receipt status %q; delivery is unknown", receipt.Status)
+	}
+	if request.Wake {
+		switch receipt.Status {
+		case messaging.StatusContextAdded:
+			return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
+		case messaging.StatusQueued, messaging.StatusSubmitted:
+			if receipt.Transport != "claude-native" {
+				return messaging.Receipt{}, fmt.Errorf("daemon returned %q for a wake request from unsupported transport %q", receipt.Status, receipt.Transport)
+			}
+		}
 	}
 	if !validMessageFilesReceipt(request, receipt) {
 		return messaging.Receipt{}, fmt.Errorf("daemon returned mismatched or incomplete file receipts; delivery is unknown")

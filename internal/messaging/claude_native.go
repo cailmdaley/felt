@@ -17,7 +17,11 @@ import (
 	"time"
 )
 
-const claudeNativeTransport = "claude-native"
+const (
+	claudeNativeTransport          = "claude-native"
+	claudeNativePreflightTimeout   = 1500 * time.Millisecond
+	claudeNativeObservationTimeout = 17 * time.Second
+)
 
 type claudeNativeRegistration struct {
 	ID         string `json:"id"`
@@ -201,33 +205,52 @@ const claudeRetryObservationTimeout = 2 * time.Second
 
 // refreshClaudeNativeReceipt scans only from the persisted send-time offset. It
 // observes transcript evidence and never connects to or writes to the receiver.
-func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record) (Receipt, bool) {
+func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record) (claudeReceiptRefresh, bool) {
 	address, err := ParseAddress(req.Address)
 	if err != nil || address.Harness != "claude" || stored.TranscriptOffset == nil || *stored.TranscriptOffset < 0 || stored.ClaudeQueueContentHash == "" {
-		return Receipt{}, false
+		return claudeReceiptRefresh{}, false
+	}
+	unknown := func(detail string) (claudeReceiptRefresh, bool) {
+		receipt := stored.Receipt
+		receipt.Status = StatusUnknown
+		receipt.Detail = detail
+		return claudeReceiptRefresh{Receipt: receipt, ErrorCode: "ambiguous_delivery", ErrorMessage: detail}, true
 	}
 	registration, err := readClaudeNative(address.ID)
 	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
-		return Receipt{}, false
+		if err == nil {
+			err = errors.New("Claude receiver registration no longer matches this address")
+		}
+		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
 	}
 	f, err := openClaudeTranscript(registration.Transcript, false)
 	if err != nil {
-		return Receipt{}, false
+		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
 	}
 	defer f.Close()
 	if _, err := f.Seek(*stored.TranscriptOffset, io.SeekStart); err != nil {
-		return Receipt{}, false
+		return unknown("native message sent; receiver transcript could not be rechecked: " + err.Error())
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
 	defer cancel()
-	stage, _ := observeClaudeTurn(refreshCtx, f, registration.Transcript, address.ID, claudeNativeUUID(req), stored.ClaudeQueueContentHash, nil)
+	stage, observeErr := observeClaudeTurn(refreshCtx, f, registration.Transcript, address.ID, claudeNativeUUID(req), stored.ClaudeQueueContentHash, nil)
+	if errors.Is(observeErr, errClaudeReceiverTurnFailed) {
+		const detail = "the receiver took the message but its turn ended in an error without a model reply"
+		receipt := stored.Receipt
+		receipt.Status = StatusUnknown
+		receipt.Detail = detail
+		return claudeReceiptRefresh{Receipt: receipt, ErrorCode: "receiver_turn_failed", ErrorMessage: detail}, true
+	}
+	if observeErr != nil && !errors.Is(observeErr, context.DeadlineExceeded) && !errors.Is(observeErr, context.Canceled) {
+		return unknown("native message sent; no correlated receiver turn observed: " + observeErr.Error())
+	}
 	if claudeStageRank(stage) <= claudeStageRank(stored.Receipt.Status) {
-		return Receipt{}, false
+		return claudeReceiptRefresh{}, false
 	}
 	upgraded := stored.Receipt
 	upgraded.Status = stage
 	upgraded.Detail = claudeStageReceipt(req, stage).Detail
-	return upgraded, true
+	return claudeReceiptRefresh{Receipt: upgraded}, true
 }
 
 // claudeNativeLive verifies that the registered receiver still owns its bound
@@ -280,16 +303,13 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	if f != nil {
 		defer f.Close()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	conn, err := connectClaudeNative(ctx, r)
+	preflightCtx, cancelPreflight := context.WithTimeout(ctx, claudeNativePreflightTimeout)
+	conn, err := connectClaudeNative(preflightCtx, r)
+	cancelPreflight()
 	if err != nil {
 		return preflight(err.Error())
 	}
 	defer conn.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetWriteDeadline(deadline)
-	}
 	uuid := claudeNativeUUID(req)
 	from, verdicts, closeReceipts, err := listenClaudeNativeReceipts(ctx, r, uuid)
 	if err != nil {
@@ -324,6 +344,14 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 		offset = &position
 	}
 	metadata := dedupMetadata{ClaudeTranscriptOffset: offset, ClaudeQueueContentHash: claudeContentHash(body.Message.Content)}
+	observationCtx, cancelObservation := context.WithTimeout(ctx, claudeNativeObservationTimeout)
+	defer cancelObservation()
+	if deadline, ok := observationCtx.Deadline(); ok {
+		if err := publishOwnerObservationDeadline(observationCtx, deadline); err != nil {
+			return preflight("cannot persist Claude observation deadline: " + err.Error())
+		}
+		_ = conn.SetWriteDeadline(deadline)
+	}
 	unknown := func(detail string) (Receipt, error, dedupMetadata) {
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: detail}, errCode("ambiguous_delivery", "%s", detail), metadata
 	}
@@ -333,7 +361,7 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	}
 	// Transcript admission establishes what the receiver observed; only a real,
 	// correlated assistant row establishes an accepted model response.
-	stage, err := observeClaudeTurn(ctx, f, r.Transcript, a.ID, uuid, metadata.ClaudeQueueContentHash, verdicts)
+	stage, err := observeClaudeTurn(observationCtx, f, r.Transcript, a.ID, uuid, metadata.ClaudeQueueContentHash, verdicts)
 	if err != nil {
 		var policy *claudePolicyError
 		if errors.As(err, &policy) {
@@ -342,6 +370,14 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 			}
 			return rejected(req, claudeNativeTransport, "receiver native inbox "+policy.status+" this message; no turn started"), errCode("wake_refused", "receiver native inbox %s this message", policy.status), dedupMetadata{}
 		}
+		if errors.Is(err, errClaudeReceiverTurnFailed) {
+			const detail = "the receiver took the message but its turn ended in an error without a model reply"
+			return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: detail}, errCode("receiver_turn_failed", "%s", detail), metadata
+		}
+		if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) && (stage == StatusQueued || stage == StatusSubmitted) {
+			return claudeStageReceipt(req, stage), nil, metadata
+		}
+		return unknown("native message sent; no correlated receiver turn observed: " + err.Error())
 	}
 	receipt := claudeStageReceipt(req, stage)
 	if stage == StatusUnknown {
@@ -356,6 +392,8 @@ func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (
 	}
 	return receipt, nil, dedupMetadata{}
 }
+
+var errClaudeReceiverTurnFailed = errors.New("receiver recorded an assistant error without a model response")
 
 type claudePolicyError struct{ status string }
 
@@ -457,7 +495,7 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 				if ancestry[row.ParentUUID] && row.UUID != "" {
 					if row.Type == "assistant" {
 						if row.IsAPIError || (len(row.Error) > 0 && string(row.Error) != "null") || row.Message.Model == "" || row.Message.Model == "<synthetic>" || row.Message.Role != "assistant" {
-							return stage, fmt.Errorf("receiver recorded an assistant error without a model response")
+							return stage, errClaudeReceiverTurnFailed
 						}
 						stage = StatusAccepted
 						return stage, nil

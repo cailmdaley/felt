@@ -4,10 +4,39 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
 )
+
+func TestMailboxReservationIgnoresPostLinkCleanupFailures(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reservation.json")
+	payload := []byte(`{"nonce":"attempt-1"}`)
+	removeCalls, syncCalls := 0, 0
+	linked, err := mailboxWriteReservationWith(
+		path,
+		payload,
+		os.Link,
+		func(string) error {
+			removeCalls++
+			return errors.New("injected temp cleanup failure")
+		},
+		func(string) error {
+			syncCalls++
+			return errors.New("injected directory sync failure")
+		},
+	)
+	if err != nil || !linked || removeCalls != 1 || syncCalls != 1 {
+		t.Fatalf("reservation link: linked=%v err=%v remove=%d sync=%d", linked, err, removeCalls, syncCalls)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(payload) {
+		t.Fatalf("linked reservation missing after cleanup errors: %q %v", got, err)
+	}
+}
 
 func TestMailboxQueueOfferAndReplay(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())

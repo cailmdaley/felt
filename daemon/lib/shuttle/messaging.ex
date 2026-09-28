@@ -13,8 +13,8 @@ defmodule Shuttle.Messaging do
     SessionLedger
   }
 
-  @local_message_timeout_ms 20_000
-  @remote_message_timeout_ms 25_000
+  @local_message_timeout_ms 32_000
+  @remote_message_timeout_ms 42_000
   @local_files_timeout_ms 60_000
   @remote_files_timeout_ms 90_000
   @local_discovery_timeout_ms 10_000
@@ -693,27 +693,53 @@ defmodule Shuttle.Messaging do
   end
 
   defp receipt_http_status(status, receipt) do
-    if Map.get(receipt, "_felt_error_code") in [
-         "invalid_address",
-         "wrong_host",
-         "invalid_request",
-         "unsupported_harness",
-         "preflight_failed"
-       ],
-       do: 400,
-       else: status
+    case Map.get(receipt, "_felt_error_code") do
+      code
+      when code in [
+             "invalid_address",
+             "wrong_host",
+             "invalid_request",
+             "unsupported_harness",
+             "preflight_failed"
+           ] ->
+        400
+
+      "message_id_conflict" ->
+        409
+
+      _ ->
+        status
+    end
   end
 
   defp validate_receipt(receipt, request, expected_address) do
     if Map.get(receipt, "message_id") == request.raw["message_id"] and
          Map.get(receipt, "address") == expected_address and
          Map.get(receipt, "status") in @receipt_statuses and
+         valid_wake_receipt?(receipt, request) and
          is_binary(Map.get(receipt, "transport")) and
          Map.get(receipt, "transport") != "" and
          (is_nil(Map.get(receipt, "detail")) or is_binary(Map.get(receipt, "detail"))) and
          valid_receipt_files?(receipt, request),
        do: :ok,
        else: :error
+  end
+
+  defp valid_wake_receipt?(receipt, request) do
+    if Map.get(request.raw, "wake", false) do
+      case {receipt["status"], receipt["transport"]} do
+        {"context_added", _transport} ->
+          false
+
+        {status, transport} when status in ["queued", "submitted"] ->
+          transport == "claude-native"
+
+        _ ->
+          true
+      end
+    else
+      true
+    end
   end
 
   defp valid_receipt_files?(receipt, %{attachments: []}),

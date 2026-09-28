@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,8 @@ type record struct {
 	ErrorMessage           string  `json:"error_message,omitempty"`
 	OwnerPID               int     `json:"owner_pid,omitempty"`
 	OwnerStart             string  `json:"owner_start_time,omitempty"`
+	OwnerDeadlineUnixNano  int64   `json:"owner_deadline_unix_nano,omitempty"`
+	Nonce                  string  `json:"nonce,omitempty"`
 	TranscriptOffset       *int64  `json:"transcript_offset,omitempty"`
 	ClaudeQueueContentHash string  `json:"claude_queue_content_hash,omitempty"`
 }
@@ -34,9 +37,54 @@ func requestHash(r Request) string {
 	return hex.EncodeToString(h[:])
 }
 
+func newReservationNonce() (string, error) {
+	var nonce [16]byte
+	if _, err := cryptorand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(nonce[:]), nil
+}
+
+func reserveDedupRecord(path string, reservation record, write func(string, []byte) (bool, error)) (bool, error) {
+	b, err := json.Marshal(reservation)
+	if err != nil {
+		return false, err
+	}
+	linked, err := write(path, b)
+	if err == nil {
+		return linked, nil
+	}
+	if !errors.Is(err, os.ErrExist) {
+		return false, err
+	}
+	// A network filesystem can complete link(2), lose its reply, then report
+	// EEXIST when the caller retransmits. Only our unguessable nonce proves the
+	// reservation at this path came from this attempt.
+	old, readErr := readDedupRecord(path)
+	if readErr == nil && old.State == "reserved" && old.Hash == reservation.Hash && old.Nonce == reservation.Nonce {
+		return true, nil
+	}
+	return false, err
+}
+
+type reservationDeadlinePublisherKey struct{}
+
+func publishOwnerObservationDeadline(ctx context.Context, deadline time.Time) error {
+	publish, _ := ctx.Value(reservationDeadlinePublisherKey{}).(func(time.Time) error)
+	if publish == nil {
+		return nil
+	}
+	return publish(deadline)
+}
+
+// Native senders replace the ceiling with their exact observation deadline
+// before writing. The 28s ceiling plus the 1.5s waiter margin fits the 32s
+// local daemon shell-out timeout even before that update arrives.
 const (
-	duplicateWaitTimeout  = 15 * time.Second
-	duplicatePollInterval = 150 * time.Millisecond
+	duplicateWaitTimeout       = 15 * time.Second
+	duplicatePollInterval      = 150 * time.Millisecond
+	duplicateWaitMargin        = 1500 * time.Millisecond
+	reservationDeadlineCeiling = 28 * time.Second
 )
 
 type dedupMetadata struct {
@@ -50,11 +98,17 @@ type dedupSendResult struct {
 	Metadata dedupMetadata
 }
 
+type claudeReceiptRefresh struct {
+	Receipt      Receipt
+	ErrorCode    string
+	ErrorMessage string
+}
+
 func withDedup(ctx context.Context, req Request, send func() (Receipt, error)) (Receipt, error) {
 	return withDedupTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
 }
 
-func withDedupDetailed(ctx context.Context, req Request, send func() dedupSendResult) (Receipt, error) {
+func withDedupDetailed(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
 	return withDedupDetailedTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
 }
 
@@ -65,13 +119,17 @@ func withDedupTimeout(ctx context.Context, req Request, send func() (Receipt, er
 }
 
 func withDedupTiming(ctx context.Context, req Request, send func() (Receipt, error), timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
-	return withDedupDetailedTiming(ctx, req, func() dedupSendResult {
+	return withDedupDetailedTiming(ctx, req, func(context.Context) dedupSendResult {
 		receipt, err := send()
 		return dedupSendResult{Receipt: receipt, Err: err}
 	}, timeout, pollInterval, onWait)
 }
 
-func withDedupDetailedTiming(ctx context.Context, req Request, send func() dedupSendResult, timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
+func withDedupDetailedTiming(ctx context.Context, req Request, send func(context.Context) dedupSendResult, timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
+	return withDedupDetailedTimingUsing(ctx, req, send, timeout, pollInterval, onWait, mailboxWriteReservation)
+}
+
+func withDedupDetailedTimingUsing(ctx context.Context, req Request, send func(context.Context) dedupSendResult, timeout, pollInterval time.Duration, onWait func(), reserve func(string, []byte) (bool, error)) (Receipt, error) {
 	dir := filepath.Join(dataDir(), "messages")
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
@@ -80,16 +138,26 @@ func withDedupDetailedTiming(ctx context.Context, req Request, send func() dedup
 	path := filepath.Join(dir, hex.EncodeToString(nameHash[:])+".json")
 	hash := requestHash(req)
 
-	reservation := record{Hash: hash, State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime()}
-	reservationJSON, err := json.Marshal(reservation)
+	nonce, err := newReservationNonce()
 	if err != nil {
-		return Receipt{}, err
+		return Receipt{}, errCode("dedup_unavailable", "cannot create reservation nonce: %v", err)
+	}
+	reservation := record{
+		Hash:       hash,
+		State:      "reserved",
+		OwnerPID:   os.Getpid(),
+		OwnerStart: currentProcessStartTime(),
+		Nonce:      nonce,
+	}
+	if address, err := ParseAddress(req.Address); err == nil && address.Harness == "claude" && req.Wake {
+		reservation.OwnerDeadlineUnixNano = time.Now().Add(reservationDeadlineCeiling).UnixNano()
 	}
 	// Publish a complete reservation atomically: an O_EXCL-created empty file
 	// would let a concurrent duplicate mistake the brief write window for a
-	// malformed, legacy record.
+	// malformed, legacy record. The nonce distinguishes an NFS link replay from
+	// a competing sender's reservation.
 	for {
-		err := mailboxWrite(path, reservationJSON, true)
+		owned, err := reserveDedupRecord(path, reservation, reserve)
 		if errors.Is(err, os.ErrExist) {
 			receipt, readErr, retry := duplicateResult(ctx, req, path, hash, timeout, pollInterval, onWait)
 			if retry {
@@ -100,12 +168,18 @@ func withDedupDetailedTiming(ctx context.Context, req Request, send func() dedup
 		if err != nil {
 			return Receipt{}, errCode("dedup_unavailable", "cannot reserve message_id: %v", err)
 		}
-		return sendReserved(dir, path, hash, req, send)
+		if !owned {
+			return Receipt{}, errCode("dedup_unavailable", "message reservation was not published")
+		}
+		return sendReserved(ctx, dir, path, hash, req, nonce, send)
 	}
 }
 
-func sendReserved(dir, path, hash string, req Request, send func() dedupSendResult) (Receipt, error) {
-	result := send()
+func sendReserved(ctx context.Context, dir, path, hash string, req Request, nonce string, send func(context.Context) dedupSendResult) (Receipt, error) {
+	ownerCtx := context.WithValue(ctx, reservationDeadlinePublisherKey{}, func(deadline time.Time) error {
+		return updateReservationOwnerDeadline(path, hash, nonce, deadline)
+	})
+	result := send(ownerCtx)
 	receipt, sendErr := result.Receipt, result.Err
 	if ErrorCode(sendErr) == "preflight_failed" {
 		// No bytes capable of delivering the message were written. Releasing the
@@ -163,6 +237,29 @@ func sendReserved(dir, path, hash string, req Request, send func() dedupSendResu
 
 // duplicateResult returns retry=true only when the reservation disappeared,
 // which happens when its owner reports a preflight failure.
+func updateReservationOwnerDeadline(path, hash, nonce string, deadline time.Time) error {
+	old, err := readDedupRecord(path)
+	if err != nil {
+		return err
+	}
+	if old.State != "reserved" || old.Hash != hash || old.Nonce != nonce {
+		return errCode("dedup_unavailable", "message reservation changed before observation began")
+	}
+	old.OwnerDeadlineUnixNano = deadline.UnixNano()
+	b, err := json.Marshal(old)
+	if err != nil {
+		return err
+	}
+	if err := mailboxWrite(path, b, false); err != nil {
+		current, readErr := readDedupRecord(path)
+		if readErr == nil && current.State == "reserved" && current.Hash == hash && current.Nonce == nonce && current.OwnerDeadlineUnixNano == deadline.UnixNano() {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func duplicateResult(ctx context.Context, req Request, path, hash string, timeout, pollInterval time.Duration, onWait func()) (Receipt, error, bool) {
 	old, err := readDedupRecord(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -192,10 +289,9 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, timeou
 		return receipt, stoppedErr, false
 	}
 
-	deadline := time.Now().Add(timeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
+	ownerDeadlineStamp := old.OwnerDeadlineUnixNano
+	ownerDeadline := duplicateOwnerWaitDeadline(ownerDeadlineStamp, timeout)
+	deadline := capDedupWaitDeadline(ctx, ownerDeadline)
 	if onWait != nil {
 		onWait()
 	}
@@ -237,6 +333,11 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, timeou
 			receipt, storedErr := storedResult(old)
 			return receipt, storedErr, false
 		}
+		if old.OwnerDeadlineUnixNano > 0 && old.OwnerDeadlineUnixNano != ownerDeadlineStamp {
+			ownerDeadlineStamp = old.OwnerDeadlineUnixNano
+			ownerDeadline = time.Unix(0, ownerDeadlineStamp).Add(duplicateWaitMargin)
+			deadline = capDedupWaitDeadline(ctx, ownerDeadline)
+		}
 		if old.State != "reserved" || old.OwnerPID <= 0 {
 			receipt, ambiguousErr := legacyAmbiguous(req)
 			return receipt, ambiguousErr, false
@@ -246,6 +347,20 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, timeou
 			return receipt, stoppedErr, false
 		}
 	}
+}
+
+func duplicateOwnerWaitDeadline(ownerDeadlineUnixNano int64, fallback time.Duration) time.Time {
+	if ownerDeadlineUnixNano > 0 {
+		return time.Unix(0, ownerDeadlineUnixNano).Add(duplicateWaitMargin)
+	}
+	return time.Now().Add(fallback)
+}
+
+func capDedupWaitDeadline(ctx context.Context, deadline time.Time) time.Time {
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		return ctxDeadline
+	}
+	return deadline
 }
 
 func readDedupRecord(path string) (record, error) {
@@ -265,38 +380,66 @@ func refreshCompletedClaudeReceipt(ctx context.Context, req Request, path, hash 
 		return old
 	}
 	candidate, ok := refreshClaudeNativeReceipt(ctx, req, old)
-	if !ok || claudeStageRank(candidate.Status) <= claudeStageRank(old.Receipt.Status) {
+	if !ok {
 		return old
 	}
 
-	lock, err := os.OpenFile(path+".refresh.lock", os.O_CREATE|os.O_RDWR, 0600)
+	// One stable lock per messages directory avoids a sidecar for every message.
+	lock, err := os.OpenFile(filepath.Join(filepath.Dir(path), ".refresh.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return old
+		return mergeClaudeReceiptRefresh(old, candidate)
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if current, readErr := readDedupRecord(path); readErr == nil && current.Hash == hash && current.State == "complete" {
-			return current
+			return mergeClaudeReceiptRefresh(current, candidate)
 		}
-		return old
+		return mergeClaudeReceiptRefresh(old, candidate)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 
 	current, err := readDedupRecord(path)
 	if err != nil || current.Hash != hash || current.State != "complete" {
-		return old
+		return mergeClaudeReceiptRefresh(old, candidate)
 	}
-	if claudeStageRank(candidate.Status) <= claudeStageRank(current.Receipt.Status) {
+	upgraded, changed := mergeClaudeReceiptRefreshWithChange(current, candidate)
+	if !changed {
 		return current
 	}
-	current.Receipt = candidate
-	current.ErrorCode = ""
-	current.ErrorMessage = ""
-	b, err := json.Marshal(current)
+	b, err := json.Marshal(upgraded)
 	if err == nil {
 		_ = mailboxWrite(path, b, false)
 	}
-	return current
+	return upgraded
+}
+
+func mergeClaudeReceiptRefresh(current record, candidate claudeReceiptRefresh) record {
+	merged, _ := mergeClaudeReceiptRefreshWithChange(current, candidate)
+	return merged
+}
+
+func mergeClaudeReceiptRefreshWithChange(current record, candidate claudeReceiptRefresh) (record, bool) {
+	if current.Receipt.Status == StatusAccepted {
+		return current, false
+	}
+	if current.ErrorCode == "receiver_turn_failed" && candidate.ErrorCode != "receiver_turn_failed" {
+		return current, false
+	}
+	if candidate.ErrorCode == "receiver_turn_failed" {
+		if current.Receipt.Status == StatusUnknown && current.ErrorCode == candidate.ErrorCode && current.ErrorMessage == candidate.ErrorMessage && current.Receipt.Detail == candidate.Receipt.Detail {
+			return current, false
+		}
+	} else if candidate.ErrorCode == "ambiguous_delivery" {
+		if current.Receipt.Status == StatusUnknown && current.ErrorCode == candidate.ErrorCode && current.Receipt.Detail == candidate.Receipt.Detail {
+			return current, false
+		}
+	} else if claudeStageRank(candidate.Receipt.Status) <= claudeStageRank(current.Receipt.Status) {
+		return current, false
+	}
+	current.Receipt = candidate.Receipt
+	current.ErrorCode = candidate.ErrorCode
+	current.ErrorMessage = candidate.ErrorMessage
+	return current, true
 }
 
 func storedResult(old record) (Receipt, error) {

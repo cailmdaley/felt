@@ -146,20 +146,41 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 	}
 }
 
-func TestPostMessageAcceptsWellFormedWakeReceiptStages(t *testing.T) {
-	for _, status := range []string{messaging.StatusQueued, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusAccepted, messaging.StatusUnknown, messaging.StatusRejected} {
-		t.Run(status, func(t *testing.T) {
-			request := messaging.Request{Address: "shuttle://host/codex/thread", MessageID: "wake-check", Wake: true}
+func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
+	tests := []struct {
+		name, status, transport string
+		wake, accepted          bool
+	}{
+		{"native queued", messaging.StatusQueued, "claude-native", true, true},
+		{"native submitted", messaging.StatusSubmitted, "claude-native", true, true},
+		{"other queued", messaging.StatusQueued, "codex", true, false},
+		{"other submitted", messaging.StatusSubmitted, "peer", true, false},
+		{"context added for wake", messaging.StatusContextAdded, "codex", true, false},
+		{"context added only", messaging.StatusContextAdded, "codex", false, true},
+		{"accepted", messaging.StatusAccepted, "peer", true, true},
+		{"unknown", messaging.StatusUnknown, "peer", true, true},
+		{"rejected", messaging.StatusRejected, "peer", true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := messaging.Request{Address: "shuttle://host/codex/thread", MessageID: "wake-check", Wake: tc.wake}
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: status, Transport: "peer"})
+				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: tc.status, Transport: tc.transport})
 			}))
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 			receipt, err := postMessage(request)
-			if calls != 1 || err != nil || receipt.Status != status {
-				t.Fatalf("well-formed %s receipt rejected: %+v %v calls=%d", status, receipt, err, calls)
+			if calls != 1 {
+				t.Fatalf("message retried automatically: %d", calls)
+			}
+			if tc.accepted {
+				if err != nil || receipt.Status != tc.status {
+					t.Fatalf("valid %s receipt rejected: %+v %v", tc.status, receipt, err)
+				}
+			} else if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
+				t.Fatalf("invalid wake receipt retained: %+v %v", receipt, err)
 			}
 		})
 	}

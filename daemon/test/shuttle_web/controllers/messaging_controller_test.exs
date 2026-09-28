@@ -25,17 +25,23 @@ defmodule ShuttleWeb.MessagingControllerTest do
           case request["message_id"] do
             "unknown" -> {"unknown", "ambiguous_delivery", 1}
             "refused" -> {"rejected", "wake_refused", 1}
+            "session-unavailable" -> {"rejected", "session_unavailable", 1}
+            "session-not-found" -> {"rejected", "session_not_found", 1}
+            "wake-required" -> {"rejected", "wake_required", 1}
             "preflight" -> {"rejected", "preflight_failed", 1}
+            "conflict" -> {"rejected", "message_id_conflict", 1}
             "unproduced" -> {"unknown", "internal", 1}
             id when id in ["queued", "context_added", "submitted"] -> {id, nil, 0}
             _ -> {"accepted", nil, 0}
           end
 
+        transport = if status in ["queued", "submitted"], do: "claude-native", else: "codex"
+
         receipt = %{
           message_id: request["message_id"],
           address: request["address"],
           status: status,
-          transport: "codex",
+          transport: transport,
           detail: nil
         }
 
@@ -132,6 +138,16 @@ defmodule ShuttleWeb.MessagingControllerTest do
              detail: "refused"
            })}
 
+        "conflict" ->
+          {:ok, 409,
+           Jason.encode!(%{
+             message_id: "conflict",
+             address: request["address"],
+             status: "rejected",
+             transport: "dedup",
+             detail: "message_id was already used for a different request"
+           })}
+
         "preflight" ->
           {:ok, 400,
            Jason.encode!(%{
@@ -146,12 +162,14 @@ defmodule ShuttleWeb.MessagingControllerTest do
           {:ok, 500, Jason.encode!(%{error: "lost receipt"})}
 
         status when status in ["queued", "context_added", "submitted"] ->
+          transport = if status in ["queued", "submitted"], do: "claude-native", else: "peer"
+
           {:ok, 200,
            Jason.encode!(%{
              message_id: status,
              address: request["address"],
              status: status,
-             transport: "peer"
+             transport: transport
            })}
 
         _ ->
@@ -614,10 +632,8 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["status"] == "accepted"
   end
 
-  test "wake receipts preserve every well-formed admission stage locally and remotely", %{
-    host: host
-  } do
-    for target <- [host, "edge"], status <- ["queued", "context_added", "submitted"] do
+  test "wake permits native admission stages only from Claude's native transport", %{host: host} do
+    for target <- [host, "edge"], status <- ["queued", "submitted"] do
       request = %{
         address: "shuttle://#{target}/codex/thread",
         text: "begin work",
@@ -631,15 +647,34 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert receipt["status"] == status
       assert receipt["message_id"] == status
     end
+
+    for target <- [host, "edge"] do
+      request = %{
+        address: "shuttle://#{target}/codex/thread",
+        text: "context only",
+        wake: true,
+        message_id: "context_added"
+      }
+
+      receipt =
+        api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
+
+      assert receipt["status"] == "unknown"
+      assert receipt["message_id"] == "context_added"
+    end
   end
 
-  test "a valid non-zero felt receipt stays 200, while a preflight refusal stays 400", %{
+  test "valid receipts use 200 except preflight refusals and ID conflicts", %{
     host: host
   } do
     for {message_id, expected_status, expected_http} <- [
           {"unknown", "unknown", 200},
           {"refused", "rejected", 200},
+          {"session-unavailable", "rejected", 200},
+          {"session-not-found", "rejected", 200},
+          {"wake-required", "rejected", 200},
           {"preflight", "rejected", 400},
+          {"conflict", "rejected", 409},
           {"unproduced", "unknown", 502}
         ] do
       request = %{
@@ -881,6 +916,14 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     assert preflight["address"] == base["address"]
     assert preflight["status"] == "rejected"
+
+    conflict =
+      api_conn()
+      |> post("/api/v1/messages", Jason.encode!(Map.put(base, "message_id", "conflict")))
+      |> json_response(409)
+
+    assert conflict["address"] == base["address"]
+    assert conflict["status"] == "rejected"
 
     unknown =
       api_conn()

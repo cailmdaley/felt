@@ -220,32 +220,41 @@ for context delivery, and use a supported live native endpoint for wake.
 A failed wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
 
-Receipts describe delivery evidence, not task completion. HTTP 200 carries any
-well-formed receipt status; 4xx reports invalid or unsupported requests and
-preflight refusals, while 5xx means the daemon cannot provide a valid receipt.
-`felt shuttle message` exits 0 for `accepted`, `submitted`, `queued`, and
-`context_added`; it exits 1 for `rejected`, `unknown`, or another command error.
+Receipts describe delivery evidence, not task completion. HTTP 200 carries a
+processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports
+`invalid_address`, `wrong_host`, `invalid_request`, `unsupported_harness`, or
+`preflight_failed`; preflight refusals may include a rejection receipt. HTTP 409
+reports `message_id_conflict` when an ID is reused for changed content. Other
+rejected receipts—including `session_unavailable`, `session_not_found`,
+`wake_required`, and `wake_refused`—return 200. HTTP 5xx means Felt did not
+provide a valid receipt or the owner could not be reached; the daemon may
+include a synthetic `unknown` receipt. `felt shuttle message` exits 0 for
+`accepted`, `submitted`, `queued`, and `context_added`; it exits 1 for
+`rejected`, `unknown`, or another command error.
 
 Retry an uncertain delivery with the identical request and the same
-`--message-id`, never a fresh ID. A concurrent attempt waits up to 15 seconds
-for the first result. A later Claude-native retry of a completed `queued`,
-`submitted`, or `unknown` receipt briefly rechecks the transcript from its saved
+`--message-id`, never a fresh ID. A concurrent attempt waits until the owner's
+recorded observation deadline plus 1.5 seconds, capped by its own request
+deadline. A later Claude-native retry of a completed `queued`, `submitted`, or
+`unknown` receipt rechecks the transcript for up to two seconds from its saved
 offset and upgrades the status when it finds later evidence; it never resends
 the message. Records without an offset return their stored receipt unchanged.
 Changed content requires a new message ID.
 
-Claude preserves its native inbound hold/refuse policy. Its adapter waits for a
-correlated real model response; if that evidence does not arrive within the
-bounded wait, the result is `unknown`, even if the message is processed later.
-Context-only messages use separately enabled Shuttle hooks. To disable those
+Claude preserves its native inbound hold/refuse policy. For a wake, `queued`
+means Claude put the message behind its current turn; `submitted` means the
+transcript shows native admission without a model reply; `accepted` requires a
+correlated real assistant reply. If the observer sees no admission stage, the
+receipt is `unknown`, even if Claude processes the message later. Context-only
+messages use separately enabled Shuttle hooks. To disable those
 hooks' message registration and delivery, set `SHUTTLE_MESSAGES=off` in the
 receiver environment. Installing hook files does not establish that the harness
 has enabled or trusted them; discovery reflects receiver registration.
 
 | Receipt | Evidence |
 |---|---|
-| `queued` | Receiver queue or hook mailbox accepted context; Claude detail identifies a message queued behind the current turn |
-| `submitted` | Claude transcript shows the native user row or `queued_command`; no model reply is observed yet |
+| `queued` | Hook mailbox: context-only, no turn starts. Claude-native wake: queued behind the current turn; the detail says it runs when that turn ends |
+| `submitted` | Claude transcript shows the native user row or `queued_command`; admission only, with no model reply observed yet |
 | `context_added` | Codex acknowledged adding persistent context; no turn started |
 | `accepted` | Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
 | `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
