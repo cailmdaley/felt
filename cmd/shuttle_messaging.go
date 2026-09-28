@@ -144,7 +144,7 @@ daemon to the owning host. The text is the second argument, '-' for stdin, or
 
 By default the addressed session is woken; --context-only (or --wake=false)
 adds the message as context without starting or steering a model turn. Prints
-"sending <message-id> to <address>" to stderr before delivery, then prints the
+"sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
 --message-id <id>. Exit 0 means accepted, submitted, queued, or context_added;
 exit 1 means rejected, unknown, or another command error.`,

@@ -98,6 +98,13 @@ func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
 	if receipt.Address != "shuttle://host/claude/session" {
 		t.Fatalf("receipt address = %q, want canonical address", receipt.Address)
 	}
+	// Normalization precedes the dedup hash, so the canonical spelling of the
+	// same request replays the stored receipt instead of conflicting.
+	request.Address = "shuttle://host/claude/session"
+	replay, err := Send(context.Background(), "host", request)
+	if err != nil || !reflect.DeepEqual(replay, receipt) {
+		t.Fatalf("canonical replay = %#v, %v; want stored receipt %#v", replay, err, receipt)
+	}
 }
 
 func TestDedupReplayAndConflict(t *testing.T) {

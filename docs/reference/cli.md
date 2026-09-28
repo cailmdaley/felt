@@ -230,9 +230,11 @@ rejected receipts—including `session_unavailable`, `session_not_found`,
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `felt shuttle message` exits 0 for
 `accepted`, `submitted`, `queued`, and `context_added`; it exits 1 for
-`rejected`, `unknown`, or another command error. Before delivery it prints
-`sending <id> to <address>` to stderr; if interrupted, retry with
-`--message-id <printed id>`.
+`rejected`, `unknown`, or another command error. A target that does not
+resolve, is ambiguous, or disagrees with the session ledger fails before any
+request is sent, with exit 1 and no receipt. Once resolved, it prints
+`sending <id> to <resolved address>` to stderr before delivery; if interrupted,
+retry with `--message-id <printed id>`.
 
 Retry an uncertain delivery with the identical request and the same
 `--message-id`, never a fresh ID. A concurrent attempt waits until the owner's

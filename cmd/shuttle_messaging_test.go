@@ -219,7 +219,7 @@ func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
 }
 
 func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
-	for _, detail := range []string{"sending <message-id> to <address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown"} {
+	for _, detail := range []string{"sending <message-id> to <resolved address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown"} {
 		if !strings.Contains(shuttleMessageCmd.Long, detail) {
 			t.Errorf("message help omits %q", detail)
 		}
@@ -246,7 +246,10 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 	shuttleMessageCmd.SetOut(io.Discard)
 	shuttleMessageCmd.SetErr(&stderr)
 
-	address := "shuttle://host/codex/thread"
+	// The alias resolves before the announcement, so the printed and posted
+	// address is the canonical one the retry and its dedup hash will use.
+	input := "shuttle://host/claude-code/session"
+	address := "shuttle://host/claude/session"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(stderr.String(), "sending msg-interrupted to "+address) {
 			t.Errorf("request reached daemon before retry ID was printed: %q", stderr.String())
@@ -256,12 +259,15 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if request.Address != address {
+			t.Errorf("posted address = %q, want %q", request.Address, address)
+		}
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "peer"})
 	}))
 	defer server.Close()
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if err := shuttleMessageCmd.RunE(shuttleMessageCmd, []string{address, "hello"}); err != nil {
+	if err := shuttleMessageCmd.RunE(shuttleMessageCmd, []string{input, "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(stderr.String(), "sending msg-interrupted to "+address+"\n") {
