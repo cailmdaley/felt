@@ -23,6 +23,7 @@
 
 import { createRoot, type Root } from 'react-dom/client'
 import { parseCompositeFeed } from '../board/KanbanComposite.js'
+import { daemonFetch } from '../board/daemonApi.js'
 import { deriveProjects, type ProjectModel } from './projectModel'
 import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
 import { CaptureForm, injectCaptureFormStyles, type CaptureProject } from './CaptureForm'
@@ -64,8 +65,8 @@ interface LoadedFeed {
 
 async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
   const [res, storesRes] = await Promise.all([
-    fetch(`${shuttleBase}/api/v1/fibers/composite`),
-    fetch(`${shuttleBase}/api/v1/felt-stores`).catch(() => null),
+    daemonFetch(`${shuttleBase}/api/v1/fibers/composite`),
+    daemonFetch(`${shuttleBase}/api/v1/felt-stores`).catch(() => null),
   ])
   if (!res.ok) throw new Error(`composite ${res.status}`)
   const json: unknown = await res.json()

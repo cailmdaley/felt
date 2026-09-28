@@ -2137,6 +2137,12 @@
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(13px * var(--kbn-type-scale, 1));
 }
+.kbn-error.kbn-booting {
+  margin: 16px 24px;
+  padding: 10px 14px;
+  border-style: dashed;
+  background: rgba(196, 147, 51, 0.04);
+}
 /* The error state replaces the whole Desk, taking the column heads — and with
    them the only refresh control — off screen. This is that control. */
 .kbn-error-retry {

@@ -19,6 +19,8 @@
  * off the end of a phone's error banner.
  */
 
+import { daemonFetch } from '../../board/daemonApi.js'
+
 /** Which operator file. The wire names are the files' own stems. */
 export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes' | 'host'
 
@@ -334,7 +336,7 @@ async function getJSON<T>(
 ): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`${base}${path}`)
+    res = await daemonFetch(`${base}${path}`)
   } catch (err) {
     throw reachError(err)
   }
@@ -351,7 +353,7 @@ async function postJSON<T>(
 ): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`${base}${path}`, {
+    res = await daemonFetch(`${base}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

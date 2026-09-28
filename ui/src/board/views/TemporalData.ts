@@ -41,6 +41,7 @@
  * one round trip, and the next ask after it settles goes to the daemon.
  */
 
+import { daemonFetch } from '../daemonApi.js'
 
 /** One coarse activity bucket. Field names are the wire's — deliberately
  *  terse, because a day of minute buckets is a lot of JSON:
@@ -302,7 +303,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
   }
 
   const readJson = async (url: string): Promise<unknown> => {
-    const res = await fetch(url)
+    const res = await daemonFetch(url)
     if (!res.ok) return null
     return await res.json()
   }
@@ -329,7 +330,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
    */
   const readFeed = async (feed: string, query: string): Promise<unknown> => {
     if (!noComposite.has(feed)) {
-      const res = await fetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
+      const res = await daemonFetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
       if (res.ok) return await res.json()
       if (res.status !== 404) return null
       noComposite.add(feed)

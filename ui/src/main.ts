@@ -1,6 +1,7 @@
 import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
+import { daemonFetch, isDaemonBooting } from './board/daemonApi.js'
 import { openStash, openCapture, openSettings } from './forms/mountForms.js'
 
 /**
@@ -48,7 +49,7 @@ const board = new KanbanModal({
   // the host serving this UI, ssh-ing out for a remote worker). Success raises
   // kitty; only failures surface a toast.
   onOpenWorker: (tmuxSession, shuttleHost) => {
-    void fetch(`${shuttleBase}/api/v1/attach`, {
+    void daemonFetch(`${shuttleBase}/api/v1/attach`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null }),
@@ -59,7 +60,9 @@ const board = new KanbanModal({
           showToast(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal', 'error')
         }
       })
-      .catch(() => showToast('Couldn’t reach the daemon to open the terminal', 'error'))
+      .catch((error: unknown) => {
+        if (!isDaemonBooting(error)) showToast('Couldn’t reach the daemon to open the terminal', 'error')
+      })
   },
 })
 

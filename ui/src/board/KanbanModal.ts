@@ -40,6 +40,7 @@
 
 import './KanbanModal.css'
 import { FiberDetailModal } from './FiberDetailModal.js'
+import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
   HorizonKind,
@@ -219,6 +220,7 @@ export class KanbanModal {
    *  host's error page — the Desk shows `renderError` for the same state,
    *  but a temporal view has no surfaces of its own to put it in. */
   private lastFetchFailed = false
+  private daemonBooting = false
   private inflightFetchToken = 0
   /**
    * Backing field for `dragSourceId`. Mutate via the property accessor below
@@ -739,15 +741,15 @@ export class KanbanModal {
       lastFetchFailed: this.lastFetchFailed,
     })
     if (kind === 'none') return
-    const signature = `${title}:${kind}`
+    const signature = `${title}:${kind}:${this.daemonBooting ? 'booting' : 'offline'}`
     if (this.viewFallbackSig === signature) return
     this.viewFallbackSig = signature
     this.viewHostEl.innerHTML = ''
     this.viewHostEl.append(
       kind === 'error'
         ? createViewFallbackPage(title, {
-            message: '— the daemon is not answering —',
-            onRetry: () => { void this.fetchAndRender() },
+            message: this.daemonBooting ? '— daemon is starting… —' : '— the daemon is not answering —',
+            onRetry: this.daemonBooting ? undefined : () => { void this.fetchAndRender() },
           })
         : createViewFallbackPage(title, { message: '— waiting for the first response —' }),
     )
@@ -1817,7 +1819,7 @@ export class KanbanModal {
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
-      const res = await fetch(`${this.shuttleBase}/api/v1/fibers/composite`)
+      const res = await daemonFetch(`${this.shuttleBase}/api/v1/fibers/composite`)
       if (token !== this.inflightFetchToken) return
       if (!res.ok) {
         this.markFetchFailed(`Server returned ${res.status}`)
@@ -1837,6 +1839,7 @@ export class KanbanModal {
       // poll even on no-op refreshes.
       // A response landed: clear any error page the views were showing.
       this.lastFetchFailed = false
+      this.daemonBooting = false
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
@@ -1851,8 +1854,11 @@ export class KanbanModal {
       this.render(data)
     } catch (err: unknown) {
       if (token !== this.inflightFetchToken) return
-      const msg = errText(err)
-      this.markFetchFailed(msg)
+      if (isDaemonBooting(err)) {
+        this.markDaemonBooting()
+      } else {
+        this.markFetchFailed(errText(err))
+      }
     }
   }
 
@@ -1927,8 +1933,29 @@ export class KanbanModal {
    * `renderError` and its own surfaces; a temporal view has neither, so it gets
    * the fallback page instead of the blank host it used to get.
    */
+  private markDaemonBooting(): void {
+    this.lastFetchFailed = true
+    this.daemonBooting = true
+    this.renderBooting()
+    if (this.activeViewId !== 'desk') {
+      const view = getView(this.activeViewId)
+      if (view) this.renderViewFallback(view.title)
+    }
+  }
+
+  private renderBooting(): void {
+    if (!this.deskEl) return
+    this.lastResponseSig = null
+    this.deskEl.innerHTML = ''
+    const state = document.createElement('div')
+    state.className = 'kbn-error kbn-booting'
+    state.textContent = 'daemon is starting…'
+    this.deskEl.append(state)
+  }
+
   private markFetchFailed(msg: string): void {
     this.lastFetchFailed = true
+    this.daemonBooting = false
     this.renderError(msg)
     if (this.activeViewId !== 'desk') {
       const view = getView(this.activeViewId)
