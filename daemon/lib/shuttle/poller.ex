@@ -785,6 +785,7 @@ defmodule Shuttle.Poller do
       live: Map.keys(state.running),
       host: state.own_host_id,
       node: DaemonHeartbeat.node_name(),
+      os_pid: System.pid(),
       app:
         for(
           {key, meta} <- state.running,
@@ -834,6 +835,7 @@ defmodule Shuttle.Poller do
         host: state.own_host_id,
         node: DaemonHeartbeat.node_name(),
         held: state.boot_quarantine or not state.contract_check.ok,
+        os_pid: System.pid(),
         workers: Map.keys(state.running),
         boots: state.daemon_boots
       )

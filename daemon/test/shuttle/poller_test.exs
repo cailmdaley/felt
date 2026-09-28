@@ -2438,6 +2438,8 @@ defmodule Shuttle.PollerTest do
           "host" => System.fetch_env!("SHUTTLE_HOST"),
           "node" => Shuttle.DaemonHeartbeat.node_name(),
           "held" => false,
+          # Not this test VM's pid: these records stand in for a previous VM.
+          "os_pid" => "0",
           "at" => now - 4_000,
           "booted_at" => booted_at,
           "workers" => [],
@@ -2576,10 +2578,48 @@ defmodule Shuttle.PollerTest do
 
     File.write!(
       heartbeat_file(),
-      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
+      Jason.encode!(%{
+        hb
+        | "at" => now - 4_000,
+          "booted_at" => now - 1_800_000,
+          # A different VM, so the pid check is not what holds here.
+          "os_pid" => "0"
+      })
     )
 
     {:ok, second} = start_quarantined_poller!(:test_poller_hb_launder_2)
+    send(second, :run_poll_cycle)
+
+    assert_held!(second, fiber_id)
+  end
+
+  test "a Poller restart inside a live VM holds, even after a human release" do
+    # No hard kill happened: the supervisor restarted the Poller. The record
+    # is released, fresh and long-run, but its OS pid is this VM's.
+    fiber_id = fresh_candidate!("tests/hb-poller-restart")
+    {:ok, first} = start_quarantined_poller!(:test_poller_hb_restart_1)
+    assert :ok = Poller.release_boot_quarantine(first)
+
+    assert_eventually(fn ->
+      assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    ref = Process.monitor(first)
+    Process.exit(first, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    File.write!(
+      heartbeat_file(),
+      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
+    )
+
+    MockRunner.reset()
+    fresh_candidate!(fiber_id)
+
+    {:ok, second} = start_quarantined_poller!(:test_poller_hb_restart_2)
     send(second, :run_poll_cycle)
 
     assert_held!(second, fiber_id)
@@ -2787,6 +2827,7 @@ defmodule Shuttle.PollerTest do
       # Stamped with this daemon's fleet identity and this machine's node name.
       assert hb["host"] == :sys.get_state(poller).own_host_id
       assert hb["node"] == Shuttle.DaemonHeartbeat.node_name()
+      assert hb["os_pid"] == System.pid()
       # And it keeps writing: `at` advances past the boot write.
       assert hb["at"] > hb["booted_at"]
     end)

@@ -58,6 +58,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
          "host" => "fleet-host",
          "node" => "login01",
          "held" => false,
+         "os_pid" => "111",
          "at" => @now - 4_000,
          "booted_at" => booted_at,
          "workers" => [],
@@ -70,7 +71,10 @@ defmodule Shuttle.DaemonHeartbeatTest do
   defp judge(read_result, observed \\ %{}) do
     DaemonHeartbeat.verdict(
       read_result,
-      Map.merge(%{now_ms: @now, live: [], host: "fleet-host", node: "login01"}, observed)
+      Map.merge(
+        %{now_ms: @now, live: [], host: "fleet-host", node: "login01", os_pid: "222"},
+        observed
+      )
     )
   end
 
@@ -118,6 +122,13 @@ defmodule Shuttle.DaemonHeartbeatTest do
       assert {:hold, _} = judge(hb(), %{stopped_at_s: boot_s + 600})
       assert {:release, _} = judge(hb(), %{stopped_at_s: boot_s - 1})
       assert {:release, _} = judge(hb(), %{stopped_at_s: nil})
+    end
+
+    test "a heartbeat from this same VM (a Poller restart), or with no pid, holds" do
+      assert {:hold, reason} = judge(hb(), %{os_pid: "111"})
+      assert reason =~ "Poller restart"
+      {:ok, record} = hb()
+      assert {:hold, _} = judge({:ok, Map.delete(record, "os_pid")})
     end
 
     test "a heartbeat stamped with another host id holds" do

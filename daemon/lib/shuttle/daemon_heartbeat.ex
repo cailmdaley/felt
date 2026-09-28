@@ -43,6 +43,7 @@ defmodule Shuttle.DaemonHeartbeat do
        "booted_at":1764499000000,  # when the writing incarnation booted
        "host":"…", "node":"…",     # its own_host_id and OS node name
        "held":false,               # was it still quarantined (or skewed)?
+       "os_pid":"12345",           # the beam's OS pid
        "workers":["fiber-uid", …], # runtime keys it had live at this write
        "boots":[…,1764499000000]}  # ring of recent boot times, newest last
 
@@ -181,6 +182,7 @@ defmodule Shuttle.DaemonHeartbeat do
          "host" => string_or_nil(json["host"]),
          "node" => string_or_nil(json["node"]),
          "held" => json["held"],
+         "os_pid" => string_or_nil(json["os_pid"]),
          "workers" => string_list(json["workers"]),
          "boots" => ms_list(json["boots"])
        }}
@@ -210,6 +212,7 @@ defmodule Shuttle.DaemonHeartbeat do
       "host" => Keyword.get(opts, :host),
       "node" => Keyword.get(opts, :node),
       "held" => Keyword.get(opts, :held),
+      "os_pid" => Keyword.get(opts, :os_pid),
       "workers" => opts |> Keyword.get(:workers, []) |> Enum.to_list() |> Enum.map(&to_string/1),
       "boots" => Keyword.get(opts, :boots, [])
     }
@@ -307,6 +310,7 @@ defmodule Shuttle.DaemonHeartbeat do
     * `:live` — the runtime keys reconciliation/adoption has just found live;
     * `:host` — this daemon's `own_host_id`;
     * `:node` — this machine's OS node name (`node_name/0`);
+    * `:os_pid` — this beam's OS pid (`System.pid/0`);
     * `:app` — the live keys whose worker is an app conversation (optional);
     * `:stopped_at_s` — the stop marker's mtime, epoch seconds (`stopped_at_s/1`;
       optional, `nil` when there is none);
@@ -338,6 +342,12 @@ defmodule Shuttle.DaemonHeartbeat do
          "daemon heartbeat was written by host #{inspect(hb["host"])} on node " <>
            "#{inspect(hb["node"])}, not this daemon (host #{inspect(Map.get(observed, :host))} " <>
            "on node #{inspect(Map.get(observed, :node))})"}
+
+      # The same OS pid means the same VM: the Poller restarted under its
+      # supervisor, which is no hard kill. A record without a pid holds too.
+      # (Pid reuse by a later VM can only turn a release into a hold.)
+      is_nil(hb["os_pid"]) or hb["os_pid"] == Map.get(observed, :os_pid) ->
+        {:hold, "daemon heartbeat has no OS pid or was written by this VM (a Poller restart)"}
 
       # An incarnation that was still held when it wrote this never had its
       # parked work released by anyone; a hard kill must not release it either.
