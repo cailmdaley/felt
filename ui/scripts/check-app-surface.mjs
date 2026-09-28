@@ -43,6 +43,15 @@ try {
   assert.equal(await page.getByRole('combobox', { name: 'Session', exact: true }).count(), 0, 'a Claude capture has no session choice')
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  // Every session-ledger read the page makes from here on, in order.
+  await page.evaluate(() => {
+    window.sessionReads = []
+    const originalFetch = window.fetch
+    window.fetch = (input, init) => {
+      if (String(input).includes('/api/v1/sessions')) window.sessionReads.push(String(input))
+      return originalFetch(input, init)
+    }
+  })
   await page.getByText('App conversation continuity', { exact: true }).click()
   const drawer = page.locator('.kbn-detail-controls-toggle')
   const verdicts = await page.locator('.kbn-ctl-foot .kbn-ctl-btn').allInnerTexts()
@@ -61,11 +70,27 @@ try {
   if (process.env.SCREENSHOT_DIR) {
     await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'detail-phone.png') })
   }
-  // Sessions: newest first, each with the one link its transcript supports.
+  // History: folded, and read only when unfolded.
+  const historyToggle = page.locator('.kbn-ctl-history-toggle')
+  assert.equal(await historyToggle.getAttribute('aria-expanded'), 'false', 'history starts folded')
+  assert.equal(await page.locator('.kbn-ctl-sessions').isVisible(), false, 'folded history shows no list')
+  assert.equal(await page.locator('.kbn-ctl-session').count(), 0, 'nothing drawn before the unfold')
+  if (process.env.SCREENSHOT_DIR) {
+    await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'history-folded-phone.png') })
+  }
+  assert.deepEqual(await page.evaluate(() => window.sessionReads), [], 'nothing is read before the unfold')
+  await historyToggle.click()
+  assert.equal(await historyToggle.getAttribute('aria-expanded'), 'true')
+  // Rows are drawn from the ledger at once, with ids to copy, before any host answers.
   const sessionRows = page.locator('.kbn-ctl-session')
   await sessionRows.first().waitFor()
-  assert.equal(await sessionRows.count(), 6, 'the folded history shows six sessions')
+  assert.equal(await sessionRows.count(), 6, 'the unfolded history shows six sessions')
+  assert.equal(await page.locator('.kbn-ctl-session-link.kbn-ctl-session-copy').count(), 6, 'rows are drawn before their links')
+  assert.equal(await page.locator('.kbn-ctl-history-count').innerText(), '8', 'the fold counts every session')
+  const reads = await page.evaluate(() => window.sessionReads)
+  assert.ok(reads[0].includes('/api/v1/sessions/composite?since_ms=0&uid=01KVBR2G7CXDWMG85592QW78ZZ'), `the ledger read names the card: ${reads[0]}`)
   const liveRow = sessionRows.nth(0)
+  await liveRow.locator('a.kbn-ctl-session-app').waitFor()
   assert.equal(await liveRow.getAttribute('data-session'), '01a0be38-6c36-7cd1-aec9-53a680d1f693', 'newest first')
   assert.equal(await liveRow.locator('.kbn-ctl-session-live').count(), 1, 'the running session is marked live')
   assert.equal(
@@ -79,24 +104,40 @@ try {
     ['claude-fable', 'claim'],
     'agent, and the kind when it is not a plain dispatch',
   )
-  const claimLink = claimRow.locator('a.kbn-ctl-session-web')
-  assert.equal(await claimLink.getAttribute('href'), 'https://claude.ai/code/session_01F466597A')
-  assert.equal(await claimLink.getAttribute('target'), '_blank', 'a claude.ai page opens in a new tab')
+  assert.equal(
+    await claimRow.locator('a.kbn-ctl-session-link.kbn-ctl-session-app').getAttribute('href'),
+    'claude://claude.ai/code/session_01F466597A',
+    'a bridged Claude session opens in the desktop app',
+  )
+  const claimWeb = claimRow.locator('a.kbn-ctl-session-alt.kbn-ctl-session-web')
+  assert.equal(await claimWeb.innerText(), 'web ↗')
+  assert.equal(await claimWeb.getAttribute('href'), 'https://claude.ai/code/session_01F466597A')
+  assert.equal(await claimWeb.getAttribute('target'), '_blank', 'its web page opens in a new tab')
   const unbridged = page.locator('.kbn-ctl-session[data-session="b69296a4-1023-4231-b372-270d7b3c4a9b"]')
-  assert.equal(await unbridged.locator('a').count(), 0, 'an unbridged session is never linked')
-  assert.equal(await unbridged.locator('button.kbn-ctl-session-copy').innerText(), 'b69296a4')
+  assert.equal(
+    await unbridged.locator('a.kbn-ctl-session-app').getAttribute('href'),
+    'claude://resume?session=b69296a4-1023-4231-b372-270d7b3c4a9b',
+    'an unbridged session on the board host resumes in the desktop app',
+  )
+  assert.equal(await unbridged.locator('a.kbn-ctl-session-web').count(), 0, 'and has no web page to offer')
   await page.locator('.kbn-ctl-session-more').click()
-  await page.waitForFunction(() => document.querySelectorAll('.kbn-ctl-session').length === 8)
+  assert.equal(await sessionRows.count(), 8, 'all N draws the rest at once')
   const foreign = page.locator('.kbn-ctl-session[data-session="c6239266-4ba7-4b72-9ba0-fb302c75458e"]')
   assert.equal(await foreign.locator('.kbn-ctl-session-host').innerText(), 'basalt-login-02', 'a session run elsewhere names its host')
-  assert.ok((await foreign.locator('a.kbn-ctl-session-web').getAttribute('href')).startsWith('https://claude.ai/'))
   const pi = page.locator('.kbn-ctl-session[data-session="01a042f4-6b7f-7f79-9c6c-8140ffd0126c"]')
+  await page.waitForTimeout(700)
   assert.equal(await pi.locator('a').count(), 0, 'a pi session has no link to open')
+  assert.equal(await foreign.locator('a').count(), 0, 'a stale host is not asked, so its row stays an id')
+  const linkReads = (await page.evaluate(() => window.sessionReads)).filter(url => url.includes('/sessions/links'))
+  assert.ok(linkReads.length > 0 && linkReads.every(url => !url.includes('basalt-login-02')), `stale host not asked: ${linkReads}`)
   const historyBox = await page.locator('.kbn-ctl-sessions').boundingBox()
   assert.ok(historyBox && historyBox.x + historyBox.width <= 390, 'phone: the history fits')
   if (process.env.SCREENSHOT_DIR) {
-    await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'sessions-phone.png') })
+    await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'history-open-phone.png') })
   }
+  await historyToggle.click()
+  assert.equal(await page.locator('.kbn-ctl-sessions').isVisible(), false, 'the fold closes again')
+  assert.equal(await page.locator('.kbn-ctl-history-count').innerText(), '8', 'and keeps its count')
 
   // Editing a live worker's settings must never substitute for a launch gesture.
   await page.evaluate(() => {
@@ -251,7 +292,26 @@ try {
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
   assert.deepEqual(errors, [])
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, session history links, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  // On a phone every Claude chat opens on claude.ai, and nothing asks for a desktop app.
+  const phone = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    reducedMotion: 'reduce',
+  })
+  await phone.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+  await phone.getByText('App conversation continuity', { exact: true }).click()
+  await phone.locator('.kbn-detail-controls-toggle').click()
+  await phone.locator('.kbn-ctl-history-toggle').click()
+  const phoneClaim = phone.locator('.kbn-ctl-session[data-session="f466597a-56d0-4047-8585-2159281ca18b"]')
+  await phoneClaim.locator('a.kbn-ctl-session-web').waitFor()
+  assert.equal(await phoneClaim.locator('a.kbn-ctl-session-link').getAttribute('href'), 'https://claude.ai/code/session_01F466597A', 'phone: claude.ai is the link')
+  await phone.waitForTimeout(600)
+  assert.equal(await phone.locator('.kbn-ctl-session a.kbn-ctl-session-app').count(), 0, 'phone: no desktop-app routes at all')
+  await phone.close()
+
+  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and session links (desktop and phone), Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }

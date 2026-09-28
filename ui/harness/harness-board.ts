@@ -1011,7 +1011,8 @@ const MOCK_SESSIONS: SessionRecord[] = [
  * more than the row shows folded (so "all N" has something to unfold), every
  * link shape the daemon answers — a bridged Claude session, an unbridged one,
  * the live Codex app thread, a Codex CLI thread, a pi session — and one run on
- * the foreign host, which names its host and resolves there.
+ * the foreign host, which names its host and, that host being stale in
+ * MOCK_ORIGINS, is not asked for its link.
  */
 const APP_UID = '01KVBR2G7CXDWMG85592QW78ZZ'
 const APP_SESSIONS: SessionRecord[] = [
@@ -1502,9 +1503,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     })
   }
 
-  if (url.includes('/api/v1/sessions/links')) return json(mockSessionLinks(url))
+  // Links arrive a beat after the ledger, as a real host's would, so the rows
+  // can be seen drawn first with ids to copy.
+  if (url.includes('/api/v1/sessions/links')) {
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    return json(mockSessionLinks(url))
+  }
   if (url.includes('/api/v1/sessions/composite')) {
-    return json({ host: LOCAL_HOST, records: [...MOCK_SESSIONS, ...APP_SESSIONS], origins: MOCK_ORIGINS })
+    const uid = new URL(url, 'http://harness').searchParams.get('uid')
+    const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)
+    return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
   }
 
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow

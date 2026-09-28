@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fiberSessions, parseSessionLinks, sessionTarget, sessionWhen } from './sessionHistory.js'
+import { claudeTargets, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'
@@ -57,37 +57,87 @@ describe('parseSessionLinks', () => {
   })
 })
 
-describe('sessionTarget', () => {
+describe('sessionTargets', () => {
   const entry = (over: Record<string, unknown>) =>
     parseSessionLinks({ links: [{ session: over.session, availability: 'available_local', ...over }] }).get(
       over.session as string,
     )
+  const primary = (...args: Parameters<typeof sessionTargets>) => sessionTargets(...args).primary
 
-  it('a bridged Claude session opens its claude.ai page from any viewer', () => {
-    const link = entry({ session: CLAUDE, harness: 'claude-code', url: 'https://claude.ai/code/session_01X' })
-    for (const [host, desktop] of [['ada', true], ['elsewhere', false]] as const) {
-      expect(sessionTarget(rec({}), link, host, desktop)).toMatchObject({
-        kind: 'web',
-        href: 'https://claude.ai/code/session_01X',
-      })
+  const BRIDGE = 'https://claude.ai/code/session_01X-y_Z'
+
+  it('a bridged Claude session opens in the desktop app with the web page beside it, from any desktop', () => {
+    const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
+    for (const host of ['ada', 'elsewhere']) {
+      const targets = sessionTargets(rec({}), link, host, true)
+      expect(targets).toEqual(claudeTargets(BRIDGE, true))
+      expect(targets.primary).toMatchObject({ kind: 'app', href: 'claude://claude.ai/code/session_01X-y_Z', label: 'claude' })
+      expect(targets.secondary).toMatchObject({ kind: 'web', href: BRIDGE, label: 'web' })
     }
+  })
+
+  it('on a phone the bridged session opens its claude.ai page, alone', () => {
+    const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
+    expect(sessionTargets(rec({}), link, 'ada', false)).toEqual({
+      primary: { kind: 'web', href: BRIDGE, label: 'claude.ai', title: BRIDGE },
+    })
+  })
+
+  it('a claude.ai URL that names no session opens on the web only', () => {
+    expect(claudeTargets('https://claude.ai/code/', true)).toEqual({
+      primary: { kind: 'web', href: 'https://claude.ai/code/', label: 'claude.ai', title: 'https://claude.ai/code/' },
+    })
+    expect(claudeTargets('https://claude.ai/code/session_01X?next=evil', true).secondary).toBeUndefined()
+  })
+
+  it('an unbridged Claude session resumes in the desktop app only from a desktop on its host', () => {
+    const link = entry({ session: CLAUDE, harness: 'claude-code' })
+    const row = rec({ host: 'ada' })
+    expect(primary(row, link, 'ada', true)).toMatchObject({ kind: 'app', href: `claude://resume?session=${CLAUDE}` })
+    expect(primary(row, link, 'ada', false).kind).toBe('copy')
+    expect(primary(row, link, 'hub', true).kind).toBe('copy')
+    // A transcript the daemon did not find is not resumable.
+    const missing = parseSessionLinks({ links: [{ session: CLAUDE, availability: 'transcript_missing' }] }).get(CLAUDE)
+    expect(primary(row, missing, 'ada', true).kind).toBe('copy')
   })
 
   it('a Codex thread opens in the app only from a desktop on the host that ran it', () => {
     const link = entry({ session: CODEX, harness: 'codex', desktop_link: `codex://threads/${CODEX}` })
     const row = rec({ session: CODEX, harness: 'codex', host: 'ada' })
-    expect(sessionTarget(row, link, 'ada', true)).toMatchObject({ kind: 'app', href: `codex://threads/${CODEX}` })
-    expect(sessionTarget(row, link, 'ada', false)).toMatchObject({ kind: 'copy', copy: CODEX })
-    expect(sessionTarget(row, link, 'hub', true)).toMatchObject({ kind: 'copy', copy: CODEX })
+    expect(primary(row, link, 'ada', true)).toMatchObject({ kind: 'app', href: `codex://threads/${CODEX}` })
+    expect(primary(row, link, 'ada', false)).toMatchObject({ kind: 'copy', copy: CODEX })
+    expect(primary(row, link, 'hub', true)).toMatchObject({ kind: 'copy', copy: CODEX })
   })
 
-  it('never builds a link the daemon did not read', () => {
-    // pi, an unbridged Claude session, an unknown one, and a forged scheme.
-    expect(sessionTarget(rec({ session: PI }), entry({ session: PI, harness: 'pi' }), 'ada', true).kind).toBe('copy')
-    expect(sessionTarget(rec({}), entry({ session: CLAUDE, harness: 'claude-code' }), 'ada', true).kind).toBe('copy')
-    expect(sessionTarget(rec({ session: CODEX, harness: 'codex' }), undefined, 'ada', true).kind).toBe('copy')
+  it('never links what the daemon did not read for this very session', () => {
+    expect(primary(rec({ session: PI }), entry({ session: PI, harness: 'pi' }), 'ada', true).kind).toBe('copy')
+    expect(primary(rec({}), entry({ session: CLAUDE, harness: 'claude-code' }), 'hub', true).kind).toBe('copy')
+    expect(primary(rec({ session: CODEX, harness: 'codex' }), undefined, 'ada', true).kind).toBe('copy')
+    // Not claude.ai, a forged scheme, and another session's thread.
+    expect(primary(rec({}), entry({ session: CLAUDE, url: 'https://evil.example/claude.ai/' }), 'ada', true).kind).toBe('copy')
     const forged = entry({ session: CODEX, url: 'javascript:alert(1)', desktop_link: 'codex://threads/x?y' })
-    expect(sessionTarget(rec({ session: CODEX }), forged, 'ada', true)).toMatchObject({ kind: 'copy', label: CODEX.slice(0, 8) })
+    expect(primary(rec({ session: CODEX }), forged, 'ada', true)).toMatchObject({ kind: 'copy', label: CODEX.slice(0, 8) })
+    const other = entry({ session: CODEX, desktop_link: `codex://threads/${PI}` })
+    expect(primary(rec({ session: CODEX }), other, 'ada', true).kind).toBe('copy')
+  })
+})
+
+describe('linkRequests', () => {
+  it('groups unlinked rows by host, skipping stale hosts and rows already linked', () => {
+    const rows = [
+      rec({ session: CLAUDE, host: 'ada' }),
+      rec({ session: CODEX, host: 'ada' }),
+      rec({ session: PI, host: 'hub' }),
+      rec({ session: '00000000-0000-4000-8000-000000000001', host: 'stale' }),
+    ]
+    const requests = linkRequests(rows, new Set([CODEX]), {
+      ada: { kind: 'local', stale: false },
+      stale: { kind: 'remote', stale: true },
+    } as never)
+    expect([...requests]).toEqual([
+      ['ada', [CLAUDE]],
+      ['hub', [PI]],
+    ])
   })
 })
 

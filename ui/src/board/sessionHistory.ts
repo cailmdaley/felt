@@ -1,18 +1,21 @@
 /**
- * The card drawer's History row: every harness session the fleet's ledgers
- * paired with this fiber, newest first, each with the one link that opens
- * exactly that chat — the claude.ai bridge URL for a Claude Code session, the
- * Codex app's thread route for a Codex one — or, where no link exists, its
- * short id to copy.
+ * The card drawer's History: a folded line (`HISTORY 38 ▾`) that unfolds to
+ * every harness session the fleet's ledgers paired with this fiber, newest
+ * first, each with the link that opens exactly that chat — in the Claude
+ * desktop app (or on claude.ai, from a phone) for a Claude Code session, in the
+ * Codex app for a Codex one — or, where no link exists, its short id to copy.
+ * {@link sessionTargets} makes that choice.
  *
- * Two reads, both lazy (the drawer asks when it first unfolds): the composite
- * session ledger (`/api/v1/sessions/composite`) for the list, then
- * `/api/v1/sessions/links` for only the rows on screen, one request per host
- * that ran them, since a transcript lives on that host.
+ * Nothing is read until the first unfold. Then two reads: this fiber's
+ * pairings from the composite session ledger (`/api/v1/sessions/composite?uid=`),
+ * drawn at once with copy-id targets; then `/api/v1/sessions/links` for only
+ * the rows on screen, one request per host that ran them (a transcript lives
+ * on that host), each host's links swapped in as it answers. A host the
+ * composite reports stale is not asked.
  */
 import { validDesktopThreadLink } from './appConversation.js'
 import { isoDayLocal } from './civilDay.js'
-import { parseSessions, type SessionRecord } from './views/TemporalData.js'
+import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
 /** Rows shown before "all N" unfolds the rest. */
 export const SESSIONS_SHOWN = 6
@@ -65,32 +68,81 @@ export type SessionTarget =
   | { kind: 'app'; href: string; label: string; title: string }
   | { kind: 'copy'; label: string; title: string; copy: string }
 
+/** A row's way back in, and optionally a second one beside it (`web ↗`). */
+export interface SessionTargets {
+  primary: SessionTarget
+  secondary?: SessionTarget
+}
+
+const CLAUDE_WEB = 'https://claude.ai/'
+/** A bridge URL naming one session: `https://claude.ai/code/session_<id>`. */
+const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/((?:cse|session)_[A-Za-z0-9_-]+)$/
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
- * What a row's link does. A claude.ai URL opens anywhere. A Codex thread route
- * opens only in the Codex app of the host that ran it, so it is offered only
- * when the board is that host's own and the viewer is at a desktop; otherwise,
- * like a pi session or one never bridged, the row offers its id to copy.
- * Nothing here is built from an id — only what the daemon read is linked.
+ * Where a bridged Claude chat opens. At a desktop, in the Claude app —
+ * `claude://claude.ai/code/session_<id>` opens the local twin of the session
+ * where there is one, else the bridge viewer, from any machine with the app —
+ * with the web page beside it; on a phone, the web page, which the Claude app
+ * there answers as a universal link. A claude.ai URL of any other shape opens
+ * on the web only.
  */
-export function sessionTarget(
+export function claudeTargets(url: string, desktop: boolean): SessionTargets {
+  const web: SessionTarget = { kind: 'web', href: url, label: 'claude.ai', title: url }
+  const id = CLAUDE_SESSION.exec(url)?.[1]
+  if (!desktop || !id) return { primary: web }
+  const app = `claude://claude.ai/code/${id}`
+  return {
+    primary: { kind: 'app', href: app, label: 'claude', title: app },
+    secondary: { ...web, label: 'web' },
+  }
+}
+
+/**
+ * What a row's links do — the one place the choice is made.
+ *
+ *   · a bridged Claude session → {@link claudeTargets};
+ *   · an unbridged Claude session whose transcript the daemon found →
+ *     `claude://resume?session=<uuid>`, which imports the CLI session into the
+ *     desktop app. It needs the transcript on the viewer's machine, so it is
+ *     offered only at a desktop on the host that ran it;
+ *   · a Codex thread → its `codex://threads/<id>` route, under the same gate,
+ *     and only when the route names this very session;
+ *   · anything else — a pi session, a host that has not answered — offers its
+ *     id to copy.
+ *
+ * "The host that ran it" is read as the board's own host: a viewer at that
+ * daemon's desktop.
+ */
+export function sessionTargets(
   record: Pick<SessionRecord, 'session' | 'host'>,
   link: SessionLinkEntry | undefined,
   boardHost: string,
   desktop: boolean,
-): SessionTarget {
+): SessionTargets {
   const url = link?.url
-  if (url && url.startsWith('https://')) {
-    return { kind: 'web', href: url, label: 'claude.ai', title: url }
+  if (url && url.startsWith(CLAUDE_WEB)) return claudeTargets(url, desktop)
+  const local = desktop && record.host === boardHost
+  if (
+    local &&
+    link?.harness === 'claude-code' &&
+    link.availability === 'available_local' &&
+    UUID.test(record.session)
+  ) {
+    const resume = `claude://resume?session=${record.session}`
+    return { primary: { kind: 'app', href: resume, label: 'claude', title: resume } }
   }
   const thread = validDesktopThreadLink(link?.desktopLink)
-  if (thread && desktop && record.host === boardHost) {
-    return { kind: 'app', href: thread, label: 'codex', title: thread }
+  if (local && thread === `codex://threads/${record.session}`) {
+    return { primary: { kind: 'app', href: thread, label: 'codex', title: thread } }
   }
   return {
-    kind: 'copy',
-    label: record.session.slice(0, 8),
-    title: `${record.session}${record.host ? ` on ${record.host}` : ''}`,
-    copy: record.session,
+    primary: {
+      kind: 'copy',
+      label: record.session.slice(0, 8),
+      title: `${record.session}${record.host ? ` on ${record.host}` : ''}`,
+      copy: record.session,
+    },
   }
 }
 
@@ -107,6 +159,23 @@ export function sessionWhen(ms: number, nowMs: number = Date.now()): string {
   return `${day} ${time}`
 }
 
+/** The hosts to ask for links, with their sessions: every host that ran a
+ *  row still unlinked, except one the composite reports stale. */
+export function linkRequests(
+  rows: readonly SessionRecord[],
+  known: ReadonlySet<string>,
+  origins: TemporalOrigins,
+): Map<string, string[]> {
+  const byHost = new Map<string, string[]>()
+  for (const row of rows) {
+    if (known.has(row.session)) continue
+    const host = row.host ?? ''
+    if (isOriginStale(origins, row.host)) continue
+    byHost.set(host, [...(byHost.get(host) ?? []), row.session])
+  }
+  return byHost
+}
+
 export interface SessionHistoryContext {
   shuttleBase: string
   uid: string
@@ -119,49 +188,77 @@ export interface SessionHistoryContext {
   now?: () => number
 }
 
+function targetEl(target: SessionTarget, cls: string): HTMLElement {
+  if (target.kind === 'copy') {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = `${cls} kbn-ctl-session-copy`
+    btn.textContent = target.label
+    btn.title = target.title
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      void navigator.clipboard?.writeText(target.copy).then(
+        () => {
+          btn.textContent = 'copied'
+          setTimeout(() => (btn.textContent = target.label), 1200)
+        },
+        () => undefined,
+      )
+    })
+    return btn
+  }
+  const a = document.createElement('a')
+  a.className = `${cls} kbn-ctl-session-${target.kind}`
+  a.href = target.href
+  a.textContent = `${target.label} ↗`
+  a.title = target.title
+  if (target.kind === 'web') {
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+  }
+  a.addEventListener('click', (e) => e.stopPropagation())
+  return a
+}
+
 /**
- * The History row's value: a list that fills itself on `load()`. Returns
- * `null` from `load` when the fiber has no ledgered sessions, so the caller
- * can drop the row rather than show an empty one.
+ * The History fold: a toggle line and the list under it. Reads nothing until
+ * first unfolded.
  */
-export function buildSessionHistory(ctx: SessionHistoryContext): {
-  el: HTMLElement
-  load: () => Promise<boolean>
-} {
-  const doFetch = ctx.fetch ?? fetch.bind(globalThis)
+export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
+  const doFetch: typeof fetch = (input, init) => (ctx.fetch ?? globalThis.fetch)(input, init)
   const el = document.createElement('div')
-  el.className = 'kbn-ctl-sessions'
+  el.className = 'kbn-ctl-history'
+
+  const toggle = document.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'kbn-ctl-history-toggle'
+  toggle.setAttribute('aria-expanded', 'false')
+  const label = document.createElement('span')
+  label.className = 'kbn-ctl-label'
+  label.textContent = 'History'
+  const count = document.createElement('span')
+  count.className = 'kbn-ctl-history-count'
+  const chevron = document.createElement('span')
+  chevron.className = 'kbn-ctl-history-chevron'
+  chevron.setAttribute('aria-hidden', 'true')
+  chevron.textContent = '▾'
+  const reading = document.createElement('span')
+  reading.className = 'kbn-ctl-history-reading'
+  reading.append(count, chevron)
+  toggle.append(label, reading)
+
+  const body = document.createElement('div')
+  body.className = 'kbn-ctl-sessions'
+  body.hidden = true
   const list = document.createElement('ol')
   list.className = 'kbn-ctl-session-list'
-  el.append(list)
+  body.append(list)
+  el.append(toggle, body)
 
   let boardHost = ''
+  let origins: TemporalOrigins = {}
   const links = new Map<string, SessionLinkEntry>()
-
-  const readLinks = async (rows: SessionRecord[]): Promise<void> => {
-    const byHost = new Map<string, string[]>()
-    for (const row of rows) {
-      if (links.has(row.session)) continue
-      const host = row.host ?? ''
-      byHost.set(host, [...(byHost.get(host) ?? []), row.session])
-    }
-    await Promise.all(
-      [...byHost].flatMap(([host, sessions]) => {
-        const batches: string[][] = []
-        for (let i = 0; i < sessions.length; i += LINKS_BATCH) batches.push(sessions.slice(i, i + LINKS_BATCH))
-        return batches.map(async (batch) => {
-          const query = `sessions=${batch.join(',')}${host ? `&host=${encodeURIComponent(host)}` : ''}`
-          try {
-            const res = await doFetch(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`)
-            if (!res.ok) return
-            for (const [id, entry] of parseSessionLinks(await res.json())) links.set(id, entry)
-          } catch {
-            /* a host that cannot answer leaves its rows unlinked */
-          }
-        })
-      }),
-    )
-  }
+  const drawn = new Map<string, { record: SessionRecord; li: HTMLLIElement }>()
 
   const row = (record: SessionRecord): HTMLLIElement => {
     const li = document.createElement('li')
@@ -180,60 +277,63 @@ export function buildSessionHistory(ctx: SessionHistoryContext): {
     if (record.kind !== 'dispatch') put('kbn-ctl-session-kind', record.kind)
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)
     if (record.session === ctx.liveSession) put('kbn-ctl-session-live', 'live')
-
-    const target = sessionTarget(record, links.get(record.session), boardHost, ctx.desktop)
-    if (target.kind === 'copy') {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'kbn-ctl-session-link kbn-ctl-session-copy'
-      btn.textContent = target.label
-      btn.title = target.title
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void navigator.clipboard?.writeText(target.copy).then(
-          () => {
-            btn.textContent = 'copied'
-            setTimeout(() => (btn.textContent = target.label), 1200)
-          },
-          () => undefined,
-        )
-      })
-      li.append(btn)
-    } else {
-      const a = document.createElement('a')
-      a.className = `kbn-ctl-session-link kbn-ctl-session-${target.kind}`
-      a.href = target.href
-      a.textContent = `${target.label} ↗`
-      a.title = target.title
-      if (target.kind === 'web') {
-        a.target = '_blank'
-        a.rel = 'noopener noreferrer'
-      }
-      a.addEventListener('click', (e) => e.stopPropagation())
-      li.append(a)
-    }
+    const targets = sessionTargets(record, links.get(record.session), boardHost, ctx.desktop)
+    li.append(targetEl(targets.primary, 'kbn-ctl-session-link'))
+    if (targets.secondary) li.append(targetEl(targets.secondary, 'kbn-ctl-session-alt'))
     return li
   }
 
-  const load = async (): Promise<boolean> => {
+  const draw = (records: readonly SessionRecord[]): void => {
+    for (const record of records) {
+      const li = row(record)
+      const seen = drawn.get(record.session)
+      if (seen) seen.li.replaceWith(li)
+      else list.append(li)
+      drawn.set(record.session, { record, li })
+    }
+  }
+
+  /** Ask each host for its rows' links; redraw that host's rows on answer. */
+  const linkUp = (rows: readonly SessionRecord[]): Promise<unknown> =>
+    Promise.all(
+      [...linkRequests(rows, new Set(links.keys()), origins)].flatMap(([host, sessions]) => {
+        const batches: string[][] = []
+        for (let i = 0; i < sessions.length; i += LINKS_BATCH) batches.push(sessions.slice(i, i + LINKS_BATCH))
+        return batches.map(async (batch) => {
+          const query = `sessions=${batch.join(',')}${host ? `&host=${encodeURIComponent(host)}` : ''}`
+          try {
+            const res = await doFetch(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`)
+            if (!res.ok) return
+            const answered = parseSessionLinks(await res.json())
+            const asked = new Set(batch)
+            for (const [id, entry] of answered) if (asked.has(id)) links.set(id, entry)
+            draw(batch.map((id) => drawn.get(id)?.record).filter((r): r is SessionRecord => !!r))
+          } catch {
+            /* a host that cannot answer leaves its rows as ids to copy */
+          }
+        })
+      }),
+    )
+
+  const load = async (): Promise<void> => {
     let records: SessionRecord[] = []
     try {
-      const res = await doFetch(`${ctx.shuttleBase}/api/v1/sessions/composite?since_ms=0`)
+      const res = await doFetch(
+        `${ctx.shuttleBase}/api/v1/sessions/composite?since_ms=0&uid=${encodeURIComponent(ctx.uid)}`,
+      )
       if (res.ok) {
         const parsed = parseSessions(await res.json(), { host: '', records: [] })
         boardHost = parsed.host
+        origins = parsed.origins ?? {}
         records = parsed.records
       }
     } catch {
-      /* no ledger, no row */
+      /* no ledger: an empty history */
     }
     const sessions = fiberSessions(records, ctx.uid)
-    if (sessions.length === 0) return false
-
+    count.textContent = String(sessions.length)
     const shown = sessions.slice(0, SESSIONS_SHOWN)
-    await readLinks(shown)
-    list.replaceChildren(...shown.map(row))
-
+    draw(shown)
     const rest = sessions.slice(SESSIONS_SHOWN)
     if (rest.length > 0) {
       const more = document.createElement('button')
@@ -242,16 +342,27 @@ export function buildSessionHistory(ctx: SessionHistoryContext): {
       more.textContent = `all ${sessions.length}`
       more.addEventListener('click', (e) => {
         e.stopPropagation()
-        more.disabled = true
-        void readLinks(rest).then(() => {
-          list.append(...rest.map(row))
-          more.remove()
-        })
+        more.remove()
+        draw(rest)
+        void linkUp(rest)
       })
-      el.append(more)
+      body.append(more)
     }
-    return true
+    void linkUp(shown)
   }
 
-  return { el, load }
+  let loaded = false
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const opening = body.hidden
+    body.hidden = !opening
+    toggle.setAttribute('aria-expanded', String(opening))
+    el.classList.toggle('kbn-ctl-history-open', opening)
+    if (opening && !loaded) {
+      loaded = true
+      void load()
+    }
+  })
+
+  return el
 }

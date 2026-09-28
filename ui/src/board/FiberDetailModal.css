@@ -2273,16 +2273,46 @@ a.kbn-detail-aloft { text-decoration: none; }
 }
 
 
-/* ── Sessions: the fiber's past chats, newest first, each a way back in ── */
-.kbn-ctl-history[hidden] { display: none; }
-.kbn-ctl-history > .kbn-ctl-field > .kbn-ctl-label { align-self: start; padding-top: 3px; }
+/* ── History: folded to one line, unfolding to the fiber's past chats ── */
+.kbn-ctl-history-toggle {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.kbn-ctl-history-reading {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  color: var(--ctl-muted);
+}
+.kbn-ctl-history-count:empty { display: none; }
+.kbn-ctl-history-chevron {
+  color: var(--ctl-faint);
+  transition: transform 120ms ease;
+}
+.kbn-ctl-history-open .kbn-ctl-history-chevron { transform: rotate(180deg); }
+.kbn-ctl-history-toggle:hover .kbn-ctl-history-reading,
+.kbn-ctl-history-toggle:hover .kbn-ctl-label { color: #1B1611; }
 .kbn-ctl-sessions {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
   min-width: 0;
-  width: 100%;
+  margin: 6px 0 0 68px;
+}
+.kbn-ctl-sessions[hidden] { display: none; }
+@container kbn-detail (max-width: 560px) {
+  .kbn-ctl-sessions { margin-left: 0; }
 }
 .kbn-ctl-session-list {
   list-style: none;
@@ -2314,9 +2344,9 @@ a.kbn-detail-aloft { text-decoration: none; }
 .kbn-ctl-session-host { flex: none; color: var(--ctl-faint); }
 .kbn-ctl-session-live { flex: none; color: var(--kbn-agent, #3D5BA0); font-weight: 500; }
 .kbn-ctl-session-live::before { content: '● '; }
-.kbn-ctl-session-link {
+.kbn-ctl-session-link,
+.kbn-ctl-session-alt {
   flex: none;
-  margin-left: auto;
   padding: 0;
   border: none;
   background: none;
@@ -2325,7 +2355,10 @@ a.kbn-detail-aloft { text-decoration: none; }
   text-decoration: none;
   cursor: pointer;
 }
-.kbn-ctl-session-link:hover { text-decoration: underline; }
+.kbn-ctl-session-link { margin-left: auto; }
+.kbn-ctl-session-alt { color: var(--ctl-faint); }
+.kbn-ctl-session-link:hover,
+.kbn-ctl-session-alt:hover { text-decoration: underline; }
 .kbn-ctl-session-copy { color: var(--ctl-faint); }
 .kbn-ctl-session-copy:hover { color: #1B1611; text-decoration: none; }
 .kbn-ctl-session-more {

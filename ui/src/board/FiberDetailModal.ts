@@ -2352,8 +2352,8 @@ export class FiberDetailModal {
    * it, how it recurs, where it runs, when it is due, how its last run went.
    * Unfolded, four things in the order they are reached for: the composer (a
    * message and the dispatch verbs that carry it), the ledger (what the next
-   * launch reads, beside the card's own due day and parent), the history (the
-   * fiber's past sessions, each linked to its own chat — see
+   * launch reads, beside the card's own due day and parent), the history
+   * (folded: the fiber's past sessions, each linked to its own chat — see
    * `sessionHistory.ts`), and the verdict that closes the card — Temper or
    * Discard, `tempered` true or false.
    *
@@ -2405,8 +2405,7 @@ export class FiberDetailModal {
     })
 
     wrap.append(toggle, body)
-    const onFirstOpen = this.buildControlsBody(body, card, shuttleManaged, reflect, (watch) => watchers.push(watch))
-    toggle.addEventListener('click', onFirstOpen, { once: true })
+    this.buildControlsBody(body, card, shuttleManaged, reflect, (watch) => watchers.push(watch))
     return wrap
   }
 
@@ -2416,7 +2415,7 @@ export class FiberDetailModal {
     shuttleManaged: boolean,
     reflect: (patch: Partial<KanbanCard>) => void,
     watch: (fn: (view: KanbanCard) => void) => void,
-  ): () => void {
+  ): void {
     // A drag or click inside a field is the field's own — it must not reach the
     // header's drag or the panel's click-away.
     const swallow = (el: HTMLElement): void => {
@@ -2458,31 +2457,20 @@ export class FiberDetailModal {
     }
     foot.append(errorEl, statusEl, discard, temper)
 
-    // The fiber's past sessions, each opening its own chat. Read when the
-    // drawer first unfolds, and absent when the ledgers hold none.
-    const history = document.createElement('div')
-    history.className = 'kbn-ctl-fields kbn-ctl-history'
-    history.hidden = true
-    let load = (): void => {}
-    if (card.uid) {
-      const sessions = buildSessionHistory({
-        shuttleBase: this.shuttleBase,
-        uid: card.uid,
-        fiberHost: card.shuttleHost,
-        liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
-        desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
-      })
-      swallow(sessions.el)
-      history.append(field('History', sessions.el))
-      load = () => {
-        void sessions.load().then((any) => {
-          history.hidden = !any
+    // The fiber's past sessions, each opening its own chat — folded, and
+    // read only when first unfolded.
+    const history = card.uid
+      ? buildSessionHistory({
+          shuttleBase: this.shuttleBase,
+          uid: card.uid,
+          fiberHost: card.shuttleHost,
+          liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
+          desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
         })
-      }
-    }
+      : null
+    if (history) swallow(history)
 
-    body.append(ledger, history, foot)
-    return load
+    body.append(...[ledger, history, foot].filter((el): el is HTMLElement => el !== null))
   }
 
   /**
