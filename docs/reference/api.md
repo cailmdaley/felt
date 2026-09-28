@@ -317,6 +317,13 @@ host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
 `OriginRouter.forward_get/4` carries no headers either way).
 `/sent-files/all` is the host-scoped feed with the composite.
 
+Neither is defended by that 304, and neither needs to be: the `ETag` is over
+`events.jsonl`, the live hook stream for every session on the host, which moves
+every few seconds — so a conditional request on a busy host essentially never
+hits. What makes both routes cheap is `Shuttle.SentFiles.Follower`, which holds
+the parsed sent-file events in memory and reads only the bytes appended since
+its last poll. A request costs one `stat`; the whole file is read once, at boot.
+
 The composite siblings are:
 
 | Route | Reads | Serves |

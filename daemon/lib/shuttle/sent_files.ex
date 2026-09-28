@@ -186,8 +186,38 @@ defmodule Shuttle.SentFiles do
     follower = Keyword.get(opts, :follower, Shuttle.SentFiles.Follower)
 
     case Shuttle.SentFiles.Follower.events(follower, path) do
-      {:ok, events} -> events
-      :miss -> scan_file(path)
+      {:ok, events} ->
+        events
+
+      :miss ->
+        warn_fallback(path)
+        scan_file(path)
+    end
+  end
+
+  # A `:miss` is correct but costs a full re-stream of a stream that reaches
+  # tens of megabytes — the very cost this module's follower exists to remove.
+  # Three unrelated conditions collapse into it: the follower is following a
+  # different path, it is not running, or the call timed out. Unlogged, a
+  # daemon in any of those states looks exactly like one where the follower
+  # never helped, which on a CPU-capped host is the worst thing to have to
+  # diagnose from load alone. Rate-limited to one line a minute because the
+  # miss repeats on every poll by construction.
+  @fallback_log_interval_ms 60_000
+
+  defp warn_fallback(path) do
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get({__MODULE__, :last_fallback_log}, nil)
+
+    if is_nil(last) or now - last >= @fallback_log_interval_ms do
+      :persistent_term.put({__MODULE__, :last_fallback_log}, now)
+
+      require Logger
+
+      Logger.warning(
+        "sent-files: follower miss for #{path}; re-streaming the whole file. " <>
+          "Check that Shuttle.SentFiles.Follower is running and following this path."
+      )
     end
   end
 

@@ -148,5 +148,11 @@ validator is its window, quantized to the minute, plus the `{mtime, size}` of
 the events file and its rotated sibling; the ledgers validate on their files.
 A composite's validator adds each remote's cached copy of the feed.
 
+The `304` is a bandwidth saving, not a cost model. A validator over
+`events.jsonl` moves every few seconds on a busy host, so the sent-files routes
+never rely on it: `Shuttle.SentFiles.Follower` keeps their parsed events in
+memory and reads only what has been appended since its last poll, which is what
+makes a request cost one `stat` rather than a full re-stream.
+
 For the design behind the joins, see the [Architecture
 notes](https://github.com/cailmdaley/felt/blob/main/AGENTS.md).
