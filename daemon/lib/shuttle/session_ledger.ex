@@ -289,9 +289,7 @@ defmodule Shuttle.SessionLedger do
   rather than a guess — a wrong harness label is worse than none.
   """
   @spec harness_for_cli(String.t() | nil) :: String.t() | nil
-  def harness_for_cli("claude"), do: "claude-code"
-  def harness_for_cli(cli) when cli in ["codex", "pi"], do: cli
-  def harness_for_cli(_), do: nil
+  def harness_for_cli(cli), do: Shuttle.Harnesses.ledger_name(cli)
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil

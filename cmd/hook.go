@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
 
@@ -130,14 +131,14 @@ func harnessFor(transcriptPath string) string {
 		claudeDir = filepath.Join(home, ".claude")
 	}
 	for prefix, harness := range map[string]string{
-		filepath.Join(claudeDir, "projects") + string(filepath.Separator): "claude-code",
-		filepath.Join(home, ".pi") + string(filepath.Separator):           "pi",
+		filepath.Join(claudeDir, "projects") + string(filepath.Separator): messaging.LedgerHarnessName("claude"),
+		filepath.Join(home, ".pi") + string(filepath.Separator):           messaging.LedgerHarnessName("pi"),
 	} {
 		if transcriptPath != "" && strings.HasPrefix(transcriptPath, prefix) {
 			return harness
 		}
 	}
-	return "codex"
+	return messaging.LedgerHarnessName("codex")
 }
 
 // ----------------------------------------------------------------------------
@@ -505,7 +506,7 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 	// Codex sessions: no Skill tool to activate, and the deny would deadlock
 	// the loop. harnessFor carries the transcript_path discriminator, shared
 	// with `felt hook event` so both agree on what a session is.
-	if harnessFor(input.TranscriptPath) != "claude-code" {
+	if messaging.NormalizeHarness(harnessFor(input.TranscriptPath)) != "claude" {
 		_ = os.WriteFile(flagPath, nil, 0644)
 		return nil
 	}

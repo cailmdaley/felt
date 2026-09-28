@@ -89,6 +89,10 @@ func ErrorCode(err error) string {
 }
 
 func FormatAddress(host, harness, id string) (string, error) {
+	return formatAddress(host, NormalizeHarness(harness), id)
+}
+
+func formatAddress(host, harness, id string) (string, error) {
 	if err := validatePart("host", host); err != nil {
 		return "", err
 	}
@@ -124,11 +128,11 @@ func ParseAddress(raw string) (Address, error) {
 	if err := validatePart("harness", h); err != nil {
 		return Address{}, err
 	}
-	canonical, err := FormatAddress(u.Host, h, id)
+	canonical, err := formatAddress(u.Host, h, id)
 	if err != nil || canonical != raw {
 		return Address{}, errCode("invalid_address", "address is not canonical")
 	}
-	return Address{Host: u.Host, Harness: h, ID: id}, nil
+	return Address{Host: u.Host, Harness: NormalizeHarness(h), ID: id}, nil
 }
 
 func validatePart(name, s string) error {

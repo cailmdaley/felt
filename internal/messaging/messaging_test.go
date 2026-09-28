@@ -29,11 +29,72 @@ func TestAddressRoundTrip(t *testing.T) {
 		t.Fatalf("bad parse: %#v", a)
 	}
 }
+
+func TestHarnessAliasesNormalizeAndMatchSharedFixture(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "daemon", "test", "fixtures", "harness_names.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Names map[string]string `json:"names"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(addressHarnessNames, fixture.Names) {
+		t.Fatalf("Go address harness names = %#v, shared fixture = %#v", addressHarnessNames, fixture.Names)
+	}
+	for spelling, canonical := range fixture.Names {
+		if got := NormalizeHarness(spelling); got != canonical {
+			t.Errorf("NormalizeHarness(%q) = %q, want %q", spelling, got, canonical)
+		}
+		address, err := FormatAddress("host", spelling, "session/id")
+		if err != nil {
+			t.Fatalf("FormatAddress(%q): %v", spelling, err)
+		}
+		want := "shuttle://host/" + canonical + "/session%2Fid"
+		if address != want {
+			t.Errorf("FormatAddress(%q) = %q, want %q", spelling, address, want)
+		}
+		parsed, err := ParseAddress("shuttle://host/" + spelling + "/session%2Fid")
+		if err != nil {
+			t.Fatalf("ParseAddress(%q): %v", spelling, err)
+		}
+		if parsed.Harness != canonical || parsed.ID != "session/id" {
+			t.Errorf("ParseAddress(%q) = %#v", spelling, parsed)
+		}
+	}
+	for canonical, want := range map[string]string{"claude": "claude-code", "codex": "codex", "pi": "pi"} {
+		if got := LedgerHarnessName(canonical); got != want {
+			t.Errorf("LedgerHarnessName(%q) = %q, want %q", canonical, got, want)
+		}
+	}
+}
 func TestParseAddressRejectsNoncanonical(t *testing.T) {
 	for _, s := range []string{"http://h/codex/id", "shuttle://H/codex/id", "shuttle://h/codex/id/extra", "shuttle://h/codex/%69d", "shuttle://h/codex/id?q=x"} {
 		if _, err := ParseAddress(s); err == nil {
 			t.Errorf("accepted %q", s)
 		}
+	}
+}
+
+func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	if err := RegisterMailbox("claude", "session", "host", "/work", true); err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		Address:   "shuttle://host/claude-code/session",
+		Text:      "context",
+		MessageID: "alias",
+		Wake:      false,
+	}
+	receipt, err := Send(context.Background(), "host", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Address != "shuttle://host/claude/session" {
+		t.Fatalf("receipt address = %q, want canonical address", receipt.Address)
 	}
 }
 

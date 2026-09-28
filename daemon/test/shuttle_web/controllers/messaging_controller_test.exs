@@ -220,6 +220,19 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["status"] == "accepted"
   end
 
+  test "ledger harness aliases normalize to canonical addresses" do
+    request = %{
+      "address" => "shuttle://edge/claude-code/native%2Fid",
+      "text" => "hello",
+      "message_id" => "harness-alias"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:forwarded, %{"address" => "shuttle://local/claude/native%2Fid"}}
+    assert receipt["address"] == "shuttle://edge/claude/native%2Fid"
+  end
+
   test "omitted wake defaults to an active task request" do
     request = %{
       "address" => "shuttle://edge/pi/p%2F1",

@@ -1,7 +1,7 @@
 defmodule Shuttle.Messaging do
   @moduledoc "Fleet discovery and strictly host-addressed worker messaging."
 
-  alias Shuttle.{Felt, OriginRouter, Poller, RegistryCommon, Remote}
+  alias Shuttle.{Felt, Harnesses, OriginRouter, Poller, RegistryCommon, Remote}
 
   @local_message_timeout_ms 20_000
   @remote_message_timeout_ms 25_000
@@ -77,6 +77,7 @@ defmodule Shuttle.Messaging do
   defp send_message(payload, mode) do
     with {:ok, request} <- validate_message(payload, mode),
          {:ok, address} <- parse_address(request.address),
+         request <- normalize_message_address(request, address),
          decision <- OriginRouter.route_host(address.host),
          result <- deliver(decision, request, address) do
       result
@@ -451,8 +452,8 @@ defmodule Shuttle.Messaging do
 
             if valid_part?(host) and valid_part?(harness) and byte_size(parsed.native) <= 4_096 and
                  not String.contains?(parsed.native, <<0>>) and
-                 build_address(host, parsed) == value,
-               do: {:ok, parsed},
+                 format_address(host, harness, parsed.native) == value,
+               do: {:ok, %{parsed | harness: Harnesses.normalize(harness)}},
                else: {:error, 400, "address is not canonical"}
 
           _ ->
@@ -466,9 +467,16 @@ defmodule Shuttle.Messaging do
     ArgumentError -> {:error, 400, "address contains invalid escaping"}
   end
 
+  defp normalize_message_address(request, address) do
+    canonical = build_address(address.host, address)
+    %{request | address: canonical, raw: Map.put(request.raw, "address", canonical)}
+  end
+
   defp build_address(host, address),
-    do:
-      "shuttle://#{host}/#{address.harness}/#{URI.encode(address.native, &go_path_segment_char?/1)}"
+    do: format_address(host, Harnesses.normalize(address.harness), address.native)
+
+  defp format_address(host, harness, native),
+    do: "shuttle://#{host}/#{harness}/#{URI.encode(native, &go_path_segment_char?/1)}"
 
   defp validate_receipt(receipt, request, expected_address) do
     if Map.get(receipt, "message_id") == request.raw["message_id"] and

@@ -67,10 +67,10 @@ func messageHookHarness(input eventHookInput) string {
 	if input.Harness == "claude" || input.Harness == "codex" || input.Harness == "pi" {
 		return input.Harness
 	}
-	if harnessFor(input.TranscriptPath) == "claude-code" {
+	if messaging.NormalizeHarness(harnessFor(input.TranscriptPath)) == "claude" {
 		return "claude"
 	}
-	if harnessFor(input.TranscriptPath) != "codex" {
+	if messaging.NormalizeHarness(harnessFor(input.TranscriptPath)) != "codex" {
 		return ""
 	}
 	if input.Model != "" || strings.TrimSpace(os.Getenv("CODEX_THREAD_ID")) == input.SessionID || strings.Contains(filepath.ToSlash(input.TranscriptPath), "/.codex/") {

@@ -51,10 +51,17 @@ func Discover(ctx context.Context, host string) Directory {
 }
 
 func Send(ctx context.Context, host string, req Request) (Receipt, error) {
+	addr, err := ParseAddress(req.Address)
+	if err != nil {
+		return rejected(req, "validation", err.Error()), err
+	}
+	req.Address, err = FormatAddress(addr.Host, addr.Harness, addr.ID)
+	if err != nil {
+		return rejected(req, "validation", err.Error()), err
+	}
 	if err := validateRequest(host, req); err != nil {
 		return rejected(req, "validation", err.Error()), err
 	}
-	addr, _ := ParseAddress(req.Address)
 	a, ok := adapters()[addr.Harness]
 	if !ok {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
