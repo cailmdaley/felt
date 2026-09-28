@@ -98,9 +98,10 @@ defmodule Shuttle.CollaborationTest do
         "/tmp/shared loom"
       )
 
-    assert prompt =~ "collaborator: felt -C '/tmp/shared loom' show #{@collaborator}"
-    assert prompt =~ "role: felt -C '/tmp/shared loom' show #{@role}"
-    assert prompt =~ "Optional origin metadata does not change this local-store lookup"
+    assert prompt ==
+             "Collaboration: collaborator #{@collaborator}, role #{@role}; " <>
+               "role store: /tmp/shared loom"
+
     refute prompt =~ "stale-host"
     refute prompt =~ "response.host"
     refute prompt =~ "/api/v1/fibers"
@@ -110,10 +111,9 @@ defmodule Shuttle.CollaborationTest do
     prompt =
       Collaboration.prompt_section({:ok, %{"vizier" => ["fable"]}}, "/tmp/shared loom")
 
-    assert prompt =~ "You are working as fable within the vizier role."
     # The store resolves through its realpath; on macOS /tmp is /private/tmp.
-    assert prompt =~ ~r"felt -C '(/private)?/tmp/shared loom' show roles/vizier\n"
-    assert prompt =~ ~r"felt -C '(/private)?/tmp/shared loom' show roles/vizier/fable"
+    assert prompt =~
+             ~r"\ACollaboration: fable in role vizier; role store: (/private)?/tmp/shared loom\z"
   end
 
   @tag :tmp_dir
@@ -151,16 +151,13 @@ defmodule Shuttle.CollaborationTest do
         ] do
       prompt = Collaboration.prompt_section(collaboration, store)
 
-      assert prompt =~ "felt -C '#{loom}' show roles/vizier"
-      assert prompt =~ "felt -C '#{loom}' show roles/vizier/fable"
-      refute prompt =~ "felt -C '#{project}'"
-      refute prompt =~ "felt -C '#{constitution}'"
+      assert prompt == "Collaboration: fable in role vizier; role store: #{loom}"
     end
   end
 
   test "role-only and multi-role prompts do not print a participant roster" do
     role_only = Collaboration.prompt_section({:ok, %{"vizier" => []}})
-    assert role_only =~ "You are working within the vizier role; no collaborator is named."
+    assert role_only == "Collaboration: role vizier, no collaborator named"
     refute role_only =~ "participants"
 
     multi =
@@ -168,7 +165,7 @@ defmodule Shuttle.CollaborationTest do
         {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}}
       )
 
-    assert multi =~ "you are the collaborator named for your model"
+    assert multi == "Collaboration: several assignments on the roster"
     refute multi =~ "vizier"
     refute multi =~ "fable"
     refute multi =~ "astra"
@@ -177,8 +174,8 @@ defmodule Shuttle.CollaborationTest do
   end
 
   test "malformed document metadata remains visible in the worker prompt" do
-    assert Collaboration.prompt_section({:error, "collaboration must be an object"}) =~
-             "invalid"
+    assert Collaboration.prompt_section({:error, "collaboration must be an object"}) ==
+             "Collaboration: invalid metadata (collaboration must be an object)"
   end
 
   defp random_ulid_tail(state) do

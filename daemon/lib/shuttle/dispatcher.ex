@@ -202,8 +202,9 @@ defmodule Shuttle.Dispatcher do
   Options:
     * `:resume_mode` — `"previous"` / `"fresh"` / absent.
     * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
-      transcript lookup (default `Shuttle.Continuation.transcript_stat/1`,
-      through the app-worker record for `surface: app`).
+      transcript lookup (default `Shuttle.Continuation.transcript_stat/1`).
+      `surface: app` fibers never consult it: an app conversation resumes
+      whenever it did not hand off.
     * `:now` — the `DateTime` the transcript's age is measured against.
   """
   @type continuation ::
@@ -259,7 +260,7 @@ defmodule Shuttle.Dispatcher do
   # occurrences. First run / no prior session → fresh (nothing to resume).
   #
   # The transcript lookup (one resolve + one stat) runs only on the dirty-death
-  # branch; `:transcript` and `:now` inject it for tests.
+  # branch of a terminal worker; `:transcript` and `:now` inject it for tests.
   defp decide_continuation(fiber, session_id, opts) do
     cond do
       fiber_kind(fiber) != "oneshot" ->
@@ -271,8 +272,13 @@ defmodule Shuttle.Dispatcher do
       Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) ->
         :fresh
 
+      # An app conversation keeps its identity in the Codex App Server whether
+      # or not its cache is warm, so it resumes as before.
+      get_in(fiber, ["shuttle", "surface"]) == "app" ->
+        {:previous, session_id}
+
       true ->
-        lookup = Keyword.get_lazy(opts, :transcript, fn -> default_transcript_lookup(fiber) end)
+        lookup = Keyword.get(opts, :transcript, &Shuttle.Continuation.transcript_stat/1)
         transcript = lookup.(session_id)
         now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
@@ -280,14 +286,6 @@ defmodule Shuttle.Dispatcher do
           do: {:previous, session_id},
           else: {:cold, session_id, transcript && transcript.path}
     end
-  end
-
-  # An app conversation's resume id is its thread id; its transcript lives
-  # under the harness session id the app-worker record carries.
-  defp default_transcript_lookup(fiber) do
-    if get_in(fiber, ["shuttle", "surface"]) == "app",
-      do: &(&1 |> Shuttle.AppWorkers.transcript_id() |> Shuttle.Continuation.transcript_stat()),
-      else: &Shuttle.Continuation.transcript_stat/1
   end
 
   # The previous-session record for a fresh launch after a cut-off session.
@@ -1146,8 +1144,6 @@ defmodule Shuttle.Dispatcher do
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
 
-  # Dispatch: fresh worker (new session) or resume previous.
-  # `resume_intent` is `:fresh | {:previous, session_id}` from check_resume_intent/3.
   defp preflight_surface("cli", agent, work_dir, runner) do
     with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_tmux_server(runner)
   end

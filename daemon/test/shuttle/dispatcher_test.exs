@@ -546,10 +546,11 @@ defmodule Shuttle.DispatcherTest do
             felt_store: "/tmp/loom"
           )
         ] do
-      assert prompt =~ "Collaboration:"
-      assert prompt =~ "felt -C '/tmp/loom' show 01KTS261GJMMRDRHS2QDMEFV3K"
-      assert prompt =~ "felt -C '/tmp/loom' show 01KTS261GJMMRDRHS2QDMEFV3M"
-      assert prompt =~ "Optional origin metadata does not change this local-store lookup"
+      assert prompt =~
+               "Collaboration: collaborator 01KTS261GJMMRDRHS2QDMEFV3K, " <>
+                 "role 01KTS261GJMMRDRHS2QDMEFV3M; role store: /tmp/loom"
+
+      refute prompt =~ "felt -C"
       refute prompt =~ "old-host"
       refute prompt =~ "response.host"
     end
@@ -566,16 +567,16 @@ defmodule Shuttle.DispatcherTest do
     singleton_prompt =
       Dispatcher.render_prompt("tests/a", collaboration: singleton, felt_store: "/tmp/loom")
 
-    assert singleton_prompt =~ "You are working as fable within the vizier role."
     # Role fibers resolve through the store's realpath; on macOS /tmp is /private/tmp.
-    assert singleton_prompt =~ ~r"felt -C '(/private)?/tmp/loom' show roles/vizier/fable"
+    assert singleton_prompt =~
+             ~r"Collaboration: fable in role vizier; role store: (/private)?/tmp/loom\z"
 
     for prompt <- [
           Dispatcher.render_prompt("tests/a", collaboration: multi),
           Dispatcher.render_resume_prompt("tests/a", collaboration: multi),
           Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: multi)
         ] do
-      assert prompt =~ "you are the collaborator named for your model"
+      assert prompt =~ "Collaboration: several assignments on the roster"
       refute prompt =~ "vizier"
       refute prompt =~ "fable"
       refute prompt =~ "astra"
@@ -1575,6 +1576,21 @@ defmodule Shuttle.DispatcherTest do
     test "a clean handoff goes fresh without looking at the transcript", ctx do
       fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
       assert :fresh = intent(fiber, 60, transcript: fn _ -> flunk("looked up") end)
+    end
+
+    test "an app conversation resumes unless handed off, whatever its transcript", ctx do
+      app = dispatched_fiber(ctx, %{"surface" => "app"})
+      untouched = fn _ -> flunk("app surface looked up a transcript") end
+
+      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(app, nil, transcript: untouched)
+
+      handed_off =
+        dispatched_fiber(ctx, %{
+          "surface" => "app",
+          "handed_off_at" => "2026-06-20T18:05:00.000000Z"
+        })
+
+      assert :fresh = intent(handed_off, nil, transcript: untouched)
     end
 
     test "explicit resume_mode wins over the transcript's temperature", ctx do

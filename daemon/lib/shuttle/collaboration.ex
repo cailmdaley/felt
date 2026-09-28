@@ -32,8 +32,12 @@ defmodule Shuttle.Collaboration do
 
   def parse(_), do: {:error, "collaboration must be an object"}
 
-  @doc "The local-store read instructions, or a visible malformed-data error."
-  @spec prompt_section(term()) :: String.t()
+  @doc """
+  The collaboration facts for a dispatch prompt: the assigned role and
+  collaborator and the shared store their fibers live in, or a visible
+  malformed-data error. How to read them is the shuttle skill's
+  (`references/collaboration.md`).
+  """
   @spec prompt_section({:ok, snapshot() | nil} | {:error, String.t()} | term(), String.t() | nil) ::
           String.t()
   def prompt_section(result, store \\ nil)
@@ -49,70 +53,35 @@ defmodule Shuttle.Collaboration do
   end
 
   def prompt_section({:error, reason}, _store),
-    do:
-      "Collaboration metadata is invalid (#{reason}); report this in Status before relying on it."
+    do: "Collaboration: invalid metadata (#{reason})"
 
   def prompt_section(_, _store), do: ""
 
   defp assignment_prompt_section(assignments, store) do
-    role_store = shared_role_store(store)
+    assignment =
+      case singleton_assignment(assignments) do
+        {:ok, role, [collaborator]} -> "#{collaborator} in role #{role}"
+        {:ok, role, []} -> "role #{role}, no collaborator named"
+        _ -> "several assignments on the roster"
+      end
 
-    store_arg =
-      if is_binary(role_store) and role_store != "",
-        do: "-C #{shell_quote(role_store)} ",
-        else: ""
-
-    case singleton_assignment(assignments) do
-      {:ok, role, [collaborator]} ->
-        [
-          "Collaboration assignment:",
-          "You are working as #{collaborator} within the #{role} role.",
-          "Read the current role and collaborator fibers after sync:",
-          "felt #{store_arg}show roles/#{role}",
-          "felt #{store_arg}show roles/#{role}/#{collaborator}"
-        ]
-        |> Enum.join("\n")
-
-      {:ok, role, []} ->
-        [
-          "Collaboration assignment:",
-          "You are working within the #{role} role; no collaborator is named.",
-          "Read its current role fiber after sync: felt #{store_arg}show roles/#{role}."
-        ]
-        |> Enum.join("\n")
-
-      _ ->
-        [
-          "Collaboration assignment:",
-          "Read the collaboration block; you are the collaborator named for your model, " <>
-            "in each role that lists it.",
-          "Read global role context from the shared store with `felt #{store_arg}show roles/<role>` " <>
-            "and `felt #{store_arg}show roles/<role>/<collaborator>`."
-        ]
-        |> Enum.join("\n")
-    end
+    "Collaboration: #{assignment}" <> store_suffix(shared_role_store(store))
   end
 
   defp legacy_prompt_section(collaboration, store) do
-    store_arg = if is_binary(store) and store != "", do: "-C #{shell_quote(store)} ", else: ""
-
     references =
-      @legacy_keys
-      |> Enum.flat_map(fn key ->
+      Enum.flat_map(@legacy_keys, fn key ->
         case Map.get(collaboration, key) do
-          %{"uid" => uid} -> ["#{key}: felt #{store_arg}show #{uid}"]
+          %{"uid" => uid} -> ["#{key} #{uid}"]
           _ -> []
         end
       end)
 
-    [
-      "Collaboration:",
-      Enum.join(references, "\n"),
-      "These UIDs resolve in the shared Felt store. Read each referenced fiber after sync and use its current body as context. Optional origin metadata does not change this local-store lookup. If a UID cannot be read, report that in Status."
-    ]
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n")
+    "Collaboration: #{Enum.join(references, ", ")}" <> store_suffix(store)
   end
+
+  defp store_suffix(store) when is_binary(store) and store != "", do: "; role store: #{store}"
+  defp store_suffix(_), do: ""
 
   defp legacy_shape?(value) do
     Enum.all?(Map.values(value), &is_map/1)
@@ -217,6 +186,4 @@ defmodule Shuttle.Collaboration do
     do: String.match?(origin, @origin_pattern)
 
   defp valid_origin?(_), do: false
-
-  defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 end

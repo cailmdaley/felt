@@ -109,7 +109,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `## Status` — whatever the transcript's size. The lookup is one resolve
   through `Shuttle.Transcript.path/2` and one stat, taken only on that
   no-handoff branch. An explicit `resume_mode` from the board wins over all of
-  this. Pinned and standing roles always start fresh.
+  this. Pinned and standing roles always start fresh. A `surface: app`
+  conversation is exempt from the transcript check: it keeps its identity in
+  the Codex App Server, so it resumes whenever it did not hand off.
 
   A clean handoff therefore *is* the end of that conversation: the next worker
   lands on the rewritten `## Status`, and `resume`/`reopen` on a closed or
@@ -197,12 +199,15 @@ shuttle skills.` and otherwise carry only this dispatch's facts:
 - On fresh launches, `Previous session: <uuid> (<harness>)` when there was
   one. When the previous session died without a handoff and was too cold to
   resume, the line says so and gives its transcript path.
-- The collaboration assignment, when the fiber carries one.
+- `Collaboration:` — the assigned role and collaborator (named when the
+  roster has exactly one of each) and the shared role store, when the fiber
+  carries a roster.
 - `From User:` followed by the exact user message, when nonblank.
 
-Syncing the store, reading the fiber and its `## Status`, and what to do with
-a predecessor's transcript are static instructions, so they live in the shuttle
-skill's Survey step rather than in every prompt.
+Syncing the store, reading the fiber and its `## Status`, what to do with a
+predecessor's transcript, and reading role and collaborator fibers are static
+instructions, so they live in the shuttle skill (its Survey step and
+`references/collaboration.md`) rather than in every prompt.
 
 Capture launches point to the shuttle skill's `references/capture.md` and carry
 JSON install metadata and the exact claim endpoint/body. That reference owns the

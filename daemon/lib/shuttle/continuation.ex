@@ -60,6 +60,8 @@ defmodule Shuttle.Continuation do
       transcript. A resume replays the whole transcript into the model, which
       is cheap only while the harness's prompt cache still holds it; past
       that window a fresh worker reading `## Status` costs less at any size.
+      A `surface: app` conversation skips the transcript check and resumes: it
+      keeps its identity in the Codex App Server.
 
   A fresh `dispatched_at` at redispatch naturally supersedes a stale
   `handed_off_at` (the new dispatch is newer than the old handoff), so nothing
