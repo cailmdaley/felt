@@ -2476,8 +2476,8 @@ defmodule Shuttle.PollerTest do
   end
 
   # Both directions assert on the SAME two observables, so a hold and a release
-  # can't be confused for one another: the flag + provenance, and whether the
-  # fresh candidate actually launched.
+  # can't be confused for one another: the flag, and whether the fresh candidate
+  # actually launched.
   defp assert_held!(poller, fiber_id) do
     assert_eventually(fn ->
       assert [%{fiber_id: ^fiber_id}] = hb_snapshot(poller).pending_launch
@@ -2485,7 +2485,6 @@ defmodule Shuttle.PollerTest do
 
     snap = hb_snapshot(poller)
     assert snap.boot_quarantine == true
-    assert snap.quarantine_release == nil
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -2518,12 +2517,6 @@ defmodule Shuttle.PollerTest do
     snap = hb_snapshot(poller)
     assert snap.boot_quarantine == false
     assert snap.pending_launch == []
-
-    # Provenance is visible, and distinct from a human release — the board must
-    # be able to say "lifted automatically".
-    assert %{mode: "auto", at: at, reason: reason} = snap.quarantine_release
-    assert is_integer(at)
-    assert reason =~ "fast bounce"
   end
 
   test "an idle fast bounce (no workers recorded) auto-releases" do
@@ -2670,9 +2663,7 @@ defmodule Shuttle.PollerTest do
 
     snap = hb_snapshot(poller)
     assert snap.contract.ok == false
-    # The hold stands AND its provenance stays empty: nothing was released.
     assert snap.boot_quarantine == true
-    assert snap.quarantine_release == nil
   end
 
   test "the daemon writes its own heartbeat while healthy" do

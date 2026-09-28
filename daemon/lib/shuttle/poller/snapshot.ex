@@ -125,12 +125,6 @@ defmodule Shuttle.Poller.Snapshot do
       eligible: eligible,
       blocked: blocked,
       boot_quarantine: state.boot_quarantine,
-      # How the hold came off, so the board can say "lifted automatically" rather
-      # than implying a person pressed release: `nil` while still held (or never
-      # armed), else `%{mode: "auto" | "human", at: ms, reason: …}`. `auto` is the
-      # boot-time fast-bounce verdict (`Shuttle.DaemonHeartbeat`) — a kernel kill
-      # nobody asked for, proven to be seconds old with its workers intact.
-      quarantine_release: quarantine_release(state.quarantine_release),
       # S2: the boot-time `felt shuttle contract` handshake result — always
       # present (not just on skew) so /api/v1/state and /api/v1/version can
       # both show "what we expect" and "what we saw" even when they match.
@@ -344,14 +338,6 @@ defmodule Shuttle.Poller.Snapshot do
         end
     end
   end
-
-  # Wire shape for the quarantine's release provenance: `mode` as a string and
-  # `at` as epoch ms, matching how every other timestamp leaves the snapshot.
-  defp quarantine_release(%{mode: mode, at: %DateTime{} = at, reason: reason}) do
-    %{mode: Atom.to_string(mode), at: DateTime.to_unix(at, :millisecond), reason: reason}
-  end
-
-  defp quarantine_release(_), do: nil
 
   defp stringify_keys(value) when is_map(value) do
     Map.new(value, fn {key, value} -> {to_string(key), value} end)

@@ -197,9 +197,8 @@ hold:
 
 Anything else holds: a stale heartbeat (a real outage), a crash loop, a missing
 or malformed file, or a CLI/daemon contract skew — which has no release path at
-all, automatic or manual. The snapshot's `quarantine_release` says which way the
-hold came off (`auto` with the reason, or `human`), so the board never implies a
-person pressed release when nobody did.
+all, automatic or manual. The daemon log records the verdict and its reason
+either way.
 
 ## CLI verbs
 

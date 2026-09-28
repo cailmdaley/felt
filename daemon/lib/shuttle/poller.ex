@@ -265,12 +265,6 @@ defmodule Shuttle.Poller do
       # untouched: a real gap, a crash loop, or no evidence at all still holds.
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
-      # How the quarantine came off, for the snapshot (and the log): `nil` while
-      # still held or never armed, else `%{mode: :auto | :human, at: DateTime.t,
-      # reason: String.t}`. The board needs the distinction — a hold lifted
-      # automatically because the daemon proved a fast bounce is a different fact
-      # about the fleet than a human pressing release.
-      quarantine_release: nil,
       # Where this daemon records its own liveness, how often, when THIS
       # incarnation booted (epoch ms), and the ring of recent boot times carried
       # forward from the previous incarnation's file. All four exist only to
@@ -788,12 +782,7 @@ defmodule Shuttle.Poller do
       {:release, reason} ->
         Logger.info("boot quarantine auto-released (#{reason}); fresh dispatch resumes")
 
-        %{
-          state
-          | boot_quarantine: false,
-            parked_launches: %{},
-            quarantine_release: %{mode: :auto, at: DateTime.utc_now(), reason: reason}
-        }
+        %{state | boot_quarantine: false, parked_launches: %{}}
 
       {:hold, reason} ->
         Logger.info("boot quarantine held (#{reason}); awaiting `bin/shuttle release`")
@@ -1326,14 +1315,8 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call(:release_boot_quarantine, _from, state) do
-    Logger.info("boot quarantine released by a human; fresh dispatch resumes on the next tick")
-
-    state = %{
-      state
-      | boot_quarantine: false,
-        parked_launches: %{},
-        quarantine_release: %{mode: :human, at: DateTime.utc_now(), reason: "released by a human"}
-    }
+    Logger.info("boot quarantine released; fresh dispatch resumes on the next tick")
+    state = %{state | boot_quarantine: false, parked_launches: %{}}
 
     # Tick now so parked fibers dispatch immediately, not a poll interval later.
     {:reply, :ok, schedule_tick(state, 0)}
