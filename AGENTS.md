@@ -117,7 +117,11 @@ lives in the docs site (`docs/`, published to
   daemon (re)start parks EVERY dispatchable candidate — fresh launches and
   dirty-death resumes alike — in `pending_launch` until `bin/shuttle release`;
   only work the daemon observed running and cron-due standing roles pass
-  through. There is no `enabled` flag; steady-state resume of a worker that dies while
+  through. A SIGTERM'd restart — every deploy and operator restart — deletes
+  the daemon heartbeat and so always holds; only a daemon killed hard (an
+  rlimit SIGKILL) and back within the heartbeat window, on the same machine,
+  with every recorded worker re-adopted and no churn, releases itself
+  (`Shuttle.DaemonHeartbeat`). There is no `enabled` flag; steady-state resume of a worker that dies while
   the daemon is healthy and unquarantined is unaffected, and force-dispatch
   bypasses the quarantine. Tags are free-form qualitative noticings.
 
@@ -179,9 +183,11 @@ git_short_sha and booted_at both move → bin/shuttle release
 `~/.config/felt/remotes.json`. A host marked `"build_ui": false` there is built
 with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
 instead — for a cluster login node on a network filesystem, where `npm ci` alone
-costs minutes. **Every restart arms the boot quarantine** — no
-fresh oneshot dispatch proceeds until `bin/shuttle release` (cron-due standing
-roles still fire). A daemon
+costs minutes. **Every deploy and operator restart arms the boot quarantine**
+— the cycle is SIGTERM, which deletes the heartbeat — so no fresh oneshot
+dispatch proceeds until `bin/shuttle release` (cron-due standing roles still
+fire). Only a hard-killed daemon back within seconds, workers intact and no
+churn, releases itself. A daemon
 route change must ship with the matching UI; `make build` builds both.
 Fetched-release users do not need this checkout deployment helper. Details:
 [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).

@@ -167,7 +167,7 @@ machine crash-looping, for example) would otherwise treat every restart as
 license to relaunch every armed, workerless fiber it can see — a burst of
 redundant, token-burning launches on each crash.
 
-Release is manual. No timeout, no self-clearing.
+Release is manual — no timeout — with one narrow exception below.
 
 ```bash
 bin/shuttle release
@@ -177,28 +177,36 @@ A human force-dispatch bypasses the quarantine without clearing it.
 
 ### The one automatic exit: a proven fast bounce
 
-A restart nobody asked for is not a restart the quarantine was built for. A
-kernel that kills the daemon on a CPU rlimit, with a supervisor respawning it
-seconds later, leaves the workers running (tmux owns them) and nothing stale —
-yet the hold stopped all new work until someone noticed.
+Every restart someone asked for holds: a deploy, `make restart`, `make stop`, a
+supervisor restart (`systemctl --user restart`, `launchctl kickstart -k`). Those
+all stop the daemon with SIGTERM first, and a SIGTERM'd daemon deletes its
+heartbeat on the way down, so the next boot has no evidence and holds.
 
-So the daemon records its own liveness while it has it, in
-`$SHUTTLE_DATA_DIR/heartbeat.json` (default `~/.shuttle/heartbeat.json`): the
-time of the write, when this incarnation booted, the workers it has live, and a
-short ring of recent boot times. It is rewritten every 10 seconds, and the next
-boot reads it once, after adoption. The hold lifts by itself only when all three
-hold:
+The exception is a daemon killed *hard* — a kernel CPU-rlimit SIGKILL on a
+capped cluster login node, say — and respawned seconds later. Its workers keep
+running (tmux owns them) and nothing went stale, yet a hold there would stop all
+new work until someone noticed. A hard kill runs no shutdown code, so it leaves
+the heartbeat behind for the next boot to judge.
 
-1. the heartbeat is less than 60 seconds old;
-2. every worker it recorded is live **now**, established by this daemon's own
-   tmux adoption rather than by trusting the file;
-3. the previous incarnation ran at least 90 seconds, and the daemon has booted
+The daemon rewrites `$SHUTTLE_DATA_DIR/heartbeat.json` (default
+`~/.shuttle/heartbeat.json`) every 10 seconds: the time of the write, when this
+incarnation booted, its host id and the machine's node name, the workers it has
+live, and a short ring of recent boot times. The next boot reads it once, after
+adoption, and lifts the hold by itself only when all of these hold:
+
+1. the heartbeat was written by this host id on this machine (a `$HOME` shared
+   across login nodes can hold another node's heartbeat);
+2. it is less than 60 seconds old, and newer than the machine's own boot;
+3. every worker it recorded is live **now**, established by this daemon's own
+   tmux adoption rather than by trusting the file — and none of them is an app
+   worker, whose liveness adoption cannot observe;
+4. the previous incarnation ran at least 90 seconds, and the daemon has booted
    at most 3 times in the last 10 minutes, counting this boot.
 
-Anything else holds: a stale heartbeat (a real outage), a crash loop, a missing
-or malformed file, or a CLI/daemon contract skew — which has no release path at
-all, automatic or manual. The daemon log records the verdict and its reason
-either way.
+Anything else holds: a graceful stop, a stale heartbeat (a real outage), a crash
+loop, a missing or malformed file, a boot whose tmux scan failed, or a CLI/daemon
+contract skew — which has no release path at all, automatic or manual. The
+daemon log records the verdict and its reason either way.
 
 ## CLI verbs
 

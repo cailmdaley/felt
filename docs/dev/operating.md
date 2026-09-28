@@ -54,7 +54,10 @@ Dispatch sanity ladder:
 2. `bin/shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
 3. Fiber is `active` but sitting in `pending_launch`? → the daemon restarted
    and the boot quarantine is armed. `bin/shuttle release`. Check this before
-   reaching for `make restart` — a restart *re-arms* the quarantine.
+   reaching for `make restart` — a restart *re-arms* the quarantine. (A daemon
+   killed hard and back within seconds, workers intact, releases itself; the
+   log line `boot quarantine auto-released` or `boot quarantine held (…)` says
+   which happened and why.)
 4. `felt shuttle` sees it but daemon doesn't → daemon binary is stale.
    `make restart` (then `bin/shuttle release`).
 5. Daemon sees it but agent never appears → check the resolved agent's `cli`

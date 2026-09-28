@@ -1,31 +1,41 @@
 defmodule Shuttle.DaemonHeartbeat do
   @moduledoc """
   The daemon's own liveness record on disk, and the boot-time verdict it
-  supports: *was this restart a fast bounce of a healthy daemon, or a real gap?*
+  supports: *was this restart a hard kill of a healthy daemon, back within
+  seconds, or anything else?*
 
-  ## Why the daemon has to record its own liveness
+  ## What it is for
 
   `Shuttle.Poller`'s boot quarantine parks every genuinely-fresh autonomous
   dispatch on each (re)start until a human runs `bin/shuttle release`. That is
   right for the restarts it was built for — a crash loop on an overloaded login
   node, a deploy, a machine coming back after hours down — because the danger
-  is mass re-dispatch of stale work.
+  is mass re-dispatch of stale work, and a deploy puts a new build in front of
+  the fleet.
 
   It is wrong for a restart nobody asked for and nothing was stale across. A
-  host that hard-caps every process at some number of CPU-seconds kills the beam
-  mid-flight and a supervisor respawns it seconds later; the workers keep running
-  (tmux owns them, and `SessionReconciliation.adopt_orphans/1` re-adopts them),
-  but all *new* work silently stops until a person notices the hold.
+  host that hard-caps every process at some number of CPU-seconds SIGKILLs the
+  beam mid-flight and a supervisor respawns it seconds later; the workers keep
+  running (tmux owns them, and `SessionReconciliation.adopt_orphans/1`
+  re-adopts them), but all *new* work silently stops until a person notices.
 
-  An rlimit kill writes no clean-exit marker, so nothing on disk distinguishes
-  "killed four seconds ago while healthy" from "down since yesterday" — unless
-  the daemon records liveness while it has it. Hence this file: written every
-  10s of uptime, read once at the next boot.
+  ## Asked-for versus hard: the signal decides
+
+  Every asked-for stop — `make stop`, `bin/shuttle`'s stop before installing a
+  supervisor, `bin/shuttle-deploy`'s listener kill, `systemctl --user restart`,
+  `launchctl kickstart -k` — sends SIGTERM first. SIGTERM runs `init:stop/0`,
+  whose first act is `Shuttle.Application.prep_stop/1`, which calls `retire/2`:
+  the file is deleted, and no later write can re-create it. The next boot finds
+  no heartbeat and holds. A hard kill runs nothing, so only a hard kill leaves
+  the file behind to be judged. (If a write is wedged in the filesystem longer
+  than `retire/2`'s bounded wait, its rename can still land after the delete;
+  the next boot then judges it like a hard kill.)
 
   ## Shape
 
-  One JSON object, rewritten whole (write-temp-then-rename, so a kill mid-write
-  leaves the previous complete file rather than a truncated one):
+  One JSON object, rewritten whole every 10s of uptime (write-temp-then-rename,
+  so a kill mid-write leaves the previous complete file rather than a truncated
+  one):
 
       {"v":1,
        "at":1764500000000,         # wall clock of THIS write, epoch ms
@@ -34,35 +44,46 @@ defmodule Shuttle.DaemonHeartbeat do
        "workers":["fiber-uid", …], # runtime keys it had live at this write
        "boots":[…,1764499000000]}  # ring of recent boot times, newest last
 
-  Every write is best-effort and never raises: the poller must not die, stall or
-  log-spam because a filesystem misbehaved. The *first* write happens at boot,
-  before anything else, which is what makes the crash-loop gate below work — a
-  incarnation that dies two seconds in still leaves its own `booted_at` behind.
+  Writes run off the Poller (`write_async/2`), are best-effort and never raise:
+  the Poller must not die, stall or log-spam because a filesystem misbehaved.
+  The *first* write happens at boot, which is what makes the crash-loop brake
+  work — an incarnation that dies two seconds in still leaves its own
+  `booted_at` behind.
 
-  ## The three conditions for an automatic release
+  ## The conditions for an automatic release
 
-  `verdict/2` releases the quarantine only when all three hold. Anything else —
-  a missing file, a truncated one, a key of the wrong type, a stale timestamp —
-  **holds** (fail closed: the quarantine is the safe state, and the cost of
-  holding is a human typing one command, versus a mass re-dispatch of stale work
-  if we guess wrong).
+  `verdict/2` releases the quarantine only when all of these hold. Anything
+  else — a missing file, a truncated one, a key of the wrong type, a stale
+  timestamp — **holds** (fail closed: the quarantine is the safe state, and the
+  cost of holding is a human typing one command, versus a mass re-dispatch of
+  stale work if we guess wrong).
 
-  1. **Fresh** — `now - at <= 60_000` ms. The write interval is
-     10_000 ms, so the grace is 6× the interval: it has to absorb the
-     last write's lag plus the respawn plus this daemon's own boot (a `felt
-     shuttle contract` probe and a tmux scan) on a login node under contention,
-     while staying far too short to cover any restart a human would call an
-     outage.
+  1. **Same daemon, same machine** — the record's `host` equals this daemon's
+     `own_host_id` and its `node` equals this machine's node name. `~/.shuttle`
+     can sit on a `$HOME` shared by several login nodes that all carry the same
+     fleet host id; an idle daemon on another node keeps a fresh heartbeat
+     with no workers, which says nothing about this node's restart.
 
-  2. **Worker continuity** — every runtime key the heartbeat recorded as live is
-     live NOW, as established by reconciliation/adoption, never by trusting the
-     file. Workers recorded and gone means something ended the workers too: not a
-     fast bounce. An empty recorded set is vacuously continuous — an idle daemon
-     that bounced in seconds has no stale backlog to withhold, which is the only
-     thing the quarantine exists to prevent.
+  2. **Fresh** — `|now - at| <= 60_000` ms, and `at` is no older than the
+     machine's own boot (`/proc/stat` `btime`, where available). The write
+     interval is 10_000 ms, so the grace is 6× the interval: it has to absorb
+     the last write's lag plus the respawn plus this daemon's own boot (a `felt
+     shuttle contract` probe and a tmux scan) on a login node under
+     contention, while staying far too short to cover any restart a human
+     would call an outage.
 
-  3. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
-     condition 1 cannot see it. Two brakes, coarse and fine:
+  3. **Worker continuity** — every runtime key the heartbeat recorded as live
+     is live NOW, as established by this boot's adoption, never by trusting
+     the file. Workers recorded and gone means something ended the workers
+     too: not a fast bounce. `Shuttle.Poller` asks for a verdict only once
+     adoption's tmux scan has completed (`adopted?`), because an empty recorded
+     set is vacuously continuous — an idle daemon that bounced in seconds has no
+     stale backlog to withhold, but a daemon that has not looked cannot claim
+     that. App workers do not count as observed: adoption re-adopts them from
+     their own JSON record, so a recorded app worker holds.
+
+  4. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
+     condition 2 cannot see it. Two brakes, coarse and fine:
 
        * the previous incarnation lived at least 90_000 ms
          (`at - booted_at`), the same number `Shuttle.Poller`'s resume-loop
@@ -70,9 +91,10 @@ defmodule Shuttle.DaemonHeartbeat do
          it can do useful work and a human should look;
        * at most 3 boots, this one included, in the preceding 600_000 ms
          (the resume-loop cooldown's window), counted from the `boots` ring
-         plus the boot being judged. Condition 3's first brake only measures the incarnation
-         that wrote last; the ring bounds churn across several, including the
-         pattern where each incarnation lives just over the threshold.
+         plus the boot being judged. The first brake only measures the
+         incarnation that wrote last; the ring bounds churn across several,
+         including the pattern where each incarnation lives just over the
+         threshold.
 
   The contract-skew gate (`contract_check.ok`) is deliberately outside all of
   this: it has no release endpoint by design, so `Shuttle.Poller` does not even

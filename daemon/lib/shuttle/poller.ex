@@ -254,15 +254,16 @@ defmodule Shuttle.Poller do
       # init from the `:boot_quarantine` opt / app config (default true;
       # config/test.exs disables it).
       #
-      # ONE automatic exit exists, and it is not a timer: a restart the daemon
-      # can PROVE was a fast bounce of a healthy incarnation releases itself at
-      # boot (`Shuttle.DaemonHeartbeat.verdict/2`, evaluated in `init/1` after
-      # adoption). A kernel that kills the beam on an rlimit is not a human
-      # asking for a hold, and the hold cost all new work until someone noticed.
-      # The proof is three-part (fresh heartbeat, the recorded workers still live
-      # BY THIS DAEMON'S OWN observation, previous incarnation not in a crash
-      # loop) and fails closed. Everything the quarantine exists for is
-      # untouched: a real gap, a crash loop, or no evidence at all still holds.
+      # ONE automatic exit exists, and it is not a timer: a daemon that was
+      # killed HARD (an rlimit SIGKILL) and is back within seconds releases
+      # itself at boot when it can prove the bounce
+      # (`Shuttle.DaemonHeartbeat.verdict/2`, evaluated in `init/1` after
+      # adoption): the heartbeat is this machine's and fresh, the recorded
+      # workers are still live BY THIS DAEMON'S OWN observation, and the
+      # previous incarnation was not in a crash loop. It fails closed. Every
+      # SIGTERM'd restart — each deploy and operator restart — deletes the
+      # heartbeat on the way down (`Shuttle.Application.prep_stop/1`) and so
+      # holds, as do a real gap, a crash loop, or no evidence at all.
       # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
       boot_quarantine: false,
       # Where this daemon records its own liveness, how often, when THIS

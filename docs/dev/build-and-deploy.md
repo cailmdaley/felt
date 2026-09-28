@@ -84,7 +84,12 @@ The helper builds the CLI, daemon, and — on every host that is not marked
 `"build_ui": false` — the UI, on that host.
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
-Every restart quarantines new launches and resumes until `bin/shuttle release`.
+Every deploy quarantines new launches and resumes until `bin/shuttle release`:
+the cycle stops the daemon with SIGTERM, and a SIGTERM'd daemon removes its
+heartbeat, so the rebuilt one has no evidence to release itself on. Only a
+daemon killed hard and back within the heartbeat window, with its workers alive
+and no churn, releases itself (see
+[the boot quarantine](../shuttle/lifecycle.md#boot-quarantine)).
 
 For a manual remote build:
 
