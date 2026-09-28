@@ -1508,6 +1508,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     return json(mockSessionLinks(url))
   }
+  // Kitty takes a moment; a row shows it pending meanwhile.
+  if (url.endsWith('/api/v1/attach')) {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    return json({ attached: true })
+  }
   if (url.includes('/api/v1/sessions/composite')) {
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)

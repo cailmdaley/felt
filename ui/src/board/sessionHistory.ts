@@ -4,8 +4,9 @@
  * first. A row acts like the Aloft pill: at a desktop, clicking it opens a
  * kitty tab on this machine — attached to the live worker, or resuming a past
  * session in its own tmux on the host that ran it (`POST /api/v1/attach`). A
- * bridged Claude session also offers its claude.ai page (`web ↗`), which is
- * all a phone gets; otherwise a phone copies the session id.
+ * bridged Claude session also links the conversation itself — `app ↗` in the
+ * Claude desktop app and `web ↗` on claude.ai, or on a phone its claude.ai
+ * page alone; otherwise a phone copies the session id.
  * {@link sessionTargets} makes that choice.
  *
  * Nothing is read until the first unfold. Then two reads: this fiber's
@@ -70,18 +71,29 @@ export type AttachBody =
 export type SessionTarget =
   | { kind: 'terminal'; body: AttachBody; label: string; title: string }
   | { kind: 'web'; href: string; label: string; title: string }
+  | { kind: 'app'; href: string; label: string; title: string }
   | { kind: 'copy'; label: string; title: string; copy: string }
 
-/** A row's action, and optionally a second one beside it (`web ↗`). */
+/** A row's action, and the small links beside it (`app ↗`, `web ↗`). */
 export interface SessionTargets {
   primary: SessionTarget
-  secondary?: SessionTarget
+  extras: SessionTarget[]
 }
 
 const CLAUDE_WEB = 'https://claude.ai/'
+/** A bridge URL naming one session: `https://claude.ai/code/session_<id>`. */
+const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/((?:cse|session)_[A-Za-z0-9_-]+)$/
+
+/** The Claude desktop app's route for a bridged session, or undefined when the
+ *  URL does not name exactly one session. */
+export function claudeAppRoute(url: string): string | undefined {
+  const id = CLAUDE_SESSION.exec(url)?.[1]
+  return id ? `claude://claude.ai/code/${id}` : undefined
+}
 
 export interface TargetContext {
-  /** A viewer a kitty tab can be opened for (not a phone). */
+  /** A viewer at a desktop, where a kitty tab and the Claude app can be
+   *  opened — not a phone. */
   desktop: boolean
   /** The live worker's session and tmux, when one is running. */
   liveSession?: string
@@ -98,8 +110,10 @@ export interface TargetContext {
  *     host that ran it. Not offered: a live worker with no tmux (a Codex app
  *     conversation, which a terminal must not take from its app), and a session
  *     whose host found no transcript.
- *   · A bridged Claude session also carries its claude.ai page — beside the
- *     terminal at a desktop, alone on a phone.
+ *   · A bridged Claude session also carries links to the conversation: at a
+ *     desktop `app ↗` (the Claude desktop app, `claude://claude.ai/code/…`)
+ *     and `web ↗` beside the terminal; on a phone its claude.ai page alone,
+ *     which the Claude app there answers.
  *   · Anything else offers its id to copy.
  */
 export function sessionTargets(
@@ -110,6 +124,8 @@ export function sessionTargets(
   const url = link?.url
   const web: SessionTarget | undefined =
     url && url.startsWith(CLAUDE_WEB) ? { kind: 'web', href: url, label: 'web', title: url } : undefined
+  const route = web && ctx.desktop ? claudeAppRoute(web.href) : undefined
+  const app: SessionTarget | undefined = route ? { kind: 'app', href: route, label: 'app', title: route } : undefined
 
   let terminal: SessionTarget | undefined
   if (ctx.desktop) {
@@ -131,9 +147,13 @@ export function sessionTargets(
     }
   }
 
-  if (terminal) return web ? { primary: terminal, secondary: web } : { primary: terminal }
-  if (web) return { primary: { ...web, label: 'claude.ai' } }
+  const links: SessionTarget[] = []
+  if (app) links.push(app)
+  if (web) links.push(web)
+  if (terminal) return { primary: terminal, extras: links }
+  if (web) return ctx.desktop ? { primary: links[0], extras: links.slice(1) } : { primary: { ...web, label: 'claude.ai' }, extras: [] }
   return {
+    extras: [],
     primary: {
       kind: 'copy',
       label: record.session.slice(0, 8),
@@ -243,14 +263,16 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   }
 
   const targetEl = (target: SessionTarget, cls: string): HTMLElement => {
-    if (target.kind === 'web') {
+    if (target.kind === 'web' || target.kind === 'app') {
       const a = document.createElement('a')
-      a.className = `${cls} kbn-ctl-session-web`
+      a.className = `${cls} kbn-ctl-session-${target.kind}`
       a.href = target.href
       a.textContent = `${target.label} ↗`
       a.title = target.title
-      a.target = '_blank'
-      a.rel = 'noopener noreferrer'
+      if (target.kind === 'web') {
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+      }
       a.addEventListener('click', (e) => e.stopPropagation())
       return a
     }
@@ -262,7 +284,17 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     btn.addEventListener('click', (e) => {
       e.stopPropagation()
       if (target.kind === 'terminal') {
-        void openTerminal(target.body)
+        // One request at a time per row: a second click while the first is
+        // in flight would only race it.
+        const li = btn.closest('li')
+        btn.disabled = true
+        btn.textContent = `${target.label} …`
+        li?.classList.add('kbn-ctl-session-pending')
+        void openTerminal(target.body).finally(() => {
+          btn.disabled = false
+          btn.textContent = `${target.label} ▸`
+          li?.classList.remove('kbn-ctl-session-pending')
+        })
         return
       }
       void navigator.clipboard?.writeText(target.copy).then(
@@ -297,7 +329,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     const targets = sessionTargets(record, links.get(record.session), ctx)
     const primary = targetEl(targets.primary, 'kbn-ctl-session-link')
     li.append(primary)
-    if (targets.secondary) li.append(targetEl(targets.secondary, 'kbn-ctl-session-alt'))
+    for (const extra of targets.extras) li.append(targetEl(extra, 'kbn-ctl-session-alt'))
     // The whole row is its primary action, as the Aloft pill is.
     if (targets.primary.kind === 'terminal') {
       li.classList.add('kbn-ctl-session-opens')

@@ -1,4 +1,4 @@
-import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink } from './appConversation.js'
+import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -2353,7 +2353,7 @@ export class FiberDetailModal {
    * Unfolded, four things in the order they are reached for: the composer (a
    * message and the dispatch verbs that carry it), the ledger (what the next
    * launch reads, beside the card's own due day and parent), the history
-   * (folded: the fiber's past sessions, each linked to its own chat — see
+   * (folded: the fiber's sessions, each row opening a terminal on it — see
    * `sessionHistory.ts`), and the verdict that closes the card — Temper or
    * Discard, `tempered` true or false.
    *
@@ -2466,7 +2466,7 @@ export class FiberDetailModal {
           fiberHost: card.shuttleHost,
           liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
           liveTmux: card.runningWorker,
-          desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
+          desktop: atDesktop(navigator.userAgent, coarsePointer()),
           onError: (message) => {
             errorEl.textContent = message
             errorEl.style.display = ''

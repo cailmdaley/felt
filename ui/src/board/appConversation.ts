@@ -13,6 +13,10 @@ export function canOpenDesktopApp(userAgent: string, coarse: boolean): boolean {
   return !coarse && !/Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)
 }
 
+/** The same test, named for what the card History asks: is the viewer at a
+ *  desktop, where a kitty tab or a desktop app can be opened for them? */
+export const atDesktop = canOpenDesktopApp
+
 export function appConversationTarget(
   card: Pick<KanbanCard, 'desktopLink' | 'shuttleHost' | 'shuttleProjectDir' | 'launchError'>,
   desktop: boolean,

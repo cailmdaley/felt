@@ -2375,3 +2375,4 @@ a.kbn-detail-aloft { text-decoration: none; }
 .kbn-ctl-session-opens { cursor: pointer; }
 .kbn-ctl-session-opens:hover { background: rgba(61, 91, 160, 0.06); }
 .kbn-ctl-session-opens:hover .kbn-ctl-session-terminal { text-decoration: underline; }
+.kbn-ctl-session-pending { opacity: 0.55; cursor: progress; }
