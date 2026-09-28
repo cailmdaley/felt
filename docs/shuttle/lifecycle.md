@@ -199,9 +199,9 @@ bin/shuttle version
 The daemon also speaks HTTP under `/api/v1`, in four groups: a **write plane**
 (`dispatch`, `transition`, `kill`, `lifecycle`, `felt-edit`, …), a **read
 plane** (`fibers`, `agents`, `felt-stores`, …), a **temporal read plane** the
-board's time views live on (`activity`, `sessions`, `commits`, `spend`,
+board's time views live on (`activity`, `sessions`, `commits`,
 `sent-files/all`, each with a `/composite` sibling that fans in every host a
-hub aggregates — the fleet — plus `moment`, which is aimed at one host), and
+hub aggregates — the fleet), and
 **operator routes** (`state`, `version`, the manual gate releases). The [API
 reference](../reference/api.md) tabulates them.
 

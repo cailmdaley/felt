@@ -60,7 +60,7 @@ To put a todo on the board, give it a shuttle block; the board shows nothing els
 
 A worker leaves in one of two ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. Or it **closes**, moving the card to **Awaiting review**, and nobody is launched. The human then tempers the card (accepts it), discards it, or resumes it. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times.
 
-The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, Scheduled, Pinned, In flight, Awaiting review, Tempered and Discarded. **Day**, **Week** and **Chronicle** show where the time went, and the **Board** tab lays out every file workers sent.
+The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, Scheduled, Pinned, In flight, Awaiting review, Tempered and Discarded. **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
 
 ## Working a constitution
 

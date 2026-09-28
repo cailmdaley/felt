@@ -349,7 +349,7 @@ describe('civilDayToLocalDate', () => {
 describe('formatSpanMinutes', () => {
   // The bare form — no `pad`, no `empty` — is what the fiber detail panel's
   // session window renders. The padded and em-dash variants the views use are
-  // pinned in dayShape.test.ts and chronicleJoin.test.ts.
+  // pinned in chronicleJoin.test.ts.
   it('renders a whole hour with an unpadded zero, not a bare hour', () => {
     expect(formatSpanMinutes(120)).toBe('2h 0m');
     expect(formatSpanMinutes(216)).toBe('3h 36m');

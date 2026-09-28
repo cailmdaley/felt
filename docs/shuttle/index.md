@@ -103,7 +103,7 @@ prior transcript.
 
 - [Constitutions](constitutions.md) — how to author one.
 - [Lifecycle](lifecycle.md) — the worker loop, exit semantics, dispatch gates.
-- [The board](board.md) — the five views, and what each gesture writes.
+- [The board](board.md) — the three views, and what each gesture writes.
 - [Cycles and eras](cycles.md) — naming a span of time.
 - [Telemetry and the ledgers](telemetry.md) — what the time views read.
 - [Installation](installation.md) — fetching or building the daemon, and

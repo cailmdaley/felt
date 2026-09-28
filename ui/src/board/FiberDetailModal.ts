@@ -1676,8 +1676,9 @@ export class FiberDetailModal {
    * Keep the open reading surface current without rebuilding its windows.
    *
    * One tick: probe the fiber's `modified_at` and re-render the body if it
-   * moved, ask `/sent-files` conditionally (an `If-None-Match` 304 is the
-   * common case), then re-baseline every artifact the panel is showing. Bytes
+   * moved, ask `/sent-files` conditionally (the `If-None-Match` rarely helps
+   * — see the fetch site), then re-baseline every artifact the panel is
+   * showing. Bytes
    * are fetched only when something actually changed, and the reader's scroll,
    * zoom, and active tabs survive every tick.
    *
@@ -3526,10 +3527,14 @@ export class FiberDetailModal {
     if (!uid && !sessionId) return []
 
     // ── Primary: the daemon endpoint ──
-    // Conditional: the local leg answers `304` from a weak ETag over the events
-    // file's {mtime,size}, which is the common case on a 15s poll. (A remote-
-    // owned fiber's leg is relayed and header-less, so it always answers 200 —
-    // see the controller's moduledoc.)
+    // Conditional, but do not count on it. The local leg's weak ETag is over
+    // the events file's {mtime,size}, and that file is the live hook stream for
+    // every session on the host — so on any host with a live session it moves
+    // every few seconds and the 304 almost never fires. A remote-owned fiber's
+    // leg is relayed and header-less, so it ALWAYS answers 200 (see the
+    // controller's moduledoc). Either way this 15s poll costs the owning daemon
+    // a full re-read of that file; the fix is an incremental reader there, not
+    // a validator here.
     const params = new URLSearchParams()
     if (uid) params.set('uid', uid)
     if (card.originId) params.set('origin', card.originId)

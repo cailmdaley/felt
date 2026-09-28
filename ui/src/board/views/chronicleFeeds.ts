@@ -136,12 +136,23 @@ export class ChronicleFeeds {
       fetchers.sessions(0),
       fetchers.commits(...commitsSpan(window)),
     ])
-    live.forEach((chunk, i) => this.chunks.set(chunk.key, results[i].buckets))
+    // An error never clears data. Every fetcher degrades to an empty result
+    // rather than rejecting, and marks it by leaving `host` blank — so a
+    // tunnel blip is indistinguishable from a quiet day unless we check.
+    // Storing one would blank Chronicle's live column and the 15s board poll
+    // would repaint that blank until the next sweep or a manual refresh.
+    live.forEach((chunk, i) => {
+      if (landed(results[i])) this.chunks.set(chunk.key, results[i].buckets)
+    })
     this.noteActivityOrigins(results)
-    this.index = buildSessionIndex(sessions.records)
-    this.sessionOrigins = sessions.origins ?? {}
-    if (this.commitsWanted === key) this.held = { key, records: commits.records }
-    this.sweptAtMs = at
+    if (landed(sessions)) {
+      this.index = buildSessionIndex(sessions.records)
+      this.sessionOrigins = sessions.origins ?? {}
+    }
+    if (this.commitsWanted === key && landed(commits)) this.held = { key, records: commits.records }
+    // Only a sweep that actually read something counts as a sweep; otherwise
+    // the failure would be cached for the whole refresh interval.
+    if (results.every(landed) && landed(sessions) && landed(commits)) this.sweptAtMs = at
   }
 
   /** The chunks `window` wants that are not held — the settled ones a scroll
@@ -151,7 +162,12 @@ export class ChronicleFeeds {
     const missing = activityChunks(window, this.sweptAtMs).filter((chunk) => !this.chunks.has(chunk.key))
     if (missing.length === 0) return
     const results = await Promise.all(missing.map((chunk) => fetchers.activity(chunk.fromMs, chunk.toMs)))
-    missing.forEach((chunk, i) => this.chunks.set(chunk.key, results[i].buckets))
+    // Same rule as the sweep, and it bites harder here: these chunks are
+    // settled, so a stored failure is never re-read and the day stays blank
+    // for the life of the page.
+    missing.forEach((chunk, i) => {
+      if (landed(results[i])) this.chunks.set(chunk.key, results[i].buckets)
+    })
     this.noteActivityOrigins(results)
   }
 
@@ -170,6 +186,14 @@ export class ChronicleFeeds {
     for (const res of results) Object.assign(fresh, res.origins ?? {})
     if (Object.keys(fresh).length > 0) this.activityOrigins = fresh
   }
+}
+
+/** Whether a temporal fetch actually reached its daemon. Every fetcher in
+ *  `TemporalData` degrades to an empty result rather than rejecting, and the
+ *  only thing distinguishing that from a genuinely empty window is the blank
+ *  `host` the fallback carries. */
+function landed(result: { host: string }): boolean {
+  return result.host !== ''
 }
 
 /** A drawn window's identity for its commit ledger. */
