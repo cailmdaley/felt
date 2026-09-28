@@ -11,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestAddressRoundTrip(t *testing.T) {
@@ -121,18 +123,123 @@ func TestDedupReplayAndConflict(t *testing.T) {
 	}
 }
 
-func TestDedupReservedIsNeverRetried(t *testing.T) {
+func writeDedupRecord(t *testing.T, dir string, req Request, rec record) {
+	t.Helper()
+	messages := filepath.Join(dir, "messages")
+	if err := os.MkdirAll(messages, 0700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := sha256.Sum256([]byte(req.MessageID))
+	path := filepath.Join(messages, hex.EncodeToString(name[:])+".json")
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
+	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "concurrent"}
+	want := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct {
+		receipt Receipt
+		err     error
+	}, 1)
+	duplicateDone := make(chan struct {
+		receipt Receipt
+		err     error
+	}, 1)
+	var calls atomic.Int32
+	send := func() (Receipt, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return want, nil
+	}
+	go func() {
+		r, err := withDedup(context.Background(), req, send)
+		firstDone <- struct {
+			receipt Receipt
+			err     error
+		}{r, err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first send did not start")
+	}
+
+	waiting := make(chan struct{})
+	var waitingOnce sync.Once
+	go func() {
+		r, err := withDedupTiming(context.Background(), req, send, time.Second, time.Millisecond, func() {
+			waitingOnce.Do(func() { close(waiting) })
+		})
+		duplicateDone <- struct {
+			receipt Receipt
+			err     error
+		}{r, err}
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("duplicate did not observe the live reservation")
+	}
+	close(release)
+
+	first := <-firstDone
+	duplicate := <-duplicateDone
+	if first.err != nil || !reflect.DeepEqual(first.receipt, want) {
+		t.Fatalf("first: %#v %v", first.receipt, first.err)
+	}
+	if duplicate.err != nil || !reflect.DeepEqual(duplicate.receipt, want) {
+		t.Fatalf("duplicate: %#v %v", duplicate.receipt, duplicate.err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("send callback ran %d times, want once", got)
+	}
+}
+
+func TestDedupDeadOwnerIsAmbiguousAndNotRetried(t *testing.T) {
 	d := t.TempDir()
 	t.Setenv("SHUTTLE_DATA_DIR", d)
-	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "m1"}
-	dir := filepath.Join(d, "messages")
-	os.MkdirAll(dir, 0700)
-	b, _ := json.Marshal(record{Hash: requestHash(req), State: "reserved"})
-	name := sha256.Sum256([]byte(req.MessageID))
-	os.WriteFile(filepath.Join(dir, hex.EncodeToString(name[:])+".json"), b, 0600)
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "dead-owner"}
+	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: 1 << 30})
 	called := false
 	r, err := withDedup(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil })
-	if called || r.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
+	const detail = "a previous attempt stopped mid-delivery; it may or may not have been delivered"
+	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
+		t.Fatalf("got %#v %v called=%v", r, err, called)
+	}
+}
+
+func TestDedupLiveReservationWaitExpires(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("SHUTTLE_DATA_DIR", d)
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "live-owner"}
+	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime()})
+	called := false
+	r, err := withDedupTimeout(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil }, 20*time.Millisecond)
+	const detail = "an identical delivery is still in progress; retry with the same message_id"
+	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
+		t.Fatalf("got %#v %v called=%v", r, err, called)
+	}
+}
+
+func TestDedupLegacyReservedRecordKeepsAmbiguousBehavior(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("SHUTTLE_DATA_DIR", d)
+	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "legacy"}
+	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved"})
+	called := false
+	r, err := withDedup(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil })
+	if called || r.Status != StatusUnknown || r.Detail != "delivery may have been attempted" || ErrorCode(err) != "ambiguous_delivery" || err.Error() != "delivery may have been attempted; refusing to resend" {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
 	}
 }

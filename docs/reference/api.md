@@ -199,8 +199,11 @@ owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports only submission state (`accepted`,
 `context_added`, `submitted`, `queued`, `unknown`, or `rejected`), transport, and detail;
 it does not claim that the recipient read or acted on the message. Reusing a
-`message_id` with the same request returns the durable receipt, while reusing it
-for changed content is rejected by the local felt adapter.
+`message_id` with the same request returns the durable receipt. A concurrent
+identical request waits up to 15 seconds for the first result; if it remains in
+progress or its owner stops before saving a result, felt returns `unknown`
+without resending. Reusing the ID for changed content is rejected by the local
+felt adapter.
 
 `POST /messages/files` accepts the same envelope plus one to eight
 `attachments`, each `{name, data, sha256}`. `name` is a portable basename,

@@ -222,7 +222,10 @@ or approval is handled by the harness, not by injecting terminal keystrokes.
 
 Receipts describe delivery evidence, not task completion. If delivery is
 uncertain, retry the identical request with the same `--message-id`; this returns
-the recorded result without repeating the turn or copying attachments again.
+the recorded result without repeating the turn or copying attachments again. A
+concurrent identical attempt waits up to 15 seconds for that result. If the
+original attempt is still running or its owner stopped before saving a result,
+the receipt is `unknown`; retry with the same ID rather than creating a new one.
 Changed content requires a new message ID. There is no automatic retry of an
 uncertain send.
 
