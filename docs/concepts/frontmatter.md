@@ -66,9 +66,11 @@ felt ls -j                                     # everything, as JSON
 scalars one per line, structured values as YAML.
 
 One convention felt *does* understand: `inputs.from` names another fiber as a
-data-flow input. `felt show <id> --consumers` gives you the reverse edge, and
-`felt check` flags broken `from` references. That is all felt itself reads. The
-rest of the block stays yours.
+data-flow input. Every `inputs:` entry with a `from:` is an edge, whether or
+not it carries an `id:` (the id only labels it). `felt show <id> --consumers`
+gives you the reverse edge, `felt check` flags broken `from` references, and
+`felt nest` rewrites the ones a move would break. That is all felt itself
+reads. The rest of the block stays yours.
 
 ### Conventions other tools read
 

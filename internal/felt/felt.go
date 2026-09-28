@@ -32,9 +32,22 @@ const (
 	StatusClosed = "closed"
 )
 
+// DataFlowInputRef is one data-flow edge: an `inputs:` entry naming its
+// source in `from:`. The entry's `id:` is an optional label; Index is its
+// position in the sequence, which locates an unlabelled entry.
 type DataFlowInputRef struct {
 	InputID string
 	From    string
+	Index   int
+}
+
+// Path locates the entry's `from:` for an issue: by its id when it has one,
+// else by its position.
+func (r DataFlowInputRef) Path() string {
+	if r.InputID != "" {
+		return "inputs." + r.InputID + ".from"
+	}
+	return fmt.Sprintf("inputs[%d].from", r.Index)
 }
 
 type BodyRef struct {

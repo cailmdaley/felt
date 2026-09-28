@@ -483,3 +483,81 @@ func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
 		t.Fatalf("rm deleted the local lookalike: %v", err)
 	}
 }
+
+// writeConsumer writes a loom fiber whose inputs name from, once with an
+// input id and once without: an entry with `from:` is a data-flow edge either
+// way.
+func writeConsumer(t *testing.T, s *felt.Storage, id, from string) {
+	t.Helper()
+	f := &felt.Felt{ID: id, Name: id, Status: felt.StatusOpen, CreatedAt: time.Now()}
+	if err := f.SetExtraField("inputs", []map[string]any{
+		{"id": "catalog", "from": from},
+		{"from": from},
+	}); err != nil {
+		t.Fatalf("SetExtraField: %v", err)
+	}
+	if err := s.Write(f); err != nil {
+		t.Fatalf("write %s: %v", id, err)
+	}
+}
+
+func inputFroms(t *testing.T, s *felt.Storage, id string) []string {
+	t.Helper()
+	f, err := s.Read(id)
+	if err != nil {
+		t.Fatalf("read %s: %v", id, err)
+	}
+	var froms []string
+	for _, item := range f.ExtraFields["inputs"].Content {
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			if item.Content[i].Value == "from" {
+				froms = append(froms, item.Content[i+1].Value)
+			}
+		}
+	}
+	return froms
+}
+
+// TestNestFromViewRewritesOutsideInputs: nest and unnest run inside a view
+// rewrite inputs.from in the enclosing store's fibers outside the view, with
+// or without an input id, in the enclosing store's coordinates.
+func TestNestFromViewRewritesOutsideInputs(t *testing.T) {
+	loomProj, subProj := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/notes/runbook")
+
+	if out, err := runCommand(t, subProj, "nest", "notes/runbook", "debug"); err != nil {
+		t.Fatalf("nest: %v\n%s", err, out)
+	}
+	for _, from := range inputFroms(t, loom, "commons/reader") {
+		if from != "ai-futures/felt/debug/runbook" {
+			t.Fatalf("after nest, outside inputs = %v, want both at ai-futures/felt/debug/runbook", inputFroms(t, loom, "commons/reader"))
+		}
+	}
+
+	if out, err := runCommand(t, subProj, "unnest", "debug/runbook"); err != nil {
+		t.Fatalf("unnest: %v\n%s", err, out)
+	}
+	for _, from := range inputFroms(t, loom, "commons/reader") {
+		if from != "ai-futures/felt/runbook" {
+			t.Fatalf("after unnest, outside inputs = %v, want both at ai-futures/felt/runbook", inputFroms(t, loom, "commons/reader"))
+		}
+	}
+}
+
+// TestCheckFlagsStaleInputFromWithoutID: a stale inputs.from held up only by
+// its last segment is warned on from the store root — the entry's input id
+// is not what makes it an edge.
+func TestCheckFlagsStaleInputFromWithoutID(t *testing.T) {
+	loomProj, _ := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/old/runbook")
+
+	out, _ := runCommand(t, loomProj, "check")
+	if got := strings.Count(out, `stale path in reference "ai-futures/felt/old/runbook"`); got != 2 {
+		t.Fatalf("check warned on %d stale inputs.from, want 2 (with and without an id):\n%s", got, out)
+	}
+	if !strings.Contains(out, "inputs.catalog.from") || !strings.Contains(out, "inputs[1].from") {
+		t.Fatalf("check should locate each entry, by id or by position:\n%s", out)
+	}
+}

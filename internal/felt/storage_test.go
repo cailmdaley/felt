@@ -2749,3 +2749,44 @@ func TestResolveScopedIDExactOuterScopeBeatsInnerPrefix(t *testing.T) {
 		}
 	}
 }
+
+// TestDataFlowEdgeNeedsFromNotID: an inputs entry is an edge when it names a
+// source in from:, labelled or not — the same set a move rewrites — so
+// --consumers and check see an unlabelled entry too, and an id without a
+// from is no edge.
+func TestDataFlowEdgeNeedsFromNotID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*Felt{{ID: "source", Name: "Source"}, {ID: "reader", Name: "Reader"}} {
+		if f.ID == "reader" {
+			if err := f.SetExtraField("inputs", []map[string]any{
+				{"id": "labelled", "from": "source"},
+				{"from": "source"},
+				{"id": "dangling"},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader, err := s.Read("reader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := reader.DataFlowInputs()
+	if len(inputs) != 2 || inputs[0].Path() != "inputs.labelled.from" || inputs[1].Path() != "inputs[1].from" {
+		t.Fatalf("DataFlowInputs() = %+v, want the two entries with a from", inputs)
+	}
+	_, consumers, err := s.ScanRelationships("source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(consumers) != 2 {
+		t.Fatalf("consumers of source = %+v, want both entries", consumers)
+	}
+}
