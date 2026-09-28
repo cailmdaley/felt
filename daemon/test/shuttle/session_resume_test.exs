@@ -50,6 +50,7 @@ defmodule Shuttle.SessionResumeTest do
 
     def calls, do: Agent.get(__MODULE__, & &1.calls)
     def set_running(running), do: Agent.update(__MODULE__, &Map.put(&1, :running, running))
+    def set_duplicate(dup), do: Agent.update(__MODULE__, &Map.put(&1, :duplicate, dup))
 
     def cmd(command, args, _opts) do
       Agent.update(
@@ -66,6 +67,11 @@ defmodule Shuttle.SessionResumeTest do
             nil -> {"unknown agent #{id}", 1}
             agent -> {Jason.encode!(agent), 0}
           end
+
+        {"tmux", ["new-session" | _]} ->
+          if Agent.get(__MODULE__, &Map.get(&1, :duplicate)),
+            do: {"duplicate session: resume-x", 1},
+            else: {"", 0}
 
         _ ->
           {"", 0}
@@ -156,12 +162,14 @@ defmodule Shuttle.SessionResumeTest do
     start_supervised!(Runner)
     start_supervised!(StubKitty)
     Application.put_env(:shuttle, :session_resume_runner, Runner)
+    Application.put_env(:shuttle, :session_resume_live, fn -> [] end)
     Application.put_env(:shuttle, :kitty_impl, StubKitty)
     Application.put_env(:shuttle, :os_type, {:unix, :linux})
 
     on_exit(fn ->
       File.rm_rf(root)
       Application.delete_env(:shuttle, :session_resume_runner)
+      Application.delete_env(:shuttle, :session_resume_live)
       Application.delete_env(:shuttle, :kitty_impl)
       Application.delete_env(:shuttle, :os_type)
 
@@ -245,6 +253,39 @@ defmodule Shuttle.SessionResumeTest do
     end
   end
 
+  describe "never a second process on a live worker's transcript" do
+    test "prepare refuses a session a worker is running, and starts nothing" do
+      assert {:error, {:live, reason}} =
+               SessionResume.prepare(@claude, runner: Runner, live_sessions: fn -> [@claude] end)
+
+      assert reason =~ "running worker"
+      assert Runner.calls() == []
+    end
+
+    test "both routes answer 409" do
+      Application.put_env(:shuttle, :session_resume_live, fn -> [@codex] end)
+
+      for route <- ["/api/v1/attach", "/api/v1/sessions/resume"] do
+        assert %{"error" => reason} =
+                 post(api_conn(), route, Jason.encode!(%{"session" => @codex}))
+                 |> json_response(409)
+
+        assert reason =~ "attach"
+      end
+
+      assert StubKitty.opened() == []
+    end
+  end
+
+  test "a double click that races tmux's duplicate-session error is the session, not a failure" do
+    Runner.set_duplicate(true)
+
+    assert {:ok, %{created: false, tmux_session: tmux}} =
+             SessionResume.prepare(@pi, runner: Runner)
+
+    assert tmux == "resume-" <> @pi
+  end
+
   describe "POST /api/v1/attach with a session" do
     test "a local session resumes here and the tab attaches to it" do
       body =
@@ -273,6 +314,22 @@ defmodule Shuttle.SessionResumeTest do
                |> json_response(422)
 
       assert reason =~ "no working directory"
+      assert StubKitty.opened() == []
+    end
+
+    test "a non-string host is a 400, and an unknown one is named" do
+      post(api_conn(), "/api/v1/attach", Jason.encode!(%{"session" => @pi, "shuttle_host" => 7}))
+      |> json_response(400)
+
+      assert %{"error" => reason} =
+               post(
+                 api_conn(),
+                 "/api/v1/attach",
+                 Jason.encode!(%{"session" => @pi, "shuttle_host" => "nowhere"})
+               )
+               |> json_response(422)
+
+      assert reason =~ "unknown host \"nowhere\""
       assert StubKitty.opened() == []
     end
 
@@ -316,6 +373,20 @@ defmodule Shuttle.SessionResumeTest do
       # And the tab's command is the ssh attach Kitty builds for that host.
       assert Shuttle.Kitty.attach_command("resume-" <> @pi, "hub-a") ==
                {:ok, ["ssh", "-tt", "hub-a-login", "tmux", "attach", "-t", "=resume-" <> @pi]}
+
+      StubPostClient.set_response(
+        {:ok, 404, Jason.encode!(%{"errors" => %{"detail" => "Not Found"}})}
+      )
+
+      assert %{"error" => reason} =
+               post(
+                 api_conn(),
+                 "/api/v1/attach",
+                 Jason.encode!(%{"session" => @pi, "shuttle_host" => "hub-a"})
+               )
+               |> json_response(502)
+
+      assert reason =~ "deploy"
 
       StubPostClient.set_response({:ok, 422, Jason.encode!(%{"error" => "no transcript"})})
 

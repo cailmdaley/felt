@@ -94,17 +94,23 @@ defmodule Shuttle.SessionResume do
 
   @doc """
   Start the resume of `session` in its tmux session, unless it is already
-  running there. `{:ok, %{tmux_session: name, created: boolean}}`, or
-  `{:error, reason}`.
+  running there. `{:ok, %{tmux_session: name, created: boolean}}`;
+  `{:error, {:live, message}}` when the session is a running worker's (two
+  harness processes must not share a transcript); or `{:error, reason}`.
 
-  Opts: as `plan/2`.
+  Opts: as `plan/2`, plus `:live_sessions` (a 0-arity function standing in for
+  `live_sessions/0`).
   """
   @spec prepare(String.t(), keyword()) ::
-          {:ok, %{tmux_session: String.t(), created: boolean()}} | {:error, String.t()}
+          {:ok, %{tmux_session: String.t(), created: boolean()}}
+          | {:error, {:live, String.t()}}
+          | {:error, String.t()}
   def prepare(session, opts \\ []) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
+    live = Keyword.get(opts, :live_sessions, &live_sessions/0)
 
-    with {:ok, plan} <- plan(session, opts) do
+    with :ok <- not_the_worker(session, live.()),
+         {:ok, plan} <- plan(session, opts) do
       if running?(plan.tmux, runner) do
         {:ok, %{tmux_session: plan.tmux, created: false}}
       else
@@ -113,7 +119,48 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  defp running?(tmux, runner) do
+  defp not_the_worker(session, live) do
+    if session in live,
+      do:
+        {:error,
+         {:live,
+          "this session is the fiber's running worker — attach to it instead of resuming it"}},
+      else: :ok
+  end
+
+  @doc """
+  The harness sessions this host's workers are running now, from the poller's
+  snapshot: an app conversation's own ids, and for a tmux worker the newest
+  session its fiber's ledger paired (the one it was dispatched or resumed on).
+  Empty when the poller cannot answer — the dispatcher's own refusal
+  (`resume-<uuid>` open) still guards the other direction.
+  """
+  @spec live_sessions() :: [String.t()]
+  def live_sessions do
+    Shuttle.Poller.snapshot(Shuttle.Poller, 5_000)
+    |> Map.get(:eligible, [])
+    |> Enum.flat_map(fn row ->
+      app = [row[:session_uuid], row[:transcript_session_uuid]]
+
+      tmux =
+        if is_binary(row[:tmux_session]) do
+          case SessionLedger.latest_for_uid(row[:uid]) do
+            %{"session" => id} -> [id]
+            _ -> []
+          end
+        else
+          []
+        end
+
+      Enum.filter(app ++ tmux, &is_binary/1)
+    end)
+  catch
+    :exit, _ -> []
+  end
+
+  @doc "Whether the tmux session `tmux` exists on this host."
+  @spec running?(String.t(), module()) :: boolean()
+  def running?(tmux, runner) do
     match?({_, 0}, runner.cmd("tmux", ["has-session", "-t", "=" <> tmux], stderr_to_stdout: true))
   end
 
@@ -134,7 +181,13 @@ defmodule Shuttle.SessionResume do
 
         {output, _} ->
           File.rm(script)
-          {:error, "tmux failed: #{output |> to_string() |> String.trim()}"}
+          output = output |> to_string() |> String.trim()
+
+          # A second click racing the first: the session exists, which is all
+          # the caller wanted.
+          if String.contains?(output, "duplicate session"),
+            do: {:ok, %{tmux_session: plan.tmux, created: false}},
+            else: {:error, "tmux failed: #{output}"}
       end
     end
   end

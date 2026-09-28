@@ -31,6 +31,7 @@ defmodule Shuttle.Dispatcher do
           | {:error, {:wrapper_unresolved, String.t()}}
           | {:error, {:work_dir_missing, String.t()}}
           | {:error, {:tmux_server_unavailable, String.t()}}
+          | {:error, {:session_open_in_resume, String.t()}}
           | {:error, String.t()}
 
   @doc """
@@ -1002,6 +1003,20 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  defp check_no_human_resume(session_id, runner) do
+    tmux = Shuttle.SessionResume.tmux_name(session_id)
+
+    if Shuttle.SessionResume.running?(tmux, runner) do
+      dispatch_refused(
+        :session_open_in_resume,
+        "session #{session_id} is open in tmux #{tmux} (a resume from the card's History). " <>
+          "Close that terminal, or attach to it, before this fiber's worker resumes the same session."
+      )
+    else
+      :ok
+    end
+  end
+
   # Every preflight refusal takes this shape: a tagged reason the surfaces can
   # match on, and an operator-facing message they render verbatim (the Poller's
   # `blocked` row, the dispatch API's 422, the CLI's stderr).
@@ -1284,85 +1299,97 @@ defmodule Shuttle.Dispatcher do
 
     case resume_intent do
       {:previous, session_id} ->
-        # Resume mode: invoke the harness-appropriate resume command and
-        # inject a small prompt as the next user turn so the resumed
-        # worker knows it was deliberately woken (and sees the user's
-        # latest directive if there is one). Without this the worker
-        # would wake blind to the directive that triggered the resume.
-        Logger.info(
-          "Resuming #{fiber_id} session #{session_id} via #{agent.id} → tmux #{session}"
-        )
-
-        resume_prompt = render_resume_prompt(fiber_id, prompt_opts)
-        resume_command = Agents.build_resume_command(agent, session_id, resume_prompt)
-
-        # Try resume; fall back to a fresh launch if the harness can't resume the
-        # target session. claude --resume exits non-zero ("No conversation found")
-        # when the on-disk transcript is gone — without a fallback the worker dies
-        # in <1s and, because the daemon keeps re-selecting the same id from
-        # history, the fiber flaps forever and can never be launched (the
-        # own-words deadlock). The fallback reuses the SAME session id, so
-        # `claude --session-id <id>` recreates the transcript under it and the next
-        # resume succeeds — the fiber self-heals. `||` keeps the resume failure
-        # non-fatal under `set -e`; harness-agnostic (no knowledge of where any CLI
-        # stores transcripts — the run itself reports success or failure).
-        # The fallback prompt must NOT carry the lineage line: the "previous"
-        # session here is the very session_id the fallback relaunches under —
-        # and the fallback only fires because its transcript is GONE, so the
-        # line would send the worker hunting for a file that does not exist.
-        fallback_command =
-          fresh_fallback_command(
-            agent,
-            fiber_id,
-            session_id,
-            prompt_context,
-            Keyword.delete(prompt_opts, :previous_session)
-          )
-
-        command = "#{resume_command} || #{fallback_command}"
-
-        # claude --resume shows an interactive "you're about to use a
-        # previous session" warning that only an Enter keypress at the
-        # TTY can dismiss. The heredoc-piped prompt arrives *after* the
-        # warning, so we can't fold it in. Schedule a tmux send-keys to
-        # fire a couple seconds in. Other harnesses (codex/pi) don't
-        # show this warning — and a headless `-p` resume has no TTY warning
-        # page and no human to attach, so both the dismiss send-keys and the
-        # wait-for-client gate are skipped for it.
-        headless = Keyword.fetch!(prompt_opts, :headless)
-
-        run_script =
-          build_run_script(fiber_id, command, agent.id,
-            dismiss_resume_warning: agent.cli == "claude" and not headless,
-            session: session,
-            headless: headless,
-            display_fiber_id: worker_fiber_id,
-            fiber_path: Keyword.get(opts, :fiber_path)
-          )
-
-        # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
-        # (same session_id — resuming doesn't change session identity, and the
-        # fresh-fallback path above reuses it as well) so the continuation
-        # heuristic compares a subsequent clean-exit or died-mid-window against
-        # THIS run, not the run being resumed. The session id is already known
-        # synchronously here (it's the resume target itself), unlike fresh
-        # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
-        # same as fresh dispatch.
-        spawn_and_record(session, work_dir, run_script, runner, fn ->
-          record_dispatch_session(
-            fiber_id,
-            session_id,
-            runner,
-            Keyword.merge(opts,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :resume
+        # A human resume of this very session (a card History row,
+        # `Shuttle.SessionResume`) may be open in `resume-<uuid>`. Two harness
+        # processes on one transcript would interleave it, so the dispatch is
+        # refused like any other preflight — the poller parks the fiber as
+        # blocked with this message — rather than killing a terminal a person
+        # may be typing in.
+        case check_no_human_resume(session_id, runner) do
+          :ok ->
+            # Resume mode: invoke the harness-appropriate resume command and
+            # inject a small prompt as the next user turn so the resumed
+            # worker knows it was deliberately woken (and sees the user's
+            # latest directive if there is one). Without this the worker
+            # would wake blind to the directive that triggered the resume.
+            Logger.info(
+              "Resuming #{fiber_id} session #{session_id} via #{agent.id} → tmux #{session}"
             )
-          )
-        end)
+
+            resume_prompt = render_resume_prompt(fiber_id, prompt_opts)
+            resume_command = Agents.build_resume_command(agent, session_id, resume_prompt)
+
+            # Try resume; fall back to a fresh launch if the harness can't resume the
+            # target session. claude --resume exits non-zero ("No conversation found")
+            # when the on-disk transcript is gone — without a fallback the worker dies
+            # in <1s and, because the daemon keeps re-selecting the same id from
+            # history, the fiber flaps forever and can never be launched (the
+            # own-words deadlock). The fallback reuses the SAME session id, so
+            # `claude --session-id <id>` recreates the transcript under it and the next
+            # resume succeeds — the fiber self-heals. `||` keeps the resume failure
+            # non-fatal under `set -e`; harness-agnostic (no knowledge of where any CLI
+            # stores transcripts — the run itself reports success or failure).
+            # The fallback prompt must NOT carry the lineage line: the "previous"
+            # session here is the very session_id the fallback relaunches under —
+            # and the fallback only fires because its transcript is GONE, so the
+            # line would send the worker hunting for a file that does not exist.
+            fallback_command =
+              fresh_fallback_command(
+                agent,
+                fiber_id,
+                session_id,
+                prompt_context,
+                Keyword.delete(prompt_opts, :previous_session)
+              )
+
+            command = "#{resume_command} || #{fallback_command}"
+
+            # claude --resume shows an interactive "you're about to use a
+            # previous session" warning that only an Enter keypress at the
+            # TTY can dismiss. The heredoc-piped prompt arrives *after* the
+            # warning, so we can't fold it in. Schedule a tmux send-keys to
+            # fire a couple seconds in. Other harnesses (codex/pi) don't
+            # show this warning — and a headless `-p` resume has no TTY warning
+            # page and no human to attach, so both the dismiss send-keys and the
+            # wait-for-client gate are skipped for it.
+            headless = Keyword.fetch!(prompt_opts, :headless)
+
+            run_script =
+              build_run_script(fiber_id, command, agent.id,
+                dismiss_resume_warning: agent.cli == "claude" and not headless,
+                session: session,
+                headless: headless,
+                display_fiber_id: worker_fiber_id,
+                fiber_path: Keyword.get(opts, :fiber_path)
+              )
+
+            # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
+            # (same session_id — resuming doesn't change session identity, and the
+            # fresh-fallback path above reuses it as well) so the continuation
+            # heuristic compares a subsequent clean-exit or died-mid-window against
+            # THIS run, not the run being resumed. The session id is already known
+            # synchronously here (it's the resume target itself), unlike fresh
+            # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
+            # same as fresh dispatch.
+            spawn_and_record(session, work_dir, run_script, runner, fn ->
+              record_dispatch_session(
+                fiber_id,
+                session_id,
+                runner,
+                Keyword.merge(opts,
+                  felt_store: felt_store,
+                  run_id: Keyword.get(opts, :run_id),
+                  tmux: session,
+                  harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                  uid: Keyword.get(opts, :uid),
+                  ledger_kind: :resume
+                )
+              )
+            end)
+
+          refused ->
+            refused
+        end
 
       :fresh ->
         # Fresh mode: build the full dispatch prompt.

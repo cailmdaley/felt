@@ -148,8 +148,12 @@ resumes workers with, for the agent that host's ledger recorded, in the working
 directory the transcript records — or finds the one already running; a remote
 host is asked through `/sessions/resume`. The tab then attaches to it like any
 worker's. The name does not end in `-shuttle`, so no dispatch, adoption or
-orphan path treats it as a worker. 422 when that host has no transcript or no
-recorded working directory to resume in.
+orphan path treats it as a worker. 409 when the session is that host's running
+worker (attach to its tmux instead); 422 when that host has no transcript or no
+recorded working directory to resume in. The other way round, a dispatcher
+resume of a session whose `resume-<uuid>` is open is refused
+(`session_open_in_resume`) and the fiber shows as blocked, rather than two
+harness processes sharing one transcript.
 
 ## Read plane
 

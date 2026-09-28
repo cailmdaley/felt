@@ -20,8 +20,10 @@ defmodule ShuttleWeb.AttachController do
 
   `shuttle_host` is optional; absent/own-host → local. Returns 200
   `{ "attached": true, "session": <tmux session> }` on success, 400 for a
-  missing or malformed session, 422 when the host cannot resume that session,
-  502 when kitty or the remote can't be reached.
+  missing or malformed session or a non-string host, 409 when the session is
+  that host's running worker (attach to its tmux instead), 422 when the host
+  cannot resume it or is unknown, 502 when kitty or the remote can't be reached
+  (or the remote's daemon predates the resume route).
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -31,6 +33,10 @@ defmodule ShuttleWeb.AttachController do
   alias Shuttle.{OriginRouter, Remote, SessionResume, Transcript}
   alias ShuttleWeb.SessionResumeController
 
+  def create(conn, %{"shuttle_host" => host}) when not (is_binary(host) or is_nil(host)) do
+    conn |> put_status(400) |> json(%{error: "shuttle_host must be a string"})
+  end
+
   def create(conn, %{"tmux_session" => session} = params) when is_binary(session) do
     attach(conn, session, Map.get(params, "shuttle_host"))
   end
@@ -38,15 +44,13 @@ defmodule ShuttleWeb.AttachController do
   def create(conn, %{"session" => session} = params) when is_binary(session) do
     host = Map.get(params, "shuttle_host")
 
-    cond do
-      not Transcript.valid_session?(session) ->
-        conn |> put_status(400) |> json(%{error: "session must be a UUID"})
-
-      true ->
-        case prepare(session, host) do
-          {:ok, tmux} -> attach(conn, tmux, host)
-          {:error, status, reason} -> conn |> put_status(status) |> json(%{error: reason})
-        end
+    if Transcript.valid_session?(session) do
+      case prepare(session, host) do
+        {:ok, tmux} -> attach(conn, tmux, host)
+        {:error, status, reason} -> conn |> put_status(status) |> json(%{error: reason})
+      end
+    else
+      conn |> put_status(400) |> json(%{error: "session must be a UUID"})
     end
   end
 
@@ -68,8 +72,9 @@ defmodule ShuttleWeb.AttachController do
   defp prepare(session, host) do
     case OriginRouter.route_host(host) do
       :local ->
-        case SessionResume.prepare(session, runner: SessionResumeController.runner()) do
+        case SessionResume.prepare(session, SessionResumeController.prepare_opts()) do
           {:ok, %{tmux_session: tmux}} -> {:ok, tmux}
+          {:error, {:live, reason}} -> {:error, 409, reason}
           {:error, reason} -> {:error, 422, reason}
         end
 
@@ -86,6 +91,11 @@ defmodule ShuttleWeb.AttachController do
                 {:error, 502, "#{remote.name} answered the resume with no tmux session"}
             end
 
+          {:forwarded, 404, _body} ->
+            {:error, 502,
+             "#{remote.name}'s daemon has no /api/v1/sessions/resume route — deploy the " <>
+               "current build there to resume its sessions"}
+
           {:forwarded, status, body} ->
             {:error, if(status in 400..499, do: status, else: 502), remote_error(body, remote)}
 
@@ -93,8 +103,8 @@ defmodule ShuttleWeb.AttachController do
             {:error, 502, "#{remote.name} could not be reached to resume the session"}
         end
 
-      {:error, _unknown} ->
-        {:error, 422, "#{host} is not in this host's fleet file"}
+      {:error, {:unknown_origin, origin}} ->
+        {:error, 422, OriginRouter.unknown_origin_message(origin)}
     end
   end
 

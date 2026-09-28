@@ -490,6 +490,44 @@ defmodule Shuttle.DispatchIntegrationTest do
            "expected a fresh dispatched_at stamp carrying the resumed session id"
   end
 
+  test "a resume is refused while a human resume of the same session is open", %{host: host} do
+    write_fiber(host, "tests/human-open", """
+    ---
+    name: Human has it open
+    status: active
+    tags:
+      - constitution
+    shuttle:
+      kind: oneshot
+      agent: claude-sonnet
+    ---
+    A fiber whose previous session a person resumed from the card's History.
+    """)
+
+    write_dispatch_marker(host, "tests/human-open", "human-session-uuid-0001")
+    IntegrationRunner.add_tmux_session(Shuttle.SessionResume.tmux_name("human-session-uuid-0001"))
+
+    assert {:error, {:session_open_in_resume, message}} =
+             Dispatcher.dispatch("tests/human-open",
+               runner: IntegrationRunner,
+               felt_store: host,
+               resume_mode: "previous"
+             )
+
+    assert message =~ "resume-human-session-uuid-0001"
+    # No second harness process on that transcript, and nothing recorded.
+    refute Enum.any?(IntegrationRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+    assert read_ledger() == []
+
+    # A fresh dispatch is a different session, and is not held back.
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/human-open",
+               runner: IntegrationRunner,
+               felt_store: host,
+               resume_mode: "fresh"
+             )
+  end
+
   # Regression for the launch deadlock (the CNRS own-words fiber): a resume whose
   # target session is GONE must not flap. The run script tries `--resume <id>`
   # and, on failure (claude exits non-zero with "No conversation found"), falls
