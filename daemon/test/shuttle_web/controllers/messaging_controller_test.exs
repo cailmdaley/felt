@@ -272,6 +272,51 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert File.exists?(Path.join(app_workers_dir, thread_id <> ".json"))
   end
 
+  test "peer discovery notices AppWorker replacement with unchanged directory stats", %{
+    host: host,
+    app_workers_dir: app_workers_dir
+  } do
+    Application.put_env(:shuttle, :felt_runner, EmptyPeerRunner)
+    thread_id = "11111111-1111-4111-8111-111111111111"
+    address = "shuttle://#{host}/codex/#{thread_id}"
+    record_path = Path.join(app_workers_dir, thread_id <> ".json")
+
+    assert :ok =
+             Shuttle.AppWorkers.put(%{
+               "session_uuid" => thread_id,
+               "thread_id" => thread_id,
+               "fiber_id" => "work/worker",
+               "uid" => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+               "active" => true
+             })
+
+    first = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    assert Enum.any?(first["sessions"], &(&1["address"] == address))
+
+    directory_before = File.stat!(app_workers_dir, time: :posix)
+    record_before = File.stat!(record_path, time: :posix)
+    assert :ok = Shuttle.AppWorkers.deactivate(thread_id)
+
+    # Reproduce an atomic rewrite inside one directory-mtime second. The old
+    # directory token is now byte-for-byte unchanged, but the record inode is not.
+    :ok =
+      File.touch(
+        app_workers_dir,
+        :calendar.system_time_to_universal_time(directory_before.mtime, :second)
+      )
+
+    directory_after = File.stat!(app_workers_dir, time: :posix)
+    record_after = File.stat!(record_path, time: :posix)
+
+    assert {directory_before.mtime, directory_before.size, directory_before.inode} ==
+             {directory_after.mtime, directory_after.size, directory_after.inode}
+
+    refute record_before.inode == record_after.inode
+
+    second = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
+    refute Enum.any?(second["sessions"], &(&1["address"] == address))
+  end
+
   test "peer discovery includes active app conversations missing from native listing", %{
     host: host,
     ledger_path: path

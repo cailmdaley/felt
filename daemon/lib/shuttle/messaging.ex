@@ -337,13 +337,28 @@ defmodule Shuttle.Messaging do
     |> maybe_map_put("transcript_id", transcript)
   end
 
+  # AppWorkers writes records by atomic rename, so directory stats miss a
+  # same-second replacement of an existing record. Fingerprint each record's
+  # own stat (including inode) and the sorted names to catch updates, additions,
+  # and removals without decoding every JSON file on each discovery request.
   defp app_worker_directory_token do
     path = Shuttle.AppWorkers.root()
 
-    case File.stat(path, time: :posix) do
-      {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} -> {path, mtime, size, inode}
-      _ -> {path, nil}
-    end
+    records =
+      Path.join(path, "*.json")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(fn file ->
+        case File.stat(file, time: :posix) do
+          {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} ->
+            {Path.basename(file), mtime, size, inode}
+
+          _ ->
+            {Path.basename(file), nil}
+        end
+      end)
+
+    {path, records}
   end
 
   defp alias_sessions(sessions, host) do
