@@ -46,11 +46,7 @@ defmodule Shuttle.PollerTest do
       restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
       restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
       restore_env("SHUTTLE_HEARTBEAT_FILE", prev_heartbeat_file)
-      # The heartbeat writer runs unlinked from the Poller and can outlive it;
-      # retiring the path first (as a graceful shutdown does) waits out a write
-      # in flight and refuses later ones, so none re-creates the dir mid-removal.
-      Shuttle.DaemonHeartbeat.retire(Path.join(data_dir, "heartbeat.json"))
-      File.rm_rf!(data_dir)
+      rm_rf_settled!(data_dir)
     end)
 
     :ok
@@ -2392,6 +2388,26 @@ defmodule Shuttle.PollerTest do
     refute Map.has_key?(Poller.parked_index(poller), fiber_id)
   end
 
+  # The heartbeat writer is linked to its Poller, but the exit signal lands
+  # asynchronously: a write in flight can finish its `mkdir_p` while the data
+  # dir is being removed. Retry until the tree stays gone.
+  defp rm_rf_settled!(dir, tries \\ 20) do
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _, _} when tries > 0 ->
+        Process.sleep(50)
+        rm_rf_settled!(dir, tries - 1)
+
+      {:error, reason, file} ->
+        raise File.Error,
+          reason: reason,
+          action: "remove files and directories recursively from",
+          path: file
+    end
+  end
+
   # ── Boot-quarantine auto-release (daemon heartbeat continuity) ──
   #
   # A kernel that kills the beam on a CPU rlimit is not a human asking for a
@@ -2591,6 +2607,19 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
     end)
+  end
+
+  test "a gracefully stopped previous incarnation (stop marker) still quarantines" do
+    # A deploy or operator restart: fresh, released, long-run — everything a
+    # hard kill would look like, except the stop marker its SIGTERM left.
+    fiber_id = fresh_candidate!("tests/hb-stopped")
+    path = write_heartbeat!()
+    :ok = DaemonHeartbeat.mark_stopped(path)
+
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stopped)
+    send(poller, :run_poll_cycle)
+
+    assert_held!(poller, fiber_id)
   end
 
   test "a stale heartbeat (a real outage) still quarantines" do

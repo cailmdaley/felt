@@ -257,10 +257,14 @@ start:
 	  sleep 1; \
 	done
 
+# The stop marker is touched BEFORE the signal: it tells the next boot this
+# stop was asked for, so the boot quarantine holds (Shuttle.DaemonHeartbeat).
+# Touching it here means a stalled filesystem delays the stop, not the marker.
 stop:
 	@pid=$$(pgrep -f '$(PIDPATTERN)'); \
 	if [ -n "$$pid" ]; then \
 	  echo "stopping shuttle (pid $$pid)"; \
+	  touch "$${SHUTTLE_DATA_DIR:-$$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null; \
 	  kill -TERM $$pid; \
 	  for i in 1 2 3 4 5; do sleep 1; pgrep -f '$(PIDPATTERN)' >/dev/null || break; done; \
 	  pgrep -f '$(PIDPATTERN)' >/dev/null && (echo "force-killing"; kill -9 $$pid) || echo "stopped"; \

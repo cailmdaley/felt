@@ -272,6 +272,9 @@ defmodule Shuttle.Poller do
       # serve the next boot's verdict; see `Shuttle.DaemonHeartbeat`.
       daemon_heartbeat_file: nil,
       daemon_heartbeat_interval_ms: nil,
+      # The heartbeat writer currently in flight, if any (see
+      # `write_daemon_heartbeat/1`).
+      daemon_heartbeat_writer: nil,
       daemon_booted_at: nil,
       daemon_boots: [],
       # True once boot adoption has scanned tmux and rebuilt `running` from what
@@ -788,7 +791,8 @@ defmodule Shuttle.Poller do
           Shuttle.AppWorkers.app?(Map.get(meta, :session)),
           do: key
         ),
-      machine_booted_at_ms: DaemonHeartbeat.machine_booted_at_ms()
+      machine_booted_at_ms: DaemonHeartbeat.machine_booted_at_ms(),
+      stopped_at_s: DaemonHeartbeat.stopped_at_s(state.daemon_heartbeat_file)
     }
 
     case DaemonHeartbeat.verdict(heartbeat, observed) do
@@ -804,13 +808,19 @@ defmodule Shuttle.Poller do
   end
 
   # Record this incarnation's liveness. Best-effort by contract — the write runs
-  # off this process and never raises, so a misbehaving filesystem costs the next
-  # boot its evidence (holding the quarantine, the safe direction) and never
-  # stalls the Poller. After a graceful shutdown has retired the file, the writer
-  # declines to re-create it (`DaemonHeartbeat.retire/2`).
+  # in a linked writer and never raises, so a misbehaving filesystem costs the
+  # next boot its evidence (holding the quarantine, the safe direction) and
+  # never stalls the Poller. A tick whose previous writer is still alive skips,
+  # so writers never pile up behind a stalled filesystem.
+  defp write_daemon_heartbeat(%State{daemon_heartbeat_writer: pid} = state)
+       when is_pid(pid) do
+    if Process.alive?(pid),
+      do: schedule_daemon_heartbeat(state),
+      else: write_daemon_heartbeat(%{state | daemon_heartbeat_writer: nil})
+  end
+
   defp write_daemon_heartbeat(%State{} = state) do
-    record_daemon_heartbeat(state)
-    schedule_daemon_heartbeat(state)
+    state |> record_daemon_heartbeat() |> schedule_daemon_heartbeat()
   end
 
   # One write, no rescheduling — for the tick above and for the moment a hold
@@ -818,7 +828,7 @@ defmodule Shuttle.Poller do
   # record that still says "held". `held` covers a contract skew too: fresh work
   # parked behind a skew is as unreleased as work parked behind the quarantine.
   defp record_daemon_heartbeat(%State{} = state) do
-    :ok =
+    pid =
       DaemonHeartbeat.write_async(state.daemon_heartbeat_file,
         booted_at: state.daemon_booted_at,
         host: state.own_host_id,
@@ -828,7 +838,7 @@ defmodule Shuttle.Poller do
         boots: state.daemon_boots
       )
 
-    state
+    %{state | daemon_heartbeat_writer: pid}
   end
 
   defp schedule_daemon_heartbeat(%State{daemon_heartbeat_interval_ms: interval} = state)

@@ -18,62 +18,27 @@ defmodule Shuttle.DaemonHeartbeatTest do
     end
   end
 
-  describe "graceful-shutdown retirement" do
+  describe "writing and the stop marker" do
     test "write_async writes the record", %{path: path} do
-      :ok = DaemonHeartbeat.write_async(path, booted_at: 1, workers: ["a"])
+      pid = DaemonHeartbeat.write_async(path, booted_at: 1, workers: ["a"])
+      assert is_pid(pid)
       assert wait_for(fn -> match?({:ok, _}, DaemonHeartbeat.read(path)) end)
       assert {:ok, %{"workers" => ["a"]}} = DaemonHeartbeat.read(path)
     end
 
-    test "retire removes the file and no later write re-creates it", %{path: path} do
+    test "mark_stopped touches heartbeat.stopped beside the heartbeat and keeps the heartbeat",
+         %{path: path} do
       :ok = DaemonHeartbeat.write(path, booted_at: 1)
+      assert DaemonHeartbeat.stopped_at_s(path) == nil
+
+      before = System.os_time(:second)
+      :ok = DaemonHeartbeat.mark_stopped(path)
+
+      assert DaemonHeartbeat.stop_marker_path(path) ==
+               Path.join(Path.dirname(path), "heartbeat.stopped")
+
+      assert DaemonHeartbeat.stopped_at_s(path) >= before
       assert File.exists?(path)
-
-      :ok = DaemonHeartbeat.retire(path)
-      refute File.exists?(path)
-      assert DaemonHeartbeat.retired?(path)
-
-      for _ <- 1..5, do: DaemonHeartbeat.write_async(path, booted_at: 1)
-      Process.sleep(100)
-      refute File.exists?(path)
-    end
-
-    test "retire waits out a write already in flight", %{path: path} do
-      # Hold the writer name as an in-flight writer would; retire must not
-      # delete until it lets go, and a writer that lands in that window must
-      # still be removed by the delete that follows.
-      name = {DaemonHeartbeat, :writer, path}
-      parent = self()
-
-      writer =
-        spawn(fn ->
-          :yes = :global.register_name(name, self())
-          send(parent, :holding)
-
-          receive do
-            :finish -> :ok = DaemonHeartbeat.write(path, booted_at: 1)
-          end
-        end)
-
-      assert_receive :holding
-      retirer = Task.async(fn -> DaemonHeartbeat.retire(path, 5_000) end)
-      Process.sleep(50)
-      assert Task.yield(retirer, 0) == nil
-
-      send(writer, :finish)
-      assert Task.await(retirer) == :ok
-      refute File.exists?(path)
-    end
-
-    test "a tick that finds a write in flight skips instead of queueing", %{path: path} do
-      name = {DaemonHeartbeat, :writer, path}
-      :yes = :global.register_name(name, self())
-
-      :ok = DaemonHeartbeat.write_async(path, booted_at: 1)
-      Process.sleep(100)
-      refute File.exists?(path)
-
-      :global.unregister_name(name)
     end
   end
 
@@ -143,6 +108,16 @@ defmodule Shuttle.DaemonHeartbeatTest do
       assert reason =~ "still quarantined"
       {:ok, record} = hb()
       assert {:hold, _} = judge({:ok, Map.delete(record, "held")})
+    end
+
+    test "a stop marker from the writer's boot second or later holds; an older one does not" do
+      {:ok, record} = hb()
+      boot_s = div(record["booted_at"], 1000)
+      assert {:hold, reason} = judge(hb(), %{stopped_at_s: boot_s})
+      assert reason =~ "stopped gracefully"
+      assert {:hold, _} = judge(hb(), %{stopped_at_s: boot_s + 600})
+      assert {:release, _} = judge(hb(), %{stopped_at_s: boot_s - 1})
+      assert {:release, _} = judge(hb(), %{stopped_at_s: nil})
     end
 
     test "a heartbeat stamped with another host id holds" do

@@ -213,6 +213,9 @@ stop_daemon() {
   _pid=$(pgrep -f "$_pat" 2>/dev/null | head -1 || true)
   [ -n "$_pid" ] || return 0
   echo "stopping the running daemon (pid $_pid)"
+  # Mark the stop as asked-for before signalling, so the next boot holds its
+  # quarantine (Shuttle.DaemonHeartbeat's stop marker).
+  touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null || true
   kill -TERM "$_pid" 2>/dev/null || true
   _i=0
   while [ "$_i" -lt 5 ]; do

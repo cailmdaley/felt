@@ -21,15 +21,16 @@ defmodule Shuttle.DaemonHeartbeat do
 
   ## Asked-for versus hard: the signal decides
 
-  Every asked-for stop — `make stop`, `bin/shuttle`'s stop before installing a
-  supervisor, `bin/shuttle-deploy`'s listener kill, `systemctl --user restart`,
-  `launchctl kickstart -k` — sends SIGTERM first. SIGTERM runs `init:stop/0`,
-  whose first act is `Shuttle.Application.prep_stop/1`, which calls `retire/2`:
-  the file is deleted, and no later write can re-create it. The next boot finds
-  no heartbeat and holds. A hard kill runs nothing, so only a hard kill leaves
-  the file behind to be judged. (If a write is wedged in the filesystem longer
-  than `retire/2`'s bounded wait, its rename can still land after the delete;
-  the next boot then judges it like a hard kill.)
+  Every asked-for stop — `make stop`, `bin/shuttle`'s `stop_daemon` (run before
+  installing a supervisor), `bin/shuttle-deploy`'s listener kill, `systemctl
+  --user restart`, `launchctl kickstart -k` — sends SIGTERM first. SIGTERM runs
+  `init:stop/0`, whose first act is `Shuttle.Application.prep_stop/1`, which
+  touches the stop marker (`mark_stopped/1`). A marker at least as new as the
+  heartbeat writer's boot means that incarnation was stopped gracefully, and
+  the next boot holds. The three scripts touch the same marker themselves
+  before they signal, so a filesystem stall blocks the script rather than
+  racing the signal. A hard kill touches nothing, so only a hard kill leaves a
+  heartbeat with no later marker.
 
   ## Shape
 
@@ -233,80 +234,60 @@ defmodule Shuttle.DaemonHeartbeat do
   end
 
   @doc """
-  Write the heartbeat off the caller's process.
+  Write the heartbeat off the caller's process, returning the writer's pid.
 
   The caller (the Poller's liveness tick) keeps the timer, because handling the
-  tick is what proves the daemon alive; the write itself runs in an unlinked
-  process so a slow filesystem never stalls the Poller. At most one write per
-  path is in flight: the writer holds a `:global` name for the path while it
-  works, and a tick that finds the name taken skips its write rather than
-  queueing behind a stuck one. A writer checks `retired?/1` only after taking the
-  name, which is what lets `retire/2` guarantee no write lands after it returns.
+  tick is what proves the daemon alive; the write itself runs in a linked
+  process so a slow filesystem never stalls the Poller, and the writer dies
+  with it. The caller skips a tick while its previous writer is still alive, so
+  writers never pile up behind a stalled filesystem.
   """
-  @spec write_async(String.t(), keyword()) :: :ok
+  @spec write_async(String.t(), keyword()) :: pid()
   def write_async(path, opts) when is_binary(path) and is_list(opts) do
-    {:ok, _pid} =
-      Task.start(fn ->
-        name = writer_name(path)
-
-        if :global.register_name(name, self()) == :yes do
-          try do
-            unless retired?(path), do: write(path, opts)
-          after
-            :global.unregister_name(name)
-          end
-        end
-      end)
-
-    :ok
+    {:ok, pid} = Task.start_link(fn -> write(path, opts) end)
+    pid
   end
 
   @doc """
-  Remove the heartbeat for good, for a graceful shutdown.
-
-  A SIGTERM'd daemon (`make stop`, `bin/shuttle stop`, a supervisor restart, a
-  deploy's listener kill) is a restart someone asked for, and must arm the next
-  boot's quarantine. Removing the file is how it says so: the next boot finds no
-  heartbeat and holds. Only a hard kill (an rlimit SIGKILL) leaves the file for
-  the next boot to judge.
-
-  Marks `path` retired first, so no later write can re-create it, then waits up
-  to `wait_ms` for a write already in flight to finish, then deletes the file.
-  A writer takes its name before it checks the mark, so every writer either
-  finished before the wait or sees the mark and writes nothing. Never raises.
+  The stop marker beside `heartbeat_path`: `heartbeat.stopped` in the same
+  directory, so `$SHUTTLE_DATA_DIR/heartbeat.stopped` by default — the path
+  `make stop`, `bin/shuttle` and `bin/shuttle-deploy` touch before they signal.
   """
-  @spec retire(String.t(), non_neg_integer()) :: :ok
-  def retire(path, wait_ms \\ 2_000) when is_binary(path) do
-    :persistent_term.put({__MODULE__, :retired, path}, true)
+  @spec stop_marker_path(String.t()) :: String.t()
+  def stop_marker_path(heartbeat_path),
+    do: Path.join(Path.dirname(heartbeat_path), "heartbeat.stopped")
 
-    case :global.whereis_name(writer_name(path)) do
-      pid when is_pid(pid) ->
-        ref = Process.monitor(pid)
+  @doc """
+  Record a graceful stop: touch the stop marker beside `heartbeat_path`.
 
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          wait_ms -> Process.demonitor(ref, [:flush])
-        end
+  Called first thing in `Shuttle.Application.prep_stop/1`. The heartbeat file
+  itself is left alone — a late write cannot erase a separate file, and the
+  kept file carries the boots ring forward. Never raises.
+  """
+  @spec mark_stopped(String.t()) :: :ok
+  def mark_stopped(heartbeat_path) when is_binary(heartbeat_path) do
+    marker = stop_marker_path(heartbeat_path)
 
-      :undefined ->
+    with :ok <- File.mkdir_p(Path.dirname(marker)),
+         :ok <- File.touch(marker) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("could not touch the stop marker #{marker}: #{inspect(reason)}")
         :ok
     end
-
-    _ = File.rm(path)
-    _ = File.rm(path <> ".tmp")
-    :ok
-  rescue
-    error ->
-      Logger.warning("daemon heartbeat retire failed (#{path}): #{inspect(error)}")
-      :ok
   end
 
-  @doc "Whether `retire/2` has run for `path` in this VM."
-  @spec retired?(String.t()) :: boolean()
-  def retired?(path), do: :persistent_term.get({__MODULE__, :retired, path}, false)
-
-  defp writer_name(path), do: {__MODULE__, :writer, path}
+  @doc """
+  The stop marker's mtime in epoch seconds, or `nil` when there is none.
+  """
+  @spec stopped_at_s(String.t()) :: integer() | nil
+  def stopped_at_s(heartbeat_path) when is_binary(heartbeat_path) do
+    case File.stat(stop_marker_path(heartbeat_path), time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} when is_integer(mtime) -> mtime
+      _ -> nil
+    end
+  end
 
   @doc """
   Append `boot_at` to `boots`, keeping the newest `#{@boots_ring_size}`.
@@ -327,6 +308,8 @@ defmodule Shuttle.DaemonHeartbeat do
     * `:host` — this daemon's `own_host_id`;
     * `:node` — this machine's OS node name (`node_name/0`);
     * `:app` — the live keys whose worker is an app conversation (optional);
+    * `:stopped_at_s` — the stop marker's mtime, epoch seconds (`stopped_at_s/1`;
+      optional, `nil` when there is none);
     * `:machine_booted_at_ms` — when this machine booted (`machine_booted_at_ms/0`;
       optional, `nil` where unknown).
 
@@ -361,6 +344,9 @@ defmodule Shuttle.DaemonHeartbeat do
       # A record without the stamp holds too.
       hb["held"] != false ->
         {:hold, "the previous incarnation was still quarantined (held: #{inspect(hb["held"])})"}
+
+      stopped_gracefully?(hb["booted_at"], Map.get(observed, :stopped_at_s)) ->
+        {:hold, "the previous incarnation was stopped gracefully (stop marker)"}
 
       age_ms > @default_grace_ms or age_ms < -@default_grace_ms ->
         {:hold, "daemon heartbeat is #{age_ms}ms old (grace #{@default_grace_ms}ms)"}
@@ -417,6 +403,15 @@ defmodule Shuttle.DaemonHeartbeat do
       _ -> nil
     end
   end
+
+  # The marker has second resolution (`touch`), so compare against the floor of
+  # the writer's boot second: a marker touched in that second or later was the
+  # stop of the incarnation that wrote this heartbeat (or of a later one).
+  # Rounding can only turn a release into a hold.
+  defp stopped_gracefully?(booted_at_ms, stopped_at_s) when is_integer(stopped_at_s),
+    do: stopped_at_s >= div(booted_at_ms, 1000)
+
+  defp stopped_gracefully?(_booted_at_ms, _stopped_at_s), do: false
 
   defp predates_machine_boot?(at, booted) when is_integer(booted), do: at < booted
   defp predates_machine_boot?(_at, _booted), do: false
