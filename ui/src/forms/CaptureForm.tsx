@@ -34,8 +34,7 @@ import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
 import { captureOutcome, captureRequestBody, type CaptureResponseData } from './captureApi'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
-import type { AgentEntry } from './StashForm'
-import { agentGroups } from './agentGroups'
+import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
 import type { Host, Project } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 import {
@@ -47,9 +46,9 @@ import {
 } from './ProjectPicker'
 
 /**
- * Fallback when the registry fetch fails — keeps the dialog usable offline.
- * The live list comes from /api/v1/agents (constraint metadata included), so
- * effort/chrome stay disabled on the fallback (no metadata to gate them).
+ * Shown until the registry answers, and kept when it cannot. The live list
+ * comes from /api/v1/agents (constraint metadata included), so effort/chrome
+ * stay disabled on the fallback (no metadata to gate them).
  */
 const FALLBACK_AGENTS: AgentEntry[] = [
   { id: 'claude-opus', default: true },
@@ -60,10 +59,8 @@ const FALLBACK_AGENTS: AgentEntry[] = [
 
 // Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
 // often a real piece of thinking to crystallize, not throwaway — worth the
-// strong model. opus's registry default_effort is now xhigh too, so the live
-// agents list yields the same; this seed just keeps the dialog correct before
-// the registry loads (offline fallback). Switching the agent re-derives effort
-// from that agent's own default_effort.
+// strong model. The seed keeps the dialog correct before the registry loads;
+// switching the agent re-derives effort from that agent's own default_effort.
 const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
@@ -98,7 +95,7 @@ export function CaptureForm({
 }: CaptureFormProps): JSX.Element {
   const [prompt, setPrompt] = useState('')
   const [agent, setAgent] = useState<string>(CAPTURE_DEFAULT_AGENT)
-  const [agents, setAgents] = useState<AgentEntry[]>(FALLBACK_AGENTS)
+  const agents = useAgentRegistry(shuttleBase) ?? FALLBACK_AGENTS
   // Axes come from the selected agent's registry constraint metadata — no
   // hardcoded lists. The effective effort is always a concrete token when
   // the selected agent supports reasoning levels. Seeded to the capture default
@@ -147,36 +144,16 @@ export function CaptureForm({
     return () => { cancelled = true }
   }, [shuttleBase])
 
-  // Agent registry (base agents only; aliases resolve to base + axes). The
-  // fallback list stays in place when the daemon is unreachable.
-  useEffect(() => {
-    let cancelled = false
-    fetch(`${shuttleBase}/api/v1/agents`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | null) => {
-        if (cancelled || !Array.isArray(raw)) return
-        const list = raw.filter((a) => !a.alias_of)
-        if (list.length) setAgents(list)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [shuttleBase])
-
   const agentRec = agents.find((a) => a.id === agent)
   const effortLevels = agentRec?.effort_levels ?? []
-  const effectiveEffort = effortLevels.includes(effort)
-    ? effort
-    : agentRec?.default_effort && effortLevels.includes(agentRec.default_effort)
-      ? agentRec.default_effort
-      : ''
+  const effectiveEffort = resolveEffort(agentRec, effort)
   const chromeCapable = agentRec?.chrome_capable ?? false
 
   const handleAgentChange = (id: string): void => {
     const wasCodex = isCodexAgent(agents.find((a) => a.id === agent))
     setAgent(id)
     const rec = agents.find((a) => a.id === id)
-    const levels = rec?.effort_levels ?? []
-    setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
+    setEffort(resolveEffort(rec, ''))
     if (!(rec?.chrome_capable ?? false)) setChrome(false)
     if (!wasCodex) setSurface(defaultSurface(rec))
   }

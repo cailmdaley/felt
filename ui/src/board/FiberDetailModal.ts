@@ -20,7 +20,7 @@ import {
   type Attachment,
 } from './attachments.js'
 import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
-import { agentGroups } from '../forms/agentGroups.js'
+import { agentGroups } from '../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'

@@ -26,7 +26,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { agentGroups } from './agentGroups'
+import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
 import { injectStyles } from './injectStyles'
 import {
   AddProjectPath,
@@ -43,21 +43,6 @@ import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface AgentEntry {
-  id: string
-  cli?: string
-  model?: string
-  default: boolean
-  /** Harness-native effort tokens this agent accepts; empty/absent = no effort axis. */
-  effort_levels?: string[]
-  /** Concrete token applied when the fiber omits an explicit effort. */
-  default_effort?: string | null
-  /** Whether the harness supports `--chrome` (claude only). */
-  chrome_capable?: boolean
-  /** Alias records resolve to base + axes; the composing picker supersedes them. */
-  alias_of?: string | null
-}
 
 export interface StashFormProps {
   /** Every project, in picker order, on every host (create is owner-routed). */
@@ -315,7 +300,8 @@ export function StashForm({
   const [parentSlug, setParentSlug] = useState<string>('')
 
   // Dispatch fields (shuttle)
-  const [agents, setAgents] = useState<AgentEntry[]>([])
+  const registry = useAgentRegistry(shuttleBase)
+  const agents = registry ?? []
   const [agentId, setAgentId] = useState<string>('') // '' = registry default
   const [effort, setEffort] = useState<string>('')
   const [kind, setKind] = useState<'oneshot' | 'standing'>('oneshot')
@@ -352,23 +338,13 @@ export function StashForm({
     titleRef.current?.focus()
   }, [])
 
-  // The agent registry straight from the daemon — a bare array. Best-effort:
-  // absence or a malformed body degrades to a free-text agent input.
+  // The agent registry straight from the daemon. Best-effort: absence or a
+  // malformed body degrades to a free-text agent input. Once it lands, the
+  // select starts on the registry's default agent.
   useEffect(() => {
-    let cancelled = false
-    fetch(`${shuttleBase}/api/v1/agents`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | null) => {
-        if (cancelled || !Array.isArray(raw)) return
-        const list = raw.filter((a) => !a.alias_of)
-        if (!list.length) return
-        setAgents(list)
-        const def = list.find((a) => a.default)
-        if (def) setAgentId(def.id)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [shuttleBase])
+    const def = registry?.find((a) => a.default)
+    if (def) setAgentId(def.id)
+  }, [registry])
 
   const tagInputLower = tagInput.trim().toLowerCase()
   const filteredSuggestions = tagSuggestions
@@ -489,25 +465,20 @@ export function StashForm({
   // The agent whose constraint metadata gates the dependent axes.
   const constraintAgent = agents.find((a) => a.id === agentId) ?? defaultAgentEntry
   const effortLevels = constraintAgent?.effort_levels ?? []
-  const effectiveEffort = effortLevels.includes(effort)
-    ? effort
-    : constraintAgent?.default_effort && effortLevels.includes(constraintAgent.default_effort)
-      ? constraintAgent.default_effort
-      : ''
+  const effectiveEffort = resolveEffort(constraintAgent, effort)
   const chromeCapable = agents.length === 0 ? true : constraintAgent?.chrome_capable ?? false
 
   // Clamp axes whenever the constraint agent shifts under them.
   useEffect(() => {
     if (chrome && !chromeCapable) setChrome(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [constraintAgent?.id, agents])
+  }, [constraintAgent?.id, registry])
 
   const handleAgentChange = (id: string): void => {
     const wasCodex = isCodexAgent(agents.find((a) => a.id === agentId) ?? defaultAgentEntry)
     setAgentId(id)
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
-    const levels = rec?.effort_levels ?? []
-    setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
+    setEffort(resolveEffort(rec, ''))
     if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
