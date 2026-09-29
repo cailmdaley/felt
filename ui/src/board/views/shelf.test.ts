@@ -94,7 +94,6 @@ describe('normalizeShelfFiles', () => {
           timestamp: 1700,
           uid: 'lensing',
           host: 'farhost',
-          caption: 'the B-mode null',
         },
       ],
       origins: { farhost: { kind: 'remote', stale: true } },
@@ -107,7 +106,6 @@ describe('normalizeShelfFiles', () => {
         sessionId: undefined,
         uid: 'lensing',
         host: 'farhost',
-        caption: 'the B-mode null',
       },
     ])
   })

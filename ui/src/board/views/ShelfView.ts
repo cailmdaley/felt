@@ -901,10 +901,8 @@ class ShelfView implements TemporalView {
     const root = document.createElement('article')
     root.className = 'kbn-shelf-card'
     root.dataset.path = file.fullPath
-    // The worker's own words first when it left any, then the path — a caption
-    // says what the file IS, which is what you want on hover; the path says
-    // where it is, which is what you want when the caption isn't enough.
-    root.title = file.caption ? `${file.caption}\n${file.fullPath}` : file.fullPath
+    // The header shows the basename; hovering says where the file lives.
+    root.title = file.fullPath
     if (isOriginStale(this.origins, file.host ?? null)) {
       root.classList.add('kbn-shelf-card-stale')
     }
@@ -1826,7 +1824,7 @@ function buildFace(file: ShelfFile, kind: ShelfKind): HTMLElement {
 
   const note = document.createElement('div')
   note.className = 'kbn-shelf-face-note'
-  note.textContent = kind === 'opaque' ? '— not drawn here —' : (file.caption ?? '')
+  note.textContent = kind === 'opaque' ? '— not drawn here —' : ''
 
   face.append(glyph, note)
   if (file.host) {

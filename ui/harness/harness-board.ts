@@ -980,6 +980,27 @@ const MOCK_ORIGINS: TemporalOrigins = {
   },
 }
 
+/**
+ * The fleet's sent files, as `GET /api/v1/sent-files/all/composite` serves
+ * them: path, basename, instant, session, the sending fiber, and the host that
+ * holds the bytes. One of each kind the Shelf draws, and one from the stale
+ * remote. Their bodies do not load over `file://`, so the Shelf shows faces.
+ */
+const MOCK_SENT_FILES = [
+  { fullPath: '/work/shear/results/b-mode-null.png', uid: 'work/euclid/photoz-systematics/reread', at: -40 * 60_000 },
+  { fullPath: '/work/shear/report/null-tests.html', uid: 'work/euclid/photoz-systematics/reread', at: -3 * 3_600_000 },
+  { fullPath: '/work/kanban/board-chrome.pdf', uid: 'ai-futures/portolan/standalone-kanban/board-chrome-redesign', at: -5 * 3_600_000 },
+  { fullPath: '/work/arxiv/digest.md', uid: 'work/arxiv/daily-digest', at: -9 * 3_600_000 },
+  { fullPath: '/work/cycles/chains.tar.gz', uid: 'work/cycles/shear-paper-sprint', at: -26 * 3_600_000, host: FOREIGN_HOST },
+].map(({ fullPath, uid, at, host }) => ({
+  fullPath,
+  basename: fullPath.split('/').pop() ?? fullPath,
+  timestamp: now + at,
+  sessionId: null,
+  uid,
+  host: host ?? LOCAL_HOST,
+}))
+
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
@@ -1308,6 +1329,17 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)
     return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
+  }
+
+  if (url.includes('/api/v1/sent-files/all/composite')) {
+    return json({ files: MOCK_SENT_FILES, origins: MOCK_ORIGINS })
+  }
+  // A text card's body. Images, pages and PDFs load by URL, not through
+  // fetch, so offline they stay faces.
+  if (url.includes('/api/v1/file')) {
+    return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
+      headers: { 'Content-Type': 'text/plain' },
+    })
   }
 
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow

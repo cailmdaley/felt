@@ -562,7 +562,7 @@
 /* Stalled: the file is taking too long, or did not come. Said in words,
    because a rectangle that stays blank explains nothing. */
 .kbn-shelf-card-stalled .kbn-shelf-face-note::after {
-  content: ' — slow to load; click to retry';
+  content: 'slow to load; click to retry';
   color: #BC4538;
   font-style: italic;
 }

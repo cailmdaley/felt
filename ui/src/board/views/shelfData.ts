@@ -5,13 +5,12 @@
  * pure transforms the view reads it through. No DOM, no layout — those are
  * ShelfView and shelfLayout.
  *
- * The record is `SentFile` (../sentFiles.ts) widened by the three facts a
- * card needs and a card's trail never did: WHICH FIBER sent it (`uid`, the
- * caption the fiber lens clusters under), WHICH DAEMON holds the bytes
- * (`host`, which `/api/v1/file` needs to route a remote read), and the
- * worker's own words for it (`caption`) when it left any. All three are
- * optional, because a record can arrive without them and a shelf of
- * unattributed cards is still a shelf.
+ * The record is `SentFile` (../sentFiles.ts) widened by the two facts a card
+ * needs and a card's trail never did: WHICH FIBER sent it (`uid`, the key the
+ * fiber lens clusters under) and WHICH DAEMON holds the bytes (`host`, which
+ * `/api/v1/file` needs to route a remote read). Both are optional, because a
+ * record can arrive without them and a shelf of unattributed cards is still a
+ * shelf.
  */
 
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
@@ -23,8 +22,6 @@ export interface ShelfFile extends SentFile {
   uid?: string
   /** The daemon holding the bytes. Absent means "this one". */
   host?: string | null
-  /** The worker's own words, when it sent any. */
-  caption?: string
 }
 
 export interface ShelfResult {
@@ -42,7 +39,7 @@ const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
  * Built ON `normalizeSentFiles` rather than beside it: the path/basename/
  * timestamp coercion (including an older writer's ISO string where a number
  * belongs) is the same job, and a second dialect of "a sent file" is exactly
- * what that module exists to prevent. This pass only adds the three shelf
+ * what that module exists to prevent. This pass only adds the two shelf
  * fields back on, index-aligned — which holds because the normalizer drops
  * only pathless records, so we filter the same way first.
  */
@@ -64,8 +61,6 @@ export function normalizeShelfFiles(raw: unknown): ShelfFile[] {
     if (uid) out.uid = uid
     const host = str(rec.host)
     if (host) out.host = host
-    const caption = str(rec.caption)
-    if (caption) out.caption = caption
     return out
   })
 }
@@ -89,7 +84,7 @@ function str(value: unknown): string | undefined {
  *
  * A file sent five times is one thing that was revised five times, not five
  * things — and the shelf is a surface of things. The surviving record keeps
- * the latest send's metadata (its fiber, its host, its caption), because that
+ * the latest send's metadata (its fiber, its host), because that
  * is the state the card will actually render.
  */
 export function dedupeByPath(files: readonly ShelfFile[]): ShelfFile[] {
