@@ -5,18 +5,15 @@ import type { KanbanCard } from './KanbanTypes.js'
  *
  * Shuttle's endpoints don't speak one error format: `/api/v1/lifecycle` and
  * `/api/v1/transition` (on the local→remote forward path) reply `text/plain`
- * with the full shuttle-ctl stderr ("shuttle exited 1: …", "fiber not found:
- * …", a validation message); the transition controller's local errors reply
- * JSON `{error}`. The old call sites did `res.json().catch(() => ({error:
- * status}))`, so a plain-text body failed to parse and collapsed to a bare
- * status code — throwing away the one line that says what actually went wrong.
+ * with the CLI's stderr ("shuttle exited 1: …", "fiber not found: …", a
+ * validation message); the transition controller's local errors reply JSON
+ * `{error}`. Parsing every body as JSON would collapse a plain-text one to a
+ * bare status code — throwing away the one line that says what went wrong.
  *
  * This reads the body once, prefers a JSON `error` field when present, falls
- * back to the raw text, and only then to `<label> (HTTP <status>)`. Always use
- * it instead of re-deriving error text inline, so every kanban op surfaces the
- * daemon's real message in the banner.
+ * back to the raw text, and only then to `<label> (HTTP <status>)`.
  */
-export async function errorMessageFromResponse(res: Response, label: string): Promise<string> {
+async function errorMessageFromResponse(res: Response, label: string): Promise<string> {
   let body = ''
   try { body = (await res.text()).trim() } catch { /* body unreadable (network/stream error) */ }
   if (body) {
@@ -32,31 +29,86 @@ export async function errorMessageFromResponse(res: Response, label: string): Pr
   return `${label} (HTTP ${res.status})`
 }
 
+/**
+ * POST one JSON body to a daemon write route, throwing the daemon's own
+ * message on a non-2xx. Every write route is owner-routed by the `origin`
+ * field in the body, so the board can drive a fiber whose owning host is not
+ * this one.
+ */
+export async function postDaemonJson(
+  shuttleBase: string,
+  path: string,
+  body: unknown,
+  label: string,
+): Promise<void> {
+  const res = await fetch(`${shuttleBase}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
+}
+
+/**
+ * The one launch request every gesture sends: `POST /api/v1/dispatch` with
+ * `force` + `ad_hoc`, owner-routed by `origin`. The daemon reopens a closed
+ * lifecycle itself and launches on the owning host regardless of poll
+ * eligibility. `resume_mode` is explicit on every launch — `fresh` starts a
+ * new session, `previous` resumes the fiber's `shuttle.session_uuid` — and
+ * `user_message` rides inline into the worker's prompt.
+ */
+export function postForceDispatch(
+  shuttleBase: string,
+  card: Pick<KanbanCard, 'id' | 'originId'>,
+  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string },
+): Promise<Response> {
+  return fetch(`${shuttleBase}/api/v1/dispatch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fiber_id: card.id,
+      origin: card.originId,
+      force: true,
+      ad_hoc: true,
+      ...fields,
+    }),
+  })
+}
+
+/** What a refused dispatch says: the structured ineligibility copy when the
+ *  daemon sent any (it names the actual host / project_dir), else its
+ *  `error`, else `fallback`. */
+export function dispatchFailureMessage(body: DispatchFailureBody, fallback: string): string {
+  if (body.reason || body.detail || body.message) return dispatchIneligibleReason(body)
+  return body.error || fallback
+}
+
 export function isAgentCard(card: KanbanCard): boolean {
   return card.shuttleKind !== undefined ||
     card.shuttleAgent !== undefined
 }
 
+/** A refused dispatch's JSON body: the ineligibility fields, or a bare `error`. */
+export type DispatchFailureBody = DispatchIneligibleBody & { error?: string }
+
 /** The structured shape a 422 not_eligible dispatch response can carry. */
 export interface DispatchIneligibleBody {
   reason?: string
-  /** Specific cause code emitted by the daemon (newer builds). */
+  /** Specific cause code emitted by the daemon. */
   detail?: string
-  /** Pre-composed human message from the daemon (newer builds). */
+  /** Pre-composed human message from the daemon. */
   message?: string
 }
 
 /**
  * Map a 422 not_eligible dispatch response to a message readable by a human.
  *
- * Newer daemons return a `detail` code (e.g. `homed_elsewhere`,
+ * The daemon returns a `detail` code (e.g. `homed_elsewhere`,
  * `project_dir_missing`, `disabled`, `closed`) and often a pre-composed
- * `message`. We prefer the daemon's `message` when present (it can name the
- * actual host / project_dir), fall back to per-`detail` copy, and finally to
- * the legacy `reason` string. The old flat "disabled, not yet due, or closed"
- * is now only the last resort for a bare `not_eligible` with no detail — the
- * common confusing case (a fiber that simply needs to run on another host)
- * now says exactly that.
+ * `message`. The daemon's `message` wins when present (it can name the actual
+ * host / project_dir), then per-`detail` copy, then the `reason` string. The
+ * flat "disabled, not yet due, or closed" is the last resort for a bare
+ * `not_eligible` with no detail.
  */
 export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
   if (body.message && body.message.trim()) return body.message.trim()

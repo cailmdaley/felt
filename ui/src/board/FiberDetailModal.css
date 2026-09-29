@@ -1,22 +1,19 @@
 /* ── Fiber detail panel — a kanban card opened as a vellum page ──────────
    One click on a card opens the fiber itself: a floating, draggable,
-   edge-and-corner-resizable panel whose body is a single-column vellum
-   rendering (outcome lede → report.html embed → markdown body). Non-modal
-   by design — no scrim, the board behind stays interactive, so the reader
-   can drag the page aside and keep an eye on one fiber while working the
-   board.
+   edge-and-corner-resizable panel whose body is a single-column page
+   (outcome lede → markdown body, under a band of attachments and sent
+   files). Non-modal by design — no scrim, the board behind stays
+   interactive, so the reader can drag the page aside and keep an eye on one
+   fiber while working the board.
 
-   Chrome is title + a live-refresh control + one controls dropdown. The panel frame
-   wears the kanban's warm parchment; the page inside sits on vellum's
-   panel paper, so the fiber reads as a page held in a frame.
-
-   Loaded from FiberDetailModal.ts. The legacy two-column dialog styles in
-   KanbanModal.css were retired with the vellum-page rework. */
+   Chrome is title + a live-refresh control + one controls drawer. The panel
+   frame wears the kanban's warm parchment; the page inside sits on a paler
+   paper, so the fiber reads as a page held in a frame. */
 
 .kbn-detail-overlay {
   position: fixed;
-  /* ≥ 10000 — .vellum-modal-scrim is 9999 and the panel must float above
-     the vellum workspace modal hosting the kanban tab. */
+  /* The floor of FloatingPanelChrome's z-order stack, which counts up from
+     10000 as windows are raised. */
   z-index: 10000;
   display: flex;
   flex-direction: column;
@@ -153,7 +150,7 @@
   font-size: calc(18px * var(--kbn-type-scale, 1));
 }
 .kbn-detail-refresh:hover {
-  color: var(--porch-verdigris, #2f7d6f);
+  color: #2f7d6f;
   background: rgba(47, 125, 111, 0.08);
 }
 .kbn-detail-close:hover {
@@ -876,8 +873,7 @@
 .kbn-detail-rh-sw { bottom: -3px; left: -3px; width: 15px; height: 15px; cursor: nesw-resize; }
 
 /* ── The file-viewer window: a sibling window to the card ─────────────────
-   The file viewer is no longer a right column inside the card panel — it's a
-   SEPARATE floating window (its own document.body overlay), independently
+   The file viewer is a SEPARATE floating window (its own document.body overlay), independently
    draggable + resizable, free to overlap the card and be raised above it.
    It reuses the card's vellum frame (.kbn-detail-overlay gives it the fixed
    position, container-type, parchment, border, shadow, radius) and adds this
@@ -888,7 +884,7 @@
 .kbn-detail-overlay.kbn-fileview-window {
   display: flex;
   flex-direction: column;
-  background: var(--porch-panel, #E8E0D2);
+  background: #E8E0D2;
   background-image:
     radial-gradient(ellipse 620px 420px at 82% 6%, rgba(255, 251, 237, 0.6), transparent 62%),
     radial-gradient(ellipse 540px 460px at 8% 96%, rgba(27, 22, 17, 0.04), transparent 64%);
@@ -1007,7 +1003,7 @@
 }
 .kbn-detail-tab-active {
   color: #2E2418;
-  border-bottom-color: var(--porch-ochre, #C2963B);
+  border-bottom-color: #C2963B;
 }
 .kbn-detail-tab-name {
   flex: 1 1 auto;
@@ -1053,14 +1049,14 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  background: var(--porch-rag, #FFFDF6);
+  background: #FFFDF6;
 }
 .kbn-detail-view-cell {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   position: relative;
-  background: var(--porch-rag, #FFFDF6);
+  background: #FFFDF6;
   scrollbar-width: thin;
   scrollbar-color: rgba(154, 123, 53, 0.35) transparent;
 }
@@ -1125,21 +1121,19 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--porch-panel, #EDE8E0);
+  background: #EDE8E0;
   border-top: 1px solid rgba(255, 251, 237, 0.5);
 }
 
-/* ── The fiber body, vellum-styled ───────────────────────────────────────
-   The standalone UI emulates the vellum reading look in plain CSS rather than
-   mounting vellum's NarrativeView/PretextProse. `.kbn-detail-prose` wraps the
-   `marked`-rendered body (utils.renderMarkdown); the lede is the outcome.
+/* ── The fiber body ──────────────────────────────────────────────────────
+   `.kbn-detail-prose` wraps the `marked`-rendered body
+   (utils.renderMarkdown); the lede is the outcome.
    Single reading column, EB Garamond, the panel's parchment/ink palette. */
 .kbn-detail-prose {
   display: block;
   /* Fill the panel: no narrow reading column, only a slim gutter — the page
      IS the panel, so the prose tracks the panel width and grows as it's
-     resized (per the parity note: text should be ~full width, tiny
-     margins, and follow the pop-up's size). */
+     resized. */
   max-width: none;
   margin: 0;
   padding: 1.5rem 1.6rem 3rem;
@@ -1182,21 +1176,21 @@
   margin-left: 0.3em;
   font: inherit;
   font-style: normal;
-  color: var(--porch-verdigris, #2f7d6f);
+  color: #2f7d6f;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 
 /* The lede = the fiber's outcome, set above the body as a quoted callout —
-   a left ochre rule + warm tint, matching how vellum presents a fiber's
-   lede/blockquote. Upright (not italic): outcomes are often long and
-   information-dense, so the rule + offset carry the "quote" read without the
-   readability cost of a full italic paragraph. */
+   a left ochre rule + warm tint, a heavier cousin of the body's blockquote.
+   Upright (not italic): outcomes are often long and information-dense, so
+   the rule + offset carry the "quote" read without the readability cost of a
+   full italic paragraph. */
 .kbn-detail-lede {
   margin: 0 0 1.7rem;
   padding: 0.5rem 0.9rem 0.55rem 1.1rem;
-  border-left: 3px solid var(--porch-ochre, #C2963B);
+  border-left: 3px solid #C2963B;
   border-radius: 0 3px 3px 0;
   background: rgba(194, 150, 59, 0.07);
   font-size: 1.04em;
@@ -1236,7 +1230,7 @@
 .kbn-detail-prose blockquote {
   margin: 0 0 0.95em;
   padding-left: 1em;
-  border-left: 2px solid var(--porch-ochre, #C2963B);
+  border-left: 2px solid #C2963B;
   font-style: italic;
   color: #5e564b;
 }
@@ -1249,12 +1243,12 @@
 
 .kbn-detail-prose a,
 .kbn-detail-prose a.md-link {
-  color: var(--porch-verdigris, #2f7d6f);
+  color: #2f7d6f;
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
 }
-.kbn-detail-prose a:hover { color: var(--porch-cinnabar, #B5453A); }
+.kbn-detail-prose a:hover { color: #B5453A; }
 
 /* ── [[wikilinks]] ────────────────────────────────────────────────────────
    A body's reference to another fiber, which opens it as a tab in the panel
@@ -1303,7 +1297,7 @@
    card — the sent-file viewer's frame and tab strip exactly, holding fibers
    instead of files. What differs is only what a cell contains: a whole fiber
    card, which brings its own frame chrome, so the card inside is stripped of
-   the window it no longer is. */
+   its window frame. */
 .kbn-detail-overlay.kbn-linkview-window .kbn-detail-view-cell {
   /* The card inside scrolls its own page pane; a second scrollport around it
      would give the reader two bars for one column. */
@@ -1326,7 +1320,7 @@
   border: none;
   border-radius: 0;
   box-shadow: none;
-  background: var(--porch-rag, #FFFDF6);
+  background: #FFFDF6;
   background-image: none;
   cursor: default;
 }
@@ -1429,7 +1423,7 @@
 
 /* ── Attachments strip ────────────────────────────────────────────────────
    A fiber body's `:::{embed}` files, one card each, in a row above the prose.
-   They no longer render inline: a scrolling document inside the scrolling
+   Cards rather than inline renders: a scrolling document inside the scrolling
    constitution reads badly on a desktop and is unusable on a phone. The cards
    wear the sent-file chip's warm ochre so the two groups read as one family,
    with more weight here because an attachment is central and evergreen where a
@@ -1706,7 +1700,7 @@
    ticket with a leading gilt bead, so the launcher mirrors what's on screen at
    a glance. */
 .kbn-detail-sent-file-open {
-  border-color: var(--porch-ochre, #C2963B);
+  border-color: #C2963B;
   background: linear-gradient(rgba(196, 147, 51, 0.22), rgba(196, 147, 51, 0.14));
   color: #5e4a1f;
   box-shadow:
@@ -1714,7 +1708,7 @@
     0 1px 2px rgba(27, 22, 17, 0.05);
 }
 .kbn-detail-sent-file-open:hover {
-  border-color: var(--porch-ochre, #C2963B);
+  border-color: #C2963B;
   background: linear-gradient(rgba(196, 147, 51, 0.3), rgba(196, 147, 51, 0.18));
   color: #4a3a16;
 }
@@ -1737,7 +1731,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--porch-ochre, #C2963B);
+  background: #C2963B;
   box-shadow: 0 0 0 1px rgba(110, 85, 38, 0.25);
 }
 .kbn-detail-sent-when {
@@ -2274,17 +2268,6 @@ a.kbn-detail-aloft { text-decoration: none; }
     min-height: 36px;
   }
   .kbn-reader-zoom-btn { min-width: 32px; min-height: 32px; }
-}
-/* A PDF's first page, rendered by pdf.js into a canvas at the face's width.
-   Anchored to the TOP rather than cover-cropped to the middle: the title and
-   authors are the part that says which document this is. */
-.kbn-detail-attach-page {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: auto;
-  object-fit: unset;
-  background: #FFFDF6;
 }
 
 /* Phone continuation uses the app's host/project picker. */

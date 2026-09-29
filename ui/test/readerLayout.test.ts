@@ -61,7 +61,7 @@ describe('an inactive reader tab', () => {
     expect(declarations('.kbn-detail-view-cell:not([hidden])')).toMatch(/z-index:\s*1/)
     expect(declarations('.kbn-detail-views')).toMatch(/position:\s*relative/)
     // The covering cell must be opaque, or the tabs beneath show through.
-    expect(declarations('.kbn-detail-view-cell')).toMatch(/background:\s*var\(--porch-rag/)
+    expect(declarations('.kbn-detail-view-cell')).toMatch(/background:\s*#[0-9A-Fa-f]{6}\s*;/)
   })
 })
 

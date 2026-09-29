@@ -24,7 +24,7 @@ import { agentGroups } from '../forms/agentGroups.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
-import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
@@ -84,17 +84,12 @@ import './FiberDetailModal.css'
  * dragged the page to the right edge to watch a fiber while working the
  * board gets the same placement on the next card. Cleared on reload.
  */
-let lastGeometry: { left: number; top: number; width: number; height: number } | null = null
+let lastGeometry: PanelGeometry | null = null
 
-/** Single-column reading width. The card panel opens here and keeps it — the
- *  file viewer is now its own floating window, so the card never grows.
- *  Mirrors the old default (≤950 / 92vw). */
+/** Single-column reading width (≤950px, or 92vw on a narrower window). The
+ *  card panel opens here and keeps it — the file viewer is its own floating
+ *  window, so the card never grows. */
 const SINGLE_COL_WIDTH = 950
-
-// The z-order stack, the open-window registry and the geometry helpers all
-// live in FloatingPanelChrome now: three windows share them (the card, the file
-// viewer, and the panel that holds followed wikilinks), and a registry that
-// only one module could see was what made the third one awkward to add.
 
 /** Wall-clock time of an INSTANT, in the reader's zone. `dispatched_at` and
  *  `handed_off_at` are real points on the timeline, not civil days — a run
@@ -443,7 +438,7 @@ interface DetailPersist {
    * differ from the path tail in the disambiguation case (two distinct files
    * both literally named `report.html`, distinguished as
    * `standalone-kanban-report.html` vs `morning-post-report.html`). Persisting
-   * it keeps the tab label stable across reload; legacy records without it fall
+   * it keeps the tab label stable across reload; a record without it falls
    * back to `basename(path)`. `zoom` is the per-file Cmd-scroll magnification
    * (1 = native), `scroll` the last reading offset — both restored per tab.
    */
@@ -570,17 +565,14 @@ interface AgentRecord {
  * FiberDetailModal — one click on a kanban card opens the fiber itself.
  *
  * A floating, draggable, edge-and-corner-resizable panel whose body is a
- * single-column page: outcome lede, then the markdown body. The standalone
- * UI emulates the vellum look in CSS rather than importing vellum's
- * `NarrativeView`/PretextProse stack — the body is rendered by the lean
- * `marked` renderer (`utils.renderMarkdown`) and styled to read like a
- * vellum page (`.kbn-detail-prose` in FiberDetailModal.css). The markdown
- * comes from the daemon's `GET /api/v1/fibers/<id>?body=true`, which reads the
- * daemon's stores including the git-synced `~/loom` mirror — so remote-host
- * fibers normally render here too; a fiber the local daemon can't read (not
- * synced to its mirror, or bodyless) degrades to its outcome, which the
- * composite feed always carries. `:::{embed}` artifacts and relative images render through the
- * daemon's owner-routed `/file` route, anchored on the fiber's own dir.
+ * single-column page: outcome lede, then the markdown body, rendered by the
+ * lean `marked` renderer (`utils.renderMarkdown`) and styled as a page
+ * (`.kbn-detail-prose` in FiberDetailModal.css). The markdown comes from the
+ * daemon's `GET /api/v1/fibers/<id>?body=true`, owner-routed by the card's
+ * origin; a fiber that can't be read degrades to its outcome, which the
+ * composite feed always carries. `:::{embed}` files become the attachment
+ * strip, and relative images render through the daemon's owner-routed `/file`
+ * route, anchored on the fiber's own dir.
  *
  * Every card action lives in one drawer directly under the title, folded by
  * default: the message box with its meeting and New session / Resume, the
@@ -590,14 +582,10 @@ interface AgentRecord {
  * Deliberately NOT a Radix AppDialog and NOT background-locked: the panel
  * is non-modal by design — "drag it aside to keep an eye on one fiber
  * while working the board" requires the kanban behind it to stay
- * interactive, so there is no scrim, no focus trap, no body-inert. This is
- * the documented exception to the new-modal invariant. Escape still
- * closes; only one instance is open at a time. The root keeps the
- * `.kbn-detail-overlay` class so Camera's wheel-exemption `closest()`
- * list keeps routing wheel events to the panel instead of zooming the map.
+ * interactive, so there is no scrim, no focus trap, no body-inert. Escape
+ * still closes; only one instance is open at a time.
  *
- * Lifecycle: `open(card)` mounts the panel; `close()` tears it down
- * (including the React root inside the page pane).
+ * Lifecycle: `open(card)` mounts the panel; `close()` tears it down.
  */
 export class FiberDetailModal {
   private overlay: HTMLElement | null = null
@@ -611,12 +599,11 @@ export class FiberDetailModal {
   private attachHost: HTMLElement | null = null
   private readonly attachmentWatches: Array<() => void> = []
   private readonly attachmentLiveUrls = new Set<string>()
-  /** Shuttle daemon base (`:4000`). Every verb routes here — transition,
-   *  dispatch (carrying user_message + resume_mode inline), lifecycle,
-   *  felt-nest — owner-routed by the card's `originId` carried as
-   *  `origin` in the body. Reads (agent registry, parent-picker fiber index)
-   *  hit the daemon's GET routes. Portolan's `:4004` no longer serves the
-   *  kanban at all. */
+  /** Shuttle daemon base (`:4000`). Every verb routes here — dispatch
+   *  (carrying user_message + resume_mode inline), lifecycle, felt-nest,
+   *  felt-edit — owner-routed by the card's `originId` carried as `origin` in
+   *  the body. Reads (agent registry, parent-picker fiber index) hit the
+   *  daemon's GET routes. */
   private readonly shuttleBase: string
   /** Parent-picker index: one `GET /api/v1/fibers` per panel-open, filtered
    *  client-side per keystroke. Cleared on close. */
@@ -636,12 +623,12 @@ export class FiberDetailModal {
    * fixture, which mounts the panel with no board behind it.
    */
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
-  // ── Two-column file viewer state (the right column) ─────────────────────
-  /** The card the panel is currently showing — every accordion action
-   *  (open/close/expand/scroll) keys its persistence off `card.uid`. */
+  // ── File viewer state (the separate viewer window) ──────────────────────
+  /** The card the panel is currently showing — every viewer action
+   *  (open/close/scroll/zoom) keys its persistence off `card.uid`. */
   private card: KanbanCard | null = null
   /** The full sent-files trail (newest-first), kept current while the panel is
-   *  open. The left-column launcher renders from this. */
+   *  open. The launcher renders from this. */
   private sentFiles: SentFile[] = []
   /** Open files in stable open-order (the tab order — tabs don't reorder on
    *  click, browser-style). Each entry owns its tab + view cell + live
@@ -808,10 +795,8 @@ export class FiberDetailModal {
     const header = document.createElement('div')
     header.className = 'kbn-detail-header'
 
-    // The title is plain identification text + the drag handle. In the
-    // standalone UI the panel *is* the fiber view, so there is no "drill out
-    // to the full workspace" target — the click-to-open-elsewhere affordance
-    // Portolan's title carried is dropped.
+    // The title is plain identification text + the drag handle: the panel IS
+    // the fiber view, so there is nowhere else for a title click to go.
     const title = document.createElement('div')
     title.className = 'kbn-detail-title'
     title.textContent = card.name
@@ -907,8 +892,7 @@ export class FiberDetailModal {
       this.onCloseRequest ? this.onCloseRequest() : this.close(),
     )
 
-    // ID breadcrumb under the title — plain identification text; the title
-    // above carries the click-to-vellum affordance.
+    // ID breadcrumb under the title — plain identification text.
     const idEl = document.createElement('div')
     idEl.className = 'kbn-detail-id'
     idEl.textContent = card.id
@@ -921,7 +905,9 @@ export class FiberDetailModal {
     // card's title strip — the panel's own bar is what moves.
     // A sheet's header is a title bar, not a handle — there is nowhere to drag
     // it to, and a pointer drag on it would fight the body's scroll.
-    if (!this.host && !this.isSheet()) this.attachDrag(overlay, header)
+    if (!this.host && !this.isSheet()) {
+      attachPanelDrag(overlay, header, { onSettle: () => this.rememberGeometry(overlay) })
+    }
 
     // ── Drawer ──────────────────────────────────────────────────────────────
     // Directly under the title, folded by default (see `buildControls`).
@@ -959,9 +945,9 @@ export class FiberDetailModal {
     // ── Sent-files launcher ──────────────────────────────────────────────────
     // The deliverable trail: files the card's worker sessions pushed via
     // SendUserFile, newest first. Mounts empty and self-populates from the
-    // daemon's /sent-files (events.jsonl fallback for older daemons). Clicking
-    // an entry opens it in the separate file-viewer window (creating that
-    // window on first open). Empty trail → the launcher never reveals itself.
+    // daemon's /sent-files. Clicking an entry opens it in the separate
+    // file-viewer window (creating that window on first open). Empty trail →
+    // the launcher never reveals itself.
     const launcher = this.buildSentFilesLauncher(card)
 
     // ── Files band: attachments, then the sent-files trail ──────────────────
@@ -992,7 +978,9 @@ export class FiberDetailModal {
       // inside the panel's window, which carries all three for it.
       this.host.append(overlay)
     } else {
-      if (!this.isSheet()) this.attachResizeHandles(overlay)
+      if (!this.isSheet()) {
+        attachPanelResize(overlay, { onSettle: () => this.rememberGeometry(overlay) })
+      }
       // Clicking anywhere on the card raises it above the viewer window. Capture
       // phase so a click on an inner control still bumps z-order first.
       overlay.addEventListener('pointerdown', () => bringToFront(overlay), true)
@@ -1066,15 +1054,13 @@ export class FiberDetailModal {
     // pane's scrollport with it, ends up below the screen. Refit both windows
     // in place so the body stays readable to its end.
     this.resizeHandler = () => {
-      if (this.overlay && !this.host && this.isSheet()) {
-        // A sheet has nothing to refit; the viewport IS its geometry.
-        return
-      }
+      // A sheet has nothing to refit; the viewport IS its geometry.
+      if (this.overlay && this.isSheet()) return
       if (this.overlay && !this.host) {
         const geom = fitted(readPanelGeometry(this.overlay))
         applyGeometryTo(this.overlay, geom)
         this.cardGeom = geom
-        if (!this.host) lastGeometry = geom
+        lastGeometry = geom
       }
       if (this.viewerWindow && !this.viewerWindow.classList.contains('kbn-detail-sheet')) {
         this.viewerGeom = fitted(readPanelGeometry(this.viewerWindow))
@@ -1236,15 +1222,11 @@ export class FiberDetailModal {
 
   /**
    * Fetch the fiber's markdown body from the daemon and render it into the
-   * page pane, styled to read like a vellum page. The body endpoint
-   * (`GET /api/v1/fibers/<id>?body=true`) reads from THIS daemon's configured
-   * felt stores — which include the git-synced `~/loom` mirror, so a remote
-   * host's fibers normally resolve here too (the mirror carries every synced
-   * project's body). It degrades to the outcome only when the fiber isn't in
-   * this daemon's mirror (e.g. not synced yet) or genuinely has no body.
-   * `:::{embed}` artifacts and relative images resolve through the daemon's
-   * `/file` route, anchored on the fiber's dir (`card.fiberDir`); an
-   * unresolvable path falls back to a placeholder.
+   * page pane. The body endpoint (`GET /api/v1/fibers/<id>?body=true`) is
+   * owner-routed by the card's origin; it degrades to the outcome when the
+   * fiber can't be found there or genuinely has no body. `:::{embed}` files
+   * become the attachment strip, and relative images resolve through the
+   * daemon's `/file` route, anchored on the fiber's dir (`card.fiberDir`).
    */
   private async renderFiberBody(
     prose: HTMLElement,
@@ -1261,11 +1243,7 @@ export class FiberDetailModal {
       // panel is never blank: the daemon's body read (`?body=true`) can take
       // several seconds under poll-load, and a bare "Loading…" reads as broken.
       // The body then fills in below the lede, or degrades to a clear note.
-      const outcome = (card.outcome ?? '').trim()
-      const lede = outcome
-        ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
-        : ''
-      prose.innerHTML = lede + '<p class="kbn-detail-body-status">loading body…</p>'
+      prose.innerHTML = ledeHtml((card.outcome ?? '').trim()) + '<p class="kbn-detail-body-status">loading body…</p>'
     }
 
     let body = ''
@@ -1275,7 +1253,6 @@ export class FiberDetailModal {
     let reached = false
     let timer: number | null = null
     try {
-      const idPath = card.id.split('/').map(encodeURIComponent).join('/')
       // Carry the owning origin so the daemon owner-routes the read to the host
       // that can actually read the fiber (over the SSH tunnel), exactly like
       // every write and the /file bytes route. A remote fiber's body is fetched
@@ -1284,15 +1261,15 @@ export class FiberDetailModal {
       const ctrl = new AbortController()
       timer = window.setTimeout(() => ctrl.abort(), 25000)
       const res = await fetch(
-        `${this.shuttleBase}/api/v1/fibers/${idPath}?body=true&origin=${origin}`,
+        `${fiberUrl(this.shuttleBase, card.id)}?body=true&origin=${origin}`,
         { signal: ctrl.signal, cache: 'no-store' },
       )
       if (res.ok) {
         const data = (await res.json()) as {
           fibers?: Array<{ fiber?: { body?: unknown; outcome?: unknown; modified_at?: unknown } }>
         }
-        // An empty `fibers` array means the daemon answered but the id isn't in
-        // its mirror (vs. found-but-bodyless); the note below distinguishes them.
+        // An empty `fibers` array means the daemon answered but has no fiber by
+        // that id (vs. found-but-bodyless); the note below distinguishes them.
         const fiber = data.fibers?.[0]?.fiber
         found = (data.fibers?.length ?? 0) > 0
         body = typeof fiber?.body === 'string' ? fiber.body.trim() : ''
@@ -1317,9 +1294,7 @@ export class FiberDetailModal {
     // Seed/advance the body's change baseline off the read that is about to
     // paint, so the first live tick compares against what the reader sees.
     if (reached) this.bodyRevision = modifiedAt
-    const lede = outcome
-      ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
-      : ''
+    const lede = ledeHtml(outcome)
 
     prose.classList.remove('kbn-detail-prose-empty')
     this.disposeAttachmentPreviews()
@@ -1355,11 +1330,9 @@ export class FiberDetailModal {
       this.restoreBodyScroll(pageScroll, overlay)
       return
     }
-    // No body. Three honest cases — remote bodies normally resolve here via the
-    // owning daemon, so this is "nothing to show" or "not synced", never a
-    // cross-host rendering gap:
+    // No body. Three honest cases:
     //   reached + found      → the fiber simply has no markdown body.
-    //   reached + not found  → not in this daemon's mirror (e.g. not synced yet).
+    //   reached + not found  → the daemon has no fiber by this id.
     //   not reached          → the read failed/timed out; offer a retry.
     const note = !reached
       ? 'Couldn’t load the body — the daemon was slow to respond. <button type="button" class="kbn-detail-body-retry">retry</button>'
@@ -1381,11 +1354,11 @@ export class FiberDetailModal {
    * Draw one card per `:::{embed}` in the body, in body order, as a strip
    * ABOVE the prose.
    *
-   * These used to render inline, which put a scrolling document inside the
-   * scrolling constitution: tolerable on a desktop, and on a phone an
-   * embedded PDF whose page 2 was simply unreachable. A card is the honest
-   * shape — it says what is attached and hands the file to the surface that
-   * can actually read it.
+   * Not inline: that would put a scrolling document inside the scrolling
+   * constitution — tolerable on a desktop, and on a phone an embedded PDF
+   * whose page 2 is simply unreachable. A card is the honest shape — it says
+   * what is attached and hands the file to the surface that can actually
+   * read it.
    *
    * The strip is NOT the sent-files trail and never merges with it. An
    * attachment is evergreen and central to the fiber; a sent file is a one-off
@@ -1458,10 +1431,13 @@ export class FiberDetailModal {
       el.disabled = true
       return el
     }
-    void this.fillAttachmentSize(abs, card, meta)
+    void readFileInfo(this.shuttleBase, abs, card.originId).then((info) => {
+      // Best-effort and silent: no answer simply leaves the size blank.
+      if (info && meta.isConnected) meta.textContent = info.exists ? formatBytes(info.size) : 'missing'
+    })
     el.addEventListener('click', (e) => {
       e.stopPropagation()
-      this.openArtifact(abs, card)
+      this.openArtifact({ fullPath: abs, basename: basename(abs), timestamp: Date.now() }, card)
     })
     return el
   }
@@ -1576,40 +1552,6 @@ export class FiberDetailModal {
     return face
   }
 
-  /** What the daemon's `/file-info` says about one path, or `null` when it
-   *  can't say — an older daemon without the route, or a failed request.
-   *  The card's size line is its caller. */
-  private async attachmentInfo(
-    fullPath: string,
-    card: KanbanCard,
-  ): Promise<{ exists: boolean; size: number | undefined } | null> {
-    try {
-      const res = await fetch(fileInfoUrl(this.shuttleBase, fullPath, card.originId ?? ''), {
-        cache: 'no-store',
-      })
-      if (!res.ok) return null
-      const data = (await res.json()) as { exists?: unknown; size?: unknown }
-      return {
-        exists: data.exists === true,
-        size: typeof data.size === 'number' ? data.size : undefined,
-      }
-    } catch {
-      return null
-    }
-  }
-
-  /** Fill a card's size from `/file-info`. Best-effort and silent: a daemon
-   *  without the route, or a file that isn't there, simply leaves it blank. */
-  private async fillAttachmentSize(
-    fullPath: string,
-    card: KanbanCard,
-    slot: HTMLElement,
-  ): Promise<void> {
-    const info = await this.attachmentInfo(fullPath, card)
-    if (!info || !slot.isConnected) return
-    slot.textContent = info.exists ? formatBytes(info.size) : 'missing'
-  }
-
   /**
    * Open one file path, by pointer.
    *
@@ -1618,17 +1560,14 @@ export class FiberDetailModal {
    * browser can lay out — and downloads straight away for a PDF or an opaque
    * file, because on iOS the download is what hands those to the native
    * viewer, the one surface that can page a PDF properly. The rule itself is
-   * `fileTapAction`'s, shared with the sent-files trail.
+   * `fileTapAction`'s; an attachment card and a sent-file chip both land here.
    */
-  private openArtifact(fullPath: string, card: KanbanCard): void {
-    if (fileTapAction(coarsePointer(), fullPath) === 'download') {
-      void this.downloadFile(fullPath, card.originId ?? '')
+  private openArtifact(file: SentFile, card: KanbanCard): void {
+    if (fileTapAction(coarsePointer(), file.fullPath) === 'download') {
+      void this.downloadFile(file.fullPath, card.originId ?? '')
       return
     }
-    this.activateFile(
-      { fullPath, basename: basename(fullPath), timestamp: Date.now() },
-      card,
-    )
+    this.activateFile(file, card)
   }
 
   /** What scrolls the body: the page pane in a window, the whole sheet on a phone. */
@@ -1682,8 +1621,8 @@ export class FiberDetailModal {
    * are fetched only when something actually changed, and the reader's scroll,
    * zoom, and active tabs survive every tick.
    *
-   * Best-effort throughout: a fiber that momentarily can't be read, or a
-   * daemon too old for a probe, leaves the readable page exactly as it is.
+   * Best-effort throughout: a fiber or a probe that momentarily can't be
+   * read leaves the readable page exactly as it is.
    */
   private async refreshLiveContent(): Promise<void> {
     const card = this.card
@@ -1758,10 +1697,9 @@ export class FiberDetailModal {
    */
   private async readFiberRevision(card: KanbanCard): Promise<string | undefined> {
     try {
-      const idPath = card.id.split('/').map(encodeURIComponent).join('/')
       const origin = encodeURIComponent(card.originId ?? '')
       const res = await fetch(
-        `${this.shuttleBase}/api/v1/fibers/${idPath}?origin=${origin}`,
+        `${fiberUrl(this.shuttleBase, card.id)}?origin=${origin}`,
         { cache: 'no-store' },
       )
       if (!res.ok) return undefined
@@ -1810,8 +1748,7 @@ export class FiberDetailModal {
   /**
    * Re-baseline every artifact path once and reload the nodes behind any that
    * moved. A path in the sent-files trail falls back to its send timestamp
-   * when `/file-info` is unavailable (an older daemon), so a re-sent file still
-   * reloads there.
+   * when `/file-info` gives no answer, so a re-sent file still reloads.
    */
   private async refreshArtifacts(card: KanbanCard): Promise<void> {
     const byPath = this.artifactNodesByPath()
@@ -1847,8 +1784,8 @@ export class FiberDetailModal {
    * Adopt a freshly read sent-files trail: relabel open tabs onto their latest
    * record, re-render the launcher when the trail actually moved, and reconcile
    * disambiguated basenames. It does NOT reload any bytes — `refreshArtifacts`
-   * owns that, and its `trail:` fallback covers a re-sent file on a daemon with
-   * no `/file-info`.
+   * owns that, and its `trail:` fallback covers a re-sent file whose
+   * `/file-info` gives no answer.
    */
   private applySentFiles(files: SentFile[], card: KanbanCard): void {
     const next = disambiguateBasenames(files)
@@ -2002,8 +1939,7 @@ export class FiberDetailModal {
   ): Promise<{ label: string; close: () => void } | null> {
     let card: KanbanCard | null = null
     try {
-      const idPath = fiberId.split('/').map(encodeURIComponent).join('/')
-      const res = await fetch(`${this.shuttleBase}/api/v1/fibers/${idPath}?body=true`)
+      const res = await fetch(`${fiberUrl(this.shuttleBase, fiberId)}?body=true`)
       if (res.ok) {
         const entry = parseCompositeFeed(await res.json()).entries[0]
         if (entry) card = cardFromCompositeEntry(entry)
@@ -2063,10 +1999,6 @@ export class FiberDetailModal {
 
   // ── Panel geometry: default + remembered, drag, resize ────────────────────
 
-  /** Default size: a reading column at nearly full viewport height — the
-   *  page wants vertical room; width stays a comfortable measure. The card
-   *  panel opens at this width and keeps it (the file viewer is its own
-   *  window); remembered geometry wins when it still fits the viewport. */
   /**
    * Is this panel a SHEET rather than a window?
    *
@@ -2108,6 +2040,10 @@ export class FiberDetailModal {
     holdSheet(SHEET_CARD, this.isSheet(), () => this.close())
   }
 
+  /** Default size: a reading column at nearly full viewport height — the
+   *  page wants vertical room; width stays a comfortable measure. The card
+   *  panel opens at this width and keeps it (the file viewer is its own
+   *  window); remembered geometry wins when it still fits the viewport. */
   private applyGeometry(overlay: HTMLElement): void {
     const vw = window.innerWidth
     const vh = window.innerHeight
@@ -2166,9 +2102,8 @@ export class FiberDetailModal {
       this.writePersist()
     })
 
-    // Download the active file to ~/Downloads — restores the save affordance the
-    // retired Portolan `:4004` route carried (⤓). Pinned right of the tabs, left
-    // of the close-all ✕; acts on whichever tab is active.
+    // Download the active file to ~/Downloads (⤓). Pinned right of the tabs,
+    // left of the close-all ✕; acts on whichever tab is active.
     const winDownload = document.createElement('button')
     winDownload.type = 'button'
     winDownload.className = 'kbn-fileview-win-download'
@@ -2330,24 +2265,6 @@ export class FiberDetailModal {
     }
   }
 
-  /** Header-strip drag. Plain pointer drag — the header is dedicated chrome,
-   *  so no modifier gate is needed (the Cmd-gate lesson from the pin-card
-   *  prototype applies to chrome-less surfaces where drag fights text
-   *  selection; a title bar doesn't). Buttons and form fields opt out. */
-  private attachDrag(overlay: HTMLElement, handle: HTMLElement): void {
-    attachPanelDrag(overlay, handle, {
-      onSettle: () => this.rememberGeometry(overlay),
-    })
-  }
-
-  /** Eight invisible resize zones on the edges and corners. Pointer-based,
-   *  same lifecycle as drag; min size keeps the header + dropdown usable. */
-  private attachResizeHandles(overlay: HTMLElement): void {
-    attachPanelResize(overlay, {
-      onSettle: () => this.rememberGeometry(overlay),
-    })
-  }
-
   // ── Controls drawer ─────────────────────────────────────────────────────
 
   /**
@@ -2501,9 +2418,9 @@ export class FiberDetailModal {
    * Resume is always offered, never gated on a card-visible session id: the
    * session to resume lives in the fiber's `shuttle.session_uuid`, which the
    * daemon reads at dispatch (resume_mode='previous') and answers with a
-   * precise error when there is genuinely nothing to resume. Gating it on
-   * `card.sessionId` grayed Resume out on every card
-   * (gotcha-standing-role-resume-button-grayed).
+   * precise error when there is genuinely nothing to resume. The card rarely
+   * carries that id, so a gate on it would gray Resume out almost
+   * everywhere.
    */
   private buildComposer(card: KanbanCard, swallow: (el: HTMLElement) => void): HTMLElement {
     const wrap = document.createElement('div')
@@ -3158,15 +3075,14 @@ export class FiberDetailModal {
     return wrap
   }
 
-  // ── Sent files: launcher + two-column accordion ─────────────────────────
+  // ── Sent files: the launcher ─────────────────────────────────────────────
 
   /**
-   * The left-column sent-files launcher. Mounts empty (hidden) and self-
-   * populates from {@link fetchSentFiles}: the daemon's `/api/v1/sent-files`
-   * endpoint. The live refresh loop re-renders it when a worker
-   * sends another file, while cards without deliverables pay zero visual cost.
-   * Each entry is a button that opens (or re-activates) the file in the
-   * right-column accordion.
+   * The sent-files launcher. Mounts empty (hidden) and self-populates from
+   * {@link fetchSentFiles}: the daemon's `/api/v1/sent-files` endpoint. The
+   * live refresh loop re-renders it when a worker sends another file, while
+   * cards without deliverables pay zero visual cost. Each entry is a button
+   * that opens (or re-activates) the file in the viewer window.
    */
   private buildSentFilesLauncher(card: KanbanCard): HTMLElement {
     const wrap = document.createElement('div')
@@ -3187,9 +3103,9 @@ export class FiberDetailModal {
     list.className = 'kbn-detail-sent-list'
     list.setAttribute('role', 'list')
 
-    // The fold. A long trail used to fill a phone screen before anything else
-    // on the card came into view; on a phone the list is clipped to its three
-    // most recent chips and this opens the rest. Which chips are hidden is a
+    // The fold. On a phone the list is clipped to its three most recent chips,
+    // so a long trail can't fill the screen before anything else on the card
+    // comes into view; this opens the rest. Which chips are hidden is a
     // CSS rule keyed off the viewport, not a JS branch, so a rotated phone or
     // a resized window can never leave the button and the list disagreeing.
     const more = document.createElement('button')
@@ -3240,13 +3156,7 @@ export class FiberDetailModal {
       row.append(name, when)
       row.addEventListener('click', (e) => {
         e.stopPropagation()
-        // Same rule as an attachment card, by pointer AND by kind — see
-        // `fileTapAction`.
-        if (fileTapAction(coarsePointer(), file.fullPath) === 'download') {
-          void this.downloadFile(file.fullPath, card.originId ?? '')
-          return
-        }
-        this.activateFile(file, card)
+        this.openArtifact(file, card)
       })
       list.append(row)
     }
@@ -3265,7 +3175,7 @@ export class FiberDetailModal {
     more.setAttribute('aria-expanded', String(expanded))
   }
 
-  /** Mark launcher entries whose file is currently open in the accordion. */
+  /** Mark launcher entries whose file is currently open in the viewer. */
   private syncLauncherActiveState(): void {
     const openPaths = new Set(this.openFiles.map((e) => e.file.fullPath))
     this.overlay
@@ -3279,7 +3189,7 @@ export class FiberDetailModal {
   // ── The tabbed full-view ────────────────────────────────────────────────
 
   /**
-   * Open `file` in the right column and make it the active (shown) tab. If it's
+   * Open `file` in the viewer window and make it the active (shown) tab. If it's
    * already open, just switch to its tab — tabs keep a stable open-order
    * (browser-style; they don't reorder on click). This is the single entry the
    * launcher and rehydration both funnel through, so the tab set + persistence
@@ -3305,7 +3215,7 @@ export class FiberDetailModal {
 
   /**
    * Build a new tab + its (empty) view cell and append both in stable
-   * open-order. Reveals the right column on the first open. Does NOT activate
+   * open-order. Opens the viewer window on the first open. Does NOT activate
    * or build the viewer — `setActive` does that lazily on first view, so
    * background tabs cost nothing until clicked.
    */
@@ -3424,7 +3334,7 @@ export class FiberDetailModal {
   }
 
   /** Close one open file. Switches to the nearest remaining tab if it was
-   *  active; dissolves the right column if it was the last. */
+   *  active; closes the viewer window if it was the last. */
   private closeFile(entry: OpenFileEntry): void {
     const { state, closed } = closeTab(
       { tabs: this.openFiles, active: this.activePath },
@@ -3445,7 +3355,7 @@ export class FiberDetailModal {
     this.writePersist()
   }
 
-  /** Debounced scroll-position persistence. Open/close/expand write
+  /** Debounced scroll-position persistence. Open/close/activate write
    *  immediately; scroll is debounced so a flick of the wheel doesn't hammer
    *  localStorage. */
   private queueScrollWrite(): void {
@@ -3456,7 +3366,7 @@ export class FiberDetailModal {
     }, 400)
   }
 
-  /** Serialize the current right-column state to localStorage. */
+  /** Serialize the current viewer and window state to localStorage. */
   private writePersist(): void {
     // A linked card is a stop on a path, not a workspace: it must not overwrite
     // the arrangement the reader chose for this fiber's own card.
@@ -3477,13 +3387,11 @@ export class FiberDetailModal {
   }
 
   /**
-   * Rebuild the right column from persisted state on panel-open. Files are
-   * activated oldest-first so the saved recency order (index 0 = top) is
-   * reproduced, with scroll/expanded carried through. Entries whose path is no
-   * longer on the (eventually-loaded) trail are pruned silently — but the
-   * rehydrate fires immediately off the persisted paths so the column is there
-   * before the trail fetch resolves. A path the trail later disowns is dropped
-   * on the next write.
+   * Rebuild the viewer window from persisted state on panel-open. Tabs are
+   * added in the saved (stable) order with scroll and zoom carried through,
+   * and the persisted active tab is shown. The rehydrate runs immediately off
+   * the persisted paths, so the viewer is there before the trail fetch
+   * resolves.
    */
   private rehydrateOpenFiles(card: KanbanCard, persist: DetailPersist): void {
     if (persist.open.length === 0) return
@@ -3493,7 +3401,7 @@ export class FiberDetailModal {
       const file: SentFile = {
         fullPath: saved.path,
         // Prefer the persisted display label (preserves the disambiguated
-        // basename); fall back to the path tail for legacy records.
+        // basename); fall back to the path tail.
         basename: saved.basename ?? basename(saved.path),
         timestamp: 0,
       }
@@ -3522,11 +3430,10 @@ export class FiberDetailModal {
   private async fetchSentFiles(
     card: KanbanCard,
   ): Promise<SentFile[] | null | typeof SENT_FILES_UNCHANGED> {
+    // The route is keyed by uid alone; a card without one has no trail.
     const uid = typeof card.uid === 'string' ? card.uid.trim() : ''
-    const sessionId = typeof card.sessionId === 'string' ? card.sessionId.trim() : ''
-    if (!uid && !sessionId) return []
+    if (!uid) return []
 
-    // ── Primary: the daemon endpoint ──
     // Conditional, but do not count on it. The local leg's weak ETag is over
     // the events file's {mtime,size}, and that file is the live hook stream for
     // every session on the host — so on any host with a live session it moves
@@ -3535,10 +3442,8 @@ export class FiberDetailModal {
     // controller's moduledoc). Either way this 15s poll costs the owning daemon
     // a full re-read of that file; the fix is an incremental reader there, not
     // a validator here.
-    const params = new URLSearchParams()
-    if (uid) params.set('uid', uid)
+    const params = new URLSearchParams({ uid })
     if (card.originId) params.set('origin', card.originId)
-    if (sessionId) params.set('sessionId', sessionId)
     try {
       const headers: Record<string, string> = {}
       if (this.sentFilesEtag) headers['If-None-Match'] = this.sentFilesEtag
@@ -3558,40 +3463,16 @@ export class FiberDetailModal {
     return null
   }
 
-  /** POST one JSON body to a daemon route; the daemon answers plain text, so
-   *  a !ok body is the error message verbatim. */
-  private async postJson(
-    path: string,
-    body: Record<string, unknown>,
-    label = 'Save',
-  ): Promise<void> {
-    const res = await fetch(`${this.shuttleBase}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const errText = await res.text().catch(() => `${res.status}`)
-      throw new Error(errText || `${label} failed: ${res.status}`)
-    }
-  }
-
-  private async postLifecycle(body: Record<string, unknown>): Promise<void> {
-    await this.postJson('/api/v1/lifecycle', body)
+  /** {@link postDaemonJson} against this panel's daemon. */
+  private postJson(path: string, body: Record<string, unknown>, label = 'Save'): Promise<void> {
+    return postDaemonJson(this.shuttleBase, path, body, label)
   }
 
   /**
-   * Unified manual requeue: a single owner-routed `/api/v1/dispatch` carrying
-   * the user's message and resume intent inline. `user_message` is the
-   * directive text (the daemon inlines it into the prompt at launch);
-   * `resume_mode` is `'fresh'` → start a new session, `'previous'` → resume the
-   * prior session. The daemon resolves the session to resume from the fiber's
-   * `shuttle.session_uuid` frontmatter field, falling back to fresh
-   * when there's nothing to resume. `force`/`ad_hoc` launch the worker on the
-   * owning host regardless of poll eligibility.
-   *
-   * Owner-routed by `card.originId` (`origin`), which carries the message and
-   * resume_mode to the owning daemon intact cross-host.
+   * Manual requeue: one force dispatch ({@link postForceDispatch}) carrying the
+   * message and the resume intent inline. The daemon resolves the session to
+   * resume from the fiber's `shuttle.session_uuid`, falling back to fresh when
+   * there is nothing to resume.
    */
   private async runRequeue(
     card: KanbanCard,
@@ -3599,14 +3480,13 @@ export class FiberDetailModal {
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
-    skipCutConfirmation = false,
   ): Promise<void> {
     // A "New session" over a LIVE worker is a CUT: the daemon stamps the
     // clean-exit marker, kills the running session, and starts fresh — which
     // discards whatever in-flight context that worker was holding. Confirm
     // before doing that. A dormant card (no live worker) cuts nothing, so it's
     // silent; Resume never cuts, so it never confirms.
-    if (mode === 'fresh' && hasWorkerToStop(card) && !skipCutConfirmation) {
+    if (mode === 'fresh' && hasWorkerToStop(card)) {
       const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
       const ok = window.confirm(
         `A worker is still running for “${card.name}”${working}.\n\n` +
@@ -3621,37 +3501,16 @@ export class FiberDetailModal {
     btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
     errorEl.style.display = 'none'
 
-    // Single force/ad-hoc dispatch carrying the message + resume_mode inline.
     let res: Response
     try {
-      // Owner-routed by `origin` in the body.
-      res = await fetch(`${this.shuttleBase}/api/v1/dispatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fiber_id: card.id,
-          origin: card.originId,
-          force: true,
-          ad_hoc: true,
-          user_message: directive,
-          resume_mode: mode,
-        }),
-      })
+      res = await postForceDispatch(this.shuttleBase, card, { user_message: directive, resume_mode: mode })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
       this.showDispatchError(errorEl, btn, original, `Couldn't reach Shuttle: ${detail}`)
       return
     }
 
-    const body = (await res.json().catch(() => ({}))) as {
-      dispatched?: boolean
-      reason?: string
-      detail?: string
-      message?: string
-      error?: string
-      tmux_session?: string
-      session_uuid?: string
-    }
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
 
     if (res.status === 409) {
       if (body.tmux_session) {
@@ -3667,11 +3526,7 @@ export class FiberDetailModal {
     }
 
     if (!res.ok) {
-      // Prefer the daemon's structured ineligibility copy (detail/message name
-      // the actual host / project_dir); fall back to the generic error / status.
-      const msg = (body.reason || body.detail || body.message)
-        ? dispatchIneligibleReason(body)
-        : (body.error ?? `Requeue failed (${res.status})`)
+      const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`)
       this.showDispatchError(errorEl, btn, original, msg)
       return
     }
@@ -3874,7 +3729,7 @@ export class FiberDetailModal {
   ): Promise<boolean> {
     if (!axes.agent) return false
     return this.withSaveStatus(statusEl, errorEl, () =>
-      this.postLifecycle({
+      this.postJson('/api/v1/lifecycle', {
         action: 'set-agent',
         origin: card.originId,
         fiber: card.id,
@@ -3904,9 +3759,8 @@ export class FiberDetailModal {
     statusEl.classList.add('kbn-detail-save-status-saving')
     try {
       await write()
-      // Refresh the kanban so the change shows up in the grid (and in any
-      // other modal that's reading the same card). The panel stays open — the
-      // user may want to keep editing.
+      // Refresh the kanban so the change shows up on the board. The panel
+      // stays open — the user may want to keep editing.
       this.onSaved()
       statusEl.textContent = 'Saved'
       statusEl.classList.remove('kbn-detail-save-status-saving')
@@ -3947,8 +3801,7 @@ export class FiberDetailModal {
 
   /**
    * Parent-picker search: one daemon index fetch per panel-open, then the
-   * shared `filterParentCandidates` rule (the retired backend
-   * `/kanban/fiber-search` semantics) per keystroke.
+   * shared `filterParentCandidates` rule per keystroke.
    */
   private async searchParents(
     q: string,
@@ -3964,10 +3817,10 @@ export class FiberDetailModal {
     try {
       const allFibers = await this.loadFiberIndex()
       if (token !== this.searchRenderToken) return
-      const data = { fibers: filterParentCandidates(allFibers, q, excludeId) }
+      const candidates = filterParentCandidates(allFibers, q, excludeId)
 
       dropdown.innerHTML = ''
-      if (data.fibers.length === 0) {
+      if (candidates.length === 0) {
         const empty = document.createElement('div')
         empty.className = 'kbn-detail-parent-option kbn-detail-parent-empty'
         empty.textContent = q ? 'No matches' : 'No fibers available'
@@ -3976,7 +3829,7 @@ export class FiberDetailModal {
         return
       }
 
-      for (const fiber of data.fibers) {
+      for (const fiber of candidates) {
         const opt = document.createElement('button')
         opt.type = 'button'
         opt.className = 'kbn-detail-parent-option'
@@ -4009,7 +3862,7 @@ export class FiberDetailModal {
    * `install --disabled`, owner-routed by `origin`. `project_dir` (the
    * worker's cwd) comes from the card's own shuttle block; a card without
    * one installs without it, which a paused draft permits — arming it later
-   * supplies the dir or fails loudly in shuttle-ctl.
+   * supplies the dir or fails loudly.
    */
   private async promoteToShuttle(
     card: KanbanCard,
@@ -4068,9 +3921,8 @@ export class FiberDetailModal {
           // `reshape` rewrites kind + schedule and nothing else — no model, no
           // project_dir, no host, and above all no status: that is what lets a
           // role sitting in Awaiting review (status: closed) be switched
-          // standing → oneshot, which the old create-with-`--reshape` route
-          // refused. The agent is NOT carried here; every axis change commits
-          // separately through `commitAxes` → `set-agent`.
+          // standing → oneshot. The agent is NOT carried here; every axis
+          // change commits separately through `commitAxes` → `set-agent`.
           //
           // A card with no block yet has nothing to reshape (the verb errors on
           // one), so it takes the create path — `install`/`repeat`, no reshape
@@ -4093,7 +3945,8 @@ export class FiberDetailModal {
             // A non-standing target DROPS the schedule key server-side, and
             // sending `--schedule` alongside it is an error — so the schedule
             // rides only when the target kind actually carries one.
-            await this.postLifecycle(
+            await this.postJson(
+              '/api/v1/lifecycle',
               targetKind === 'standing'
                 ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
                 : { action: 'reshape', origin, fiber: fiberId, kind: targetKind },
@@ -4104,15 +3957,14 @@ export class FiberDetailModal {
             // this arm: the kind control is hidden until the card is
             // shuttle-managed, and pinning a block-less card is refused on the
             // board too (`pinRole` banners "promote it first").
-            await this.postLifecycle({
+            await this.postJson('/api/v1/lifecycle', {
               action: 'repeat', origin, fiber: fiberId,
               // Undefined when the block carries none, which a paused install
-              // permits; an arming install without one fails loudly in
-              // shuttle-ctl.
+              // permits; an arming install without one fails loudly.
               schedule, tz, model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
             })
           } else {
-            await this.postLifecycle({
+            await this.postJson('/api/v1/lifecycle', {
               action: 'install', origin, fiber: fiberId,
               model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
               // A paused draft must stay paused across the install (install
@@ -4150,30 +4002,61 @@ export class FiberDetailModal {
   }
 }
 
+/** The outcome as the page's lede callout, or nothing for an empty one. */
+function ledeHtml(outcome: string): string {
+  return outcome
+    ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
+    : ''
+}
+
+/** The daemon's document route for one fiber id, each id segment encoded on
+ *  its own so a slug id keeps its separators. */
+function fiberUrl(shuttleBase: string, id: string): string {
+  return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
+}
+
+interface FileInfo {
+  exists: boolean
+  size?: number
+  modifiedAt?: number
+}
+
+/** What the daemon's `/file-info` says about one path, or `null` when it
+ *  can't say (a failed or refused request). Metadata only — no bytes. */
+async function readFileInfo(
+  shuttleBase: string,
+  path: string,
+  originId: string | undefined,
+): Promise<FileInfo | null> {
+  try {
+    const res = await fetch(fileInfoUrl(shuttleBase, path, originId ?? ''), { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = (await res.json()) as { exists?: unknown; size?: unknown; modified_at?: unknown }
+    return {
+      exists: data.exists === true,
+      size: typeof data.size === 'number' ? data.size : undefined,
+      modifiedAt: typeof data.modified_at === 'number' ? data.modified_at : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
- * Probe a daemon-owned file using metadata only. `undefined` means the route is
- * unavailable or malformed; `missing` is a real revision so a file that is
- * created after the constitution opens can be noticed on the next tick.
+ * One path's change revision from {@link readFileInfo}. `undefined` means no
+ * usable answer; `missing` is a real revision, so a file created after the
+ * constitution opens is noticed on the next tick.
  */
 async function readFileRevision(
   shuttleBase: string,
   path: string,
-  originId: string,
+  originId: string | undefined,
 ): Promise<string | undefined> {
-  try {
-    const res = await fetch(fileInfoUrl(shuttleBase, path, originId), { cache: 'no-store' })
-    if (!res.ok) return undefined
-    const data = (await res.json()) as {
-      exists?: unknown
-      modified_at?: unknown
-      size?: unknown
-    }
-    if (data.exists !== true) return 'missing'
-    if (typeof data.modified_at !== 'number' || typeof data.size !== 'number') return undefined
-    return `present:${data.modified_at}:${data.size}`
-  } catch {
-    return undefined
-  }
+  const info = await readFileInfo(shuttleBase, path, originId)
+  if (!info) return undefined
+  if (!info.exists) return 'missing'
+  if (info.modifiedAt === undefined || info.size === undefined) return undefined
+  return `present:${info.modifiedAt}:${info.size}`
 }
 
 /** Return the artifact path behind one inline `/file` iframe. */
