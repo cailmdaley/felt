@@ -61,8 +61,8 @@
      the column where finished work waits to be judged. It earns its place by
      being orthogonal to both other axes: whether work came out well is a
      different question from who did it or when, and no other pigment answers
-     it. Everything else that used to be verdigris — human actors, workers
-     aloft, due dates — was one of the axes above wearing the wrong colour. */
+     it. Human actors, workers aloft and due dates belong to the axes above
+     and never wear it. */
   --kbn-tempered: #3F8278;
   --kbn-tempered-ink: #2E6862;
 
@@ -156,25 +156,17 @@
 .kbn-col-inFlight .kbn-cap { color: #3D5BA0; }                 /* cobalt */
 .kbn-col-awaitingReview .kbn-cap { color: var(--kbn-tempered); }  /* verdigris — the verdict axis */
 
-/* Fills the host element supplied by vellum's workspace slot
-   (KanbanHost in src/vellum/mount.tsx). The host gives us a fixed-
-   viewport positioning context; the kanban stretches to inset:0
-   inside it. No border or shadow — vellum's outer modal already
-   provides the chrome boundary, and a nested border reads as
-   tile-in-tile.
-
-   Header padding-left clears 44px for vellum's modal close button
-   (24px wide at left:8px — see vellum/mount.tsx:openVellumWorkspaceModal). */
+/* Fills the host element the board is mounted into (`#app`, from main.ts):
+   the host gives a positioning context, and the kanban stretches to inset:0
+   inside it. No border or shadow — the page is the whole browser tab. */
 .kbn-modal {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  /* No top inset: the standalone web UI runs in a plain browser tab with no
-     workspace corner chrome to clear (the ✕ / new-window buttons were
-     Portolan's native shell). The page starts nearly flush — the Timeline
-     ribbon sits just below the body's own tight top padding. box-sizing keeps
-     the inset:0 + 100%/100% sizing honest. */
+  /* No top inset: the page starts nearly flush, the tab strip just below the
+     body's own tight top padding. box-sizing keeps the inset:0 + 100%/100%
+     sizing honest. */
   box-sizing: border-box;
   /* Pigment & Parchment warm-cool wash — the page is *lit*, not glowing.
      A warm ochre/cinnabar breath at the upper-left, a cool cobalt
@@ -218,17 +210,16 @@
   border-color: rgba(188, 69, 56, 0.5);
   color: #A2362A;
 }
-/* Horizon rows: Now expanded by default, future rows as thin foldable
-   headers. The board scrolls vertically; each lifecycle cell handles
-   its own dense card stack. */
+/* The page's column of sections. The board scrolls vertically; each
+   lifecycle cell handles its own dense card stack. */
 .kbn-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
   /* Tight top margin — intentional, not a dead band. Sides/bottom keep the
-     12px breathing room; the top hugs so the Timeline ribbon reads as a
-     horizon strip at the very top of the page. */
+     12px breathing room; the top hugs so the tab strip sits at the very top
+     of the page. */
   padding: 6px 12px 12px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -236,8 +227,8 @@
   min-height: 0;
 }
 /* ── View tabs ────────────────────────────────────────────────────────
-   Four pages behind one hairline row: desk (the kanban below) plus the
-   temporal views. Right-aligned above the Timeline ribbon. Each tab sits
+   The pages behind one hairline row: desk (the kanban below) plus the
+   temporal views, left-aligned at the top of the page. Each tab sits
    in a quiet hairline box — a card, not a pill — so the row reads as a
    set of pressable keys rather than bare running text. The active tab
    gets a cinnabar border and a breath of fill; the rest sit faded, the
@@ -250,7 +241,7 @@
   gap: 6px;
   padding: 0 2px 4px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
-  /* Pulls the ribbon up under the row — `.kbn-body`'s 10px gap is spacing
+  /* Pulls the page up under the row — `.kbn-body`'s 10px gap is spacing
      between *sections*, and the tabs are a label for what follows, not a
      section of their own. */
   margin-bottom: -4px;
@@ -314,19 +305,17 @@
 }
 
 /* The Desk wrapper is a toggle handle, not a box: `display: contents` keeps
-   the four surfaces as direct flex items of `.kbn-body`, so their gaps,
-   `flex: 1` and percentage heights resolve exactly as they did before the
-   wrapper existed. Switching to a temporal view sets `display: none` here
+   the three surfaces as direct flex items of `.kbn-body`, so their gaps,
+   `flex: 1` and percentage heights resolve as if the wrapper were not
+   there. Switching to a temporal view sets `display: none` here
    inline, which hides the subtree without rebuilding it. */
 .kbn-desk {
   display: contents;
 }
 
 /* ── Section layout: Now → Pinned → Resting ──────────────────────────────── */
-/* Section heads are gone except Pinned's and Resting's (the layout reads on its
-   own; those two name a surface whose meaning isn't self-evident). The
-   collapse-toggle chrome retired with the Timeline ribbon, which was the only
-   section that ever carried it. */
+/* Only Pinned and Resting carry a section head (the layout reads on its own;
+   those two name a surface whose meaning isn't self-evident). */
 .kbn-section {
   position: relative;
   display: flex;
@@ -342,13 +331,10 @@
   outline-offset: -2px;
 }
 .kbn-section-now {
-  /* Now claims most of the height and the other two sit under it. The floor
-     used to reserve ~200px for the Timeline ribbon ABOVE plus a bare peek of
-     Pinned and Resting below, which left Resting permanently under the fold.
-     With the ribbon gone that reservation is pure surplus: 260px is enough for
-     the Pinned band plus a full row of Resting clusters, so the whole Desk
-     fits on a normal viewport and Resting stops being a place you scroll to
-     find. Falls back to plain `flex: 1` on a short viewport. */
+  /* Now claims most of the height and the other two sit under it: 260px is
+     enough for the Pinned band plus a full row of Resting clusters, so the
+     whole Desk fits on a normal viewport and Resting is never a place you
+     scroll to find. Falls back to plain `flex: 1` on a short viewport. */
   flex: 1 1 auto;
   min-height: min(64vh, calc(100% - 260px));
 }
@@ -557,10 +543,10 @@
 }
 
 /* ── Drag-reveal horizon ─────────────────────────────────────────────────────
-   The Desk's permanent day-ribbon retired: the chronicle tells the
-   past-and-future story, and the room it took now goes to Pinned and Resting.
-   What it uniquely owned was the GESTURE — dropping a card on a date — so the
-   day axis comes back for exactly as long as a card is in the air.
+   The Desk keeps no permanent time axis: the chronicle tells the
+   past-and-future story, and the room goes to Pinned and Resting. What the
+   Desk needs from a day axis is the GESTURE — dropping a card on a date — so
+   the axis appears for exactly as long as a card is in the air.
 
    Height, not display, is what animates: a zero-height overflow-hidden band
    that grows to one row. `display:none` can't be transitioned.
@@ -643,9 +629,8 @@
   min-width: 58px;
 }
 
-/* Day cells. Kept verbatim from the retired ribbon's axis — same small-caps
-   serif weekday, same oldstyle numeral, same gold-leaf today — because the
-   horizon should read as the ribbon returning, not as a new control. */
+/* Day cells: a small-caps serif weekday, an oldstyle numeral, and a
+   gold-leaf today. */
 .kbn-timeline-day {
   display: flex;
   flex-direction: row;
@@ -843,9 +828,7 @@
   font-size: calc(9px * var(--kbn-type-scale, 1));
   color: #6E5A2E;
 }
-/* ARMED: a lens chip under the cursor mid-drag. The chapter chips used to live
-   on the drag horizon and wear this; they are gone from the strip, and the
-   always-visible row inherits the language verbatim — same loud step as a day
+/* ARMED: a lens chip under the cursor mid-drag. The same loud step as a day
    cell, in the chip's own clothes: filled ochre, solid edge, and a small lift
    so it reads through a ghost passing over it. */
 .kbn-lens-chip.kbn-timeline-dropcol-active {
@@ -1308,8 +1291,8 @@
 }
 .kbn-col-action-inFlight:hover { background: #4D6CB5; }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px rgba(61, 91, 160, 0.40); }
-/* Awaiting review → Refresh `↻`, teal (the green of the A dropcap), promoted
-   from the old faded transparent treatment to a full button. */
+/* Awaiting review → Refresh `↻`, teal (the green of the A dropcap), a full
+   button like its siblings. */
 .kbn-col-action-awaitingReview {
   background: #3F8278;
   border: 1px solid #2E6862;
@@ -1590,8 +1573,8 @@
 .kbn-card-glyph-human {
   color: var(--kbn-you);
 }
-/* Plain text since the title-click → vellum shortcut retired (the whole
-   card opens the fiber-detail panel); the card's own cursor applies. */
+/* Plain text: the whole card opens the fiber-detail panel, so the card's own
+   cursor applies. */
 .kbn-card-name {
   flex: 1;
   font-size: calc(14.5px * var(--kbn-type-scale, 1));
@@ -1853,7 +1836,7 @@
   z-index: 6;
   min-width: 180px;
   max-width: 280px;
-  background: var(--kbn-surface, #FBF8F3);
+  background: #FBF8F3;
   border: 1px solid rgba(107, 78, 113, 0.28);
   border-radius: 2px;
   padding: 4px 6px;
@@ -1882,8 +1865,7 @@
 .kbn-card-queued-row:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* A row that can be picked up says so, PER ROW — keyed off `draggable`, which
    is the same bit the drag machinery reads, so the affordance cannot drift
-   from the permission. (It used to hang off the list, which meant a queue was
-   grabbable all-or-nothing.) `grab` and a hairline gutter are the whole
+   from the permission. `grab` and a hairline gutter are the whole
    affordance: a peek list is a thing you read first and rearrange second, and
    a handle per row would make the reading worse to advertise the rarer
    gesture. */
@@ -2093,7 +2075,7 @@
 }
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
-   and clicks through to vellum, but drag is disabled because
+   and opens its detail panel, but drag is disabled because
    mutation has nowhere to land until reconnect. Visual signal
    is a desaturated dim plus a not-allowed cursor on the drag
    handle. */
@@ -2568,8 +2550,8 @@
      pill is a link to it in the Claude app, in every phase. */
   .kbn-card-worker-link { text-decoration: none; }
   /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
-     cursor and the lift-on-press would be promising a gesture that no longer
-     exists. */
+     cursor and the lift-on-press would be promising a gesture that isn't
+     there. */
   .kbn-card,
   .kbn-pin-chip,
   .kbn-cluster-item { cursor: pointer; }
