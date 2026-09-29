@@ -3138,10 +3138,9 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A shuttle block's dispatch kind: `kind:`, else its `mode:` alias, else
-  # "oneshot".
+  # A shuttle block's dispatch kind: `kind:`, else "oneshot".
   @doc false
-  def role_kind(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode", "oneshot"))
+  def role_kind(shuttle), do: Map.get(shuttle, "kind", "oneshot")
 
   # A fiber's dispatch kind; "oneshot" when it carries no shuttle block.
   @doc false

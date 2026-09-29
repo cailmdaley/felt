@@ -2920,7 +2920,7 @@ defmodule Shuttle.PollerTest do
       "tests/standing-sleeping",
       """
       enabled: true
-      mode: standing
+      kind: standing
       schedule:
         kind: cron
         expr: "0 9 * * 1-5"
@@ -3786,7 +3786,7 @@ defmodule Shuttle.PollerTest do
       "tests/standing-stale",
       """
       enabled: true
-      mode: standing
+      kind: standing
       schedule:
         kind: cron
         expr: "0 9 * * 1-5"
@@ -3849,7 +3849,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_shuttle(
       "tests/standing-review",
       """
-      mode: standing
+      kind: standing
       schedule:
         kind: cron
         expr: "0 9 * * 1-5"
@@ -3874,7 +3874,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_shuttle(
       "tests/standing-accepted",
       """
-      mode: standing
+      kind: standing
       schedule:
         kind: cron
         expr: "0 9 * * 1-5"

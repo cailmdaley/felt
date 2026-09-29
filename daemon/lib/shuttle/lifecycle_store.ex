@@ -256,7 +256,6 @@ defmodule Shuttle.LifecycleStore do
   # schedule-bound paths, reject it along with oneshots and non-shuttle fibers.
   # (`accept` itself no longer requires standing — it dispatches by kind.)
   defp require_standing(%{"kind" => "standing"}), do: :ok
-  defp require_standing(%{"mode" => "standing"}), do: :ok
 
   defp require_standing(shuttle),
     do:
@@ -268,7 +267,6 @@ defmodule Shuttle.LifecycleStore do
   # re-arm) writes them to `active`; a oneshot is rejected — force-dispatching a
   # oneshot runs it once and leaves its status put, with no loop to revive.
   defp require_perennial(%{"kind" => kind}) when kind in ["standing", "pinned"], do: :ok
-  defp require_perennial(%{"mode" => mode}) when mode in ["standing", "pinned"], do: :ok
 
   defp require_perennial(shuttle),
     do:
@@ -276,7 +274,6 @@ defmodule Shuttle.LifecycleStore do
        "rearm only applies to standing or pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
 
   defp require_pinned(%{"kind" => "pinned"}), do: :ok
-  defp require_pinned(%{"mode" => "pinned"}), do: :ok
 
   defp require_pinned(shuttle),
     do: {:error, "park only applies to pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}

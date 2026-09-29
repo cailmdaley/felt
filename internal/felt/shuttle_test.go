@@ -67,36 +67,6 @@ func TestShuttleFacet_NonMappingIsNotAFacet(t *testing.T) {
 	}
 }
 
-// TestShuttleFacet_LegacyModeAlias proves felt's YAML decode path honors the
-// legacy `mode:` -> `kind:` alias (a block carrying mode: standing must validate
-// and resolve a next_due, not be rejected for an empty kind).
-func TestShuttleFacet_LegacyModeAlias(t *testing.T) {
-	f := shuttleFiber(t, map[string]any{
-		"mode":     "standing",
-		"agent":    "claude-sonnet",
-		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
-	})
-	b, ok, err := f.ShuttleBlock()
-	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
-	}
-	if b.Kind != "standing" {
-		t.Fatalf("mode: standing should decode to Kind=standing, got %q", b.Kind)
-	}
-	if err := f.ValidateShuttleFacet(); err != nil {
-		t.Fatalf("a valid mode: standing block must validate, got: %v", err)
-	}
-	out := marshalShuttle(t, f)
-	sh := out["shuttle"].(map[string]any)
-	resolved, ok := sh["resolved"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected resolved for a mode: standing role, got: %v", sh)
-	}
-	if _, ok := resolved["next_due"]; !ok {
-		t.Fatalf("mode: standing must resolve a next_due, got: %v", resolved)
-	}
-}
-
 func shuttleFiber(t *testing.T, block map[string]any) *Felt {
 	t.Helper()
 	f, err := New("test-fiber", "Test Fiber")

@@ -31,7 +31,7 @@ defmodule Shuttle.StandingRole do
     # snapshot's runtime join key. nil when the caller didn't supply it or the
     # fiber has no uid.
     :uid,
-    :mode,
+    :kind,
     # The raw schedule map, carried for the snapshot's display only — never
     # parsed here (felt owns cron). nil for a block without one.
     :schedule,
@@ -48,7 +48,7 @@ defmodule Shuttle.StandingRole do
   @type t :: %__MODULE__{
           fiber_id: String.t(),
           uid: String.t() | nil,
-          mode: String.t() | nil,
+          kind: String.t() | nil,
           schedule: map() | nil,
           next_due_at: DateTime.t() | nil,
           prev_due: DateTime.t() | nil,
@@ -62,7 +62,7 @@ defmodule Shuttle.StandingRole do
     role = %__MODULE__{
       fiber_id: fiber_id,
       uid: uid,
-      mode: string(data["kind"] || data["mode"]),
+      kind: string(data["kind"]),
       schedule: map_or_nil(data["schedule"]),
       # next_due/prev_due come from felt's resolution; fall back to the legacy
       # flat next_due_at only if felt emitted nothing (pre-Stage-2 documents).
@@ -74,7 +74,7 @@ defmodule Shuttle.StandingRole do
   end
 
   @spec standing?(t() | nil) :: boolean()
-  def standing?(%__MODULE__{mode: "standing"}), do: true
+  def standing?(%__MODULE__{kind: "standing"}), do: true
   def standing?(_), do: false
 
   @doc """
@@ -153,7 +153,7 @@ defmodule Shuttle.StandingRole do
   # (next_due_at present ⟺ the cron parsed and a future tick exists). Both the
   # dispatch and display paths gate on this alone — there are no review/next_due
   # validations: the document, not a review overlay, is the truth.
-  defp dispatchable?(%__MODULE__{mode: "standing", next_due_at: %DateTime{}}), do: true
+  defp dispatchable?(%__MODULE__{kind: "standing", next_due_at: %DateTime{}}), do: true
   defp dispatchable?(_), do: false
 
   @doc """
@@ -211,14 +211,14 @@ defmodule Shuttle.StandingRole do
   # rejected an unparseable schedule on write (emitting no resolved occurrence).
   defp validation_errors(%__MODULE__{} = role) do
     [
-      validate_mode(role),
+      validate_kind(role),
       validate_schedule(role)
     ]
     |> Enum.reject(&is_nil/1)
   end
 
-  defp validate_mode(%__MODULE__{mode: "standing"}), do: nil
-  defp validate_mode(%__MODULE__{mode: mode}), do: "kind must be standing, got #{inspect(mode)}"
+  defp validate_kind(%__MODULE__{kind: "standing"}), do: nil
+  defp validate_kind(%__MODULE__{kind: kind}), do: "kind must be standing, got #{inspect(kind)}"
 
   # A standing role is well-formed iff felt resolved a next occurrence for it.
   # felt emits next_due only when the cron parsed, so its presence IS the
