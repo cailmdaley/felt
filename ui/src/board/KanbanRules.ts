@@ -5,20 +5,14 @@ import { dueCivilDay, isoDayLocal } from './civilDay.js';
 // The kanban's single classifier, in the view. Shuttle (the engine) speaks
 // engine vocabulary — eligible/blocked/running — and never names a kanban
 // column; translating that into columns is view logic, so it lives here, in
-// the frontend, as the SOLE implementation. (Historically this same code ran
-// server-side in `server/src/KanbanRules.ts`; the "kanban reads Shuttle
-// directly" cutover relocated it here so there is exactly one home.)
+// the frontend, as the SOLE implementation.
 
-// Two surfaces, not three. `now` is desk presence and `stashed` is Resting;
-// there is no separate scheduled surface, because a `due:` is a date a card
-// wears, never a place it goes. (The old `soon` exiled every future-dated card
-// to a permanent timeline strip; the strip is gone, so `soon` meant invisible.)
+// Two surfaces. `now` is desk presence and `stashed` is Resting; there is no
+// scheduled surface, because a `due:` is a date a card wears, never a place it
+// goes.
 export type KanbanHorizon = 'now' | 'stashed';
 
-/**
- * The set of columns the kanban renders. Differs from KanbanTarget in that
- * KanbanTarget's legacy aliases are absent.
- */
+/** The set of columns the kanban renders. */
 export type KanbanColumn =
   | 'drafts'
   | 'scheduled'
@@ -102,7 +96,7 @@ export interface CycleDropCandidate {
  * never assigned to a cycle, so there is no field to write, nothing to keep in
  * sync, and no way for a cycle's roster to disagree with the calendar.
  *
- * Two rungs, in the order this function tries them:
+ * Two rungs, in the order `cycleMembership` tries them:
  *
  *   'due'       the fiber's `due:` falls inside the span. The plain reading of
  *               "this is due this sprint".
@@ -110,12 +104,6 @@ export interface CycleDropCandidate {
  *               are living in. Work in flight belongs to the current chapter by
  *               definition; it says nothing about a chapter that hasn't opened,
  *               which is why this rung is gated on the span covering today.
- *   'worked'    the fiber was worked on some day inside the span. This is the
- *               real historical rule, and it is the one the Desk CANNOT answer:
- *               activity days live in the temporal feeds, which the Desk does
- *               not fetch. The rung is implemented and tested here so the day a
- *               caller can supply `workedDays` it simply passes them; the Desk
- *               leaves the field undefined and the rung is skipped.
  */
 export type CycleMembershipReason = 'due' | 'in-flight';
 
@@ -289,12 +277,11 @@ export function classifyFiber(
 
   // A resting pinned umbrella role: schedule-less, never auto-dispatched. It
   // gets its own strip rather than reading as an armed oneshot in the
-  // Now/in-flight lane. Resting covers BOTH parked (`status:open`) and the
-  // older armed-at-rest (`status:active`) generations — a pinned role belongs
-  // on the strip whenever it is neither closed (handled above) nor actively
-  // running (the running-worker override above sends a live pinned worker to
-  // Now). Matching both statuses keeps parked roles like science/cmbx
-  // (`status:open`) visible on the strip without ejecting legacy active ones.
+  // Now/in-flight lane. A pinned role belongs on the strip whenever it is
+  // neither closed (handled above) nor actively running (the running-worker
+  // override above sends a live pinned worker to Now), so both resting
+  // statuses — parked `status:open` and armed-at-rest `status:active` — land
+  // here.
   if (
     f.hasShuttleBlock === true &&
     f.shuttleKind === 'pinned' &&
@@ -658,7 +645,7 @@ export function chainTail(
  * instead of dispatch, which is a different thing than the one you aimed at.
  *
  * So the card claims only a DELIBERATE hit: release near its middle. The outer
- * band is the column's, exactly as it was before sequences existed. The zone
+ * band is the column's. The zone
  * is also what the plum highlight tracks, so the promise and the behavior are
  * the same rectangle.
  *
@@ -681,7 +668,7 @@ export interface ZoneRect {
  * RECTANGLES, and the hot zone has to be computed on the second one. Computed
  * on the first, the bottom card of a full column has its middle band below the
  * fold: the zone is real, it just cannot be pointed at, and the card reads as
- * inert while every card above it highlights. That was the bug.
+ * inert while every card above it highlights.
  */
 export function intersectRects(a: ZoneRect, b: ZoneRect): ZoneRect | null {
   const left = Math.max(a.left, b.left);
@@ -716,11 +703,10 @@ export function inStackHotZone(
  * no interception, no banner, no flash — it simply is not a stack, and the
  * column handles the drop it always handled.
  *
- * A legal stack claims on either of two signals, and the second one exists
- * because the first turned out to be a moving target:
+ * A legal stack claims on either of two signals, because the first is a
+ * moving target:
  *
- *   • THE HOT ZONE — the pointer is near the card's middle. Fast, and the
- *     original rule.
+ *   • THE HOT ZONE — the pointer is near the card's middle. Fast.
  *   • DWELL — the pointer has rested anywhere on the card for a beat. Aiming
  *     at a band is only easy if the band holds still, and on this board it does
  *     not: picking a card up materializes the drag horizon, which pushes the
@@ -728,8 +714,7 @@ export function inStackHotZone(
  *     not the middle any more. A card near the bottom of a scrolling column
  *     gets it twice over — the same shift pushes it further under the fold, and
  *     its visible strip (which is what the zone is measured on) shrinks with
- *     it. That is how one card came to look permanently inert while its
- *     neighbours lit up.
+ *     it.
  *
  * Dwell is the honest reading of the gesture anyway: a drag that CROSSES a card
  * on its way to a column is moving, and a drag that STOPS on a card is aiming
@@ -763,7 +748,8 @@ export function stackZoneOffered(cardHeight: number, visibleHeight: number): boo
   if (visibleHeight <= 0 || cardHeight <= 0) return false;
   // The pixel floor guards against SLIVERS, so it is capped at the card's own
   // height: a 22px Resting row or pinned chip that is entirely on screen is not
-  // a sliver of anything, and refusing it made every compact surface un-stackable.
+  // a sliver of anything, and refusing it would make every compact surface
+  // un-stackable.
   return visibleHeight >= Math.max(cardHeight * 0.4, Math.min(cardHeight, MIN_STACK_ZONE_PX));
 }
 
@@ -823,11 +809,10 @@ export interface QueueRowGesture {
  *     stack drop follows, for the same reason: a fan-in someone assembled by
  *     hand carries intent no drag can reconstruct.
  *
- * The narrower one used to gate the wider one, which meant a queue of ONE — or
- * a queue with a single hand-written member anywhere in it — had no draggable
- * rows at all, and the row that was perfectly free to leave simply did not
- * move. Hence the signature: the row's own shape decides `draggable`, the
- * chain's shape decides `reorderable`.
+ * Neither permission gates the other: a queue of ONE, or a queue with a single
+ * hand-written member anywhere in it, still lets a free row leave. Hence the
+ * signature: the row's own shape decides `draggable`, the chain's shape decides
+ * `reorderable`.
  *
  * NOTHING ABOUT THE HEAD CARD IS AN INPUT. Not its column, not its state, not
  * whose daemon serves it. That is deliberate and it is why they are absent
@@ -995,12 +980,10 @@ export function queueMemberNote(
  *
  * ONE NUMBER, and it is the WHOLE chain — the closed members are queued behind
  * this card in every sense the fold cares about, and a count that skipped them
- * would disagree with the peek list right under it.
- * The chip used to append a second clause counting the settled ones ("· 1 in
- * review"); it made a glance at the desk do arithmetic to answer a question the
- * glance was not asking. How each member sits is a fact about that member, so
- * it belongs where the members are: the peek list, where every row says its own
- * state and wears its own colour (`queueMemberNote`).
+ * would disagree with the peek list right under it. The chip carries no second
+ * clause counting the settled ones: how each member sits is a fact about that
+ * member, so it belongs where the members are — the peek list, where every row
+ * says its own state and wears its own colour (`queueMemberNote`).
  */
 export function queuedChipLabel(total: number): string {
   return `+${total} queued`;
@@ -1036,15 +1019,14 @@ export type StackRefusal = 'alreadyQueued';
  *
  * The gesture writes exactly one scalar `depends_on:`, so it declines every
  * case where one edge is not the whole truth — and only those. What the cards
- * have DONE is no longer any of its business: a queue is ordering, so a
- * tempered or pinned card is a perfectly good thing to file work behind.
+ * have DONE, and what KIND they are, is none of its business: a queue is
+ * ordering, so a tempered card or a pinned role is a perfectly good thing to
+ * file work behind, and a standing role filed after something is still just
+ * filed after it.
  *
  *   • a hand-written LIST on the source — a fan-in someone assembled on
  *     purpose; a drag cannot know which of those edges it was meant to replace.
  *   • a CYCLE fiber on either end — a band of time is not a queue position.
- *   • a standing or pinned source — those run on a cron or from the strip, and
- *     folding one away under another card would take the launcher off the
- *     strip (the same ground as `setSurface`'s standing/pinned guards).
  *   • a LOOP or a NO-OP — the source already sits behind the target, or the
  *     edge would close a ring no gesture could undo.
  *
@@ -1082,10 +1064,10 @@ export function stackDropVerdict(
   //
   // Two shapes of the same fact: the source sits somewhere in the chain behind
   // the target (so the tail is the source itself, or the source is one of the
-  // members between), or it holds exactly the edge this drop would write. Both
-  // used to fall through to "that would make a loop", which is true of the
-  // mechanics and useless to the human: a card that is ALREADY where you are
-  // trying to put it is not a loop, it is a no-op. The `code` lets the surface
+  // members between), or it holds exactly the edge this drop would write.
+  // "That would make a loop" is true of the mechanics and useless to the human:
+  // a card that is ALREADY where you are trying to put it is not a loop, it is
+  // a no-op. The `code` lets the surface
   // name it during the drag without the refusal claiming the event.
   if (tail === source.id || queuedBehind(target.id, dependents).includes(source.id)) {
     return { ok: false, code: 'alreadyQueued', reason: 'it is already queued behind this one' };
@@ -1106,8 +1088,8 @@ export function stackDropVerdict(
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {
   if (typeof value !== 'string') return undefined;
   // Only `stashed` is a value; everything else is absence. `now` is absence by
-  // definition, and legacy `soon` frontmatter reads as absence too: the surface
-  // it named no longer exists, and a card that carried it belongs on the desk
-  // wearing whatever `due:` it has.
+  // definition, and any other value (`soon` still turns up in old frontmatter)
+  // names no surface, so the card belongs on the desk wearing whatever `due:`
+  // it has.
   return value.trim() === 'stashed' ? 'stashed' : undefined;
 }
