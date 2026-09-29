@@ -678,7 +678,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "render_prompt inlines the carried user_message as a From User block" do
-    # STORE 3: the user's directive rides the dispatch as a transient parameter,
+    # The user's directive rides the dispatch as a transient parameter,
     # inlined into the prompt at launch (no persisted review-comment).
     prompt = Dispatcher.render_prompt("tests/haiku", user_message: "talk to me first")
     assert prompt =~ "From User"

@@ -351,8 +351,7 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
 
     # The poller uses felt's widened kanban projection (the full field set the
-    # document cache builds entries from); broad listing is only a fallback for
-    # older remote felt binaries.
+    # document cache builds entries from).
     projection = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
 
     assert wait_until(fn ->
@@ -461,8 +460,7 @@ defmodule Shuttle.PollerTest do
 
     show_count = felt_show_count()
 
-    # felt wedges: every listing (narrow projection AND the broad fallback)
-    # now times out. The tick degrades by retaining the last-known candidate:
+    # felt wedges: every listing now times out. The tick degrades by retaining the last-known candidate:
     # the card stays served, and the mtime-keyed cache reuses the entry
     # without re-shelling a felt that just timed out.
     # Capture the last all-fresh refreshed_at before the failure, so we can prove
@@ -3468,7 +3466,7 @@ defmodule Shuttle.PollerTest do
 
     # The prior run's session id lives in the per-host dispatch marker; a forced
     # resume reads it from there. The resume directive (`resume_mode: "previous"`)
-    # now rides the dispatch call as a transient parameter (STORE 3), not a
+    # now rides the dispatch call as a transient parameter, not a
     # persisted felt review-comment — so there is no since-window to scope and the
     # "morning-post blocked for days" pathology cannot recur.
     write_dispatch_marker(fiber_id, "stored-standing-session-id")
@@ -4104,7 +4102,7 @@ defmodule Shuttle.PollerTest do
 
     # The prior session id lives in the per-host dispatch marker the daemon wrote
     # at spawn (the only structured session-id home). resume_mode rides the
-    # dispatch call (STORE 3), not a persisted review-comment.
+    # dispatch call, not a persisted review-comment.
     write_dispatch_marker(fiber_id, "stored-session-id")
 
     {:ok, poller} =

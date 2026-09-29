@@ -2034,34 +2034,17 @@ defmodule Shuttle.Poller do
     # superset of the fields the poller needs for eligibility, ownership, and
     # identity). Widening it lets the document cache build each entry DIRECTLY
     # from its candidate row (no per-miss `felt show`, no stat), so a poll tick
-    # costs one `felt ls` per store. Keep the broad fallback so a not-yet-upgraded
-    # remote felt fails soft instead of hiding every card on that store.
-    case run_felt(store, state.runner, [
-           "ls",
-           "--json",
-           "--has-field",
-           "shuttle",
-           "--json-field",
-           Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
-         ]) do
-      {:ok, output} ->
-        {:ok, output}
-
-      # A timeout means felt itself is wedged (overloaded node, dead SSH), not
-      # that the flags were unsupported — the strictly-more-expensive broad
-      # listing would just burn a second 60s wall-clock stall per store per
-      # tick. Propagate immediately; discover_candidates degrades to the
-      # store's last-known rows.
-      {:error, :timeout} = error ->
-        error
-
-      {:error, reason} ->
-        Logger.warning(
-          "shuttle felt ls failed for #{store}; falling back to broad listing: #{inspect(reason)}"
-        )
-
-        run_felt(store, state.runner, ["ls", "--json"])
-    end
+    # costs one `felt ls` per store. A failure of any kind degrades
+    # `discover_candidates/1` to the store's last-known rows; a felt too old for
+    # these flags is caught by the boot contract probe (`Shuttle.Contract`).
+    run_felt(store, state.runner, [
+      "ls",
+      "--json",
+      "--has-field",
+      "shuttle",
+      "--json-field",
+      Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
+    ])
   end
 
   # The autonomous-tick eligibility filter. Beyond the shared `eligible?`

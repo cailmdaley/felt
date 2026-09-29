@@ -50,7 +50,9 @@ defmodule Shuttle.ConfigFiles do
       class, or a `listen` that is not loopback tcp or a short absolute unix
       path.
     * `:stores` / `:projects` → checked here, against the shape
-      `Shuttle.PathListConfig` actually accepts, because no CLI verb reads them.
+      `Shuttle.PathListConfig` actually accepts: felt has no verb that
+      validates them. (The CLI reads `stores.json` inside other verbs —
+      `cmd/shuttle_stores.go` — and does not read `projects.json`.)
 
   So the daemon never grows a second opinion about what a valid fleet file is.
   It grows one opinion about *when* to ask, and asks felt.
@@ -338,10 +340,10 @@ defmodule Shuttle.ConfigFiles do
   defp validate_decoded(:host, text, _decoded),
     do: validate_via_felt(text, "FELT_HOST_FILE", ["shuttle", "host", "--json"])
 
-  # No CLI verb reads the path-list files, so the shape check lives here — and
-  # it is the shape `PathListConfig` accepts, not a stricter one. In particular
-  # a bare JSON array is valid: both readers take it, and refusing it here
-  # would reject a file the daemon then happily polls.
+  # No felt verb validates the path-list files, so the shape check lives here —
+  # and it is the shape `PathListConfig` accepts, not a stricter one. In
+  # particular a bare JSON array is valid: every reader takes it, and refusing
+  # it here would reject a file the daemon then happily polls.
   defp validate_decoded(id, _text, decoded) when id in [:stores, :projects] do
     key = json_key(id)
 

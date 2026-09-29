@@ -11,7 +11,7 @@ defmodule Shuttle.Delivery do
   board's explicit Resume forces a resume.
   """
 
-  alias Shuttle.{Messaging, Poller, SessionLedger}
+  alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger}
 
   @type result ::
           {:message, pos_integer(), map()}
@@ -86,8 +86,9 @@ defmodule Shuttle.Delivery do
     end
   end
 
-  defp harness(cli) when cli in ["claude", "codex", "pi"], do: cli
-  defp harness(_), do: nil
+  defp harness(cli) do
+    if Harnesses.supported?(cli), do: Harnesses.normalize(cli)
+  end
 
   defp message_id,
     do: "deliver-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
