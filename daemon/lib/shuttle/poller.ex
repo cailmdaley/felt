@@ -1539,7 +1539,10 @@ defmodule Shuttle.Poller do
     refreshed_at =
       if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
 
-    state = reconcile(%{state | felt_stores: felt_stores})
+    # One tmux + process scan per cycle, shared by orphan adoption and the
+    # dead-standing-role pass below.
+    sessions = list_shuttle_sessions(state)
+    state = reconcile(%{state | felt_stores: felt_stores}, sessions)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
 
@@ -1572,12 +1575,12 @@ defmodule Shuttle.Poller do
 
     # Downtime recovery: a standing role whose tmux session is gone but whose
     # document is still armed (status:active, no verdict) never fired
-    # `handle_worker_exit` (the daemon was down across the exit). Scan tmux and
-    # mark such roles awaiting (status:closed) so the armed document does not
-    # re-fire. Oneshots need no analog: a status:active oneshot with no live
-    # session is simply eligible again on the next tick — retries collapsed into
-    # the poll loop.
-    state = StandingRoles.reconcile_dead_standing_roles(state, candidates)
+    # `handle_worker_exit` (the daemon was down across the exit). Mark such
+    # roles awaiting (status:closed) so the armed document does not re-fire.
+    # Oneshots need no analog: a status:active oneshot with no live session is
+    # simply eligible again on the next tick — retries collapsed into the poll
+    # loop.
+    state = StandingRoles.reconcile_dead_standing_roles(state, candidates, sessions)
 
     # Parking is dispatch-authority bookkeeping, not capacity accounting: while
     # quarantined, the parked map is rebuilt from the current dispatchable set
@@ -3115,11 +3118,12 @@ defmodule Shuttle.Poller do
   # candidates: the candidates were read before `reconcile_fiber_closures/1`'s
   # fresh reads, so a worker that closed its fiber mid-poll would still look
   # active in them, be re-adopted, and be killed during its own final act.
-  defp reconcile(%State{} = state) do
+  # `sessions` is this cycle's `list_shuttle_sessions/1` scan.
+  defp reconcile(%State{} = state, sessions) do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
-    SessionReconciliation.reconcile_orphaned_sessions(state)
+    SessionReconciliation.reconcile_orphaned_sessions(state, sessions)
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do

@@ -41,15 +41,16 @@ defmodule Shuttle.Poller.StandingRoles do
   # `adopt_orphans` (init) and `reconcile_orphaned_sessions` (per-poll) handle
   # the *live* analog: a tmux session exists, we just aren't watching it. This
   # pass is the *dead* analog for the kind that must NOT re-fire on its own.
-  def reconcile_dead_standing_roles(%State{} = state, candidates) do
+  def reconcile_dead_standing_roles(%State{} = state, candidates, scan) do
     # This pass WRITES to fibers (status:closed/open) on the strength of "no
-    # live session", so it may only act on POSITIVE evidence: {:ok, sessions}
-    # — including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
-    # (a wedged `tmux ls`, a timeout) the scan is skipped wholesale —
+    # live session", so it may only act on POSITIVE evidence: `scan` (the
+    # cycle's `Poller.list_shuttle_sessions/1` result) is {:ok, sessions} —
+    # including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
+    # (a wedged `tmux ls`, a timeout) the pass is skipped wholesale —
     # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
     # never mass-mark live standing/pinned roles dead. A truly dead orphan is
     # simply caught by the next healthy scan.
-    case Poller.list_shuttle_sessions(state) do
+    case scan do
       {:ok, sessions} ->
         live = MapSet.new(sessions)
 

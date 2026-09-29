@@ -51,18 +51,19 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # Per-poll reconcile: find live tmux sessions that have no watcher and adopt
-  # them. Sessions already covered by a running entry are left alone.
-  def reconcile_orphaned_sessions(%State{} = state) do
+  # them. Sessions already covered by a running entry are left alone. `scan` is
+  # the cycle's `Poller.list_shuttle_sessions/1` result; on an :unknown scan
+  # there is nothing safe to reconcile — retry next poll.
+  def reconcile_orphaned_sessions(%State{} = state, scan) do
     state = adopt_app_sessions(state)
-    # Find tmux sessions that exist but have no watcher. On an :unknown scan
-    # there is nothing safe to reconcile — retry next poll.
-    case Poller.list_shuttle_sessions(state) do
-      {:ok, sessions} -> reconcile_orphaned_sessions(state, sessions)
+
+    case scan do
+      {:ok, sessions} -> adopt_unwatched(state, sessions)
       {:error, :unknown} -> state
     end
   end
 
-  defp reconcile_orphaned_sessions(%State{} = state, sessions) do
+  defp adopt_unwatched(%State{} = state, sessions) do
     running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
 
     orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))
