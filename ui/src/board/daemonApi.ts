@@ -28,6 +28,21 @@ export function isDaemonBooting(error: unknown): error is DaemonBootingError {
   return error instanceof DaemonBootingError
 }
 
+/**
+ * A failed daemon request as a sentence.
+ *
+ * An unreachable daemon is detected by TYPE, not by reading the message. The
+ * fetch spec says a transport failure rejects with a `TypeError` and says
+ * nothing about the wording: Chrome writes "Failed to fetch", Firefox
+ * "NetworkError when attempting to fetch resource", and WebKit — the phone —
+ * writes "Load failed". Anything that is not a TypeError came from our own
+ * code and is already a sentence, so it is passed through.
+ */
+export function daemonErrorMessage(error: unknown): string {
+  if (error instanceof TypeError) return 'Couldn’t reach the Shuttle daemon (:4000).'
+  return (error as { message?: string })?.message ?? String(error)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

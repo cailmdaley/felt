@@ -13,10 +13,10 @@ export interface KanbanCard {
   name: string
   path: string
   /**
-   * Origin that contributed this fiber — `local` for filesystem-walk sources,
-   * `remote-<hostname>` for fibers sourced from an agent's fiber-tree
-   * snapshot. Drives the "waiting on `<hostname>`" stale badge and the
-   * drag-disable when the originating agent is disconnected (Stage 3b).
+   * Origin that contributed this fiber — the composite row's `origin`: the
+   * serving daemon's own host id, or the name of the remote it came from.
+   * Routes owner-addressed writes and drives the "waiting on `<hostname>`"
+   * stale badge and the drag-disable when that origin is disconnected.
    */
   originId: string
   /**
@@ -101,15 +101,6 @@ export interface KanbanCard {
   held?: boolean
   /** Ms timestamp the boot-quarantine hold began (`parked_at`), for a tooltip. */
   heldSince?: number
-  /**
-   * Session UUID of the most recently dispatched worker, IFF the fiber's
-   * frontmatter still carries `shuttle.session.id`. Effectively always absent:
-   * continuation state lives in the `shuttle:` block's `session_uuid`, resolved
-   * by the daemon at dispatch time. Display-only hint data; must NOT gate Resume
-   * (which always tries). Kept because a stray legacy frontmatter id still
-   * enriches the sent-files query.
-   */
-  sessionId?: string
   /**
    * `shuttle.runtime.dispatched_at` — the INSTANT the owning daemon launched
    * the most recent worker. Rides the composite feed inside felt's `shuttle`
@@ -332,9 +323,6 @@ export interface KanbanResponse {
     stash: number
     pinned: number
   }
-  /** Historical: total tempered count. Equals
-   *  `timeline.past.filter(c => c.tempered === true).length`. */
-  temperedTotal: number
   /**
    * Per-origin freshness, keyed by `originId`. Always includes `local`
    * and an entry for every remote origin with a snapshot in the store.

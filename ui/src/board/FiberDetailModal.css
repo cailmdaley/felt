@@ -2274,7 +2274,7 @@ a.kbn-detail-aloft { text-decoration: none; }
 .kbn-detail-app-guide {
   margin: 0 0 1rem;
   padding: 0.65rem 0.8rem;
-  border-left: 2px solid var(--text-muted);
+  border-left: 2px solid #7A7368;
   font-size: 0.85rem;
   line-height: 1.5;
 }

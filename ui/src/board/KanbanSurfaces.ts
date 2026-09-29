@@ -1455,7 +1455,7 @@ export class KanbanSurfaceRenderer {
       kind === 'drafts'
         ? this.o.onStashClick && {
             glyph: '+', modifier: 'drafts',
-            label: 'Stash a new fiber (n)', onClick: this.o.onStashClick,
+            label: 'Stash a new fiber', onClick: this.o.onStashClick,
           }
         : kind === 'inFlight'
           ? this.o.onNewIdeaClick && {

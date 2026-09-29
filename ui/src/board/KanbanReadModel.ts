@@ -1,20 +1,16 @@
 // The kanban's read model, in the view.
 //
-// `buildKanbanResponseFromComposite` is the frontend mirror of the backend
-// `server/src/KanbanReadModel.ts` `buildResponse()` — MINUS collection. The
-// daemon's `GET /api/v1/fibers/composite` now owns collection (the local owner
-// feed concatenated with each remote daemon's cached owner feed), so the only
-// thing left for the view is the read model that was always view logic:
-// classify → assemble surfaces → build cards → compute staleness. The output is
-// the exact `KanbanResponse` shape `KanbanSurfaces` (the renderer) already
-// consumes, so the renderer is untouched.
+// The daemon's `GET /api/v1/fibers/composite` owns collection (the local owner
+// feed concatenated with each remote daemon's cached owner feed).
+// `buildKanbanResponseFromComposite` is the view logic over it: classify →
+// assemble surfaces → build cards → compute staleness, producing the
+// `KanbanResponse` shape `KanbanSurfaces` (the renderer) consumes.
 //
 // The single most important property lives in `toCard`: a card's
 // `runningWorker` comes from the feed row's owner-served `runtime`, never from a
-// second tmux read. Every fiber's liveness was resolved once, by its owning
-// host. There is no second local observer to disagree with the daemon's
-// reconciled `status` — which is what structurally dissolves the
-// drag-to-drafts bounce (the symptom this whole constitution exists to kill).
+// second tmux read. Every fiber's liveness is resolved once, by its owning
+// host, so there is no second local observer to disagree with the daemon's
+// reconciled `status` — and no drag-to-drafts bounce between the two.
 
 import type {
   CompositeEntry,
@@ -119,7 +115,6 @@ export function buildKanbanResponseFromComposite(
     folded: surfaces.folded,
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
-    temperedTotal: surfaces.temperedTotal,
     staleness,
     generatedAt: nowMs,
   };
@@ -154,9 +149,8 @@ export function buildKanbanResponseFromComposite(
  * The precedence above is for fibers with NO owner — plain `due:` cards and
  * cycles, which every store roots equally and no daemon can claim. A fiber that
  * names a `shuttle.host` is not one of those: exactly one daemon owns it, and
- * since `5669fc7` (`kanban_aux_admissible?` no longer waves through an
- * elsewhere-owned fiber that happens to carry a `due:`) no other daemon serves
- * it at all. So an owner row, when present, wins outright — ahead of local,
+ * no other daemon serves it (`kanban_aux_admissible?` refuses an
+ * elsewhere-owned fiber even when it carries a `due:`). So an owner row, when present, wins outright — ahead of local,
  * ahead of fresh. Not a tiebreak: writes route by `originId`, and the local
  * git mirror of an owned fiber is a copy the human cannot edit through the
  * board (`/transition`, `/felt-edit`, `/lifecycle` are all owner-routed, so
@@ -166,14 +160,14 @@ export function buildKanbanResponseFromComposite(
  * reading; falling back to the mirror shows a disconnected host's work as
  * though it were fresh.
  *
- * That single rule replaces the liveness reconciliation this function used to
- * do: when the owner's row is the card, its worker arrives with it. What
- * survives is the negative half — a non-owner row that reaches us carrying a
- * `runtime` (a pre-`5669fc7` daemon still leaking foreign rows, a renamed host)
- * has its liveness dropped rather than believed, because the board would
- * otherwise offer to open and to kill a session that host does not run. Once
- * the fleet is current this whole function is a no-op for owned fibers: the
- * feed hands us exactly one row each and there is nothing to reconcile.
+ * That single rule is the liveness reconciliation: when the owner's row is the
+ * card, its worker arrives with it. The negative half remains — a non-owner
+ * row that reaches us carrying a `runtime` (an older remote daemon leaking
+ * foreign rows, a renamed host) has its liveness dropped rather than believed,
+ * because the board would otherwise offer to open and to kill a session that
+ * host does not run. On a current fleet this function is a no-op for owned
+ * fibers: the feed hands us exactly one row each and there is nothing to
+ * reconcile.
  */
 export function dedupeMirroredRows(
   entries: CompositeEntry[],
@@ -235,7 +229,6 @@ type AssembledSurfaces = {
   pinned: KanbanCard[];
   folded: KanbanCard[];
   cycles: KanbanCard[];
-  temperedTotal: number;
 };
 
 /**
@@ -256,9 +249,8 @@ const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
 /**
  * The classify-and-route pass: run `classifyFiber` (the SINGLE source of truth)
  * over each eligible entry, sort each column, and route the open/scheduled
- * buckets onto the three response surfaces (now / timeline / stash). Verbatim
- * port of the backend `assembleSurfaces`, with `toCard` reading owner-served
- * liveness off the feed row instead of a local tmux index.
+ * buckets onto the three response surfaces (now / timeline / stash), with
+ * `toCard` reading owner-served liveness off the feed row.
  */
 function assembleSurfaces(
   entries: CompositeEntry[],
@@ -407,7 +399,6 @@ function assembleSurfaces(
     pinned,
     folded,
     cycles,
-    temperedTotal: tempered.length,
   };
 }
 
@@ -558,12 +549,10 @@ export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()
 }
 
 /**
- * One composite row → one card. The frontend twin of the backend `toCard`, with
- * collection-era machinery dropped:
- *   - `runningWorker` is the feed row's owner-served `runtime.tmuxSession` —
- *     uniform for local and remote, ONE observer per fiber. No `resolveRunningWorker`,
- *     no local tmux index, no per-origin branch. This is the bounce-kill.
- * Edge resolution still reads `byId` across the whole feed.
+ * One composite row → one card. `runningWorker` is the feed row's owner-served
+ * `runtime.tmuxSession` — uniform for local and remote, ONE observer per fiber,
+ * no local tmux index and no per-origin branch. Edge resolution reads `byId`
+ * across the whole feed.
  */
 function toCard(
   entry: CompositeEntry,
@@ -619,7 +608,6 @@ function toCard(
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
-    sessionId: f.shuttleSessionId,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
     shuttleAgent: f.shuttleAgent,

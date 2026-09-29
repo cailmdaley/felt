@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
 import { captureOutcome, captureRequestBody, type CaptureResponseData } from './captureApi'
+import { daemonErrorMessage } from '../board/daemonApi'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
 import type { Host, Project } from './projectModel'
@@ -203,8 +204,7 @@ export function CaptureForm({
         surface: outcome.surface ?? (isCodexAgent(agentRec) ? surface : 'cli'),
       })
     } catch (err) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      setError(msg.includes('fetch') ? 'Couldn’t reach the Shuttle daemon (:4000).' : msg)
+      setError(daemonErrorMessage(err))
       setSubmitting(false)
     }
   }

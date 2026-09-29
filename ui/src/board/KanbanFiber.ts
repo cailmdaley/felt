@@ -63,9 +63,6 @@ export interface Fiber {
    * schedule-less umbrella role the poller never auto-dispatches; only the
    * explicit force-dispatch verb launches it). */
   shuttleKind?: 'oneshot' | 'standing' | 'pinned';
-  /** `shuttle.session.id` — the most recently dispatched worker's session UUID
-   * when frontmatter still carries one. Display-only hint data. */
-  shuttleSessionId?: string;
   /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
    * daemon most recently launched for this fiber. Machine-managed, and the ONLY
    * value on the row that changes when a fresh dispatch replaces one session with
@@ -174,7 +171,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     !!shuttleRaw && typeof shuttleRaw === 'object' && !Array.isArray(shuttleRaw);
 
   let shuttleKind: 'oneshot' | 'standing' | 'pinned' | undefined;
-  let shuttleSessionId: string | undefined;
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
@@ -192,11 +188,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       s.kind === 'standing' ? 'standing' : s.kind === 'pinned' ? 'pinned' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
 
-    const session = s.session;
-    if (session && typeof session === 'object' && !Array.isArray(session)) {
-      const sid = (session as Record<string, unknown>).id;
-      if (typeof sid === 'string' && sid) shuttleSessionId = sid;
-    }
 
     // shuttle.runtime — the machine-managed nested block (session_uuid,
     // dispatched_at, handed_off_at, run_id). Readers read ONLY the nested
@@ -267,7 +258,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     tempered,
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
-    shuttleSessionId,
     shuttleSessionUuid,
     shuttleDispatchedAt,
     shuttleHandedOffAt,

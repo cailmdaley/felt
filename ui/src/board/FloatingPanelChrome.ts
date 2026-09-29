@@ -55,8 +55,8 @@ export function halfAndHalf(): { card: PanelGeometry; other: PanelGeometry } {
  * The shared z-order stack for every floating window on the board — the card
  * panel, the file viewer, the wikilink panel. Clicking one raises it above the
  * others: a `pointerdown` bumps the counter and stamps the window's `z-index`,
- * so the last-touched window wins. Seeded above the vellum scrim (9999), which
- * is where the panel's base CSS `z-index` sits.
+ * so the last-touched window wins. Seeded at the panel's base CSS `z-index`
+ * (10000), so the first raise lands above every window at rest.
  */
 let panelZ = 10000
 export function bringPanelToFront(el: HTMLElement): void {

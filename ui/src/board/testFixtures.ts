@@ -48,7 +48,6 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
     pinned: [],
     folded: [],
     cycles: [],
-    temperedTotal: 0,
     staleness: {},
     generatedAt: 0,
     ...over,
