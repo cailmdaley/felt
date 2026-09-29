@@ -121,18 +121,15 @@ defmodule Shuttle.Poller.Snapshot do
       standing_roles: StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
       claimed_count: map_size(state.running),
       max_concurrent: state.max_concurrent_workers,
+      # The refresh's hit/miss/eviction/entry counts plus the feed envelope's
+      # freshness fields (its `entries` is the live cache size; the stats'
+      # count from the last refresh is the one reported here).
       document_cache:
-        state.document_cache_stats
+        state
+        |> Poller.document_cache_meta()
+        |> Map.delete(:entries)
+        |> Map.merge(state.document_cache_stats)
         |> stringify_keys()
-        |> Map.put("state", Poller.document_cache_state(state))
-        |> Map.put("last_refresh_ms", state.document_cache_last_refresh_ms)
-        |> Map.put(
-          "refreshed_at",
-          case state.document_cache_refreshed_at do
-            %DateTime{} = dt -> DateTime.to_iso8601(dt)
-            _ -> nil
-          end
-        )
     }
   end
 

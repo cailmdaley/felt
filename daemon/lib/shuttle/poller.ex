@@ -633,7 +633,7 @@ defmodule Shuttle.Poller do
       end
 
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-    own_host_id = Keyword.get(opts, :own_host_id, resolve_own_host_id())
+    own_host_id = Keyword.get_lazy(opts, :own_host_id, &resolve_own_host_id/0)
 
     # Use the registered name (atom) when available so cross-process sends
     # survive a supervisor restart of this Poller. Process.info/2 returns
@@ -1790,8 +1790,10 @@ defmodule Shuttle.Poller do
   # viewer renders instead of a binary up/down. `state` is "cold" until the
   # first poll warms the cache, then "fresh" — or "partial" when this tick built
   # the cache with at least one store served from last-known rows (a listing
-  # failure). `refreshed_at` reflects the last ALL-stores-fresh tick.
-  defp document_cache_meta(%State{} = state) do
+  # failure). `refreshed_at` reflects the last ALL-stores-fresh tick. The
+  # snapshot's `document_cache` block carries the same fields.
+  @doc false
+  def document_cache_meta(%State{} = state) do
     %{
       state: document_cache_state(state),
       refreshed_at: iso8601_or_nil(state.document_cache_refreshed_at),
@@ -1800,11 +1802,9 @@ defmodule Shuttle.Poller do
     }
   end
 
-  # Also the snapshot module's source for the `document_cache.state` wire field.
-  @doc false
-  def document_cache_state(%State{document_cache_ready: false}), do: "cold"
-  def document_cache_state(%State{document_cache_partial: true}), do: "partial"
-  def document_cache_state(_state), do: "fresh"
+  defp document_cache_state(%State{document_cache_ready: false}), do: "cold"
+  defp document_cache_state(%State{document_cache_partial: true}), do: "partial"
+  defp document_cache_state(_state), do: "fresh"
 
   defp iso8601_or_nil(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp iso8601_or_nil(_), do: nil
@@ -3979,11 +3979,7 @@ defmodule Shuttle.Poller do
       state: if(state.poll_check_in_progress, do: "reading", else: "idle"),
       stall_timeout_ms: state.stall_timeout_ms,
       stalls: state.poll_stalls,
-      last_stalled_at:
-        case state.last_poll_stalled_at do
-          %DateTime{} = at -> DateTime.to_iso8601(at)
-          _ -> nil
-        end
+      last_stalled_at: iso8601_or_nil(state.last_poll_stalled_at)
     })
   end
 

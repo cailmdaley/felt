@@ -486,7 +486,7 @@ defmodule Shuttle.Dispatcher do
 
     surface = Keyword.get(opts, :surface) || "cli"
 
-    with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
+    with {:ok, agent} <- resolve_agent_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
          :ok <- preflight_surface(surface, agent, work_dir, runner) do
@@ -531,8 +531,9 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Capture/Stash resolves an agent name + axes with no fiber on disk, so it
-  # shells felt — the registry owner — rather than re-resolving locally:
+  # Resolves an agent name + axes with no fiber on disk (a capture, or
+  # `Shuttle.SessionResume`'s ledger-named agent), so it shells felt — the
+  # registry owner — rather than re-resolving locally:
   #   felt shuttle agents resolve <name> [--effort <E>] [--chrome] --json
   # emits the same shape felt inlines as `shuttle.resolved.agent`. The daemon
   # turns it into a command record via from_resolved/1. felt exits non-zero with
@@ -541,7 +542,8 @@ defmodule Shuttle.Dispatcher do
   # layer can answer 422 (client error) without string-sniffing — other capture
   # failures (tmux spawn, missing model config) stay 500-shaped. Routed through
   # the injected `runner` so tests need no live `felt shuttle agents` verb.
-  defp capture_resolve_axes(agent_name, effort, chrome, runner) do
+  @doc false
+  def resolve_agent_axes(agent_name, effort, chrome, runner) do
     args =
       ["shuttle", "agents", "resolve", agent_name] ++
         if(is_binary(effort) and effort != "", do: ["--effort", effort], else: []) ++
@@ -1162,20 +1164,10 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, %{"id" => id} = thread} <- start,
          :ok <-
-           Shuttle.AppWorkers.put(%{
-             "session_uuid" => id,
-             "thread_id" => id,
-             "transcript_session_uuid" =>
-               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
-             "project_id" => thread["projectId"],
+           put_app_worker(thread, agent, work_dir, %{
              "fiber_id" => fiber_id,
              "uid" => Keyword.get(opts, :uid),
-             "felt_store" => Keyword.get(opts, :felt_store),
-             "cwd" => work_dir,
-             "agent_id" => agent.id,
-             "active" => true,
-             "launch_state" => "starting",
-             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+             "felt_store" => Keyword.get(opts, :felt_store)
            }) do
       # Identity is durable before naming, turning, or adopting the conversation.
       if intent == :fresh, do: name_app_thread(client, id, Path.basename(fiber_id))
@@ -1189,7 +1181,7 @@ defmodule Shuttle.Dispatcher do
       if marker == :ok do
         append_session_ledger(
           fiber_id,
-          thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
+          app_transcript_id(thread),
           Keyword.merge(opts,
             harness: "codex",
             ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume),
@@ -1255,20 +1247,10 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, %{"id" => id} = thread} <- client.start_thread(app_opts(agent, work_dir, opts)),
          :ok <-
-           Shuttle.AppWorkers.put(%{
-             "session_uuid" => id,
-             "thread_id" => id,
-             "transcript_session_uuid" =>
-               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
-             "project_id" => thread["projectId"],
+           put_app_worker(thread, agent, work_dir, %{
              "fiber_id" => nil,
              "uid" => nil,
-             "felt_store" => felt_store,
-             "cwd" => work_dir,
-             "agent_id" => agent.id,
-             "active" => true,
-             "launch_state" => "starting",
-             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+             "felt_store" => felt_store
            }),
          :ok <- name_app_thread(client, id, yap),
          {:ok, _} <-
@@ -1295,6 +1277,27 @@ defmodule Shuttle.Dispatcher do
        }}
     end
   end
+
+  # The durable record of a just-started app conversation; `fiber` carries its
+  # `fiber_id`, `uid` and `felt_store` (nil fiber and uid for a capture).
+  defp put_app_worker(%{"id" => id} = thread, agent, work_dir, fiber) do
+    Shuttle.AppWorkers.put(
+      Map.merge(fiber, %{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "transcript_session_uuid" => app_transcript_id(thread),
+        "project_id" => thread["projectId"],
+        "cwd" => work_dir,
+        "agent_id" => agent.id,
+        "active" => true,
+        "launch_state" => "starting",
+        "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+    )
+  end
+
+  defp app_transcript_id(%{"id" => id} = thread),
+    do: thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id)
 
   defp name_app_thread(client, id, title) do
     label =

@@ -251,12 +251,7 @@ defmodule Shuttle.SessionResume do
   end
 
   defp resolve_agent(id, runner) do
-    case runner.cmd("felt", ["shuttle", "agents", "resolve", id, "--json"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> {:ok, output |> Jason.decode!() |> Agents.from_resolved()}
-      _ -> :error
-    end
+    Dispatcher.resolve_agent_axes(id, nil, false, runner)
   rescue
     _ -> :error
   end
