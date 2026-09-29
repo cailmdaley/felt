@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -506,7 +507,9 @@ func (s *Storage) CheckAvailableID(id string) error {
 	return nil
 }
 
-// Write saves a felt to disk.
+// Write saves a felt to disk. The file is replaced atomically, so a
+// concurrent reader — another felt, the daemon's poll — sees the old document
+// or the new one, never a truncated file.
 func (s *Storage) Write(f *Felt) error {
 	if f == nil {
 		return fmt.Errorf("cannot write nil felt")
@@ -521,10 +524,21 @@ func (s *Storage) Write(f *Felt) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := WriteFiberFile(path, data); err != nil {
 		return fmt.Errorf("writing file %s: %w", path, err)
 	}
 	return nil
+}
+
+// WriteFiberFile replaces the fiber file at path atomically (see
+// atomicfile). An existing file keeps its mode, as an in-place write would; a
+// new one is 0644.
+func WriteFiberFile(path string, data []byte) error {
+	perm := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return atomicfile.Write(path, data, perm)
 }
 
 // Read loads a felt from disk by ID.
@@ -773,7 +787,7 @@ func (w pendingWrite) write(s *Storage) error {
 	if path == "" {
 		path = s.Path(w.id)
 	}
-	if err := os.WriteFile(path, w.data, 0644); err != nil {
+	if err := WriteFiberFile(path, w.data); err != nil {
 		return fmt.Errorf("writing file %s: %w", path, err)
 	}
 	return nil
@@ -1124,7 +1138,7 @@ func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) erro
 		if dryRun {
 			continue
 		}
-		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
+		if err := WriteFiberFile(file.path, rewritten); err != nil {
 			return fmt.Errorf("writing normalized fiber %s: %w", file.path, err)
 		}
 	}
@@ -1162,7 +1176,7 @@ func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, er
 		if dryRun {
 			continue
 		}
-		if err := os.WriteFile(file.path, rewritten, 0644); err != nil {
+		if err := WriteFiberFile(file.path, rewritten); err != nil {
 			return nil, fmt.Errorf("writing identity-backfilled fiber %s: %w", file.path, err)
 		}
 	}

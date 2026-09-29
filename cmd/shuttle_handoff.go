@@ -160,7 +160,7 @@ func stampHandedOff(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := atomicWriteFile(path, data); err != nil {
+	if err := felt.WriteFiberFile(path, data); err != nil {
 		return "", err
 	}
 	return at, nil
@@ -193,26 +193,4 @@ func endOwnTmuxSession() {
 // is not persisted (Felt.ID is yaml:"-"); Parse needs only a label.
 func idFromPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), felt.FileExt)
-}
-
-// atomicWriteFile writes data to path via a temp file in the same directory and a
-// rename, so a concurrent reader (the daemon's poll) never sees a truncated file.
-// felt's own Storage.Write is a plain os.WriteFile; handoff earns atomicity because
-// the worker exits immediately after and the daemon may poll mid-write.
-func atomicWriteFile(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".shuttle-handoff-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
 }

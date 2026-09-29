@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/atomicfile"
 )
 
 const pluginGenerationMarkerName = ".felt-generation.json"
@@ -99,7 +101,10 @@ func writePluginGeneration(candidate string, identity pluginGenerationIdentity) 
 	path := filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)
 	// The marker is what recovery and the receipt trust after a crash, so its
 	// write must be atomic and durable.
-	return writeFileDurably(path, data, 0o644, ".felt-generation-*", "writing plugin generation marker", "writing plugin generation marker", "committing plugin generation marker")
+	if err := atomicfile.Write(path, data, 0o644); err != nil {
+		return fmt.Errorf("writing plugin generation marker: %w", err)
+	}
+	return nil
 }
 
 func readPluginGeneration(pluginRoot string) (pluginGenerationIdentity, error) {
@@ -172,10 +177,11 @@ func pluginPayloadDigest(root string) (string, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported plugin payload entry %q", path)
 		}
-		// Prefix match: a SIGKILL between the marker's temp-file creation and
-		// its rename can strand a `.felt-generation-*` temp file in the same
-		// tree; neither it nor the marker belongs to the described payload.
-		if base := filepath.Base(path); base == pluginGenerationMarkerName || strings.HasPrefix(base, ".felt-generation-") {
+		// A SIGKILL between the marker's temp-file creation and its rename can
+		// strand a temp file in the same tree — atomicfile's, or the
+		// `.felt-generation-*` one a tree written by an older felt may hold;
+		// neither it nor the marker belongs to the described payload.
+		if base := filepath.Base(path); base == pluginGenerationMarkerName || atomicfile.IsTemp(base, pluginGenerationMarkerName) || strings.HasPrefix(base, ".felt-generation-") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)

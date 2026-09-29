@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/spf13/cobra"
 )
 
@@ -642,12 +643,8 @@ func saveRemotes(doc remotesFile) error {
 		return err
 	}
 	payload = append(payload, '\n')
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename %s: %w", tmp, err)
+	if err := atomicfile.Write(path, payload, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

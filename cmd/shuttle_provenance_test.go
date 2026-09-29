@@ -200,7 +200,7 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 	if string(got) != string(good) {
 		t.Fatalf("failed transfer replaced verified cache: %q", got)
 	}
-	matches, err := filepath.Glob(filepath.Join(cache, ".transcript-*"))
+	matches, err := filepath.Glob(filepath.Join(cache, ".*.tmp"))
 	if err != nil {
 		t.Fatal(err)
 	}

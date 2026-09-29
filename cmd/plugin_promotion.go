@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	internalfelt "github.com/cailmdaley/felt/internal/felt"
 )
 
@@ -495,7 +495,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 		// Each rename is made durable before the journal advances past it:
 		// a journal phase that reached disk ahead of the rename it describes
 		// would make recovery destroy the wrong copy.
-		if err := syncParentDir(current); err != nil {
+		if err := atomicfile.SyncDir(filepath.Dir(current)); err != nil {
 			return rollbackPluginPromotion(runtimeDir, candidate, hadOld, fmt.Errorf("parking last known-good plugin: %w", err))
 		}
 	}
@@ -505,7 +505,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 	if err := os.Rename(candidate, current); err != nil {
 		return rollbackPluginPromotion(runtimeDir, candidate, hadOld, fmt.Errorf("promoting plugin candidate: %w", err))
 	}
-	if err := syncParentDir(current); err != nil {
+	if err := atomicfile.SyncDir(filepath.Dir(current)); err != nil {
 		return rollbackPluginPromotion(runtimeDir, current, hadOld, fmt.Errorf("promoting plugin candidate: %w", err))
 	}
 
@@ -534,7 +534,7 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 	// Best-effort: a journal removal lost to power loss is safe (recovery
 	// treats a committed journal as cleanup), but making it durable avoids
 	// the spurious pending-promotion receipt until the next setup runs.
-	_ = syncParentDir(journal)
+	_ = atomicfile.SyncDir(filepath.Dir(journal))
 	return nil
 }
 
@@ -565,7 +565,7 @@ func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause er
 		}
 		// Best-effort: a rollback has no better move on sync failure, so the
 		// restored current carries weaker durability than a forward promotion.
-		_ = syncParentDir(current)
+		_ = atomicfile.SyncDir(filepath.Dir(current))
 	}
 	_ = os.Remove(filepath.Join(runtimeDir, pluginJournalName))
 	return cause
@@ -615,7 +615,7 @@ func recoverPluginPromotion(runtimeDir string) error {
 			if err := os.Rename(previous, current); err != nil {
 				return fmt.Errorf("recovering last known-good plugin: %w", err)
 			}
-			_ = syncParentDir(current)
+			_ = atomicfile.SyncDir(filepath.Dir(current))
 		}
 	} else {
 		_ = os.RemoveAll(current)
@@ -748,74 +748,12 @@ func writePluginJournal(path string, journal pluginPromotionJournal) error {
 	if err != nil {
 		return err
 	}
-	return writeFileDurably(path, data, 0o600, ".promotion-*", "creating plugin journal", "", "committing plugin journal")
-}
-
-// writeFileDurably writes data to path atomically and durably: an fsynced
-// temp file in the target directory, a rename, then a parent-directory sync
-// so the rename itself survives power loss — the guarantee the plugin
-// recovery paths depend on. stepMsg wraps the per-step failures when
-// non-empty; callers that report those bare pass "".
-func writeFileDurably(path string, data []byte, perm os.FileMode, tmpPrefix, createMsg, stepMsg, commitMsg string) error {
-	step := func(err error) error {
-		if err == nil || stepMsg == "" {
-			return err
-		}
-		return fmt.Errorf("%s: %w", stepMsg, err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), tmpPrefix)
-	if err != nil {
-		return fmt.Errorf("%s: %w", createMsg, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return step(err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return step(err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return step(err)
-	}
-	if err := tmp.Close(); err != nil {
-		return step(err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("%s: %w", commitMsg, err)
-	}
-	if err := syncParentDir(path); err != nil {
-		return fmt.Errorf("%s: %w", commitMsg, err)
+	// Recovery trusts the journal after a crash, so its write must be atomic
+	// and durable.
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
+		return fmt.Errorf("committing plugin journal: %w", err)
 	}
 	return nil
-}
-
-// syncParentDir fsyncs the directory containing path so a just-completed
-// rename (or removal) survives power loss on filesystems that require an
-// explicit directory sync. Filesystems that cannot sync a directory
-// (ENOTSUP/EINVAL — some network and FUSE mounts) are tolerated: they never
-// offered the durability the sync buys, and refusing to install there would
-// trade a narrower crash window for a setup that cannot run at all.
-func syncParentDir(path string) error {
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil && !tolerableSyncError(err) {
-		return fmt.Errorf("syncing directory %s: %w", filepath.Dir(path), err)
-	}
-	return nil
-}
-
-// tolerableSyncError reports fsync refusals from filesystems that simply do
-// not support it. ENOTSUP and EOPNOTSUPP are the same errno on Linux but
-// distinct on Darwin, so both are listed.
-func tolerableSyncError(err error) bool {
-	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
 }
 
 func copyTree(source, destination string) error {
@@ -858,7 +796,7 @@ func copyTree(source, destination string) error {
 		if copyErr != nil {
 			return copyErr
 		}
-		if syncErr != nil && !tolerableSyncError(syncErr) {
+		if syncErr != nil && !atomicfile.TolerableSyncError(syncErr) {
 			return syncErr
 		}
 		return closeErr
@@ -876,15 +814,7 @@ func syncTreeDirs(root string) error {
 		if !info.IsDir() {
 			return nil
 		}
-		dir, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer dir.Close()
-		if err := dir.Sync(); err != nil && !tolerableSyncError(err) {
-			return fmt.Errorf("syncing directory %s: %w", path, err)
-		}
-		return nil
+		return atomicfile.SyncDir(path)
 	})
 }
 

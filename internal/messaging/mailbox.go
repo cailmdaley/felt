@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/atomicfile"
 )
 
 // Supported harness hook interfaces accept additional context without starting
@@ -262,7 +264,13 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	return b, err
 }
 
+// mailboxWrite publishes b at path in one step. A replacing write is an
+// atomic rename; an exclusive one hard-links the finished temp file into
+// place, so it fails rather than replace a message already there.
 func mailboxWrite(path string, b []byte, exclusive bool) error {
+	if !exclusive {
+		return atomicfile.Write(path, b, 0o600)
+	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".mailbox-")
 	if err != nil {
 		return err
@@ -278,17 +286,11 @@ func mailboxWrite(path string, b []byte, exclusive bool) error {
 	if err != nil {
 		return err
 	}
-	if exclusive {
-		if err = os.Link(f.Name(), path); err != nil {
-			return err
-		}
-		if err = os.Remove(f.Name()); err != nil {
-			return err
-		}
-	} else {
-		if err = os.Rename(f.Name(), path); err != nil {
-			return err
-		}
+	if err = os.Link(f.Name(), path); err != nil {
+		return err
+	}
+	if err = os.Remove(f.Name()); err != nil {
+		return err
 	}
 	return syncDir(filepath.Dir(path))
 }

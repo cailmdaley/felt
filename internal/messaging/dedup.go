@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/atomicfile"
 )
 
 type record struct {
@@ -199,11 +201,11 @@ func sendReserved(ctx context.Context, dir, path, hash string, req Request, nonc
 	if receipt.MessageID == "" {
 		receipt = Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: "unknown", Detail: "delivery outcome is unknown"}
 	}
-	tmp, err := os.CreateTemp(dir, ".receipt-")
+	tmp, err := atomicfile.Create(path, 0o600)
 	if err != nil {
 		return receipt, errCode("dedup_unavailable", "delivery completed but receipt could not be saved: %v", err)
 	}
-	tmp.Chmod(0600)
+	defer tmp.Abort()
 	metadata := result.Metadata
 	if receipt.Transport != claudeNativeTransport || (receipt.Status != StatusQueued && receipt.Status != StatusSubmitted && receipt.Status != StatusUnknown) {
 		metadata = dedupMetadata{}
@@ -219,24 +221,11 @@ func sendReserved(ctx context.Context, dir, path, hash string, req Request, nonc
 		stored.ErrorCode = ErrorCode(sendErr)
 		stored.ErrorMessage = sendErr.Error()
 	}
-	err = json.NewEncoder(tmp).Encode(stored)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	closeErr := tmp.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-	} else {
-		os.Remove(tmp.Name())
+	if err = json.NewEncoder(tmp).Encode(stored); err == nil {
+		err = tmp.Commit()
 	}
 	if err != nil {
 		return receipt, errCode("dedup_unavailable", "delivery completed but receipt could not be saved: %v", err)
-	}
-	if err = syncDir(dir); err != nil {
-		return receipt, errCode("dedup_unavailable", "delivery completed but receipt directory could not be synced: %v", err)
 	}
 	return receipt, sendErr
 }

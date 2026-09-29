@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
@@ -396,24 +397,8 @@ func writeHostClass(class hostClass) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".host.json-*")
-	if err != nil {
+	if err := atomicfile.Write(path, payload, 0o600); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("protect %s: %w", tmp.Name(), err)
-	}
-	if _, err := tmp.Write(payload); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("write %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("write %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return "", fmt.Errorf("rename into %s: %w", path, err)
 	}
 	return path, nil
 }

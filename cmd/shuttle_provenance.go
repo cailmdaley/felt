@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -761,25 +762,15 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 		body, _ := io.ReadAll(resp.Body)
 		return "", daemonStatusError{url: u.String(), status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
-	dir, dest, err := transcriptCachePath(receipt.Session)
+	_, dest, err := transcriptCachePath(receipt.Session)
 	if err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp(dir, ".transcript-*")
+	tmp, err := atomicfile.Create(dest, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("creating transcript cache temp file: %w", err)
 	}
-	tmpName := tmp.Name()
-	keep := false
-	defer func() {
-		_ = tmp.Close()
-		if !keep {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		return "", fmt.Errorf("protecting transcript cache: %w", err)
-	}
+	defer tmp.Abort()
 	hasher := sha256.New()
 	count, err := io.Copy(io.MultiWriter(tmp, hasher), resp.Body)
 	if err != nil {
@@ -815,16 +806,9 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 	if hex.EncodeToString(hasher.Sum(nil)) != wantHash {
 		return "", fmt.Errorf("transcript %s: sha256 does not match daemon receipt", receipt.Session)
 	}
-	if err := tmp.Sync(); err != nil {
-		return "", fmt.Errorf("syncing transcript cache: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("closing transcript cache: %w", err)
-	}
-	if err := os.Rename(tmpName, dest); err != nil {
+	if err := tmp.Commit(); err != nil {
 		return "", fmt.Errorf("installing transcript cache: %w", err)
 	}
-	keep = true
 	return dest, nil
 }
 
