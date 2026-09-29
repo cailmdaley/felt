@@ -37,8 +37,7 @@ defmodule Shuttle.Continuation do
   key, and reading one too would let a stale flat key shadow a
   since-written-but-since-cleared nested one. A fiber carrying only flat keys
   reads as having no continuation state (the safe default: absent
-  `dispatched_at` treats as fresh); `felt shuttle migrate-runtime <fiber>`
-  lifts it into the nested form.
+  `dispatched_at` treats as fresh).
 
   ## Continuation decision
 
