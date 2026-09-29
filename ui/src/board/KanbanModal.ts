@@ -49,7 +49,7 @@ import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
-import type { MoveAction, MoveBroker, MoveDestination, QueueTarget } from './MoveDestinations.js'
+import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards, surfaceTotals } from './KanbanReadModel.js'
@@ -2439,14 +2439,26 @@ export class KanbanModal {
   }
 
   /**
-   * The move seam handed to the menu: four calls, each landing in the same
-   * private gesture method the equivalent drop lands in.
+   * The Move menu's seam. Why the menu exists is written once, in
+   * `MoveDestinations.ts`; these four calls are the ONLY thing the menu is
+   * given, so it never learns a column, a dependency graph or a wire protocol,
+   * and every item it performs lands in the same private gesture method the
+   * equivalent drop lands in. Each call rules on {@link liveCard}.
    */
   private readonly moveBroker: MoveBroker = {
-    destinations: (card) => this.moveDestinationsFor(card),
-    queueTargets: (card) => this.moveQueueTargetsFor(card),
-    perform: (card, action) => this.performMove(card, action),
-    queueBehind: (card, tailId) => this.moveQueueBehind(card, tailId),
+    // Legal destinations, ruled on where the board actually has the card
+    // (`findCardColumn`) rather than a local re-derivation.
+    destinations: (card) => {
+      const live = this.liveCard(card)
+      return moveDestinations(live, findCardColumn(this.lastResponse, live.id))
+    },
+    // Cards this one may be queued behind, from the same graph and the same
+    // verdict the card-onto-card drop consults.
+    queueTargets: (card) =>
+      queueTargets(this.liveCard(card), boardCards(this.lastResponse), boardDependents(this.lastResponse)),
+    perform: (card, action) => this.performMove(this.liveCard(card), action),
+    // `tailId` is the chain's END, already resolved by `queueTargets`.
+    queueBehind: (card, tailId) => void this.stackBehind(this.liveCard(card), tailId),
   }
 
   /** Teardown for the open move menu. Non-null iff one is up — a second long
@@ -2464,31 +2476,22 @@ export class KanbanModal {
   private openMoveMenuFor(card: KanbanCard, anchor: HTMLElement): void {
     this.closeMoveMenu?.()
     this.closeMoveMenu = null
-    if (this.moveDestinationsFor(card).length === 0) return
+    if (this.moveBroker.destinations(card).length === 0) return
     this.closeMoveMenu = openMoveMenu(card, anchor, this.moveBroker, () => {
       this.closeMoveMenu = null
     })
   }
 
-  // ── The Move menu's seam (MoveBroker) ──────────────────────────────────
-  //
-  // Why the menu exists is written once, in `MoveDestinations.ts`. What
-  // matters here is the seam: these four methods are the ONLY thing the detail
-  // panel is given, so it never learns a column, a dependency graph or a wire
-  // protocol, and every item it performs lands in the same private gesture
-  // method the equivalent drop lands in. Nothing about the drag changes; this
-  // is a second door onto it.
-
   /**
-   * THE LIVE CARD, not the one the panel is holding.
+   * THE LIVE CARD, not the one the menu is holding.
    *
-   * A detail sheet stays open for as long as the reader wants, polling its body
-   * while the board polls underneath it — so the `KanbanCard` captured when the
-   * panel opened goes stale: the worker finishes, the card closes, someone
-   * tempers it from another host. Every method below therefore re-resolves the
-   * card by id before it rules or writes, and only falls back to the caller's
-   * copy when the board genuinely has no row for it (a card that has left the
-   * feed entirely, where the stale copy is all anyone has).
+   * The menu stays open for as long as the reader wants while the board polls
+   * underneath it — so the `KanbanCard` captured at the long press goes stale:
+   * the worker finishes, the card closes, someone tempers it from another
+   * host. Every broker call therefore re-resolves the card by id before it
+   * rules or writes, and only falls back to the caller's copy when the board
+   * genuinely has no row for it (a card that has left the feed entirely,
+   * where the stale copy is all anyone has).
    *
    * This is the same discipline `transition` already follows for the COLUMN,
    * for the same reason: a gesture ruled on a stale read is a gesture that
@@ -2498,27 +2501,9 @@ export class KanbanModal {
     return findCardById(this.lastResponse, card.id) ?? card
   }
 
-  /** Legal destinations for this card, ruled on where the board actually has
-   *  it (`findCardColumn`) rather than a local re-derivation. */
-  moveDestinationsFor(card: KanbanCard): MoveDestination[] {
-    const live = this.liveCard(card)
-    return moveDestinations(live, findCardColumn(this.lastResponse, live.id))
-  }
-
-  /** Cards this one may be queued behind, from the same graph and the same
-   *  verdict the card-onto-card drop consults. */
-  moveQueueTargetsFor(card: KanbanCard): QueueTarget[] {
-    return queueTargets(
-      this.liveCard(card),
-      boardCards(this.lastResponse),
-      boardDependents(this.lastResponse),
-    )
-  }
-
   /** Perform one non-queue destination. Each branch is the drop's own entry
    *  point, so banners, optimism and reconciliation are inherited whole. */
-  performMove(stale: KanbanCard, action: MoveAction): void {
-    const card = this.liveCard(stale)
+  private performMove(card: KanbanCard, action: MoveAction): void {
     switch (action.kind) {
       case 'transition':
         this.transition(card, action.target)
@@ -2537,15 +2522,9 @@ export class KanbanModal {
         return
       case 'queue':
         // The picker owns this one — it needs a target before anything is
-        // written. `moveQueueBehind` is where it lands.
+        // written. The broker's `queueBehind` is where it lands.
         return
     }
-  }
-
-  /** The chosen queue target, written as the same scalar edge the drop writes.
-   *  `tailId` is the chain's END, already resolved by `queueTargets`. */
-  moveQueueBehind(card: KanbanCard, tailId: string): void {
-    void this.stackBehind(this.liveCard(card), tailId)
   }
 
   /**
