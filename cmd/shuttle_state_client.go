@@ -34,17 +34,11 @@ type StandingRoleEntry struct {
 	LastRunAt *int64 `json:"last_run_at,omitempty"`
 }
 
-// RetryEntry mirrors `Poller.build_snapshot/1`'s `retrying` rows.
-type RetryEntry struct {
-	FiberID string `json:"fiber_id"`
-}
-
 // Snapshot is the daemon's per-host runtime state (GET /api/v1/state). Used by
 // the raw snapshot passthrough and the cross-host composite render; own-host
 // identity resolution (resolveOwnHost) does not consume this type.
 type Snapshot struct {
 	Eligible      []SnapshotEntry     `json:"eligible,omitempty"`
-	Retrying      []RetryEntry        `json:"retrying,omitempty"`
 	StandingRoles []StandingRoleEntry `json:"standing_roles,omitempty"`
 }
 

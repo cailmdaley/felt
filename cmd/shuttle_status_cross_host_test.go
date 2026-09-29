@@ -29,7 +29,6 @@ const sampleCompositeJSON = `{
         "runtime_seconds": 44
       }
     ],
-    "retrying": [],
     "standing_roles": [
       {
         "fiber_id": "ai-futures/shuttle/standing-roles/canary-local-snapshot",
@@ -53,9 +52,6 @@ const sampleCompositeJSON = `{
             "started_at": 1778010100000,
             "runtime_seconds": 88
           }
-        ],
-        "retrying": [
-          {"fiber_id": "tests/flaky-job", "attempt": 2, "due_in_ms": 4000, "error": "boom"}
         ],
         "standing_roles": []
       },
@@ -84,7 +80,6 @@ func TestCompositeRows_All(t *testing.T) {
 			"candide": {
 				Snapshot: &Snapshot{
 					Eligible: []SnapshotEntry{{FiberID: "remote/x", Agent: "claude-sonnet", State: "running"}},
-					Retrying: []RetryEntry{{FiberID: "remote/r"}},
 				},
 				Stale: false,
 			},
@@ -103,7 +98,6 @@ func TestCompositeRows_All(t *testing.T) {
 		"local/a":        "",
 		"local/standing": "",
 		"remote/x":       "candide",
-		"remote/r":       "candide",
 	} {
 		if got := gotIDs[fid]; got != wantOrigin {
 			t.Errorf("fiber %q: got origin %q, want %q", fid, got, wantOrigin)
@@ -291,7 +285,6 @@ func TestFetchComposite_ParsesSampleResponse(t *testing.T) {
 	want := []string{
 		":ai-futures/shuttle/constitution-shuttle-remote-dispatch",
 		":ai-futures/shuttle/standing-roles/canary-local-snapshot",
-		"candide:tests/flaky-job",
 		"candide:tests/smoke-remote-haiku",
 		"cineca:",
 	}

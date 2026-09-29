@@ -19,7 +19,7 @@ import (
 //     single-host status output).
 //   - Remote rows have Origin == "<remote name>" — the name from the fleet file.
 //
-// A remote daemon's snapshot only enumerates what is running, retrying, or a
+// A remote daemon's snapshot only enumerates what is running or a
 // standing role — not idle/scheduled one-shot fibers. Cross-host rows therefore
 // reflect runtime state, not the full installed-fiber inventory; the local table
 // (felt-native, this machine's full inventory) is unchanged, so the laptop's
@@ -107,15 +107,6 @@ func snapshotToRows(origin string, snap *Snapshot, stale bool) []FiberStatus {
 			State:   state,
 			Running: true,
 			Session: e.TmuxSession,
-			Stale:   stale,
-		})
-	}
-
-	for _, r := range snap.Retrying {
-		rows = append(rows, FiberStatus{
-			FiberID: r.FiberID,
-			Origin:  origin,
-			State:   "retrying",
 			Stale:   stale,
 		})
 	}
