@@ -625,6 +625,10 @@ uninstall_agent() {
 
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
+# `-h`/`--help` anywhere prints usage instead of running the verb.
+for arg in "$@"; do
+  case "$arg" in -h|--help) CMD=--help ;; esac
+done
 
 case "$CMD" in
   start)
