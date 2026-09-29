@@ -2188,13 +2188,20 @@ defmodule Shuttle.Poller do
     {resume, %{state | parked_launches: parked}}
   end
 
-  defp pinned_role?(fiber) do
-    case Map.get(fiber, "shuttle") do
-      shuttle when is_map(shuttle) ->
-        role_kind(shuttle) == "pinned"
+  defp pinned_role?(fiber), do: fiber_role_kind(fiber) == "pinned"
 
-      _ ->
-        false
+  # Does this role's worker exit close it to awaiting-review? Only STANDING
+  # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
+  # gate — `status: closed` is what stops the cron from re-dispatching the role
+  # again this cycle. A PINNED role's session end splits on the clean-handoff
+  # signal instead (see `handle_worker_exit/2`), and a pinned worker that is
+  # genuinely done self-closes to `status: closed`.
+  defp standing_role?(fiber), do: fiber_role_kind(fiber) == "standing"
+
+  defp fiber_role_kind(fiber) do
+    case Map.get(fiber, "shuttle") do
+      shuttle when is_map(shuttle) -> role_kind(shuttle)
+      _ -> nil
     end
   end
 
@@ -3298,9 +3305,11 @@ defmodule Shuttle.Poller do
 
   # Write `status: closed` (untempered) to a standing role's document when its
   # worker died unobserved and the document is still armed. Only an owned,
-  # armed (status:active, no verdict) STANDING role is touched; oneshots, pinned
-  # roles (which never auto-re-fire — see standing_block?), roles this daemon
-  # doesn't own, and already-closed/tempered roles are left alone. The mark is
+  # armed (status:active, no verdict) STANDING role is touched: an armed
+  # standing document would re-fire on the next cron tick, so it must be
+  # closed. Oneshots and pinned roles (a dead pinned worker is parked on its
+  # own path), roles this daemon doesn't own, and already-closed/tempered roles
+  # are left alone. The mark is
   # idempotent: once status flips to closed the running entry is gone (the
   # caller removes it) and the `status == "active"` guard short-circuits any
   # later pass.
@@ -3308,7 +3317,7 @@ defmodule Shuttle.Poller do
     with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
          shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          true <- host_owned?(shuttle, state.own_host_id),
-         true <- standing_block?(shuttle),
+         true <- standing_role?(fiber),
          "active" <- Map.get(fiber, "status", ""),
          true <- is_nil(Map.get(fiber, "tempered")) do
       Logger.info(
@@ -3321,20 +3330,6 @@ defmodule Shuttle.Poller do
       _ -> :ok
     end
   end
-
-  # Direct read of the STANDING (cron) signal from a shuttle: block, with no
-  # lifecycle overlay merge (`role_kind/1`). Only standing roles need the
-  # dead-orphan awaiting mark: an armed
-  # standing document (`status: active`) would re-fire on the next cron tick if
-  # its worker died unobserved, so it must be closed. A PINNED role is
-  # oneshot-shaped: a dead pinned worker correctly leaves the document
-  # at `status: active`, and the next poll re-dispatches it (the loop) just like
-  # an orphaned oneshot — there is nothing to close.
-  defp standing_block?(shuttle) when is_map(shuttle) do
-    role_kind(shuttle) == "standing"
-  end
-
-  defp standing_block?(_), do: false
 
   # The role's dispatch kind, reading the new `kind:` shape and falling back to
   # the legacy `mode:` field, defaulting to "oneshot".
@@ -3838,25 +3833,6 @@ defmodule Shuttle.Poller do
       # `gotcha-remote-daemon-foreign-felt-store-path`.
       {:error, reason} ->
         {:error, reason}
-    end
-  end
-
-  # Does this role's worker exit close it to awaiting-review? Only STANDING
-  # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
-  # gate — `status: closed` is what stops the cron from re-dispatching the role
-  # again this cycle. A PINNED role does NOT come here: its session-end handling
-  # (the pinned branch above) splits on the clean-handoff signal — a clean
-  # handoff leaves it `active` for an autonomous redispatch next tick, a dirty
-  # death parks it to the strip (`active → open` via mark_pinned_parked). A
-  # pinned worker that's genuinely done self-closes to `status: closed` — handled
-  # by the `status == "closed"` branch before this gate is reached (it lands in
-  # Awaiting review and returns to the strip when the human accepts). The "it
-  # ran" record lives in the per-host dispatch/handoff markers, not in the status
-  # field.
-  defp standing_role?(fiber) do
-    case StandingRoles.standing_role_from_fiber(fiber) do
-      {:ok, role} -> StandingRole.standing?(role)
-      {:error, _} -> false
     end
   end
 

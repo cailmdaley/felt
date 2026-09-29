@@ -61,12 +61,10 @@ defmodule Shuttle.Dispatcher do
       Defaults to `Shuttle.Runner.Default`.
     * `:work_dir` — working directory for the tmux session. Defaults to `File.cwd!()`.
     * `:felt_store` — directory containing the `.felt/` index this dispatch
-      should read fibers from. Defaults to `default_felt_store/0`.
-      The Poller passes its configured `state.felt_store` here so each shuttle
-      instance is consistent within itself; running multiple shuttle instances
-      against different felt stores (e.g. one for `~/loom`, another for a
-      standalone project root) is the supported way to span felt stores.
-    * `:prompt_context` — `:constitution` (default) or `:standing_run`.
+      should read fibers from. Defaults to the first configured store; the
+      Poller passes the fiber's owning store.
+    * `:prompt_context` — `:constitution` (default), or
+      `{:standing_run, run_id}` / `{:standing_run, run_id, :ad_hoc}`.
     * `:force` — explicit manual dispatch override. When true, the dispatcher
       stops refusing closed fibers (the Poller already relaxes eligibility
       under force) and `resolve_resume_intent` ignores the ad-hoc
@@ -291,14 +289,8 @@ defmodule Shuttle.Dispatcher do
     %{uuid: session_id, harness: harness, cut_off: true, transcript: transcript}
   end
 
-  @doc """
-  Returns shuttle's default felt store.
-
-  Mirrors `Shuttle.FeltStores.configured_hosts/0` and keeps `Dispatcher`
-  working standalone (e.g. via the CLI) without a running Poller.
-  """
-  @spec default_felt_store() :: String.t() | nil
-  def default_felt_store do
+  # The first configured felt store: the default when a caller names none.
+  defp default_felt_store do
     Shuttle.FeltStores.configured_hosts() |> List.first()
   end
 
@@ -776,8 +768,7 @@ defmodule Shuttle.Dispatcher do
   # immediately closes" symptom) while the card stays in its closed column. So
   # a missing felt store (`{:error, :reopen_unavailable}`) or a non-zero
   # `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the dispatch and
-  # propagates through the `with` chain to the caller. (This reverses the prior
-  # deliberate "reopen is non-fatal" choice for the closed case.)
+  # propagates through the `with` chain to the caller.
   #
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
   # reopen stays best-effort: the worker has a live mandate regardless, so a
@@ -847,10 +838,8 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Shell `felt shuttle reopen` through the one audited write helper
-  # (`Shuttle.Felt.Shuttle`). Post-S1/C1, felt's own `resolveOwnHost` is pure
-  # local state (no re-entrant daemon round-trip), so this no longer needs to
-  # hand felt an explicit `--host` override the way it once did — see
-  # `Shuttle.Felt.Shuttle`'s moduledoc.
+  # (`Shuttle.Felt.Shuttle`). felt resolves its own host from local state, so
+  # no `--host` override is passed — see `Shuttle.Felt.Shuttle`'s moduledoc.
   defp run_reopen(fiber_id, runner, felt_store) do
     Shuttle.Felt.Shuttle.run("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
   end
@@ -917,10 +906,10 @@ defmodule Shuttle.Dispatcher do
   # operator is told their harness is broken when the real fact is that the
   # fiber's checkout lives on another machine.
   #
-  # The Poller's `project_dir_available?/1` already disqualifies such a fiber on
-  # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
-  # launch) bypasses eligibility entirely and lands straight here — so this is
-  # the only place the forced path can learn it.
+  # The Poller never hands this a missing declared `project_dir`: it refuses a
+  # plain dispatch and starts a forced one in the felt store
+  # (`project_dir_for_dispatch/2`). This check covers every other work_dir — a
+  # capture's, a direct caller's — and one that vanished between the two.
   defp check_work_dir(work_dir) when is_binary(work_dir) and work_dir != "" do
     if File.dir?(work_dir) do
       :ok
@@ -953,7 +942,7 @@ defmodule Shuttle.Dispatcher do
   # records every dispatch error there), and the dispatch API's 422.
   #
   # The result is not cached, but a refusal is not re-probed every tick either —
-  # the Poller parks the fiber for a cooldown (see `wrapper_preflight_open?/2`).
+  # the Poller parks the fiber for a cooldown (see `preflight_cooldown_open?/2`).
   # Caching the ANSWER would be wrong at exactly the moment it mattered (the
   # operator installs the wrapper and the daemon goes on refusing); parking the
   # FIBER expires on its own and a force-dispatch skips it.
@@ -1597,8 +1586,8 @@ defmodule Shuttle.Dispatcher do
   # heuristic compares `handed_off_at` against — it must exist the moment the
   # tmux session starts doing work, not some seconds later. So for EVERY
   # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
-  # `store_session_id` returns (Runner-bounded felt shell-outs now make this a
-  # bounded, not unbounded, blocking call — see F3). Only the piece that
+  # `store_session_id` returns (a bounded blocking call: the Runner bounds
+  # every felt shell-out). Only the piece that
   # genuinely can't be known yet — codex/pi's session UUID, scraped from a
   # JSONL file the harness hasn't necessarily written when tmux launches — is
   # deferred to an async task, and that task only BACKFILLS `session_uuid`
@@ -1954,7 +1943,7 @@ defmodule Shuttle.Dispatcher do
     # cases where that auto-attach can't run — kitty isn't running, or the
     # daemon was dispatched with no human in the loop (CLI, scheduled
     # standing role). After the timeout the harness proceeds at the
-    # default-size, same as the world before this gate existed.
+    # default-size.
     wait_for_client_block =
       if session != "" and not headless, do: wait_for_client_block(session), else: ""
 
@@ -1994,13 +1983,10 @@ defmodule Shuttle.Dispatcher do
   #
   # The daemon is a Mix release with a bundled ERTS, and `erl` exports ROOTDIR,
   # BINDIR, PROGNAME and EMU into the BEAM's environment — which every tmux
-  # worker then inherits. Under the escript those pointed at the host's
-  # Erlang install and were harmless. Under a release they point INTO
-  # `bin/rel`, whose ERTS ships no `mix`, no `start.boot` for anything but the
-  # daemon, and no full OTP lib tree. A worker that runs `mix`, `elixir`,
-  # `erl`, `iex` or `escript` then dies with
-  # `cannot get bootfile .../bin/rel/bin/start.boot` — which is exactly how
-  # this was found: a worker dispatched onto this very repo could not build it.
+  # worker then inherits. They point INTO `bin/rel`, whose ERTS ships no
+  # `mix`, no `start.boot` for anything but the daemon, and no full OTP lib
+  # tree. A worker that runs `mix`, `elixir`, `erl`, `iex` or `escript` then
+  # dies with `cannot get bootfile .../bin/rel/bin/start.boot`.
   #
   # `bash -l` does not fix it: the login profile PREPENDS to the inherited
   # PATH, so the release's erts bin keeps shadowing the real toolchain, and
@@ -2008,8 +1994,7 @@ defmodule Shuttle.Dispatcher do
   #
   # So the worker's script drops the four exported vars and filters the
   # release's own directories out of PATH before anything else runs. A worker
-  # with no Erlang on PATH is correct — it sees whatever the host installs,
-  # the same as before the daemon shipped its own.
+  # with no Erlang on PATH is correct — it sees whatever the host installs.
   @doc false
   # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
   # must drop the release's Erlang first.
