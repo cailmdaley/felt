@@ -171,6 +171,19 @@ if [ "$PUSH" = 1 ]; then
   git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
 fi
 
+# Remote hosts pull the upstream, so the upstream must hold the target: a
+# rejected or skipped push would otherwise deploy whatever someone else pushed.
+for h in $HOSTS; do
+  [ "$h" = local ] && continue
+  git -C "$REPO" fetch -q 2>/dev/null
+  if ! git -C "$REPO" merge-base --is-ancestor HEAD '@{u}' 2>/dev/null ||
+     [ "$(git -C "$REPO" rev-parse HEAD)" != "$(git -C "$REPO" rev-parse '@{u}' 2>/dev/null)" ]; then
+    bad "HEAD $TARGET_SHA is not what its upstream holds; remotes would pull something else — push (or pull) first"
+    exit 1
+  fi
+  break
+done
+
 # Shell snippets that reach the daemon on whichever host runs them, at the
 # address that host's `felt shuttle host --json` resolves: its unix socket on a
 # shared or exposed host, its loopback port otherwise. A felt that errors (a
