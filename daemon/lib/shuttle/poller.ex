@@ -587,15 +587,13 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Returns `{:ok, felt_store}` for the first configured host that contains
-  `fiber_id`, or `{:error, :not_found}` if the fiber isn't in any host.
+  Returns `{:ok, felt_store}` for the configured store that owns `fiber_id`,
+  or `{:error, :not_found}` if the fiber isn't in any store.
 
   The result is cached in the Poller's state for the daemon's lifetime.
 
-  NOT production API: internal callers resolve through `host_for_fiber/2`
-  (or `FeltStores.host_for_fiber/2` / `RelayHelpers.host_for_fiber/1`) directly.
-  `resolve_fiber_host/2` is the test seam `poller_test.exs` uses to exercise the private
-  `host_for_fiber/2` fallback resolver, which needs poller state.
+  NOT production API: the test seam `poller_test.exs` uses to exercise the
+  Poller's cache-then-felt store resolution, which needs poller state.
   """
   @spec resolve_fiber_host(GenServer.server(), String.t()) ::
           {:ok, String.t()} | {:error, :not_found | :timeout}
@@ -2456,7 +2454,7 @@ defmodule Shuttle.Poller do
 
   `own_host_id/0` targets the default-named `#{inspect(__MODULE__)}` — the
   production singleton every external consumer (controllers, `Shuttle.Kitty`,
-  `Shuttle.Cli`, `Shuttle.FiberDocuments`, `Shuttle.OriginRouter`) means by
+  `Shuttle.FiberDocuments`, `Shuttle.OriginRouter`) means by
   "this daemon's identity". `own_host_id/1` targets a specific `server` for
   a test poller started under a different name.
   """
@@ -2632,27 +2630,21 @@ defmodule Shuttle.Poller do
   #
   # Resolution order:
   # 1. State cache (fast; populated by discover_candidates/1 each poll cycle)
-  # 2. Ask felt: `FeltStores.resolve_fiber/2` (against THIS daemon's
+  # 2. Ask felt: `FeltStores.host_for_fiber/2` (against THIS daemon's
   #    `state.felt_stores`) shells `felt show -j` (or a uid scan) and reports the
   #    owning store directly, reading felt's carried path rather than
   #    reconstructing or globbing candidate files.
   #
   # Returns {:ok, host} for the store that owns the fiber, or {:error,
-  # :not_found} when no configured store claims it.
+  # :not_found | :timeout} when no configured store claims it.
   #
   # Cache updates are the caller's responsibility: the poll cycle merges
   # discover_candidates/1's host map, and handle_call(:resolve_fiber_host)
   # caches what it resolves.
   defp host_for_fiber(fiber_id, state) do
     case Map.get(state.fiber_host_cache, fiber_id) do
-      host when is_binary(host) ->
-        {:ok, host}
-
-      nil ->
-        case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
-          {:ok, %{host: host}} -> {:ok, host}
-          {:error, _} = error -> error
-        end
+      host when is_binary(host) -> {:ok, host}
+      nil -> Shuttle.FeltStores.host_for_fiber(fiber_id, state.felt_stores)
     end
   end
 
