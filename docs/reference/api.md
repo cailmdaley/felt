@@ -34,20 +34,20 @@ is not enough.
 |---|---|---|
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
 | `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
-| `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber |
+| `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
 | `POST /capture` | owner-routed; meeting setup is local first | Launch a session from a free-text prompt; meeting mode starts local hark recording before routing the scribe capture |
 | `POST /meeting/join` | local recording; delivery owner-routed | Start local hark recording and join the meeting to an existing constitution's worker |
 | `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
-| `POST /inject` | local | Paste text into a live worker's tmux prompt without submitting it |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /felt-stores` | host-addressed | Persist a daemon's registered felt stores (whole list; takes `expected_digest`) |
 | `POST /projects` | host-addressed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` (which takes `expected_digest`) |
 | `POST /config/:id` | host-addressed | Replace one operator file's text, validated first by whoever owns its grammar |
+| `POST /agents/effort` | host-addressed | `{id, effort}` sets one agent's default effort, `effort: null` resets it — shells `felt shuttle agents effort <id> <level>\|--reset` |
 | `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
@@ -68,6 +68,18 @@ names, not copied profile bodies; workers synchronize their store and read
 relevant role and collaborator content locally. The request's top-level
 `origin` still routes the task edit. See
 [Collaborators](../concepts/collaborators.md).
+
+### Lifecycle actions
+
+`POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
+fields, and runs the matching `felt shuttle <action>` on the owning host:
+`install`, `pin`, `repeat`, `reshape`, `pause`, `resume`, `accept`,
+`set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept` and `resume`
+run felt's writer (`felt shuttle <verb> <fiber> --local`) inside the owning
+daemon's Poller, between poll cycles, which then refreshes that fiber's
+document cache; the outcome is always kept. A success is 200 with felt's
+output as text. A felt refusal is 422 with `shuttle exited <status>:
+<message>`; an unknown action or a missing field is 400.
 
 ### Capture and meeting mode
 
@@ -137,7 +149,7 @@ to another fiber. CLI claims use `tmux_session`. The app dispatch prompt
 supplies the claim information and the appropriate completion instructions.
 A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
 
-`/attach` and `/inject` are terminal operations. An app conversation's UUID
+`/attach` is a terminal operation. An app conversation's UUID
 is not a terminal name or a verified mobile URL. Phone conversation access
 uses the host's Codex project listing until a direct app URL is available.
 
@@ -167,7 +179,7 @@ harness processes sharing one transcript.
 | `GET /agents` | host-addressed | The effective agent registry (shells `felt shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's felt binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
-| `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents` or `remotes` — plus `entries` for the two path lists |
+| `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents`, `remotes` or `host` — plus `entries` for the two path lists |
 | `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
 | `GET /file` | owner-routed | Raw bytes by absolute path, with `ETag` / `Last-Modified` conditional GET for live HTML, markdown, and text readers |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
@@ -344,9 +356,9 @@ writes the files underneath.
 that window plus the `{mtime, size}` of `events.jsonl` and its rotated sibling
 — a repeat request over an unchanged file is a `304`. As with the sent-files
 routes below, that validator almost never matches on a busy host and is not
-what keeps the route cheap: `Shuttle.Activity.Follower` holds the histogram
-in memory, folded once from both files and then only over appended bytes, and
-a request reads its window out of that.
+what keeps the route cheap: `Shuttle.EventStream` holds the histogram in
+memory, folded once from both files and then only over appended bytes, and a
+request reads its window out of that.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
@@ -354,12 +366,17 @@ host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
 `OriginRouter.forward_get/4` carries no headers either way).
 `/sent-files/all` is the host-scoped feed with the composite.
 
-Neither is defended by that 304, and neither needs to be: the `ETag` is over
-`events.jsonl`, the live hook stream for every session on the host, which moves
-every few seconds — so a conditional request on a busy host essentially never
-hits. What makes both routes cheap is `Shuttle.SentFiles.Follower`, which holds
-the parsed sent-file events in memory and reads only the bytes appended since
-its last poll. A request costs one `stat`; the whole file is read once, at boot.
+`/sent-files` takes `uid` (required; 400 without it) and `origin`. Its `ETag`
+covers the `events.jsonl` pair and the session ledger. The trail is whatever
+`events.jsonl.1` and `events.jsonl` hold, so a send survives one rotation and is
+gone after the second.
+
+Neither route is defended by the 304, and neither needs to be: `events.jsonl`
+is the live hook stream for every session on the host and moves every few
+seconds, so a conditional request on a busy host essentially never hits. What
+makes both routes cheap is `Shuttle.EventStream`, which holds the parsed
+sent-file events in memory and reads only the bytes appended since its last
+poll. A request costs one `stat`; the files are read once, at boot.
 
 The composite siblings are:
 
@@ -370,8 +387,9 @@ The composite siblings are:
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
 
-A composite asks each remote for that feed when it is requested, not on a
-timer: a remote already asked within the last minute is served from the
+The board reads only these composites; the single-host routes are what a hub
+asks each peer for. A composite asks each remote for that feed when it is
+requested, not on a timer: a remote already asked within the last minute is served from the
 hub's cache, and one that does not answer within five seconds is served from
 its last good copy (kept on disk under `remote-temporal/<feed>/`). `origins`
 marks a remote `stale` once its last success for that feed is more than ten
@@ -381,9 +399,9 @@ weak `ETag` over its local inputs and every remote's cached copy, and answers
 
 ## The operator files
 
-`GET`/`POST /api/v1/config/:id` is a **text** plane over the four JSON files a
+`GET`/`POST /api/v1/config/:id` is a **text** plane over the five JSON files a
 daemon reads from `~/.config/felt/` — `stores`, `projects`, `agents`,
-`remotes`. It deliberately does not parse a file into a structure and
+`remotes`, `host`. It deliberately does not parse a file into a structure and
 re-encode it: that round trip drops every key the structure does not know
 about, and `remotes.json` carries several (`auth`, `ssh_flags`,
 `tunnel.label`, per-entry timeouts) that no CLI flag can even express.
@@ -397,7 +415,8 @@ commits:
 |---|---|
 | `remotes` | `felt shuttle remotes list --json` under `FELT_REMOTES_FILE` |
 | `agents` | `felt shuttle agents --json` under `FELT_AGENTS_FILE` |
-| `stores`, `projects` | shape-checked in the daemon — no CLI verb reads them |
+| `host` | `felt shuttle host --json` under `FELT_HOST_FILE` |
+| `stores`, `projects` | shape-checked in the daemon — no felt verb validates them |
 
 A refusal is a 400 carrying that tool's own sentence verbatim. Empty text
 removes the file, which is the same vocabulary the structured writers already
@@ -436,7 +455,7 @@ here" rather than as a missing file.
 | Route | Purpose |
 |---|---|
 | `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` |
-| `GET /state` | Full local state: running workers, retry queue, waiters |
+| `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing roles, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
