@@ -377,10 +377,9 @@ capture_login_path_with() { # <shell> <flags>
 # It also names a shape worth fixing upstream rather than patching here:
 # install.sh knows exactly where it put the binary, discards that, and
 # install-agent reconstructs it by ventriloquizing the user's shell. Two
-# components deriving one fact independently is the pattern this release is
-# retiring elsewhere (the host identity below is the same story); passing the
-# install directory through would let this function become a check instead of a
-# repair.
+# components deriving one fact independently is the pattern to retire; passing
+# the install directory through would let this function become a check instead
+# of a repair.
 #
 # A missing `felt` entirely is the loud case: nothing to append, and the
 # install is heading straight for that 500.
@@ -409,58 +408,24 @@ felt_dir_into_path() {
   fi
 }
 
-# The machine's canonical identity, written once at install time.
+# The machine's canonical identity, made durable at install time.
 #
-# `~/.shuttle/host` is what the CLI and the daemon both read to answer "which
-# host am I?" — the OS hostname is consulted only to seed it, because the two
-# runtimes normalize it differently (Erlang gives the short name, Go keeps the
-# DNS domain) and DHCP rewrites it on some networks. Under the strict dispatch
-# predicate (block.host == own_host_id) either kind of drift silently unhomes
-# every fiber the CLI armed.
-#
-# The seeding is otherwise done by whichever side reaches the fallback first,
-# which leaves one asymmetry: a daemon started with SHUTTLE_HOST exported (the
-# ssh-alias case) resolves from the env var and never writes the file, so a CLI
-# shell without that export falls back to the hostname and disagrees. Install
-# time is where that closes — the daemon we are about to supervise is the one
-# whose identity this is.
-#
-# An existing non-empty file always wins: it may hold a friendly name someone
-# chose deliberately, and re-deciding it here would rename the machine out from
-# under every fiber already homed to it. Normalization matches the other two
-# implementations exactly (trim, lowercase, cut at the first "."); an explicit
-# SHUTTLE_HOST is taken as-is, as both readers take it.
-#
-# Creating ~/.shuttle here is correct: install-agent is a shuttle command
-# setting up shuttle's own state. (The felt CLI must NOT do the same — creating
-# that directory is what switches on the event stream.)
+# felt is the one resolver of "which host am I?": the daemon asks `felt
+# shuttle host --json` at boot, and `felt shuttle host seed` writes the answer
+# into the host file (~/.shuttle/host unless SHUTTLE_HOST_FILE names another)
+# unless the file already holds one. Install time is where a SHUTTLE_HOST
+# exported for the daemon gets written down, so a CLI shell without that export
+# agrees with it. Creating ~/.shuttle there is correct: install-agent is a
+# shuttle command setting up shuttle's own state.
 seed_host_identity() {
-  _hostfile="${SHUTTLE_HOST_FILE:-$HOME/.shuttle/host}"
-  # First non-empty line, trimmed — the same read both other implementations do.
-  _cur=$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$_hostfile" 2>/dev/null \
-    | sed -n '/./{p;q;}' || true)
-  if [ -n "$_cur" ]; then
-    echo "host identity → $_cur   ($_hostfile)"
+  if ! command -v felt >/dev/null 2>&1; then
+    echo "⚠️  no \`felt\` on this PATH, so no host identity was seeded." >&2
     return 0
   fi
-  # Trimmed, not stripped: both readers take SHUTTLE_HOST as-is apart from the
-  # surrounding whitespace, so squeezing out an interior space would invent a
-  # name neither of them would ever resolve to.
-  _id=$(printf '%s' "${SHUTTLE_HOST-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-  if [ -n "$_id" ]; then
-    _why="from \$SHUTTLE_HOST"
-  else
-    _id=$( (hostname 2>/dev/null || uname -n) | tr '[:upper:]' '[:lower:]' | cut -d. -f1 | tr -d '[:space:]')
-    _why="from this machine's hostname"
+  if ! felt shuttle host seed; then
+    echo "⚠️  could not seed a host identity (felt's message is above); the daemon" >&2
+    echo "    dispatches nothing until it can resolve one." >&2
   fi
-  if [ -z "$_id" ]; then
-    echo "⚠️  could not determine a host identity (no \$SHUTTLE_HOST, no hostname);" >&2
-    echo "    write one to $_hostfile or the daemon will dispatch nothing." >&2
-    return 0
-  fi
-  mkdir -p "$(dirname -- "$_hostfile")"
-  printf '%s\n' "$_id" > "$_hostfile"
-  echo "host identity → $_id   (seeded $_why into $_hostfile)"
 }
 
 install_agent() {
@@ -575,10 +540,9 @@ install_agent() {
   # A supervisor with no daemon to run is worse than none.
   need_launcher
 
-  # Before the job exists, so the daemon it starts reads a file that is already
-  # there rather than seeding one from a hostname the CLI may normalize
-  # differently. --print returned above: previewing a file must not name the
-  # machine.
+  # Before the job exists, so the daemon it starts resolves an identity that
+  # is already written down. --print returned above: previewing a file must
+  # not name the machine.
   seed_host_identity
 
   mkdir -p "$(dirname -- "$AGENT_LOG_V")"

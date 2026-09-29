@@ -25,7 +25,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
     # concurrent user's `/tmp/.felt` (or its own leftover state) must never
     # be read from or `rm -rf`'d by this suite.
     root =
-      Path.join(System.tmp_dir!(), "shuttle-felt-store-mock-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-felt-store-mock-#{System.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(Path.join(root, ".felt"))
 
@@ -244,8 +247,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
     do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
   def remove_tmux_session(session),
-    do:
-      Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+    do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
 
   def set_new_session_delay(ms),
     do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
@@ -293,6 +295,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
       Agent.update(
         __MODULE__,
         &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
+      )
+
+  # What `felt shuttle host --json` answers, for tests that clear SHUTTLE_HOST
+  # so the Poller asks felt for its identity. `output` is the raw stdout;
+  # a nonzero `exit_status` is felt refusing (a malformed host file).
+  def set_host_json(output, exit_status \\ 0) when is_binary(output),
+    do:
+      Agent.update(
+        __MODULE__,
+        &(&1 |> Map.put(:host_json, output) |> Map.put(:host_exit, exit_status))
       )
 
   def commands, do: Agent.get(__MODULE__, & &1.commands)
@@ -357,8 +369,18 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "felt" and match?(["shuttle", "contract"], args) ->
-        level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level())))
+        level =
+          Agent.get(
+            __MODULE__,
+            &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level()))
+          )
+
         {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
+
+      command == "felt" and args == ["shuttle", "host", "--json"] ->
+        Agent.get(__MODULE__, fn state ->
+          {Map.get(state, :host_json, ~s({"id": "mock-host"})), Map.get(state, :host_exit, 0)}
+        end)
 
       # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
       # resolution. The daemon shells felt (registry owner) rather than

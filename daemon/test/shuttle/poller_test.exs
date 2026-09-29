@@ -255,204 +255,84 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  # The Poller defaults `own_host_id` from a three-step precedence chain:
-  # SHUTTLE_HOST env var → ~/.shuttle/host file → :inet.gethostname().
-  # Explicit `own_host_id:` opts always win; these tests cover the
-  # resolution chain that drives production daemons. There is intentionally
-  # no Application-config step and no "local" fallback — see
-  # Shuttle.Poller.own_host_id/0.
-  test "poller resolves own_host_id from SHUTTLE_HOST env var when set" do
-    prev = System.get_env("SHUTTLE_HOST")
-    System.put_env("SHUTTLE_HOST", "candide")
+  # The Poller's default `own_host_id` is SHUTTLE_HOST when set, else felt's
+  # answer from `felt shuttle host --json` — felt owns the host file and the
+  # OS-hostname fallback. Explicit `own_host_id:` opts always win.
+  describe "own_host_id resolution" do
+    setup do
+      prev = System.get_env("SHUTTLE_HOST")
 
-    try do
-      {:ok, poller} =
-        start_poller!(
-          name: :test_poller_env_host,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
+      on_exit(fn ->
+        # Restore the pin config/test.exs sets so sibling tests keep it.
+        if prev, do: System.put_env("SHUTTLE_HOST", prev), else: System.delete_env("SHUTTLE_HOST")
+      end)
+
+      :ok
+    end
+
+    test "SHUTTLE_HOST, trimmed, wins without asking felt" do
+      System.put_env("SHUTTLE_HOST", "  candide \n")
+      MockRunner.set_host_json(~s({"id": "from-felt"}))
+
+      {:ok, poller} = start_identity_poller(:test_poller_env_host)
 
       assert Poller.snapshot(poller).host == "candide"
-    after
-      # Restore the env var the test suite started with so sibling tests
-      # (and the SHUTTLE_HOST pin set by config/test.exs) keep working.
-      if prev, do: System.put_env("SHUTTLE_HOST", prev), else: System.delete_env("SHUTTLE_HOST")
+      refute asked_felt_for_host?()
+    end
+
+    test "with SHUTTLE_HOST unset the id is felt's, frozen for the Poller's life" do
+      System.delete_env("SHUTTLE_HOST")
+      MockRunner.set_host_json(~s({"id": "candide", "class": "single-user"}))
+
+      {:ok, poller} = start_identity_poller(:test_poller_felt_host)
+
+      assert Poller.snapshot(poller).host == "candide"
+      assert Poller.own_host_id(:test_poller_felt_host) == "candide"
+      assert asked_felt_for_host?()
+
+      # A later change in felt's answer does not reach a booted Poller.
+      MockRunner.set_host_json(~s({"id": "renamed"}))
+      assert Poller.own_host_id(:test_poller_felt_host) == "candide"
+    end
+
+    test "a Poller whose felt cannot name the host refuses to boot" do
+      System.delete_env("SHUTTLE_HOST")
+      MockRunner.set_host_json("parsing host.json: not a JSON object", 1)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, reason} =
+                 start_supervised(%{
+                   id: make_ref(),
+                   start:
+                     {Poller, :start_link,
+                      [
+                        [
+                          name: :test_poller_no_host,
+                          runner: MockRunner,
+                          poll_interval_ms: 60_000,
+                          felt_stores: [MockRunner.felt_root()],
+                          daemon_heartbeat_file: test_heartbeat_file()
+                        ]
+                      ]},
+                   restart: :temporary
+                 })
+
+        assert inspect(reason) =~ "felt shuttle host --json"
+      end)
     end
   end
 
-  test "poller resolves own_host_id from ~/.shuttle/host file when SHUTTLE_HOST unset" do
-    prev = System.get_env("SHUTTLE_HOST")
-    prev_file = System.get_env("SHUTTLE_HOST_FILE")
-    path = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")
-    File.write!(path, "candide\n")
-    # Redirect the file tier BEFORE clearing SHUTTLE_HOST: between the two
-    # calls the chain resolves against the default path, and its last tier
-    # seeds that file.
-    System.put_env("SHUTTLE_HOST_FILE", path)
-    System.delete_env("SHUTTLE_HOST")
-
-    try do
-      {:ok, poller} =
-        start_poller!(
-          name: :test_poller_host_file,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      assert Poller.snapshot(poller).host == "candide"
-    after
-      File.rm(path)
-
-      if prev_file,
-        do: System.put_env("SHUTTLE_HOST_FILE", prev_file),
-        else: System.delete_env("SHUTTLE_HOST_FILE")
-
-      if prev, do: System.put_env("SHUTTLE_HOST", prev), else: System.delete_env("SHUTTLE_HOST")
-    end
-  end
-
-  test "poller falls back to :inet.gethostname when SHUTTLE_HOST and host file are unset" do
-    prev = System.get_env("SHUTTLE_HOST")
-    prev_file = System.get_env("SHUTTLE_HOST_FILE")
-    # Point the host-file source at a path that does not exist so the chain
-    # genuinely falls through to the OS hostname regardless of the dev
-    # machine's real ~/.shuttle/host. Redirected BEFORE SHUTTLE_HOST is
-    # cleared: between the two calls the chain would otherwise reach the file
-    # tier at its default path, and the hostname tier seeds it.
-    System.put_env(
-      "SHUTTLE_HOST_FILE",
-      Path.join(System.tmp_dir!(), "shuttle-host-absent-#{System.unique_integer([:positive])}")
+  defp start_identity_poller(name) do
+    start_poller!(
+      name: name,
+      runner: MockRunner,
+      poll_interval_ms: 60_000,
+      felt_stores: [MockRunner.felt_root()]
     )
-
-    System.delete_env("SHUTTLE_HOST")
-
-    {:ok, hostname} = :inet.gethostname()
-
-    expected =
-      hostname |> to_string() |> String.trim() |> String.split(".") |> hd() |> String.downcase()
-
-    try do
-      {:ok, poller} =
-        start_poller!(
-          name: :test_poller_gethostname,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      assert Poller.snapshot(poller).host == expected
-    after
-      # The hostname tier now SEEDS the host file, so this temp path exists.
-      File.rm(System.get_env("SHUTTLE_HOST_FILE"))
-
-      if prev_file,
-        do: System.put_env("SHUTTLE_HOST_FILE", prev_file),
-        else: System.delete_env("SHUTTLE_HOST_FILE")
-
-      if prev, do: System.put_env("SHUTTLE_HOST", prev)
-    end
   end
 
-  # The OS hostname is a time-varying, runtime-varying value: DHCP rewrites it,
-  # and `:inet.gethostname/0` strips the DNS domain where Go's `os.Hostname()`
-  # keeps it. Mirroring the precedence chain in both languages was not enough —
-  # the CLI stamped `studio-air.home` while this daemon called itself
-  # `studio-macbook-air`, and every fiber armed through the CLI went
-  # undispatched in silence. So the hostname tier normalizes, then writes the
-  # result to the host file: consulted once per machine, never again.
-  test "hostname fallback seeds the host file, so the next resolve reads a fixed identity" do
-    prev = System.get_env("SHUTTLE_HOST")
-    prev_file = System.get_env("SHUTTLE_HOST_FILE")
-
-    path =
-      Path.join([
-        System.tmp_dir!(),
-        "shuttle-host-seed-#{System.unique_integer([:positive])}",
-        "host"
-      ])
-
-    # The parent must exist: seeding writes into an existing directory and
-    # never creates one, so that a felt-only machine with no ~/.shuttle does
-    # not acquire one (and with it, an event stream) from a resolve.
-    File.mkdir_p!(Path.dirname(path))
-    # Redirect the file tier BEFORE clearing SHUTTLE_HOST, so no resolve in
-    # the window between them can reach the default path and seed it.
-    System.put_env("SHUTTLE_HOST_FILE", path)
-    System.delete_env("SHUTTLE_HOST")
-
-    {:ok, hostname} = :inet.gethostname()
-
-    expected =
-      hostname |> to_string() |> String.trim() |> String.split(".") |> hd() |> String.downcase()
-
-    try do
-      {:ok, poller} =
-        start_poller!(
-          name: :test_poller_host_seed,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      assert Poller.snapshot(poller).host == expected
-      assert File.read!(path) |> String.trim() == expected
-
-      # A later resolve reads the file, not the (now drifted) OS hostname.
-      File.write!(path, "renamed-by-hand\n")
-
-      {:ok, poller2} =
-        start_poller!(
-          name: :test_poller_host_seed_reread,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      assert Poller.snapshot(poller2).host == "renamed-by-hand"
-    after
-      File.rm_rf(Path.dirname(path))
-
-      if prev_file,
-        do: System.put_env("SHUTTLE_HOST_FILE", prev_file),
-        else: System.delete_env("SHUTTLE_HOST_FILE")
-
-      if prev, do: System.put_env("SHUTTLE_HOST", prev)
-    end
-  end
-
-  # SHUTTLE_HOST is the explicit override and the test seam, not an identity to
-  # make durable: a one-off `SHUTTLE_HOST=x` must never permanently rename the
-  # machine for every other process that reads the host file.
-  test "SHUTTLE_HOST does not seed the host file" do
-    prev_file = System.get_env("SHUTTLE_HOST_FILE")
-
-    path =
-      Path.join(System.tmp_dir!(), "shuttle-host-noseed-#{System.unique_integer([:positive])}")
-
-    System.put_env("SHUTTLE_HOST_FILE", path)
-
-    try do
-      {:ok, poller} =
-        start_poller!(
-          name: :test_poller_host_no_seed,
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      # config/test.exs pins SHUTTLE_HOST for the whole suite.
-      assert Poller.snapshot(poller).host == System.get_env("SHUTTLE_HOST")
-      refute File.exists?(path)
-    after
-      File.rm(path)
-
-      if prev_file,
-        do: System.put_env("SHUTTLE_HOST_FILE", prev_file),
-        else: System.delete_env("SHUTTLE_HOST_FILE")
-    end
+  defp asked_felt_for_host? do
+    Enum.member?(MockRunner.commands(), {"felt", ["shuttle", "host", "--json"]})
   end
 
   test "poller uses the shuttle felt listing for discovery" do
