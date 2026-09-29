@@ -66,20 +66,10 @@ defmodule ShuttleWeb.LifecycleController do
   defp action(%{"action" => action}), do: {:error, "unknown lifecycle action #{inspect(action)}"}
   defp action(_), do: {:error, "missing lifecycle action"}
 
-  defp execute("accept", %{"fiber" => fiber} = params) do
-    with {:ok, fiber_id} <- fiber_address(fiber) do
-      LifecycleService.accept(fiber_id, keep_outcome: truthy?(params["keep_outcome"]))
-    end
-  end
-
-  defp execute("resume", %{"fiber" => fiber}) do
-    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
-      case LifecycleService.resume(fiber_id) do
-        {:ok, output} -> {:ok, output}
-        {:error, _reason} -> args_for("resume", %{"fiber" => fiber_id}) |> run_elem(felt_store)
-      end
-    end
-  end
+  # accept and resume go through `Shuttle.LifecycleService`, which runs felt's
+  # writer inside the Poller so the document write lands between poll cycles.
+  defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
+  defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(install pin repeat reshape pause set-model set-agent set-outcome uninstall) do
@@ -105,10 +95,6 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp refresh_card(_), do: :ok
 
-  defp fiber_address(identifier) do
-    with {:ok, %{fiber_id: fiber_id}} <- resolve_fiber(identifier), do: {:ok, fiber_id}
-  end
-
   defp resolve_fiber(identifier), do: FeltStores.resolve_fiber_or_error(identifier)
 
   defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
@@ -126,8 +112,6 @@ defmodule ShuttleWeb.LifecycleController do
   defp args_for("pause", %{"fiber" => fiber} = params) do
     {:ok, ["pause", fiber] |> add_bool_flag("--no-kill", params["no_kill"])}
   end
-
-  defp args_for("resume", %{"fiber" => fiber}), do: {:ok, ["resume", fiber]}
 
   defp args_for("pin", %{"fiber" => fiber} = params) do
     {:ok,
@@ -171,7 +155,12 @@ defmodule ShuttleWeb.LifecycleController do
   # clear back to the harness default.
   defp args_for("set-agent", %{"fiber" => fiber} = params) do
     args = ["set-agent", fiber]
-    args = if(is_binary(params["agent"]) and params["agent"] != "", do: args ++ [params["agent"]], else: args)
+
+    args =
+      if(is_binary(params["agent"]) and params["agent"] != "",
+        do: args ++ [params["agent"]],
+        else: args
+      )
 
     args =
       case params do
@@ -216,9 +205,6 @@ defmodule ShuttleWeb.LifecycleController do
   defp add_bool_flag(args, flag, true), do: args ++ [flag]
   defp add_bool_flag(args, _flag, _), do: args
 
-  defp truthy?(true), do: true
-  defp truthy?(_), do: false
-
   # Routed through the one audited write helper (`Shuttle.Felt.Shuttle`),
   # which itself sits on `Shuttle.Felt.run` (Runner-bounded — F3/C3) rather
   # than a private `System.cmd/3` copy. Every `args_for/2` clause returns
@@ -226,14 +212,17 @@ defmodule ShuttleWeb.LifecycleController do
   # helper's `(verb, fiber_id, args, opts)` shape without touching a single
   # `args_for` clause.
   defp run([verb, fiber_id | rest], felt_store) do
-    env = [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
-
-    case Shuttle.Felt.Shuttle.run(verb, fiber_id, rest, felt_store: felt_store, env: env) do
-      {:ok, output} -> {:ok, output}
-      {:command_error, status, output} -> {:command_error, status, clean_command_output(output)}
-      {:error, reason} -> {:error, reason}
-    end
+    verb
+    |> Shuttle.Felt.Shuttle.run(fiber_id, rest, felt_store: felt_store)
+    |> clean_result()
   end
+
+  defp lifecycle(verb, fiber), do: verb |> LifecycleService.transition(fiber) |> clean_result()
+
+  defp clean_result({:command_error, status, output}),
+    do: {:command_error, status, clean_command_output(output)}
+
+  defp clean_result(result), do: result
 
   defp clean_command_output(output) when is_binary(output) do
     output

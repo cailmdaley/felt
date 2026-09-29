@@ -24,7 +24,7 @@ import (
 // reverts.
 //
 // Scope: this lock covers Go CLI writers only. The daemon's OWN in-process
-// Elixir document writers — LifecycleStore resume_from_doc / mark_awaiting via
+// Elixir document writers — LifecycleStore mark_awaiting / park / rearm via
 // FiberDoc.write! — do NOT take this flock; they write inside the daemon
 // process and are outside this cross-process guard. In practice they run
 // sequentially within the daemon rather than being concurrently excluded, so

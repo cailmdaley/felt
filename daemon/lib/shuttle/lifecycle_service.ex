@@ -1,63 +1,43 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  Daemon-side orchestration for the standing-role lifecycle verbs that re-arm an
-  awaiting role by writing the felt document (`accept` / `resume`).
+  The daemon's side of the role lifecycle verbs `accept` and `resume`.
 
-  Both the `/api/v1/lifecycle` endpoint (operator / `felt shuttle`) and the
-  `/api/v1/transition` kanban path go through here, so an accept behaves
-  identically regardless of which gesture triggered it. The work is to run the
-  transition *through the Poller* (`Poller.lifecycle_transition/3`) so the
-  felt-document write is atomic against poll cycles.
+  felt is their one writer: `felt shuttle <verb> <fiber> --local` re-arms (or,
+  for a pinned accept, re-parks) the role and concludes its run
+  (`shuttle.runtime.handed_off_at = now`) in a single document write, so the
+  poller never reads a re-armed role without the stamp that keeps its
+  just-served occurrence from firing again.
 
-  Awaiting is `status: closed` + untempered in the document itself (there is no
-  review axis); re-arm writes `status: active` and `next_due` is recomputed from
-  the cron schedule on the next poll (there is no runtime store). The durable
-  signal the standing-role dead-orphan detector reads is `shuttle.handed_off_at`,
-  which `LifecycleStore` folds into each re-arm write — a human re-arm concludes
-  the run, the same handoff a clean worker exit leaves — not a felt-history event.
+  `/api/v1/lifecycle` and the kanban's `accept-run` transition both come
+  through `transition/2`. With the Poller running, the write happens inside it
+  (`Poller.lifecycle_transition/3`) — between poll cycles, with the fiber's
+  document-cache entry refreshed after; without one (a controller test, a
+  restart window) it is shelled directly.
   """
 
-  alias Shuttle.{FeltStores, LifecycleStore, Poller}
+  alias Shuttle.{FeltStores, Poller}
 
-  @spec accept(String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, String.t()} | {:error, :timeout, String.t()}
-  def accept(fiber_id, opts \\ []) when is_binary(fiber_id) do
-    with {:ok, address} <- fiber_address(fiber_id) do
-      case transition(:accept, address, opts) do
-        {:ok, output} -> {:ok, output}
-        {:error, reason} -> {:error, to_message(reason)}
+  @type verb :: :accept | :resume
+
+  @spec transition(verb(), String.t()) ::
+          Shuttle.Felt.result() | {:error, :timeout, String.t()}
+  def transition(verb, identifier) when verb in [:accept, :resume] and is_binary(identifier) do
+    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <-
+           FeltStores.resolve_fiber_or_error(identifier) do
+      if is_pid(Process.whereis(Poller)) do
+        Poller.lifecycle_transition(verb, fiber_id)
+      else
+        write(verb, fiber_id, felt_store: felt_store)
       end
     end
   end
 
-  @spec resume(String.t()) ::
-          {:ok, String.t()} | {:error, String.t()} | {:error, :timeout, String.t()}
-  def resume(fiber_id) when is_binary(fiber_id) do
-    with {:ok, address} <- fiber_address(fiber_id) do
-      case transition(:resume, address, []) do
-        {:ok, output} -> {:ok, output}
-        {:error, reason} -> {:error, to_message(reason)}
-      end
-    end
+  @doc """
+  Shell `felt shuttle <verb> <fiber_id> --local`. `opts` go to
+  `Shuttle.Felt.Shuttle.run/4` (`:felt_store`, `:runner`).
+  """
+  @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
+  def write(verb, fiber_id, opts) when verb in [:accept, :resume] do
+    Shuttle.Felt.Shuttle.run(Atom.to_string(verb), fiber_id, ["--local"], opts)
   end
-
-  # When the Poller is running (the live daemon) route through it so the felt
-  # document write happens atomically against poll cycles — otherwise a
-  # concurrent poll could read a half-written document. When it isn't (offline
-  # lifecycle ops, unit tests) write the document directly.
-  defp transition(verb, fiber_id, opts) do
-    if is_pid(Process.whereis(Poller)) do
-      Poller.lifecycle_transition(verb, fiber_id, opts)
-    else
-      apply(LifecycleStore, verb, [fiber_id, opts])
-    end
-  end
-
-  defp fiber_address(identifier) do
-    with {:ok, %{fiber_id: fiber_id}} <- FeltStores.resolve_fiber_or_error(identifier),
-         do: {:ok, fiber_id}
-  end
-
-  defp to_message(reason) when is_binary(reason), do: reason
-  defp to_message(reason), do: inspect(reason)
 end

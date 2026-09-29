@@ -22,8 +22,9 @@ defmodule Shuttle.Transition do
        availability set by construction (the `resolve ⊆ availability` invariant
        — see `gotcha-shuttle-resolve-invoke-daemon-split`), so a second read
        could only disagree with the first by racing it. Then the mutation:
-       pause/reopen/close shell the offline frontmatter writer, accept-run /
-       dispatch-ad-hoc go through the in-process lifecycle.
+       pause/reopen/close shell felt's frontmatter writer, accept-run runs
+       felt's `accept` inside the Poller, and dispatch-ad-hoc force-dispatches
+       through it.
 
     3. **Forward branch** = `POST <remote>/api/v1/transition` with `origin`
        omitted, so the owning daemon runs its OWN local branch against its
@@ -117,43 +118,37 @@ defmodule Shuttle.Transition do
     end
   end
 
-  # pause / reopen / close shell the Go frontmatter writer with
-  # SHUTTLE_LIFECYCLE_OFFLINE so it writes frontmatter only (status, tempered,
-  # closed-at) WITHOUT calling back into this daemon's /api/v1/lifecycle. The
-  # document carries the entire lifecycle (status + tempered) — there is no
-  # runtime row to reset, so close/reopen are a single felt write and
-  # re-arm/awaiting are recomputed from the document on the next poll.
+  # pause / reopen / close shell felt's frontmatter writer (status, tempered,
+  # closed-at). The document carries the entire lifecycle (status + tempered) —
+  # there is no runtime row to reset, so close/reopen are a single felt write
+  # and re-arm/awaiting are recomputed from the document on the next poll.
   defp invoke_action(fiber_id, "pause", felt_store),
-    do: run_offline("pause", fiber_id, [], felt_store)
+    do: run_felt("pause", fiber_id, [], felt_store)
 
   defp invoke_action(fiber_id, "reopen", felt_store),
-    do: run_offline("reopen", fiber_id, [], felt_store)
+    do: run_felt("reopen", fiber_id, [], felt_store)
 
   # reopen-draft: status:open + verdict cleared — a paused draft, NOT armed.
   # The kanban's "drag a closed card to Drafts" verb, and the park-as-draft
   # half it composes before a planning-surface drop on a closed card (the
   # slides snap-back fix; see Portolan kanban-ux-rework/placement-pipeline-invariants).
   defp invoke_action(fiber_id, "reopen-draft", felt_store),
-    do: run_offline("reopen", fiber_id, ["--as-draft"], felt_store)
+    do: run_felt("reopen", fiber_id, ["--as-draft"], felt_store)
 
-  # accept-run goes through the in-process lifecycle path so the felt-document
-  # re-arm happens atomically against poll cycles, not the shelled-out
-  # `felt shuttle accept` (which can race a concurrent poll's document read).
+  # accept-run goes through `Shuttle.LifecycleService`, which runs felt's
+  # `accept` writer inside the Poller, between poll cycles.
   defp invoke_action(fiber_id, "accept-run", _felt_store) do
-    case LifecycleService.accept(fiber_id) do
-      {:ok, _output} -> :ok
-      {:error, reason} -> {:error, {:command_error, 1, reason}}
-    end
+    :accept |> LifecycleService.transition(fiber_id) |> invoke_result()
   end
 
   defp invoke_action(fiber_id, "close-awaiting-review", felt_store),
-    do: run_offline("close", fiber_id, [], felt_store)
+    do: run_felt("close", fiber_id, [], felt_store)
 
   defp invoke_action(fiber_id, "close-tempered", felt_store),
-    do: run_offline("close", fiber_id, ["--tempered=true"], felt_store)
+    do: run_felt("close", fiber_id, ["--tempered=true"], felt_store)
 
   defp invoke_action(fiber_id, "close-composted", felt_store),
-    do: run_offline("close", fiber_id, ["--tempered=false"], felt_store)
+    do: run_felt("close", fiber_id, ["--tempered=false"], felt_store)
 
   defp invoke_action(fiber_id, "dispatch-ad-hoc", _felt_store) do
     case Poller.dispatch_fiber(Poller, fiber_id, force: true, ad_hoc: true) do
@@ -167,19 +162,20 @@ defmodule Shuttle.Transition do
   # timeout+SIGKILL reap instead of a bare `System.cmd/3` that would hang this
   # Phoenix request (and leak the process) forever against a wedged felt on a
   # loaded node. `felt_store` may be `nil` (no store resolved) — the helper
-  # omits `--felt-store` in that case, same as before.
-  defp run_offline(verb, fiber_id, args, felt_store) do
-    case Shuttle.Felt.Shuttle.run(verb, fiber_id, args,
-           felt_store: felt_store,
-           env: lifecycle_offline_env()
-         ) do
-      {:ok, _output} -> :ok
-      {:command_error, status, output} -> {:error, {:command_error, status, output}}
-      {:error, reason} -> {:error, reason}
-    end
+  # omits `--felt-store` in that case.
+  defp run_felt(verb, fiber_id, args, felt_store) do
+    verb
+    |> Shuttle.Felt.Shuttle.run(fiber_id, args, felt_store: felt_store)
+    |> invoke_result()
   end
 
-  defp lifecycle_offline_env, do: [{"SHUTTLE_LIFECYCLE_OFFLINE", "1"}]
+  defp invoke_result({:ok, _output}), do: :ok
+
+  defp invoke_result({:command_error, status, output}),
+    do: {:error, {:command_error, status, output}}
+
+  defp invoke_result({:error, :timeout, reason}), do: {:error, reason}
+  defp invoke_result({:error, reason}), do: {:error, reason}
 
   # ── Forward branch: relay to the owning remote daemon ──
 

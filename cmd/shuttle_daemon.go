@@ -225,18 +225,11 @@ func readDaemonResponse(url string, resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
-// postLifecycle routes a lifecycle action (resume, accept) to the daemon, which
-// applies it atomically against its poll cycle. The action is injected into the
-// payload; the daemon's plain-text response is returned on success.
-// SHUTTLE_LIFECYCLE_OFFLINE forces the offline path (callers then write the
-// document locally).
-func postLifecycle(action string, payload map[string]any) (string, error) {
-	if os.Getenv("SHUTTLE_LIFECYCLE_OFFLINE") != "" {
-		return "", fmt.Errorf("daemon lifecycle disabled by SHUTTLE_LIFECYCLE_OFFLINE")
-	}
-
-	payload["action"] = action
-	body, err := json.Marshal(payload)
+// postLifecycle hands a lifecycle action (resume, accept) on fiberID to the
+// daemon, which runs `felt shuttle <action> --local` between its poll cycles.
+// The daemon's plain-text response is returned on success.
+func postLifecycle(action, fiberID string) (string, error) {
+	body, err := json.Marshal(map[string]string{"action": action, "fiber": fiberID})
 	if err != nil {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}
@@ -266,6 +259,5 @@ func isLifecycleTransportError(err error) bool {
 	if _, ok := err.(daemonStatusError); ok {
 		return false
 	}
-	return strings.Contains(err.Error(), "reaching daemon") ||
-		strings.Contains(err.Error(), "SHUTTLE_LIFECYCLE_OFFLINE")
+	return strings.Contains(err.Error(), "reaching daemon")
 }

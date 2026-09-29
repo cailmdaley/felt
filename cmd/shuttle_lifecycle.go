@@ -19,9 +19,11 @@ import (
 // top-level `tempered` ExtraField, closed-at is f.ClosedAt; only the config
 // verbs (set-model/set-agent/reshape) touch the shuttle: block, and they do it
 // surgically (SetShuttleField / SetShuttleNodeField) so the daemon-owned runtime
-// keys ride through untouched. Every write passes the ownership guard. resume and
-// accept take a soft hop through the daemon (atomic re-arm against its poll
-// cycle) with a correct local-write fallback when it is down.
+// keys ride through untouched. Every write passes the ownership guard. felt is
+// the one writer of every lifecycle transition: resume and accept hop through
+// the owning daemon, which runs the same verb with --local inside its poll loop
+// (serialized with polling, its document cache refreshed after), and write here
+// with --local or when the daemon is unreachable.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
 // write verb: a full read (body preserved for the re-serialize), a required
@@ -151,7 +153,10 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 
 // ---- resume ----------------------------------------------------------------
 
-var resumeProjectDir string
+var (
+	resumeProjectDir string
+	resumeLocal      bool
+)
 
 var resumeCmd = &cobra.Command{
 	Use:   "resume <fiber>",
@@ -161,12 +166,13 @@ the owning daemon dispatches it on its next poll (after a daemon restart, once
 the boot quarantine is released).
 
 For a standing role awaiting review (status: closed + untempered), resume re-arms
-it for immediate dispatch and routes to the owning daemon (which clears the
-awaiting marker and recomputes due-ness from the schedule), falling back to a
-local document write when the daemon is unreachable. A draft (status: open) is
-armed straight to active. Every other closed fiber — a oneshot or pinned role,
-or any accepted or discarded close — is refused; use 'felt shuttle reopen' to
-requeue it.
+it and concludes the run it reviewed (shuttle.runtime.handed_off_at = now), so
+the role runs at its schedule's next tick. That write routes through the owning
+daemon, which applies it with --local between poll cycles; --local, or an
+unreachable daemon, writes the document here. A draft (status: open) is armed
+straight to active. Every other closed fiber — a oneshot or pinned role, or any
+accepted or discarded close — is refused; use 'felt shuttle reopen' to requeue
+it.
 
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A draft installed without one is refused; --project-dir sets it
@@ -175,6 +181,11 @@ project_dir. A draft installed without one is refused; --project-dir sets it
   felt shuttle resume analysis/scratch --project-dir "$PWD"   # a draft installed without one`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !resumeLocal && !cmd.Flags().Changed("project-dir") {
+			if routed, err := routeLifecycle("resume", args[0], standingAwaiting); routed {
+				return err
+			}
+		}
 		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
@@ -187,31 +198,14 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			return err
 		}
 
-		// A standing role awaiting review (status:closed + untempered) re-arms
-		// through the owning daemon, which clears the awaiting marker and
-		// recomputes due-ness. Falls back to a local write when the daemon is down.
-		// A --project-dir lands in the document first, so the daemon arms the
-		// block as it now stands.
-		docAwaiting := f.Status == felt.StatusClosed && readTempered(f) == nil
-		if block.Kind == "standing" && docAwaiting {
-			if cmd.Flags().Changed("project-dir") {
-				if err := st.Write(f); err != nil {
-					return fmt.Errorf("writing fiber: %w", err)
-				}
-			}
-			if output, err := postLifecycle("resume", map[string]any{"fiber": f.ID}); err == nil {
-				fmt.Print(output)
-				return nil
-			} else if !isLifecycleTransportError(err) {
-				return err
-			}
-			if err := unclose(f, felt.StatusActive); err != nil {
+		if standingAwaiting(f, block) {
+			if err := rearmStanding(f); err != nil {
 				return err
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("resumed %s%s (standing role; re-queued for immediate dispatch)\n", args[0], ref.location())
+			fmt.Printf("resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.location())
 			return nil
 		}
 
@@ -233,6 +227,59 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 		}
 		return nil
 	},
+}
+
+// standingAwaiting reports whether f is a standing role awaiting review:
+// status: closed with no verdict (tempered unset).
+func standingAwaiting(f *felt.Felt, block *shuttle.Block) bool {
+	return block.Kind == "standing" && f.Status == felt.StatusClosed && readTempered(f) == nil
+}
+
+// rearmStanding re-arms a standing role (status: active, verdict and
+// closed-at cleared) and concludes its run by stamping
+// shuttle.runtime.handed_off_at = now in the same document write. A human
+// accept or resume ends the run the way a worker handoff does: the poller's
+// repeat-firing guard is prev_due > last_serviced, where last_serviced is the
+// latest of dispatched_at / handed_off_at / created_at, so the fresh stamp
+// rests the role until its next occurrence instead of re-firing the one that
+// just ran. Status and stamp land in one write, so no reader sees the role
+// armed without the stamp. UTC, in the wire format stampHandedOff uses.
+func rearmStanding(f *felt.Felt) error {
+	if err := unclose(f, felt.StatusActive); err != nil {
+		return err
+	}
+	if err := f.SetShuttleRuntimeField("handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("stamping handed_off_at: %w", err)
+	}
+	return nil
+}
+
+// routeLifecycle hands verb to the owning daemon when the fiber qualifies and
+// reports whether the daemon answered. The daemon runs the same verb with
+// --local between its poll cycles, so the write is serialized with polling and
+// its document cache sees it at once. The lookup takes no fiber lock — the
+// daemon's writer needs it. routed is false when the fiber does not qualify
+// (or cannot be read) or the daemon is unreachable; the caller then writes
+// locally, where every refusal is reported. A daemon refusal or an owner-check
+// failure is routed, with its error.
+func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool) (routed bool, err error) {
+	f, _, _, err := shuttleResolveFiberRef(query, true)
+	if err != nil {
+		return false, nil
+	}
+	block, ok, err := f.ShuttleBlock()
+	if err != nil || !ok || !qualifies(f, block) || ensureOwnedHere(f, query) != nil {
+		return false, nil
+	}
+	output, err := postLifecycle(verb, f.ID)
+	if err == nil {
+		fmt.Print(output)
+		return true, nil
+	}
+	if isLifecycleTransportError(err) {
+		return false, nil
+	}
+	return true, err
 }
 
 // checkArmable is the arming gate: every verb that makes a fiber dispatchable
@@ -461,53 +508,56 @@ func resolveOutcomeValue(cmd *cobra.Command, flagValue string) (string, error) {
 
 // ---- accept ----------------------------------------------------------------
 
-var acceptKeepOutcome bool
+var acceptLocal bool
 
 var acceptCmd = &cobra.Command{
 	Use:   "accept <fiber>",
 	Short: "Accept a completed standing or pinned run (re-arm / re-park)",
-	Long: `Resolves the human verdict on a role awaiting review (status: closed +
-untempered), kind-aware:
+	Long: `Resolves the human verdict on an untempered role (status: closed, or
+status: active while its run is still in flight), kind-aware:
 
-  standing → re-arms it (status: active), clearing closed-at / tempered.
-             Due-ness is recomputed by the daemon from the schedule (no stored
-             next_due_at, no review block). Clears the outcome so the next
-             dispatch starts blank; pass --keep-outcome to preserve it.
+  standing → re-arms it (status: active), clearing closed-at / tempered, and
+             concludes the run (shuttle.runtime.handed_off_at = now) so the
+             next dispatch is the schedule's next tick. Due-ness is recomputed
+             by the daemon from the schedule (no stored next_due_at, no review
+             block).
   pinned   → re-parks it back to the strip (status: open), clearing
              closed-at / tempered. A human Resume (force-dispatch) starts it
              again.
 
-Routes to the owning daemon when reachable (a single in-process transition);
-falls back to a local document write when the daemon is down.`,
+The outcome is kept: the last run's digest stays the card's headline until the
+next run writes its own.
+
+Routes to the owning daemon, which applies it with --local between poll
+cycles; --local, or an unreachable daemon, writes the document here.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !acceptLocal {
+			if routed, err := routeLifecycle("accept", args[0], perennialRole); routed {
+				return err
+			}
+		}
 		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
 		if err != nil {
 			return err
 		}
 		defer unlock()
-		if block.Kind != "standing" && block.Kind != "pinned" {
+		if !perennialRole(f, block) {
 			return fmt.Errorf("accept only applies to standing or pinned roles (fiber has kind=%s)", block.Kind)
 		}
-		// Awaiting is felt-native: status: closed + untempered.
-		if !(f.Status == felt.StatusClosed && readTempered(f) == nil) {
+		// Acceptable: untempered, and closed (awaiting review) or still active —
+		// the board's Temper gesture can land while the run is in flight, before
+		// the exit writer closes it. Drafts and verdicts are refused.
+		if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
 			return fmt.Errorf(
-				"fiber %s is not awaiting review (accept requires status:closed + untempered; status=%q tempered=%v)",
+				"fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)",
 				args[0], f.Status, readTempered(f))
 		}
 
 		// PINNED accept RE-PARKS the finished arc back to the strip (status: open,
 		// verdict cleared) — the kind-aware other half of accept (standing re-arms
 		// active, pinned re-parks open). No schedule, no recurrence to advance.
-		// Routes to the owning daemon (LifecycleStore.accept is kind-aware) with a
-		// local-write fallback when the daemon is down.
 		if block.Kind == "pinned" {
-			if output, err := postLifecycle("accept", map[string]any{"fiber": f.ID}); err == nil {
-				fmt.Print(output)
-				return nil
-			} else if !isLifecycleTransportError(err) {
-				return err
-			}
 			if err := unclose(f, felt.StatusOpen); err != nil {
 				return err
 			}
@@ -521,56 +571,33 @@ falls back to a local document write when the daemon is down.`,
 		if block.Schedule == nil {
 			return fmt.Errorf("fiber %s has no schedule", args[0])
 		}
-
-		// Gated at the CLI before either path: the daemon-routed request and
-		// the offline local write both arm the fiber (status: active), so
-		// both need a resolvable agent up front (the daemon resolves again
-		// at dispatch; that's fine, this just fails fast and offline too).
-		if err := checkArmable(args[0], "resume", block); err != nil {
-			return err
+		// Arming a closed role holds it to the armed-install gate; accepting a
+		// role that is already active arms nothing.
+		if f.Status != felt.StatusActive {
+			if err := checkArmable(args[0], "resume", block); err != nil {
+				return err
+			}
 		}
-
-		if output, err := postLifecycle("accept", map[string]any{
-			"fiber":        f.ID,
-			"keep_outcome": acceptKeepOutcome,
-		}); err == nil {
-			fmt.Print(output)
-			return nil
-		} else if !isLifecycleTransportError(err) {
-			return err
-		}
-
-		// Offline fallback (daemon down). Re-arm straight from the doc schedule;
-		// the daemon recomputes due-ness on its next poll.
 		computedNext, err := shuttle.NextOccurrence(block.Schedule, time.Now())
 		if err != nil {
 			return fmt.Errorf("computing next occurrence: %w", err)
 		}
-		if err := unclose(f, felt.StatusActive); err != nil {
+		if err := rearmStanding(f); err != nil {
 			return err
-		}
-		if !acceptKeepOutcome {
-			f.Outcome = ""
-		}
-		// Stamp the same conclude-the-run signal the daemon-reachable path folds in
-		// (LifecycleStore.accept -> conclude_run -> handed_off_at = now): the
-		// poller's repeat-firing guard is `prev_due > last_serviced`, and
-		// last_serviced_at_ms (standing_roles.ex:385) is the max of dispatched_at /
-		// handed_off_at / rearmed_at / created_at. Without a fresh handed_off_at
-		// here, last_serviced stays pinned at the PREVIOUS dispatch, so the guard is
-		// immediately satisfied and the role fires on the very next poll — while
-		// this command just printed a next-due tomorrow morning. UTC instant, same
-		// as every other stamp on this path (and matching the wire format
-		// stampHandedOff uses in shuttle_handoff.go).
-		if err := f.SetShuttleRuntimeField("handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return fmt.Errorf("stamping handed_off_at: %w", err)
 		}
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("accepted run for %s%s\n  next due: %s\n", args[0], ref.location(), computedNext.Format(time.RFC3339))
+		fmt.Printf("accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
+			args[0], ref.location(), computedNext.Format(time.RFC3339))
 		return nil
 	},
+}
+
+// perennialRole reports whether block is a standing or pinned role — the kinds
+// accept resolves a verdict on.
+func perennialRole(_ *felt.Felt, block *shuttle.Block) bool {
+	return block.Kind == "standing" || block.Kind == "pinned"
 }
 
 // ---- set-model -------------------------------------------------------------
@@ -930,13 +957,14 @@ and a live worker is left running.`,
 }
 
 func init() {
-	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none)")
+	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); writes here, without the daemon hop")
+	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, "Write the document here instead of routing through the owning daemon")
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
 	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
-	acceptCmd.Flags().BoolVar(&acceptKeepOutcome, "keep-outcome", false, "Preserve the existing outcome instead of clearing it for the next dispatch")
+	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, "Write the document here instead of routing through the owning daemon")
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")

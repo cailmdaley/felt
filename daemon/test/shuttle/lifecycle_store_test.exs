@@ -4,107 +4,6 @@ defmodule Shuttle.LifecycleStoreTest do
 
   alias Shuttle.LifecycleStore
 
-  alias Shuttle.Test.RecordingRunner
-
-  describe "accept/resume recognize new-model awaiting (status:closed + untempered)" do
-    test "accept re-arms a closed+untempered standing role from the doc schedule" do
-      with_doc_awaiting_role(fn fiber_id, path ->
-        assert {:ok, message} = LifecycleStore.accept(fiber_id)
-        assert message =~ "accepted run for #{fiber_id}"
-        assert message =~ "next run on the schedule's next tick"
-
-        # Document re-armed straight from the doc: status:active, verdict cleared.
-        # next_due is recomputed from the cron schedule on the next poll — there
-        # is no runtime row to assert (slice 6: runtime store gone).
-        fm = read_frontmatter(path)
-        assert fm["status"] == "active"
-        refute Map.has_key?(fm, "tempered")
-        refute Map.has_key?(fm, "closed-at")
-      end)
-    end
-
-    test "resume re-arms a closed+untempered standing role to immediate" do
-      with_doc_awaiting_role(fn fiber_id, path ->
-        assert {:ok, message} = LifecycleStore.resume(fiber_id)
-        assert message =~ "re-queued for immediate dispatch"
-
-        fm = read_frontmatter(path)
-        assert fm["status"] == "active"
-        refute Map.has_key?(fm, "tempered")
-      end)
-    end
-
-    test "a tempered:false (composted) standing role is NOT awaiting — accept refuses" do
-      with_doc_awaiting_role(
-        fn fiber_id, _path ->
-          # Composted is a verdict, not awaiting (status:closed + tempered:false):
-          # the doc-awaiting precondition rejects.
-          assert {:error, reason} = LifecycleStore.accept(fiber_id)
-          assert reason =~ "not acceptable"
-        end,
-        status: "closed",
-        tempered: false
-      )
-    end
-
-    test "accept re-arms an active+untempered standing role (temper mid-run / pre-exit-mark)" do
-      # The morning-post temper bug: Temper clicked while the run was still
-      # status:active (worker alive or just killed, exit writer not yet run).
-      # Accept must re-arm idempotently rather than refuse — the refusal is
-      # what let the transition fall through to close-tempered.
-      with_doc_awaiting_role(
-        fn fiber_id, path ->
-          assert {:ok, message} = LifecycleStore.accept(fiber_id)
-          assert message =~ "accepted run for #{fiber_id}"
-
-          fm = read_frontmatter(path)
-          assert fm["status"] == "active"
-          refute Map.has_key?(fm, "tempered")
-        end,
-        status: "active"
-      )
-    end
-  end
-
-  describe "conclude: status re-arm THEN `felt shuttle mark-runtime --handed-off-at` (Stage 5)" do
-    test "accept re-arms the doc (atomic) then shells mark-runtime to stamp the handoff" do
-      with_doc_awaiting_role(fn fiber_id, path ->
-        {:ok, _} = RecordingRunner.start()
-
-        assert {:ok, _} = LifecycleStore.accept(fiber_id, runner: RecordingRunner)
-
-        # First write (atomic, surgical): status re-armed, verdict cleared.
-        fm = read_frontmatter(path)
-        assert fm["status"] == "active"
-        refute Map.has_key?(fm, "tempered")
-
-        # Second write: the prior run is concluded by shelling felt (felt owns the
-        # nested write). The flat conclude op is gone — handed_off_at is NOT written
-        # into the doc by the daemon's surgical write.
-        refute get_in(fm, ["shuttle", "handed_off_at"])
-        refute get_in(fm, ["shuttle", "runtime"])
-
-        assert Enum.any?(RecordingRunner.calls(), fn {cmd, args, _} ->
-                 cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
-                   "--handed-off-at" in args
-               end)
-      end)
-    end
-
-    test "resume also concludes via mark-runtime" do
-      with_doc_awaiting_role(fn fiber_id, _path ->
-        {:ok, _} = RecordingRunner.start()
-
-        assert {:ok, _} = LifecycleStore.resume(fiber_id, runner: RecordingRunner)
-
-        assert Enum.any?(RecordingRunner.calls(), fn {cmd, args, _} ->
-                 cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
-                   "--handed-off-at" in args
-               end)
-      end)
-    end
-  end
-
   describe "mark_awaiting/1 — the standing-exit writer (active → closed, untempered)" do
     test "flips status:active → closed with closed-at, no verdict, and reads as doc-awaiting" do
       with_doc_awaiting_role(
@@ -116,25 +15,6 @@ defmodule Shuttle.LifecycleStoreTest do
           assert fm["status"] == "closed"
           assert is_binary(fm["closed-at"])
           refute Map.has_key?(fm, "tempered")
-        end,
-        status: "active"
-      )
-    end
-
-    test "the full exit → accept cycle re-arms the role straight from the document" do
-      with_doc_awaiting_role(
-        fn fiber_id, path ->
-          # Worker exits → awaiting review (status:closed, untempered).
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
-          assert read_frontmatter(path)["status"] == "closed"
-
-          # Human accepts → re-armed from the doc schedule (status:active, verdict
-          # and closed-at cleared). The active → closed → active cycle is real.
-          assert {:ok, _} = LifecycleStore.accept(fiber_id)
-          fm = read_frontmatter(path)
-          assert fm["status"] == "active"
-          refute Map.has_key?(fm, "tempered")
-          refute Map.has_key?(fm, "closed-at")
         end,
         status: "active"
       )
@@ -179,24 +59,6 @@ defmodule Shuttle.LifecycleStoreTest do
           assert msg =~ "standing"
           # Untouched: mark_awaiting did not close it.
           assert read_frontmatter(path)["status"] == "closed"
-        end,
-        status: "closed"
-      )
-    end
-
-    test "accept RE-PARKS a closed pinned role to the strip (status: open, verdict cleared)" do
-      # Pinned joins the unified lifecycle: a finished pinned arc closes to
-      # Awaiting review (status:closed + untempered), and the human verdict is a
-      # kind-aware accept that RE-PARKS it to the strip (status:open) — the mirror
-      # of standing's accept (which re-arms to active). tempered/closed-at cleared.
-      with_pinned_role(
-        fn fiber_id, path ->
-          assert {:ok, msg} = LifecycleStore.accept(fiber_id)
-          assert msg =~ "re-parked"
-          fm = read_frontmatter(path)
-          assert fm["status"] == "open"
-          assert is_nil(fm["tempered"])
-          assert is_nil(fm["closed-at"])
         end,
         status: "closed"
       )
@@ -284,29 +146,6 @@ defmodule Shuttle.LifecycleStoreTest do
 
           assert strip_closed_at(first) == strip_closed_at(second),
                  "repeated writes churned the file:\n#{first}\n--- vs ---\n#{second}"
-        end,
-        status: "open"
-      )
-    end
-
-    test "accept re-arms (status active, verdict cleared) without touching the block scalar" do
-      with_rich_outcome_role(
-        fn fiber_id, path, original ->
-          # Put the role in the awaiting shape accept expects, then accept.
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
-          assert {:ok, _} = LifecycleStore.accept(fiber_id)
-
-          written = File.read!(path)
-          assert {:ok, parsed} = YamlElixir.read_from_string(frontmatter_of(written))
-
-          assert parsed["status"] == "active"
-          refute Map.has_key?(parsed, "tempered")
-          refute Map.has_key?(parsed, "closed-at")
-          # The headline outcome is preserved across the re-arm, byte-for-byte.
-          assert parsed["outcome"] == @rich_outcome
-          assert written =~ "outcome: |-"
-
-          assert_only_keys_changed(original, written, %{"status" => "active"})
         end,
         status: "open"
       )

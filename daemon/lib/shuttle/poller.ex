@@ -34,6 +34,7 @@ defmodule Shuttle.Poller do
     Collaboration,
     DaemonHeartbeat,
     Dispatcher,
+    LifecycleService,
     LifecycleStore,
     StandingRole,
     WorkerWatcher
@@ -147,7 +148,7 @@ defmodule Shuttle.Poller do
       standing_roles: [],
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
-      # poll cycle and by host_for_fiber/2 on demand. Entries are never evicted.
+      # poll cycle. Entries are never evicted.
       fiber_host_cache: %{},
       # %{uid => slug} — boundary uid→slug RESOLUTION index, rebuilt each poll
       # from the candidate rows (every row carries both `id` and `uid`). It lets
@@ -206,16 +207,6 @@ defmodule Shuttle.Poller do
       # scroll unread in the daemon log. Entries clear on successful dispatch or
       # when the fiber's eligibility changes (frontmatter edit, pause, close).
       dispatch_failures: %{},
-      # %{runtime_key => unix_ms} — the instant a standing role was re-armed by
-      # accept/resume, keyed by runtime key (uid when present, else slug) so a
-      # rename mid-cycle can't strand the stamp. One of the "last serviced"
-      # signals the due rule anchors on (alongside the fiber's
-      # dispatched_at/handed_off_at and its creation): it marks the just-served
-      # occurrence so the role isn't immediately re-served when accept flips
-      # closed→active. The within-lifetime fast path; the durable backstop is the
-      # `shuttle.handed_off_at` the re-arm stamps (`LifecycleStore`). NOT
-      # persisted; a restart loses nothing that field doesn't already carry.
-      rearmed_at: %{},
       # %{runtime_key => %{count: pos_integer, opened_at: DateTime.t | nil,
       # fiber_id: slug, uid: String.t | nil}} — the resume-loop circuit breaker's
       # per-fiber state. `count` is consecutive rapid worker exits (lived <
@@ -525,22 +516,6 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Paste text into a fiber's live worker session without submitting it.
-
-  The session is resolved using both the uid-keyed canonical name and the
-  leaf-only name, preferring the canonical name. Text reaches tmux only
-  through a temporary file, so arbitrary multiline content never enters a
-  shell command.
-  """
-  @spec inject(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def inject(fiber_id, text), do: inject(__MODULE__, fiber_id, text)
-
-  @spec inject(GenServer.server(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def inject(server, fiber_id, text) do
-    GenServer.call(server, {:inject, fiber_id, text}, @dispatch_call_timeout_ms)
-  end
-
-  @doc """
   Spawn-without-constitution: launch a capture session (free-text prompt, no
   pre-existing fiber) in `work_dir`. See `Shuttle.Dispatcher.capture/2`.
 
@@ -557,49 +532,20 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run a standing-role lifecycle transition (`:accept` / `:resume`) through the
-  Poller so the felt-document write is atomic against poll cycles. accept/resume
-  re-arm an awaiting role by writing `status: active` to the document; running
-  the transition inside the GenServer keeps a concurrent
-  poll from reading a half-written document.
+  Run felt's `accept` / `resume` writer (`Shuttle.LifecycleService.write/3`)
+  inside the Poller, so the document write lands between poll cycles rather
+  than under one, then refresh the fiber's document-cache entry so the board
+  reads the transition at once.
   """
-  @spec lifecycle_transition(:accept | :resume, String.t(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
-  def lifecycle_transition(verb, fiber_id, opts \\ []),
-    do: lifecycle_transition(__MODULE__, verb, fiber_id, opts)
-
-  @spec lifecycle_transition(
-          GenServer.server(),
-          :accept | :resume,
-          String.t(),
-          keyword()
-        ) :: {:ok, String.t()} | {:error, term()}
-  def lifecycle_transition(server, verb, fiber_id, opts) do
-    GenServer.call(
-      server,
-      {:lifecycle_transition, verb, fiber_id, opts},
-      @dispatch_call_timeout_ms
-    )
+  @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t()) ::
+          Shuttle.Felt.result()
+  def lifecycle_transition(server \\ __MODULE__, verb, fiber_id) do
+    GenServer.call(server, {:lifecycle_transition, verb, fiber_id}, @dispatch_call_timeout_ms)
   end
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()
   def orchestrator_state(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
     GenServer.call(server, :orchestrator_state, timeout_ms)
-  end
-
-  @doc """
-  Returns `{:ok, felt_store}` for the configured store that owns `fiber_id`,
-  or `{:error, :not_found}` if the fiber isn't in any store.
-
-  The result is cached in the Poller's state for the daemon's lifetime.
-
-  NOT production API: the test seam `poller_test.exs` uses to exercise the
-  Poller's cache-then-felt store resolution, which needs poller state.
-  """
-  @spec resolve_fiber_host(GenServer.server(), String.t()) ::
-          {:ok, String.t()} | {:error, :not_found | :timeout}
-  def resolve_fiber_host(server, fiber_id) do
-    GenServer.call(server, {:resolve_fiber_host, fiber_id})
   end
 
   @doc """
@@ -1113,29 +1059,6 @@ defmodule Shuttle.Poller do
     {:reply, reply, state}
   end
 
-  def handle_call({:inject, fiber_id, text}, _from, state) do
-    {runtime_key, slug} = resolve_identity(state, fiber_id)
-    uid = resolved_uid(state, slug, runtime_key)
-
-    case fetch_fiber_full(slug, state) do
-      {:ok, fiber} ->
-        session =
-          live_session_for_fiber(state, slug, uid) ||
-            live_session_for_fiber(state, slug, Map.get(fiber, "uid"))
-
-        case session do
-          nil ->
-            {:reply, {:error, :not_found}, state}
-
-          session ->
-            {:reply, paste_into_session(state.runner, session, text), state}
-        end
-
-      {:error, _reason} ->
-        {:reply, {:error, :not_found}, state}
-    end
-  end
-
   def handle_call({:kill_session, fiber_id}, _from, state) do
     case running_key(state, fiber_id) do
       nil ->
@@ -1240,8 +1163,7 @@ defmodule Shuttle.Poller do
                  Shuttle.AppWorkers.id(current.session)
                ),
              {:ok, _} <-
-               paste_into_session(
-                 state.runner,
+               start_app_turn(
                  current.session,
                  Keyword.get(opts, :user_message) || "Continue the work on fiber #{fiber_id}."
                ) do
@@ -1271,33 +1193,19 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_call({:lifecycle_transition, verb, fiber_id, opts}, _from, state) do
-    {runtime_key, slug} = resolve_identity(state, fiber_id)
-
-    # The conclude step (`felt shuttle mark-runtime --handed-off-at`) needs the
-    # injectable runner + this daemon's store set; thread them through opts.
-    opts = Keyword.merge([runner: state.runner, felt_stores: state.felt_stores], opts)
+  def handle_call({:lifecycle_transition, verb, fiber_id}, _from, state) do
+    {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
     result =
-      case verb do
-        :accept -> LifecycleStore.accept(slug, opts)
-        :resume -> LifecycleStore.resume(slug, opts)
-        other -> {:error, "unknown lifecycle transition #{inspect(other)}"}
-      end
+      LifecycleService.write(verb, slug,
+        runner: state.runner,
+        felt_store: owning_store(slug, state)
+      )
 
-    # On a successful re-arm, stamp the instant so the due-window clamp in
-    # `standing_role_due?` won't re-serve the occurrence that just ran (the
-    # standing-role temper oscillation). accept/resume both flip closed→active.
-    # Keyed by runtime key so the poll's `last_serviced_at_ms` (which reads the
-    # candidate's runtime key) finds it.
     state =
       case result do
-        {:ok, _} when verb in [:accept, :resume] ->
-          now_ms = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
-          %{state | rearmed_at: Map.put(state.rearmed_at, runtime_key, now_ms)}
-
-        _ ->
-          state
+        {:ok, _} when state.document_cache_ready -> refresh_document_entry(state, slug)
+        _ -> state
       end
 
     {:reply, result, state}
@@ -1305,19 +1213,6 @@ defmodule Shuttle.Poller do
 
   def handle_call(:orchestrator_state, _from, state) do
     {:reply, add_poll_health(Snapshot.build_full_state(state), state), state}
-  end
-
-  def handle_call({:resolve_fiber_host, fiber_id}, _from, state) do
-    case host_for_fiber(fiber_id, state) do
-      {:ok, host} ->
-        # Cache the result so subsequent resolutions within the same daemon
-        # lifetime skip the felt shell-out.
-        new_state = %{state | fiber_host_cache: Map.put(state.fiber_host_cache, fiber_id, host)}
-        {:reply, {:ok, host}, new_state}
-
-      {:error, _} = error ->
-        {:reply, error, state}
-    end
   end
 
   def handle_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
@@ -1364,9 +1259,9 @@ defmodule Shuttle.Poller do
 
   # Resolve any public identifier (a uid from the UI, a slug from the CLI) to
   # `{runtime_key, slug}`: the runtime key is what `running`/`claimed`/
-  # `dispatch_failures`/`rearmed_at` are keyed by (uid when the fiber has one,
-  # else slug), and the slug is felt's address for I/O. Resolution order, each
-  # step cheaper than a felt shell-out before it:
+  # `dispatch_failures` are keyed by (uid when the fiber has one, else slug),
+  # and the slug is felt's address for I/O. Resolution order, each step cheaper
+  # than a felt shell-out before it:
   #   1. the running registry (`running_key`'s scan) — a live fiber answers from
   #      its own metadata;
   #   2. the poll-refreshed `uid_slug_index` — a uid-shaped input maps to its
@@ -2141,7 +2036,7 @@ defmodule Shuttle.Poller do
     {resume, fresh} =
       Enum.split_with(dispatchable, fn fiber ->
         MapSet.member?(state.was_running, runtime_key_for_fiber(fiber)) or
-          (state.contract_check.ok and StandingRoles.standing_role_due?(fiber, state))
+          (state.contract_check.ok and StandingRoles.standing_role_due?(fiber))
       end)
 
     parked =
@@ -2233,7 +2128,7 @@ defmodule Shuttle.Poller do
       # is a board-only ordering annotation ("filed after that"), read solely
       # by the UI fold and by `felt check`'s shape validation.
       role_kind(shuttle) == "standing" ->
-        StandingRoles.standing_role_due?(fiber, state)
+        StandingRoles.standing_role_due?(fiber)
 
       true ->
         true
@@ -2639,9 +2534,8 @@ defmodule Shuttle.Poller do
   # Returns {:ok, host} for the store that owns the fiber, or {:error,
   # :not_found | :timeout} when no configured store claims it.
   #
-  # Cache updates are the caller's responsibility: the poll cycle merges
-  # discover_candidates/1's host map, and handle_call(:resolve_fiber_host)
-  # caches what it resolves.
+  # The poll cycle fills the cache from discover_candidates/1's host map; a
+  # resolution here is not cached.
   defp host_for_fiber(fiber_id, state) do
     case Map.get(state.fiber_host_cache, fiber_id) do
       host when is_binary(host) -> {:ok, host}
@@ -3503,7 +3397,9 @@ defmodule Shuttle.Poller do
       if(Shuttle.ULID.valid?(runtime_key), do: runtime_key)
   end
 
-  defp paste_into_session(_runner, "codex-app:" <> id = session, text) do
+  # Start a turn carrying `text` in a live Codex app conversation and mark the
+  # app worker running again.
+  defp start_app_turn("codex-app:" <> id = session, text) do
     case Shuttle.AppWorkers.client().start_turn(id, text, []) do
       {:ok, turn} ->
         :ok =
@@ -3517,29 +3413,6 @@ defmodule Shuttle.Poller do
 
       error ->
         error
-    end
-  end
-
-  defp paste_into_session(runner, session, text) do
-    token = System.unique_integer([:positive])
-    path = Path.join(System.tmp_dir!(), "shuttle-inject-#{token}")
-    buffer = "shuttle-inject-#{token}"
-
-    try do
-      File.write!(path, text)
-
-      with {_, 0} <-
-             runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
-           {_, 0} <-
-             runner.cmd("tmux", ["paste-buffer", "-p", "-t", session <> ":", "-b", buffer, "-d"],
-               stderr_to_stdout: true
-             ) do
-        {:ok, %{session: session, bytes: byte_size(text)}}
-      else
-        {output, status} -> {:error, {:paste_failed, output, status}}
-      end
-    after
-      File.rm(path)
     end
   end
 

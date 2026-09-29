@@ -34,7 +34,7 @@ import (
 // surfacing a version-skew warning/refusal at startup instead of failing one
 // shelled write at a time. Bumped in lockstep with
 // daemon/lib/shuttle/contract.ex's @expected_level.
-const ShuttleContractLevel = 3
+const ShuttleContractLevel = 4
 
 var shuttleContractCmd = &cobra.Command{
 	Use:   "contract",

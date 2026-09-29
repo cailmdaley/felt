@@ -372,246 +372,51 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              ~s(shuttle exited 1: no fiber found matching "science/cmbx/explorations/spt-talk-push")
   end
 
-  test "accept for standing roles re-arms from the doc and evicts runtime frontmatter" do
-    store = fixture_store!("shuttle-lifecycle-accept", "tests/standing-accept", "Standing accept")
+  # accept and resume are felt's to write: the controller runs
+  # `felt shuttle <verb> <fiber> --local` in the fiber's owning store (through
+  # the Poller when one is running — none is in this suite) and relays felt's
+  # answer. What the write does to the document is pinned by felt's own suite
+  # (cmd/shuttle_lifecycle_test.go).
+  for verb <- ~w(accept resume) do
+    test "#{verb} runs felt's writer with --local in the owning store" do
+      store = fixture_store!("shuttle-lifecycle-#{unquote(verb)}", "tests/standing", "Standing")
+      args_file = install_fake_felt!()
 
-    # Awaiting is the document itself — `status: closed` + untempered. accept
-    # re-arms straight from the doc schedule; there is no `review` axis and no
-    # runtime row (slice 6: runtime store gone). next_due is recomputed from the
-    # cron schedule on the next poll.
-    path =
-      write_fiber!(store, "tests/standing-accept", """
-      ---
-      name: Standing accept
-      status: closed
-      outcome: digest
-      closed-at: 2026-06-01T09:30:00Z
-      shuttle:
-        kind: standing
-        host: #{Shuttle.Poller.own_host_id()}
-        project_dir: #{store}
-        schedule:
-          expr: 0 9 * * 1-5
-          tz: UTC
-      ---
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{"action" => unquote(verb), "fiber" => "tests/standing"})
+        )
 
-      Body.
-      """)
+      assert conn.status == 200
+      assert conn.resp_body == "ok\n"
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "accept",
-          "fiber" => "tests/standing-accept"
-        })
-      )
-
-    assert conn.status == 200
-    assert conn.resp_body =~ "accepted run for tests/standing-accept"
-    # accept re-arms the role; the precise next tick rides the board's polled
-    # snapshot (felt is the cron authority — Stage 4b), not this message.
-    assert conn.resp_body =~ "next run on the schedule's next tick"
-
-    text = File.read!(path)
-    frontmatter = frontmatter(text)
-    refute frontmatter =~ "review:"
-    refute frontmatter =~ "closed-at:"
-    assert frontmatter =~ "status: active"
-    # accept PRESERVES the prior run's outcome — it stays the card headline
-    # until the next run overwrites it (accept no longer blanks it).
-    assert frontmatter =~ "outcome: digest"
-    assert frontmatter =~ "schedule:"
+      assert File.read!(args_file) ==
+               "--felt-store\n#{store}\n#{unquote(verb)}\ntests/standing\n--local\n"
+    end
   end
 
-  test "accept re-arms a standing role awaiting review (temper resumes it)" do
-    store =
-      fixture_store!(
-        "shuttle-lifecycle-accept-reenable",
-        "tests/standing-accept-reenable",
-        "Standing accept reenable"
-      )
+  test "accept relays felt's refusal as a 422 with the cobra prefix stripped" do
+    fixture_store!("shuttle-lifecycle-accept-refused", "tests/standing-tempered", "Tempered")
 
-    # A standing role whose last run is awaiting (status: closed + untempered).
-    # Accepting it ("temper") re-arms from the doc schedule — status: active is
-    # the sole dispatch gate (slice 5: no enabled flag), and any stale enabled
-    # key is wiped on the rewrite.
-    path =
-      write_fiber!(store, "tests/standing-accept-reenable", """
-      ---
-      name: Standing accept reenable
-      status: closed
-      closed-at: 2026-06-01T09:30:00Z
-      shuttle:
-        enabled: false
-        kind: standing
-        host: #{Shuttle.Poller.own_host_id()}
-        project_dir: #{store}
-        schedule:
-          expr: 0 9 * * 1-5
-          tz: UTC
-      ---
-
-      Body.
-      """)
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "accept",
-          "fiber" => "tests/standing-accept-reenable"
-        })
-      )
-
-    assert conn.status == 200
-
-    frontmatter = frontmatter(File.read!(path))
-    assert frontmatter =~ "status: active"
-    # Clean cutover: no enabled flag survives the re-arm rewrite.
-    refute frontmatter =~ "enabled"
-  end
-
-  test "resume for standing roles re-arms from the doc and evicts runtime frontmatter" do
-    store = fixture_store!("shuttle-lifecycle-resume", "tests/standing-resume", "Standing resume")
-
-    # Awaiting is `status: closed` + untempered. resume re-arms from the doc for
-    # immediate dispatch — no review axis, no runtime row (slice 6).
-    path =
-      write_fiber!(store, "tests/standing-resume", """
-      ---
-      name: Standing resume
-      status: closed
-      outcome: digest
-      closed-at: 2026-06-01T09:12:00Z
-      shuttle:
-        kind: standing
-        host: #{Shuttle.Poller.own_host_id()}
-        project_dir: #{store}
-        schedule:
-          expr: 0 9 * * 1-5
-          tz: UTC
-      ---
-
-      Body.
-      """)
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "resume",
-          "fiber" => "tests/standing-resume"
-        })
-      )
-
-    assert conn.status == 200
-    assert conn.resp_body =~ "re-queued for immediate dispatch"
-
-    frontmatter = path |> File.read!() |> frontmatter()
-    refute frontmatter =~ "review:"
-    refute frontmatter =~ "closed-at:"
-    assert frontmatter =~ "status: active"
-    assert frontmatter =~ "outcome: digest"
-  end
-
-  test "accept re-arms a status:active role idempotently (temper mid-run)" do
-    # Accept reads ONLY the document (slice 4 deleted the review overlay, slice 6
-    # the runtime store). An armed (`status: active`) untempered role ACCEPTS —
-    # the kanban's Temper gesture can land while the run is still in flight
-    # (worker alive or just killed, exit writer not yet run), and refusing here
-    # is what let the transition fall through to close-tempered (the
-    # morning-post temper bug, 2026-06-12). Re-arm from active is idempotent.
-    store =
-      fixture_store!(
-        "shuttle-lifecycle-accept-armed",
-        "tests/standing-accept-armed",
-        "Standing accept armed"
-      )
-
-    path =
-      write_fiber!(store, "tests/standing-accept-armed", """
-      ---
-      name: Standing accept armed
-      status: active
-      outcome: digest
-      shuttle:
-        kind: standing
-        host: #{Shuttle.Poller.own_host_id()}
-        project_dir: #{store}
-        schedule:
-          expr: 0 9 * * 1-5
-          tz: UTC
-      ---
-
-      Body.
-      """)
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "accept",
-          "fiber" => "tests/standing-accept-armed"
-        })
-      )
-
-    assert conn.status == 200
-
-    # The document stays armed and untempered — no verdict written.
-    fm = frontmatter(File.read!(path))
-    assert fm =~ "status: active"
-    refute fm =~ "tempered"
-  end
-
-  test "accept fails closed instead of falling back to felt shuttle frontmatter writes" do
-    args_file = install_fake_felt!()
-
-    store =
-      fixture_store!(
-        "shuttle-lifecycle-accept-fail-closed",
-        "tests/standing-accept-fail",
-        "Standing accept fail"
-      )
-
-    write_fiber!(store, "tests/standing-accept-fail", """
-    ---
-    name: Standing accept fail
-    status: closed
-    tempered: true
-    shuttle:
-      enabled: true
-      kind: standing
-      schedule:
-        expr: 0 9 * * 1-5
-        tz: UTC
-    ---
-
-    Body.
+    install_fake_felt!("""
+    printf 'Error: fiber tests/standing-tempered is not acceptable (accept requires status active|closed + untempered)\\n' >&2
+    exit 1
     """)
 
     conn =
       post(
         api_conn(),
         "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "accept",
-          "fiber" => "tests/standing-accept-fail"
-        })
+        Jason.encode!(%{"action" => "accept", "fiber" => "tests/standing-tempered"})
       )
 
-    assert conn.status == 400
-    assert conn.resp_body =~ "not acceptable"
-    refute File.exists?(args_file)
-  end
+    assert conn.status == 422
 
-  defp frontmatter(content) do
-    [_, frontmatter | _] = String.split(content, "---\n", parts: 3)
-    frontmatter
+    assert conn.resp_body ==
+             "shuttle exited 1: fiber tests/standing-tempered is not acceptable " <>
+               "(accept requires status active|closed + untempered)"
   end
 
   # The lifecycle controller now shells `felt shuttle <verb>` for the write, but

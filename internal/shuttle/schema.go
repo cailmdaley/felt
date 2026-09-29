@@ -121,8 +121,8 @@ func (b *Block) UnmarshalYAML(value *yaml.Node) error {
 //     — while a dirty death or idle exit parks it back to the strip
 //     (active → open). When the arc is done it closes to Awaiting review, and a
 //     human accept re-parks it to the strip. See Poller.filter_eligible /
-//     tick_kind_eligible?, handle_worker_exit's pinned branch, and
-//     LifecycleStore.accept / park.
+//     tick_kind_eligible?, handle_worker_exit's pinned branch,
+//     LifecycleStore.park, and `felt shuttle accept`.
 var ValidKinds = []string{"oneshot", "standing", "pinned"}
 
 // ---- Validation ------------------------------------------------------------
