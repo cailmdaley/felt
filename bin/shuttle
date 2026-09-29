@@ -51,6 +51,18 @@ resolve_listen() {
   esac
 }
 
+# The daemon's stop marker: heartbeat.stopped in the data directory
+# `felt shuttle host --json` reports as data_dir — $SHUTTLE_DATA_DIR trimmed and
+# a leading ~ expanded, as the daemon resolves it. Without a felt that reports
+# it, the plain expansion.
+stop_marker() {
+  _dd=""
+  if command -v felt >/dev/null 2>&1; then
+    _dd=$(felt shuttle host --json 2>/dev/null | sed -n 's/.*"data_dir": *"\([^"]*\)".*/\1/p' | head -n 1)
+  fi
+  printf '%s/heartbeat.stopped\n' "${_dd:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}"
+}
+
 need_launcher() {
   if [ -z "$LAUNCHER" ]; then
     echo "no daemon release found — build it with \`make daemon\` (checkout) or reinstall the release tarball" >&2
@@ -218,7 +230,7 @@ stop_daemon() {
   echo "stopping the running daemon (pid $_pid)"
   # Mark the stop as asked-for before signalling, so the next boot holds its
   # quarantine (Shuttle.DaemonHeartbeat's stop marker).
-  touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null || true
+  touch "$(stop_marker)" 2>/dev/null || true
   kill -TERM "$_pid" 2>/dev/null || true
   _i=0
   while [ "$_i" -lt 5 ]; do
@@ -573,7 +585,7 @@ install_agent() {
     # not ||-chained, so a miss on one socket doesn't skip the other. Killing
     # the session SIGHUPs the daemon (no graceful shutdown), so the stop marker
     # goes down first, as in stop_daemon.
-    touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null || true
+    touch "$(stop_marker)" 2>/dev/null || true
     tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t shuttle-daemon 2>/dev/null || true
     tmux kill-session -t shuttle-daemon 2>/dev/null || true
     stop_daemon

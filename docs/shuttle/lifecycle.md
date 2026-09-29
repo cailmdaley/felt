@@ -188,9 +188,10 @@ supervisor restart (`systemctl --user restart`, `launchctl kickstart -k`). Those
 all stop the daemon with SIGTERM, and a SIGTERM'd daemon touches a stop marker,
 `$SHUTTLE_DATA_DIR/heartbeat.stopped`, first thing on the way down. `make stop`,
 `bin/shuttle`'s own stop (run by `install-agent`) and `bin/shuttle-deploy` touch
-it themselves before they signal, and so does re-running `bin/shuttle-launch`,
-whose tmux `kill-session` SIGHUPs the daemon with no shutdown at all. The next
-boot sees the marker and holds.
+it themselves before they signal — in the `data_dir` that `felt shuttle host
+--json` reports, so they apply the daemon's own trim and `~` rule — and so does
+re-running `bin/shuttle-launch`, whose tmux `kill-session` SIGHUPs the daemon
+with no shutdown at all. The next boot sees the marker and holds.
 
 The exception is a daemon killed *hard* — a kernel CPU-rlimit SIGKILL on a
 capped cluster login node, say — and respawned seconds later. Its workers keep

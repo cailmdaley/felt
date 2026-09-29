@@ -126,7 +126,7 @@ defmodule Shuttle.EventStream do
   """
   @spec default_events_file() :: Path.t()
   def default_events_file do
-    System.get_env("SHUTTLE_EVENTS_FILE") || Path.join(Shuttle.data_dir(), "events.jsonl")
+    Shuttle.state_path("SHUTTLE_EVENTS_FILE", "events.jsonl")
   end
 
   @doc "The rotated sibling of `live`, named exactly as the writer names it."

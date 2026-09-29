@@ -60,7 +60,7 @@ defmodule Shuttle.CommitLedger do
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_COMMITS_FILE") || Path.join(Shuttle.data_dir(), "commits.jsonl")
+    Shuttle.state_path("SHUTTLE_COMMITS_FILE", "commits.jsonl")
   end
 
   @doc """

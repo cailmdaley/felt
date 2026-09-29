@@ -176,10 +176,12 @@ fi
 # shared or exposed host, its loopback port otherwise. A felt that errors (a
 # malformed host.json, a refused listen address) stops the snippet with felt's
 # message; only a felt with no `host` verb, or no felt, falls back to
-# 127.0.0.1:4000. The prelude sets `sock` (empty for tcp), `port` and `base`.
+# 127.0.0.1:4000. The prelude sets `sock` (empty for tcp), `port` and `base`,
+# and `dd`, the data directory felt reports (empty without one).
 listen_prelude() {
-  printf '%s' 'l=; if command -v felt >/dev/null 2>&1; then '
+  printf '%s' 'l=; dd=; if command -v felt >/dev/null 2>&1; then '
   printf '%s' 'out=$(felt shuttle host --json 2>&1) || { echo "cannot resolve the daemon listen address: $out" >&2; exit 3; }; '
+  printf '%s' 'dd=$(printf "%s\n" "$out" | sed -n '"'"'s/.*"data_dir": *"\([^"]*\)".*/\1/p'"'"' | head -n 1); '
   printf '%s' 'l=$(printf "%s\n" "$out" | sed -n '"'"'s/.*"listen": *"\([^"]*\)".*/\1/p'"'"' | head -n 1); fi; '
   printf '%s' 'sock=; port=4000; '
   printf '%s' 'case "$l" in unix://*) sock="${l#unix://}";; tcp://127.0.0.1:*) port="${l##*:}";; esac; '
@@ -208,10 +210,11 @@ daemon_call() { # $1 = extra curl args, $2 = API path
 # Kill whatever holds the daemon's listener; the host's supervisor restarts it.
 # The snippet runs on the target host (run_on), and touches the daemon's stop
 # marker there before the SIGTERM, so the rebuilt daemon's boot quarantine holds
-# (Shuttle.DaemonHeartbeat).
+# (Shuttle.DaemonHeartbeat). The marker lives in the data directory that host's
+# felt reports, else the plain $SHUTTLE_DATA_DIR expansion.
 daemon_kill() {
   listen_prelude
-  printf '%s' 'touch "${SHUTTLE_DATA_DIR:-$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null; '
+  printf '%s' 'touch "${dd:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null; '
   printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi | xargs -r kill'
 }
 

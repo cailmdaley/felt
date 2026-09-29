@@ -200,6 +200,10 @@ type hostSettings struct {
 	Listen       string `json:"listen"`
 	ListenSource string `json:"listen_source"`
 	File         string `json:"file"`
+	// DataDir is shuttle.DataDir(): the resolved host-local state directory, so
+	// a shell (the stop-marker writers) applies the same trim and leading-~
+	// rule the CLI and the daemon share. Empty when it cannot be resolved.
+	DataDir string `json:"data_dir"`
 
 	listen listenAddr
 }
@@ -291,6 +295,9 @@ func resolveHostSettings() (hostSettings, error) {
 		return hostSettings{}, err
 	}
 	s := hostSettings{File: path, Class: string(hostClassSingleUser), ClassSource: hostSourceDefault}
+	if dir, err := shuttle.DataDir(); err == nil {
+		s.DataDir = dir
+	}
 
 	doc, err := readHostFile(path)
 	if err != nil {
@@ -417,9 +424,11 @@ The class says who else can reach this machine and sets the default listener
   shared-multi-user    other users log in; the daemon listens on a unix socket
   exposed              reachable from outside; the daemon listens on a unix socket
 
---json prints {id, class, class_source, listen, listen_source, file}. The daemon
-reads its host id from it at boot, and shells it as the validator: a malformed
-host file fails here, naming its path.
+--json prints {id, class, class_source, listen, listen_source, file, data_dir}.
+The daemon reads its host id from it at boot, and shells it as the validator:
+a malformed host file fails here, naming its path. data_dir is the resolved
+host-local state directory ($SHUTTLE_DATA_DIR trimmed, a leading ~ expanded,
+else ~/.shuttle); the stop scripts touch its heartbeat.stopped.
 
 Examples:
   felt shuttle host
@@ -443,6 +452,7 @@ Examples:
 		fmt.Printf("id      %s (%s)\n", s.ID, source.describe())
 		fmt.Printf("class   %s (%s)\n", s.Class, describeHostSource(s.ClassSource, s.File))
 		fmt.Printf("listen  %s (%s)\n", s.Listen, describeHostSource(s.ListenSource, s.File))
+		fmt.Printf("data    %s\n", s.DataDir)
 		return nil
 	},
 }

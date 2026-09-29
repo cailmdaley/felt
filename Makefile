@@ -268,11 +268,15 @@ start:
 # The stop marker is touched BEFORE the signal: it tells the next boot this
 # stop was asked for, so the boot quarantine holds (Shuttle.DaemonHeartbeat).
 # Touching it here means a stalled filesystem delays the stop, not the marker.
+# It lives in the data directory `felt shuttle host --json` reports as data_dir
+# ($SHUTTLE_DATA_DIR trimmed, a leading ~ expanded, as the daemon resolves it);
+# without a felt that reports it, the plain expansion.
 stop:
 	@pid=$$(pgrep -f '$(PIDPATTERN)'); \
 	if [ -n "$$pid" ]; then \
 	  echo "stopping shuttle (pid $$pid)"; \
-	  touch "$${SHUTTLE_DATA_DIR:-$$HOME/.shuttle}/heartbeat.stopped" 2>/dev/null; \
+	  dd=; command -v felt >/dev/null 2>&1 && dd=$$(felt shuttle host --json 2>/dev/null | sed -n 's/.*"data_dir": *"\([^"]*\)".*/\1/p' | head -n 1); \
+	  touch "$${dd:-$${SHUTTLE_DATA_DIR:-$$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null; \
 	  kill -TERM $$pid; \
 	  for i in 1 2 3 4 5; do sleep 1; pgrep -f '$(PIDPATTERN)' >/dev/null || break; done; \
 	  pgrep -f '$(PIDPATTERN)' >/dev/null && (echo "force-killing"; kill -9 $$pid) || echo "stopped"; \

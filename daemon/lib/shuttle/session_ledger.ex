@@ -71,7 +71,7 @@ defmodule Shuttle.SessionLedger do
   """
   @spec default_path() :: String.t()
   def default_path do
-    System.get_env("SHUTTLE_SESSIONS_FILE") || Path.join(Shuttle.data_dir(), "sessions.jsonl")
+    Shuttle.state_path("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
   end
 
   @doc """

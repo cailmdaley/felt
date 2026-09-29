@@ -53,6 +53,20 @@ defmodule Shuttle do
   end
 
   @doc """
+  One host-local state file: `$<env_var>` when it names a path — trimmed, a
+  blank value counting as unset, and otherwise taken as written — else `leaf`
+  under `data_dir/0`. The Go CLI's `shuttleStatePath` (cmd/shuttle_events.go)
+  applies the same rule; `test/fixtures/data_dir/cases.json` holds both to it.
+  """
+  @spec state_path(String.t(), String.t()) :: String.t()
+  def state_path(env_var, leaf) do
+    case String.trim(System.get_env(env_var, "")) do
+      "" -> Path.join(data_dir(), leaf)
+      path -> path
+    end
+  end
+
+  @doc """
   The address the daemon's HTTP surface listens on, as `tcp://127.0.0.1:PORT`
   or `unix:///path` — see `Shuttle.Host` for the resolution rule.
 

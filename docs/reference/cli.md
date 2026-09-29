@@ -316,7 +316,7 @@ the existing owner-served file surface.
 | `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
 | `felt shuttle remotes rm <name>` | Remove a remote |
 | `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
-| `felt shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file}`; the daemon reads its host id from it at boot) |
+| `felt shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file, data_dir}`; the daemon reads its host id from it at boot, and the stop scripts put `heartbeat.stopped` in `data_dir`) |
 | `felt shuttle host seed` | Write this host's id to `~/.shuttle/host` (or `$SHUTTLE_HOST_FILE`) unless it already holds one: `$SHUTTLE_HOST`, else the normalized hostname. `bin/shuttle install-agent` runs it |
 | `felt shuttle host class <class>` | Set this host's trust class in `~/.config/felt/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
 | `felt shuttle host check-owner` | Verify that a socket-class TCP listener belongs to this user, from `/proc/net/tcp{,6}` (a no-op for Unix listeners and off Linux) |

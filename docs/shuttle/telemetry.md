@@ -13,7 +13,8 @@ append-only JSONL files in the daemon's state directory.
 All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`; the value
 is trimmed and a leading `~` expands to your home), and each has its own
 override: `SHUTTLE_EVENTS_FILE`, `SHUTTLE_SESSIONS_FILE`,
-`SHUTTLE_COMMITS_FILE`.
+`SHUTTLE_COMMITS_FILE` (trimmed, blank counting as unset, otherwise taken as
+written).
 
 They are host-local by design. Every file records what happened on the machine
 that wrote it, and a hub reads a remote's copy over the tunnel rather than

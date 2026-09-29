@@ -13,5 +13,23 @@
     {"name": "another user's tilde is literal", "env": "~other/state", "expect": "~other/state"},
     {"name": "dot-dot kept", "env": "/srv/a/../b", "expect": "/srv/a/../b"},
     {"name": "relative kept", "env": "shuttle-data", "expect": "shuttle-data"}
-  ]
+  ],
+  "state_files": {
+    "_comment": "Per-file overrides, asserted by the Go suite (cmd/shuttle_events_test.go, shuttleStatePath) and the Elixir suite (test/shuttle/data_dir_test.exs, Shuttle.state_path/2). Every case runs with SHUTTLE_DATA_DIR set to `data_dir`, once for each entry of `files`. `env` is that file's override variable, or null for unset. In `expect`, `<data_dir>` and `<leaf>` stand for the fixture's data_dir and the file's leaf. An override is trimmed and a blank one counts as unset; otherwise it is taken exactly as written — a leading ~ is not expanded.",
+    "data_dir": "/srv/shuttle-data",
+    "files": [
+      {"env_var": "SHUTTLE_EVENTS_FILE", "leaf": "events.jsonl"},
+      {"env_var": "SHUTTLE_COMMITS_FILE", "leaf": "commits.jsonl"},
+      {"env_var": "SHUTTLE_SESSIONS_FILE", "leaf": "sessions.jsonl"}
+    ],
+    "cases": [
+      {"name": "unset", "env": null, "expect": "<data_dir>/<leaf>"},
+      {"name": "empty", "env": "", "expect": "<data_dir>/<leaf>"},
+      {"name": "blank", "env": "  \n", "expect": "<data_dir>/<leaf>"},
+      {"name": "absolute", "env": "/var/lib/shuttle/state.jsonl", "expect": "/var/lib/shuttle/state.jsonl"},
+      {"name": "padded absolute", "env": " /var/lib/shuttle/state.jsonl\n", "expect": "/var/lib/shuttle/state.jsonl"},
+      {"name": "tilde taken as written", "env": "~/state.jsonl", "expect": "~/state.jsonl"},
+      {"name": "relative kept", "env": "state.jsonl", "expect": "state.jsonl"}
+    ]
+  }
 }
