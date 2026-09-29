@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { daemonFetch, DaemonBootingError } from './daemonApi.js'
+import { daemonErrorMessage, daemonFetch, DaemonBootingError } from './daemonApi.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -18,5 +18,22 @@ describe('daemonFetch boot handling', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
     await expect(daemonFetch('/api/v1/state')).resolves.toBe(response)
+  })
+})
+
+describe('daemonErrorMessage', () => {
+  // Every engine names a transport failure differently; the TypeError is the
+  // only thing they agree on.
+  it.each([
+    ['Chrome', 'Failed to fetch'],
+    ['Firefox', 'NetworkError when attempting to fetch resource.'],
+    ['WebKit', 'Load failed'],
+  ])('names the daemon when the fetch itself never lands (%s)', (_engine, message) => {
+    expect(daemonErrorMessage(new TypeError(message))).toBe('Couldn’t reach the Shuttle daemon (:4000).')
+  })
+
+  it('passes our own errors through as written', () => {
+    expect(daemonErrorMessage(new Error('fetch the parent first'))).toBe('fetch the parent first')
+    expect(daemonErrorMessage('plain')).toBe('plain')
   })
 })

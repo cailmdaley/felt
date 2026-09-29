@@ -275,7 +275,7 @@ jobs:
           # The artifact must serve the UI bundle it shipped with.
           curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
           # And the shim's HTTP verbs must answer.
-          SHUTTLE_PORT=4390 out/shuttle/bin/shuttle snapshot >/dev/null
+          SHUTTLE_PORT=4390 out/shuttle/bin/shuttle status >/dev/null
           kill "$DAEMON_PID"
 
       - name: Attach the tarball to the release

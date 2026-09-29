@@ -1828,12 +1828,10 @@ export class KanbanModal {
   }
 
   private computeResponseSignature(data: KanbanResponse): string {
-    // Hash the three surfaces + staleness — stale-origin cards dim and
-    // disable drag even when the card lists themselves are unchanged.
-    // `totals` is a pure `.length` derivation of those same surfaces;
-    // `temperedTotal` is a historical count the daemon sends and this file only
-    // passes through, and a card tempering moves `timeline.past` with it. So
-    // hashing either could only produce redundant work.
+    // Hash the surfaces + staleness — stale-origin cards dim and disable drag
+    // even when the card lists themselves are unchanged. `totals` is a pure
+    // `.length` derivation of those same surfaces, so hashing it could only
+    // produce redundant work.
     return JSON.stringify({
       n: data.now,
       tl: data.timeline,
@@ -2663,9 +2661,7 @@ function unfoldedColumn(card: KanbanCard): 'drafts' | 'inFlight' | 'awaitingRevi
 
 /**
  * Reassemble a response from mutated surfaces with the length-derived totals
- * recomputed. `temperedTotal` rides through on the spread: it is a historical
- * count that can exceed the recent-N `past` slice, so it cannot be recounted
- * from these arrays.
+ * recomputed.
  */
 function withSurfaces(
   resp: KanbanResponse,

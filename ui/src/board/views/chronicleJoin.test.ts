@@ -30,7 +30,6 @@ import {
   SPELL_MAX_H,
   eraName,
   fiberBodyOf,
-  fiberDocUrl,
   firstParagraph,
   groupNarration,
   lifelineExtent,
@@ -42,8 +41,8 @@ import {
   rowWaitingOn,
   type CycleCard,
   saysNothingHere,
-  shuttleOrigin,
 } from './ChronicleView.js'
+import { fiberDocUrl } from '../utils.js'
 import { buildLedgerNarration } from './join.js'
 import type { LedgerNarration } from './join.js'
 import { diffClause } from './vocabulary.js'
@@ -522,12 +521,6 @@ describe('placing a cycle band on the day grid', () => {
 })
 
 describe('routing a cycle write to its owner', () => {
-  it('strips the remote- prefix and defaults to local', () => {
-    expect(shuttleOrigin('remote-basalt-login')).toBe('basalt-login')
-    expect(shuttleOrigin('local')).toBe('local')
-    expect(shuttleOrigin(undefined)).toBe('local')
-  })
-
   it('carries the owning origin onto the band, so an edge drag can route by it', () => {
     // The grips and the review write act on an existing fiber, and a
     // remote-owned cycle has to be written where it lives. Same-host the two
@@ -535,13 +528,12 @@ describe('routing a cycle write to its owner', () => {
     const remote: CycleCard = {
       id: 'cycles/remote-era',
       name: 'Remote era',
-      originId: 'remote-basalt-login',
+      originId: 'basalt-login',
       cycleStart: WINDOW_DAYS[10].iso,
       due: WINDOW_DAYS[20].iso,
     }
     const band = readCycleBand(remote, WINDOW_DAYS, DAY_INDEX, CYCLE_NOW)
-    expect(band?.originId).toBe('remote-basalt-login')
-    expect(shuttleOrigin(band?.originId)).toBe('basalt-login')
+    expect(band?.originId).toBe('basalt-login')
   })
 })
 
@@ -862,11 +854,11 @@ describe('a row waits on its origin, and only on its own', () => {
   }
 
   it('names the host a wholly-remote row is waiting on', () => {
-    expect(rowWaitingOn({ originId: 'remote-ada' }, 'ada', origins)).toBe('ada')
+    expect(rowWaitingOn({ originId: 'ada' }, 'ada', origins)).toBe('ada')
   })
 
   it('says nothing about a remote that is answering', () => {
-    expect(rowWaitingOn({ originId: 'remote-bob' }, 'bob', origins)).toBeNull()
+    expect(rowWaitingOn({ originId: 'bob' }, 'bob', origins)).toBeNull()
   })
 
   // The local daemon answers for itself. A remote falling behind says nothing
@@ -878,14 +870,14 @@ describe('a row waits on its origin, and only on its own', () => {
   // A thin window is not an error: an origin nobody reports on is one nothing
   // claims to be waiting for.
   it('reads an unmentioned origin as fresh rather than guessing', () => {
-    expect(rowWaitingOn({ originId: 'remote-cass' }, 'cass', origins)).toBeNull()
-    expect(rowWaitingOn({ originId: 'remote-ada' }, 'ada', {})).toBeNull()
+    expect(rowWaitingOn({ originId: 'cass' }, 'cass', origins)).toBeNull()
+    expect(rowWaitingOn({ originId: 'ada' }, 'ada', {})).toBeNull()
   })
 
-  it('resolves the origin under any of the three spellings the board uses', () => {
-    expect(rowWaitingOn({ originId: 'ada' }, 'ada', origins)).toBe('ada')
+  it('resolves the origin under either spelling the board uses', () => {
+    expect(rowWaitingOn({ originId: 'ada' }, 'bob', origins)).toBe('bob')
     // Only the hostname matches here — the board's id for it is opaque.
-    expect(rowWaitingOn({ originId: 'remote-7f2' }, 'ada', origins)).toBe('ada')
+    expect(rowWaitingOn({ originId: '7f2' }, 'ada', origins)).toBe('ada')
   })
 })
 
@@ -923,9 +915,7 @@ describe('retirePendingCycles', () => {
 
 /**
  * The intention line reads a fiber DOCUMENT, and the daemon answers documents
- * in the list envelope — `{fibers:[{fiber:{…}}]}`. The old reader looked for
- * `doc.fiber.body` on that envelope and so found nothing on every response it
- * ever got: the era face was silent about every cycle, written or not.
+ * in the list envelope — `{fibers:[{fiber:{…}}]}`.
  */
 describe('fiberBodyOf', () => {
   it('reads the body out of the list envelope the daemon sends', () => {
@@ -933,10 +923,10 @@ describe('fiberBodyOf', () => {
     expect(fiberBodyOf(doc)).toBe('The era in which.')
   })
 
-  it('accepts the flatter shapes a relay or an older daemon may send', () => {
-    expect(fiberBodyOf({ fiber: { body: 'flat' } })).toBe('flat')
-    expect(fiberBodyOf({ body: 'flatter' })).toBe('flatter')
-    expect(fiberBodyOf({ fibers: [{ body: 'on the entry' }] })).toBe('on the entry')
+  it('reads only the list envelope', () => {
+    expect(fiberBodyOf({ fiber: { body: 'flat' } })).toBeUndefined()
+    expect(fiberBodyOf({ body: 'flatter' })).toBeUndefined()
+    expect(fiberBodyOf({ fibers: [{ body: 'on the entry' }] })).toBeUndefined()
   })
 
   // A drawn era carries no prose — the drag asks when, not what. That is an

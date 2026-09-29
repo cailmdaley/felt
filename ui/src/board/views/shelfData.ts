@@ -10,8 +10,8 @@
  * caption the fiber lens clusters under), WHICH DAEMON holds the bytes
  * (`host`, which `/api/v1/file` needs to route a remote read), and the
  * worker's own words for it (`caption`) when it left any. All three are
- * optional, because a daemon older than the composite answers without them
- * and a shelf of unattributed cards is still a shelf.
+ * optional, because a record can arrive without them and a shelf of
+ * unattributed cards is still a shelf.
  */
 
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
@@ -37,7 +37,7 @@ export interface ShelfResult {
 const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
 
 /**
- * Coerce a composite body into shelf records.
+ * Coerce a composite body (`{files: [...]}`) into shelf records.
  *
  * Built ON `normalizeSentFiles` rather than beside it: the path/basename/
  * timestamp coercion (including an older writer's ISO string where a number
@@ -47,7 +47,8 @@ const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
  * only pathless records, so we filter the same way first.
  */
 export function normalizeShelfFiles(raw: unknown): ShelfFile[] {
-  const items = pickItems(raw)
+  const files = isRecord(raw) ? raw.files : undefined
+  const items: unknown[] = Array.isArray(files) ? files : []
   const kept = items.filter(
     (item) =>
       !!item &&
@@ -59,39 +60,24 @@ export function normalizeShelfFiles(raw: unknown): ShelfFile[] {
   return base.map((file, i) => {
     const rec = (kept[i] ?? {}) as Record<string, unknown>
     const out: ShelfFile = { ...file }
-    const uid = str(rec.uid) ?? str(rec.fiber)
+    const uid = str(rec.uid)
     if (uid) out.uid = uid
-    const host = str(rec.host) ?? str(rec.origin)
+    const host = str(rec.host)
     if (host) out.host = host
-    const caption = str(rec.caption) ?? str(rec.description)
+    const caption = str(rec.caption)
     if (caption) out.caption = caption
     return out
   })
 }
 
-/**
- * Pull the record array out of whatever shape answered.
- *
- * The composite envelopes its payload; the single-host route has historically
- * answered with a bare array. Accepting both means the view never branches on
- * which daemon it is talking to.
- */
-function pickItems(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw
-  if (!raw || typeof raw !== 'object') return []
-  const rec = raw as Record<string, unknown>
-  for (const key of ['items', 'files', 'sentFiles', 'sent_files', 'events']) {
-    if (Array.isArray(rec[key])) return rec[key] as unknown[]
-  }
-  return []
-}
-
 /** The composite's origins block, or an empty one. */
 export function pickOrigins(raw: unknown): TemporalOrigins {
-  if (!raw || typeof raw !== 'object') return {}
-  const origins = (raw as Record<string, unknown>).origins
-  if (!origins || typeof origins !== 'object' || Array.isArray(origins)) return {}
-  return origins as TemporalOrigins
+  const origins = isRecord(raw) ? raw.origins : undefined
+  return isRecord(origins) ? (origins as TemporalOrigins) : {}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 function str(value: unknown): string | undefined {
@@ -118,38 +104,26 @@ export function dedupeByPath(files: readonly ShelfFile[]): ShelfFile[] {
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
 /**
- * Read the fleet's sent files since `sinceMs`.
+ * Read the fleet's sent files since `sinceMs` from the cross-host composite.
  *
- * Cross-host first, single-host as the fallback a daemon older than the
- * composite needs, and EMPTY for everything else — a 404, a 5xx, a network
- * error, a body that is not a list. The Shelf's empty state is a quiet line of
- * marginalia, so an unreachable daemon and a fleet that has sent nothing land
- * in the same honest place instead of an error splash.
+ * EMPTY for every failure — a 404, a 5xx, a network error, a body that is not
+ * a list. The Shelf's empty state is a quiet line of marginalia, so an
+ * unreachable daemon and a fleet that has sent nothing land in the same honest
+ * place instead of an error splash.
  */
 export async function fetchShelf(shuttleBase: string, sinceMs: number): Promise<ShelfResult> {
   // `since_ms`, an INSTANT, for the same reason every other temporal route
   // takes one: a civil day resolved in the daemon's zone is a different window
   // from the same day resolved in the browser's.
   const since = Math.floor(sinceMs)
-  const urls = [
-    `${shuttleBase}/api/v1/sent-files/all/composite?since_ms=${since}`,
-    `${shuttleBase}/api/v1/sent-files/all?since_ms=${since}`,
-  ]
-  for (const url of urls) {
-    let body: unknown
-    try {
-      const res = await fetch(url)
-      if (!res.ok) continue
-      body = await res.json()
-    } catch {
-      continue
-    }
-    // An OK response is the answer, including an empty one — a fleet that has
-    // sent nothing is a fact, not a reason to ask the older route for a second
-    // opinion. Only a route that isn't there falls through to the next.
+  try {
+    const res = await fetch(`${shuttleBase}/api/v1/sent-files/all/composite?since_ms=${since}`)
+    if (!res.ok) return EMPTY_SHELF
+    const body: unknown = await res.json()
     return { files: dedupeByPath(normalizeShelfFiles(body)), origins: pickOrigins(body) }
+  } catch {
+    return EMPTY_SHELF
   }
-  return EMPTY_SHELF
 }
 
 // ── File kind ────────────────────────────────────────────────────────────────

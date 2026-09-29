@@ -863,8 +863,8 @@
 
 /* Pager chip — the resting-cluster overflow control (.kbn-cluster-more). A
    slim gold-leaf pill that reads as a manuscript catchword rather than a UI
-   scrollbar; click cycles pages. (The Pinned band's own pager, .kbn-pin-more,
-   is gone — that band now always shows every pinned role.) */
+   scrollbar; click cycles pages. The Pinned band has no pager: it always
+   shows every pinned role. */
 .kbn-tl-pager {
   align-self: start;
   justify-self: start;

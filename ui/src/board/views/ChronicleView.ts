@@ -87,6 +87,7 @@ import {
 } from './chronicleSearch.js'
 import { cycleSpan } from '../KanbanRules.js'
 import { restingCards } from '../KanbanReadModel.js'
+import { fiberDocUrl } from '../utils.js'
 import './ChronicleView.css'
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -157,16 +158,9 @@ export function railDate(nowMs: number): Date {
   return d
 }
 
-/**
- * The origin key a write is routed by — `local`, or a bare hostname for a
- * remote-owned fiber.
- */
-export function shuttleOrigin(originId: string | undefined): string {
-  return (originId ?? 'local').replace(/^remote-/, '')
-}
-
-/** Origin for a write with no card behind it yet — a cycle being created. The
- *  board is never pinned to a remote, so such a write lands on this daemon. */
+/** Origin for a write with no card origin behind it — a cycle being created.
+ *  The board is never pinned to a remote, so such a write lands on this
+ *  daemon. */
 const BOARD_ORIGIN = 'local'
 
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
@@ -650,33 +644,17 @@ export function firstParagraph(body: string | undefined): string {
   return ''
 }
 
-/** The document endpoint for one fiber id. Each id SEGMENT is encoded on its
- *  own, so a slug id (`cycles/before`) keeps its separators and reconstructs as
- *  the same id on the daemon's wildcard route. */
-export function fiberDocUrl(shuttleBase: string, id: string): string {
-  return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
-}
-
 /**
  * The body out of a fiber-document response.
  *
  * The endpoint answers with the LIST envelope — `{ fibers: [{ fiber: {…} }] }`
  * — and the body rides the fiber object, only when the request asked for it
- * (`?body=1`); `doc.fiber.body` read off the envelope finds nothing. The
- * flatter shapes are accepted too, so a relayed or older daemon reads the same.
+ * (`?body=1`).
  */
 export function fiberBodyOf(doc: unknown): string | undefined {
   if (typeof doc !== 'object' || doc === null) return undefined
-  const d = doc as {
-    fibers?: Array<{ fiber?: { body?: unknown }; body?: unknown }>
-    fiber?: { body?: unknown }
-    body?: unknown
-  }
-  const entry = d.fibers?.[0]
-  for (const candidate of [entry?.fiber?.body, entry?.body, d.fiber?.body, d.body]) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate
-  }
-  return undefined
+  const body = (doc as { fibers?: Array<{ fiber?: { body?: unknown } }> }).fibers?.[0]?.fiber?.body
+  return typeof body === 'string' && body.trim() ? body : undefined
 }
 
 // ── Row model ────────────────────────────────────────────────────────────────
@@ -733,7 +711,7 @@ export interface ChronicleRow {
  *  freshness by), then the daemon's own host, then the fiber's dispatch host —
  *  each rung only consulted when the one above says the uninformative `local`. */
 function hostLabel(card: KanbanCard, response: KanbanResponse): string {
-  const origin = response.staleness?.[card.originId]?.hostname ?? shuttleOrigin(card.originId)
+  const origin = response.staleness?.[card.originId]?.hostname ?? card.originId
   if (origin && origin !== 'local') return origin.toLowerCase()
   if (response.feltHost && response.feltHost !== 'local') return response.feltHost.toLowerCase()
   return (card.shuttleHost ?? 'local').toLowerCase()
@@ -749,9 +727,9 @@ function hostLabel(card: KanbanCard, response: KanbanResponse): string {
  * than current, which is what the muted register says.
  *
  * The origins block is keyed by ORIGIN NAME, and the board knows the same
- * origin by up to three spellings (`remote-ada`, `ada`, and the hostname the
- * staleness block reports). All three are tried; the label is what the reader
- * sees either way.
+ * origin by two spellings (the card's origin and the hostname the staleness
+ * block reports). Both are tried; the label is what the reader sees either
+ * way.
  */
 export function rowWaitingOn(
   card: Pick<KanbanCard, 'originId'>,
@@ -759,7 +737,7 @@ export function rowWaitingOn(
   origins: TemporalOrigins,
 ): string | null {
   if (card.originId === 'local') return null
-  const keys = [card.originId, shuttleOrigin(card.originId), hostname]
+  const keys = [card.originId, hostname]
   return keys.some((key) => isOriginStale(origins, key)) ? hostname : null
 }
 
@@ -2466,7 +2444,7 @@ class ChronicleView implements TemporalView {
     for (const p of this.pendingCycles) if (p.id === band.id || p.name === band.name) p.name = name
     this.repaintNow()
     try {
-      await this.feltEdit(ctx, { fiber_id: band.id, origin: shuttleOrigin(band.originId), name })
+      await this.feltEdit(ctx, { fiber_id: band.id, origin: band.originId, name })
       ctx.requestRefresh()
     } catch (err) {
       // Put the old name back rather than leave the strip claiming a rename the
@@ -2487,7 +2465,7 @@ class ChronicleView implements TemporalView {
    * silently delete everything under it.
    */
   private async writeIntention(band: CycleBand, body: string, ctx: ViewContext): Promise<void> {
-    await this.feltEdit(ctx, { fiber_id: band.id, origin: shuttleOrigin(band.originId), body })
+    await this.feltEdit(ctx, { fiber_id: band.id, origin: band.originId, body })
     this.intentions.set(band.id, firstParagraph(body))
     this.repaintNow()
     ctx.requestRefresh()
@@ -2536,7 +2514,7 @@ class ChronicleView implements TemporalView {
       .filter(Boolean)
       .join(' · ')
     if (!text) throw new Error('nothing to inscribe')
-    const origin = shuttleOrigin(band.originId)
+    const origin = band.originId
     await this.feltEdit(ctx, { fiber_id: band.id, origin, set: { outcome: text } })
     ctx.requestRefresh()
   }
@@ -2722,7 +2700,7 @@ class ChronicleView implements TemporalView {
 
     // The CARD's origin, not the board's: a remote-owned cycle has to be
     // written where it lives, and same-host the two happen to agree.
-    const origin = shuttleOrigin(band.originId)
+    const origin = band.originId
     const payload =
       edge === 'start'
         ? { fiber_id: id, origin, set: { start: day } }
@@ -2844,7 +2822,7 @@ class ChronicleView implements TemporalView {
     this.dueEdits.set(cardId, day)
     this.repaintNow()
 
-    const origin = shuttleOrigin(originId)
+    const origin = originId ?? BOARD_ORIGIN
     try {
       await this.feltEdit(ctx, { fiber_id: cardId, origin, due: day })
       ctx.requestRefresh()

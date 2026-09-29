@@ -37,6 +37,7 @@ import {
 } from './ProjectPicker'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
+import { daemonErrorMessage } from '../board/daemonApi'
 import type { Host, Project } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 
@@ -441,8 +442,7 @@ export function StashForm({
       }
       onCreated(data.id)
     } catch (err) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      setError(msg.includes('fetch') ? 'Couldn’t reach the Shuttle daemon (:4000).' : msg)
+      setError(daemonErrorMessage(err))
       setSubmitting(false)
     }
   }

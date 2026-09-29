@@ -222,12 +222,13 @@ export function queueTargets(
 }
 
 /**
- * What the detail panel needs from the board in order to offer the menu.
+ * What the move menu needs from the board in order to offer its places.
  *
- * The panel knows nothing about columns, dependency graphs or wire protocols;
- * the board knows nothing about menus. This is the seam. `KanbanModal`
- * implements it over its existing gesture methods, so every item the menu
- * performs is byte-for-byte the drop it stands in for.
+ * The menu opens from a long-press on a card. It knows nothing about columns,
+ * dependency graphs or wire protocols; the board knows nothing about menus.
+ * This is the seam. `KanbanModal` implements it over its existing gesture
+ * methods, so every item the menu performs is byte-for-byte the drop it stands
+ * in for.
  */
 export interface MoveBroker {
   /** Legal destinations for this card, given where the board has it. */

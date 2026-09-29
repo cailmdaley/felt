@@ -19,7 +19,7 @@
  * off the end of a phone's error banner.
  */
 
-import { daemonFetch } from '../../board/daemonApi.js'
+import { daemonErrorMessage, daemonFetch } from '../../board/daemonApi.js'
 
 /** Which operator file. The wire names are the files' own stems. */
 export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes' | 'host'
@@ -263,22 +263,8 @@ export const isConflict = (err: unknown): boolean =>
 export const isUnavailable = (err: unknown): boolean =>
   err instanceof DaemonRefusal && err.status === 503
 
-/**
- * A thrown `fetch` — the daemon did not answer at all — as a sentence.
- *
- * Detected by TYPE, not by reading the message. The fetch spec says a
- * transport failure rejects with a `TypeError`, and it says nothing at all
- * about the wording: Chrome writes "Failed to fetch", Firefox "NetworkError
- * when attempting to fetch resource", and **WebKit writes "Load failed"**. A
- * substring test for "fetch" therefore worked everywhere except Safari — which
- * is the phone, which is the entire reason this surface exists. Anything that
- * is not a TypeError came from our own code and is already a sentence, so it
- * is passed through.
- */
-const reachError = (err: unknown): Error => {
-  if (err instanceof TypeError) return new Error('Couldn’t reach the Shuttle daemon (:4000).')
-  return new Error((err as { message?: string })?.message ?? String(err))
-}
+/** A thrown `fetch` as an Error carrying {@link daemonErrorMessage}'s sentence. */
+const reachError = (err: unknown): Error => new Error(daemonErrorMessage(err))
 
 /**
  * Did a request addressed to another machine come back answered by this one?
