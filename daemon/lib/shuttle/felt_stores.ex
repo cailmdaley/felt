@@ -21,9 +21,9 @@ defmodule Shuttle.FeltStores do
     json_key: "felt_stores"
   }
 
-  @type host_list :: [String.t()]
+  @type store_list :: [String.t()]
 
-  @expanded_cache_key {__MODULE__, :expanded_hosts}
+  @expanded_cache_key {__MODULE__, :expanded_stores}
   # How stale the poller lets the expansion get before re-walking it. The
   # symlink topology changes about monthly and the walk costs ~1 s on a large
   # store, so minutes of lag are free — and no request ever pays for it.
@@ -33,29 +33,29 @@ defmodule Shuttle.FeltStores do
   The configured stores, expanded with symlinked substores.
 
   A cache read — the walk runs in the poll cycle's Task
-  (`refresh_expanded_hosts/0`), never on a request process. The exception is a
+  (`refresh_expanded_stores/0`), never on a request process. The exception is a
   cold start: the first call for a given base list, which includes a
   just-changed `FELT_STORES`/registry, so a config change takes effect at once.
   """
-  @spec configured_hosts() :: host_list()
-  def configured_hosts, do: cached_expansion(:infinity)
+  @spec configured_stores() :: store_list()
+  def configured_stores, do: cached_expansion(:infinity)
 
   @doc """
   Re-walk the stores for symlinked substores and publish the result for
-  `configured_hosts/0` to read.
+  `configured_stores/0` to read.
 
   The poller calls this from its poll Task, so the cost lands off-process on a
   cadence the daemon owns; within `@expansion_refresh_ms` of the last walk it is
   itself just a cache read.
   """
-  @spec refresh_expanded_hosts() :: host_list()
-  def refresh_expanded_hosts, do: cached_expansion(@expansion_refresh_ms)
+  @spec refresh_expanded_stores() :: store_list()
+  def refresh_expanded_stores, do: cached_expansion(@expansion_refresh_ms)
 
   # Cached by base list, so a config change never serves the old expansion.
   # `:infinity` sorts above every integer, so the read path takes the cached
   # branch whenever an entry for this base exists.
   defp cached_expansion(max_age_ms) do
-    base = configured_base_hosts()
+    base = configured_base_stores()
     now = System.monotonic_time(:millisecond)
 
     case :persistent_term.get(@expanded_cache_key, :none) do
@@ -74,11 +74,11 @@ defmodule Shuttle.FeltStores do
 
   This is the human-curated registry: `FELT_STORES` when explicitly set,
   otherwise the persisted `~/.config/felt/stores.json` list. Use this for picker
-  surfaces that should reflect the canonical city list. Use `configured_hosts/0`
+  surfaces that should reflect the canonical city list. Use `configured_stores/0`
   for daemon polling/resolution, where symlinked substores must be expanded.
   """
-  @spec configured_base_hosts() :: host_list()
-  def configured_base_hosts, do: PathListConfig.configured(@spec_)
+  @spec configured_base_stores() :: store_list()
+  def configured_base_stores, do: PathListConfig.configured(@spec_)
 
   # Expand a store list with the project roots of any **symlinked substores**
   # reachable from each store's `.felt/`.
@@ -107,17 +107,17 @@ defmodule Shuttle.FeltStores do
   end
 
   @doc """
-  Realpath of `<host>/.felt`, resolving symlinks along the path so the ownership
+  Realpath of `<store>/.felt`, resolving symlinks along the path so the ownership
   prefix matches felt's symlink-resolved `path`. See `Shuttle.Realpath`.
 
   This is the prefix both ownership checks build on — this module's
-  `host_for_fiber/2` and the poller's `run_shuttle_listing/2` — so they must
+  `store_for_fiber/2` and the poller's `run_shuttle_listing/2` — so they must
   canonicalize identically or a store enumerates fibers the other drops.
   Falls back to the expanded path when resolution fails.
   """
   @spec store_felt_realpath(String.t()) :: String.t()
-  def store_felt_realpath(host) do
-    felt_dir = host |> Path.join(".felt") |> Path.expand()
+  def store_felt_realpath(store) do
+    felt_dir = store |> Path.join(".felt") |> Path.expand()
 
     case Shuttle.Realpath.resolve(felt_dir) do
       {:ok, resolved} -> resolved
@@ -189,25 +189,25 @@ defmodule Shuttle.FeltStores do
   defp inside?(path, prefix), do: path == prefix or String.starts_with?(path, prefix <> "/")
 
   @doc """
-  Resolve which configured felt store owns `fiber_id`, as `{:ok, host}`,
+  Resolve which configured felt store owns `fiber_id`, as `{:ok, store}`,
   `{:error, :not_found}`, or `{:error, :timeout}`. Thin wrapper over
   `resolve_fiber/1` returning just the owning store root.
   """
   @type resolved_fiber :: %{
-          host: String.t(),
+          store: String.t(),
           fiber_id: String.t(),
           path: String.t(),
           uid: String.t() | nil
         }
 
-  @spec host_for_fiber(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
-  def host_for_fiber(fiber_id), do: host_for_fiber(fiber_id, configured_hosts())
+  @spec store_for_fiber(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
+  def store_for_fiber(fiber_id), do: store_for_fiber(fiber_id, configured_stores())
 
-  @spec host_for_fiber(String.t(), host_list()) ::
+  @spec store_for_fiber(String.t(), store_list()) ::
           {:ok, String.t()} | {:error, :not_found | :timeout}
-  def host_for_fiber(fiber_id, hosts) do
-    case resolve_fiber(fiber_id, hosts) do
-      {:ok, %{host: host}} -> {:ok, host}
+  def store_for_fiber(fiber_id, stores) do
+    case resolve_fiber(fiber_id, stores) do
+      {:ok, %{store: store}} -> {:ok, store}
       {:error, _} = error -> error
     end
   end
@@ -224,7 +224,7 @@ defmodule Shuttle.FeltStores do
   the values come from felt's read chokepoint, not from guessing filesystem
   layouts.
 
-  Returns `%{host, fiber_id, path, uid}` where `host` is the owning store root
+  Returns `%{store, fiber_id, path, uid}` where `store` is the owning store root
   (for shelling subsequent felt commands), `fiber_id` is felt's addressable
   slug, `path` is the absolute on-disk file, and `uid` is the intrinsic identity
   when felt carries one.
@@ -240,7 +240,7 @@ defmodule Shuttle.FeltStores do
   """
   @spec resolve_fiber(String.t()) :: {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
   def resolve_fiber(identifier) when is_binary(identifier),
-    do: resolve_fiber(identifier, configured_hosts())
+    do: resolve_fiber(identifier, configured_stores())
 
   @doc """
   `resolve_fiber/1` with its failures mapped into the CLI-result error
@@ -262,24 +262,24 @@ defmodule Shuttle.FeltStores do
   end
 
   @doc """
-  As `resolve_fiber/1`, but resolves against an explicit `hosts` store list
+  As `resolve_fiber/1`, but resolves against an explicit `stores` list
   rather than the globally-configured stores. The Poller passes its own
-  `state.felt_stores` so cold-path host resolution honors the exact store set
+  `state.felt_stores` so cold-path store resolution honors the exact store set
   that daemon instance is configured for (which may differ from the global
-  `configured_hosts/0`, e.g. in tests or multi-store overrides).
+  `configured_stores/0`, e.g. in tests or multi-store overrides).
   """
-  @spec resolve_fiber(String.t(), host_list()) ::
+  @spec resolve_fiber(String.t(), store_list()) ::
           {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
-  def resolve_fiber(identifier, hosts) when is_binary(identifier) and is_list(hosts) do
+  def resolve_fiber(identifier, stores) when is_binary(identifier) and is_list(stores) do
     # `:timeout` is sticky-but-weak: it survives a miss (the world stayed
     # unknown) but loses to any positive resolution — so a wedged store never
     # masks an answer another store, or the uid scan, can still give.
-    show = show_resolution(hosts, identifier)
+    show = show_resolution(stores, identifier)
 
     result =
       case show do
         %{} -> show
-        _ -> uid_resolution(hosts, identifier) || show
+        _ -> uid_resolution(stores, identifier) || show
       end
 
     case result do
@@ -299,18 +299,18 @@ defmodule Shuttle.FeltStores do
   # Returns the resolved map, `:timeout` (some store never answered and none
   # resolved — absence is not established), or nil (every store answered "not
   # mine").
-  defp show_resolution(hosts, identifier) do
-    Enum.reduce(hosts, nil, fn
+  defp show_resolution(stores, identifier) do
+    Enum.reduce(stores, nil, fn
       _host, %{} = resolved ->
         resolved
 
-      host, acc ->
-        case felt_show_json(host, identifier) do
+      store, acc ->
+        case felt_show_json(store, identifier) do
           {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
-            owner = owning_store(hosts, path) || host
+            owner = owning_store(stores, path) || store
 
             owner_fiber =
-              if owner == host, do: fiber, else: felt_for_path(owner, identifier, fiber)
+              if owner == store, do: fiber, else: felt_for_path(owner, identifier, fiber)
 
             resolved_from(owner, owner_fiber) || acc
 
@@ -328,18 +328,18 @@ defmodule Shuttle.FeltStores do
   # reading the carried `path`, and assigning ownership by that path. Skipped
   # entirely for non-ULID identifiers (those resolve via `show_resolution`).
   # Same nil / `:timeout` / resolved-map contract as `show_resolution/2`.
-  defp uid_resolution(hosts, uid) do
+  defp uid_resolution(stores, uid) do
     if Shuttle.ULID.valid?(uid) do
-      Enum.reduce(hosts, nil, fn
+      Enum.reduce(stores, nil, fn
         _host, %{} = resolved ->
           resolved
 
-        host, acc ->
-          case felt_ls_json(host) do
+        store, acc ->
+          case felt_ls_json(store) do
             {:ok, rows} when is_list(rows) ->
               Enum.find_value(rows, acc, fn
                 %{"uid" => ^uid, "path" => path} = fiber when is_binary(path) and path != "" ->
-                  owner = owning_store(hosts, path) || host
+                  owner = owning_store(stores, path) || store
                   resolved_from(owner, fiber)
 
                 _ ->
@@ -356,9 +356,9 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  defp resolved_from(host, %{"id" => id, "path" => path} = fiber)
+  defp resolved_from(store, %{"id" => id, "path" => path} = fiber)
        when is_binary(id) and id != "" and is_binary(path) and path != "" do
-    resolved(path, host, id, ulid_or_nil(Map.get(fiber, "uid")))
+    resolved(path, store, id, ulid_or_nil(Map.get(fiber, "uid")))
   end
 
   defp resolved_from(_host, _fiber), do: nil
@@ -366,9 +366,9 @@ defmodule Shuttle.FeltStores do
   # The configured store that physically roots `path`: the one whose realpath
   # `.felt/` is a prefix of felt's carried (symlink-resolved) path. nil when no
   # configured store owns it (the caller keeps the queried store as a fallback).
-  defp owning_store(hosts, path) do
-    Enum.find(hosts, fn host ->
-      String.starts_with?(path, store_felt_realpath(host) <> "/")
+  defp owning_store(stores, path) do
+    Enum.find(stores, fn store ->
+      String.starts_with?(path, store_felt_realpath(store) <> "/")
     end)
   end
 
@@ -382,12 +382,12 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  defp felt_show_json(host, identifier) do
+  defp felt_show_json(store, identifier) do
     # Never fold stderr into stdout: felt prints "no fiber found matching …" to
     # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
     # A `:timeout` from the bounded runner is kept distinct from a miss: the
     # store never answered, so "not found" is not established.
-    case runner().cmd("felt", ["-C", host, "show", identifier, "-j"], stderr_to_stdout: false) do
+    case runner().cmd("felt", ["-C", store, "show", identifier, "-j"], stderr_to_stdout: false) do
       {output, 0} -> Jason.decode(output)
       {_output, :timeout} -> {:error, :timeout}
       {_output, _status} -> {:error, :not_found}
@@ -399,8 +399,8 @@ defmodule Shuttle.FeltStores do
   # `-s all` so a UID pointing at a closed/composted fiber still resolves; the
   # default `ls` filters to open/active. felt walks the tree and carries `uid`
   # and `path` per row, so no index build is required.
-  defp felt_ls_json(host) do
-    case runner().cmd("felt", ["-C", host, "ls", "-j", "-s", "all"], stderr_to_stdout: false) do
+  defp felt_ls_json(store) do
+    case runner().cmd("felt", ["-C", store, "ls", "-j", "-s", "all"], stderr_to_stdout: false) do
       {output, 0} -> Jason.decode(output)
       {_output, :timeout} -> {:error, :timeout}
       {_output, _status} -> {:error, :not_found}
@@ -416,8 +416,8 @@ defmodule Shuttle.FeltStores do
   # bounded runner.
   defp runner, do: Application.get_env(:shuttle, :felt_stores_runner, Shuttle.Runner.Default)
 
-  defp resolved(path, host, fiber_id, uid) do
-    %{host: host, fiber_id: fiber_id, path: path, uid: uid}
+  defp resolved(path, store, fiber_id, uid) do
+    %{store: store, fiber_id: fiber_id, path: path, uid: uid}
   end
 
   defp ulid_or_nil(value) when is_binary(value) do
@@ -426,8 +426,8 @@ defmodule Shuttle.FeltStores do
 
   defp ulid_or_nil(_), do: nil
 
-  @spec save(host_list()) :: {:ok, host_list()} | {:error, term()}
-  def save(hosts) when is_list(hosts), do: PathListConfig.save(@spec_, hosts)
+  @spec save(store_list()) :: {:ok, store_list()} | {:error, term()}
+  def save(stores) when is_list(stores), do: PathListConfig.save(@spec_, stores)
 
   @doc """
   Where the registry file resolves: `FELT_STORES_FILE`, else
@@ -440,12 +440,11 @@ defmodule Shuttle.FeltStores do
   @doc """
   The list PERSISTED in the file, ignoring `FELT_STORES`.
 
-  Distinct from `configured_base_hosts/0`, which answers "what is this daemon
+  Distinct from `configured_base_stores/0`, which answers "what is this daemon
   actually polling" — the env form when it is set. An editor of the file wants
   the file: showing the env list in a control that writes the file would let
   someone save the override's contents into a file nobody reads.
   """
-  @spec registered_hosts() :: host_list()
-  def registered_hosts, do: PathListConfig.registered(@spec_)
-
+  @spec registered_stores() :: store_list()
+  def registered_stores, do: PathListConfig.registered(@spec_)
 end

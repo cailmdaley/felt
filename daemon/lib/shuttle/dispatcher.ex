@@ -291,7 +291,7 @@ defmodule Shuttle.Dispatcher do
 
   # The first configured felt store: the default when a caller names none.
   defp default_felt_store do
-    Shuttle.FeltStores.configured_hosts() |> List.first()
+    Shuttle.FeltStores.configured_stores() |> List.first()
   end
 
   @doc "Renders the skill entrypoint and launch-specific data for a worker."

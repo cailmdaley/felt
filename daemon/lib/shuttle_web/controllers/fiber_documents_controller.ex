@@ -334,7 +334,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # turn into a 503 (owner-feed endpoint) or a stale-marked empty local column
   # (composite board).
   defp cached_owner_feed do
-    case Shuttle.Poller.cached_fiber_documents(felt_stores: Shuttle.FeltStores.configured_hosts()) do
+    case Shuttle.Poller.cached_fiber_documents(
+           felt_stores: Shuttle.FeltStores.configured_stores()
+         ) do
       {:ok, %{fibers: entries} = body} ->
         held = Shuttle.Poller.parked_index()
         {:ok, %{body | fibers: Enum.map(entries, &Snapshot.put_held(&1, held))}}

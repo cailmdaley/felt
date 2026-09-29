@@ -407,7 +407,7 @@ defmodule Shuttle.DispatcherTest do
     start_supervised!(MockRunner)
     MockRunner.reset()
 
-    # `default_felt_store/0` resolves through `FeltStores.configured_hosts/0`,
+    # `default_felt_store/0` resolves through `FeltStores.configured_stores/0`,
     # which reads the FELT_STORES env / persisted stores.json — NOT the injected
     # test runner. On a machine with a configured loom it returns a store; in a
     # bare CI environment it returns [] → `default_felt_store/0` is nil, so the
@@ -415,7 +415,7 @@ defmodule Shuttle.DispatcherTest do
     # aborts with :reopen_unavailable before it can shell `felt shuttle reopen`.
     # Pin a store here so store resolution is deterministic regardless of the
     # host's felt config; delete on exit so the setting never leaks to other
-    # suites (the persistent_term cache in configured_hosts/0 is keyed by the
+    # suites (the persistent_term cache in configured_stores/0 is keyed by the
     # base config, so a differing base on the next suite recomputes cleanly).
     prev_stores = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", "/tmp")

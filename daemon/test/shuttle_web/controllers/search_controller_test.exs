@@ -56,7 +56,7 @@ defmodule ShuttleWeb.SearchControllerTest do
     Application.put_env(:shuttle, :felt_runner, MockRunner)
     on_exit(fn -> restore_app_env(:felt_runner, previous) end)
 
-    # configured_hosts/0 falls through to FELT_STORES / the persisted
+    # configured_stores/0 falls through to FELT_STORES / the persisted
     # ~/.config/felt/stores.json registry — on a dev machine that registry is
     # rarely empty, so this suite silently rode ambient config and only CI (a
     # fresh runner with neither) exposed it. One store is enough: MockRunner
@@ -67,7 +67,6 @@ defmodule ShuttleWeb.SearchControllerTest do
 
     :ok
   end
-
 
   test "a blank query answers empty without shelling felt" do
     conn = get(api_conn(), "/api/v1/search?q=%20%20")

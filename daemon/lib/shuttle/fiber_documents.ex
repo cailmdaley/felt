@@ -117,7 +117,7 @@ defmodule Shuttle.FiberDocuments do
   end
 
   defp collect(opts, with_body?, mode) do
-    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_hosts/0)
+    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
 
     results = Enum.map(stores, &list_store(&1, with_body?, mode))
     errors = Enum.flat_map(results, &store_errors/1)
@@ -192,7 +192,7 @@ defmodule Shuttle.FiberDocuments do
   """
   @spec get(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def get(id, opts \\ []) do
-    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_hosts/0)
+    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
     with_body? = Keyword.get(opts, :with_body, false)
 
     case fast_lookup(stores, id, with_body?) do

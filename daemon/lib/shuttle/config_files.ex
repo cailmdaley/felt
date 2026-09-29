@@ -174,7 +174,7 @@ defmodule Shuttle.ConfigFiles do
   "empty" about a host that never answered: the read either works or fails.
   """
   @spec entries(id()) :: [String.t()] | nil
-  def entries(:stores), do: FeltStores.registered_hosts()
+  def entries(:stores), do: FeltStores.registered_stores()
   def entries(:projects), do: Projects.registered_projects()
   def entries(_), do: nil
 

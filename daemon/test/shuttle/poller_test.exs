@@ -5447,7 +5447,7 @@ defmodule Shuttle.PollerTest do
   # These tests exercise the multi-felt-store path directly against the file
   # system; they bypass MockRunner's in-memory fiber store and write real
   # .felt/ directories instead. They use `resolve_fiber_host/2` (the public
-  # GenServer call) to verify host_for_fiber resolution without depending on
+  # GenServer call) to verify store_for_fiber resolution without depending on
   # dispatch (which requires the full OTP tree).
 
   # Helper: write a minimal fiber .md file with a shuttle: block into
@@ -5653,7 +5653,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [loom, project]
       )
 
-    :sys.replace_state(poller, &%{&1 | fiber_host_cache: %{}})
+    :sys.replace_state(poller, &%{&1 | fiber_store_cache: %{}})
 
     assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
   end

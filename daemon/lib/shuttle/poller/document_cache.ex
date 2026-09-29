@@ -31,10 +31,10 @@ defmodule Shuttle.Poller.DocumentCache do
   mtime and building the rest directly from their candidate rows. Returns
   `{cache, stats}` where `stats` carries hits/misses/evictions/entries.
 
-  `host_map` is `%{fiber_id => felt_store}`, resolving each candidate to the
+  `store_map` is `%{fiber_id => felt_store}`, resolving each candidate to the
   store that physically roots it (so the entry's `felt_store`/`path` are correct).
   """
-  def refresh(state, candidates, host_map) do
+  def refresh(state, candidates, store_map) do
     previous = state.document_cache
 
     {cache, stats} =
@@ -51,7 +51,7 @@ defmodule Shuttle.Poller.DocumentCache do
           reused = reconcile_report_path(cached, candidate)
           {Map.put(cache_acc, key, reused), Map.update!(stats, :hits, &(&1 + 1))}
         else
-          case build_entry(candidate, host_map) do
+          case build_entry(candidate, store_map) do
             {:ok, entry} ->
               cached = %{modified_at: modified_at, entry: entry}
               {Map.put(cache_acc, key, cached), Map.update!(stats, :misses, &(&1 + 1))}
@@ -119,9 +119,9 @@ defmodule Shuttle.Poller.DocumentCache do
   # shell-out and no stat: the row already carries the full kanban projection
   # (including the native `report_path` existence signal), so
   # `FiberDocuments.entries_for_fiber/2` shapes the wire entry in-process.
-  defp build_entry(candidate, host_map) do
+  defp build_entry(candidate, store_map) do
     id = Map.get(candidate, "id")
-    store = if is_binary(id), do: Map.get(host_map, id)
+    store = if is_binary(id), do: Map.get(store_map, id)
 
     cond do
       not (is_binary(id) and id != "") ->

@@ -739,7 +739,7 @@ defmodule Shuttle.Meeting do
     local =
       try do
         case Shuttle.Poller.cached_fiber_documents(
-               felt_stores: Shuttle.FeltStores.configured_hosts()
+               felt_stores: Shuttle.FeltStores.configured_stores()
              ) do
           {:ok, %{fibers: entries}} -> entries
           _ -> []

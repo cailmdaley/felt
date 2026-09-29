@@ -58,7 +58,7 @@ defmodule ShuttleWeb.SearchController do
   end
 
   defp search(query, limit) do
-    stores = FeltStores.configured_hosts()
+    stores = FeltStores.configured_stores()
 
     {rows, errors} =
       Enum.reduce(stores, {[], []}, fn store, {rows, errors} ->

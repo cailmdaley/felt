@@ -13,10 +13,10 @@ defmodule ShuttleWeb.FeltNestController do
   `POST /api/v1/felt-nest` body: `{ "fiber_id": "...", "origin": "...",
   "parent": "<parent-id>" | null }`.
 
-    * `parent` string — `felt -C <host> nest <fiber> <parent>`. The parent must
-      resolve within the SAME felt host as the fiber; a cross-host re-parent is
+    * `parent` string — `felt -C <store> nest <fiber> <parent>`. The parent must
+      resolve within the SAME felt store as the fiber; a cross-store re-parent is
       refused with a 400 rather than handed to felt with a dangling id.
-    * `parent` null/`""` — `felt -C <host> unnest <fiber>` (promote to
+    * `parent` null/`""` — `felt -C <store> unnest <fiber>` (promote to
       top-level).
 
   Responds 200 with felt's plain-text output; the caller derives the fiber's
@@ -24,7 +24,7 @@ defmodule ShuttleWeb.FeltNestController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, host_for_fiber: 1]
+  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, store_for_fiber: 1]
 
   alias Shuttle.{Felt, FeltStores, OriginRouter}
 
@@ -46,27 +46,27 @@ defmodule ShuttleWeb.FeltNestController do
 
   defp create_local(conn, fiber_id, params) do
     result =
-      with {:ok, host, address} <- host_for_fiber(fiber_id),
-           {:ok, args} <- args(host, address, Map.fetch(params, "parent")) do
-        run(host, args)
+      with {:ok, store, address} <- store_for_fiber(fiber_id),
+           {:ok, args} <- args(store, address, Map.fetch(params, "parent")) do
+        run(store, args)
       end
 
     send_cli_result(conn, "felt", result)
   end
 
   # `parent` is required (absent is a caller bug, not a no-op); null or ""
-  # means unnest. A string parent must resolve within the same host.
-  defp args(_host, _address, :error), do: {:error, "parent is required (null to unnest)"}
-  defp args(_host, address, {:ok, nil}), do: {:ok, ["unnest", address]}
-  defp args(_host, address, {:ok, ""}), do: {:ok, ["unnest", address]}
+  # means unnest. A string parent must resolve within the same store.
+  defp args(_store, _address, :error), do: {:error, "parent is required (null to unnest)"}
+  defp args(_store, address, {:ok, nil}), do: {:ok, ["unnest", address]}
+  defp args(_store, address, {:ok, ""}), do: {:ok, ["unnest", address]}
 
-  defp args(host, address, {:ok, parent}) when is_binary(parent) do
+  defp args(store, address, {:ok, parent}) when is_binary(parent) do
     case FeltStores.resolve_fiber(parent) do
-      {:ok, %{host: ^host, fiber_id: parent_address}} ->
+      {:ok, %{store: ^store, fiber_id: parent_address}} ->
         {:ok, ["nest", address, parent_address]}
 
-      {:ok, %{host: other}} ->
-        {:error, "cannot reparent across felt hosts (#{host} → #{other})"}
+      {:ok, %{store: other}} ->
+        {:error, "cannot reparent across felt stores (#{store} → #{other})"}
 
       {:error, :not_found} ->
         {:error, "parent fiber not found: #{parent}"}
@@ -76,7 +76,7 @@ defmodule ShuttleWeb.FeltNestController do
     end
   end
 
-  defp args(_host, _address, {:ok, _}), do: {:error, "parent must be a string or null"}
+  defp args(_store, _address, {:ok, _}), do: {:error, "parent must be a string or null"}
 
-  defp run(host, args), do: Felt.run(["-C", host] ++ args)
+  defp run(store, args), do: Felt.run(["-C", store] ++ args)
 end

@@ -349,7 +349,7 @@ defmodule Shuttle.LifecycleStore do
   end
 
   # Resolve a fiber id to its owning felt store + store-scoped id — the pair
-  # `felt shuttle mark-runtime` needs (run with `cd: host`). Uses the daemon's
+  # `felt shuttle mark-runtime` needs (run with `cd: store`). Uses the daemon's
   # configured `felt_stores` when threaded (the poller passes `state.felt_stores`),
   # else the global configured stores.
   defp resolve_runtime_target(fiber_id, felt_stores) do
@@ -361,7 +361,7 @@ defmodule Shuttle.LifecycleStore do
       end
 
     case resolution do
-      {:ok, %{host: host, fiber_id: scoped_id}} -> {:ok, host, scoped_id}
+      {:ok, %{store: store, fiber_id: scoped_id}} -> {:ok, store, scoped_id}
       _ -> :error
     end
   end
