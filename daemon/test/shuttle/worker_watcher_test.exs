@@ -2,7 +2,7 @@ defmodule Shuttle.WorkerWatcherTest do
   use ExUnit.Case
 
   alias Shuttle.WorkerWatcher
-  alias Shuttle.Dispatcher
+  alias Shuttle.Test.FiberUid
 
   # ── Mock Runner ──
 
@@ -128,7 +128,7 @@ defmodule Shuttle.WorkerWatcherTest do
   end
 
   test "watcher detects session death and notifies poller" do
-    session = Dispatcher.session_name("tests/haiku")
+    session = FiberUid.session("tests/haiku")
     MockRunner.add_session(session)
 
     {:ok, watcher} =
@@ -161,7 +161,7 @@ defmodule Shuttle.WorkerWatcherTest do
     assert {:error, :normal} =
              WorkerWatcher.start_link(
                fiber_id: "tests/missing",
-               session: Dispatcher.session_name("tests/missing"),
+               session: FiberUid.session("tests/missing"),
                poller: self(),
                runner: MockRunner,
                heartbeat_interval_ms: 50
@@ -171,7 +171,7 @@ defmodule Shuttle.WorkerWatcherTest do
   end
 
   test "watcher can be stopped gracefully" do
-    session = Dispatcher.session_name("tests/haiku")
+    session = FiberUid.session("tests/haiku")
     MockRunner.add_session(session)
 
     {:ok, watcher} =
@@ -199,7 +199,7 @@ defmodule Shuttle.WorkerWatcherTest do
   # removing the session yields "can't find session" → :gone.
 
   test "watcher survives transient tmux failures without declaring worker dead" do
-    session = Dispatcher.session_name("tests/flaky")
+    session = FiberUid.session("tests/flaky")
     FlakeyRunner.add_session(session)
 
     {:ok, watcher} =
@@ -240,7 +240,7 @@ defmodule Shuttle.WorkerWatcherTest do
     # so far more than max_consecutive_failures of them in a row still can't kill
     # a live worker. Reverting Shuttle.Tmux's :unknown carve-out (treating any
     # non-zero as death) re-arms the false-kill-then-resume storm.
-    session = Dispatcher.session_name("tests/inconclusive")
+    session = FiberUid.session("tests/inconclusive")
     FlakeyRunner.add_session(session)
 
     {:ok, watcher} =
@@ -267,7 +267,7 @@ defmodule Shuttle.WorkerWatcherTest do
   end
 
   test "watcher resets failure counter after recovery" do
-    session = Dispatcher.session_name("tests/recover")
+    session = FiberUid.session("tests/recover")
     FlakeyRunner.add_session(session)
 
     {:ok, watcher} =
@@ -315,7 +315,7 @@ defmodule Shuttle.WorkerWatcherTest do
   # — the watcher must trap+log, not crash.
   # See [[ai-futures/shuttle/finding-ghost-workers-stuck-running]].
   test "watcher accepts a registered atom as :poller and delivers via name" do
-    session = Dispatcher.session_name("tests/named-poller")
+    session = FiberUid.session("tests/named-poller")
     MockRunner.add_session(session)
 
     # Register the test process under a unique name so send/2 can resolve it
@@ -341,7 +341,7 @@ defmodule Shuttle.WorkerWatcherTest do
   end
 
   test "watcher logs and continues when registered :poller name has no live process" do
-    session = Dispatcher.session_name("tests/dead-poller")
+    session = FiberUid.session("tests/dead-poller")
     MockRunner.add_session(session)
 
     # Use an atom that is NOT registered to any process. send/2 to an

@@ -7,10 +7,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
   watcher). This module re-adopts those live sessions so the daemon resumes
   supervising them — at boot (`adopt_orphans/1`) and on every poll
   (`reconcile_orphaned_sessions/1`). Both walk the live `*-shuttle` tmux
-  sessions, map each back to its fiber through `candidate_session_lookup/1`
-  (which recognizes both the uid-keyed canonical name and the leaf-only name,
-  guarding ambiguous leaves), and either start a watcher over the live
-  session, kill a session whose fiber has closed, or skip an unknown one.
+  sessions, map each back to its fiber by its `<leaf>-<uid>-shuttle` name
+  through `candidate_session_lookup/1`, and either start a watcher over the
+  live session, kill a session whose fiber has closed, or skip an unknown one.
 
   Functions take the `Shuttle.Poller.State` struct and return updated state;
   the helpers they share with the rest of the poller live in `Shuttle.Poller`.
@@ -79,13 +78,12 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
-  # `session` is the *live* tmux session name to adopt. Callers that discovered
-  # a live orphan pass its exact name (either name form); the default picks
-  # whichever of the fiber's name forms is actually live (preferring the
-  # uid-keyed name), for callers that only have the fiber identity.
+  # `session` is the *live* session to adopt. Callers that discovered a live
+  # orphan pass its exact name; the default is the fiber's live worker session,
+  # else its worker name, for callers that only have the fiber identity.
   def adopt_session(state, fiber_id, session \\ nil) do
-    # Fetch first so the uid for the canonical session name comes straight off
-    # the fiber. The runtime maps key by the fiber's runtime key; felt I/O stays
+    # Fetch first so the uid for the session name comes straight off the fiber.
+    # The runtime maps key by the fiber's runtime key; felt I/O stays
     # slug-addressed.
     case Poller.fetch_fiber_full(fiber_id, state) do
       {:ok, fiber} ->
@@ -95,64 +93,75 @@ defmodule Shuttle.Poller.SessionReconciliation do
           session || Poller.live_session_for_fiber(state, fiber_id, uid) ||
             Dispatcher.session_name(fiber_id, uid)
 
-        if Map.get(fiber, "status") != "closed" or Shuttle.AppWorkers.app?(session) do
-          # Label only — felt owns resolution; read its resolved id off the
-          # already-fetched fiber JSON rather than re-resolving.
-          agent_id = Poller.agent_id_from_fiber(fiber)
+        cond do
+          # No uid, so no worker name and nothing to adopt under one.
+          session == nil ->
+            Logger.debug("Skipping adoption for #{fiber_id}: the fiber has no intrinsic id")
+            state
 
-          now = DateTime.utc_now()
-          runtime_key = Poller.runtime_key_for_fiber(fiber)
+          Map.get(fiber, "status") != "closed" or Shuttle.AppWorkers.app?(session) ->
+            adopt_live_session(state, fiber_id, fiber, uid, session)
 
-          app_record =
-            case Shuttle.AppWorkers.id(session) do
-              nil ->
-                %{}
-
-              id ->
-                case Shuttle.AppWorkers.get(id) do
-                  {:ok, record} -> record
-                  _ -> %{}
-                end
-            end
-
-          started_at =
-            case DateTime.from_iso8601(app_record["started_at"] || "") do
-              {:ok, timestamp, _} -> timestamp
-              _ -> now
-            end
-
-          running_meta = %{
-            state: Map.get(app_record, "launch_state", "running"),
-            launch_error: app_record["last_error"],
-            fiber_id: fiber_id,
-            session: session,
-            agent_id: app_record["agent_id"] || agent_id,
-            uid: uid,
-            felt_store: app_record["felt_store"],
-            started_at: started_at,
-            last_activity_at: started_at
-          }
-
-          case Poller.start_watcher(state, fiber_id, running_meta) do
-            {:ok, running_meta} ->
-              running = Map.put(state.running, runtime_key, running_meta)
-
-              Logger.info("Adopted orphan session: #{session}")
-
-              %{state | running: running}
-              |> Poller.note_running(runtime_key)
-
-            {:error, reason} ->
-              Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")
-              state
-          end
-        else
-          kill_closed_session(state, fiber_id, fiber, session)
+          true ->
+            kill_closed_session(state, fiber_id, fiber, session)
         end
 
       {:error, _} ->
         # Fiber not found — skip, don't kill (could be from another host or test)
         Logger.debug("Skipping orphan session for unknown fiber: #{inspect(session)}")
+        state
+    end
+  end
+
+  defp adopt_live_session(state, fiber_id, fiber, uid, session) do
+    # Label only — felt owns resolution; read its resolved id off the
+    # already-fetched fiber JSON rather than re-resolving.
+    agent_id = Poller.agent_id_from_fiber(fiber)
+
+    now = DateTime.utc_now()
+    runtime_key = Poller.runtime_key_for_fiber(fiber)
+
+    app_record =
+      case Shuttle.AppWorkers.id(session) do
+        nil ->
+          %{}
+
+        id ->
+          case Shuttle.AppWorkers.get(id) do
+            {:ok, record} -> record
+            _ -> %{}
+          end
+      end
+
+    started_at =
+      case DateTime.from_iso8601(app_record["started_at"] || "") do
+        {:ok, timestamp, _} -> timestamp
+        _ -> now
+      end
+
+    running_meta = %{
+      state: Map.get(app_record, "launch_state", "running"),
+      launch_error: app_record["last_error"],
+      fiber_id: fiber_id,
+      session: session,
+      agent_id: app_record["agent_id"] || agent_id,
+      uid: uid,
+      felt_store: app_record["felt_store"],
+      started_at: started_at,
+      last_activity_at: started_at
+    }
+
+    case Poller.start_watcher(state, fiber_id, running_meta) do
+      {:ok, running_meta} ->
+        running = Map.put(state.running, runtime_key, running_meta)
+
+        Logger.info("Adopted orphan session: #{session}")
+
+        %{state | running: running}
+        |> Poller.note_running(runtime_key)
+
+      {:error, reason} ->
+        Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")
         state
     end
   end
@@ -187,41 +196,39 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end)
   end
 
-  # Maps every live tmux session name a candidate could carry — both the
-  # uid-keyed canonical name and the leaf-only name — back to its fiber,
-  # so orphan adoption recognizes a worker launched under either scheme. The
-  # uid-keyed entries are inherently collision-free; the leaf-only
-  # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
-  # to `:ambiguous` and are skipped rather than mis-adopted).
+  # Maps each candidate's worker session name (`<leaf>-<uid>-shuttle`) back to
+  # its fiber, so orphan adoption recognizes the workers it launched. A uid is
+  # unique to one fiber, so a name claimed by two fibers means a duplicated id
+  # (a copied file): it resolves to `:ambiguous` and is skipped rather than
+  # mis-adopted. A candidate without a uid has no worker name and no entry.
   defp candidate_session_lookup(%State{} = state) do
     {candidates, _store_map, _store_listings} = Poller.discover_candidates(state)
 
     candidates
     |> Enum.reduce(%{}, fn fiber, acc ->
-      case {Map.get(fiber, "id"), Map.get(fiber, "status")} do
-        {fiber_id, status} when is_binary(fiber_id) and fiber_id != "" ->
-          bucket = if(status == "closed", do: :closed, else: :open)
+      fiber_id = Map.get(fiber, "id")
 
-          # Record fiber_id in `bucket` of the session's grouped sets. `Map.update/4`
-          # inserts the default VERBATIM when the key is absent — the function is NOT
-          # applied to it — so the default must already carry fiber_id. Without this,
-          # a session name seen exactly once (every uid-keyed name is unique to one
-          # fiber) keeps empty sets, resolves to nil below, and the live worker is
-          # never adopted — the daemon-restart-drops-all-adoptions bug.
-          add_to_bucket = fn grouped ->
-            Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id))
-          end
+      session =
+        if is_binary(fiber_id) and fiber_id != "",
+          do: Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
-          singleton = add_to_bucket.(%{open: MapSet.new(), closed: MapSet.new()})
+      if session do
+        bucket = if(Map.get(fiber, "status") == "closed", do: :closed, else: :open)
 
-          fiber_id
-          |> Dispatcher.session_names(Map.get(fiber, "uid"))
-          |> Enum.reduce(acc, fn session, acc2 ->
-            Map.update(acc2, session, singleton, add_to_bucket)
-          end)
+        # Record fiber_id in `bucket` of the session's grouped sets. `Map.update/4`
+        # inserts the default VERBATIM when the key is absent — the function is NOT
+        # applied to it — so the default must already carry fiber_id. Without this,
+        # a session name seen exactly once (every name is unique to one fiber) keeps
+        # empty sets, resolves to nil below, and the live worker is never adopted —
+        # the daemon-restart-drops-all-adoptions bug.
+        add_to_bucket = fn grouped ->
+          Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id))
+        end
 
-        _ ->
-          acc
+        singleton = add_to_bucket.(%{open: MapSet.new(), closed: MapSet.new()})
+        Map.update(acc, session, singleton, add_to_bucket)
+      else
+        acc
       end
     end)
     |> Enum.into(%{}, fn {session, grouped} ->
@@ -262,7 +269,10 @@ defmodule Shuttle.Poller.SessionReconciliation do
         kill_closed_session(state, fiber_id, fiber, session)
 
       :ambiguous ->
-        Logger.warning("Skipping orphan session with ambiguous leaf-only name: #{session}")
+        Logger.warning(
+          "Skipping orphan session whose name two fibers share (a duplicated id): #{session}"
+        )
+
         state
 
       nil ->

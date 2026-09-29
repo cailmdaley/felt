@@ -11,35 +11,42 @@ defmodule Shuttle.WorkerProcessTest do
 
   @table """
     700     1 /opt/homebrew/bin/tmux new-session -d -s shuttle-anchor
-    812   700 bash -l /var/folders/T/shuttle-run-leaf-01ABC-shuttle.42.sh
+    812   700 bash -l /var/folders/T/shuttle-run-leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle.42.sh
     813   812 claude --effort high --resume #{@uuid}
     900   700 bash -l /var/folders/T/shuttle-run-resume-#{@uuid}.7.sh
     950     1 bash -l /var/folders/T/shuttle-run-9859.sh
     951   950 claude --session-id=aaaaaaaa-0000-0000-0000-000000000000
-    960     1 /usr/bin/tmux new-session -d -s dead-01XYZ-shuttle bash -l /tmp/shuttle-run-dead-01XYZ-shuttle.3.sh
+    960     1 /usr/bin/tmux new-session -d -s dead-01KTHDNZS287ZSSG8X8V59XKW1-shuttle bash -l /tmp/shuttle-run-dead-01KTHDNZS287ZSSG8X8V59XKW1-shuttle.3.sh
     970   700 pi --model x Previous session: bbbbbbbb-0000-0000-0000-000000000000 (claude)
   """
 
   defp procs, do: WorkerProcess.parse(@table)
 
   test "script_path names the session, and the process table reads it back" do
-    path = WorkerProcess.script_path("leaf-01ABC-shuttle")
+    path = WorkerProcess.script_path("leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle")
     assert String.starts_with?(path, System.tmp_dir!())
-    assert Path.basename(path) =~ ~r/^shuttle-run-leaf-01ABC-shuttle\.\d+\.sh$/
+
+    assert Path.basename(path) =~
+             ~r/^shuttle-run-leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle\.\d+\.sh$/
 
     [proc] = WorkerProcess.parse("  5  1 bash -l #{path}\n")
-    assert WorkerProcess.session_process([proc], "leaf-01ABC-shuttle") == proc
-    assert WorkerProcess.sessions([proc]) == ["leaf-01ABC-shuttle"]
+
+    assert WorkerProcess.session_process([proc], "leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle") ==
+             proc
+
+    assert WorkerProcess.sessions([proc]) == ["leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle"]
   end
 
   test "sessions lists only shuttle worker sessions with a live run script" do
     # resume-<uuid> is not a worker session; an unnamed script names none.
-    assert WorkerProcess.sessions(procs()) == ["leaf-01ABC-shuttle"]
+    assert WorkerProcess.sessions(procs()) == ["leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle"]
   end
 
   test "a tmux server keeping its forking client's argv is not a live worker" do
-    assert WorkerProcess.session_process(procs(), "dead-01XYZ-shuttle") == nil
-    refute "dead-01XYZ-shuttle" in WorkerProcess.sessions(procs())
+    assert WorkerProcess.session_process(procs(), "dead-01KTHDNZS287ZSSG8X8V59XKW1-shuttle") ==
+             nil
+
+    refute "dead-01KTHDNZS287ZSSG8X8V59XKW1-shuttle" in WorkerProcess.sessions(procs())
   end
 
   test "holder matches the uuid as a whole argv token, or a --flag=<uuid> token" do

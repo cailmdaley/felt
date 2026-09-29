@@ -86,6 +86,7 @@ defmodule ShuttleWeb.ClaimController do
   defp error_status(:not_found), do: {404, "not_found"}
   defp error_status(:closed), do: {422, "closed"}
   defp error_status(:not_installed), do: {422, "not_installed"}
+  defp error_status(:uid_missing), do: {422, "uid_missing"}
   defp error_status(:already_running), do: {409, "already_running"}
   defp error_status(:session_not_found), do: {422, "session_not_found"}
   defp error_status(:native_thread_unverified), do: {422, "native_thread_unverified"}

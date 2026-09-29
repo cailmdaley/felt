@@ -44,22 +44,15 @@ defmodule Shuttle.ActionQueries do
   defp running?(fiber, opts), do: is_binary(live_session(fiber, opts))
 
   defp live_session(fiber, opts) do
-    fiber
-    |> fiber_address()
-    |> Dispatcher.session_names(fiber_uid(fiber))
-    |> Enum.find(&session_live?(&1, opts))
+    case Dispatcher.session_name(fiber_address(fiber), Map.get(fiber, "uid")) do
+      nil -> nil
+      session -> if session_live?(session, opts), do: session
+    end
   end
 
   defp session_live?(session, opts) do
     runner = Keyword.get(opts, :runner, default_runner())
     Shuttle.Tmux.present?(runner, session)
-  end
-
-  defp fiber_uid(fiber) do
-    case Map.get(fiber, "uid") do
-      uid when is_binary(uid) and uid != "" -> uid
-      _ -> nil
-    end
   end
 
   defp fiber_address(fiber) do

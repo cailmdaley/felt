@@ -100,12 +100,9 @@ defmodule Shuttle.Poller.StandingRoles do
       Shuttle.AppWorkers.for_fiber(fiber_id, Map.get(fiber, "uid")) != nil ->
         state
 
-      # A live tmux session (either name form) means the worker is still up —
+      # A live worker session means the worker is still up —
       # `reconcile_orphaned_sessions`/`adopt_orphans` will adopt it. Not dead.
-      Enum.any?(
-        Dispatcher.session_names(fiber_id, Map.get(fiber, "uid")),
-        &MapSet.member?(live_sessions, &1)
-      ) ->
+      MapSet.member?(live_sessions, Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))) ->
         state
 
       # The marker discriminator: only a role that was actually DISPATCHED but

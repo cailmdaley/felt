@@ -2,6 +2,9 @@ defmodule Shuttle.DispatcherTest do
   use ExUnit.Case
 
   alias Shuttle.Dispatcher
+  alias Shuttle.Test.FiberUid
+
+  require Shuttle.Dispatcher
   alias Shuttle.Agents
 
   # ── Mock Runner ──
@@ -182,6 +185,20 @@ defmodule Shuttle.DispatcherTest do
           "resolved" => %{"agent" => @claude_opus_resolved}
         }
       },
+      # A fiber with no intrinsic id (a hand-made file never backfilled), and
+      # one whose id is not a ULID: neither has a worker session name.
+      "tests/no-uid" => %{
+        status: "active",
+        tags: ["constitution"],
+        uid: nil,
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
+      "tests/bad-uid" => %{
+        status: "active",
+        tags: ["constitution"],
+        uid: "not-a-ulid",
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/uid-fiber" => %{
         status: "active",
         tags: ["constitution"],
@@ -343,7 +360,7 @@ defmodule Shuttle.DispatcherTest do
             }
             |> maybe_put("shuttle", fiber.shuttle)
             |> maybe_put("collaboration", Map.get(fiber, :collaboration))
-            |> maybe_put("uid", Map.get(fiber, :uid))
+            |> maybe_put("uid", Map.get(fiber, :uid, Shuttle.Test.FiberUid.for(fiber_id)))
 
           {Jason.encode!(payload), 0}
 
@@ -782,34 +799,27 @@ defmodule Shuttle.DispatcherTest do
     assert Dispatcher.session_name("a/b/c", uid) == "c-#{uid}-shuttle"
   end
 
-  test "session_name/2 falls back to the legacy leaf-only name when uid is absent" do
-    assert Dispatcher.session_name("tests/haiku", nil) == "haiku-shuttle"
-    assert Dispatcher.session_name("tests/haiku", "") == "haiku-shuttle"
+  test "session_name/2 has no name for a fiber without a ULID uid" do
+    assert Dispatcher.session_name("tests/haiku", nil) == nil
+    assert Dispatcher.session_name("tests/haiku", "") == nil
+    assert Dispatcher.session_name("tests/haiku", "not-a-ulid") == nil
   end
 
-  test "session_name/1 is the legacy leaf-only form (retained for dual-recognition)" do
-    assert Dispatcher.session_name("tests/haiku") == "haiku-shuttle"
-    assert Dispatcher.session_name("a/b/c") == "c-shuttle"
-  end
-
-  test "session_names/2 returns both forms for dual-recognition" do
+  test "the name session_name/2 produces is exactly the name shuttle_session?/1 recognizes" do
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
+    name = Dispatcher.session_name("tests/haiku", uid)
 
-    assert Dispatcher.session_names("tests/haiku", uid) == [
-             "haiku-#{uid}-shuttle",
-             "haiku-shuttle"
-           ]
+    assert Dispatcher.shuttle_session?(name)
+    assert Shuttle.ULID.from_tmux(name) == uid
 
-    # No uid → only the legacy form is recognizable.
-    assert Dispatcher.session_names("tests/haiku", nil) == ["haiku-shuttle"]
-
-    # Both forms are Shuttle sessions.
-    assert Enum.all?(Dispatcher.session_names("tests/haiku", uid), &Dispatcher.shuttle_session?/1)
+    for other <- ["haiku-shuttle", "haiku-01J-shuttle", "capture-deadbeef", "resume-#{uid}"] do
+      refute Dispatcher.shuttle_session?(other), "#{other} must not read as a worker session"
+    end
   end
 
   test "dispatch creates tmux session for eligible fiber" do
     result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-    assert {:ok, "haiku-shuttle"} = result
+    assert result == {:ok, FiberUid.session("tests/haiku")}
 
     commands = MockRunner.commands()
 
@@ -828,7 +838,8 @@ defmodule Shuttle.DispatcherTest do
   # all. These tests pin the preflight that turns that into a loud refusal.
 
   test "dispatch preflights the wrapper in a login bash before spawning tmux" do
-    assert {:ok, "haiku-shuttle"} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert Dispatcher.dispatch("tests/haiku", runner: MockRunner) ==
+             {:ok, FiberUid.session("tests/haiku")}
 
     commands = MockRunner.commands()
 
@@ -884,7 +895,9 @@ defmodule Shuttle.DispatcherTest do
     # spawn reports whatever it actually finds.
     MockRunner.set_wrapper_kind("claude", :wedged)
 
-    assert {:ok, "haiku-shuttle"} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert Dispatcher.dispatch("tests/haiku", runner: MockRunner) ==
+             {:ok, FiberUid.session("tests/haiku")}
+
     assert Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
@@ -973,12 +986,30 @@ defmodule Shuttle.DispatcherTest do
            end)
   end
 
-  test "dispatch refuses when a live worker exists under the legacy name (dual-recognition)" do
-    # A worker launched before the uid-keyed cutover carries the legacy
-    # leaf-only name; check_not_running must still see it and refuse a
-    # duplicate dispatch for the uid-carrying fiber.
-    MockRunner.add_tmux_session("uid-fiber-shuttle")
-    assert {:error, :already_running} = Dispatcher.dispatch("tests/uid-fiber", runner: MockRunner)
+  test "dispatch refuses a fiber without an intrinsic id, naming the fix, before touching tmux" do
+    for {fiber, fix} <- [
+          {"tests/no-uid", "felt backfill-ids"},
+          {"tests/bad-uid", "is not a ULID"}
+        ] do
+      MockRunner.reset()
+
+      assert {:error, {:uid_missing, message}} = Dispatcher.dispatch(fiber, runner: MockRunner)
+      assert Dispatcher.refusal?(:uid_missing, message)
+      assert message =~ fiber
+      assert message =~ fix
+
+      refute Enum.any?(MockRunner.commands(), &match?({"tmux", _}, &1)),
+             "a refused dispatch must not probe or spawn tmux"
+    end
+
+    # A forced dispatch is refused just the same — force overrides status,
+    # not the missing worker name — and never reopens the fiber first.
+    MockRunner.reset()
+
+    assert {:error, {:uid_missing, _}} =
+             Dispatcher.dispatch("tests/no-uid", runner: MockRunner, force: true)
+
+    refute Enum.any?(MockRunner.commands(), fn {_, args} -> "reopen" in args end)
   end
 
   test "dispatch refuses closed fiber" do
@@ -1097,28 +1128,31 @@ defmodule Shuttle.DispatcherTest do
 
   test "dispatch refuses already-running fiber" do
     # Pre-seed the tmux session
-    MockRunner.add_tmux_session(Dispatcher.session_name("tests/haiku"))
+    MockRunner.add_tmux_session(FiberUid.session("tests/haiku"))
 
     result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
     assert {:error, :already_running} = result
   end
 
   test "dispatch does not treat child fiber session as already-running parent" do
-    MockRunner.add_tmux_session(Dispatcher.session_name("tests/haiku/child"))
+    MockRunner.add_tmux_session(FiberUid.session("tests/haiku/child"))
 
     result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-    assert {:ok, "haiku-shuttle"} = result
+    assert result == {:ok, FiberUid.session("tests/haiku")}
 
     assert Enum.any?(MockRunner.commands(), fn
-             {"tmux", ["has-session", "-t", "=haiku-shuttle"]} -> true
-             _ -> false
+             {"tmux", ["has-session", "-t", "=" <> session]} ->
+               session == FiberUid.session("tests/haiku")
+
+             _ ->
+               false
            end)
   end
 
   test "dispatch reads felt's resolved pi agent (pi-tagged fiber)" do
     result = Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner)
     assert {:ok, session} = result
-    assert session == Dispatcher.session_name("tests/pi-tagged")
+    assert session == FiberUid.session("tests/pi-tagged")
 
     # Verify the tmux new-session command was issued
     commands = MockRunner.commands()
@@ -1131,7 +1165,7 @@ defmodule Shuttle.DispatcherTest do
 
   test "dispatch uses felt's resolved agent (claude-opus) when present" do
     assert {:ok, _session} = Dispatcher.dispatch("tests/shuttle-agent-block", runner: MockRunner)
-    script = read_run_script_for(Dispatcher.session_name("tests/shuttle-agent-block"))
+    script = read_run_script_for(FiberUid.session("tests/shuttle-agent-block"))
     assert script =~ "agent=claude-opus"
     refute script =~ "agent=claude-sonnet"
   end
@@ -1140,7 +1174,7 @@ defmodule Shuttle.DispatcherTest do
     assert {:ok, _session} =
              Dispatcher.dispatch("tests/shuttle-agent-overrides-tag", runner: MockRunner)
 
-    script = read_run_script_for(Dispatcher.session_name("tests/shuttle-agent-overrides-tag"))
+    script = read_run_script_for(FiberUid.session("tests/shuttle-agent-overrides-tag"))
     assert script =~ "agent=claude-opus"
     refute script =~ "agent=pi-deepseek-flash"
   end
@@ -2054,7 +2088,7 @@ defmodule Shuttle.DispatcherTest do
       Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp", felt_store: "/tmp")
 
     assert session =~ ~r/^capture-[0-9a-f]{8}$/
-    refute String.ends_with?(session, "-shuttle")
+    refute Dispatcher.shuttle_session?(session)
     assert is_binary(uuid)
 
     {_, args} =
