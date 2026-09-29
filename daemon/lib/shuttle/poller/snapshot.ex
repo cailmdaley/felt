@@ -33,7 +33,7 @@ defmodule Shuttle.Poller.Snapshot do
         |> Map.merge(%{
           fiber_id: fiber_id,
           uid: Poller.metadata_uid(meta),
-          felt_store: Map.get(state.fiber_host_cache, fiber_id),
+          felt_store: Map.get(state.fiber_store_cache, fiber_id),
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
         })

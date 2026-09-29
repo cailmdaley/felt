@@ -93,7 +93,7 @@ defmodule Shuttle.Transition do
   # which is the real guard.
   defp transition_local(fiber_id, target) do
     with {:ok, %{id: action_id}} <- resolve(fiber_id, target),
-         {:ok, felt_store} <- FeltStores.host_for_fiber(fiber_id),
+         {:ok, felt_store} <- FeltStores.store_for_fiber(fiber_id),
          :ok <- invoke_action(fiber_id, action_id, felt_store) do
       Poller.refresh_document(fiber_id)
       {:ok, action_id}
@@ -110,7 +110,7 @@ defmodule Shuttle.Transition do
 
       # Any other resolve failure is an unresolvable fiber (unknown id,
       # unreadable frontmatter, foreign store) — the read paths 404 it, so match
-      # them rather than falling to the catch-all 500. A `host_for_fiber`
+      # them rather than falling to the catch-all 500. A `store_for_fiber`
       # `:timeout` is deliberately NOT folded in here: a wedged store means the
       # world is unknown, not that the fiber is absent.
       {:error, _reason} ->

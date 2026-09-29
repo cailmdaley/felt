@@ -2,11 +2,12 @@ package messaging
 
 import (
 	"context"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 func adapters() map[string]adapter {
@@ -133,10 +134,12 @@ func rejected(r Request, transport, detail string) Receipt {
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusRejected, Transport: transport, Detail: detail}
 }
 
+// dataDir is shuttle.DataDir. With no home directory to expand against it is
+// /.shuttle, which no unprivileged process can write, so every store below it
+// fails loudly instead of landing relative to the working directory.
 func dataDir() string {
-	if p := os.Getenv("SHUTTLE_DATA_DIR"); p != "" {
-		return p
+	if dir, err := shuttle.DataDir(); err == nil {
+		return dir
 	}
-	h, _ := os.UserHomeDir()
-	return h + "/.shuttle"
+	return "/.shuttle"
 }

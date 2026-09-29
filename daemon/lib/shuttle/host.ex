@@ -308,24 +308,13 @@ defmodule Shuttle.Host do
   # any other socket path, so a `..` in SHUTTLE_DATA_DIR is refused rather
   # than cleaned away, and a relative one stays relative (and is refused).
   defp class_default(_socket_class, _fallback_port) do
-    case unix_listen(data_dir() <> "/sock/daemon.sock") do
+    case unix_listen(Shuttle.data_dir() <> "/sock/daemon.sock") do
       {:ok, listen} ->
         {:ok, listen}
 
       {:error, kind, message} ->
         {:error, kind,
          message <> ~s(; set SHUTTLE_LISTEN or host.json "listen" to a usable unix:// path)}
-    end
-  end
-
-  # SHUTTLE_DATA_DIR (trimmed, a leading `~` expanded, never made absolute
-  # against the working directory), else `~/.shuttle` — the Go reader's rule.
-  defp data_dir do
-    case System.get_env("SHUTTLE_DATA_DIR") |> Kernel.||("") |> String.trim() do
-      "" -> Path.join(System.user_home!(), ".shuttle")
-      "~" -> System.user_home!()
-      "~/" <> rest -> Path.join(System.user_home!(), rest)
-      dir -> dir
     end
   end
 

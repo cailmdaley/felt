@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -27,8 +28,8 @@ import (
 // This is the Go half of a two-reader contract, like the fleet file: the
 // daemon resolves the same class and listener from the same file, and
 // daemon/test/fixtures/host/ holds cases BOTH suites must reproduce. The
-// daemon also shells `felt shuttle host --json` as the validator, so the JSON
-// shape of hostSettings is a wire format.
+// daemon also shells `felt shuttle host --json` for its host id and as the
+// validator, so the JSON shape of hostSettings is a wire format.
 //
 // Resolution:
 //
@@ -337,7 +338,7 @@ func resolveHostSettings() (hostSettings, error) {
 // classDefaultListen is the listener a class gets when nothing overrides it.
 func classDefaultListen(class hostClass) (listenAddr, error) {
 	if class.usesSocket() {
-		dir, err := shuttleDataDir()
+		dir, err := shuttle.DataDir()
 		if err != nil {
 			return listenAddr{}, err
 		}
@@ -358,28 +359,6 @@ func classDefaultListen(class hostClass) (listenAddr, error) {
 		port = p
 	}
 	return listenAddr{Network: "tcp", Address: "127.0.0.1:" + strconv.Itoa(port)}, nil
-}
-
-// shuttleDataDir is $SHUTTLE_DATA_DIR, else ~/.shuttle. Only a leading "~"
-// is expanded: the value is neither cleaned nor made absolute against the
-// working directory, so the socket-path checks see what the operator wrote,
-// exactly as the daemon does.
-func shuttleDataDir() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("SHUTTLE_DATA_DIR")); v != "" {
-		if v != "~" && !strings.HasPrefix(v, "~/") {
-			return v, nil
-		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving home directory: %w", err)
-		}
-		return home + v[1:], nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".shuttle"), nil
 }
 
 func hostClassList() string {
@@ -453,12 +432,14 @@ The class says who else can reach this machine and sets the default listener
   shared-multi-user    other users log in; the daemon listens on a unix socket
   exposed              reachable from outside; the daemon listens on a unix socket
 
---json prints {id, class, class_source, listen, listen_source, file} and is the
-validator the daemon shells: a malformed host file fails here, naming its path.
+--json prints {id, class, class_source, listen, listen_source, file}. The daemon
+reads its host id from it at boot, and shells it as the validator: a malformed
+host file fails here, naming its path.
 
 Examples:
   felt shuttle host
   felt shuttle host --json
+  felt shuttle host seed
   felt shuttle host class shared-multi-user`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -517,6 +498,35 @@ var shuttleHostClassCmd = &cobra.Command{
 	},
 }
 
+var shuttleHostSeedCmd = &cobra.Command{
+	Use:   "seed",
+	Short: "Write this host's identity to the host file if it holds none",
+	Long: `Make this machine's host id durable in the host file ($SHUTTLE_HOST_FILE,
+else ~/.shuttle/host), creating its directory.
+
+An id already in the file is kept. Otherwise $SHUTTLE_HOST, else the
+normalized OS hostname, is written, so the daemon and every later CLI call
+resolve the same name. bin/shuttle install-agent runs this before it starts
+the daemon it supervises.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, source, seeded, err := seedOwnHost()
+		if err != nil {
+			return err
+		}
+		path := hostConfigFilePath()
+		switch {
+		case !seeded:
+			fmt.Printf("host identity → %s   (%s)\n", id, path)
+		case source == hostSourceEnv:
+			fmt.Printf("host identity → %s   (seeded from $SHUTTLE_HOST into %s)\n", id, path)
+		default:
+			fmt.Printf("host identity → %s   (seeded from this machine's hostname into %s)\n", id, path)
+		}
+		return nil
+	},
+}
+
 func describeHostSource(source, file string) string {
 	switch source {
 	case hostSourceHostFile:
@@ -532,5 +542,6 @@ func describeHostSource(source, file string) string {
 func init() {
 	shuttleHostCmd.AddCommand(shuttleHostClassCmd)
 	shuttleHostCmd.AddCommand(shuttleHostCheckOwnerCmd)
+	shuttleHostCmd.AddCommand(shuttleHostSeedCmd)
 	shuttleCmd.AddCommand(shuttleHostCmd)
 }

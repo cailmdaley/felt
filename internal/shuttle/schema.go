@@ -73,42 +73,6 @@ func (s *Schedule) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// UnmarshalYAML accepts the canonical `kind` field as well as the legacy `mode`
-// alias. felt decodes the block from a yaml.Node, so without this the `mode` alias would be unreachable and a
-// `mode:`-only legacy block would decode to an empty Kind — failing validation
-// and skipping next_due resolution. The daemon tolerates `mode` (it reads
-// kind || mode); as felt becomes the schema authority it must tolerate it too.
-// The aux struct (not Block) breaks the decode recursion; the nested *Schedule
-// still resolves through its own UnmarshalYAML (the legacy `timezone` alias).
-func (b *Block) UnmarshalYAML(value *yaml.Node) error {
-	var aux struct {
-		Kind       string    `yaml:"kind"`
-		Mode       string    `yaml:"mode"`
-		Host       string    `yaml:"host"`
-		ProjectDir string    `yaml:"project_dir"`
-		Agent      string    `yaml:"agent"`
-		Surface    string    `yaml:"surface"`
-		Effort     string    `yaml:"effort"`
-		Chrome     bool      `yaml:"chrome"`
-		Schedule   *Schedule `yaml:"schedule"`
-	}
-	if err := value.Decode(&aux); err != nil {
-		return err
-	}
-	b.Kind = aux.Kind
-	if b.Kind == "" {
-		b.Kind = aux.Mode
-	}
-	b.Host = aux.Host
-	b.ProjectDir = aux.ProjectDir
-	b.Agent = aux.Agent
-	b.Surface = aux.Surface
-	b.Effort = aux.Effort
-	b.Chrome = aux.Chrome
-	b.Schedule = aux.Schedule
-	return nil
-}
-
 // ValidKinds enumerates the allowed kind values.
 //
 //   - oneshot  — one-time dispatch, picked up on the next poll when status:active.

@@ -57,7 +57,7 @@ func TestResolveOwnHost_Precedence(t *testing.T) {
 }
 
 // TestResolveOwnHost_EnvBeatsFile locks in that SHUTTLE_HOST takes precedence
-// over the ~/.shuttle/host file, mirroring the Elixir daemon's own_host_id.
+// over the ~/.shuttle/host file.
 func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
 	withOwnHost(t, "filehost")
 	t.Setenv("SHUTTLE_HOST", "envhost")
@@ -144,8 +144,8 @@ func TestResolveOwnHost_HostnameNormalized(t *testing.T) {
 
 // TestResolveOwnHost_HostnameSeedsFile is the fix's core invariant: the OS
 // hostname is consulted ONCE, then written to the host-config file so every
-// later resolve — on either side of the CLI/daemon split — reads a value that
-// cannot drift with DHCP or with which runtime asks.
+// later resolve — the CLI's and, through it, the daemon's — reads a value that
+// cannot drift with DHCP.
 func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "")
 	path := filepath.Join(t.TempDir(), "host")
@@ -232,6 +232,57 @@ func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
 	if got, err := resolveOwnHost(""); err != nil || got != "somewhere" {
 		t.Fatalf("unwritable seed must not break resolution: got %q err %v", got, err)
 	}
+}
+
+// TestSeedOwnHost covers `felt shuttle host seed`, the explicit install-time
+// write: it creates the directory, persists $SHUTTLE_HOST (the implicit seed
+// never does), and never replaces an identity the file already holds.
+func TestSeedOwnHost(t *testing.T) {
+	prev := osHostname
+	osHostname = func() (string, error) { return "Studio-Air.home", nil }
+	t.Cleanup(func() { osHostname = prev })
+
+	t.Run("env value is persisted and the directory created", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "dot-shuttle", "host")
+		t.Setenv("SHUTTLE_HOST_FILE", path)
+		t.Setenv("SHUTTLE_HOST", "  alias-host ")
+
+		id, source, seeded, err := seedOwnHost()
+		if err != nil || id != "alias-host" || source != hostSourceEnv || !seeded {
+			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "alias-host\n" {
+			t.Fatalf("host file: %q", data)
+		}
+	})
+
+	t.Run("hostname is normalized when nothing else names the machine", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "host")
+		t.Setenv("SHUTTLE_HOST_FILE", path)
+		t.Setenv("SHUTTLE_HOST", "")
+
+		id, source, seeded, err := seedOwnHost()
+		if err != nil || id != "studio-air" || source != hostSourceHostname || !seeded {
+			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
+		}
+	})
+
+	t.Run("an existing identity wins over the env", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "host")
+		if err := os.WriteFile(path, []byte("chosen-name\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SHUTTLE_HOST_FILE", path)
+		t.Setenv("SHUTTLE_HOST", "alias-host")
+
+		id, source, seeded, err := seedOwnHost()
+		if err != nil || id != "chosen-name" || source != hostSourceFile || seeded {
+			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
+		}
+		if data, _ := os.ReadFile(path); string(data) != "chosen-name\n" {
+			t.Fatalf("existing identity was rewritten: %q", data)
+		}
+	})
 }
 
 func TestEnsureOwnedHere(t *testing.T) {

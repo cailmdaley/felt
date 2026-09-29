@@ -407,14 +407,14 @@ defmodule Shuttle.DispatcherTest do
     start_supervised!(MockRunner)
     MockRunner.reset()
 
-    # `default_felt_store/0` resolves through `FeltStores.configured_hosts/0`,
+    # `default_felt_store/0` resolves through `FeltStores.configured_stores/0`,
     # which reads the FELT_STORES env / persisted stores.json — NOT the injected
     # test runner. On a machine with a configured loom it returns a store; in a
     # bare CI environment it returns [] → `default_felt_store/0` is nil, and a
     # dispatch has no store to read the fiber from.
     # Pin a store here so store resolution is deterministic regardless of the
     # host's felt config; delete on exit so the setting never leaks to other
-    # suites (the persistent_term cache in configured_hosts/0 is keyed by the
+    # suites (the persistent_term cache in configured_stores/0 is keyed by the
     # base config, so a differing base on the next suite recomputes cleanly).
     prev_stores = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", "/tmp")
@@ -677,7 +677,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "render_prompt inlines the carried user_message as a From User block" do
-    # STORE 3: the user's directive rides the dispatch as a transient parameter,
+    # The user's directive rides the dispatch as a transient parameter,
     # inlined into the prompt at launch (no persisted review-comment).
     prompt = Dispatcher.render_prompt("tests/haiku", user_message: "talk to me first")
     assert prompt =~ "From User"
@@ -1704,13 +1704,15 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_run_script scrubs the daemon's own release ERTS from the worker env" do
-    script = Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet")
+    root = "/opt/shuttle it's/bin/rel"
+
+    script =
+      Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet",
+        release_root: root
+      )
 
     # The vars `erl` itself exports.
     assert script =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
-    # The release's own directories filtered out of PATH.
-    assert script =~ ~s|grep -vF "$RELEASE_ROOT/erts"|
-    assert script =~ ~s|grep -vF "$RELEASE_ROOT/bin"|
     assert script =~ "unset RELEASE_ROOT"
 
     # It must run BEFORE the harness command, or the damage is already done.
@@ -1720,6 +1722,40 @@ defmodule Shuttle.DispatcherTest do
       end)
 
     assert scrub_at < command_at
+
+    # Run the scrub itself against a worker env that inherited the release's
+    # PATH and erl's exports but no RELEASE_ROOT — the shape a daemon-launched
+    # worker actually receives.
+    inherited =
+      Enum.join(
+        [
+          "#{root}/erts-16.4/bin",
+          "#{root}/bin",
+          "/usr/bin",
+          "#{root}.prev/bin",
+          "/bin"
+        ],
+        ":"
+      )
+
+    probe = Dispatcher.erts_scrub_block(root) <> ~s(printf '%s|%s' "$PATH" "${ROOTDIR-unset}")
+
+    {out, 0} =
+      System.cmd("/bin/bash", ["-c", probe],
+        env: [
+          {"PATH", inherited},
+          {"ROOTDIR", "#{root}"},
+          {"BINDIR", "#{root}/erts-16.4/bin"},
+          {"RELEASE_ROOT", nil}
+        ]
+      )
+
+    assert out == "/usr/bin:#{root}.prev/bin:/bin|unset"
+  end
+
+  test "erts_scrub_block leaves PATH alone with no release root" do
+    refute Dispatcher.erts_scrub_block(nil) =~ "PATH="
+    assert Dispatcher.erts_scrub_block(nil) =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
   end
 
   test "build_run_script with dismiss_resume_warning embeds backgrounded send-keys" do

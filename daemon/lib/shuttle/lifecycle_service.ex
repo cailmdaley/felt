@@ -22,7 +22,7 @@ defmodule Shuttle.LifecycleService do
   @spec transition(verb(), String.t()) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def transition(verb, identifier) when verb in [:accept, :resume] and is_binary(identifier) do
-    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <-
+    with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
            FeltStores.resolve_fiber_or_error(identifier) do
       if is_pid(Process.whereis(Poller)) do
         Poller.lifecycle_transition(verb, fiber_id)

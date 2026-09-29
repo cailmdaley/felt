@@ -297,6 +297,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
         &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
       )
 
+  # What `felt shuttle host --json` answers, for tests that clear SHUTTLE_HOST
+  # so the Poller asks felt for its identity. `output` is the raw stdout;
+  # a nonzero `exit_status` is felt refusing (a malformed host file).
+  def set_host_json(output, exit_status \\ 0) when is_binary(output),
+    do:
+      Agent.update(
+        __MODULE__,
+        &(&1 |> Map.put(:host_json, output) |> Map.put(:host_exit, exit_status))
+      )
+
   def commands, do: Agent.get(__MODULE__, & &1.commands)
 
   # Real felt inlines a fully-resolved `shuttle.resolved.agent` on every fiber
@@ -376,6 +386,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
         [verb, id, "--local"] = args |> Enum.drop(1) |> drop_felt_store()
         apply_lifecycle_write(verb, id)
         {"#{verb} #{id}\n", 0}
+
+      command == "felt" and args == ["shuttle", "host", "--json"] ->
+        Agent.get(__MODULE__, fn state ->
+          {Map.get(state, :host_json, ~s({"id": "mock-host"})), Map.get(state, :host_exit, 0)}
+        end)
 
       # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
       # resolution. The daemon shells felt (registry owner) rather than

@@ -54,6 +54,14 @@ endif
 # boot script identifies the daemon beam without matching the bin/shuttle shim
 # (a short-lived /bin/sh) or pgrep's own shell command (`[r]el`).
 PIDPATTERN := [b]in/rel/releases/.*/start
+# mix, run against the host's own Erlang. A shell the daemon started (a worker,
+# a resumed session) can inherit the release's ERTS — bin/rel/erts-*/bin and
+# bin/rel/bin at the head of PATH, plus erl's ROOTDIR/BINDIR/PROGNAME/EMU — and
+# mix under that ERTS dies with "cannot get bootfile .../bin/rel/bin/start.boot".
+# So every mix target drops those variables and every PATH entry under this
+# checkout's bin/rel (and its rel.next / rel.prev siblings).
+MIX_PATH := $(shell printf '%s' "$$PATH" | tr ':' '\n' | awk -v r='$(CURDIR)/bin/rel' 'index($$0, r) != 1' | paste -sd: -)
+MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 # Keep-alive knobs, all optional and all owned by `bin/shuttle install-agent`
 # — the labels, unit/plist paths, the login-shell PATH capture and the per-OS
 # ssh-agent default live there so a fetched tarball (no Makefile) installs the
@@ -155,16 +163,16 @@ else ifneq ($(shell command -v go 2>/dev/null),)
 else
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
 endif
-	cd daemon && mix deps.get
-	cd daemon && mix shuttle.gen_version
+	cd daemon && $(MIX) deps.get
+	cd daemon && $(MIX) shuttle.gen_version
 	@# Regenerate the .app spec before assembling. Mix rewrites it only when
 	@# mix.exs is NEWER than the existing spec, and mix.exs now takes its
 	@# version from $$SHUTTLE_VERSION — an env change touches no mtime. So a
 	@# build that once stamped a release tag would keep reporting that tag from
 	@# every later plain `make daemon` (verified: it does). --force makes the
 	@# local path match what release.yml does for the same reason.
-	cd daemon && MIX_ENV=prod mix compile
-	cd daemon && MIX_ENV=prod mix compile.app --force
+	cd daemon && MIX_ENV=prod $(MIX) compile
+	cd daemon && MIX_ENV=prod $(MIX) compile.app --force
 	@# Assemble beside the live release and swap, never in place. A running
 	@# daemon holds NIF .so files open under bin/rel/lib; on an NFS home that
 	@# turns every unlink into a .nfs* silly-rename stub, and `--overwrite`'s
@@ -175,7 +183,7 @@ endif
 	@# set aside as bin/rel.retained-<epoch> and swept by a later build once
 	@# nothing holds it.
 	rm -rf bin/rel.next
-	cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel.next
+	cd daemon && MIX_ENV=prod $(MIX) release shuttled --overwrite --path ../bin/rel.next
 	@if [ -f ui/dist/index.html ]; then \
 	  for app in bin/rel.next/lib/shuttle-*; do \
 	    mkdir -p "$$app/priv/ui"; \
@@ -197,7 +205,7 @@ go-test:
 	go test ./...
 
 mix-test:
-	cd daemon && mix test
+	cd daemon && $(MIX) test
 
 # The board's own suite. `npm test` runs it twice, once per pinned timezone —
 # the civil-day rules are only meaningful against a real UTC offset.

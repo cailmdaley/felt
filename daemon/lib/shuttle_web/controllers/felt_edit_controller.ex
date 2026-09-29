@@ -38,7 +38,7 @@ defmodule ShuttleWeb.FeltEditController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, host_for_fiber: 1]
+  import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, store_for_fiber: 1]
 
   alias Shuttle.{Collaboration, Felt, OriginRouter, Poller, RemoteFiberRegistry}
 
@@ -72,10 +72,10 @@ defmodule ShuttleWeb.FeltEditController do
          {:ok, due_args} <- due_args(params),
          {:ok, native_args} <- native_args(params),
          {:ok, collaboration} <- collaboration(params),
-         {:ok, host, address} <- host_for_fiber(fiber_id),
+         {:ok, store, address} <- store_for_fiber(fiber_id),
          {:ok, output} <-
            run(
-             host,
+             store,
              address,
              add,
              remove,
@@ -98,12 +98,12 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   # An empty diff is a no-op.
-  defp run(_host, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
+  defp run(_store, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
 
-  defp run(host, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do
+  defp run(store, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do
     Felt.run([
       "-C",
-      host,
+      store,
       "shuttle",
       "assign",
       fiber_id,
@@ -112,8 +112,8 @@ defmodule ShuttleWeb.FeltEditController do
     ])
   end
 
-  defp run(host, fiber_id, add, remove, unset, set_pairs, due_args, nil) do
-    args = ["-C", host, "edit", fiber_id]
+  defp run(store, fiber_id, add, remove, unset, set_pairs, due_args, nil) do
+    args = ["-C", store, "edit", fiber_id]
     args = Enum.reduce(remove, args, fn tag, acc -> acc ++ ["--untag", tag] end)
     args = Enum.reduce(add, args, fn tag, acc -> acc ++ ["--tag", tag] end)
     args = Enum.reduce(unset, args, fn key, acc -> acc ++ ["--unset", key] end)
@@ -126,7 +126,7 @@ defmodule ShuttleWeb.FeltEditController do
   # Both commands are individual locked read-modify-write operations. Refusing
   # a mixed request keeps a collaboration replacement atomic with respect to
   # ordinary frontmatter/body edits instead of guessing an ordering.
-  defp run(_host, _fiber_id, _add, _remove, _unset, _set_pairs, _due_args, _collaboration),
+  defp run(_store, _fiber_id, _add, _remove, _unset, _set_pairs, _due_args, _collaboration),
     do: {:error, "collaboration must be the only document mutation in a request"}
 
   # `set` is a map of opaque scalar frontmatter. Render each entry as the

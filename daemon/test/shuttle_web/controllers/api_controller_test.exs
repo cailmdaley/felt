@@ -529,7 +529,7 @@ defmodule ShuttleWeb.APIControllerTest do
   # ── Owner-routing for the non-drag write verbs (Shuttle.OriginRouter) ──
   #
   # The kanban posts tag/horizon edits, promote/requeue lifecycle, and the
-  # dispatch directive (user_message + resume_mode, STORE 3) directly to Shuttle,
+  # dispatch directive (user_message + resume_mode) directly to Shuttle,
   # carrying the `origin` the composite board stamped. A remote-owned card
   # forwards to the owning daemon's IDENTICAL endpoint over the tunnel (origin
   # stripped, so the owner runs its own local branch) and relays the response
@@ -597,8 +597,8 @@ defmodule ShuttleWeb.APIControllerTest do
     assert Jason.decode!(last.body) == %{"fiber_id" => "tests/remote-card"}
   end
 
-  test "dispatch owner-routes the STORE-3 user_message + resume_mode intact" do
-    # STORE 3: the user's directive + continuation mode ride the dispatch call
+  test "dispatch owner-routes the user_message + resume_mode intact" do
+    # The user's directive + continuation mode ride the dispatch call
     # (replacing the old file-a-review-comment-then-dispatch two-step). For a
     # remote-owned card they must owner-route to the owning daemon's /dispatch
     # with origin stripped — the body otherwise verbatim.

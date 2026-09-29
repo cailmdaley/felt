@@ -73,11 +73,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(install pin repeat reshape pause set-model set-agent set-outcome uninstall) do
-    # `resolve_fiber`'s `:host` key is the felt-STORE path (`--felt-store`),
-    # not an identity override — see `Shuttle.Felt.Shuttle`'s C4 note. Renamed
-    # only at this local boundary; `FeltStores.resolve_fiber/1`'s wire shape
-    # is out of scope for this pass.
-    with {:ok, %{host: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
+    with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
       |> run_elem(felt_store)

@@ -10,7 +10,7 @@ defmodule Shuttle.OriginRouter do
   tunnel. `/transition`, `/felt-edit`, `/lifecycle`, and `/dispatch` all route
   through here, so owner-routing has ONE implementation that cannot drift
   per-verb (the same discipline `Shuttle.Transition` keeps for `invoke/2` +
-  `http_error/1`). `/dispatch` carries the STORE-3 `user_message` + `resume_mode`
+  `http_error/1`). `/dispatch` carries the `user_message` + `resume_mode`
   in its forwarded body, so a remote-owned card's directive owner-routes intact.
 
     * `route/2` decides local vs remote from the carried origin.

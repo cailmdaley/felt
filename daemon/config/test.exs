@@ -23,21 +23,19 @@ config :shuttle,
   https_proxy: false,
   tailnet_dial_test_cacerts_enabled: true
 
-# Test daemon identity. Resolved at Poller boot by
-# `Shuttle.Poller.resolve_own_host_id/0`, which owns the precedence order.
-# Nothing is pinned at the Application config layer, where a value would ride
-# into any artifact built with MIX_ENV=test; setting SHUTTLE_HOST for the test
-# run keeps tests stable across machines without writing the value into the
-# release artifact. Tests that exercise host-pin matching pass explicit
+# Test daemon identity. `Shuttle.Poller.own_host_id/1` takes SHUTTLE_HOST when
+# it is set and asks `felt shuttle host --json` otherwise, so pinning it keeps
+# the suite off the real felt and stable across machines. Nothing is pinned at
+# the Application config layer, where a value would ride into any artifact
+# built with MIX_ENV=test. Tests that exercise host-pin matching pass explicit
 # `own_host_id:` opts to `Poller.start_link`.
 System.put_env("SHUTTLE_HOST", "test-host")
 
-# Fence the test run away from the developer's real ~/.shuttle/host. The
-# hostname tier of `resolve_own_host_id/0` SEEDS that file, and the host tests
-# clear SHUTTLE_HOST to exercise the lower tiers — so without a pinned path a
-# resolve from any concurrent `async: true` test could rewrite this machine's
-# canonical identity. Individual tests still override this with their own temp
-# path; this only has to be somewhere harmless.
+# Fence the test run away from the developer's real ~/.shuttle/host. felt's
+# hostname tier SEEDS that file, and the identity tests clear SHUTTLE_HOST —
+# so without a pinned path a real felt reached from any concurrent test could
+# rewrite this machine's canonical identity. This only has to be somewhere
+# harmless.
 System.put_env(
   "SHUTTLE_HOST_FILE",
   Path.join(System.tmp_dir!(), "shuttle-test-host-#{System.unique_integer([:positive])}")

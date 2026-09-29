@@ -132,8 +132,8 @@ defmodule ShuttleWeb.FeltStoresController do
     %{
       kind: "local",
       stale: false,
-      felt_stores: FeltStores.configured_base_hosts(),
-      expanded_felt_stores: FeltStores.configured_hosts(),
+      felt_stores: FeltStores.configured_base_stores(),
+      expanded_felt_stores: FeltStores.configured_stores(),
       # The curated picker-project list (Stash/Capture cities), separate from the
       # TCC-scoped poll-store list above. Absent/empty → the forms fall back to
       # store-registry + current-cards derivation, so this is purely additive.

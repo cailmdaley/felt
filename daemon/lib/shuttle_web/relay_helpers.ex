@@ -140,15 +140,15 @@ defmodule ShuttleWeb.RelayHelpers do
   Resolve a fiber id to its owning felt store and canonical address, mapping the
   resolution failures to the CLI-result error vocabulary `send_cli_result/3`
   renders. Shared by the felt-edit and felt-nest local branches, whose owning
-  writer needs `-C <host>` and the store-relative address.
+  writer needs `-C <store>` and the store-relative address.
   """
-  @spec host_for_fiber(String.t()) ::
+  @spec store_for_fiber(String.t()) ::
           {:ok, String.t(), String.t()}
           | {:error, String.t()}
           | {:error, :timeout, String.t()}
-  def host_for_fiber(fiber_id) do
-    with {:ok, %{host: host, fiber_id: address}} <- FeltStores.resolve_fiber_or_error(fiber_id),
-         do: {:ok, host, address}
+  def store_for_fiber(fiber_id) do
+    with {:ok, %{store: store, fiber_id: address}} <- FeltStores.resolve_fiber_or_error(fiber_id),
+         do: {:ok, store, address}
   end
 
   @doc "True for a non-empty binary — the required-string guard the controllers share."

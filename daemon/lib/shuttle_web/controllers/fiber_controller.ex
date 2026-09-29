@@ -274,7 +274,7 @@ defmodule ShuttleWeb.FiberController do
   end
 
   defp felt_root(_frontmatter) do
-    FeltStores.configured_hosts()
+    FeltStores.configured_stores()
     |> List.first()
   end
 

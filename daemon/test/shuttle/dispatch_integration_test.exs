@@ -514,7 +514,7 @@ defmodule Shuttle.DispatchIntegrationTest do
                "its transcript is not on this host."
   end
 
-  # Kanban resume: resume_mode=previous (a dispatch parameter, STORE 3) triggers
+  # Kanban resume: resume_mode=previous (a dispatch parameter) triggers
   # claude --resume against the dispatch marker's session.
   test "kanban resume: resume_mode=previous param triggers --resume", %{host: host} do
     write_fiber(host, "tests/kanban-resume", """
@@ -1845,7 +1845,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   # ── User message block ─────────────────────────────────────────────────────
 
   # The user's directive rides the dispatch call as the `:user_message` parameter
-  # (STORE 3) and surfaces as the "From User" block in the prompt, so the worker
+  # and surfaces as the "From User" block in the prompt, so the worker
   # sees it at the top of context. It is transient — inlined at launch, never
   # persisted — so there is no "consumed by a prior run" suppression to compute.
   test "the user_message dispatch parameter surfaces as a From User block",

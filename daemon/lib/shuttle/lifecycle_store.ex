@@ -128,7 +128,6 @@ defmodule Shuttle.LifecycleStore do
   # closed, when its session ends — so `mark_awaiting` rejects it along with
   # oneshots and non-shuttle fibers.
   defp require_standing(%{"kind" => "standing"}), do: :ok
-  defp require_standing(%{"mode" => "standing"}), do: :ok
 
   defp require_standing(shuttle),
     do:
@@ -140,7 +139,6 @@ defmodule Shuttle.LifecycleStore do
   # re-arm) writes them to `active`; a oneshot is rejected — force-dispatching a
   # oneshot runs it once and leaves its status put, with no loop to revive.
   defp require_perennial(%{"kind" => kind}) when kind in ["standing", "pinned"], do: :ok
-  defp require_perennial(%{"mode" => mode}) when mode in ["standing", "pinned"], do: :ok
 
   defp require_perennial(shuttle),
     do:
@@ -148,7 +146,6 @@ defmodule Shuttle.LifecycleStore do
        "rearm only applies to standing or pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
 
   defp require_pinned(%{"kind" => "pinned"}), do: :ok
-  defp require_pinned(%{"mode" => "pinned"}), do: :ok
 
   defp require_pinned(shuttle),
     do: {:error, "park only applies to pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
@@ -213,7 +210,7 @@ defmodule Shuttle.LifecycleStore do
   end
 
   # Resolve a fiber id to its owning felt store + store-scoped id — the pair
-  # `felt shuttle mark-runtime` needs (run with `cd: host`). Uses the daemon's
+  # `felt shuttle mark-runtime` needs (run with `cd: store`). Uses the daemon's
   # configured `felt_stores` when threaded (the poller passes `state.felt_stores`),
   # else the global configured stores.
   defp resolve_runtime_target(fiber_id, felt_stores) do
@@ -225,7 +222,7 @@ defmodule Shuttle.LifecycleStore do
       end
 
     case resolution do
-      {:ok, %{host: host, fiber_id: scoped_id}} -> {:ok, host, scoped_id}
+      {:ok, %{store: store, fiber_id: scoped_id}} -> {:ok, store, scoped_id}
       _ -> :error
     end
   end

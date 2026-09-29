@@ -30,13 +30,13 @@ defmodule Shuttle.FeltStoresTest do
       :ok
     end
 
-    test "configured_hosts/0 is [] when nothing is configured — no implicit ~/loom default" do
+    test "configured_stores/0 is [] when nothing is configured — no implicit ~/loom default" do
       System.delete_env("FELT_STORES")
       # An explicit override at an absent path keeps resolution genuinely empty
       # instead of reading the user's real ~/.config/felt/stores.json.
       System.put_env("FELT_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
 
-      assert FeltStores.configured_hosts() == []
+      assert FeltStores.configured_stores() == []
     end
 
     test "FELT_STORES env still wins over an absent registry" do
@@ -44,17 +44,17 @@ defmodule Shuttle.FeltStoresTest do
       store = tmp_dir()
       System.put_env("FELT_STORES", store)
 
-      assert FeltStores.configured_hosts() == [Path.expand(store)]
+      assert FeltStores.configured_stores() == [Path.expand(store)]
     end
   end
 
-  describe "host_for_fiber/1" do
+  describe "store_for_fiber/1" do
     test "resolves a loom-resident fiber by its full store-relative slug" do
       loom = tmp_dir()
       write_fiber(Path.join(loom, ".felt"), ["ai-futures", "portolan", "debug"])
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, host} = FeltStores.host_for_fiber("ai-futures/portolan/debug")
+      assert {:ok, host} = FeltStores.store_for_fiber("ai-futures/portolan/debug")
       assert Path.expand(host) == Path.expand(loom)
     end
 
@@ -63,7 +63,7 @@ defmodule Shuttle.FeltStoresTest do
       write_fiber(Path.join(loom, ".felt"), ["a", "b"])
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, _} = FeltStores.host_for_fiber("a/b")
+      assert {:ok, _} = FeltStores.store_for_fiber("a/b")
 
       # Resolution now asks felt, and `felt show b` fuzzy-matches the bare leaf
       # to its addressable slug `a/b` (basename match) — the same fiber every
@@ -87,7 +87,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, host} = FeltStores.host_for_fiber("review-ngmix-v2-pr740")
+      assert {:ok, host} = FeltStores.store_for_fiber("review-ngmix-v2-pr740")
       assert same_dir?(host, project)
     end
 
@@ -102,7 +102,7 @@ defmodule Shuttle.FeltStoresTest do
       File.write!(Path.join(felt, "flat-fiber.md"), "---\nname: Flat\n---\n\nBody.\n")
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, host} = FeltStores.host_for_fiber("flat-fiber")
+      assert {:ok, host} = FeltStores.store_for_fiber("flat-fiber")
       assert Path.expand(host) == Path.expand(loom)
     end
 
@@ -118,22 +118,22 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(pfelt, Path.join([loom, ".felt", "sp_validation"]))
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, host} = FeltStores.host_for_fiber("sp-validation-restructuring")
+      assert {:ok, host} = FeltStores.store_for_fiber("sp-validation-restructuring")
       assert same_dir?(host, project)
     end
 
-    test "resolves an intrinsic UID to the felt address and host" do
+    test "resolves an intrinsic UID to the felt address and store" do
       loom = tmp_dir()
       uid = "01KTCWJ8F2DF0VY3E6W92Q7H8M"
       write_fiber(Path.join(loom, ".felt"), ["tests", "uid-card"], id: uid)
       System.put_env("FELT_STORES", loom)
 
-      assert {:ok, %{host: host, fiber_id: "tests/uid-card", uid: ^uid, path: path}} =
+      assert {:ok, %{store: host, fiber_id: "tests/uid-card", uid: ^uid, path: path}} =
                FeltStores.resolve_fiber(uid)
 
       assert Path.expand(host) == Path.expand(loom)
       assert path =~ "uid-card.md"
-      assert {:ok, ^host} = FeltStores.host_for_fiber(uid)
+      assert {:ok, ^host} = FeltStores.store_for_fiber(uid)
     end
 
     test "returns :not_found for an unknown fiber" do
@@ -141,11 +141,11 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(Path.join(loom, ".felt"))
       System.put_env("FELT_STORES", loom)
 
-      assert {:error, :not_found} = FeltStores.host_for_fiber("does-not-exist")
+      assert {:error, :not_found} = FeltStores.store_for_fiber("does-not-exist")
     end
   end
 
-  describe "configured_hosts/0 symlinked-substore discovery" do
+  describe "configured_stores/0 symlinked-substore discovery" do
     # The candide topology: a project's `.felt` symlinked into loom. The poller
     # enumerates a fiber only from the store it physically roots in, so the
     # project root must be a store. Following the loom symlink auto-discovers it,
@@ -158,7 +158,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
       System.put_env("FELT_STORES", loom)
 
-      hosts = FeltStores.configured_hosts()
+      hosts = FeltStores.configured_stores()
 
       assert Enum.any?(hosts, &same_dir?(&1, loom))
       assert Enum.any?(hosts, &same_dir?(&1, project))
@@ -178,7 +178,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), Path.join(nested, "shapepipe"))
       System.put_env("FELT_STORES", loom)
 
-      hosts = FeltStores.configured_hosts()
+      hosts = FeltStores.configured_stores()
 
       assert Enum.any?(hosts, &same_dir?(&1, loom))
       assert Enum.any?(hosts, &same_dir?(&1, project))
@@ -202,15 +202,15 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(elsewhere, Path.join([loom, ".felt", "gateway"]))
       System.put_env("FELT_STORES", loom)
 
-      hosts = FeltStores.configured_hosts()
+      hosts = FeltStores.configured_stores()
 
       refute Enum.any?(hosts, &same_dir?(&1, project))
       assert hosts == [Path.expand(loom)]
     end
 
-    # Freshness is the POLLER's job: `configured_hosts/0` only reads the
+    # Freshness is the POLLER's job: `configured_stores/0` only reads the
     # published expansion (so no board request ever pays for the walk), and
-    # `refresh_expanded_hosts/0` — called from the poll Task — is what re-walks.
+    # `refresh_expanded_stores/0` — called from the poll Task — is what re-walks.
     test "the read path serves the cache; the poller's refresh republishes" do
       loom = tmp_dir()
       project = tmp_dir()
@@ -220,18 +220,18 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), link)
       System.put_env("FELT_STORES", loom)
 
-      assert length(FeltStores.configured_hosts()) == 2
+      assert length(FeltStores.configured_stores()) == 2
       File.rm!(link)
       # Still 2: the read path did not touch the filesystem.
-      assert length(FeltStores.configured_hosts()) == 2
+      assert length(FeltStores.configured_stores()) == 2
 
       # Age the published entry past the refresh cadence, as the clock would.
-      key = {FeltStores, :expanded_hosts}
+      key = {FeltStores, :expanded_stores}
       {base, expanded, walked_at} = :persistent_term.get(key)
       :persistent_term.put(key, {base, expanded, walked_at - 600_000})
 
-      assert FeltStores.refresh_expanded_hosts() == [Path.expand(loom)]
-      assert FeltStores.configured_hosts() == [Path.expand(loom)]
+      assert FeltStores.refresh_expanded_stores() == [Path.expand(loom)]
+      assert FeltStores.configured_stores() == [Path.expand(loom)]
     end
 
     test "skips a dangling substore symlink" do
@@ -240,7 +240,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!("/no/such/path/.felt", Path.join([loom, ".felt", "ghost"]))
       System.put_env("FELT_STORES", loom)
 
-      assert FeltStores.configured_hosts() == [Path.expand(loom)]
+      assert FeltStores.configured_stores() == [Path.expand(loom)]
     end
 
     test "skips a symlink to a non-.felt directory" do
@@ -250,7 +250,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(other, Path.join([loom, ".felt", "not-a-substore"]))
       System.put_env("FELT_STORES", loom)
 
-      assert FeltStores.configured_hosts() == [Path.expand(loom)]
+      assert FeltStores.configured_stores() == [Path.expand(loom)]
     end
 
     # Realpath dedup is load-bearing: a store reached via two spellings of the
@@ -268,7 +268,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(project, alias_link)
       System.put_env("FELT_STORES", "#{loom},#{alias_link}")
 
-      hosts = FeltStores.configured_hosts()
+      hosts = FeltStores.configured_stores()
 
       # `alias_link` (explicit) and `project` (discovered via loom) are the same
       # real dir, so exactly one survives the realpath dedup.
@@ -290,7 +290,7 @@ defmodule Shuttle.FeltStoresTest do
       File.ln_s!(Path.join(project, ".felt"), Path.join(parent, ".felt"))
       System.put_env("FELT_STORES", "#{parent},#{project}")
 
-      hosts = FeltStores.configured_hosts()
+      hosts = FeltStores.configured_stores()
 
       survivors =
         Enum.filter(hosts, &same_dir?(Path.join(&1, ".felt"), Path.join(project, ".felt")))
@@ -329,12 +329,12 @@ defmodule Shuttle.FeltStoresTest do
       :ok
     end
 
-    test "resolve_fiber/2 and host_for_fiber/2 report {:error, :timeout}, not :not_found" do
+    test "resolve_fiber/2 and store_for_fiber/2 report {:error, :timeout}, not :not_found" do
       Application.put_env(:shuttle, :felt_stores_runner, TimeoutRunner)
       store = tmp_dir()
 
       assert {:error, :timeout} = FeltStores.resolve_fiber("some/fiber", [store])
-      assert {:error, :timeout} = FeltStores.host_for_fiber("some/fiber", [store])
+      assert {:error, :timeout} = FeltStores.store_for_fiber("some/fiber", [store])
     end
 
     test "a positive resolution from another store wins over a wedged one" do

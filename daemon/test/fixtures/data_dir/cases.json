@@ -1,0 +1,17 @@
+{
+  "_comment": "SHUTTLE_DATA_DIR resolution, asserted by BOTH the Go suite (internal/shuttle/datadir_test.go) and the Elixir daemon suite (test/shuttle/data_dir_test.exs). `env` is the variable's value, or null for unset. In `expect`, a value that is exactly `~` or starts with `~/` has that `~` replaced by the home directory the test runs under; anything else is compared as written. The value is trimmed, a leading '~' or '~/' is expanded, and it is otherwise left exactly as written — not cleaned, not made absolute.",
+  "cases": [
+    {"name": "unset", "env": null, "expect": "~/.shuttle"},
+    {"name": "empty", "env": "", "expect": "~/.shuttle"},
+    {"name": "blank", "env": "   ", "expect": "~/.shuttle"},
+    {"name": "absolute", "env": "/srv/shuttle-data", "expect": "/srv/shuttle-data"},
+    {"name": "padded absolute", "env": "  /srv/shuttle-data\n", "expect": "/srv/shuttle-data"},
+    {"name": "bare tilde", "env": "~", "expect": "~"},
+    {"name": "tilde path", "env": "~/state/shuttle", "expect": "~/state/shuttle"},
+    {"name": "padded tilde path", "env": " ~/state/shuttle ", "expect": "~/state/shuttle"},
+    {"name": "trailing slash kept", "env": "~/state/", "expect": "~/state/"},
+    {"name": "another user's tilde is literal", "env": "~other/state", "expect": "~other/state"},
+    {"name": "dot-dot kept", "env": "/srv/a/../b", "expect": "/srv/a/../b"},
+    {"name": "relative kept", "env": "shuttle-data", "expect": "shuttle-data"}
+  ]
+}

@@ -285,24 +285,12 @@ func compositeFiberRows() []compositeFiberRow {
 }
 
 // identityPending reports a shuttle block that has been dispatched but has not
-// yet recorded the session UUID that pairs it with a harness session. The
-// runtime sub-map wins over the flat legacy keys when both are present.
+// yet recorded the session UUID that pairs it with a harness session, reading
+// the nested shuttle.runtime sub-map every writer emits.
 func identityPending(block map[string]any) bool {
-	dispatched, session := "", ""
-	if value, ok := block["dispatched_at"].(string); ok {
-		dispatched = value
-	}
-	if value, ok := block["session_uuid"].(string); ok {
-		session = value
-	}
-	if runtime, ok := block["runtime"].(map[string]any); ok {
-		if value, ok := runtime["dispatched_at"].(string); ok {
-			dispatched = value
-		}
-		if value, ok := runtime["session_uuid"].(string); ok {
-			session = value
-		}
-	}
+	runtime, _ := block["runtime"].(map[string]any)
+	dispatched, _ := runtime["dispatched_at"].(string)
+	session, _ := runtime["session_uuid"].(string)
 	return strings.TrimSpace(dispatched) != "" && strings.TrimSpace(session) == ""
 }
 

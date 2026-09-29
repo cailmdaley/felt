@@ -22,7 +22,7 @@ defmodule Shuttle.Poller do
   `:felt_stores` start option pins the list instead (tests).
 
   Each fiber resolves to exactly one store: the one whose `.felt/` physically
-  roots the fiber file. The resolution is cached in `State.fiber_host_cache`
+  roots the fiber file. The resolution is cached in `State.fiber_store_cache`
   for the daemon's lifetime.
   """
 
@@ -149,7 +149,7 @@ defmodule Shuttle.Poller do
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
       # poll cycle. Entries are never evicted.
-      fiber_host_cache: %{},
+      fiber_store_cache: %{},
       # %{uid => slug} — boundary uid→slug RESOLUTION index, rebuilt each poll
       # from the candidate rows (every row carries both `id` and `uid`). It lets
       # a uid-shaped public call (the kanban action-menu hot path — the UI posts
@@ -304,14 +304,14 @@ defmodule Shuttle.Poller do
       # set by `was_running` — members re-dispatch, only non-members land here
       # (runtime-observation, never stale on-disk markers).
       parked_launches: %{},
-      # %{host => rows} — the last SUCCESSFUL `felt ls` shuttle listing per
-      # host, retained VERBATIM (no reshape: `created_at`, `tempered`, `slug`,
+      # %{store => rows} — the last SUCCESSFUL `felt ls` shuttle listing per
+      # store, retained VERBATIM (no reshape: `created_at`, `tempered`, `slug`,
       # … survive exactly as felt emitted them). Refreshed on every successful
-      # listing; served by `discover_candidates/1` when a host's listing fails
+      # listing; served by `discover_candidates/1` when a store's listing fails
       # (timeout, transient exec error), so an outage degrades to yesterday's
       # truth instead of blanking the store or serving a lossy six-key shadow.
       # The retention is OUTAGE-LONG, not one-tick: rows persist until the
-      # host's next successful listing replaces them (only a successful
+      # store's next successful listing replaces them (only a successful
       # listing that omits a fiber is deletion evidence). Safe because these
       # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
       # fiber and re-verifies status before any launch.
@@ -574,11 +574,13 @@ defmodule Shuttle.Poller do
     {felt_stores, auto_discover} =
       case Keyword.fetch(opts, :felt_stores) do
         {:ok, hosts} -> {hosts, false}
-        :error -> {Shuttle.FeltStores.configured_hosts(), true}
+        :error -> {Shuttle.FeltStores.configured_stores(), true}
       end
 
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-    own_host_id = Keyword.get_lazy(opts, :own_host_id, &resolve_own_host_id/0)
+
+    own_host_id =
+      Keyword.get_lazy(opts, :own_host_id, fn -> resolve_own_host_id(runner: runner) end)
 
     # Use the registered name (atom) when available so cross-process sends
     # survive a supervisor restart of this Poller. Process.info/2 returns
@@ -594,8 +596,8 @@ defmodule Shuttle.Poller do
     own_host_id = to_string(own_host_id)
 
     # Freeze this instance's own_host_id into a persistent_term keyed by
-    # its self_ref, so `own_host_id/1`'s public accessor never re-touches
-    # SHUTTLE_HOST/~/.shuttle/host per call — see that function's doc. Keyed
+    # its self_ref, so `own_host_id/1`'s public accessor never re-resolves
+    # the identity per call — see that function's doc. Keyed
     # per-instance (not one global slot) so distinct named Pollers in the same
     # BEAM (multi-host tests) never stomp on each other's frozen identity.
     :persistent_term.put({@own_host_pt_namespace, self_ref}, own_host_id)
@@ -1373,21 +1375,21 @@ defmodule Shuttle.Poller do
   # down with the Task.
   defp poll_reads(%State{} = state) do
     state = refresh_felt_stores(state)
-    {candidates, host_map, host_listings} = discover_candidates(state)
+    {candidates, store_map, store_listings} = discover_candidates(state)
 
     # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
     # cache itself stays on `State`. Entries are built directly from the candidate
     # rows the poll already discovered — one `felt ls` per store, no per-miss
     # `felt show` and no filesystem stat.
     {refresh_us, {document_cache, document_cache_stats}} =
-      :timer.tc(fn -> Shuttle.Poller.DocumentCache.refresh(state, candidates, host_map) end)
+      :timer.tc(fn -> Shuttle.Poller.DocumentCache.refresh(state, candidates, store_map) end)
 
     {:ok,
      %{
        felt_stores: state.felt_stores,
        candidates: candidates,
-       host_map: host_map,
-       host_listings: host_listings,
+       store_map: store_map,
+       store_listings: store_listings,
        document_cache: document_cache,
        document_cache_stats: document_cache_stats,
        document_cache_refresh_ms: div(refresh_us, 1000)
@@ -1409,8 +1411,8 @@ defmodule Shuttle.Poller do
   defp apply_poll_cycle(%State{} = state, %{
          felt_stores: felt_stores,
          candidates: candidates,
-         host_map: new_host_map,
-         host_listings: host_listings,
+         store_map: new_store_map,
+         store_listings: store_listings,
          document_cache: document_cache,
          document_cache_stats: document_cache_stats,
          document_cache_refresh_ms: document_cache_refresh_ms
@@ -1428,7 +1430,7 @@ defmodule Shuttle.Poller do
     # A partial tick — at least one store's listing FAILED (its rows came from
     # `last_known_listings`) — reports `cache.state == "partial"` and does NOT
     # advance `refreshed_at`, so staleness stays honest for the failed store.
-    listings_ok? = map_size(host_listings) == length(felt_stores)
+    listings_ok? = map_size(store_listings) == length(felt_stores)
 
     refreshed_at =
       if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
@@ -1440,12 +1442,12 @@ defmodule Shuttle.Poller do
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
 
-    # Merge newly resolved host entries into the cache. Existing entries
-    # are not evicted — earlier-configured hosts win for ID collisions,
+    # Merge newly resolved store entries into the cache. Existing entries
+    # are not evicted — earlier-configured stores win for ID collisions,
     # and cache entries are stable for the daemon's lifetime.
     state = %{
       state
-      | fiber_host_cache: Map.merge(new_host_map, state.fiber_host_cache),
+      | fiber_store_cache: Map.merge(new_store_map, state.fiber_store_cache),
         # Rebuilt (not merged) each poll so a rename or delete can't leave a
         # stale uid→slug entry; an as-yet-unseen uid falls through to felt.
         uid_slug_index: build_uid_slug_index(candidates),
@@ -1462,9 +1464,9 @@ defmodule Shuttle.Poller do
         dispatch_failures: evict_stale_by_candidates(state.dispatch_failures, candidates),
         resume_loop: evict_stale_by_candidates(state.resume_loop, candidates),
         # Fold this poll's SUCCESSFUL listings over the retained map (a failed
-        # host keeps its previous rows), pruned to the current store set.
+        # store keeps its previous rows), pruned to the current store set.
         last_known_listings:
-          state.last_known_listings |> Map.merge(host_listings) |> Map.take(felt_stores)
+          state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores)
     }
 
     # Downtime recovery: a standing role whose tmux session is gone but whose
@@ -1553,12 +1555,12 @@ defmodule Shuttle.Poller do
   # No tag predicate — the shuttle: block is the source of truth, matching the
   # same contract every other surface reads.
   #
-  # Returns {:ok, fibers, host_map, host_listings} where:
-  #   fibers        — [%{"id" => id, "uid" => uid, "status" => status, "path" => …}] across all hosts
-  #   host_map      — %{fiber_id => felt_store} for host resolution
-  #   host_listings — %{host => rows} for the hosts whose listing SUCCEEDED
+  # Returns {:ok, fibers, store_map, store_listings} where:
+  #   fibers        — [%{"id" => id, "uid" => uid, "status" => status, "path" => …}] across all stores
+  #   store_map     — %{fiber_id => felt_store} for store resolution
+  #   store_listings — %{store => rows} for the stores whose listing SUCCEEDED
   #                   this poll (verbatim rows; `apply_poll_cycle/2` folds them
-  #                   into `state.last_known_listings`). A failed host is
+  #                   into `state.last_known_listings`). A failed store is
   #                   absent, so its retained rows survive untouched.
   #
   # Each fiber row carries its own "uid", so callers that need the intrinsic
@@ -1566,10 +1568,10 @@ defmodule Shuttle.Poller do
   #
   # ## Symlink discipline
   #
-  # The same physical fiber file is often reachable from multiple felt hosts via
+  # The same physical fiber file is often reachable from multiple felt stores via
   # symlinks. Two cases that occur in practice:
   #
-  # 1. A project host (`~/work/project-a`) whose `.felt/` is a symlink into
+  # 1. A project store (`~/work/project-a`) whose `.felt/` is a symlink into
   #    `~/loom/.felt/work/project-a/`. The same `task-board.md` is reachable as
   #    `task-board` (project view) and `work/project-a/task-board` (loom view).
   #
@@ -1582,52 +1584,52 @@ defmodule Shuttle.Poller do
   # If both views were enumerated, dispatch would race: each "different" id
   # passes `tmux has-session` independently → multiple workers on one file.
   #
-  # **Rule: a fiber is enumerated only by the host where it is physically
+  # **Rule: a fiber is enumerated only by the store where it is physically
   # rooted.** `list_shuttle_fibers/2` enforces this by reading felt's carried
   # `path` (absolute, symlink-resolved) and keeping a fiber iff that path lives
-  # under `realpath(host)/.felt/` — so case 2's loom view drops the fiber (its
+  # under `realpath(store)/.felt/` — so case 2's loom view drops the fiber (its
   # realpath roots in lightcone) and the lightcone store claims it. A store
   # whose own `.felt/` is a symlink (case 1) owns nothing; the target store
   # enumerates it. Ownership is read from felt's path, never reverse-derived.
   @doc false
   def discover_candidates(state) do
-    {all_fibers, host_map, host_listings} =
-      Enum.reduce(state.felt_stores, {[], %{}, %{}}, fn host,
+    {all_fibers, store_map, store_listings} =
+      Enum.reduce(state.felt_stores, {[], %{}, %{}}, fn store,
                                                         {acc_fibers, acc_map, acc_listings} ->
         {fibers, acc_listings} =
-          case list_shuttle_fibers(host, state) do
+          case list_shuttle_fibers(store, state) do
             {:ok, fibers} ->
-              {fibers, Map.put(acc_listings, host, fibers)}
+              {fibers, Map.put(acc_listings, store, fibers)}
 
             {:error, reason} ->
               # A failed listing — felt timing out on an overloaded login
               # node, a transient exec failure — means the world is UNKNOWN
-              # for this host, not that its fibers are gone. Dropping them
+              # for this store, not that its fibers are gone. Dropping them
               # would blank the ENTIRE store for the tick: every
               # document-cache entry evicted, every card vanishing and
               # reappearing as felt recovers. Only a SUCCESSFUL listing that
               # omits a fiber is evidence of deletion, so on error we serve
-              # the host's last successful listing VERBATIM (see
+              # the store's last successful listing VERBATIM (see
               # `State.last_known_listings`) — same rows, same fields, no
               # reshape — and the mtime-keyed document cache serves the
               # entries without re-shelling felt. The listing map is not
               # updated, so the retained rows survive until felt recovers.
-              retained = Map.get(state.last_known_listings, host, [])
+              retained = Map.get(state.last_known_listings, store, [])
 
               Logger.warning(
-                "fiber discovery failed for #{host} (#{inspect(reason)}); " <>
+                "fiber discovery failed for #{store} (#{inspect(reason)}); " <>
                   "carrying #{length(retained)} last-known fiber(s) for this tick"
               )
 
               {retained, acc_listings}
           end
 
-        new_map = Map.new(fibers, &{Map.get(&1, "id", ""), host})
+        new_map = Map.new(fibers, &{Map.get(&1, "id", ""), store})
         merged_map = Map.merge(new_map, acc_map)
         {acc_fibers ++ fibers, merged_map, acc_listings}
       end)
 
-    {all_fibers, host_map, host_listings}
+    {all_fibers, store_map, store_listings}
   end
 
   # Owner-only feed gate for a cached document entry: keep it iff its
@@ -1815,17 +1817,17 @@ defmodule Shuttle.Poller do
     )
   end
 
-  # Read one host's shuttle fibers via felt's JSON, keeping only those
-  # PHYSICALLY ROOTED in this host. Ownership is read from felt's carried
-  # `path` (absolute, symlink-resolved) — a fiber belongs to `host` iff its
-  # path lives under `realpath(host)/.felt/`. felt enumerates symlink-traversed
+  # Read one store's shuttle fibers via felt's JSON, keeping only those
+  # PHYSICALLY ROOTED in this store. Ownership is read from felt's carried
+  # `path` (absolute, symlink-resolved) — a fiber belongs to `store` iff its
+  # path lives under `realpath(store)/.felt/`. felt enumerates symlink-traversed
   # fibers too (loom listing a project whose `.felt` is symlinked in), so the
   # path-prefix check is what keeps each fiber owned by exactly the store that
   # physically roots it, read from felt rather than reverse-derived. A store
   # whose own `.felt/` is a symlink owns nothing here: the target store
   # enumerates it canonically.
-  defp list_shuttle_fibers(host, state) do
-    felt_dir = Path.join(host, ".felt")
+  defp list_shuttle_fibers(store, state) do
+    felt_dir = Path.join(store, ".felt")
 
     case File.lstat(felt_dir) do
       {:ok, %File.Stat{type: :symlink}} ->
@@ -1838,7 +1840,7 @@ defmodule Shuttle.Poller do
         if empty_dir?(felt_dir) do
           {:ok, []}
         else
-          run_shuttle_listing(host, state)
+          run_shuttle_listing(store, state)
         end
 
       _ ->
@@ -1853,24 +1855,24 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp run_shuttle_listing(host, state) do
-    case run_felt_ls_for_shuttle(host, state) do
+  defp run_shuttle_listing(store, state) do
+    case run_felt_ls_for_shuttle(store, state) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
-          owned_prefix = Shuttle.FeltStores.store_felt_realpath(host) <> "/"
+          owned_prefix = Shuttle.FeltStores.store_felt_realpath(store) <> "/"
 
           # Per-row isolation: felt itself skips-and-warns unparseable fibers
           # (warning on stderr, valid JSON of the rest on stdout, exit 0), so a
           # single malformed fiber never poisons the blob. The `is_map/1` guard
           # is the same posture on our side of the wire — one non-map row is
-          # dropped, never the whole host's listing.
+          # dropped, never the whole store's listing.
           kept =
             Enum.filter(fibers, fn fiber ->
               is_map(fiber) and is_map(Map.get(fiber, "shuttle")) and
                 owned_by_store?(fiber, owned_prefix)
             end)
 
-          {:ok, Shuttle.FiberDocuments.union_by_id(kept, aux_rows(host, state, owned_prefix))}
+          {:ok, Shuttle.FiberDocuments.union_by_id(kept, aux_rows(store, state, owned_prefix))}
         else
           _ -> {:error, :invalid_json}
         end
@@ -1881,7 +1883,7 @@ defmodule Shuttle.Poller do
   end
 
   # A fiber is owned by this store iff felt's carried physical `path` lives
-  # under `realpath(host)/.felt/`. No `path` (older felt) means we cannot
+  # under `realpath(store)/.felt/`. No `path` (older felt) means we cannot
   # confirm ownership, so the fiber is conservatively dropped — the owning
   # store, where felt does carry a matching path, enumerates it.
   defp owned_by_store?(%{"path" => path}, owned_prefix) when is_binary(path) and path != "" do
@@ -1899,59 +1901,45 @@ defmodule Shuttle.Poller do
   # Fails SOFT, per walk: an aux filter that errors or times out logs and
   # contributes nothing, leaving the primary listing — and therefore every
   # dispatchable fiber — untouched. Only the primary walk can fail a store.
-  defp aux_rows(host, state, owned_prefix) do
+  defp aux_rows(store, state, owned_prefix) do
     [_primary | aux] = Shuttle.FiberDocuments.kanban_walks()
-    Enum.flat_map(aux, &aux_walk_rows(host, state, owned_prefix, &1))
+    Enum.flat_map(aux, &aux_walk_rows(store, state, owned_prefix, &1))
   end
 
-  defp aux_walk_rows(host, state, owned_prefix, filter) do
+  defp aux_walk_rows(store, state, owned_prefix, filter) do
     fields = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
     args = ["ls", "--json"] ++ filter ++ ["--json-field", fields]
 
-    with {:ok, output} <- run_felt(host, state.runner, args),
+    with {:ok, output} <- run_felt(store, state.runner, args),
          {:ok, rows} when is_list(rows) <- Jason.decode(output) do
       Enum.filter(rows, &(is_map(&1) and owned_by_store?(&1, owned_prefix)))
     else
       error ->
-        Logger.warning("kanban aux walk #{inspect(filter)} failed for #{host}: #{inspect(error)}")
+        Logger.warning(
+          "kanban aux walk #{inspect(filter)} failed for #{store}: #{inspect(error)}"
+        )
+
         []
     end
   end
 
-  defp run_felt_ls_for_shuttle(host, state) do
+  defp run_felt_ls_for_shuttle(store, state) do
     # Widened projection: felt filters by raw top-level frontmatter first, then
     # emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
     # superset of the fields the poller needs for eligibility, ownership, and
     # identity). Widening it lets the document cache build each entry DIRECTLY
     # from its candidate row (no per-miss `felt show`, no stat), so a poll tick
-    # costs one `felt ls` per store. Keep the broad fallback so a not-yet-upgraded
-    # remote felt fails soft instead of hiding every card on that host.
-    case run_felt(host, state.runner, [
-           "ls",
-           "--json",
-           "--has-field",
-           "shuttle",
-           "--json-field",
-           Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
-         ]) do
-      {:ok, output} ->
-        {:ok, output}
-
-      # A timeout means felt itself is wedged (overloaded node, dead SSH), not
-      # that the flags were unsupported — the strictly-more-expensive broad
-      # listing would just burn a second 60s wall-clock stall per host per
-      # tick. Propagate immediately; discover_candidates degrades to the
-      # host's last-known rows.
-      {:error, :timeout} = error ->
-        error
-
-      {:error, reason} ->
-        Logger.warning(
-          "shuttle felt ls failed for #{host}; falling back to broad listing: #{inspect(reason)}"
-        )
-
-        run_felt(host, state.runner, ["ls", "--json"])
-    end
+    # costs one `felt ls` per store. A failure of any kind degrades
+    # `discover_candidates/1` to the store's last-known rows; a felt too old for
+    # these flags is caught by the boot contract probe (`Shuttle.Contract`).
+    run_felt(store, state.runner, [
+      "ls",
+      "--json",
+      "--has-field",
+      "shuttle",
+      "--json-field",
+      Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
+    ])
   end
 
   # The autonomous-tick eligibility filter. Beyond the shared `eligible?`
@@ -2328,25 +2316,22 @@ defmodule Shuttle.Poller do
   `ShuttleWeb.FiberController` when stamping a `host:` on a new fiber) share
   the exact same resolution.
 
-  This is THE one host-identity resolver. Every surface that stamps or
-  matches `shuttle.host` — the dispatch filter, the `/api/v1/fibers` owned
-  feed, the CLI's `host:` stamp on new fibers, the state/snapshot
-  endpoints — goes through here, so a daemon's advertised identity is
-  single-valued by construction. Do not re-derive `:inet.gethostname()`
-  anywhere else; that drift is exactly how a daemon came to own by its raw
-  login-node hostname while its fibers were stamped with its friendly ssh
-  alias, and the owner-only feed silently dropped every one of them.
+  This is the daemon's one source of its host identity. Every surface that
+  stamps or matches `shuttle.host` — the dispatch filter, the
+  `/api/v1/fibers` owned feed, the `host:` stamp on new fibers, the
+  state/snapshot endpoints — goes through here, so a daemon's advertised
+  identity is single-valued by construction. Do not derive a hostname
+  anywhere else in the daemon: the identity comes from `SHUTTLE_HOST` or from
+  `felt shuttle host --json`, the same resolver the CLI stamps with.
 
   Reads the value `init/1` froze into a `:persistent_term` at boot
-  (keyed by `server`'s registered name/pid), NOT a fresh env/file/hostname
-  lookup — post-launch env/file drift (an operator editing `~/.shuttle/host`
-  while the daemon runs, a respawn exporting a different `SHUTTLE_HOST`)
-  must not split routing from ownership mid-run: every consumer within one
-  daemon lifetime sees the SAME identity, computed once. Falls back to a
-  fresh `resolve_own_host_id/0` computation only when no Poller by that name
-  has booted yet — the common case for pure-unit tests with no live Poller,
-  and the daemon's own very first `init/1` call before it has written the
-  cache.
+  (keyed by `server`'s registered name/pid), NOT a fresh lookup — post-launch
+  drift (an operator editing `~/.shuttle/host` while the daemon runs, a
+  respawn exporting a different `SHUTTLE_HOST`) must not split routing from
+  ownership mid-run: every consumer within one daemon lifetime sees the SAME
+  identity, computed once. Resolves afresh only when no Poller by that name
+  has booted yet — pure-unit tests with no live Poller, and callers that run
+  before the daemon's Poller starts.
 
   `own_host_id/0` targets the default-named `#{inspect(__MODULE__)}` — the
   production singleton every external consumer (controllers, `Shuttle.Kitty`,
@@ -2360,193 +2345,67 @@ defmodule Shuttle.Poller do
   @spec own_host_id(GenServer.server()) :: String.t()
   def own_host_id(server) do
     case :persistent_term.get({@own_host_pt_namespace, server}, nil) do
-      nil -> resolve_own_host_id()
+      nil -> resolve_own_host_id([])
       frozen -> frozen
     end
   end
 
-  # The actual env → host-file → hostname computation. Runs exactly once per
-  # Poller boot (`init/1` calls this to compute the value it then freezes) plus
-  # as `own_host_id/1`'s fallback when nothing has frozen a value yet.
+  # `SHUTTLE_HOST` (trimmed) when set — the explicit override and the test
+  # seam, the same first tier felt itself honours — else felt's answer. felt is
+  # the one resolver of the host file and the OS-hostname fallback (see
+  # cmd/shuttle_host.go), so the CLI's `host:` stamp and this daemon's dispatch
+  # predicate cannot disagree about which machine this is. Runs once per
+  # Poller boot (`init/1` freezes the result) plus as `own_host_id/1`'s
+  # fallback when nothing has frozen a value yet. `felt_opts` go to
+  # `Shuttle.Felt.run/2` (`init/1` passes its `:runner`).
   #
-  # Precedence:
-  #
-  #   1. `SHUTTLE_HOST` env var, if set and non-empty. The explicit override
-  #      and the test seam — `config/test.exs` pins it via `System.put_env/2`,
-  #      and the daemon's tmux respawn loop can export it.
-  #
-  #   2. `~/.shuttle/host` file (its trimmed first line), if present. The durable
-  #      per-host canonical identity: unlike the env var it survives every
-  #      daemon launch path (`make start`, a bare `bin/shuttle start`, a
-  #      respawn outside the loop), so the daemon *derives* its friendly name
-  #      (the ssh alias instead of a raw login-node hostname) rather than
-  #      depending on an operator remembering to export it. Override the path
-  #      with `SHUTTLE_HOST_FILE`.
-  #
-  #   3. `:inet.gethostname()`, normalized and then WRITTEN BACK to the host
-  #      file. Two separately-deployed daemons get distinct ids automatically;
-  #      no per-machine config needed.
-  #
-  # Tiers 1-3 are the same chain the Go CLI walks (cmd/shuttle_host.go), but
-  # mirroring the chain was not enough on its own. The first two tiers are
-  # stable values two processes can agree on; the OS hostname is neither. It
-  # varies across runtimes — `:inet.gethostname/0` reports the short name while
-  # Go's `os.Hostname()` keeps the DNS domain, so the same Mac is
-  # "studio-macbook-air" here and "studio-air.home" there — and it varies
-  # across time, because DHCP rewrites it on some networks. Under the strict
-  # dispatch predicate (`block.host == own_host_id`) either kind of drift
-  # silently unhomes every fiber the CLI armed: this daemon sees a host it
-  # isn't, dispatches nothing, and reports nothing wrong.
-  #
-  # So the OS hostname is consulted once per machine and then retired: it is
-  # normalized identically on both sides (trimmed, downcased, truncated at the
-  # first ".") and seeded into the host file, which every later resolve on
-  # either side reads instead. Whoever reaches the fallback first fixes the
-  # name; agreement is the point, not which name won. Seeding is best-effort —
-  # a read-only home still resolves, just without the durability.
-  #
-  # No `Application.get_env(:shuttle, :host)` step and no `"local"` default:
-  # an absent `host:` is unowned everywhere, never silently grabbed.
-  #
-  # Raises if `:inet.gethostname/0` truly fails — a system-level problem;
-  # silently degrading into a no-op filter would make the failure invisible.
-  @spec resolve_own_host_id() :: String.t()
-  defp resolve_own_host_id do
-    case System.get_env("SHUTTLE_HOST") do
-      env when is_binary(env) and env != "" ->
-        env
-
-      _ ->
-        case host_config_file_value() do
-          name when is_binary(name) and name != "" ->
-            name
-
-          _ ->
-            case os_hostname_normalized() do
-              name when is_binary(name) and name != "" ->
-                seed_host_config_file(name)
-
-              other ->
-                raise "Shuttle.Poller could not resolve own_host_id: " <>
-                        ":inet.gethostname/0 returned #{inspect(other)}. " <>
-                        "Set SHUTTLE_HOST=<name> or write ~/.shuttle/host."
-            end
-        end
+  # Raises when felt cannot answer: a daemon with no identity would match no
+  # `shuttle.host` and dispatch nothing, silently.
+  @spec resolve_own_host_id(keyword()) :: String.t()
+  defp resolve_own_host_id(felt_opts) do
+    case String.trim(System.get_env("SHUTTLE_HOST", "")) do
+      "" -> felt_host_id(felt_opts)
+      env -> env
     end
   end
 
-  # `:inet.gethostname/0` put through `normalize_hostname/1`, or the raw
-  # error tuple when the syscall fails (so the caller can report it verbatim).
-  @spec os_hostname_normalized() :: String.t() | term()
-  defp os_hostname_normalized do
-    case :inet.gethostname() do
-      {:ok, name} when name != [] -> name |> to_string() |> normalize_hostname()
-      other -> other
-    end
-  end
-
-  # Reduces a raw OS hostname to the canonical short form both sides agree on:
-  # trimmed, downcased, and cut at the first "." so "Studio-Air.home" and
-  # "studio-air" are the same machine. Matches `normalizeHostname` in
-  # cmd/shuttle_host.go; the two must not drift.
-  @spec normalize_hostname(String.t()) :: String.t()
-  defp normalize_hostname(raw) do
-    raw
-    |> String.trim()
-    |> String.split(".", parts: 2)
-    |> List.first()
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-  end
-
-  # Persists a hostname-derived identity to the host file so it stops being
-  # derived, then returns it unchanged. Reached only from
-  # `resolve_own_host_id/0`'s last tier — `SHUTTLE_HOST` unset and the file
-  # absent or blank — so it never overwrites an explicit choice. Best-effort by
-  # design: a failed write (read-only home, a container with no writable
-  # `$HOME`) leaves the caller with the in-memory value rather than crashing
-  # the daemon at boot.
-  #
-  # Writes only into a parent directory that ALREADY exists, and never creates
-  # one. The existence of `~/.shuttle` is the gate that distinguishes a shuttle
-  # host from a machine that installed felt for fibers alone (the same gate the
-  # event stream and commit ledger use), and the Go CLI resolves this identity
-  # inside `felt hook event` — before that gate is consulted. An `mkdir_p` here
-  # would switch a felt-only machine's event stream on. Declining to seed costs
-  # nothing; breaking the gate does.
-  @spec seed_host_config_file(String.t()) :: String.t()
-  defp seed_host_config_file(name) do
-    path = host_config_file()
-
-    if File.dir?(Path.dirname(path)) do
-      File.write(path, name <> "\n")
-    end
-
-    name
-  end
-
-  # Trimmed FIRST line of the `~/.shuttle/host` canonical-identity file, or nil
-  # when the file is absent/unreadable or that line is blank. First-line-only
-  # (not first non-empty line) to match `hostConfigFileValue` in
-  # cmd/shuttle_host.go exactly — any divergence recreates the split identity
-  # this file exists to prevent. This is the tier
-  # `resolve_own_host_id/0` seeds on first fallback, so after one resolve on a
-  # fresh machine it is the tier that answers.
-  @spec host_config_file_value() :: String.t() | nil
-  defp host_config_file_value do
-    path = host_config_file()
-
-    with {:ok, content} <- File.read(path) do
-      content
-      |> String.split("\n", parts: 2)
-      |> List.first()
-      |> to_string()
-      |> String.trim()
-      |> case do
-        "" -> nil
-        value -> value
-      end
+  defp felt_host_id(felt_opts) do
+    with {:ok, output} <- Shuttle.Felt.run(["shuttle", "host", "--json"], felt_opts),
+         {:ok, %{"id" => id}} when is_binary(id) and id != "" <- Jason.decode(output) do
+      id
     else
-      _ -> nil
-    end
-  end
-
-  @spec host_config_file() :: String.t()
-  defp host_config_file do
-    case System.get_env("SHUTTLE_HOST_FILE") do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand("~/.shuttle/host")
+      other ->
+        raise "Shuttle.Poller could not resolve own_host_id from `felt shuttle host --json`: " <>
+                "#{inspect(other)}. Set SHUTTLE_HOST=<name> or run `felt shuttle host seed`."
     end
   end
 
   # Resolves which configured felt store owns `fiber_id` — the store root used
-  # to shell subsequent felt commands, NOT the shuttle.host dispatch-affinity
-  # field.
+  # to shell subsequent felt commands.
   #
   # Resolution order:
   # 1. State cache (fast; populated by discover_candidates/1 each poll cycle)
-  # 2. Ask felt: `FeltStores.host_for_fiber/2` (against THIS daemon's
+  # 2. Ask felt: `FeltStores.store_for_fiber/2` (against THIS daemon's
   #    `state.felt_stores`) shells `felt show -j` (or a uid scan) and reports the
   #    owning store directly, reading felt's carried path rather than
   #    reconstructing or globbing candidate files.
   #
-  # Returns {:ok, host} for the store that owns the fiber, or {:error,
+  # Returns {:ok, store} for the store that owns the fiber, or {:error,
   # :not_found | :timeout} when no configured store claims it.
   #
-  # The poll cycle fills the cache from discover_candidates/1's host map; a
+  # The poll cycle fills the cache from discover_candidates/1's store map; a
   # resolution here is not cached.
-  defp host_for_fiber(fiber_id, state) do
-    case Map.get(state.fiber_host_cache, fiber_id) do
-      host when is_binary(host) -> {:ok, host}
-      nil -> Shuttle.FeltStores.host_for_fiber(fiber_id, state.felt_stores)
+  defp store_for_fiber(fiber_id, state) do
+    case Map.get(state.fiber_store_cache, fiber_id) do
+      store when is_binary(store) -> {:ok, store}
+      nil -> Shuttle.FeltStores.store_for_fiber(fiber_id, state.felt_stores)
     end
   end
 
   # The fiber's owning felt store, falling back to the first configured store
   # when resolution fails (callers need *some* store to shell felt against).
   defp owning_store(fiber_id, state) do
-    case host_for_fiber(fiber_id, state) do
+    case store_for_fiber(fiber_id, state) do
       {:ok, h} -> h
       {:error, _} -> List.first(state.felt_stores)
     end
@@ -2953,7 +2812,7 @@ defmodule Shuttle.Poller do
   # dispatch fields so the continuation heuristic and "Resume previous" can
   # recover its session UUID. Routes through `felt shuttle mark-runtime` (felt
   # owns the nesting). The store/scoped-id pair mirrors the dispatch
-  # path: `host_for_fiber` (the same owning-store the poll enumerated this fiber
+  # path: `store_for_fiber` (the same owning-store the poll enumerated this fiber
   # from), falling back to the primary configured store. A claim with no captured
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
   # handoff can later be compared against it. A meeting capture's claim also
@@ -3156,10 +3015,9 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A shuttle block's dispatch kind: `kind:`, else its `mode:` alias, else
-  # "oneshot".
+  # A shuttle block's dispatch kind: `kind:`, else "oneshot".
   @doc false
-  def role_kind(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode", "oneshot"))
+  def role_kind(shuttle), do: Map.get(shuttle, "kind", "oneshot")
 
   # A fiber's dispatch kind; "oneshot" when it carries no shuttle block.
   @doc false
@@ -3642,7 +3500,7 @@ defmodule Shuttle.Poller do
   end
 
   # Fetch a fiber's full JSON representation via the felt CLI. Routes to the
-  # fiber's owning host via host_for_fiber/2 (cache → felt resolution).
+  # fiber's owning store via store_for_fiber/2 (cache → felt resolution).
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
@@ -3864,14 +3722,14 @@ defmodule Shuttle.Poller do
 
   # Re-reads the configured host list each poll cycle, so registry or env changes
   # are picked up without a daemon restart. Runs inside the poll Task, which is
-  # why the symlinked-substore walk belongs here too: `refresh_expanded_hosts/0`
+  # why the symlinked-substore walk belongs here too: `refresh_expanded_stores/0`
   # re-walks it on its own multi-minute cadence and publishes the result, leaving
-  # `configured_hosts/0` a pure cache read for the board's request path. No-op
+  # `configured_stores/0` a pure cache read for the board's request path. No-op
   # when the caller passed an explicit :felt_stores opt.
   defp refresh_felt_stores(%{auto_discover_felt_stores: false} = state), do: state
 
   defp refresh_felt_stores(%{felt_stores: current} = state) do
-    fresh = Shuttle.FeltStores.refresh_expanded_hosts()
+    fresh = Shuttle.FeltStores.refresh_expanded_stores()
 
     if fresh == current do
       state

@@ -15,30 +15,28 @@ import (
 // dispatch predicate (block.host == own_host_id) has a value to match, and no
 // host-less block is produced by normal flows.
 //
-// Precedence mirrors the Elixir daemon's own_host_id (daemon/lib/shuttle/poller.ex)
-// exactly: explicit --host (cross-host install, an explicit per-invocation
+// This is the one host-identity resolver. The daemon does not re-derive it: its
+// Poller asks `felt shuttle host --json` once at boot (unless SHUTTLE_HOST is
+// set) and freezes the answer, and `bin/shuttle install-agent` runs `felt
+// shuttle host seed`. So the CLI's stamp and the daemon's dispatch predicate
+// cannot disagree about which machine this is.
+//
+// Precedence: explicit --host (cross-host install, an explicit per-invocation
 // override — checked first because it's a deliberate ask, not an ambient
-// identity source) → SHUTTLE_HOST env var → the `~/.shuttle/host` file (its
-// trimmed first line; path overridable via SHUTTLE_HOST_FILE) →
+// identity source) → SHUTTLE_HOST env var (trimmed) → the `~/.shuttle/host`
+// file (its trimmed first line; path overridable via SHUTTLE_HOST_FILE) →
 // os.Hostname(), normalized and then WRITTEN BACK to the host file.
 //
-// Mirroring the chain was not enough on its own. The first three tiers are
-// stable values two processes can agree on; the OS hostname is neither. It
-// varies across runtimes — Erlang's :inet.gethostname() reports the short
-// name, os.Hostname() keeps the DNS domain, so the same Mac is
-// "studio-macbook-air" to the daemon and "studio-air.home" to the CLI —
-// and it varies across time, because DHCP rewrites it on some networks. Under
-// the strict dispatch predicate (block.host == own_host_id) either kind of
-// drift silently unhomes every fiber the CLI armed: the daemon sees a host it
-// isn't, dispatches nothing, and reports nothing wrong.
-//
-// So the OS hostname is consulted once per machine and then retired. It is
-// normalized identically on both sides (trimmed, lowercased, truncated at the
-// first "."), and seeded into the host-config path, which every later resolve
-// on either side reads instead. Whoever reaches the fallback first fixes the
-// name; agreement is the point, not which name won. Seeding is best-effort —
-// a read-only home, or a machine with no ~/.shuttle at all, still resolves,
-// just without the durability.
+// The first three tiers are stable values; the OS hostname is not. It varies
+// across time, because DHCP rewrites it on some networks, and under the strict
+// dispatch predicate (block.host == own_host_id) a drifted name silently
+// unhomes every fiber armed under the old one: the daemon sees a host it
+// isn't, dispatches nothing, and reports nothing wrong. So the OS hostname is
+// consulted once per machine and then retired: normalized (trimmed,
+// lowercased, truncated at the first ".") and seeded into the host file,
+// which every later resolve reads instead. Seeding is best-effort — a
+// read-only home, or a machine with no ~/.shuttle at all, still resolves, just
+// without the durability.
 //
 // Deliberately no daemon round-trip: the daemon shells this CLI while its
 // Poller waits on the subprocess, so asking the daemon would be re-entrant.
@@ -109,10 +107,9 @@ func resolveOwnHostSourced(flagVal string) (string, hostSource, error) {
 // one). Production code never reassigns it.
 var osHostname = os.Hostname
 
-// normalizeHostname reduces a raw OS hostname to the canonical short form both
-// sides agree on: trimmed, lowercased, and cut at the first "." so
-// "Studio-Air.home" and "studio-air" are the same machine. Matches
-// normalize_hostname/1 in the Elixir poller; the two must not drift.
+// normalizeHostname reduces a raw OS hostname to its canonical short form:
+// trimmed, lowercased, and cut at the first "." so "Studio-Air.home" and
+// "studio-air" are the same machine.
 func normalizeHostname(raw string) string {
 	name := strings.TrimSpace(raw)
 	if i := strings.Index(name, "."); i >= 0 {
@@ -145,9 +142,39 @@ func seedHostConfigFile(name string) {
 	_ = os.WriteFile(path, []byte(name+"\n"), 0o644)
 }
 
+// seedOwnHost makes this machine's identity durable, for `felt shuttle host
+// seed` (which `bin/shuttle install-agent` runs before it starts the daemon it
+// supervises). An identity already in the host file always wins: it may be a
+// name someone chose, and re-deciding it would rename the machine out from
+// under every fiber homed to it. Otherwise the resolved identity — $SHUTTLE_HOST,
+// else the normalized OS hostname — is written, and seeded reports that.
+//
+// It differs from the implicit seeding in resolveOwnHost in two deliberate
+// ways, both because installing a daemon is an explicit act of setting up
+// shuttle's own state: it creates the file's directory, and it persists
+// $SHUTTLE_HOST, so a daemon installed from a shell exporting it and a CLI
+// shell without the export still name the machine alike.
+func seedOwnHost() (id string, source hostSource, seeded bool, err error) {
+	if h, ok := hostConfigFileValue(); ok {
+		return h, hostSourceFile, false, nil
+	}
+	id, source, err = resolveOwnHostSourced("")
+	if err != nil {
+		return "", "", false, err
+	}
+	path := hostConfigFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", "", false, fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(id+"\n"), 0o644); err != nil {
+		return "", "", false, fmt.Errorf("write %s: %w", path, err)
+	}
+	return id, source, true, nil
+}
+
 // hostConfigFilePath is the canonical per-host identity file: SHUTTLE_HOST_FILE
-// if set, else ~/.shuttle/host. Mirrors host_config_file/0 in the Elixir poller
-// so both the CLI and the daemon read the same file by default.
+// if set, else ~/.shuttle/host. The daemon asks `felt shuttle host --json`
+// rather than reading it, so this is its only reader.
 func hostConfigFilePath() string {
 	if v := strings.TrimSpace(os.Getenv("SHUTTLE_HOST_FILE")); v != "" {
 		if expanded, err := expandUserPath(v); err == nil {
@@ -164,11 +191,8 @@ func hostConfigFilePath() string {
 
 // hostConfigFileValue returns the trimmed FIRST line of the host config file,
 // or ("", false) when the file is absent/unreadable or that line is blank.
-// First-line-only (not first non-empty line) to match host_config_file_value/0
-// in the Elixir poller exactly — any divergence here recreates the split
-// identity this file exists to prevent. This is the tier resolveOwnHost seeds
-// on first fallback, so after one resolve on a fresh machine it is the tier
-// that answers.
+// This is the tier resolveOwnHost seeds on first fallback, so after one
+// resolve on a fresh machine it is the tier that answers.
 func hostConfigFileValue() (string, bool) {
 	data, err := os.ReadFile(hostConfigFilePath())
 	if err != nil {
