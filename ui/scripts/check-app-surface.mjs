@@ -344,8 +344,8 @@ try {
   // On a phone the card's sheet is one scroll surface: with the drawer and
   // History unfolded, a touch swipe reaches the last History row and the
   // verdicts, and swiping back reaches the page. The files band is stretched
-  // to stand in for a card with attachments and a sent-files trail — the
-  // height that used to push the drawer's end under the sheet's clip.
+  // to stand in for a card with attachments and a sent-files trail — tall
+  // enough that a drawer scrolling on its own would end under the sheet's clip.
   const touch = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
   await touch.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await touch.getByText('App conversation continuity', { exact: true }).click()
