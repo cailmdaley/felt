@@ -1197,7 +1197,7 @@ and a live worker is left running.`,
 
 func init() {
 	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); writes here, without the daemon hop")
-	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, "Write the document here instead of routing through the owning daemon")
+	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
@@ -1205,13 +1205,16 @@ func init() {
 	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
 	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
-	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, "Write the document here instead of routing through the owning daemon")
+	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, localFlagUsage)
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
 	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
+	for _, c := range []*cobra.Command{pauseCmd, closeCmd, reopenCmd, setOutcomeCmd, setModelCmd, setAgentCmd, reshapeCmd, uninstallShuttleCmd} {
+		c.Flags().Bool("local", false, localFlagUsage)
+	}
 
 	shuttleCmd.AddCommand(pauseCmd)
 	shuttleCmd.AddCommand(resumeCmd)

@@ -22,17 +22,25 @@ const maxLaunchMessageBytes = 64 << 10
 // shuttle.host differs from this host and is configured in remotes.json. An
 // unknown or malformed fleet entry must fail before an origin-routed endpoint
 // can degrade the request to this daemon's local mirror.
+//
+// Under --local nothing routes: the daemon shells every routing verb with it,
+// so a daemon-run verb only ever writes a fiber this host owns, and a
+// remote-owned one is refused with ownerMismatchError rather than sent back
+// through the daemon.
 func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
 	owner := strings.TrimSpace(blockHost)
 	if owner == "" {
 		return "", nil
 	}
-	own, _, err := resolveOwnHostSourced("")
+	own, source, err := resolveOwnHostSourced("")
 	if err != nil {
 		return "", fmt.Errorf("cannot verify fiber %s ownership: %w", args[0], err)
 	}
 	if owner == own {
 		return "", nil
+	}
+	if localOnly(cmd) {
+		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source}
 	}
 
 	remotes, err := configuredRemotes()
@@ -47,6 +55,16 @@ func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (
 	path, _ := feltRemotesPath()
 	return "", ownerRouteRefusal(cmd, args, owner,
 		fmt.Sprintf("host %q is not an enabled remote in %s", owner, path))
+}
+
+// localFlagUsage is the one description of --local on every verb that can
+// route to an owning daemon.
+const localFlagUsage = "Write the document here and never route through a daemon; a fiber another host owns is refused"
+
+// localOnly reports whether cmd runs with --local set.
+func localOnly(cmd *cobra.Command) bool {
+	flag := cmd.Flags().Lookup("local")
+	return flag != nil && flag.Value.String() == "true"
 }
 
 func ownerRouteRefusal(cmd *cobra.Command, args []string, owner, reason string) error {

@@ -88,7 +88,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
     assert File.read!(args_file) ==
              "--felt-store\n#{store}\nreshape\ntests/nightly\nstanding\n--schedule\n0 7 * * *\n" <>
-               "--tz\nEurope/Paris\n"
+               "--tz\nEurope/Paris\n--local\n"
   end
 
   # A schedule-only edit passes NO kind positional — the CLI keeps the current
@@ -113,7 +113,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n"
+             "--felt-store\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
   end
 
   # Only the three legal kinds reach the CLI — an arbitrary string is rejected
@@ -187,7 +187,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n"
+             "--felt-store\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n--local\n"
   end
 
   test "close and reopen delegate through the existing lifecycle endpoint" do
@@ -206,7 +206,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert close_conn.status == 200
 
     assert File.read!(close_args) ==
-             "--felt-store\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n"
+             "--felt-store\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n--local\n"
 
     reopen_store =
       fixture_store!("shuttle-lifecycle-reopen-route", "tests/reopen-route", "Reopen route")
@@ -228,7 +228,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert reopen_conn.status == 200
 
     assert File.read!(reopen_args) ==
-             "--felt-store\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n"
+             "--felt-store\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n--local\n"
   end
 
   # set-interactive is retired: the controller no longer allows the action, so a
@@ -270,7 +270,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     # The multi-line outcome rides as a single argv element (one `--outcome`
     # value), so the block scalar survives without stdin piping.
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n"
+             "--felt-store\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n--local\n"
   end
 
   # T2: pause is the kanban's most-hit lifecycle write — the drag-a-card-off
@@ -294,7 +294,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\npause\ntests/pause-edit\n"
+             "--felt-store\n#{store}\npause\ntests/pause-edit\n--local\n"
   end
 
   test "pause --no-kill appends the flag after the verb and fiber id" do
@@ -313,7 +313,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\npause\ntests/pause-nokill\n--no-kill\n"
+             "--felt-store\n#{store}\npause\ntests/pause-nokill\n--no-kill\n--local\n"
   end
 
   # set-agent composes base agent × effort × chrome in one validated write.
@@ -341,7 +341,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n"
+             "--felt-store\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n--local\n"
   end
 
   test "set-agent can update project_dir without changing agent axes" do
@@ -364,7 +364,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n"
+             "--felt-store\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
   end
 
   test "set-model shells felt shuttle in the resolved owning store" do
@@ -397,7 +397,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-model\nscience/cmbx/explorations/spt-talk-push\ncodex\n"
+             "--felt-store\n#{store}\nset-model\nscience/cmbx/explorations/spt-talk-push\ncodex\n--local\n"
   end
 
   test "command errors collapse duplicated cobra error lines" do

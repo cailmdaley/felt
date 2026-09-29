@@ -41,6 +41,6 @@ defmodule Shuttle.LifecycleService do
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
   def write(verb, fiber_id, opts) when verb in [:accept, :resume] do
-    Shuttle.Felt.Shuttle.run(Atom.to_string(verb), fiber_id, ["--local"], opts)
+    Shuttle.Felt.Shuttle.run(Atom.to_string(verb), fiber_id, [], opts)
   end
 end

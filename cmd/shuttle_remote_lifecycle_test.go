@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -418,5 +419,40 @@ func TestRemoteResumeReportsFreshRemoteBootQuarantine(t *testing.T) {
 	}
 	if !strings.Contains(out, "may stay pending") || !strings.Contains(out, "bin/shuttle release") || mustRead(t, storage, "draft").Status != felt.StatusOpen {
 		t.Fatalf("resume output = %q; hub mirror status = %q", out, mustRead(t, storage, "draft").Status)
+	}
+}
+
+// The daemon shells every routing verb with --local. Such a call on a
+// remote-owned fiber is refused as a mirror write and never routed back through
+// the daemon.
+func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
+	configureRemoteLifecycleTest(t)
+	dir, storage := newStore(t)
+	block := remoteShuttleBlock(t.TempDir())
+	block["kind"] = "pinned"
+	seedShuttleRole(t, storage, "work/task", felt.StatusActive, block, nil)
+	before, _ := os.ReadFile(storage.Path("work/task"))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("--local verb reached the daemon: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	for _, verb := range [][]string{
+		{"pause"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
+		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"reshape", "oneshot"}, {"uninstall"},
+	} {
+		argv := append([]string{"shuttle", verb[0], "work/task"}, verb[1:]...)
+		argv = append(argv, "--local")
+		_, err := runCommand(t, dir, argv...)
+		var mismatch ownerMismatchError
+		if !errors.As(err, &mismatch) {
+			t.Fatalf("%s --local on a remote-owned fiber: want ownerMismatchError, got %T: %v", verb[0], err, err)
+		}
+	}
+	after, _ := os.ReadFile(storage.Path("work/task"))
+	if string(before) != string(after) {
+		t.Fatal("refused --local verb modified the hub mirror")
 	}
 }
