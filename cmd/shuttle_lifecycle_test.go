@@ -144,7 +144,8 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
-	killed := withStubbedTmux(t, map[string]bool{"task-shuttle": true})
+	f := mustRead(t, storage, "task")
+	killed := withStubbedTmux(t, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
 
 	if out, err := runCommand(t, dir, "shuttle", "pause", "task", "--no-kill"); err != nil {
 		t.Fatalf("pause --no-kill: %v\n%s", err, out)

@@ -107,18 +107,10 @@ The daemon's boot quarantine can still hold an eligible fiber until
 		rows := make([]FiberStatus, 0, len(entries))
 		seenSessions := map[string]bool{}
 		for _, entry := range entries {
-			// The canonical (uid-keyed) name is the row's display session;
-			// liveness recognizes both forms the daemon launches under
-			// (shuttleTmuxSessionNames).
 			session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-			running := false
-			for _, candidate := range shuttleTmuxSessionNames(entry.FiberID, entry.UID) {
-				if live[candidate] && owners[candidate] == entry.FiberID {
-					running = true
-					session = candidate
-					seenSessions[candidate] = true
-					break
-				}
+			running := session != "" && live[session] && owners[session] == entry.FiberID
+			if running {
+				seenSessions[session] = true
 			}
 			rows = append(rows, FiberStatus{
 				FiberID: entry.FiberID,
@@ -244,7 +236,7 @@ func runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": dispatchAssessment(f.ID, statusNow, block),
+			"dispatch": dispatchAssessment(f.ID, f.UID, statusNow, block),
 		}
 		if block.Agent != "" {
 			out["agent"] = block.Agent
@@ -267,7 +259,7 @@ func runStatusOneFiber(query string) error {
 		fmt.Printf("  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Println("")
-	fmt.Println(dispatchAssessment(f.ID, statusNow, block))
+	fmt.Println(dispatchAssessment(f.ID, f.UID, statusNow, block))
 	return nil
 }
 
@@ -278,7 +270,7 @@ func runStatusOneFiber(query string) error {
 // without a project_dir still dispatches — its worker starts in the felt
 // store — but no verb arms it again until it has one, so every call named
 // here carries the --project-dir it would need.
-func dispatchAssessment(fiberID, statusNow string, block *shuttle.Block) string {
+func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) string {
 	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
 	arm := func(verb string) string {
 		if noProjectDir {
@@ -291,6 +283,8 @@ func dispatchAssessment(fiberID, statusNow string, block *shuttle.Block) string 
 		own, _ := resolveOwnHost("")
 		var verdict string
 		switch {
+		case uid == "":
+			return "→ Armed, but the fiber has no intrinsic id — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter."
 		case block.Host == "":
 			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `felt shuttle uninstall` then install / repeat / pin, which stamp this host."
 		case block.Host != own:
@@ -314,13 +308,11 @@ func dispatchAssessment(fiberID, statusNow string, block *shuttle.Block) string 
 }
 
 // liveWorkerSession reports the tmux session holding this fiber's worker, if
-// any — recognizing both the canonical uid-keyed name and the legacy leaf-only
-// one, exactly as the table's liveness check does.
+// one is live. A fiber without a uid has no session name and so no worker.
 func liveWorkerSession(f *felt.Felt) (string, bool) {
-	for _, candidate := range shuttleTmuxSessionNames(f.ID, f.UID) {
-		if tmuxSessionExists(candidate) {
-			return candidate, true
-		}
+	session := shuttleTmuxSessionName(f.ID, f.UID)
+	if session != "" && tmuxSessionExists(session) {
+		return session, true
 	}
 	return "", false
 }
@@ -433,28 +425,24 @@ func listShuttleFibers(store string) ([]shuttleEntry, error) {
 	return entries, nil
 }
 
-// sessionOwnerMap maps every session-name form a fiber could carry — uid-keyed
-// canonical and legacy leaf-only — back to its fiber id. Closed fibers are
-// excluded (no live worker to attribute). The uid-keyed names are collision-free;
-// the legacy leaf-only names keep a collision guard: two open fibers sharing a
-// leaf drop out of the map rather than mis-attributing a live worker.
+// sessionOwnerMap maps each open fiber's worker session name back to its fiber
+// id. Closed fibers (no live worker to attribute) and fibers without a uid (no
+// session name) are excluded. Two fibers carrying the same uid — a copied file —
+// drop out of the map rather than mis-attributing a live worker.
 func sessionOwnerMap(entries []shuttleEntry) map[string]string {
 	owners := map[string]string{}
 	collisions := map[string]bool{}
 	for _, entry := range entries {
-		if entry.Status == felt.StatusClosed {
+		session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
+		if entry.Status == felt.StatusClosed || session == "" || collisions[session] {
 			continue
 		}
-		for _, session := range shuttleTmuxSessionNames(entry.FiberID, entry.UID) {
-			if existing, ok := owners[session]; ok && existing != entry.FiberID {
-				delete(owners, session)
-				collisions[session] = true
-				continue
-			}
-			if !collisions[session] {
-				owners[session] = entry.FiberID
-			}
+		if existing, ok := owners[session]; ok && existing != entry.FiberID {
+			delete(owners, session)
+			collisions[session] = true
+			continue
 		}
+		owners[session] = entry.FiberID
 	}
 	return owners
 }

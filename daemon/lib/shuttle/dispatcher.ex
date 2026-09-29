@@ -2,6 +2,7 @@ defmodule Shuttle.Dispatcher do
   @moduledoc """
   Dispatches a single worker for a felt constitution fiber:
   - Locates the fiber via felt CLI
+  - Refuses a fiber without an intrinsic id (its worker would have no name)
   - Checks status (refuses closed)
   - Checks for an existing worker
   - Starts the selected terminal or app surface with the dispatch prompt
@@ -27,6 +28,7 @@ defmodule Shuttle.Dispatcher do
           | {:error, :already_running}
           | {:error, :reopen_failed}
           | {:error, :missing_session_id}
+          | {:error, {:uid_missing, String.t()}}
           | {:error, {:wrapper_unresolved, String.t()}}
           | {:error, {:work_dir_missing, String.t()}}
           | {:error, {:tmux_server_unavailable, String.t()}}
@@ -42,6 +44,7 @@ defmodule Shuttle.Dispatcher do
   """
   defguard refusal?(tag, message)
            when tag in [
+                  :uid_missing,
                   :wrapper_unresolved,
                   :work_dir_missing,
                   :tmux_server_unavailable,
@@ -86,7 +89,7 @@ defmodule Shuttle.Dispatcher do
     force = Keyword.get(opts, :force, false)
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
-         uid = Map.get(fiber, "uid"),
+         {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- check_not_closed(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
@@ -640,57 +643,29 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc """
-  Canonical tmux session name for a fiber, keyed by its uid.
+  The tmux session name of a fiber's worker: `<leaf>-<uid>-shuttle`.
 
-  The form is `<leaf>-<uid>-shuttle`: the human-readable leaf keeps tmux/kitty
-  titles legible from the left edge when truncated, and the uid (the fiber's
-  intrinsic ULID) makes the name collision-free and rename-safe — two fibers
-  sharing a leaf do not collide, and renaming a fiber leaves the running
-  worker's session addressable by the uid that does not change.
+  The human-readable leaf keeps tmux/kitty titles legible from the left edge
+  when truncated, and the uid (the fiber's intrinsic ULID) makes the name
+  collision-free and rename-safe — two fibers sharing a leaf do not collide,
+  and renaming a fiber leaves the running worker's session addressable by the
+  uid that does not change.
 
-  When `uid` is `nil` or empty (a fiber without a uid), falls back to the
-  leaf-only `<leaf>-shuttle` form.
+  `nil` when `uid` is not a ULID: such a fiber has no worker name, and
+  `dispatch/2` refuses it (`:uid_missing`). The names produced here are exactly
+  the names `shuttle_session?/1` recognizes.
   """
-  @spec session_name(String.t(), String.t() | nil) :: String.t()
-  def session_name(fiber_id, uid) when is_binary(uid) and uid != "" do
-    fiber_leaf(fiber_id) <> "-" <> uid <> "-shuttle"
-  end
-
-  def session_name(fiber_id, _uid), do: session_name(fiber_id)
-
-  @doc """
-  Leaf-only tmux session name (`<leaf>-shuttle`): the name a fiber without a
-  uid launches under, and the second form every recognition/adoption path
-  matches (`session_names/2`).
-  """
-  @spec session_name(String.t()) :: String.t()
-  def session_name(fiber_id) do
-    fiber_leaf(fiber_id) <> "-shuttle"
+  @spec session_name(String.t(), String.t() | nil) :: String.t() | nil
+  def session_name(fiber_id, uid) do
+    if Shuttle.ULID.valid?(uid), do: fiber_leaf(fiber_id) <> "-" <> uid <> "-shuttle"
   end
 
   @doc """
-  Both tmux session-name forms for a fiber — the uid-keyed canonical name and
-  the leaf-only name — so recognition/adoption matches a live worker under
-  either. Returns `[uid_keyed, leaf_only]` when a uid is available, or just
-  `[leaf_only]` when it is not.
-  """
-  @spec session_names(String.t(), String.t() | nil) :: [String.t()]
-  def session_names(fiber_id, uid) when is_binary(uid) and uid != "" do
-    [session_name(fiber_id, uid), session_name(fiber_id)]
-  end
-
-  def session_names(fiber_id, _uid), do: [session_name(fiber_id)]
-
-  @doc """
-  Returns true when a tmux session name belongs to a Shuttle worker.
-
-  Both name forms — `<leaf>-<uid>-shuttle` and the leaf-only `<leaf>-shuttle` —
-  end in `-shuttle`, so the suffix test recognizes either.
+  Returns true when a tmux session name belongs to a Shuttle worker: it parses
+  as `<leaf>-<ULID>-shuttle` (`Shuttle.ULID.from_tmux/1`).
   """
   @spec shuttle_session?(String.t()) :: boolean()
-  def shuttle_session?(session_name) do
-    String.ends_with?(session_name, "-shuttle")
-  end
+  def shuttle_session?(session_name), do: Shuttle.ULID.from_tmux(session_name) != nil
 
   # ── Internal ──
 
@@ -828,22 +803,44 @@ defmodule Shuttle.Dispatcher do
     status == "active" and is_nil(tempered) and is_nil(closed_at)
   end
 
-  # Dual-recognition: a live worker under either the uid-keyed name or the
-  # leaf-only name blocks a fresh dispatch OR a resume. `present?` treats
-  # an inconclusive `has-session` as present, so a transient tmux failure can
+  # A fiber's worker is named by its uid (`session_name/2`), so a fiber without
+  # one cannot be dispatched: refuse before anything else touches it, with the
+  # fix named, through the same refusal shape every preflight uses (the
+  # Poller's `blocked` row, the dispatch API's 422, the CLI's stderr).
+  defp check_uid(fiber_id, fiber) do
+    uid = Map.get(fiber, "uid")
+
+    cond do
+      Shuttle.ULID.valid?(uid) ->
+        {:ok, uid}
+
+      uid in [nil, ""] ->
+        dispatch_refused(
+          :uid_missing,
+          "fiber #{fiber_id} has no intrinsic id, and a worker's tmux session is named " <>
+            "<leaf>-<id>-shuttle. Run `felt backfill-ids` in its store, or add an `id:` (ULID) " <>
+            "to its frontmatter."
+        )
+
+      true ->
+        dispatch_refused(
+          :uid_missing,
+          "fiber #{fiber_id}'s id #{inspect(uid)} is not a ULID (26 uppercase Crockford " <>
+            "base32 characters), so its worker has no tmux session name. Replace the `id:` in " <>
+            "its frontmatter with a ULID."
+        )
+    end
+  end
+
+  # A live worker blocks a fresh dispatch OR a resume. `present?` treats an
+  # inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
   defp check_not_running(fiber_id, uid, runner, surface) do
-    if surface == "app" and System.find_executable("tmux") == nil do
-      :ok
-    else
-      fiber_id
-      |> session_names(uid)
-      |> Enum.any?(&Shuttle.Tmux.present?(runner, &1))
-      |> case do
-        true -> {:error, :already_running}
-        false -> :ok
-      end
+    cond do
+      surface == "app" and System.find_executable("tmux") == nil -> :ok
+      Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
+      true -> :ok
     end
   end
 
@@ -1657,9 +1654,8 @@ defmodule Shuttle.Dispatcher do
   defp append_session_ledger(fiber_id, uuid, opts) do
     Shuttle.SessionLedger.record(
       fiber: fiber_id,
-      # Explicit, not tmux-inferred: a fiber with no uid yields a plain
-      # `<leaf>-shuttle` tmux name, and an inferred-nil uid line would be
-      # invisible to latest_for_uid forever (the claim path already passes it).
+      # Explicit, not tmux-inferred: an app worker has no tmux name to infer
+      # from, and the claim path passes it the same way.
       uid: Keyword.get(opts, :uid),
       session: uuid,
       thread_id: Keyword.get(opts, :thread_id),

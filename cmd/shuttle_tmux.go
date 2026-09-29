@@ -1,16 +1,18 @@
 package cmd
 
 import (
+	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
 // tmux session naming + management for the felt CLI's worker-facing verbs (pause
-// kills a live worker; attach/session-name address one). The names MUST match the
-// daemon's own scheme (Shuttle.Dispatcher.session_names/2) — a uid-keyed canonical
-// form, and a leaf-only form recognized alongside it — so the CLI recognizes a
-// session the daemon launched. The daemon owns the launch; the CLI only
-// recognizes and kills.
+// kills a live worker; attach/session-name address one). A worker's session is
+// always <leaf>-<uid>-shuttle, the same scheme as the daemon's
+// Shuttle.Dispatcher.session_name/2 and Shuttle.ULID.from_tmux/1, so the CLI
+// recognizes the sessions the daemon launches. The daemon owns the launch; the
+// CLI only recognizes and kills.
 
 // fiberLeaf extracts the human-readable leaf (last path component) of a fiber id,
 // e.g. "my-task" from "project/tasks/my-task". Keeps tmux/kitty titles legible
@@ -26,31 +28,22 @@ func fiberLeaf(fiberID string) string {
 	return fiberID
 }
 
-// legacyTmuxSessionName is the pre-uid session form (<leaf>-shuttle), kept for
-// dual-recognition of workers launched before the uid-keyed cutover.
-func legacyTmuxSessionName(fiberID string) string {
-	return fiberLeaf(fiberID) + "-shuttle"
-}
-
-// shuttleTmuxSessionName is the canonical worker session name: <leaf>-<uid>-shuttle.
-// The uid (intrinsic ULID) makes it collision-free and rename-safe — two fibers
-// sharing a leaf no longer collide, and renaming a fiber leaves the running
-// worker's session addressable. An empty uid falls back to the legacy form.
+// shuttleTmuxSessionName is a worker's tmux session name: <leaf>-<uid>-shuttle.
+// The uid (the fiber's intrinsic ULID) makes it collision-free and rename-safe —
+// two fibers sharing a leaf do not collide, and renaming a fiber leaves the
+// running worker's session addressable. A fiber without a uid has no session
+// name (""): the daemon refuses to dispatch it.
 func shuttleTmuxSessionName(fiberID, uid string) string {
 	if uid == "" {
-		return legacyTmuxSessionName(fiberID)
+		return ""
 	}
 	return fiberLeaf(fiberID) + "-" + uid + "-shuttle"
 }
 
-// shuttleTmuxSessionNames returns both the canonical (uid-keyed) and legacy
-// session names so recognition matches a live worker regardless of which scheme
-// launched it. With a uid: [canonical, legacy]; without: [legacy].
-func shuttleTmuxSessionNames(fiberID, uid string) []string {
-	if uid == "" {
-		return []string{legacyTmuxSessionName(fiberID)}
-	}
-	return []string{shuttleTmuxSessionName(fiberID, uid), legacyTmuxSessionName(fiberID)}
+// errFiberWithoutUID is the operator-facing error for a fiber that cannot have a
+// worker session because it carries no intrinsic id.
+func errFiberWithoutUID(fiberID string) error {
+	return fmt.Errorf("fiber %s has no intrinsic id, so it has no worker session name — run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter", fiberID)
 }
 
 // tmuxSessionExists / killTmuxSession are func vars so tests can stub tmux
@@ -64,11 +57,23 @@ var killTmuxSession = func(session string) error {
 	return exec.Command("tmux", "kill-session", "-t", session).Run()
 }
 
+// shuttleSessionULID matches the uid a worker session name embeds:
+// <leaf>-<ULID>-shuttle, Crockford base32 (no I, L, O, U).
+var shuttleSessionULID = regexp.MustCompile(`-([0-9A-HJKMNP-TV-Z]{26})-shuttle$`)
+
+// fiberUIDFromTmuxSession returns the fiber uid embedded in a worker session
+// name, or "" when the name is not a shuttle worker's.
+func fiberUIDFromTmuxSession(sessionName string) string {
+	if m := shuttleSessionULID.FindStringSubmatch(sessionName); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // isShuttleTmuxSessionName reports whether a tmux session name belongs to a
-// shuttle worker. Both name forms (uid-keyed and legacy leaf-only) end in
-// "-shuttle", so the suffix test recognizes either.
+// shuttle worker: one that parses as <leaf>-<ULID>-shuttle.
 func isShuttleTmuxSessionName(sessionName string) bool {
-	return strings.HasSuffix(sessionName, "-shuttle")
+	return fiberUIDFromTmuxSession(sessionName) != ""
 }
 
 // liveTmuxSessions returns the set of live shuttle worker session names — the

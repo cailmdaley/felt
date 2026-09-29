@@ -68,38 +68,50 @@ defmodule Shuttle.WaitingTrackerTest do
   # ── Category derivation per last event type ──
 
   test "file delivery preserves waiting state and timestamp", %{events: events} do
-    prewrite(events, "stop", "foo-01J-shuttle", @base - 1000)
-    prewrite(events, "file_sent", "foo-01J-shuttle", @base)
+    prewrite(events, "stop", "foo-01J00000000000000000000000-shuttle", @base - 1000)
+    prewrite(events, "file_sent", "foo-01J00000000000000000000000-shuttle", @base)
     name = start(events)
-    assert phase(name, "foo-01J-shuttle") == "waiting"
-    assert last_event_at(name, "foo-01J-shuttle") == @base - 1000
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base - 1000
   end
 
   test "a stop event yields phase \"waiting\"", %{events: events} do
     name = start(events)
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
   end
 
   test "a notification event yields phase \"attention\"", %{events: events} do
     name = start(events)
-    append(events, "notification", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+    append(events, "notification", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
   end
 
   test "subagent_stop yields phase \"waiting\" (folded into waiting, not cleared)",
        %{events: events} do
     name = start(events)
-    append(events, "subagent_stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
   end
 
   for working_type <- ["pre_tool_use", "post_tool_use", "user_prompt_submit", "session_start"] do
     test "a #{working_type} event yields phase \"working\" (long-tool guard)",
          %{events: events} do
       name = start(events)
-      append(events, unquote(working_type), "foo-01J-shuttle")
-      assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+      append(events, unquote(working_type), "foo-01J00000000000000000000000-shuttle")
+
+      assert wait_until(fn ->
+               phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+             end)
     end
   end
 
@@ -107,24 +119,36 @@ defmodule Shuttle.WaitingTrackerTest do
 
   test "last event wins: stop then pre_tool_use reads as \"working\"", %{events: events} do
     name = start(events)
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
 
     # A following tool call wins — the worker resumed, no stickiness keeps it idle.
-    append(events, "pre_tool_use", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append(events, "pre_tool_use", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
   end
 
   test "untyped notification after stop reads as \"attention\"",
        %{events: events} do
     name = start(events)
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
 
     # Untyped notifications retain the attention signal for harnesses that
     # do not report why they are notifying.
-    append(events, "notification", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+    append(events, "notification", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
   end
 
   # ── Waiting on itself, not on you ────────────────────────────────────────
@@ -141,74 +165,116 @@ defmodule Shuttle.WaitingTrackerTest do
   test "a stop that leaves detached shells running reads as \"working\"",
        %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 2})
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
   end
 
   test "the idle timer over outstanding background work does not raise a hand",
        %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 1})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 1})
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
 
     # The count is carried onto the notification, which knows nothing about the
     # shells on its own.
-    append_ev(events, "notification", "foo-01J-shuttle", %{notificationKind: "idle_prompt"})
+    append_ev(events, "notification", "foo-01J00000000000000000000000-shuttle", %{
+      notificationKind: "idle_prompt"
+    })
+
     Process.sleep(30)
-    assert phase(name, "foo-01J-shuttle") == "working"
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
   end
 
   test "an idle reminder remains waiting rather than demanding attention", %{events: events} do
     name = start(events)
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
 
-    append_ev(events, "notification", "foo-01J-shuttle", %{
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
+
+    append_ev(events, "notification", "foo-01J00000000000000000000000-shuttle", %{
       notificationKind: "idle_prompt",
       timestamp: @base + 1
     })
 
-    assert wait_until(fn -> activity(name, "foo-01J-shuttle")[:last_event_at] == @base + 1 end)
-    assert phase(name, "foo-01J-shuttle") == "waiting"
+    assert wait_until(fn ->
+             activity(name, "foo-01J00000000000000000000000-shuttle")[:last_event_at] == @base + 1
+           end)
+
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
   end
 
   test "a permission prompt is attention even over running background work",
        %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 2})
 
-    append_ev(events, "notification", "foo-01J-shuttle", %{notificationKind: "permission_prompt"})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
+
+    append_ev(events, "notification", "foo-01J00000000000000000000000-shuttle", %{
+      notificationKind: "permission_prompt"
+    })
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
   end
 
   test "resuming the session clears the outstanding count", %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 1})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 1})
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
 
     # A prompt arrived (the shell reporting back, or a human). Whatever is still
     # running, the NEXT stop says so; until then nothing is outstanding.
-    append(events, "user_prompt_submit", "foo-01J-shuttle")
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    append(events, "user_prompt_submit", "foo-01J00000000000000000000000-shuttle")
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
   end
 
   test "a subagent stop states the count too", %{events: events} do
     name = start(events)
     # The worker's own subagent finishing is a last event like any other, and
     # the shells it leaves behind are the same shells.
-    append_ev(events, "subagent_stop", "foo-01J-shuttle", %{backgroundTasks: 1})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", %{
+      backgroundTasks: 1
+    })
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
   end
 
   test "a subagent stop can also clear a carried-forward count", %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J-shuttle", %{backgroundTasks: 2})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 2})
 
-    append_ev(events, "subagent_stop", "foo-01J-shuttle", %{backgroundTasks: 0})
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
+
+    append_ev(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", %{
+      backgroundTasks: 0
+    })
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
   end
 
   test "the suppression expires: an endless task cannot silence a worker forever",
@@ -218,32 +284,43 @@ defmodule Shuttle.WaitingTrackerTest do
     # A shell that never returns — a dev server, a tail. An hour later the
     # session has been quiet with nothing to show, and the board says so rather
     # than keeping the worker invisible.
-    append_ev(events, "stop", "foo-01J-shuttle", %{
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{
       backgroundTasks: 1,
       timestamp: @base - 61 * 60 * 1_000
     })
 
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
   end
 
   test "a long build inside the bound stays quiet", %{events: events} do
     name = start(events)
 
-    append_ev(events, "stop", "foo-01J-shuttle", %{
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{
       backgroundTasks: 1,
       timestamp: @base - 30 * 60 * 1_000
     })
 
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "working" end)
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+           end)
   end
 
   test "a harness that names neither field behaves exactly as before",
        %{events: events} do
     name = start(events)
-    append(events, "stop", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "waiting" end)
-    append(events, "notification", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+           end)
+
+    append(events, "notification", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
   end
 
   # ── Real last_event_at, not poll wall-clock (pins the fake-timestamp fix) ──
@@ -252,19 +329,19 @@ defmodule Shuttle.WaitingTrackerTest do
        %{events: events} do
     name = start(events)
     one_hour_ago = @base - @hour_ms
-    append(events, "stop", "foo-01J-shuttle", one_hour_ago)
+    append(events, "stop", "foo-01J00000000000000000000000-shuttle", one_hour_ago)
 
-    assert wait_until(fn -> ingested?(name, "foo-01J-shuttle") end)
-    assert last_event_at(name, "foo-01J-shuttle") == one_hour_ago
+    assert wait_until(fn -> ingested?(name, "foo-01J00000000000000000000000-shuttle") end)
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == one_hour_ago
   end
 
   test "a line missing a timestamp falls back to the ingest clock", %{events: events} do
     name = start(events)
-    line = Jason.encode!(%{type: "stop", tmuxSession: "foo-01J-shuttle"})
+    line = Jason.encode!(%{type: "stop", tmuxSession: "foo-01J00000000000000000000000-shuttle"})
     File.write!(events, line <> "\n", [:append])
 
-    assert wait_until(fn -> ingested?(name, "foo-01J-shuttle") end)
-    assert last_event_at(name, "foo-01J-shuttle") == @base
+    assert wait_until(fn -> ingested?(name, "foo-01J00000000000000000000000-shuttle") end)
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base
   end
 
   # ── Boot seeding from a pre-written file (pins the stopped-before-boot fix) ──
@@ -272,12 +349,12 @@ defmodule Shuttle.WaitingTrackerTest do
   test "a session stopped before boot is known immediately, with its real time",
        %{events: events} do
     stopped_24h_ago = @base - 24 * @hour_ms
-    prewrite(events, "stop", "stale-01J-shuttle", stopped_24h_ago)
+    prewrite(events, "stop", "stale-01J00000000000000000000000-shuttle", stopped_24h_ago)
 
     name = start(events)
 
     # No new append — it must already be there from the boot seed.
-    act = activity(name, "stale-01J-shuttle")
+    act = activity(name, "stale-01J00000000000000000000000-shuttle")
     assert act != nil
     assert act.phase == "waiting"
     assert act.last_event_at == stopped_24h_ago
@@ -285,25 +362,25 @@ defmodule Shuttle.WaitingTrackerTest do
 
   test "boot seed prunes a session older than 48h, keeps one just inside",
        %{events: events} do
-    prewrite(events, "stop", "ancient-01J-shuttle", @base - 49 * @hour_ms)
-    prewrite(events, "stop", "recent-01J-shuttle", @base - 47 * @hour_ms)
+    prewrite(events, "stop", "ancient-01J00000000000000000000000-shuttle", @base - 49 * @hour_ms)
+    prewrite(events, "stop", "recent-01J00000000000000000000000-shuttle", @base - 47 * @hour_ms)
 
     name = start(events)
 
-    refute ingested?(name, "ancient-01J-shuttle")
-    assert ingested?(name, "recent-01J-shuttle")
+    refute ingested?(name, "ancient-01J00000000000000000000000-shuttle")
+    assert ingested?(name, "recent-01J00000000000000000000000-shuttle")
   end
 
   test "boot seed honors last-event-wins across the whole file", %{events: events} do
     # stop, then notification, then pre_tool_use — the last one wins on seed.
-    prewrite(events, "stop", "seed-01J-shuttle", @base - 3_000)
-    prewrite(events, "notification", "seed-01J-shuttle", @base - 2_000)
-    prewrite(events, "pre_tool_use", "seed-01J-shuttle", @base - 1_000)
+    prewrite(events, "stop", "seed-01J00000000000000000000000-shuttle", @base - 3_000)
+    prewrite(events, "notification", "seed-01J00000000000000000000000-shuttle", @base - 2_000)
+    prewrite(events, "pre_tool_use", "seed-01J00000000000000000000000-shuttle", @base - 1_000)
 
     name = start(events)
 
-    assert phase(name, "seed-01J-shuttle") == "working"
-    assert last_event_at(name, "seed-01J-shuttle") == @base - 1_000
+    assert phase(name, "seed-01J00000000000000000000000-shuttle") == "working"
+    assert last_event_at(name, "seed-01J00000000000000000000000-shuttle") == @base - 1_000
   end
 
   # ── Filtering / robustness (carried forward) ──
@@ -320,27 +397,40 @@ defmodule Shuttle.WaitingTrackerTest do
     name = start(events)
 
     line =
-      Jason.encode!(%{type: "notification", tmuxSession: "foo-01J-shuttle", timestamp: @base})
+      Jason.encode!(%{
+        type: "notification",
+        tmuxSession: "foo-01J00000000000000000000000-shuttle",
+        timestamp: @base
+      })
 
     File.write!(events, line, [:append])
     Process.sleep(40)
-    refute ingested?(name, "foo-01J-shuttle")
+    refute ingested?(name, "foo-01J00000000000000000000000-shuttle")
 
     File.write!(events, "\n", [:append])
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
   end
 
   test "file truncation resets the tail offset without crashing", %{events: events} do
     name = start(events)
-    append(events, "notification", "foo-01J-shuttle")
-    assert wait_until(fn -> phase(name, "foo-01J-shuttle") == "attention" end)
+    append(events, "notification", "foo-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
+           end)
 
     File.write!(events, "")
     Process.sleep(40)
-    append(events, "notification", "bar-01J-shuttle")
-    assert wait_until(fn -> phase(name, "bar-01J-shuttle") == "attention" end)
+    append(events, "notification", "bar-01J00000000000000000000000-shuttle")
+
+    assert wait_until(fn ->
+             phase(name, "bar-01J00000000000000000000000-shuttle") == "attention"
+           end)
 
     # A truncated file cannot make a remembered session wrong, only unrefreshed.
-    assert phase(name, "foo-01J-shuttle") == "attention"
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "attention"
   end
 end

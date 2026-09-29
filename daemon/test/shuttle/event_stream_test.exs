@@ -237,11 +237,22 @@ defmodule Shuttle.EventStreamTest do
       ev("file_sent", -3, Map.put(at.(-3), "files", ["/tmp/a.html"]))
     ])
 
-    append(path, [ev("notification", -2, Map.put(at.(-2), "tmuxSession", "other-shuttle"))])
+    append(path, [
+      ev(
+        "notification",
+        -2,
+        Map.put(at.(-2), "tmuxSession", "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle")
+      )
+    ])
+
     name = start(path)
 
     # The session's last event lives only in the rotated file.
-    assert waiting(name) == %{shuttle => "waiting", "other-shuttle" => "attention"}
+    assert waiting(name) == %{
+             shuttle => "waiting",
+             "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle" => "attention"
+           }
+
     assert sent(name, path) == ["/tmp/a.html"]
 
     assert Enum.map(recent(name, path, now), & &1.k) == ["agent", "reply", "notify"]

@@ -14,7 +14,7 @@ defmodule ShuttleWeb.APIControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   alias Shuttle.Poller
-  alias Shuttle.Dispatcher
+  alias Shuttle.Test.FiberUid
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
 
   alias Shuttle.Test.StubPostClient
@@ -118,13 +118,14 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == "tests/api-dispatch"
-    assert body["tmux_session"] == Dispatcher.session_name("tests/api-dispatch")
+    assert body["tmux_session"] == FiberUid.session("tests/api-dispatch")
   end
 
   test "dispatch returns 409 for already running fiber" do
     fiber = make_fiber("tests/api-dispatch-2")
     MockRunner.set_fiber("tests/api-dispatch-2", fiber)
-    MockRunner.add_tmux_session(Dispatcher.session_name("tests/api-dispatch-2"))
+    MockRunner.set_shuttle("tests/api-dispatch-2", oneshot_shuttle())
+    MockRunner.add_tmux_session(FiberUid.session("tests/api-dispatch-2"))
 
     conn =
       post(
@@ -215,7 +216,7 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == fiber_id
-    assert body["tmux_session"] == Dispatcher.session_name(fiber_id)
+    assert body["tmux_session"] == FiberUid.session(fiber_id)
   end
 
   test "dispatch returns 400 without fiber_id" do

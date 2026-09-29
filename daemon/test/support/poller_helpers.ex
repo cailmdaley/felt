@@ -14,12 +14,15 @@ defmodule Shuttle.Test.PollerHelpers do
   def oneshot_shuttle, do: "enabled: true\nkind: oneshot\n"
 
   @doc """
-  A minimal felt fiber map, with `attrs` merged over the defaults.
+  A minimal felt fiber map, with `attrs` merged over the defaults. Its `uid` is
+  `Shuttle.Test.FiberUid.for(id)`, so its worker session is
+  `Shuttle.Test.FiberUid.session(id)`.
   """
   def make_fiber(id, attrs \\ %{}) do
     Map.merge(
       %{
         "id" => id,
+        "uid" => Shuttle.Test.FiberUid.for(id),
         "name" => id,
         "status" => "active",
         "tags" => ["constitution"],

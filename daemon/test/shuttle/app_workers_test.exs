@@ -514,7 +514,7 @@ defmodule Shuttle.AppWorkersTest do
 
     copied =
       Runner.fiber("tests/copied")
-      |> Map.put("uid", "different-owner-uid")
+      |> Map.put("uid", "01KTHDNZS287ZSSG8X8V59XKZZ")
       |> put_in(["shuttle", "runtime"], %{"session_uuid" => "app-session-1"})
 
     Runner.set_fiber("tests/copied", copied)

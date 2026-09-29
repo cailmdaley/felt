@@ -61,7 +61,7 @@ func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 	dir, storage := newStore(t)
 	// An active oneshot with a live worker, an active standing (idle/scheduled),
 	// a paused (open) role, a closed role, and a pure note (no shuttle facet).
-	seedShuttleRoleUID(t, storage, "proj/runner", "01RUNNERUID0000000000000001", felt.StatusActive, oneshot())
+	seedShuttleRoleUID(t, storage, "proj/runner", "01KTHDNZS287ZSSG8X8V59XKW1", felt.StatusActive, oneshot())
 	seedShuttleRole(t, storage, "proj/sched", felt.StatusActive, map[string]any{"kind": "standing", "agent": "claude-opus", "schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"}}, nil)
 	seedShuttleRole(t, storage, "proj/paused", felt.StatusOpen, oneshot(), nil)
 	seedShuttleRole(t, storage, "proj/done", felt.StatusClosed, oneshot(), nil)
@@ -159,7 +159,7 @@ func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
 func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 	dir, _ := newStore(t)
 	// A live shuttle session that maps to no shuttle: facet in the store.
-	withStubbedLiveSessions(t, map[string]bool{"ghost-shuttle": true})
+	withStubbedLiveSessions(t, map[string]bool{"ghost-01KTHDNZS287ZSSG8X8V59XKW9-shuttle": true})
 
 	out, err := runCommand(t, dir, "shuttle", "status", "--include-orphans", "--json")
 	if err != nil {
@@ -171,7 +171,7 @@ func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 	}
 	found := false
 	for _, r := range rows {
-		if r.FiberID == "ghost-shuttle" && r.Running {
+		if r.FiberID == "ghost-01KTHDNZS287ZSSG8X8V59XKW9-shuttle" && r.Running {
 			found = true
 		}
 	}
@@ -184,7 +184,7 @@ func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 
 func TestShuttlePs_AttributesOwner(t *testing.T) {
 	dir, storage := newStore(t)
-	seedShuttleRoleUID(t, storage, "proj/worker", "01WORKERUID0000000000000001", felt.StatusActive, oneshot())
+	seedShuttleRoleUID(t, storage, "proj/worker", "01KTHDNZS287ZSSG8X8V59XKW2", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/worker")
 	session := shuttleTmuxSessionName(f.ID, f.UID)
 	withStubbedLiveSessions(t, map[string]bool{session: true})
@@ -219,7 +219,7 @@ func TestShuttlePs_Empty(t *testing.T) {
 
 func TestShuttleSessionName(t *testing.T) {
 	dir, storage := newStore(t)
-	seedShuttleRoleUID(t, storage, "proj/task", "01SESSIONUID000000000000001", felt.StatusActive, oneshot())
+	seedShuttleRoleUID(t, storage, "proj/task", "01KTHDNZS287ZSSG8X8V59XKW3", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/task")
 	want := shuttleTmuxSessionName(f.ID, f.UID)
 
@@ -230,8 +230,59 @@ func TestShuttleSessionName(t *testing.T) {
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("session-name = %q, want %q", strings.TrimSpace(out), want)
 	}
-	if !strings.Contains(want, "01SESSIONUID000000000000001") {
+	if !strings.Contains(want, "01KTHDNZS287ZSSG8X8V59XKW3") {
 		t.Fatalf("uid-keyed name expected, got %q", want)
+	}
+}
+
+// stripFiberID rewrites a seeded fiber's file without its `id:` line, bypassing
+// storage (whose writes stamp one) — the shape of a hand-made fiber file.
+func stripFiberID(t *testing.T, storage *felt.Storage, id string) {
+	t.Helper()
+	path := storage.Path(id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "id:") {
+			kept = append(kept, line)
+		}
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if mustRead(t, storage, id).UID != "" {
+		t.Fatalf("fixture %s still carries an id", id)
+	}
+}
+
+// A fiber without an intrinsic id has no worker session name: the addressing
+// verbs say so and name the fix, and the single-fiber report says the daemon
+// refuses it.
+func TestShuttleFiberWithoutUID_HasNoSessionName(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
+	stripFiberID(t, storage, "task")
+	withStubbedTmux(t, map[string]bool{"task-shuttle": true})
+
+	for _, verb := range []string{"session-name", "attach"} {
+		out, err := runCommand(t, dir, "shuttle", verb, "task")
+		if err == nil {
+			t.Fatalf("%s should refuse a fiber without an id:\n%s", verb, out)
+		}
+		if !strings.Contains(err.Error(), "felt backfill-ids") {
+			t.Fatalf("%s error should name the fix, got: %v", verb, err)
+		}
+	}
+
+	out, err := runCommand(t, dir, "shuttle", "status", "task")
+	if err != nil {
+		t.Fatalf("status task: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "no intrinsic id") || strings.Contains(out, "running (tmux") {
+		t.Fatalf("status should report the missing id and no worker:\n%s", out)
 	}
 }
 

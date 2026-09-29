@@ -126,7 +126,18 @@ defmodule Shuttle.Test.FeltStoreRunner do
     dir_path = Path.join([dir | segments] ++ ["#{basename}.md"])
     File.mkdir_p!(Path.dirname(dir_path))
     indented = yaml |> String.trim() |> String.split("\n") |> Enum.map_join("\n", &("  " <> &1))
-    File.write!(dir_path, "---\nstatus: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
+
+    # The file carries the same intrinsic id as the in-memory fiber, so a real
+    # felt reading it (the document reader) sees the uid the mock serves. A
+    # fiber set up with `"uid" => nil` stays id-less on disk too.
+    uid =
+      case fiber(id) do
+        nil -> Shuttle.Test.FiberUid.for(id)
+        existing -> Map.get(existing, "uid")
+      end
+
+    id_line = if uid, do: "id: #{uid}\n", else: ""
+    File.write!(dir_path, "---\n#{id_line}status: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
 
     # Mirror real felt: carry the absolute, symlink-resolved on-disk `path`.
     # The poller reads this `path` to decide store ownership instead of
@@ -145,6 +156,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         state.fibers
         |> Map.get(id, %{
           "id" => id,
+          "uid" => uid,
           "name" => id,
           "created_at" => "2026-04-28T00:00:00Z",
           "tags" => ["constitution"]

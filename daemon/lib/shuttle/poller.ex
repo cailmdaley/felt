@@ -460,7 +460,7 @@ defmodule Shuttle.Poller do
   own fiber claims itself), and generally any externally-spawned worker.
   Validates the fiber (exists, not closed, no live worker) and the tmux
   session, renames the session to the canonical `<leaf>-<uid>-shuttle` name
-  (so restart re-adoption, dual-recognition liveness, and the kanban treat it
+  (so restart re-adoption, liveness, and the kanban treat it
   identically to a dispatched worker), starts a watcher, and writes the same
   per-host dispatch marker the dispatcher writes at spawn (when `:session_uuid`
   is provided) so resume works.
@@ -1538,18 +1538,18 @@ defmodule Shuttle.Poller do
   # handle on, and a config fix or pause would not clear a paused resume loop
   # without waiting out the cooldown. Active fibers with persistent failures
   # keep their entry across cycles so the kanban can show the failure count.
+  #
+  # Entries are keyed by runtime key and kept only under the candidate's
+  # CURRENT key, so an entry recorded under a fiber's slug is dropped once the
+  # fiber gains a uid (a `:uid_missing` refusal cleared by `felt backfill-ids`).
   defp evict_stale_by_candidates(map, candidates) do
-    active_ids =
+    active_keys =
       candidates
       |> Enum.filter(fn fiber -> Map.get(fiber, "status") in ["open", "active"] end)
-      |> Enum.map(&Map.get(&1, "id", ""))
+      |> Enum.map(&runtime_key_for_fiber/1)
       |> MapSet.new()
 
-    # Entries are keyed by runtime key; match the carried slug
-    # (`entry.fiber_id`) against the active candidate slugs.
-    Map.filter(map, fn {_key, entry} ->
-      MapSet.member?(active_ids, Map.get(entry, :fiber_id))
-    end)
+    Map.filter(map, fn {key, _entry} -> MapSet.member?(active_keys, key) end)
   end
 
   # Discovers candidate fibers by asking felt for a narrow shuttle projection
@@ -1782,9 +1782,14 @@ defmodule Shuttle.Poller do
   # so a re-key can't leave a duplicate card. The mtime is carried so the next
   # poll's `DocumentCache.reusable_entry?/2` reuses this entry.
   defp refresh_document_entry(%State{} = state, fiber_id) do
+    # A document's `id` is the fiber's uid, so a slug-addressed refresh matches
+    # on the carried `slug` too.
     without_fiber =
       :maps.filter(
-        fn _key, %{entry: entry} -> get_in(entry, [:fiber, "id"]) != fiber_id end,
+        fn _key, %{entry: entry} ->
+          fiber = Map.get(entry, :fiber, %{})
+          fiber_id not in [Map.get(fiber, "id"), Map.get(fiber, "uid"), Map.get(fiber, "slug")]
+        end,
         state.document_cache
       )
 
@@ -2701,10 +2706,10 @@ defmodule Shuttle.Poller do
 
     running = running_worker(state, fiber_id)
 
-    # Pass the resolved uid so the pre-check sees the canonical
-    # `<leaf>-<uid>-shuttle` name, not just the leaf-only one — a live
-    # canonical session of a not-yet-running fiber is then refused with
-    # :already_running instead of degrading to a rename collision.
+    # Pass the resolved uid so the pre-check sees the fiber's
+    # `<leaf>-<uid>-shuttle` name — a live session under it for a
+    # not-yet-running fiber is then refused with :already_running instead of
+    # degrading to a rename collision.
     live_session = live_session_for_fiber(state, fiber_id, uid)
 
     cond do
@@ -2748,6 +2753,11 @@ defmodule Shuttle.Poller do
               not is_map(Map.get(fiber, "shuttle")) ->
                 {state, {:error, :not_installed}}
 
+              # The claimed session is renamed to the worker name, which is
+              # keyed by the fiber's uid; without one there is no name to take.
+              Dispatcher.session_name(fiber_id, Map.get(fiber, "uid")) == nil ->
+                {state, {:error, :uid_missing}}
+
               true ->
                 register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
             end
@@ -2762,9 +2772,9 @@ defmodule Shuttle.Poller do
     # display label, never a dispatch decision.
     agent_id = Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
 
-    # Rename to the canonical `<leaf>-<uid>-shuttle` name so everything
-    # downstream — restart re-adoption, dual-recognition liveness, the kanban's
-    # runtime stamp — treats the claimed session exactly like a dispatched one.
+    # Rename to the worker name `<leaf>-<uid>-shuttle` so everything
+    # downstream — restart re-adoption, liveness, the kanban's runtime stamp —
+    # treats the claimed session exactly like a dispatched one.
     canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
     rename_result =
@@ -2781,8 +2791,8 @@ defmodule Shuttle.Poller do
 
           {output, _} ->
             # Fail the claim rather than registering under a non-canonical
-            # name: the restart re-adoption scan and dual-recognition liveness
-            # only see `-shuttle`-suffixed canonical names, so a degraded
+            # name: the restart re-adoption scan and liveness only see
+            # `<leaf>-<uid>-shuttle` names, so a degraded
             # registration would go invisible on daemon restart and a
             # duplicate worker would dispatch alongside it.
             Logger.warning("claim: rename #{tmux_session} → #{canonical} failed: #{output}")
@@ -3234,10 +3244,14 @@ defmodule Shuttle.Poller do
   # `:tmux_server_unavailable` rides it too: no tmux server and no reachable
   # kitty is a state only a human can leave (open kitty, or start a server by
   # hand), and each attempt pays a `kitty @ launch` round trip.
+  #
+  # `:uid_missing` rides it so a fiber without an id logs its refusal once per
+  # cooldown rather than every tick until someone runs `felt backfill-ids`.
   defp preflight_cooldown_open?(%State{} = state, runtime_key) do
     case Map.get(state.dispatch_failures, runtime_key) do
       %{reason: {tag, _detail}, attempted_at: %DateTime{} = at}
       when tag in [
+             :uid_missing,
              :wrapper_unresolved,
              :work_dir_missing,
              :project_dir_missing,
@@ -3319,17 +3333,18 @@ defmodule Shuttle.Poller do
     running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key)
   end
 
-  # A tracked worker, or a live session under either of the fiber's names that
-  # nothing tracks yet.
+  # A tracked worker, or a live session under the fiber's name that nothing
+  # tracks yet.
   defp open_session?(%State{} = state, fiber_id, runtime_key, uid) do
     tracked?(state, fiber_id, runtime_key) or
       live_session_for_fiber(state, fiber_id, uid) != nil
   end
 
-  # The fiber's *live* tmux session name (either form), preferring the uid-keyed
-  # canonical name when both happen to exist. Returns nil when neither is live.
-  # `uid` may be supplied by a caller that already resolved it (the dispatch and
-  # adopt paths); otherwise it's read off a matching running entry.
+  # The fiber's *live* worker session — an app worker's ref, or its tmux
+  # session (`Dispatcher.session_name/2`) when that is live — else nil. `uid`
+  # may be supplied by a caller that already resolved it (the dispatch and adopt
+  # paths); otherwise it's read off a matching running entry. Without a uid the
+  # fiber has no tmux name, so nothing is live under it.
   @doc false
   def live_session_for_fiber(%State{} = state, fiber_id, uid \\ nil) do
     case Shuttle.AppWorkers.for_fiber(fiber_id, uid) do
@@ -3344,13 +3359,14 @@ defmodule Shuttle.Poller do
               _ -> false
             end
 
-        if app_without_tmux? do
-          nil
-        else
-          fiber_id
-          |> Dispatcher.session_names(uid || metadata_uid(running_worker(state, fiber_id)))
-          |> Enum.find(&already_running_session?(state, &1))
-        end
+        session =
+          Dispatcher.session_name(
+            fiber_id,
+            uid || metadata_uid(running_worker(state, fiber_id))
+          )
+
+        if not app_without_tmux? and session != nil and already_running_session?(state, session),
+          do: session
     end
   end
 

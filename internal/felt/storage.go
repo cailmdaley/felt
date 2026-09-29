@@ -510,10 +510,14 @@ func (s *Storage) CheckAvailableID(id string) error {
 
 // Write saves a felt to disk. The file is replaced atomically, so a
 // concurrent reader — another felt, the daemon's poll — sees the old document
-// or the new one, never a truncated file.
+// or the new one, never a truncated file. A felt without an intrinsic id is
+// given a fresh ULID first (see WriteFiberFile), so f.UID matches the file.
 func (s *Storage) Write(f *Felt) error {
 	if f == nil {
 		return fmt.Errorf("cannot write nil felt")
+	}
+	if strings.TrimSpace(f.UID) == "" {
+		f.UID = NewULID()
 	}
 	data, err := f.Marshal()
 	if err != nil {
@@ -535,7 +539,15 @@ func (s *Storage) Write(f *Felt) error {
 // reader never sees it truncated, without fsync: fibers are git-tracked and
 // rewritten in bulk, which a per-file sync would make minutes slow (see
 // atomicfile). An existing file keeps its mode bits; a new one is 0644.
+//
+// It is the one path every fiber write takes, so it also keeps ids
+// self-healing: a document whose frontmatter carries no `id:` is written with a
+// fresh ULID stamped in, exactly as `felt add` and `felt backfill-ids` do.
+// Content whose frontmatter does not parse is written as given.
 func WriteFiberFile(path string, data []byte) error {
+	if stamped, _, err := backfillIntrinsicID(data); err == nil {
+		data = stamped
+	}
 	perm := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
@@ -1249,15 +1261,23 @@ func backfillIntrinsicIDFrontmatter(frontmatter []byte) ([]byte, bool, error) {
 		return frontmatter, false, nil
 	}
 
+	idValue := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: NewULID()}
+	stamped := false
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == "id" && strings.TrimSpace(mapping.Content[i+1].Value) != "" {
+		if mapping.Content[i].Value != "id" {
+			continue
+		}
+		if strings.TrimSpace(mapping.Content[i+1].Value) != "" {
 			return frontmatter, false, nil
 		}
+		// A blank `id:` takes the ULID in place, so the key never appears twice.
+		mapping.Content[i+1] = idValue
+		stamped = true
 	}
-
-	idKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "id"}
-	idValue := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: NewULID()}
-	mapping.Content = append([]*yaml.Node{idKey, idValue}, mapping.Content...)
+	if !stamped {
+		idKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "id"}
+		mapping.Content = append([]*yaml.Node{idKey, idValue}, mapping.Content...)
+	}
 
 	rewritten, err := yaml.Marshal(mapping)
 	if err != nil {

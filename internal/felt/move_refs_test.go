@@ -31,7 +31,7 @@ func readFiberFile(t *testing.T, s *Storage, id string) string {
 }
 
 func fiber(name, body string) string {
-	return "---\nname: " + name + "\n---\n\n" + body + "\n"
+	return "---\nid: fixture-" + name + "\nname: " + name + "\n---\n\n" + body + "\n"
 }
 
 // newMoveFixture is the store every move test starts from: a, b, a/x with a
@@ -92,9 +92,9 @@ func TestMoveSubtreeRewritesBodyLinks(t *testing.T) {
 // stamped with the zero time.
 func TestMoveSubtreeWritesOnlyChangedFiles(t *testing.T) {
 	s := newMoveFixture(t)
-	citing := "---\nname: C\n# a comment felt would not round-trip\nextra: [1, 2]\n---\n\nSee [[a/x]].\n"
+	citing := "---\nid: fixture-C\nname: C\n# a comment felt would not round-trip\nextra: [1, 2]\n---\n\nSee [[a/x]].\n"
 	writeFiberFile(t, s, "c", citing)
-	untouched := "---\nname: D\n---\n\nSee [[b]] and [[x]].\n"
+	untouched := "---\nid: fixture-D\nname: D\n---\n\nSee [[b]] and [[x]].\n"
 	writeFiberFile(t, s, "d", untouched)
 	movedContent := readFiberFile(t, s, "a/x/y")
 

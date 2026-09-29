@@ -4,6 +4,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   import Shuttle.Test.TranscriptHelpers
 
   alias Shuttle.{Dispatcher, Poller}
+  alias Shuttle.Test.FiberUid
   import Shuttle.Test.PollerHelpers
 
   # Every test here dispatches through the REAL `felt` binary (see
@@ -130,8 +131,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     # Isolate the per-host runtime markers (dispatch / handoff / re-arm) under a
     # throwaway SHUTTLE_DATA_DIR — the substrate that replaced felt history. The
-    # dispatcher writes the dispatch marker keyed by the fiber's runtime key (the
-    # slug for these uid-less test fibers); resume reads it back.
+    # dispatcher writes the dispatch marker keyed by the fiber's runtime key (its
+    # uid); resume reads it back.
     prev_data_dir = System.get_env("SHUTTLE_DATA_DIR")
 
     data_dir =
@@ -267,7 +268,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     A fresh oneshot fiber.
     """)
 
-    assert {:ok, "fresh-oneshot-shuttle"} =
+    assert {:ok, FiberUid.session("tests/fresh-oneshot")} ==
              Dispatcher.dispatch("tests/fresh-oneshot",
                runner: IntegrationRunner,
                felt_store: host
@@ -297,7 +298,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert ledger["fiber"] == "tests/fresh-oneshot"
     assert ledger["kind"] == "dispatch"
     assert ledger["harness"] == "claude-code"
-    assert ledger["tmux"] == "fresh-oneshot-shuttle"
+    assert ledger["tmux"] == FiberUid.session("tests/fresh-oneshot")
     assert ledger["host"] == Shuttle.Poller.own_host_id()
     assert is_integer(ledger["at"])
     # The session UUID the dispatch generated, echoed into the run script.
@@ -347,7 +348,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     """)
 
     # Pre-seed the tmux session to simulate a live worker.
-    IntegrationRunner.add_tmux_session(Dispatcher.session_name("tests/running-fiber"))
+    IntegrationRunner.add_tmux_session(FiberUid.session("tests/running-fiber"))
 
     assert {:error, :already_running} =
              Dispatcher.dispatch("tests/running-fiber",
@@ -552,7 +553,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert ledger["fiber"] == "tests/kanban-resume"
     assert ledger["session"] == "kanban-session-uuid-5678"
     assert ledger["harness"] == "claude-code"
-    assert ledger["tmux"] == "kanban-resume-shuttle"
+    assert ledger["tmux"] == FiberUid.session("tests/kanban-resume")
 
     # Claude's resume warning dismiss block is present.
     assert script =~ "send-keys"
@@ -936,7 +937,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     A codex fiber whose session UUID should be captured from its own transcript.
     """)
 
-    assert {:ok, "codex-capture-shuttle"} =
+    assert {:ok, FiberUid.session("tests/codex-capture")} ==
              Dispatcher.dispatch("tests/codex-capture",
                runner: IntegrationRunner,
                felt_store: host,
@@ -1005,7 +1006,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     A codex fiber whose transcript lands after local midnight.
     """)
 
-    assert {:ok, "codex-straddle-shuttle"} =
+    assert {:ok, FiberUid.session("tests/codex-straddle")} ==
              Dispatcher.dispatch("tests/codex-straddle",
                runner: IntegrationRunner,
                felt_store: host,
@@ -1539,7 +1540,7 @@ defmodule Shuttle.DispatchIntegrationTest do
                  {:ok, body} ->
                    Enum.any?(
                      body.fibers,
-                     &(get_in(&1, [:fiber, "id"]) == "tests/standing-awaiting-rearm")
+                     &(get_in(&1, [:fiber, "slug"]) == "tests/standing-awaiting-rearm")
                    )
 
                  _ ->
@@ -1570,7 +1571,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
 
       entry =
-        Enum.find(body.fibers, &(get_in(&1, [:fiber, "id"]) == "tests/standing-awaiting-rearm"))
+        Enum.find(body.fibers, &(get_in(&1, [:fiber, "slug"]) == "tests/standing-awaiting-rearm"))
 
       assert entry, "re-armed role should still be in the owned feed"
       assert entry.fiber["status"] == "active"
@@ -1641,7 +1642,7 @@ defmodule Shuttle.DispatchIntegrationTest do
                  {:ok, body} ->
                    Enum.any?(
                      body.fibers,
-                     &(get_in(&1, [:fiber, "id"]) == "tests/standing-temper-rest")
+                     &(get_in(&1, [:fiber, "slug"]) == "tests/standing-temper-rest")
                    )
 
                  _ ->
@@ -1664,7 +1665,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       # Now poll: the just-served tick must NOT re-fire. Clear recorded commands
       # so the assertion isolates this poll cycle's dispatch behavior.
       IntegrationRunner.reset(host)
-      session = Dispatcher.session_name("tests/standing-temper-rest")
+      session = FiberUid.session("tests/standing-temper-rest")
       send(poller, :run_poll_cycle)
       Process.sleep(150)
 
@@ -1714,7 +1715,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert eventually(fn ->
              case Poller.cached_fiber_documents(poller) do
                {:ok, body} ->
-                 Enum.any?(body.fibers, &(get_in(&1, [:fiber, "id"]) == "tests/refresh-seam"))
+                 Enum.any?(body.fibers, &(get_in(&1, [:fiber, "slug"]) == "tests/refresh-seam"))
 
                _ ->
                  false
@@ -1755,14 +1756,14 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     assert :ok = Poller.refresh_document(poller, "tests/refresh-seam")
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
-    entry = Enum.find(body.fibers, &(get_in(&1, [:fiber, "id"]) == "tests/refresh-seam"))
+    entry = Enum.find(body.fibers, &(get_in(&1, [:fiber, "slug"]) == "tests/refresh-seam"))
     assert entry.fiber["outcome"] == "changed outcome"
 
     # Delete the fiber on disk; refresh evicts it from the feed (no poll).
     File.rm_rf!(Path.join([host, ".felt", "tests", "refresh-seam"]))
     assert :ok = Poller.refresh_document(poller, "tests/refresh-seam")
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
-    refute Enum.any?(body.fibers, &(get_in(&1, [:fiber, "id"]) == "tests/refresh-seam"))
+    refute Enum.any?(body.fibers, &(get_in(&1, [:fiber, "slug"]) == "tests/refresh-seam"))
   end
 
   # resume_mode=fresh explicitly requests a new session — UNCONDITIONALLY, winning
@@ -1917,12 +1918,26 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # Mirror of Go lifecycle_test.go's writeFiber: writes a fiber markdown file
   # at host/.felt/<id segments>/<basename>.md so `felt show --json` can find it.
+  # Plants a fiber file. Frontmatter without an `id:` gets `FiberUid.for(id)`,
+  # as every real fiber carries an intrinsic id.
   defp write_fiber(host, id, content) do
     parts = String.split(id, "/")
     basename = List.last(parts)
     dir = Path.join([host, ".felt"] ++ parts)
     File.mkdir_p!(dir)
-    File.write!(Path.join(dir, "#{basename}.md"), String.trim(content) <> "\n")
+
+    content =
+      case String.trim(content) do
+        "---\n" <> rest = trimmed ->
+          if Regex.match?(~r/^id:/m, rest),
+            do: trimmed,
+            else: "---\nid: #{FiberUid.for(id)}\n" <> rest
+
+        trimmed ->
+          trimmed
+      end
+
+    File.write!(Path.join(dir, "#{basename}.md"), content <> "\n")
   end
 
   # Reads back a fiber's frontmatter from disk (host/.felt/<id>/<basename>.md),
@@ -1953,7 +1968,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     """)
 
     # The session id lives in the per-host dispatch marker (the only structured
-    # session-id home). Keyed by the fiber's runtime key (slug for these fibers).
+    # session-id home). Stamped through felt on the fiber itself.
     if session, do: write_dispatch_marker(host, id, session)
   end
 

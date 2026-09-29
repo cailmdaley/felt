@@ -103,8 +103,13 @@ output distinguishes them: `id` gives the slug address, `uid` gives the ULID.
 felt show bao-analysis/damping-prior -j | jq '{id, uid}'
 ```
 
-Backfill fibers that lack an id with `felt backfill-ids`. Run it on the
-canonical store only — see [Fibers](fibers.md#migrating-a-legacy-store).
+Every fiber carries one. A felt write to a fiber that has none (a file made
+by hand) stamps a fresh ULID into it, and shuttle refuses to dispatch a fiber
+without one, since its worker's tmux session is named `<leaf>-<id>-shuttle`.
+Backfill a whole store with `felt backfill-ids`. Run it on the canonical store
+only — see [Fibers](fibers.md#migrating-a-legacy-store) — and sync before
+editing an id-less fiber elsewhere, so two replicas do not mint different ids
+for it.
 
 ## Never hand-edit timestamps
 
