@@ -27,18 +27,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { agentGroups } from './agentGroups'
+import { injectStyles } from './injectStyles'
 import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
   injectProjectPickerStyles,
-  type PickerHost,
-  type PickerProject,
   useProjectSelection,
 } from './ProjectPicker'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
-import { shuttleOrigin } from './projectModel'
+import type { Host, Project } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
@@ -60,22 +59,13 @@ export interface AgentEntry {
   alias_of?: string | null
 }
 
-/** A destination project, derived by the island from the composite feed. */
-export interface StashProject extends PickerProject {
-  /** Loom-relative substore prefix; `''` when the project is a store root.
-   *  Used to scope/strip parent candidates to project-relative slugs. */
-  loomPrefix: string
-}
-
 export interface StashFormProps {
-  /** Connected projects (the island supplies the local-only set for create). */
-  availableCities?: StashProject[]
+  /** Every project, in picker order, on every host (create is owner-routed). */
+  projects: Project[]
   /** Every host the picker can point at — the store registry's origins. The
    *  host control is the left half of the pair; the project list is whatever
    *  the selected host owns. */
-  availableHosts?: PickerHost[]
-  /** Optional activity timestamps per project id, for the recency sort. */
-  cityActivityById?: Record<string, number>
+  hosts: Host[]
   /** Existing tag set for autocomplete (island-supplied, from the feed). */
   tagSuggestions?: string[]
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
@@ -85,7 +75,7 @@ export interface StashFormProps {
   /** Register a new project directory and hand back the refreshed project set
    *  (the island re-derives it from the daemon). Absent → the picker offers no
    *  "+ Add project…" row. */
-  onProjectAdded?: (path: string) => Promise<StashProject[]>
+  onProjectAdded?: (path: string) => Promise<Project[]>
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
 }
@@ -309,9 +299,8 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
 // ---------------------------------------------------------------------------
 
 export function StashForm({
-  availableCities = [],
-  availableHosts = [],
-  cityActivityById = {},
+  projects: availableProjects,
+  hosts,
   tagSuggestions = [],
   shuttleBase = '',
   onCreated,
@@ -340,21 +329,19 @@ export function StashForm({
   const [error, setError] = useState<string | null>(null)
 
   const {
-    hosts,
     selectedHostId,
     selectedHost,
     handleHostChange,
-    cities,
-    hostCities,
-    selectedCityId,
-    setSelectedCityId,
-    selectedCity,
+    projects,
+    hostProjects,
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
     addProject,
-  } = useProjectSelection<StashProject>({
+  } = useProjectSelection<Project>({
     shuttleBase,
-    availableCities,
-    availableHosts,
-    cityActivityById,
+    projects: availableProjects,
+    hosts,
     onProjectAdded,
   })
 
@@ -426,7 +413,7 @@ export function StashForm({
       setError('Schedule (cron expression) is required for standing roles.')
       return
     }
-    if (!selectedCity) {
+    if (!selectedProject) {
       setError('Pick a project — the stash needs a felt store to land in.')
       return
     }
@@ -452,7 +439,7 @@ export function StashForm({
         kind,
         schedule,
         tz: scheduleTz,
-        projectDir: selectedCity.path,
+        projectDir: selectedProject.path,
         chrome,
         surface,
       }),
@@ -469,7 +456,7 @@ export function StashForm({
           frontmatter,
           // Owner-routing key — the daemon writes locally when this is its own
           // origin (or 'local') and forwards to the owning remote otherwise.
-          origin: shuttleOrigin(selectedCity.originId),
+          origin: selectedProject.originId,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
@@ -562,7 +549,7 @@ export function StashForm({
                   add one: the project select's first option, "Add a new
                   project…", is how a host with an empty list bootstraps its
                   first. */}
-              {(cities.length > 0 || onProjectAdded) && (
+              {(projects.length > 0 || onProjectAdded) && (
                 <>
                   <div className="stash-field">
                     <span className="stash-label">Host</span>
@@ -576,9 +563,9 @@ export function StashForm({
                   <div className="stash-field">
                     <span className="stash-label">Project</span>
                     <ProjectPicker
-                      projects={hostCities}
-                      selectedId={selectedCityId}
-                      onSelect={setSelectedCityId}
+                      projects={hostProjects}
+                      selectedId={selectedProjectId}
+                      onSelect={setSelectedProjectId}
                       onAddProject={onProjectAdded ? addProject.begin : undefined}
                       className="stash-select"
                     />
@@ -594,7 +581,7 @@ export function StashForm({
                 <ParentPicker
                   value={parentSlug}
                   onChange={setParentSlug}
-                  scopePrefix={selectedCity?.loomPrefix ?? ''}
+                  scopePrefix={selectedProject?.loomPrefix ?? ''}
                   shuttleBase={shuttleBase}
                 />
               </label>
@@ -891,15 +878,9 @@ export function StashForm({
   )
 }
 
-/**
- * Inject the StashForm's CSS once. Idempotent — safe to call on every open.
- */
+/** Inject the StashForm's CSS, and the shared pickers' sheet it draws on. */
 export function injectStashFormStyles(): void {
-  if (typeof document === 'undefined') return
-  if (document.getElementById('stash-form-styles')) return
-  const style = document.createElement('style')
-  style.id = 'stash-form-styles'
-  style.textContent = `
+  injectStyles('stash-form-styles', `
     .stash-scrim {
       position: fixed;
       inset: 0;
@@ -1527,9 +1508,6 @@ export function injectStashFormStyles(): void {
       .stash-select { padding-right: 30px; }
     }
 
-  `
-  document.head.appendChild(style)
-  // The shared directory picker rides along: both forms that open it are opened
-  // through this same injection point (Stash directly, Capture via mountForms).
+  `)
   injectProjectPickerStyles()
 }

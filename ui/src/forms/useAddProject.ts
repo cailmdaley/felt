@@ -1,6 +1,6 @@
 /**
- * "+ Add project…" — the one flow behind both project pickers, and exactly two
- * cases now that the HOST is chosen before the click:
+ * "+ Add project…" — the one flow behind both project pickers, in two cases,
+ * decided by the host chosen before the click:
  *
  *   1. **Native.** Local host + a daemon that reported `native_folder_picker`
  *      → `POST /api/v1/choose-folder` raises the host's own Finder/GTK/KDE
@@ -11,16 +11,10 @@
  *      host, POSTed to the owner-routed `POST /api/v1/projects` so the owning
  *      daemon does the felt-init and the registration.
  *
- * There used to be a third shape between them — an in-browser directory
- * browser over `GET /api/v1/browse`, walking a remote's filesystem a click at
- * a time. It is gone: with the host settled up front, the walk bought nothing
- * a pasted path doesn't, and the create endpoint's own 400 ("not a directory:
- * …", from the remote) is the validation that actually mattered.
- *
  * Cancelling the native dialog is silent — no row, no toast, nothing selected.
  * That is the whole point of asking the OS: "no" costs one keystroke. A native
- * pick the daemon then refuses to register surfaces that refusal in the path
- * row, seeded with the path, where it can be read and corrected.
+ * pick the daemon then refuses to register opens the path row with that
+ * refusal, where a corrected path can be typed.
  */
 
 import { useCallback, useState } from 'react'
@@ -28,12 +22,10 @@ import { chooseFolder, registerProject } from './chooseFolder'
 
 interface AddProjectOptions<P> {
   shuttleBase: string
-  /** The selected host can raise an OS dialog — its `native_folder_picker`
-   *  from `/api/v1/felt-stores`. Only meaningful together with `isLocalHost`:
-   *  a remote's dialog would open on a desktop nobody is sitting at. */
+  /** The selected host is the local daemon's own and can raise an OS dialog
+   *  (its `native_folder_picker` from `/api/v1/felt-stores`). A remote's
+   *  dialog would open on a desktop nobody is sitting at. */
   nativeFolderPicker: boolean
-  /** The selected host is the local daemon's own. */
-  isLocalHost: boolean
   /** Host id the add targets — `'local'` or a bare remote name. Rides along as
    *  `origin` on the owner-routed create. */
   origin: string
@@ -62,7 +54,6 @@ export interface AddProjectFlow {
 export function useAddProject<P>({
   shuttleBase,
   nativeFolderPicker,
-  isLocalHost,
   origin,
   onProjectAdded,
   onAdded,
@@ -88,7 +79,7 @@ export function useAddProject<P>({
 
   const begin = useCallback((): void => {
     if (!onProjectAdded || busy) return
-    if (!nativeFolderPicker || !isLocalHost) {
+    if (!nativeFolderPicker) {
       openPath()
       return
     }
@@ -108,7 +99,7 @@ export function useAddProject<P>({
         setBusy(false)
       }
     })()
-  }, [busy, nativeFolderPicker, isLocalHost, origin, onProjectAdded, openPath, shuttleBase, adopt])
+  }, [busy, nativeFolderPicker, origin, onProjectAdded, openPath, shuttleBase, adopt])
 
   const submitPath = useCallback(
     (path: string): void => {

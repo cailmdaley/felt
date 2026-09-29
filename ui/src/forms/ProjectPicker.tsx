@@ -1,26 +1,15 @@
 /**
  * ProjectPicker — the host + project pair both forms use.
  *
- * **Two native `<select>`s, and nothing more.** The project half used to be a
- * bespoke filtering combobox, grown for one reason: a native `<select>` seemed
- * unable to carry the "Add a new project…" row. It can — see the sentinel note
- * below — and the combobox cost far more than it bought. Sitting in a row of
- * native selects (host, project, agent, effort) it read as the odd one out, it
- * could not be sized to match them, and its mouse handling was actually broken:
- * the list portalled into `document.body`, which is the *parent* of this app's
- * React root (`#shuttle-forms-root`), so click events on the portalled rows
- * bubbled straight past the root container where React 18 delegates its
- * listeners. The rows' `onMouseDown` never ran. Keyboard worked; the mouse did
- * nothing. All of that machinery — portal, measured-rect anchoring, capture
- * phase re-measure, filter input, keyboard nav, outside-click — is gone.
+ * **Two native `<select>`s**, sized and keyed like the agent and effort
+ * selects beside them. A custom combobox would read as the odd one out in that
+ * row, and a portalled list would sit outside `#shuttle-forms-root`, where
+ * React 18 delegates its listeners, so its mouse events would never arrive.
  *
- * **Host first, then project.** One flat list mixing every origin made the
- * default selection land wherever recency pointed — often a remote — and then
- * "Add a new project…" quietly meant "on that remote", which is not what
- * anybody clicking it meant. So the host is its own control, to the left,
+ * **Host first, then project.** The host is its own control, to the left,
  * defaulting to the local daemon; the project list is whatever that host owns.
- * A single-host list needs no host suffix on its rows, and the add flow has an
- * unambiguous destination before it starts.
+ * "Add a new project…" then has an unambiguous destination before it starts,
+ * and a single-host list needs no host suffix on its rows.
  *
  * **Why the magic option is safe here.** The two things that make a magic
  * `<option>` a trap are both answered:
@@ -38,6 +27,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import type { Host } from './projectModel'
+import { injectStyles } from './injectStyles'
 import { useAddProject, type AddProjectFlow } from './useAddProject'
 
 export interface PickerProject {
@@ -51,22 +42,8 @@ export interface PickerProject {
   originId: string
 }
 
-/** A host the pickers can point at — one origin of `/api/v1/felt-stores`. */
-export interface PickerHost {
-  /** `'local'` for the daemon's own host, else the bare remote name. Matches
-   *  the projects' `originId`. */
-  id: string
-  /** How the host reads (the remote's display name, or the local hostname). */
-  label: string
-  /** This is the daemon's own host. */
-  isLocal: boolean
-  /** This host can raise an OS folder dialog (`POST /api/v1/choose-folder`). */
-  nativeFolderPicker: boolean
-}
-
 export interface ProjectPickerProps {
-  /** Already in the order the form wants them (recency, then name), and
-   *  already scoped to the selected host. */
+  /** Already in picker order and scoped to the selected host. */
   projects: PickerProject[]
   selectedId: string | null
   onSelect: (id: string) => void
@@ -87,27 +64,6 @@ export const ADD_PROJECT_VALUE = '__add_project__'
  *  never qualifies with an origin. */
 export function projectLabel(project: PickerProject): string {
   return project.name ?? project.id
-}
-
-/** Stand-in when the caller passed no host list (an old island, or a degraded
- *  registry fetch): one local host — exactly the pre-split behaviour. */
-export const FALLBACK_HOST: PickerHost = {
-  id: 'local',
-  label: 'local',
-  isLocal: true,
-  nativeFolderPicker: false,
-}
-
-/** Recency first, then name — the default-selection and picker order both
- *  forms present. */
-export function byRecency(
-  activityById: Record<string, number>,
-): <P extends { id: string; name?: string }>(a: P, b: P) => number {
-  return (a, b) => {
-    const recencyDelta = (activityById[b.id] ?? 0) - (activityById[a.id] ?? 0)
-    if (recencyDelta !== 0) return recencyDelta
-    return (a.name ?? a.id).localeCompare(b.name ?? b.id, undefined, { sensitivity: 'base' })
-  }
 }
 
 /** The projects one host owns, in the order they came in. The single place the
@@ -189,7 +145,7 @@ export function ProjectPicker({
 }
 
 export interface HostPickerProps {
-  hosts: PickerHost[]
+  hosts: Host[]
   selectedId: string | null
   onSelect: (id: string) => void
   /** See `ProjectPickerProps.className`. */
@@ -237,14 +193,9 @@ export interface AddProjectPathProps {
 
 /**
  * Add-a-project on a host with no OS dialog to raise (every remote, and any
- * headless local daemon): type the absolute path.
- *
- * This replaced an in-browser directory browser that walked the remote
- * filesystem a click at a time over `GET /api/v1/browse`. Once the host is
- * chosen up front, that walk buys nothing a paste of the path doesn't — and
- * the create endpoint already answers 400 with the reason when the path isn't
- * a directory over there, which is the only validation the browser was really
- * providing.
+ * headless local daemon): type the absolute path. The owner-routed create
+ * answers 400 with the reason when the path is not a directory over there,
+ * and that reason is shown in the row.
  */
 export function AddProjectPath({
   hostLabel,
@@ -282,8 +233,8 @@ export function AddProjectPath({
               e.preventDefault()
               submit()
             } else if (e.key === 'Escape') {
-              // Same reason as the dropdown's: unhandled, Escape closes the
-              // whole form instead of this row.
+              // Unhandled, Escape would close the whole form instead of
+              // this row.
               e.preventDefault()
               e.stopPropagation()
               onCancel()
@@ -315,17 +266,11 @@ export function AddProjectPath({
 }
 
 /**
- * Inject the pickers' CSS once — the host and project selects and the remote
- * path-entry row, which are one flow and so one sheet. Idempotent by element
- * id, the same pattern as `injectStashFormStyles`. Safe to call from either
- * form's mount path.
+ * Inject the pickers' CSS — the host and project selects and the path-entry
+ * row, which are one flow and so one sheet. Both forms' sheets pull it in.
  */
 export function injectProjectPickerStyles(): void {
-  if (typeof document === 'undefined') return
-  if (document.getElementById('project-picker-styles')) return
-  const style = document.createElement('style')
-  style.id = 'project-picker-styles'
-  style.textContent = `
+  injectStyles('project-picker-styles', `
     .projpick-input {
       width: 100%;
       box-sizing: border-box;
@@ -390,8 +335,7 @@ export function injectProjectPickerStyles(): void {
       font-size: 12px;
       color: #8B3A28;
     }
-  `
-  document.head.appendChild(style)
+  `)
 }
 
 /**
@@ -404,64 +348,51 @@ export function injectProjectPickerStyles(): void {
  */
 export function useProjectSelection<P extends PickerProject>(opts: {
   shuttleBase: string
-  availableCities: P[]
-  availableHosts: PickerHost[]
-  cityActivityById: Record<string, number>
+  /** Every project, in picker order (most recently active first). */
+  projects: P[]
+  /** Every host, never empty — `deriveHosts` always yields the local one. */
+  hosts: Host[]
   onProjectAdded?: (path: string) => Promise<P[]>
-  /** An extra way this page knows the local host can raise a dialog, ORed with
-   *  the host's own flag. Remotes never get one: the dialog would open on a
-   *  desktop nobody is sitting at. */
-  nativeFolderPicker?: boolean
 }): {
-  hosts: PickerHost[]
   selectedHostId: string
-  selectedHost: PickerHost
+  selectedHost: Host
   handleHostChange: (id: string) => void
-  cities: P[]
-  sortedCities: P[]
-  hostCities: P[]
-  selectedCityId: string | null
-  setSelectedCityId: (id: string | null) => void
-  selectedCity: P | null
+  projects: P[]
+  hostProjects: P[]
+  selectedProjectId: string | null
+  setSelectedProjectId: (id: string | null) => void
+  selectedProject: P | null
   addProject: AddProjectFlow
 } {
   // Live project set: seeded from the island's derivation, replaced wholesale
-  // when the directory picker registers one (the island re-derives it, so the
-  // shape stays single-sourced there).
-  const [cities, setCities] = useState<P[]>(opts.availableCities)
-  // Default-selection priority: most-recently-active → alphabetical → null
-  // (only when the host has none).
-  const sortedCities = [...cities].sort(byRecency(opts.cityActivityById))
+  // when the add flow registers one (the island re-derives it, so the shape
+  // stays single-sourced there).
+  const [projects, setProjects] = useState<P[]>(opts.projects)
 
-  // Host first: the local daemon's own, unless the caller scoped the form to a
-  // project that lives elsewhere. Defaulting to recency would land on whichever
-  // remote was busiest, and "add a project" would then quietly mean "over
-  // there" — the thing this split exists to prevent.
-  const hosts: PickerHost[] =
-    opts.availableHosts.length > 0 ? opts.availableHosts : [FALLBACK_HOST]
+  // Host first: the local daemon's own. Defaulting to recency would land on
+  // whichever remote was busiest, and "add a project" would then quietly mean
+  // "over there".
+  const { hosts } = opts
   const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
   const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(
-    () => projectsForHost(sortedCities, defaultHostId)[0]?.id ?? null,
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    () => projectsForHost(projects, defaultHostId)[0]?.id ?? null,
   )
-  const hostCities = projectsForHost(sortedCities, selectedHostId)
+  const hostProjects = projectsForHost(projects, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]
-  const selectedCity = hostCities.find((c) => c.id === selectedCityId) ?? null
+  const selectedProject = hostProjects.find((p) => p.id === selectedProjectId) ?? null
 
   // The add-project row — native OS dialog on a local host that has one, the
   // absolute-path row everywhere else (see useAddProject).
   const addProject = useAddProject<P>({
     shuttleBase: opts.shuttleBase,
-    nativeFolderPicker:
-      selectedHost.isLocal &&
-      (selectedHost.nativeFolderPicker || (opts.nativeFolderPicker ?? false)),
-    isLocalHost: selectedHost.isLocal,
+    nativeFolderPicker: selectedHost.isLocal && selectedHost.nativeFolderPicker,
     origin: selectedHostId,
     onProjectAdded: opts.onProjectAdded,
     onAdded: (next, path) => {
-      setCities(next)
-      const added = next.find((c) => c.path === path && c.originId === selectedHostId)
-      if (added) setSelectedCityId(added.id)
+      setProjects(next)
+      const added = next.find((p) => p.path === path && p.originId === selectedHostId)
+      if (added) setSelectedProjectId(added.id)
     },
   })
 
@@ -471,21 +402,19 @@ export function useProjectSelection<P extends PickerProject>(opts: {
   // host, so it goes too.
   const handleHostChange = (id: string): void => {
     setSelectedHostId(id)
-    setSelectedCityId(projectsForHost(sortedCities, id)[0]?.id ?? null)
+    setSelectedProjectId(projectsForHost(projects, id)[0]?.id ?? null)
     addProject.closePath()
   }
 
   return {
-    hosts,
     selectedHostId,
     selectedHost,
     handleHostChange,
-    cities,
-    sortedCities,
-    hostCities,
-    selectedCityId,
-    setSelectedCityId,
-    selectedCity,
+    projects,
+    hostProjects,
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
     addProject,
   }
 }

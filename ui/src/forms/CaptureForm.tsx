@@ -14,7 +14,7 @@
  * Standalone-UI note: `shuttleBase` defaults to `''` (relative), so the form
  * talks to its own daemon same-origin (dev: through the Vite proxy). Capture is
  * owner-routed at the daemon — `origin` forwards to the owning host — so the
- * project picker may offer remote projects, unlike Stash's local-only create.
+ * project picker offers remote projects too.
  *
  * Built on AppDialog (Radix) — focus trap, Esc, portal, scroll lock for free.
  * Cmd/Ctrl+Enter submits.
@@ -31,19 +31,18 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
+import { injectStyles } from './injectStyles'
 import { captureOutcome, captureRequestBody, type CaptureResponseData } from './captureApi'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import type { AgentEntry } from './StashForm'
 import { agentGroups } from './agentGroups'
-import { shuttleOrigin } from './projectModel'
+import type { Host, Project } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
   injectProjectPickerStyles,
-  type PickerHost,
-  type PickerProject,
   useProjectSelection,
 } from './ProjectPicker'
 
@@ -68,28 +67,16 @@ const FALLBACK_AGENTS: AgentEntry[] = [
 const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
-/** A destination project, as Capture consumes it (Stash's `StashProject`
- *  minus `loomPrefix`, which only parent-nesting needs). */
-export type CaptureProject = PickerProject
-
 export interface CaptureFormProps {
-  /** All connected projects; each carries its own originId + path. */
-  availableCities?: CaptureProject[]
+  /** Every project, in picker order; each carries its own originId + path. */
+  projects: Project[]
   /** Every host the picker can point at — the store registry's origins. The
    *  host control is the left half of the pair; the project list is whatever
    *  the selected host owns. */
-  availableHosts?: PickerHost[]
+  hosts: Host[]
   /** Register a new project directory and hand back the refreshed project set
    *  (the island re-derives it from the daemon). Absent → no add-project row. */
-  onProjectAdded?: (path: string) => Promise<CaptureProject[]>
-  /** The local daemon can raise its own OS folder dialog. True → the add row on
-   *  the local host opens Finder/zenity; every other case asks for the absolute
-   *  path on the selected host. Redundant with `availableHosts`' local entry,
-   *  and the fallback when no host list came through. */
-  nativeFolderPicker?: boolean
-  /** Unix-ms of most recent activity per project id — recency ranking for the
-   *  default selection and picker order. */
-  cityActivityById?: Record<string, number>
+  onProjectAdded?: (path: string) => Promise<Project[]>
   /** Called after an ordinary successful launch. App runs have no tmux name. */
   onSpawned: (launch: { tmuxSession: string; surface: ExecutionSurface }) => void
   /** Called once the daemon confirms meeting recording began. */
@@ -101,11 +88,9 @@ export interface CaptureFormProps {
 }
 
 export function CaptureForm({
-  availableCities = [],
-  availableHosts = [],
-  cityActivityById = {},
+  projects: availableProjects,
+  hosts,
   onProjectAdded,
-  nativeFolderPicker = false,
   onSpawned,
   onMeetingResult,
   onCancel,
@@ -128,23 +113,20 @@ export function CaptureForm({
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const {
-    hosts,
     selectedHostId,
     selectedHost,
     handleHostChange,
-    cities,
-    hostCities,
-    selectedCityId,
-    setSelectedCityId,
-    selectedCity,
+    projects,
+    hostProjects,
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
     addProject,
-  } = useProjectSelection<CaptureProject>({
+  } = useProjectSelection<Project>({
     shuttleBase,
-    availableCities,
-    availableHosts,
-    cityActivityById,
+    projects: availableProjects,
+    hosts,
     onProjectAdded,
-    nativeFolderPicker,
   })
 
   const meetingEnabled = meetingAvailable && meetingMode !== null
@@ -207,7 +189,7 @@ export function CaptureForm({
       textareaRef.current?.focus()
       return
     }
-    if (!selectedCity) {
+    if (!selectedProject) {
       setError('Pick a project — the capture session needs a directory to land in.')
       return
     }
@@ -219,8 +201,8 @@ export function CaptureForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(captureRequestBody({
           prompt: trimmed,
-          projectDir: selectedCity.path,
-          origin: shuttleOrigin(selectedCity.originId),
+          projectDir: selectedProject.path,
+          origin: selectedProject.originId,
           agent,
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
           chrome,
@@ -230,7 +212,7 @@ export function CaptureForm({
       })
       const data = (await res.json().catch(() => ({}))) as CaptureResponseData
       const outcome = captureOutcome(res, data, {
-        projectDir: selectedCity.path,
+        projectDir: selectedProject.path,
         meetingMode: meetingEnabled ? meetingMode : null,
         host: selectedHost.label,
       })
@@ -291,7 +273,7 @@ export function CaptureForm({
               a native <select> too: its "Add a new project…" entry is a
               sentinel option, restored on change, so it never becomes a
               selected state (see ProjectPicker). */}
-          {(cities.length > 0 || onProjectAdded) && (
+          {(projects.length > 0 || onProjectAdded) && (
             <>
               <div className="capture-field">
                 <span className="capture-label">Host</span>
@@ -305,9 +287,9 @@ export function CaptureForm({
               <div className="capture-field">
                 <span className="capture-label">Project</span>
                 <ProjectPicker
-                  projects={hostCities}
-                  selectedId={selectedCityId}
-                  onSelect={setSelectedCityId}
+                  projects={hostProjects}
+                  selectedId={selectedProjectId}
+                  onSelect={setSelectedProjectId}
                   onAddProject={onProjectAdded ? addProject.begin : undefined}
                   className="capture-select"
                 />
@@ -465,9 +447,8 @@ export function MeetingControl({ mode, disabled, onChange }: {
 }
 
 /**
- * Inject the Capture dialog's CSS once — idempotent by element id, the same
- * pattern as `injectStashFormStyles`. The shared pickers' sheet rides along,
- * because `AddProjectPath` still draws from it.
+ * Inject the Capture dialog's CSS, and the shared pickers' sheet
+ * `AddProjectPath` draws on.
  *
  * Every measurable value the alignment depends on lives here and nowhere else:
  * `.capture-form`'s children are all full-width blocks on one column, and the
@@ -475,11 +456,7 @@ export function MeetingControl({ mode, disabled, onChange }: {
  * markup rather than a coincidence between two style sources.
  */
 export function injectCaptureFormStyles(): void {
-  if (typeof document === 'undefined') return
-  if (document.getElementById('capture-form-styles')) return
-  const style = document.createElement('style')
-  style.id = 'capture-form-styles'
-  style.textContent = `
+  injectStyles('capture-form-styles', `
     .capture-form {
       display: flex;
       flex-direction: column;
@@ -777,7 +754,6 @@ export function injectCaptureFormStyles(): void {
     .capture-submit:hover:not(:disabled) {
       background: #35508F;
     }
-  `
-  document.head.appendChild(style)
+  `)
   injectProjectPickerStyles()
 }

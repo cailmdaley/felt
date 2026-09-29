@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { parseChooseFolder, parseRegisterProject } from './chooseFolder.js'
-import { deriveHosts, deriveProjects } from './projectModel.js'
+import { parseCompositeFeed } from '../board/KanbanComposite.js'
+import { deriveHosts, deriveProjects, type ProjectModel } from './projectModel.js'
 
 describe('parseChooseFolder', () => {
   it('reads a chosen path', () => {
@@ -40,7 +41,9 @@ describe('parseChooseFolder', () => {
 })
 
 describe('deriveProjects native flag', () => {
-  const feed = { host: 'laptop', origins: { laptop: { kind: 'local' } }, entries: [] }
+  const feed = parseCompositeFeed({ host: 'laptop', origins: { laptop: { kind: 'local' } }, fibers: [] })
+  const localPicker = (model: ProjectModel): boolean | undefined =>
+    model.hosts.find((h) => h.isLocal)?.nativeFolderPicker
 
   it('carries the local origin’s native_folder_picker', () => {
     const model = deriveProjects(feed, {
@@ -50,15 +53,15 @@ describe('deriveProjects native flag', () => {
         candide: { kind: 'remote', felt_stores: [], native_folder_picker: false },
       },
     })
-    expect(model.nativeFolderPicker).toBe(true)
+    expect(localPicker(model)).toBe(true)
   })
 
-  it('is false when the daemon is too old to report one', () => {
+  it('is false when the daemon reports none', () => {
     const model = deriveProjects(feed, {
       host: 'laptop',
       origins: { laptop: { kind: 'local', felt_stores: ['/loom'], projects: ['/dev/felt'] } },
     })
-    expect(model.nativeFolderPicker).toBe(false)
+    expect(localPicker(model)).toBe(false)
   })
 
   it('ignores a remote’s dialog — nobody is sitting at that desktop', () => {
@@ -69,7 +72,7 @@ describe('deriveProjects native flag', () => {
         candide: { kind: 'remote', felt_stores: ['/loom'], projects: ['/home/x/p'], native_folder_picker: true },
       },
     })
-    expect(model.nativeFolderPicker).toBe(false)
+    expect(localPicker(model)).toBe(false)
   })
 })
 
@@ -113,18 +116,9 @@ describe('deriveHosts', () => {
     expect(candide).toMatchObject({ label: 'Candide', isLocal: false, nativeFolderPicker: false })
   })
 
-  it('marks an unreachable remote stale', () => {
-    const hosts = deriveHosts(
-      { host: 'laptop', origins: { candide: { kind: 'remote', stale: true } } },
-      'laptop',
-      {},
-    )
-    expect(hosts.find((h) => h.id === 'candide')?.stale).toBe(true)
-  })
-
   it('always yields a local host, even from a registry that names no origins', () => {
     expect(deriveHosts({}, 'laptop', {})).toEqual([
-      { id: 'local', label: 'laptop', isLocal: true, nativeFolderPicker: false, stale: false },
+      { id: 'local', label: 'laptop', isLocal: true, nativeFolderPicker: false },
     ])
   })
 
@@ -139,7 +133,7 @@ describe('deriveHosts', () => {
 describe('deriveProjects hosts', () => {
   it('offers every configured origin, including one with no projects yet', () => {
     const model = deriveProjects(
-      { host: 'laptop', origins: { laptop: { kind: 'local' } }, entries: [] },
+      parseCompositeFeed({ host: 'laptop', origins: { laptop: { kind: 'local' } }, fibers: [] }),
       {
         host: 'laptop',
         origins: {

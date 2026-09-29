@@ -160,10 +160,7 @@ export function railDate(nowMs: number): Date {
 
 /**
  * The origin key a write is routed by — `local`, or a bare hostname for a
- * remote-owned fiber. Mirrors `shuttleOrigin` in src/forms/projectModel.ts;
- * duplicated rather than imported because the board does not otherwise depend
- * on the forms layer, and a one-line regex is a cheaper coupling than a
- * cross-layer import.
+ * remote-owned fiber.
  */
 export function shuttleOrigin(originId: string | undefined): string {
   return (originId ?? 'local').replace(/^remote-/, '')

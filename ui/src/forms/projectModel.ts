@@ -1,5 +1,6 @@
-// The standalone UI's "project" set — derived from Shuttle's registered
-// felt-store list plus current card working dirs, not from historical cards.
+// The Stash and Capture forms' host and project sets — derived from Shuttle's
+// registered felt-store list plus current card working dirs, not from
+// historical cards.
 //
 // `GET /api/v1/felt-stores` is the canonical store registry. The composite feed
 // is still useful for recency, substore-prefix inference, and current working
@@ -8,8 +9,7 @@
 // Local project dirs stay registry-curated because local historical cards still
 // include retired checkouts.
 // Closed historical fibers are not authority: they carry old `project_dir`
-// values forever, so closed-only dirs would resurrect retired checkouts like
-// Portolan/Shuttle.
+// values forever, so closed-only dirs would resurrect retired checkouts.
 //
 // The one inferred quantity is `loomPrefix`: the loom-relative path the
 // project's `.felt` symlinks to (e.g. `…/projects/portolan/.felt` →
@@ -37,49 +37,36 @@
 // The residual mis-inference never mis-places a top-level stash (the daemon
 // resolves the substore from `project_dir`); only nesting candidates are
 // affected. A fully exact project_dir→substore map needs a daemon-side
-// resolution (slice-4 server work).
+// resolution.
 
-import { parseCompositeFeed } from '../board/KanbanComposite.js'
-
-/**
- * Normalize a project's `originId` to the owner-routing key the daemon's
- * `OriginRouter` expects on a write. The standalone feed always carries bare
- * host names (`origin || host`), so this is defense-in-depth: it strips a stray
- * `remote-` prefix (Portolan's old `'remote-<host>'` city-origin shape) that
- * would otherwise match no configured remote and silently fall through to a
- * mis-routed LOCAL write. Both owner-routed forms (Stash + Capture) send their
- * origin through here, so the guard is enforced in exactly one place.
- */
-export const shuttleOrigin = (originId: string): string => originId.replace(/^remote-/, '')
+import type { CompositeFeed } from '../board/KanbanComposite.js'
 
 /** Trailing-slash-insensitive path compare — store-root detection. */
 const norm = (p: string): string => p.replace(/\/+$/, '')
 
-interface ProjectEntry {
-  /** Stable key: `${originId}:${path}`. */
+/** A destination project, as both forms consume it. */
+export interface Project {
+  /** Stable key: `${owning origin}:${path}`. */
   id: string
   /** Display name — the project_dir basename. */
   name: string
   /** `shuttle.project_dir` — the worker cwd AND the create endpoint's felt root. */
   path: string
-  /** Owning host/remote (bare name, e.g. `my-laptop`, `cluster-a`). */
+  /** The owner-routing key sent as `origin` on a create or capture: `'local'`
+   *  for the daemon's own host, else the owning remote's bare name. Matches
+   *  the `Host.id` it belongs to. */
   originId: string
-  /** This origin is the local daemon's own host. Owner-routed writes (Stash
-   *  create, Capture spawn) send `origin: 'local'` for these; remote projects
-   *  send their bare host name and the daemon forwards. */
-  isLocal: boolean
-  /** Loom-relative substore prefix; `''` when the project is a store root. */
+  /** Loom-relative substore prefix; `''` when the project is a store root.
+   *  Scopes and strips Stash's parent candidates to project-relative slugs. */
   loomPrefix: string
-  /** Newest fiber mtime in the project (unix-ms) — recency ranking. */
-  lastActivity: number
 }
 
 /** A host the pickers can point at — one origin of the store registry, whether
  *  or not it currently owns any projects (an empty host still needs to be
  *  reachable in the picker: that is where its first project gets added). */
-export interface HostEntry {
+export interface Host {
   /** `'local'` for the daemon's own host, else the bare remote name. Matches
-   *  the projects' `originId` as the forms consume them. */
+   *  the projects' `originId`. */
   id: string
   /** How the host reads — a remote's `display`, else its bare name. */
   label: string
@@ -87,35 +74,30 @@ export interface HostEntry {
   /** This host can raise its own OS folder dialog. False for every remote:
    *  a dialog there would open on a desktop nobody is sitting at. */
   nativeFolderPicker: boolean
-  /** The daemon could not reach this remote on the last poll. */
-  stale: boolean
 }
 
 export interface ProjectModel {
   /** Every origin the pickers can point at, local first. */
-  hosts: HostEntry[]
-  /** Every distinct project across all origins, recency-ranked. */
-  projects: ProjectEntry[]
-  /** `{projectId: lastActivity}` — feeds the forms' city-picker recency sort. */
-  activityById: Record<string, number>
-  /** The LOCAL daemon reports a native folder dialog. Only the local origin's
-   *  flag matters here: a remote's dialog would open on a desktop nobody is
-   *  sitting at, so remote hosts always fall through to typing the path. */
-  nativeFolderPicker: boolean
+  hosts: Host[]
+  /** Every distinct project across all origins, most recently active first,
+   *  then by name — the picker order and default selection both forms use. */
+  projects: Project[]
+}
+
+interface RankedProject extends Project {
+  /** Newest fiber mtime in the project (unix-ms). */
+  lastActivity: number
 }
 
 interface StoreRegistryOrigin {
   kind?: 'local' | 'remote' | string
   stale?: boolean
   felt_stores?: string[]
-  /** Curated picker-project list (Stash/Capture cities). When present it is
-   *  authoritative for this origin — it replaces the felt-store + current-cards
-   *  derivation. Absent → fall back to that derivation, so an uncurated host is
-   *  unchanged. Separate from `felt_stores`, which stays TCC-scoped for polling. */
+  /** Curated picker-project list. When present it is authoritative for this
+   *  origin — it replaces the felt-store + current-cards derivation. Separate
+   *  from `felt_stores`, which stays TCC-scoped for polling. */
   projects?: string[]
-  /** This host can raise its own OS folder dialog (`POST /api/v1/choose-folder`).
-   *  Decides, before the human clicks "+ Add project…", whether the form asks
-   *  the OS or asks the human to type the path. */
+  /** This host can raise its own OS folder dialog (`POST /api/v1/choose-folder`). */
   native_folder_picker?: boolean
   /** Presentation label a remote carries for itself. */
   display?: string
@@ -124,6 +106,18 @@ interface StoreRegistryOrigin {
 interface StoreRegistry {
   host?: string
   origins?: Record<string, StoreRegistryOrigin>
+}
+
+/** The feed's per-origin block, as far as the host and project sets read it. */
+type FeedOrigins = Record<string, { kind: 'local' | 'remote'; stale?: boolean }>
+
+interface Acc {
+  originId: string
+  path: string
+  feltStore: string
+  slugs: string[]
+  lastActivity: number
+  current: boolean
 }
 
 /** Last path segment of an absolute dir (`/a/b/c` → `c`), tolerating a
@@ -162,21 +156,45 @@ function substorePrefix(slugs: string[], projectBasename: string): string {
 }
 
 /**
- * Derive the project set from a raw composite-feed body (`GET
- * /api/v1/fibers/composite`). Groups every fiber by `(origin, project_dir)`,
- * infers each group's `loomPrefix`, and ranks by recency.
+ * A project row. A project that IS its own felt store (the loom root, a
+ * private store) has store-root-relative ids → prefix `''`. That is
+ * structural, so it overrides the basename heuristic, which a stray
+ * `loom/`-pathed fiber would mislead.
  */
-export function deriveProjects(feedBody: unknown, registryBody?: unknown): ProjectModel {
-  const feed = parseCompositeFeed(feedBody)
-
-  interface Acc {
-    originId: string
-    path: string
-    feltStore: string
-    slugs: string[]
-    lastActivity: number
-    current: boolean
+function projectRow(
+  key: string,
+  path: string,
+  isLocal: boolean,
+  originId: string,
+  acc: Acc | undefined,
+): RankedProject {
+  const name = basename(path)
+  const isStoreRoot = norm(path) === norm(acc?.feltStore ?? path)
+  return {
+    id: key,
+    name,
+    path,
+    originId: isLocal ? 'local' : originId,
+    loomPrefix: isStoreRoot || !acc ? '' : substorePrefix(acc.slugs, name),
+    lastActivity: acc?.lastActivity ?? 0,
   }
+}
+
+/** Most recently active first, then name. */
+function rank(projects: RankedProject[]): Project[] {
+  return projects.sort((a, b) =>
+    b.lastActivity - a.lastActivity ||
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  )
+}
+
+/**
+ * Derive the host and project sets from the composite feed (`GET
+ * /api/v1/fibers/composite`) and the store registry body (`GET
+ * /api/v1/felt-stores`). Groups every fiber by `(origin, project_dir)`, infers
+ * each group's `loomPrefix`, and ranks by recency.
+ */
+export function deriveProjects(feed: CompositeFeed, registryBody?: unknown): ProjectModel {
   const groups = new Map<string, Acc>()
 
   for (const entry of feed.entries) {
@@ -201,83 +219,50 @@ export function deriveProjects(feedBody: unknown, registryBody?: unknown): Proje
   }
 
   const registry = parseStoreRegistry(registryBody)
+  const hosts = deriveHosts(registry, feed.host, feed.origins)
   const registryProjects = projectsFromRegistry(registry, groups, feed.host, feed.origins)
-  if (registryProjects.length > 0) {
-    const activityById: Record<string, number> = {}
-    for (const p of registryProjects) activityById[p.id] = p.lastActivity
-    return {
-      hosts: deriveHosts(registry, feed.host, feed.origins),
-      projects: registryProjects,
-      activityById,
-      nativeFolderPicker: nativePicker(registry, feed.host),
-    }
-  }
+  if (registryProjects.length > 0) return { hosts, projects: registryProjects }
 
-  const projects: ProjectEntry[] = [...groups.values()].map((acc) => {
-    const name = basename(acc.path)
-    // When project_dir IS its own felt store (no substore symlink — e.g. the
-    // loom root, or a private store like the iCloud wedding store), ids are
-    // store-root-relative and the prefix is exactly `''`. This is structural,
-    // so it overrides the basename heuristic (which a stray fiber pathed under
-    // a `loom/` segment would otherwise mislead).
-    const isStoreRoot = norm(acc.path) === norm(acc.feltStore)
-    return {
-      id: `${acc.originId}:${acc.path}`,
-      name,
-      path: acc.path,
-      originId: acc.originId,
-      isLocal: feed.origins[acc.originId]?.kind === 'local' || acc.originId === feed.host,
-      loomPrefix: isStoreRoot ? '' : substorePrefix(acc.slugs, name),
-      lastActivity: acc.lastActivity,
-    }
-  })
-
-  // Recency first, then name — the default-selection + picker order the forms expect.
-  projects.sort((a, b) =>
-    b.lastActivity - a.lastActivity ||
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  const projects = [...groups.values()].map((acc) =>
+    projectRow(
+      `${acc.originId}:${acc.path}`,
+      acc.path,
+      feed.origins[acc.originId]?.kind === 'local' || acc.originId === feed.host,
+      acc.originId,
+      acc,
+    ),
   )
-
-  const activityById: Record<string, number> = {}
-  for (const p of projects) activityById[p.id] = p.lastActivity
-
-  return {
-    hosts: deriveHosts(registry, feed.host, feed.origins),
-    projects,
-    activityById,
-    nativeFolderPicker: nativePicker(registry, feed.host),
-  }
+  return { hosts, projects: rank(projects) }
 }
 
 /**
  * The host list the pickers offer, from the same store registry the projects
  * come from — so the two can never disagree about which origins exist.
  *
- * The local origin is normalized to the id `'local'` (matching how `toProjects`
- * rewrites a local project's `originId`) and sorted first, because that is
- * where the picker defaults: a fresh form should point at the machine the human
- * is sitting at, never at whichever remote happened to be busiest.
+ * The local origin is normalized to the id `'local'` (matching a local
+ * project's `originId`) and sorted first, because that is where the picker
+ * defaults: a fresh form should point at the machine the human is sitting at,
+ * never at whichever remote happened to be busiest.
  *
- * A registry that names no origins at all (an old or degraded daemon) still
- * yields the local host, so the forms always have something to point at.
+ * A registry that names no origins at all (an unreachable registry read)
+ * still yields the local host, so the forms always have something to point at.
  */
 export function deriveHosts(
   registry: StoreRegistry,
   feedHost: string,
-  feedOrigins: Record<string, { kind: 'local' | 'remote'; stale?: boolean }>,
-): HostEntry[] {
+  feedOrigins: FeedOrigins,
+): Host[] {
   const localId = registry.host || feedHost
   const ids = new Set([...Object.keys(registry.origins ?? {}), ...Object.keys(feedOrigins)])
-  const hosts: HostEntry[] = []
+  const hosts: Host[] = []
   const seen = new Set<string>()
   let sawLocal = false
 
   for (const id of ids) {
     if (seen.has(id)) continue
     const origin = registry.origins?.[id]
-    const feedOrigin = feedOrigins[id]
     const isLocal =
-      id === localId || origin?.kind === 'local' || feedOrigin?.kind === 'local' || id === feedHost
+      id === localId || origin?.kind === 'local' || feedOrigins[id]?.kind === 'local' || id === feedHost
     if (isLocal) {
       // Two ids can both look local (a registry host that disagrees with the
       // feed's); they collapse to the one `'local'` entry the projects use.
@@ -289,7 +274,6 @@ export function deriveHosts(
         label: id || 'local',
         isLocal: true,
         nativeFolderPicker: nativePicker(registry, feedHost),
-        stale: false,
       })
     } else {
       seen.add(id)
@@ -299,7 +283,6 @@ export function deriveHosts(
         isLocal: false,
         // Never native: the dialog would open on that host's own desktop.
         nativeFolderPicker: false,
-        stale: origin?.stale === true || feedOrigin?.stale === true,
       })
     }
   }
@@ -310,7 +293,6 @@ export function deriveHosts(
       label: localId || 'local',
       isLocal: true,
       nativeFolderPicker: nativePicker(registry, feedHost),
-      stale: false,
     })
   }
 
@@ -322,9 +304,7 @@ export function deriveHosts(
 }
 
 /** The local origin's `native_folder_picker`, found by host id or, failing
- *  that, by `kind: 'local'` — the registry names its own host, but a degraded
- *  body may not. Absent → false: no flag means an older daemon with no
- *  `/api/v1/choose-folder`, and typing the path is the safe read. */
+ *  that, by `kind: 'local'`. Absent → false: typing the path is the safe read. */
 function nativePicker(registry: StoreRegistry, feedHost: string): boolean {
   const origins = registry.origins ?? {}
   const local =
@@ -335,28 +315,22 @@ function nativePicker(registry: StoreRegistry, feedHost: string): boolean {
 }
 
 function parseStoreRegistry(body: unknown): StoreRegistry {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return {}
-  const root = body as Record<string, unknown>
-  const host = typeof root.host === 'string' ? root.host : undefined
+  if (!isRecord(body)) return {}
+  const host = typeof body.host === 'string' ? body.host : undefined
   const origins: Record<string, StoreRegistryOrigin> = {}
 
-  if (root.origins && typeof root.origins === 'object' && !Array.isArray(root.origins)) {
-    for (const [originId, raw] of Object.entries(root.origins as Record<string, unknown>)) {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-      const rec = raw as Record<string, unknown>
-      const feltStores = stringArray(rec.felt_stores) ?? []
+  if (isRecord(body.origins)) {
+    for (const [originId, rec] of Object.entries(body.origins)) {
+      if (!isRecord(rec)) continue
       origins[originId] = {
         kind: typeof rec.kind === 'string' ? rec.kind : undefined,
         stale: rec.stale === true,
-        felt_stores: feltStores,
+        felt_stores: stringArray(rec.felt_stores) ?? [],
         projects: stringArray(rec.projects),
         native_folder_picker: rec.native_folder_picker === true,
         display: typeof rec.display === 'string' ? rec.display : undefined,
       }
     }
-  } else {
-    const feltStores = stringArray(root.felt_stores) ?? []
-    if (feltStores.length > 0) origins[host || 'local'] = { kind: 'local', felt_stores: feltStores }
   }
 
   return { host, origins }
@@ -364,50 +338,31 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
 
 function projectsFromRegistry(
   registry: StoreRegistry,
-  groups: Map<
-    string,
-    { originId: string; path: string; feltStore: string; slugs: string[]; lastActivity: number; current: boolean }
-  >,
+  groups: Map<string, Acc>,
   feedHost: string,
-  feedOrigins: Record<string, { kind: 'local' | 'remote'; stale?: boolean }>,
-): ProjectEntry[] {
+  feedOrigins: FeedOrigins,
+): Project[] {
   const origins = registry.origins ?? {}
-  const projects: ProjectEntry[] = []
+  const projects: RankedProject[] = []
   const seen = new Set<string>()
   // Origins that ship a curated `projects` list own their entries outright: the
-  // list is the city set, and the felt-store + current-cards derivation is
-  // skipped for them (below). An origin with no curated list keeps the old
-  // behavior, so this is purely additive.
+  // list is the project set, and the felt-store + current-cards derivation is
+  // skipped for them (below).
   const curatedOrigins = new Set<string>()
 
   for (const [originId, origin] of Object.entries(origins)) {
     const curated = origin.projects ?? []
     if (curated.length > 0) curatedOrigins.add(originId)
     const stores = curated.length > 0 ? curated : origin.felt_stores ?? []
+    const kind = origin.kind === 'remote' || feedOrigins[originId]?.kind === 'remote' ? 'remote' : 'local'
+    const isLocal = kind === 'local' || originId === feedHost || originId === registry.host
     for (const rawPath of stores) {
       const path = rawPath.trim().replace(/\/+$/, '')
       if (!path) continue
       const key = `${originId}:${path}`
       if (seen.has(key)) continue
       seen.add(key)
-
-      const acc = groups.get(key)
-      const name = basename(path)
-      const kind = origin.kind === 'remote' || feedOrigins[originId]?.kind === 'remote' ? 'remote' : 'local'
-      const feltStore = acc?.feltStore ?? path
-      // A project that IS its own felt store (the loom root, a private store)
-      // has store-root-relative ids → prefix `''`. Structural, so it overrides
-      // the basename heuristic (which a stray `loom/`-pathed fiber would mislead).
-      const isStoreRoot = norm(path) === norm(feltStore)
-      projects.push({
-        id: key,
-        name,
-        path,
-        originId,
-        isLocal: kind === 'local' || originId === feedHost || originId === registry.host,
-        loomPrefix: isStoreRoot ? '' : acc ? substorePrefix(acc.slugs, name) : '',
-        lastActivity: acc?.lastActivity ?? 0,
-      })
+      projects.push(projectRow(key, path, isLocal, originId, groups.get(key)))
     }
   }
 
@@ -416,39 +371,27 @@ function projectsFromRegistry(
   // the authoritative signal for those working dirs; closed-only dirs are
   // historical and local dirs stay registry-curated.
   for (const acc of groups.values()) {
-    // A curated origin's city set is closed — don't let a current card resurrect
-    // a project dir the human deliberately left off the list.
+    // A curated origin's project set is closed — don't let a current card
+    // resurrect a project dir the human deliberately left off the list.
     if (curatedOrigins.has(acc.originId)) continue
     const origin = origins[acc.originId]
     const feedOrigin = feedOrigins[acc.originId]
     if (!acc.current || origin?.stale === true || feedOrigin?.stale === true) continue
-    const kind = origin?.kind === 'remote' || feedOrigin?.kind === 'remote' ? 'remote' : 'local'
-    if (kind !== 'remote') continue
+    if (origin?.kind !== 'remote' && feedOrigin?.kind !== 'remote') continue
 
     const path = acc.path.trim().replace(/\/+$/, '')
     if (!path) continue
     const key = `${acc.originId}:${path}`
     if (seen.has(key)) continue
     seen.add(key)
-
-    const name = basename(path)
-    const isStoreRoot = norm(path) === norm(acc.feltStore)
-    projects.push({
-      id: key,
-      name,
-      path,
-      originId: acc.originId,
-      isLocal: false,
-      loomPrefix: isStoreRoot ? '' : substorePrefix(acc.slugs, name),
-      lastActivity: acc.lastActivity,
-    })
+    projects.push(projectRow(key, path, false, acc.originId, acc))
   }
 
-  projects.sort((a, b) =>
-    b.lastActivity - a.lastActivity ||
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-  )
-  return projects
+  return rank(projects)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 function stringArray(value: unknown): string[] | undefined {
