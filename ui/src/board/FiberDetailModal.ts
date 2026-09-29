@@ -3430,11 +3430,10 @@ export class FiberDetailModal {
   private async fetchSentFiles(
     card: KanbanCard,
   ): Promise<SentFile[] | null | typeof SENT_FILES_UNCHANGED> {
+    // The route is keyed by uid alone; a card without one has no trail.
     const uid = typeof card.uid === 'string' ? card.uid.trim() : ''
-    const sessionId = typeof card.sessionId === 'string' ? card.sessionId.trim() : ''
-    if (!uid && !sessionId) return []
+    if (!uid) return []
 
-    // ── Primary: the daemon endpoint ──
     // Conditional, but do not count on it. The local leg's weak ETag is over
     // the events file's {mtime,size}, and that file is the live hook stream for
     // every session on the host — so on any host with a live session it moves
@@ -3443,10 +3442,8 @@ export class FiberDetailModal {
     // controller's moduledoc). Either way this 15s poll costs the owning daemon
     // a full re-read of that file; the fix is an incremental reader there, not
     // a validator here.
-    const params = new URLSearchParams()
-    if (uid) params.set('uid', uid)
+    const params = new URLSearchParams({ uid })
     if (card.originId) params.set('origin', card.originId)
-    if (sessionId) params.set('sessionId', sessionId)
     try {
       const headers: Record<string, string> = {}
       if (this.sentFilesEtag) headers['If-None-Match'] = this.sentFilesEtag

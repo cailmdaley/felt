@@ -1347,7 +1347,17 @@ export class KanbanModal {
     return due === undefined || sameCivilDue(card.due, due)
   }
 
-  /** Would `setSurface` find nothing to write for this open/active card? */
+  /**
+   * Would `setSurface` find nothing to write for this card?
+   *
+   * Never for a CLOSED card. A tempered/composted past run OR an
+   * awaiting-review one (closed, untempered) classifies by its lifecycle
+   * state, not its stored horizon: it sits in Awaiting review / Past
+   * regardless of a `horizon: stashed` left in its frontmatter. So even when
+   * the stored horizon already equals the target, the drop is a real state
+   * change — commitSurface reopens it as a draft so it actually leaves that
+   * column and lands on the surface.
+   */
   private alreadyOnSurface(
     card: KanbanCard,
     horizon: HorizonKind,
@@ -1452,19 +1462,7 @@ export class KanbanModal {
       horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
     const due = dropsStaleDue ? null : opts.due
 
-    const sameHorizon = this.sameSurface(card, horizon, opts)
-    const sameDue = this.sameDueAs(card, due)
-    // Any CLOSED card — a tempered/composted past run OR an awaiting-review one
-    // (closed, untempered) — classifies by its lifecycle state, not its stored
-    // horizon: it sits in Awaiting review / Past regardless of a `horizon:
-    // stashed` left in its frontmatter. So even when the stored horizon already
-    // equals the target, the drop is a real state change — commitSurface
-    // reopens it as a draft so it actually leaves that column and lands on the
-    // surface. Never short-circuit a closed card. (This was the "reminders
-    // bridge already has horizon:stashed, so dragging to stash silently
-    // no-ops" bug — sameHorizon was true but the card never moved.)
-    const isClosedSource = card.status === 'closed'
-    if (!isClosedSource && sameHorizon && sameDue) {
+    if (this.alreadyOnSurface(card, horizon, { cold: opts.cold, due })) {
       // A genuine no-op: an open/active card already on this surface with these
       // fields. Tell the user rather than leaving the drag feeling broken.
       this.showBanner(`“${card.name}” is already in ${SURFACE_TITLE[horizon]}.`, 'info')
