@@ -24,7 +24,7 @@ import { agentGroups } from '../forms/agentGroups.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
-import { dispatchIneligibleReason, isAgentCard } from './KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
@@ -3558,40 +3558,16 @@ export class FiberDetailModal {
     return null
   }
 
-  /** POST one JSON body to a daemon route; the daemon answers plain text, so
-   *  a !ok body is the error message verbatim. */
-  private async postJson(
-    path: string,
-    body: Record<string, unknown>,
-    label = 'Save',
-  ): Promise<void> {
-    const res = await fetch(`${this.shuttleBase}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const errText = await res.text().catch(() => `${res.status}`)
-      throw new Error(errText || `${label} failed: ${res.status}`)
-    }
-  }
-
-  private async postLifecycle(body: Record<string, unknown>): Promise<void> {
-    await this.postJson('/api/v1/lifecycle', body)
+  /** {@link postDaemonJson} against this panel's daemon. */
+  private postJson(path: string, body: Record<string, unknown>, label = 'Save'): Promise<void> {
+    return postDaemonJson(this.shuttleBase, path, body, label)
   }
 
   /**
-   * Unified manual requeue: a single owner-routed `/api/v1/dispatch` carrying
-   * the user's message and resume intent inline. `user_message` is the
-   * directive text (the daemon inlines it into the prompt at launch);
-   * `resume_mode` is `'fresh'` → start a new session, `'previous'` → resume the
-   * prior session. The daemon resolves the session to resume from the fiber's
-   * `shuttle.session_uuid` frontmatter field, falling back to fresh
-   * when there's nothing to resume. `force`/`ad_hoc` launch the worker on the
-   * owning host regardless of poll eligibility.
-   *
-   * Owner-routed by `card.originId` (`origin`), which carries the message and
-   * resume_mode to the owning daemon intact cross-host.
+   * Manual requeue: one force dispatch ({@link postForceDispatch}) carrying the
+   * message and the resume intent inline. The daemon resolves the session to
+   * resume from the fiber's `shuttle.session_uuid`, falling back to fresh when
+   * there is nothing to resume.
    */
   private async runRequeue(
     card: KanbanCard,
@@ -3599,14 +3575,13 @@ export class FiberDetailModal {
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
-    skipCutConfirmation = false,
   ): Promise<void> {
     // A "New session" over a LIVE worker is a CUT: the daemon stamps the
     // clean-exit marker, kills the running session, and starts fresh — which
     // discards whatever in-flight context that worker was holding. Confirm
     // before doing that. A dormant card (no live worker) cuts nothing, so it's
     // silent; Resume never cuts, so it never confirms.
-    if (mode === 'fresh' && hasWorkerToStop(card) && !skipCutConfirmation) {
+    if (mode === 'fresh' && hasWorkerToStop(card)) {
       const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
       const ok = window.confirm(
         `A worker is still running for “${card.name}”${working}.\n\n` +
@@ -3621,37 +3596,16 @@ export class FiberDetailModal {
     btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
     errorEl.style.display = 'none'
 
-    // Single force/ad-hoc dispatch carrying the message + resume_mode inline.
     let res: Response
     try {
-      // Owner-routed by `origin` in the body.
-      res = await fetch(`${this.shuttleBase}/api/v1/dispatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fiber_id: card.id,
-          origin: card.originId,
-          force: true,
-          ad_hoc: true,
-          user_message: directive,
-          resume_mode: mode,
-        }),
-      })
+      res = await postForceDispatch(this.shuttleBase, card, { user_message: directive, resume_mode: mode })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
       this.showDispatchError(errorEl, btn, original, `Couldn't reach Shuttle: ${detail}`)
       return
     }
 
-    const body = (await res.json().catch(() => ({}))) as {
-      dispatched?: boolean
-      reason?: string
-      detail?: string
-      message?: string
-      error?: string
-      tmux_session?: string
-      session_uuid?: string
-    }
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
 
     if (res.status === 409) {
       if (body.tmux_session) {
@@ -3667,11 +3621,7 @@ export class FiberDetailModal {
     }
 
     if (!res.ok) {
-      // Prefer the daemon's structured ineligibility copy (detail/message name
-      // the actual host / project_dir); fall back to the generic error / status.
-      const msg = (body.reason || body.detail || body.message)
-        ? dispatchIneligibleReason(body)
-        : (body.error ?? `Requeue failed (${res.status})`)
+      const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`)
       this.showDispatchError(errorEl, btn, original, msg)
       return
     }
@@ -3874,7 +3824,7 @@ export class FiberDetailModal {
   ): Promise<boolean> {
     if (!axes.agent) return false
     return this.withSaveStatus(statusEl, errorEl, () =>
-      this.postLifecycle({
+      this.postJson('/api/v1/lifecycle', {
         action: 'set-agent',
         origin: card.originId,
         fiber: card.id,
@@ -4093,7 +4043,8 @@ export class FiberDetailModal {
             // A non-standing target DROPS the schedule key server-side, and
             // sending `--schedule` alongside it is an error — so the schedule
             // rides only when the target kind actually carries one.
-            await this.postLifecycle(
+            await this.postJson(
+              '/api/v1/lifecycle',
               targetKind === 'standing'
                 ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
                 : { action: 'reshape', origin, fiber: fiberId, kind: targetKind },
@@ -4104,7 +4055,7 @@ export class FiberDetailModal {
             // this arm: the kind control is hidden until the card is
             // shuttle-managed, and pinning a block-less card is refused on the
             // board too (`pinRole` banners "promote it first").
-            await this.postLifecycle({
+            await this.postJson('/api/v1/lifecycle', {
               action: 'repeat', origin, fiber: fiberId,
               // Undefined when the block carries none, which a paused install
               // permits; an arming install without one fails loudly in
@@ -4112,7 +4063,7 @@ export class FiberDetailModal {
               schedule, tz, model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
             })
           } else {
-            await this.postLifecycle({
+            await this.postJson('/api/v1/lifecycle', {
               action: 'install', origin, fiber: fiberId,
               model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
               // A paused draft must stay paused across the install (install

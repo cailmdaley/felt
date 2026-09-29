@@ -48,7 +48,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchIneligibleReason, errorMessageFromResponse } from './KanbanModalShared.js'
+import { dispatchFailureMessage, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker, MoveDestination, QueueTarget } from './MoveDestinations.js'
@@ -1060,52 +1060,25 @@ export class KanbanModal {
   }
 
   /**
-   * Drag-to-inFlight launch path. A SINGLE daemon call: POST
-   * /api/v1/dispatch (force=true, ad_hoc=true) owns the whole launch —
-   * owner-routed by `origin`, it reopens the lifecycle if the fiber is
-   * closed and dispatches on the host that owns `shuttle.host`.
+   * Drag-to-inFlight launch: ONE force dispatch owns the whole launch, with no
+   * transition beside it — the dispatch reopens a closed lifecycle itself, and
+   * a second write would race it into a 409 already_running.
    *
-   * This used to fire a transition target=inFlight FIRST, but that was
-   * both redundant (requeue already reopens-if-closed) and harmful: for an
-   * enabled fiber the transition resolved to dispatch-ad-hoc and SPAWNED the
-   * worker immediately, racing requeue's own force-dispatch into a 409
-   * already_running. Collapsing to one call removed the race; the drag
-   * carries no directive. (overnight-audit C6, regression from 5973cdc.)
+   * A drag carries no message and always starts fresh; resuming and saying
+   * something first live behind the detail panel, where they are chosen on
+   * purpose. `fresh` is stamped explicitly rather than left to the daemon's
+   * auto-decide, which would resume a transcript that died dirty.
    */
   private async launchFromDrag(card: KanbanCard): Promise<void> {
-    // Drag launch always starts fresh. Resume-previous and "talk first" intent
-    // live behind the detail modal where the user can choose them intentionally.
-    // The daemon's force/ad-hoc dispatch reopens a closed lifecycle and spawns
-    // the worker on the owning host (owner-routed by `origin`).
-    let requeueRes: Response
+    let res: Response
     try {
-      requeueRes = await fetch(`${this.shuttleBase}/api/v1/dispatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fiber_id: card.id,
-          origin: card.originId,
-          force: true,
-          ad_hoc: true,
-          // "Drag launch always starts fresh" is unconditional — stamp it as an
-          // explicit fresh directive, NOT the marker auto-decide (which would
-          // resume a dirty-dead transcript; see dispatcher commit 3bdb776).
-          resume_mode: 'fresh',
-        }),
-      })
+      res = await postForceDispatch(this.shuttleBase, card, { resume_mode: 'fresh' })
     } catch (err: unknown) {
-      const detail = errText(err)
-      throw new Error(`Couldn't reach the Shuttle daemon: ${detail}`)
+      throw new Error(`Couldn't reach the Shuttle daemon: ${errText(err)}`)
     }
-    if (!requeueRes.ok) {
-      const body = (await requeueRes.json().catch(() => ({}))) as { reason?: string; detail?: string; message?: string; error?: string }
-      // Prefer the structured ineligibility copy (detail/message name the
-      // actual host / project_dir); only fall back to the generic error or
-      // status when the daemon gave us nothing to map.
-      if (body.reason || body.detail || body.message) {
-        throw new Error(dispatchIneligibleReason(body))
-      }
-      throw new Error(body.error || `requeue ${requeueRes.status}`)
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
+      throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
     }
   }
 
@@ -1686,11 +1659,9 @@ export class KanbanModal {
     }
   }
 
-  /** POST one lifecycle verb, throwing the daemon's error text on non-2xx.
-   *  Undefined body fields are dropped so the daemon sees only what's set. */
+  /** POST one lifecycle verb, throwing the daemon's error text on non-2xx. */
   private async postLifecycle(body: Record<string, unknown>): Promise<void> {
-    const clean = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined))
-    await this.postJson('/api/v1/lifecycle', clean, 'Lifecycle action failed')
+    await this.postJson('/api/v1/lifecycle', body, 'Lifecycle action failed')
   }
 
   private announce(msg: string): void {
@@ -2205,19 +2176,9 @@ export class KanbanModal {
 
   // ── URL + chrome helpers ───────────────────────────────────────────────────
 
-  /**
-   * POST one JSON body to a daemon write route, throwing the daemon's own
-   * message on a non-2xx. Every route here is owner-routed by the `origin`
-   * field in the body, so the board can drive a fiber whose owning host is
-   * not this one.
-   */
-  private async postJson(path: string, body: unknown, label: string): Promise<void> {
-    const res = await fetch(`${this.shuttleBase}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
+  /** {@link postDaemonJson} against this board's daemon. */
+  private postJson(path: string, body: unknown, label: string): Promise<void> {
+    return postDaemonJson(this.shuttleBase, path, body, label)
   }
 
   /** The drag/menu lifecycle write: the daemon maps the column `target` -> a
