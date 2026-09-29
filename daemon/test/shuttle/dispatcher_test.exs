@@ -1705,13 +1705,15 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_run_script scrubs the daemon's own release ERTS from the worker env" do
-    script = Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet")
+    root = "/opt/shuttle it's/bin/rel"
+
+    script =
+      Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet",
+        release_root: root
+      )
 
     # The vars `erl` itself exports.
     assert script =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
-    # The release's own directories filtered out of PATH.
-    assert script =~ ~s|grep -vF "$RELEASE_ROOT/erts"|
-    assert script =~ ~s|grep -vF "$RELEASE_ROOT/bin"|
     assert script =~ "unset RELEASE_ROOT"
 
     # It must run BEFORE the harness command, or the damage is already done.
@@ -1721,6 +1723,40 @@ defmodule Shuttle.DispatcherTest do
       end)
 
     assert scrub_at < command_at
+
+    # Run the scrub itself against a worker env that inherited the release's
+    # PATH and erl's exports but no RELEASE_ROOT — the shape a daemon-launched
+    # worker actually receives.
+    inherited =
+      Enum.join(
+        [
+          "#{root}/erts-16.4/bin",
+          "#{root}/bin",
+          "/usr/bin",
+          "#{root}.prev/bin",
+          "/bin"
+        ],
+        ":"
+      )
+
+    probe = Dispatcher.erts_scrub_block(root) <> ~s(printf '%s|%s' "$PATH" "${ROOTDIR-unset}")
+
+    {out, 0} =
+      System.cmd("/bin/bash", ["-c", probe],
+        env: [
+          {"PATH", inherited},
+          {"ROOTDIR", "#{root}"},
+          {"BINDIR", "#{root}/erts-16.4/bin"},
+          {"RELEASE_ROOT", nil}
+        ]
+      )
+
+    assert out == "/usr/bin:#{root}.prev/bin:/bin|unset"
+  end
+
+  test "erts_scrub_block leaves PATH alone with no release root" do
+    refute Dispatcher.erts_scrub_block(nil) =~ "PATH="
+    assert Dispatcher.erts_scrub_block(nil) =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
   end
 
   test "build_run_script with dismiss_resume_warning embeds backgrounded send-keys" do

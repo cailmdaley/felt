@@ -1870,7 +1870,9 @@ defmodule Shuttle.Dispatcher do
   # Public for tests. Builds the bash script that wraps the harness command
   # with start/exit banners. With `dismiss_resume_warning: true` and a
   # `session:` name, also schedules a backgrounded tmux send-keys to
-  # dismiss claude --resume's interactive warning page.
+  # dismiss claude --resume's interactive warning page. `release_root:`
+  # overrides the release root the environment scrub filters PATH against
+  # (see `erts_scrub_block/1`).
   def build_run_script(fiber_id, command, agent_id, opts \\ []) do
     dismiss_resume_warning = Keyword.get(opts, :dismiss_resume_warning, false)
     session = Keyword.get(opts, :session, "")
@@ -1938,7 +1940,7 @@ defmodule Shuttle.Dispatcher do
     set -e
     trap 'rm -f "$0"' EXIT
 
-    #{erts_scrub_block()}#{fiber_key_block}#{wait_for_client_block}
+    #{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{fiber_key_block}#{wait_for_client_block}
     echo ""
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"
 
@@ -1969,7 +1971,8 @@ defmodule Shuttle.Dispatcher do
   #
   # The daemon is a Mix release with a bundled ERTS, and `erl` exports ROOTDIR,
   # BINDIR, PROGNAME and EMU into the BEAM's environment — which every tmux
-  # worker then inherits. They point INTO `bin/rel`, whose ERTS ships no
+  # worker then inherits, along with a PATH that leads with the release's
+  # `erts-*/bin` and `bin`. Those point INTO the release, whose ERTS ships no
   # `mix`, no `start.boot` for anything but the daemon, and no full OTP lib
   # tree. A worker that runs `mix`, `elixir`, `erl`, `iex` or `escript` then
   # dies with `cannot get bootfile .../bin/rel/bin/start.boot`.
@@ -1978,25 +1981,46 @@ defmodule Shuttle.Dispatcher do
   # PATH, so the release's erts bin keeps shadowing the real toolchain, and
   # ROOTDIR survives untouched regardless of PATH order.
   #
-  # So the worker's script drops the four exported vars and filters the
-  # release's own directories out of PATH before anything else runs. A worker
-  # with no Erlang on PATH is correct — it sees whatever the host installs.
+  # So the script drops the exported vars and removes every PATH entry at or
+  # under the release root before anything else runs. The root is written into
+  # the script when the daemon builds it — the worker's own environment carries
+  # no reliable `RELEASE_ROOT`. A worker with no Erlang on PATH is correct: it
+  # sees whatever the host installs.
+  #
+  # `release_root` is nil when the daemon runs under Mix rather than as a
+  # release: `:code.root_dir/0` is then the host's own OTP install, the very
+  # toolchain workers should keep, so PATH is left alone.
   @doc false
   # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
   # must drop the release's Erlang first.
-  def erts_scrub_block do
-    ~S"""
+  def erts_scrub_block(release_root \\ release_root()) do
+    path_filter =
+      case release_root do
+        root when is_binary(root) and root != "" ->
+          """
+          PATH=$(printf '%s' "$PATH" | tr ':' '\\n' \\
+            | awk -v r=#{shell_single_quote(root)} '$0 != r && index($0, r "/") != 1' \\
+            | paste -sd: -)
+          export PATH
+          """
+
+        _ ->
+          ""
+      end
+
+    """
     unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME
-    if [ -n "${RELEASE_ROOT:-}" ]; then
-      PATH=$(printf '%s' "$PATH" | tr ':' '\n' \
-        | grep -vF "$RELEASE_ROOT/erts" | grep -vF "$RELEASE_ROOT/bin" \
-        | paste -sd: -)
-      export PATH
-    fi
-    unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \
-          RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \
+    #{path_filter}unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \\
+          RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \\
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
     """
+  end
+
+  @doc false
+  # The root of the release this daemon runs from, or nil under Mix (see
+  # `erts_scrub_block/1`). A release carries no Mix, so its absence is the tell.
+  def release_root do
+    if Code.ensure_loaded?(Mix), do: nil, else: to_string(:code.root_dir())
   end
 
   defp run_felt(runner, args, opts \\ []) do
