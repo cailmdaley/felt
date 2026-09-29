@@ -104,6 +104,8 @@ felt shuttle message <address> "Results attached" --attach results.csv
 
 A plain message starts a turn or steers one in progress; `--context-only` arrives at the next natural pause without asking for a turn. `--file <path>` sends multiline text, and `--from` labels you when detection fails. felt prints `sending <message-id> to <resolved address>` to stderr before delivery. The receiver needs a live, supported integration; shuttle won't bypass an unavailable one or a pending approval. Receipts report observed delivery stages, not completed work: for Claude, `submitted` means native admission without a model reply, and `accepted` means a correlated assistant reply. If a call is interrupted, or you want to know whether a `queued`, `submitted`, or `unknown` receipt has advanced, retry the identical request with `--message-id <printed id>`: felt returns the stored receipt, rechecking a Claude transcript for later evidence, and never delivers twice. A fresh ID could repeat the work. Reach runs one way — this host sees only the hosts in its own fleet file (`felt shuttle remotes list`), so the hub that dispatched you may be out of sight. Where you have no route, use the store: leave a note in the fiber and `felt sync --push`.
 
+From any host in the fleet, `felt shuttle reopen <fiber>` starts a worker on the fiber's own host.
+
 To put a finished file in front of the human, use your harness's own file tool when it has one (Claude Code's `SendUserFile`); otherwise `felt shuttle send-file <path>...` puts it on the Board tab. Shuttle detects your session automatically; if it can't, pass `--session <native-id>`, and never invent one.
 
 ## Where to go next
