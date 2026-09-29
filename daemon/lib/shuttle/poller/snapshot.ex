@@ -74,7 +74,7 @@ defmodule Shuttle.Poller.Snapshot do
 
     blocked = dispatch_blocked ++ loop_blocked
 
-    # Autonomous dispatches the boot quarantine (or an S2 contract skew) is
+    # Autonomous dispatches the boot quarantine (or a contract skew) is
     # withholding — all of them, resumes included. First-class rows, not
     # `blocked`: nothing failed — the daemon is deliberately withholding
     # autonomous dispatch authority until a human releases it (quarantine) or
@@ -113,7 +113,7 @@ defmodule Shuttle.Poller.Snapshot do
       eligible: eligible,
       blocked: blocked,
       boot_quarantine: state.boot_quarantine,
-      # S2: the boot-time `felt shuttle contract` handshake result — always
+      # The boot-time `felt shuttle contract` handshake result — always
       # present (not just on skew) so /api/v1/state and /api/v1/version can
       # both show "what we expect" and "what we saw" even when they match.
       contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),

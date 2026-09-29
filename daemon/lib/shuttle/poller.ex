@@ -56,7 +56,7 @@ defmodule Shuttle.Poller do
   # start_link opt override it (config/test.exs sets false so dispatch tests
   # exercise the tick directly; quarantine tests opt back in per-poller).
   @default_boot_quarantine true
-  # S4: the persistent_term namespace `own_host_id/1` freezes each Poller
+  # The persistent_term namespace `own_host_id/1` freezes each Poller
   # instance's identity under (keyed further by that instance's self_ref —
   # see init/1). A plain atom tag, not `__MODULE__`, so it reads unambiguously
   # in `:persistent_term.info/0` dumps.
@@ -281,7 +281,7 @@ defmodule Shuttle.Poller do
       # so it holds while this is false: a reorder that ran the verdict before
       # adoption, or a boot whose tmux scan came back unknown, fails closed.
       adopted?: false,
-      # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1` (S2): the
+      # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1`: the
       # daemon shells `felt shuttle contract` and compares it to
       # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
       # unparseable stdout, or a nonzero exit — an old CLI where `contract` is
@@ -658,7 +658,7 @@ defmodule Shuttle.Poller do
 
     own_host_id = to_string(own_host_id)
 
-    # S4: freeze this instance's own_host_id into a persistent_term keyed by
+    # Freeze this instance's own_host_id into a persistent_term keyed by
     # its self_ref, so `own_host_id/1`'s public accessor never re-touches
     # SHUTTLE_HOST/~/.shuttle/host per call — see that function's doc. Keyed
     # per-instance (not one global slot) so distinct named Pollers in the same
@@ -678,20 +678,7 @@ defmodule Shuttle.Poller do
       own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
       runner: runner,
-      stall_timeout_ms:
-        Keyword.get(
-          opts,
-          :stall_timeout_ms,
-          Keyword.get(
-            opts,
-            :poll_stall_timeout_ms,
-            Application.get_env(
-              :shuttle,
-              :poll_stall_timeout_ms,
-              Application.get_env(:shuttle, :stall_timeout_ms, @default_poll_stall_timeout_ms)
-            )
-          )
-        ),
+      stall_timeout_ms: Keyword.get(opts, :stall_timeout_ms, @default_poll_stall_timeout_ms),
       # Restart is not dispatch authority: quarantine every autonomous
       # dispatch until a human releases the hold (see the State field
       # comment). Opt wins over app config so tests can exercise the
@@ -702,7 +689,7 @@ defmodule Shuttle.Poller do
           :boot_quarantine,
           Application.get_env(:shuttle, :boot_quarantine, @default_boot_quarantine)
         ),
-      # S2 boot-time version handshake: probe ONCE here, before the first
+      # Boot-time version handshake: probe ONCE here, before the first
       # tick, so a skewed CLI is caught (and fresh dispatch held) before any
       # autonomous work is even considered. Runner-bounded, so a slow/wedged
       # `felt` degrades to a logged skew rather than hanging boot.
@@ -1573,7 +1560,7 @@ defmodule Shuttle.Poller do
     refreshed_at =
       if listings_ok?, do: DateTime.utc_now(), else: state.document_cache_refreshed_at
 
-    state = reconcile(%{state | felt_stores: felt_stores}, candidates)
+    state = reconcile(%{state | felt_stores: felt_stores})
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
 
@@ -1628,7 +1615,7 @@ defmodule Shuttle.Poller do
           # launches are parked. A just-restarted daemon grants NO fresh
           # autonomous dispatch until a human releases the hold, but never
           # strands work that was demonstrably alive moments ago. A CLI/daemon
-          # contract skew (S2) rides the SAME gate: every shelled write is
+          # contract skew rides the SAME gate: every shelled write is
           # suspect, so fresh launches are held the same way, but read-only
           # polling and already-observed resumes stay alive. Unlike boot
           # quarantine, skew has no release endpoint — a restart (after the
@@ -2488,7 +2475,7 @@ defmodule Shuttle.Poller do
   login-node hostname while its fibers were stamped with its friendly ssh
   alias, and the owner-only feed silently dropped every one of them.
 
-  S4: reads the value `init/1` froze into a `:persistent_term` at boot
+  Reads the value `init/1` froze into a `:persistent_term` at boot
   (keyed by `server`'s registered name/pid), NOT a fresh env/file/hostname
   lookup — post-launch env/file drift (an operator editing `~/.shuttle/host`
   while the daemon runs, a respawn exporting a different `SHUTTLE_HOST`)
@@ -2857,7 +2844,7 @@ defmodule Shuttle.Poller do
            prompt_context: prompt_context,
            felt_store: felt_store,
            force: Keyword.get(opts, :force, false),
-           # STORE 3: the user's directive + continuation mode ride the dispatch
+           # The user's directive + continuation mode ride the dispatch
            # call (no persisted review-comment). The dispatcher inlines the
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
@@ -3181,11 +3168,15 @@ defmodule Shuttle.Poller do
 
   # ── Reconciliation ──
 
-  defp reconcile(%State{} = state, candidates) do
+  # Orphan adoption maps sessions through a FRESH store walk, not this poll's
+  # candidates: the candidates were read before `reconcile_fiber_closures/1`'s
+  # fresh reads, so a worker that closed its fiber mid-poll would still look
+  # active in them, be re-adopted, and be killed during its own final act.
+  defp reconcile(%State{} = state) do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
-    SessionReconciliation.reconcile_orphaned_sessions(state, candidates)
+    SessionReconciliation.reconcile_orphaned_sessions(state)
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do
@@ -3856,7 +3847,7 @@ defmodule Shuttle.Poller do
             {:standing_run, StandingRole.ad_hoc_run_id(now), :ad_hoc}
           else
             # A resumed run keeps the awaiting run's id; only a fresh scheduled
-            # run mints a new id. The run id flows into the STORE-1 dispatch
+            # run mints a new id. The run id flows into the dispatch
             # marker. See StandingRole.dispatch_run_id.
             {:standing_run, StandingRole.dispatch_run_id(role, now)}
           end
