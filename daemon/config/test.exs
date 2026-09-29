@@ -27,13 +27,11 @@ config :shuttle,
   tailnet_dial_test_cacerts_enabled: true
 
 # Test daemon identity. Resolved at Poller boot by
-# `Shuttle.Poller.resolve_own_host_id/0`, which owns the precedence order. We
-# don't pin `host:` at the Application config layer: the previous pin
-# (host: "local") leaked into daemon artifacts built with MIX_ENV=test and
-# stamped "local" onto production daemons, after which every fiber without an
-# explicit host: silently failed the dispatch filter. Setting SHUTTLE_HOST for
-# the test run keeps tests stable across machines without writing the value
-# into the release artifact. Tests that exercise host-pin matching pass explicit
+# `Shuttle.Poller.resolve_own_host_id/0`, which owns the precedence order.
+# Nothing is pinned at the Application config layer, where a value would ride
+# into any artifact built with MIX_ENV=test; setting SHUTTLE_HOST for the test
+# run keeps tests stable across machines without writing the value into the
+# release artifact. Tests that exercise host-pin matching pass explicit
 # `own_host_id:` opts to `Poller.start_link`.
 System.put_env("SHUTTLE_HOST", "test-host")
 

@@ -86,13 +86,10 @@ defmodule Shuttle.Application do
   require Logger
 
   # Optional children, in start order. Each is gated by an app-config flag that
-  # defaults to on; config/test.exs turns most of them off so the suite drives
-  # them explicitly. Note that :start_waiting_tracker,
-  # :start_sent_files_follower, :start_activity_follower and
-  # :start_remote_temporal_registry have no prod config entry at all — they
-  # ride the inline `true` default. The endpoint starts before these children
-  # so it binds before slow store, event-stream, follower seed, or bridge
-  # initialization.
+  # defaults to on here and is set nowhere else but config/test.exs, which turns
+  # them off so the suite drives them explicitly. The endpoint starts before
+  # these children so it binds before slow store, event-stream, follower seed,
+  # or bridge initialization.
   @optional_children [
     {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},

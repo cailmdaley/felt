@@ -8,17 +8,17 @@ defmodule Shuttle.Poller do
 
   ## Felt stores
 
-  The Poller manages one or more felt stores on the same machine. Configure via:
+  The Poller manages one or more felt stores on the same machine, as
+  `Shuttle.FeltStores` resolves them and re-read every poll cycle:
 
-      config :shuttle, felt_stores: ["~/some-store", "~/other-project"]
-      # or env var (comma-separated, takes precedence over the persisted file):
+      # env var (comma-separated, takes precedence over the persisted file):
       FELT_STORES=~/some-store,~/other-project
       # or persisted registration written through the HTTP API:
       ~/.config/felt/stores.json
 
-  The registry is the source of truth: when no env or config stores are set,
-  the configured list comes straight from the registry (empty if none
-  registered).
+  The registry is the source of truth: with `FELT_STORES` unset, the list
+  comes straight from the registry (empty if none registered). A
+  `:felt_stores` start option pins the list instead (tests).
 
   Each fiber resolves to exactly one store: the one whose `.felt/` physically
   roots the fiber file. The resolution is cached in `State.fiber_host_cache`
