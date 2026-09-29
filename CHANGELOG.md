@@ -6,8 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Removed
+
+- `felt shuttle accept --keep-outcome`. Accept and resume always keep the outcome: the last run's digest stays the card's headline until the next run writes its own.
+  The `keep_outcome` parameter of `POST /api/v1/lifecycle` is gone with it.
+- `SHUTTLE_LIFECYCLE_OFFLINE`. Pass `--local` to `felt shuttle accept` or `resume` to write the document without the daemon.
+- `felt shuttle migrate-runtime`. felt reads continuation keys only under `shuttle.runtime`; a flat `shuttle.session_uuid` no longer resolves a message target.
+- The `mode:` alias for `kind:` in a `shuttle:` block, in felt and the daemon alike.
+- `POST /api/v1/inject`.
+- `bin/shuttle snapshot` and `bin/shuttle dispatch`. Use `felt shuttle snapshot` and `felt shuttle dispatch [--ad-hoc]`; `bin/shuttle` keeps `start`, `status`, `release`, `reset`, `version` and the keep-alive verbs.
+
 ### Changed
 
+- felt is the one writer of `accept` and `resume`. From the CLI they go through the owning daemon, which runs `felt shuttle <verb> --local` between poll cycles; `--local`, or an unreachable daemon, writes the document directly.
+  Accept takes an untempered role that is closed or still in flight, and re-arming a closed standing role checks its `project_dir` and agent as any arming does.
+  Resume on a standing role awaiting review concludes the run (`shuttle.runtime.handed_off_at`) on every path, so the next run comes at the schedule's next tick.
+  `POST /api/v1/lifecycle` relays felt's refusal of either as 422 `shuttle exited <status>: <message>`.
+- The daemon/CLI contract is level 4. Upgrade felt with the daemon: a daemon finding an older felt holds at boot and reports the skew.
+- felt alone resolves the host id. The daemon takes `SHUTTLE_HOST`, now trimmed, or asks `felt shuttle host --json` once at boot, and does not boot when felt cannot answer.
+  `felt shuttle host seed` writes the id to `~/.shuttle/host` when it holds none; `shuttle install-agent` runs it.
+- `$SHUTTLE_DATA_DIR` is trimmed and a leading `~` expanded for every file shuttle keeps: the event stream, the ledgers, the message mailboxes, the default socket and daemon state.
+- One reader follows `events.jsonl` for activity, waiting state and the sent-files trail. A sent file stays on the trail through one rotation of the stream, and waiting state carries across a rotation.
+- The board reads its temporal feeds from the `/composite` routes only; a peer's missing feed reads as empty for that window.
 - `felt check --json` exits non-zero when it reports an error-level issue, as plain `felt check` does.
   Scripts that read the JSON and judge it themselves should expect exit status 1 on a store with errors.
 - Arming requires a `project_dir` on every verb that arms a fiber (`felt shuttle resume`, `reopen`, `accept`, `felt edit -s active`), not only on `install` and `repeat`.
@@ -22,6 +42,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Workers launched by a daemon running from a release no longer inherit its Erlang runtime: the run script drops the release from `PATH` and unsets `ROOTDIR`, `BINDIR`, `PROGNAME` and `EMU`, so `mix`, `erl` and `elixir` in a worker find the host's own toolchain instead of dying with `cannot get bootfile`.
+  The Makefile's mix targets scrub the same variables, so `make daemon` and `make mix-test` work from such a shell.
 - An id written out in full resolves to that fiber before any prefix completion.
   From a project view, `felt edit other/deep` no longer edits a local `other/deepx` when `other/deep` exists in the enclosing store, and `felt rm` no longer calls the exact id a guess.
 - A query spelling a fiber's own file as an id (`science/cmbx/cmbx` for `.felt/science/cmbx/cmbx.md`) is a stale path the slug rescue answers, not a stray file to migrate.
