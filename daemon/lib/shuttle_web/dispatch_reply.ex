@@ -66,11 +66,11 @@ defmodule ShuttleWeb.DispatchReply do
      )}
   end
 
-  def render(fiber_id, {:error, reopen}) when reopen in [:reopen_unavailable, :reopen_failed] do
+  def render(fiber_id, {:error, :reopen_failed}) do
     {422,
      %{
        dispatched: false,
-       reason: to_string(reopen),
+       reason: "reopen_failed",
        fiber_id: fiber_id,
        message:
          "Could not reopen the closed fiber — no worker was spawned. " <>
