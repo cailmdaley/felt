@@ -190,6 +190,47 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "--felt-store\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n"
   end
 
+  test "close and reopen delegate through the existing lifecycle endpoint" do
+    close_store =
+      fixture_store!("shuttle-lifecycle-close-route", "tests/close-route", "Close route")
+
+    close_args = install_fake_felt!()
+
+    close_conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "close", "fiber" => "tests/close-route", "tempered" => true})
+      )
+
+    assert close_conn.status == 200
+
+    assert File.read!(close_args) ==
+             "--felt-store\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n"
+
+    reopen_store =
+      fixture_store!("shuttle-lifecycle-reopen-route", "tests/reopen-route", "Reopen route")
+
+    reopen_args = install_fake_felt!()
+
+    reopen_conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "reopen",
+          "fiber" => "tests/reopen-route",
+          "as_draft" => true,
+          "project_dir" => "/tmp/project"
+        })
+      )
+
+    assert reopen_conn.status == 200
+
+    assert File.read!(reopen_args) ==
+             "--felt-store\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n"
+  end
+
   # set-interactive is retired: the controller no longer allows the action, so a
   # stale client gets a clean rejection rather than a felt shuttle invocation.
   test "set-interactive is rejected as an unknown lifecycle action" do
@@ -301,6 +342,29 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
     assert File.read!(args_file) ==
              "--felt-store\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n"
+  end
+
+  test "set-agent can update project_dir without changing agent axes" do
+    store =
+      fixture_store!("shuttle-lifecycle-set-project-dir", "tests/project-dir", "Project dir")
+
+    args_file = install_fake_felt!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "set-agent",
+          "fiber" => "tests/project-dir",
+          "project_dir" => "/tmp/project"
+        })
+      )
+
+    assert conn.status == 200
+
+    assert File.read!(args_file) ==
+             "--felt-store\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n"
   end
 
   test "set-model shells felt shuttle in the resolved owning store" do

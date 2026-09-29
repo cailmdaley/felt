@@ -8,7 +8,7 @@ defmodule ShuttleWeb.LifecycleController do
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
   branch delegates to felt's `shuttle` CLI verbs, so the validated offline
   frontmatter writer remains the single implementation of
-  install/pause/resume/repeat/pin/accept/set-model/set-outcome/uninstall.
+  install/pause/resume/repeat/pin/accept/close/reopen/set-model/set-agent/set-outcome/uninstall.
 
   `install`/`repeat`/`pin` are CREATE verbs — they refuse a fiber that already
   carries a shuttle block. Changing the SHAPE of an existing block (its kind,
@@ -25,7 +25,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause resume repeat pin reshape accept set-model set-agent set-outcome uninstall)
+  @allowed ~w(install pause resume repeat pin reshape accept close reopen set-model set-agent set-outcome uninstall)
 
   @kinds ~w(oneshot standing pinned)
 
@@ -71,7 +71,7 @@ defmodule ShuttleWeb.LifecycleController do
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install pin repeat reshape pause set-model set-agent set-outcome uninstall) do
+       when action in ~w(install pin repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
@@ -106,6 +106,24 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp args_for("pause", %{"fiber" => fiber} = params) do
     {:ok, ["pause", fiber] |> add_bool_flag("--no-kill", params["no_kill"])}
+  end
+
+  defp args_for("close", %{"fiber" => fiber} = params) do
+    args = ["close", fiber]
+
+    args =
+      case params do
+        %{"tempered" => value} when is_boolean(value) -> args ++ ["--tempered=#{value}"]
+        _ -> args
+      end
+
+    {:ok, args}
+  end
+
+  defp args_for("reopen", %{"fiber" => fiber} = params) do
+    args = ["reopen", fiber]
+    args = add_bool_flag(args, "--as-draft", params["as_draft"])
+    {:ok, add_string_flag(args, "--project-dir", params["project_dir"])}
   end
 
   defp args_for("pin", %{"fiber" => fiber} = params) do
@@ -175,7 +193,7 @@ defmodule ShuttleWeb.LifecycleController do
         _ -> args
       end
 
-    {:ok, args}
+    {:ok, add_string_flag(args, "--project-dir", params["project_dir"])}
   end
 
   # The outcome string round-trips as a single argv element, so multi-line

@@ -24,10 +24,12 @@ var shuttleCmd = &cobra.Command{
 	Short: "Agent dispatch — the felt tree's active mode",
 	Long: `A fiber with a shuttle: block is work the daemon dispatches to an agent;
 without one it is a note. These verbs install, schedule, pause, and hand off
-that block. Write verbs validate before touching disk and work offline.
-snapshot, dispatch, sessions, transcript, message, validate-identity, and
-felt shuttle status --all talk to the local daemon (127.0.0.1:4000 or a unix
-socket; see felt shuttle host).
+that block. Local write verbs validate before touching disk and work offline.
+When shuttle.host names a configured remote, lifecycle writes, reopen, and
+dispatch route through the local daemon to the owner instead of writing this
+host's Git mirror. Snapshot, dispatch, sessions, transcript, message,
+validate-identity, and felt shuttle status --all talk to the local daemon
+(127.0.0.1:4000 or a unix socket; see felt shuttle host).
 
 Common paths:
   felt shuttle install <fiber> --project-dir "$PWD"   dispatch a fiber once

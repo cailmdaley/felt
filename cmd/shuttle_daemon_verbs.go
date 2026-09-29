@@ -35,14 +35,41 @@ var shuttleSnapshotCmd = &cobra.Command{
 
 var shuttleDispatchCmd = &cobra.Command{
 	Use:   "dispatch <fiber>",
-	Short: "Ask the local daemon to dispatch a fiber now",
-	Args:  cobra.ExactArgs(1),
+	Short: "Ask the owning daemon to dispatch a fiber now",
+	Long: `Routes a remote-owned fiber through this host's daemon to the owner.
+Use --message or --message-file to add a launch directive (the From User prompt block).`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		adHoc, _ := cmd.Flags().GetBool("ad-hoc")
-		payload, _ := json.Marshal(map[string]any{
-			"fiber_id": args[0],
-			"ad_hoc":   adHoc,
-		})
+		message, messageSet, err := readLaunchMessage(cmd, dispatchMessage, dispatchMessageFile)
+		if err != nil {
+			return err
+		}
+		fields := map[string]any{"ad_hoc": adHoc}
+		if messageSet {
+			fields["user_message"] = message
+		}
+		if fiber, _, _, resolveErr := shuttleResolveFiberRef(args[0], true); resolveErr == nil {
+			if block, ok, blockErr := fiber.ShuttleBlock(); blockErr != nil {
+				return blockErr
+			} else if ok && block != nil {
+				owner, ownerErr := routeOwnerForCommand(cmd, args, block.Host)
+				if ownerErr != nil {
+					return ownerErr
+				}
+				if routed, routeErr := forwardDispatch(cmd, args, owner, fiber, fields); routed || routeErr != nil {
+					return routeErr
+				}
+			}
+		}
+		request := map[string]any{"fiber_id": args[0], "ad_hoc": adHoc}
+		if messageSet {
+			request["user_message"] = message
+		}
+		payload, err := json.Marshal(request)
+		if err != nil {
+			return fmt.Errorf("encoding dispatch request: %w", err)
+		}
 		endpoint, err := daemonEndpoint("/api/v1/dispatch")
 		if err != nil {
 			return err
@@ -65,8 +92,15 @@ func printDaemonBody(body []byte) {
 	}
 }
 
+var (
+	dispatchMessage     string
+	dispatchMessageFile string
+)
+
 func init() {
 	shuttleDispatchCmd.Flags().Bool("ad-hoc", false, "For standing roles, dispatch an ad-hoc run without consuming the scheduled occurrence")
+	shuttleDispatchCmd.Flags().StringVar(&dispatchMessage, "message", "", "Launch directive for the worker (the From User prompt block)")
+	shuttleDispatchCmd.Flags().StringVar(&dispatchMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
 	shuttleCmd.AddCommand(shuttleSnapshotCmd)
 	shuttleCmd.AddCommand(shuttleDispatchCmd)
 }

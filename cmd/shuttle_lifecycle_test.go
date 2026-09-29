@@ -880,6 +880,8 @@ func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 
 func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 	withOwnHost(t, "macbook")
+	writeRemotes(t, `{"version":1,"remotes":[]}`)
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
@@ -890,8 +892,8 @@ func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 	if err == nil {
 		t.Fatal("close on a cineca-owned fiber from macbook must be refused")
 	}
-	if _, ok := err.(ownerMismatchError); !ok {
-		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "not an enabled remote") || !strings.Contains(err.Error(), "felt shuttle close remote") {
+		t.Fatalf("expected an actionable routing refusal, got %T: %v", err, err)
 	}
 	after, _ := os.ReadFile(storage.Path("remote"))
 	if string(before) != string(after) {
