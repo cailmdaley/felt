@@ -348,6 +348,13 @@ export function fileBytesUrl(base: string, fullPath: string, originId: string): 
   return withOrigin(`${base}${FILE_ROUTE}?path=${encodePathParam(abs)}`, originId)
 }
 
+/** The daemon's document route for one fiber id. Each id SEGMENT is encoded
+ *  on its own, so a slug id (`cycles/before`) keeps its separators and
+ *  reconstructs as the same id on the daemon's wildcard route. */
+export function fiberDocUrl(shuttleBase: string, id: string): string {
+  return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
+}
+
 /**
  * Build the owner-routed metadata URL used to check an artifact without
  * downloading its bytes. The daemon returns `{exists, modified_at, size}`;

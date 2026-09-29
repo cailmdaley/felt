@@ -87,7 +87,7 @@ function lay(
 describe('normalizeShelfFiles', () => {
   it('reads a composite envelope and keeps the shelf fields', () => {
     const out = normalizeShelfFiles({
-      items: [
+      files: [
         {
           fullPath: '/w/report.html',
           basename: 'report.html',
@@ -112,10 +112,10 @@ describe('normalizeShelfFiles', () => {
     ])
   })
 
-  it('accepts a bare array, an ISO timestamp, and a `fiber`/`origin` dialect', () => {
-    const out = normalizeShelfFiles([
-      { fullPath: '/w/a.svg', timestamp: '2023-11-14T22:13:20.000Z', fiber: 'shear', origin: 'laptop' },
-    ])
+  it('reads an ISO timestamp and derives a missing basename', () => {
+    const out = normalizeShelfFiles({
+      files: [{ fullPath: '/w/a.svg', timestamp: '2023-11-14T22:13:20.000Z', uid: 'shear', host: 'laptop' }],
+    })
     expect(out[0].timestamp).toBe(Date.parse('2023-11-14T22:13:20.000Z'))
     expect(out[0].uid).toBe('shear')
     expect(out[0].host).toBe('laptop')
@@ -123,8 +123,13 @@ describe('normalizeShelfFiles', () => {
   })
 
   it('drops pathless records rather than drawing a card that opens nothing', () => {
-    expect(normalizeShelfFiles([{ basename: 'ghost.html' }, null, 7])).toEqual([])
+    expect(normalizeShelfFiles({ files: [{ basename: 'ghost.html' }, null, 7] })).toEqual([])
     expect(normalizeShelfFiles('nonsense')).toEqual([])
+  })
+
+  it('reads only the composite envelope', () => {
+    expect(normalizeShelfFiles([{ fullPath: '/w/bare.html', timestamp: 1 }])).toEqual([])
+    expect(normalizeShelfFiles({ items: [{ fullPath: '/w/other.html', timestamp: 1 }] })).toEqual([])
   })
 
   it('reads the origins block, and shrugs at a body that has none', () => {

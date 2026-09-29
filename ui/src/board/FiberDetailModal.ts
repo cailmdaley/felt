@@ -2,6 +2,7 @@ import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktop
 import {
   basename,
   cacheBustUrl,
+  fiberDocUrl,
   fileBytesUrl,
   fileInfoUrl,
   humanizeIdleAge,
@@ -1261,7 +1262,7 @@ export class FiberDetailModal {
       const ctrl = new AbortController()
       timer = window.setTimeout(() => ctrl.abort(), 25000)
       const res = await fetch(
-        `${fiberUrl(this.shuttleBase, card.id)}?body=true&origin=${origin}`,
+        `${fiberDocUrl(this.shuttleBase, card.id)}?body=true&origin=${origin}`,
         { signal: ctrl.signal, cache: 'no-store' },
       )
       if (res.ok) {
@@ -1699,7 +1700,7 @@ export class FiberDetailModal {
     try {
       const origin = encodeURIComponent(card.originId ?? '')
       const res = await fetch(
-        `${fiberUrl(this.shuttleBase, card.id)}?origin=${origin}`,
+        `${fiberDocUrl(this.shuttleBase, card.id)}?origin=${origin}`,
         { cache: 'no-store' },
       )
       if (!res.ok) return undefined
@@ -1939,7 +1940,7 @@ export class FiberDetailModal {
   ): Promise<{ label: string; close: () => void } | null> {
     let card: KanbanCard | null = null
     try {
-      const res = await fetch(`${fiberUrl(this.shuttleBase, fiberId)}?body=true`)
+      const res = await fetch(`${fiberDocUrl(this.shuttleBase, fiberId)}?body=true`)
       if (res.ok) {
         const entry = parseCompositeFeed(await res.json()).entries[0]
         if (entry) card = cardFromCompositeEntry(entry)
@@ -4007,12 +4008,6 @@ function ledeHtml(outcome: string): string {
   return outcome
     ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
     : ''
-}
-
-/** The daemon's document route for one fiber id, each id segment encoded on
- *  its own so a slug id keeps its separators. */
-function fiberUrl(shuttleBase: string, id: string): string {
-  return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
 }
 
 interface FileInfo {

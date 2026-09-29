@@ -14,16 +14,13 @@ import {
 } from './TemporalData.js'
 
 /**
- * The narration fetcher's WIRE FORM. The views' side of the contract is
- * unchanged (inclusive civil days in, commits out) — what these cover is the
- * transport underneath it, which moved from the daemon's civil-day params to
- * timezone-free instants so the daemon's zone can no longer shift a browser's
- * window. The suite runs twice, under America/Los_Angeles and Europe/Paris, so
- * the local-midnight resolution is exercised in two zones on every run.
+ * The temporal fetchers' WIRE FORM: every route speaks timezone-free instants,
+ * so the daemon's zone cannot shift a browser's window. The suite runs twice,
+ * under America/Los_Angeles and Europe/Paris, so the local-midnight resolution
+ * is exercised in two zones on every run.
  */
 
-/** Reply per URL substring: the composite path and the plain path answer
- *  differently, which is the whole subject of the fallback tests. */
+/** Reply per URL substring; anything unmatched answers 404. */
 function routedFetch(routes: Array<[match: string, respond: () => Response]>): FetchCall[] {
   const calls: FetchCall[] = []
   vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
@@ -191,10 +188,9 @@ describe('sessions fetcher', () => {
 
 // ── Cross-host composites ────────────────────────────────────────────────────
 //
-// Every feed is asked for cross-host first and degrades to the single-host
-// route on a 404. What these pin is the pair of promises the views rest on: an
-// item always knows its host, and an origins block is always present — so no
-// view has to know which route answered.
+// Every feed is read from its cross-host composite. What these pin is the pair
+// of promises the views rest on: an item always knows its host, and an origins
+// block is always present.
 
 describe('composite routing', () => {
   it('asks the composite first and reads its hosts and origins', async () => {
@@ -238,26 +234,34 @@ describe('composite routing', () => {
     expect(staleOrigins(out.origins ?? {})).toEqual(['bob'])
   })
 
-  it('falls back to the plain route on a composite 404, then stops probing', async () => {
-    // An older daemon has no composite. It must keep working, and it must not
-    // pay a wasted round trip on every window for the rest of the session.
+  it('reads a composite 404 as empty and never asks the single-host route', async () => {
     const calls = routedFetch([
       ['/sessions/composite', () => new Response('', { status: 404 })],
-      ['/sessions', ok({ host: 'ada', records: [
+      ['/sessions?', ok({ host: 'ada', records: [
         { at: 1, fiber: 'work/a', session: 's1', kind: 'dispatch', tmux: 't1' },
       ] })],
     ])
     const fetchers = createTemporalFetchers('')
 
-    const first = await fetchers.sessions(0)
-    const second = await fetchers.sessions(1)
+    await expect(fetchers.sessions(0)).resolves.toEqual({ host: '', records: [], origins: {} })
+    await fetchers.sessions(1)
 
-    expect(calls.map((c) => c.url.includes('composite'))).toEqual([true, false, false])
-    // The single-host route carries no host per record; the response's own host
-    // fills in, so the join key is scoped either way.
-    expect(first.records[0].host).toBe('ada')
-    expect(first.origins).toEqual({ ada: { kind: 'local', stale: false } })
-    expect(second.records).toHaveLength(1)
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/v1/sessions/composite?since_ms=0',
+      '/api/v1/sessions/composite?since_ms=1',
+    ])
+  })
+
+  it('fills an unstamped record from the serving host', async () => {
+    routedFetch([
+      ['/sessions/composite', ok({ host: 'ada', records: [
+        { at: 1, fiber: 'work/a', session: 's1', kind: 'dispatch', tmux: 't1' },
+      ] })],
+    ])
+    const out = await createTemporalFetchers('').sessions(0)
+
+    expect(out.records[0].host).toBe('ada')
+    expect(out.origins).toEqual({ ada: { kind: 'local', stale: false } })
   })
 
   it('keeps probing the composite after a 5xx — that is not an old daemon', async () => {
@@ -278,17 +282,17 @@ describe('composite routing', () => {
   it('degrades one feed without degrading the others', async () => {
     const calls = routedFetch([
       ['/activity/composite', () => new Response('', { status: 404 })],
-      ['/activity', ok({ host: 'ada', from_ms: 0, to_ms: 1, buckets: [] })],
       ['/sessions/composite', ok({ host: 'ada', records: [], origins: {} })],
     ])
     const fetchers = createTemporalFetchers('')
 
-    await fetchers.activity(0, 1)
-    await fetchers.sessions(0)
+    const activity = await fetchers.activity(0, 1)
+    const sessions = await fetchers.sessions(0)
 
+    expect(activity.buckets).toEqual([])
+    expect(sessions.host).toBe('ada')
     expect(calls.map((c) => c.url)).toEqual([
       '/api/v1/activity/composite?from_ms=0&to_ms=1',
-      '/api/v1/activity?from_ms=0&to_ms=1',
       '/api/v1/sessions/composite?since_ms=0',
     ])
   })
@@ -354,17 +358,6 @@ describe('the commits wire form', () => {
     expect(calls[0].params.get('since_ms')).toBe('1000')
     expect(calls[0].params.get('until_ms')).toBe('9000')
     expect(result.records).toEqual([])
-  })
-
-  it('falls back to the plain route ONCE when the composite is absent', async () => {
-    const calls = routedFetch([
-      ['/commits?', ok({ host: 'ada', records: [], origins: {} })],
-    ])
-    const fetchers = createTemporalFetchers('')
-    await fetchers.commits(1, 2)
-    await fetchers.commits(3, 4)
-    // Probe, fallback, then the second window goes straight to the plain route.
-    expect(calls.map((c) => c.url.includes('composite'))).toEqual([true, false, false])
   })
 
   it('degrades to an empty ledger rather than rejecting', async () => {

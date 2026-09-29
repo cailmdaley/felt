@@ -12,15 +12,12 @@
  * the only sources the views join on — a commit's subject line is a convention
  * a human types, and a page built on it attributes work by guessing.
  *
- * Each is asked for CROSS-HOST FIRST — `/api/v1/<feed>/composite`, which serves
- * this daemon's live read concatenated with every remote's cached read, each
- * item stamped with the host it came from, plus an `origins` block reporting
+ * Each is read CROSS-HOST — `/api/v1/<feed>/composite`, which serves this
+ * daemon's live read concatenated with every remote's cached read, each item
+ * stamped with the host it came from, plus an `origins` block reporting
  * per-origin freshness (the fibers composite's block verbatim; see
- * {@link TemporalOrigin}). A daemon older than the composites answers 404 on
- * that path, so the feed falls back to the plain single-host route ONCE and
- * remembers — the offline harness and an old daemon keep working, and neither
- * pays a wasted probe per window. Either way the result carries hosts and an
- * origins block, so a view never branches on which route answered.
+ * {@link TemporalOrigin}). The result always carries hosts and an origins
+ * block, so a view never has to ask where an item came from.
  *
  * EVERY ROUTE TAKES INSTANTS, and that is the point. A civil day resolved in
  * the DAEMON's zone is a different window from the same day resolved in the
@@ -29,9 +26,9 @@
  * here, in the browser's zone, and the routes only ever speak `from_ms`/
  * `to_ms`.
  *
- * A daemon older than these routes answers 404. That must not break the board,
- * so every failure path — 404, 5xx, network error, malformed body — resolves to
- * an EMPTY result rather than rejecting. A view therefore never needs a
+ * A feed that cannot be read must not break the board, so every failure path —
+ * 404, 5xx, network error, malformed body — resolves to an EMPTY result rather
+ * than rejecting. A view therefore never needs a
  * try/catch; it renders "nothing here" for a daemon that can't answer.
  *
  * Nothing is cached here. HOW OFTEN a feed is read is the caller's decision —
@@ -57,10 +54,10 @@ export interface ActivityBucket {
   k: 'attention' | 'notify' | 'agent' | 'reply'
   n: number
   /** Which daemon's events file produced it. The composite stamps every
-   *  bucket; the single-host route does not, and the fetcher fills it from the
-   *  response's own `host` so a bucket always knows where it came from.
-   *  Absent only on a bucket nobody stamped — a mock, or a pre-host daemon —
-   *  which the joins read as "host unknown", never as "local". */
+   *  bucket; the fetcher fills an unstamped one from the response's own
+   *  `host`, so a bucket always knows where it came from. Absent only on a
+   *  bucket nobody stamped — a mock — which the joins read as "host unknown",
+   *  never as "local". */
   host?: string | null
 }
 
@@ -286,40 +283,15 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
     return value
   }
 
-  const readJson = async (url: string): Promise<unknown> => {
-    const res = await daemonFetch(url)
-    if (!res.ok) return null
-    return await res.json()
-  }
-
   /**
-   * Feeds whose composite route is known absent. A daemon older than the
-   * cross-host routes answers 404 on `/…/composite`; we fall back to the plain
-   * per-host route ONCE and remember, so the offline harness and an old daemon
-   * do not pay a wasted round trip on every window. Per-feed rather than
-   * global: the three routes shipped together, but a proxy that serves one and
-   * not another should degrade one feed, not all three.
-   */
-  const noComposite = new Set<string>()
-
-  /**
-   * Read a feed composite-first. `query` is shared by both routes — the
-   * composites take exactly the params their single-host originals do.
-   *
-   * A composite 404 is the ONLY signal that means "older daemon": a 5xx, a
-   * network error or a malformed body could equally be a transient hiccup on a
-   * daemon that does have the route, and latching those would strand a fleet
-   * on single-host data until the board reloads. Those paths return null and
-   * the caller degrades to empty for this window only.
+   * Read a feed's cross-host composite. Every failure — 404, 5xx, network
+   * error — returns null and the caller degrades to empty for this window
+   * only; the next window asks again.
    */
   const readFeed = async (feed: string, query: string): Promise<unknown> => {
-    if (!noComposite.has(feed)) {
-      const res = await daemonFetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
-      if (res.ok) return await res.json()
-      if (res.status !== 404) return null
-      noComposite.add(feed)
-    }
-    return await readJson(`${shuttleBase}/api/v1/${feed}?${query}`)
+    const res = await daemonFetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
+    if (!res.ok) return null
+    return await res.json()
   }
 
   return {
@@ -368,8 +340,8 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
     },
 
     /**
-     * The commit ledger over a window. Same composite-first read as the other
-     * two feeds, same degrade-to-empty on every failure path.
+     * The commit ledger over a window. Same composite read as the other two
+     * feeds, same degrade-to-empty on every failure path.
      *
      * Keyed on the window, not on a constant like `sessions(0)`: this file
      * grows one line per COMMIT rather than one per session, so a whole-history
@@ -415,10 +387,8 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
       cwd: typeof entry.cwd === 'string' ? entry.cwd : null,
       k: k as ActivityBucket['k'],
       n: typeof n === 'number' && Number.isFinite(n) ? n : 0,
-      // The composite stamps each bucket; the single-host route stamps only the
-      // response. Filling the response's host in here means a bucket's `host`
-      // is the truth on both routes, so nothing downstream has to know which
-      // one answered.
+      // The composite stamps each bucket; an unstamped one belongs to the
+      // daemon that served the response.
       host: text(entry.host) ?? (host || null),
     })
   }
@@ -436,10 +406,9 @@ function parseActivity(body: unknown, fallback: ActivityResult): ActivityResult 
  * the same translation `parseCompositeFeed` does for the fibers composite,
  * because the two blocks are deliberately the same shape.
  *
- * The single-host routes carry no block at all. Rather than leave the views
- * with nothing to key on, synthesize the one origin such a response describes:
- * itself, local and fresh. That keeps "is this origin stale?" a total question
- * on both routes.
+ * The serving daemon is always an origin: if the block does not name it,
+ * synthesize it as local and fresh. That keeps "is this origin stale?" a total
+ * question for every host a response reports.
  */
 function parseOrigins(value: unknown, localHost: string): TemporalOrigins {
   const out: TemporalOrigins = {}
