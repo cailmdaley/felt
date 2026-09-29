@@ -26,6 +26,12 @@ defmodule Shuttle.Felt.Shuttle do
 
   alias Shuttle.Felt
 
+  # The verbs felt can route to an owning daemon. The daemon is the owner, so
+  # it runs each of them with `--local`: the write lands here, never calls
+  # back into this daemon, and a fiber another host owns is refused rather
+  # than forwarded.
+  @local_verbs ~w(pause resume close reopen accept set-outcome set-model set-agent reshape uninstall)
+
   @doc """
   Run `felt shuttle <verb> <fiber_id> <args...>`.
 
@@ -45,16 +51,23 @@ defmodule Shuttle.Felt.Shuttle do
       explicit Poller runner in scope).
     * anything else forwards to `Shuttle.Felt.run/2` verbatim (`:cd`, `:env`,
       `:timeout_ms`, …).
+
+  A verb felt can route to an owning daemon (`pause`, `resume`, `close`,
+  `reopen`, `accept`, `set-outcome`, `set-model`, `set-agent`, `reshape`,
+  `uninstall`) gets `--local` appended.
   """
   @spec run(String.t(), String.t(), [String.t()], keyword()) :: Felt.result()
   def run(verb, fiber_id, args \\ [], opts \\ []) do
     {felt_store, opts} = Keyword.pop(opts, :felt_store)
 
     argv =
-      (["shuttle"] ++ felt_store_flag(felt_store) ++ [verb, fiber_id]) ++ args
+      (["shuttle"] ++ felt_store_flag(felt_store) ++ [verb, fiber_id]) ++ args ++ local_flag(verb)
 
     Felt.run(argv, opts)
   end
+
+  defp local_flag(verb) when verb in @local_verbs, do: ["--local"]
+  defp local_flag(_verb), do: []
 
   defp felt_store_flag(store) when is_binary(store) and store != "", do: ["--felt-store", store]
   defp felt_store_flag(_), do: []

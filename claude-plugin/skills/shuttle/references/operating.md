@@ -48,7 +48,7 @@ felt shuttle ps                             # live workers
 felt shuttle snapshot                       # the daemon's state
 ```
 
-The daemon acts on each change at its next poll. `accept` and `resume` go through the owning daemon when it answers (`--local` writes here), and both keep the outcome: the last run's digest stays the card's headline until the next run writes its own.
+The daemon acts on each change at its next poll. Lifecycle verbs, from `reshape` to `uninstall`, work from any host in the fleet: for a fiber another host owns, they go through the owner's daemon, as the board does. `accept` and `resume` keep the outcome, so the last run's digest stays the card's headline until the next run writes its own.
 
 ## Claiming a fiber into your session
 
@@ -78,9 +78,15 @@ From the claim on, you are the worker, and the skill's loop and exits apply.
 
 ## Remote hosts
 
-Each host lists the others it can reach in `~/.config/felt/remotes.json`, each with an SSH target and tunnel port or a Tailscale `url`; `felt shuttle remotes list|add|rm|path` edits it. Reach runs one way: a hub that lists a spoke sees the spoke's cards and sessions, and the spoke sees nothing of the hub until its own file names it. To talk back from a spoke, register the hub with `felt shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`. On a host running userspace `tailscaled` that also needs an outbound proxy, which opens an unauthenticated gateway into the whole tailnet: set it up only on a single-user hub, never on a shared login node (the installation guide's "Tailscale as fleet transport" has the recipe).
+Each host lists the others it can reach in `~/.config/felt/remotes.json`, each with an SSH target and tunnel port or a Tailscale `url`; `felt shuttle remotes list|add|rm|path` edits it.
+Reach runs one way: a hub that lists a spoke sees the spoke's cards and sessions, and the spoke sees nothing of the hub until its own file names it.
+To talk back from a spoke, register the hub with `felt shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`.
+On a host running userspace `tailscaled` that also needs an outbound proxy, which opens an unauthenticated gateway into the whole tailnet: set it up only on a single-user hub, never on a shared login node (the installation guide's "Tailscale as fleet transport" has the recipe).
 
-Cards from a remote host reach the hub's board over this transport, not through git. If a remote card is missing, debug the tunnel and the store registration; pushing the store won't make it appear.
+From a hub, `felt shuttle reopen <fiber> --message "<directive>"` starts a worker on the fiber's own host, with the directive as its From User; the other lifecycle verbs reach remote fibers the same way.
+
+Cards from a remote host reach the hub's board over this transport, not through git.
+If a remote card is missing, debug the tunnel and the store registration; pushing the store won't make it appear.
 
 ## When a card is missing
 

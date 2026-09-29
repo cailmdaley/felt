@@ -21,7 +21,7 @@ defmodule Shuttle.Contract do
 
   # Bumped in lockstep with cmd/shuttle_contract.go's ShuttleContractLevel.
   # Level 4: the daemon shells `felt shuttle accept|resume <fiber> --local`.
-  @expected_level 4
+  @expected_level 5
 
   @doc "The daemon's expected `felt shuttle contract` level."
   @spec expected_level() :: pos_integer()

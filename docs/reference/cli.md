@@ -80,18 +80,24 @@ people.
 
 ## `felt shuttle` (dispatch layer)
 
-These optional verbs apply once a fiber carries a `shuttle:` block. Write verbs
-work offline, and validate before they touch disk. `snapshot`, `dispatch`,
-`status --all`/`--remote`, `sessions`, `transcript`, `message`, and
+These optional verbs apply once a fiber carries a `shuttle:` block. Local-host
+write verbs work offline and validate before they touch disk. When a fiber's
+`shuttle.host` names an enabled remote in `~/.config/felt/remotes.json`,
+`pause`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
+`set-outcome`, `reshape`, and `uninstall` route through the local daemon to the
+owner; `dispatch` does the same. `snapshot`, `dispatch`, `status --all`/`--remote`,
+`sessions`, `transcript`, `message`, and
 `validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
-per `felt shuttle host`). `accept` and `resume` go through the owning daemon
-when it answers, which applies them with `--local` inside its Poller,
-serialized with the Poller's state changes (a poll read in flight sees the old
-document or the new one, written in one atomic step);
-`--local`, or a daemon that cannot be reached, writes the document directly.
-A daemon that takes the request but does not answer within 5 s is reported
-("did not answer in time … may still apply"), never bypassed with a local
-write, since the transition may still land there. For what
+per `felt shuttle host`). `accept` and `resume` on a fiber this host owns go
+through its daemon when it answers, which applies them with `--local` inside
+its Poller, serialized with the Poller's state changes (a poll read in flight
+sees the old document or the new one, written in one atomic step); a daemon
+that cannot be reached means the document is written directly. A daemon that
+takes the request but does not answer within 5 s is reported ("did not answer
+in time … may still apply"), never bypassed with a local write, since the
+transition may still land there. `--local` writes the document here and never
+routes; on a fiber another host owns it is refused. If routing to an owner is
+impossible, the CLI explains why and names the command to run there. For what
 the daemon speaks directly, see the [HTTP API](api.md).
 
 ### Install / reshape the contract
@@ -123,9 +129,9 @@ untouched by any of this.
 | `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `felt shuttle accept <fiber>` | Resolve the human verdict on an untempered role, closed or still active: a standing role re-arms and its run concludes (`handed_off_at`); a pinned role re-parks to `open`. The outcome is kept. `--local` skips the daemon |
-| `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
+| `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
-| `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`); leaves the current session running |
+| `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
 | `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
 | `felt shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `felt shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
@@ -138,7 +144,7 @@ untouched by any of this.
 | `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so |
 | `felt shuttle ps` | Live tmux worker sessions only |
 | `felt shuttle snapshot` | Print the local daemon's state snapshot |
-| `felt shuttle dispatch <fiber>` | Ask the local daemon to dispatch a fiber now (`--ad-hoc`) |
+| `felt shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
 | `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
 | `felt shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
 | `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |

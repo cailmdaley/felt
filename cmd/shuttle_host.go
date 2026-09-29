@@ -245,6 +245,10 @@ func (e ownerMismatchError) Error() string {
 // are ALL absent/empty — something genuinely broken. Silently permitting the
 // write in that state is how a wrong-host mirror-write would happen
 // invisibly; failing loud surfaces it instead.
+//
+// Lifecycle verbs that can route to a configured remote owner check ownership
+// through routeOwnerForCommand instead, which refuses with this same error
+// under --local.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	block, ok, err := f.ShuttleBlock()
 	if err != nil || !ok || block == nil {

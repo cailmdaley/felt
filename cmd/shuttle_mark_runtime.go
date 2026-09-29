@@ -44,6 +44,9 @@ touches tmux.`,
 			return err
 		}
 		defer unlock()
+		if err := ensureOwnedHere(f, args[0]); err != nil {
+			return err
+		}
 
 		fields := []struct{ flag, key, val string }{
 			{"dispatched-at", "dispatched_at", markRuntimeDispatchedAt},
