@@ -617,6 +617,45 @@ func TestShuttleAccept_UnreachableDaemonWritesLocally(t *testing.T) {
 	}
 }
 
+// TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable: a daemon
+// that took the connection but answers after the client gives up may still
+// apply the accept, so the CLI neither writes locally (which would refuse once
+// the daemon's accept lands) nor claims a refusal: it says the transition may
+// still apply.
+func TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, nil)
+
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		fmt.Fprint(w, "accepted by the daemon\n")
+	}))
+	defer server.Close()
+	defer close(release)
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	prev := daemonLifecycleTimeout
+	daemonLifecycleTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { daemonLifecycleTimeout = prev })
+
+	out, err := runCommand(t, dir, "shuttle", "accept", "f")
+	if err == nil {
+		t.Fatalf("an unanswered accept reported success:\n%s", out)
+	}
+	for _, want := range []string{"did not answer in time", "may still apply", "felt show f"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not say %q", err, want)
+		}
+	}
+	if status := mustRead(t, storage, "f").Status; status != felt.StatusClosed {
+		t.Fatalf("an unanswered accept fell back to a local write: status = %q", status)
+	}
+}
+
 func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)

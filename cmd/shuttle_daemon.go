@@ -9,11 +9,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,8 +23,8 @@ import (
 // daemon. Most `felt shuttle` verbs are pure local-frontmatter writes; the
 // daemon-coupled ones are the read verbs (snapshot, sessions, status --all) and
 // the soft lifecycle hop for standing-role resume/accept, which the daemon
-// re-arms atomically against its poll cycle, falling back to a local write when
-// it is down.
+// applies serialized with its Poller's state changes, falling back to a local
+// write only when no connection to it could be made.
 
 // daemonURL is the local shuttle daemon's base URL. No CLI flag by design — the
 // daemon is a per-machine service. SHUTTLE_DAEMON_URL overrides it outright
@@ -149,12 +151,13 @@ func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error
 // different things: a read may cross an SSH tunnel to another machine's daemon
 // (validate-identity fans out over every configured remote), a dispatch POST
 // waits on the daemon's own work, and the lifecycle POST bounds how long
-// `resume`/`accept` hang interactively before falling back to a local write.
+// `resume`/`accept` hang interactively. A var so tests can shorten it.
 const (
-	daemonReadTimeout      = 15 * time.Second
-	daemonPostTimeout      = 10 * time.Second
-	daemonLifecycleTimeout = 5 * time.Second
+	daemonReadTimeout = 15 * time.Second
+	daemonPostTimeout = 10 * time.Second
 )
+
+var daemonLifecycleTimeout = 5 * time.Second
 
 // daemonStatusError is a non-2xx response — the daemon was reached but rejected
 // the request (a logic error, NOT a transport failure). A distinct type so
@@ -186,8 +189,19 @@ func getDaemon(url string, timeout time.Duration) ([]byte, error) {
 }
 
 func postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, error) {
+	return postDaemonContext(context.Background(), url, payload, timeout)
+}
+
+// postDaemonContext is postDaemon under ctx, for a caller that traces the
+// request (postLifecycle).
+func postDaemonContext(ctx context.Context, url string, payload []byte, timeout time.Duration) ([]byte, error) {
 	client := daemonHTTPClient(timeout)
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("building daemon request to %s: %w", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
 	}
@@ -225,9 +239,36 @@ func readDaemonResponse(url string, resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// daemonUnansweredError is a lifecycle request that reached the daemon — a
+// connection was made — but got no response: the client timed out or the
+// connection dropped. The daemon may still apply the transition, so the caller
+// must neither fall back to a local write (which would then refuse, the accept
+// having landed) nor report a refusal.
+type daemonUnansweredError struct {
+	url string
+	err error
+}
+
+func (e *daemonUnansweredError) Error() string {
+	return fmt.Sprintf("daemon at %s %s: %v", e.url, e.what(), e.err)
+}
+
+// what says how the answer failed to arrive.
+func (e *daemonUnansweredError) what() string {
+	var netErr net.Error
+	if errors.As(e.err, &netErr) && netErr.Timeout() {
+		return "did not answer in time"
+	}
+	return "dropped the connection before answering"
+}
+
+func (e *daemonUnansweredError) Unwrap() error { return e.err }
+
 // postLifecycle hands a lifecycle action (resume, accept) on fiberID to the
-// daemon, which runs `felt shuttle <action> --local` between its poll cycles.
-// The daemon's plain-text response is returned on success.
+// daemon, which runs `felt shuttle <action> --local` serialized with its
+// Poller's state changes. The daemon's plain-text response is returned on
+// success. A transport failure after the connection was made is a
+// *daemonUnansweredError, not a transport error.
 func postLifecycle(action, fiberID string) (string, error) {
 	body, err := json.Marshal(map[string]string{"action": action, "fiber": fiberID})
 	if err != nil {
@@ -238,8 +279,15 @@ func postLifecycle(action, fiberID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	respBody, err := postDaemon(endpoint, body, daemonLifecycleTimeout)
+	var connected atomic.Bool
+	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+	})
+	respBody, err := postDaemonContext(ctx, endpoint, body, daemonLifecycleTimeout)
 	if err != nil {
+		if connected.Load() && isLifecycleTransportError(err) {
+			return "", &daemonUnansweredError{url: endpoint, err: err}
+		}
 		return "", err
 	}
 	return string(respBody), nil
@@ -247,13 +295,18 @@ func postLifecycle(action, fiberID string) (string, error) {
 
 // isLifecycleTransportError reports whether err means "daemon unreachable" (so
 // the caller should fall back to a local document write) rather than a daemon
-// refusal or an owner-check failure, both of which must surface to the user.
+// refusal, an owner-check failure or a request the daemon received but did not
+// answer, all of which must surface to the user.
 func isLifecycleTransportError(err error) bool {
 	if err == nil {
 		return false
 	}
 	var ownerErr *daemonTCPOwnerCheckError
 	if errors.As(err, &ownerErr) {
+		return false
+	}
+	var unanswered *daemonUnansweredError
+	if errors.As(err, &unanswered) {
 		return false
 	}
 	if _, ok := err.(daemonStatusError); ok {

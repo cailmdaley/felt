@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,7 @@ import (
 // the one writer of every lifecycle transition: resume and accept hop through
 // the owning daemon, which runs the same verb with --local inside its poll loop
 // (serialized with polling, its document cache refreshed after), and write here
-// with --local or when the daemon is unreachable.
+// with --local or when no connection to the daemon can be made.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
 // write verb: a full read (body preserved for the re-serialize), a required
@@ -168,8 +169,10 @@ the boot quarantine is released).
 For a standing role awaiting review (status: closed + untempered), resume re-arms
 it and concludes the run it reviewed (shuttle.runtime.handed_off_at = now), so
 the role runs at its schedule's next tick. That write routes through the owning
-daemon, which applies it with --local between poll cycles; --local, or an
-unreachable daemon, writes the document here. A draft (status: open) is armed
+daemon, which applies it with --local between poll cycles; --local, or a
+daemon that cannot be reached, writes the document here. A daemon that takes
+the request but does not answer in time is reported, not bypassed: the
+transition may still apply there. A draft (status: open) is armed
 straight to active. Every other closed fiber — a oneshot or pinned role, or any
 accepted or discarded close — is refused; use 'felt shuttle reopen' to requeue
 it.
@@ -255,13 +258,14 @@ func rearmStanding(f *felt.Felt) error {
 }
 
 // routeLifecycle hands verb to the owning daemon when the fiber qualifies and
-// reports whether the daemon answered. The daemon runs the same verb with
-// --local between its poll cycles, so the write is serialized with polling and
-// its document cache sees it at once. The lookup takes no fiber lock — the
-// daemon's writer needs it. routed is false when the fiber does not qualify
-// (or cannot be read) or the daemon is unreachable; the caller then writes
-// locally, where every refusal is reported. A daemon refusal or an owner-check
-// failure is routed, with its error.
+// reports whether the daemon took it. The daemon runs the same verb with
+// --local serialized with its Poller's state changes, so its document cache
+// sees the write at once. The lookup takes no fiber lock — the daemon's writer
+// needs it. routed is false when the fiber does not qualify (or cannot be
+// read) or no connection to the daemon could be made; the caller then writes
+// locally, where every refusal is reported. A daemon refusal, an owner-check
+// failure, or a request the daemon received but did not answer is routed, with
+// its error — the last because the transition may still apply there.
 func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool) (routed bool, err error) {
 	f, _, _, err := shuttleResolveFiberRef(query, true)
 	if err != nil {
@@ -278,6 +282,10 @@ func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Bloc
 	}
 	if isLifecycleTransportError(err) {
 		return false, nil
+	}
+	var unanswered *daemonUnansweredError
+	if errors.As(err, &unanswered) {
+		return true, fmt.Errorf("%s %s: the daemon at %s %s (%v); the %s may still apply — check `felt show %s` before retrying", verb, f.ID, unanswered.url, unanswered.what(), unanswered.err, verb, f.ID)
 	}
 	return true, err
 }
@@ -529,7 +537,9 @@ The outcome is kept: the last run's digest stays the card's headline until the
 next run writes its own.
 
 Routes to the owning daemon, which applies it with --local between poll
-cycles; --local, or an unreachable daemon, writes the document here.`,
+cycles; --local, or a daemon that cannot be reached, writes the document here.
+A daemon that takes the request but does not answer in time is reported, not
+bypassed: the accept may still apply there.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !acceptLocal {
