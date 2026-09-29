@@ -2,7 +2,7 @@ defmodule Shuttle.ApplicationBootTest do
   use ExUnit.Case, async: false
 
   test "endpoint starts before Poller and TailnetDial" do
-    flags = [:start_poller, :start_tailnet_dial, :start_sent_files_follower]
+    flags = [:start_poller, :start_tailnet_dial, :start_event_stream]
     previous = Map.new(flags, &{&1, Application.get_env(:shuttle, &1)})
 
     Enum.each(flags, &Application.put_env(:shuttle, &1, true))
@@ -13,15 +13,15 @@ defmodule Shuttle.ApplicationBootTest do
     endpoint = Enum.find_index(ids, &(&1 == ShuttleWeb.Endpoint))
     poller = Enum.find_index(ids, &(&1 == Shuttle.Poller))
     tailnet = Enum.find_index(ids, &(&1 == Shuttle.TailnetDial))
-    sent_files_follower = Enum.find_index(ids, &(&1 == Shuttle.SentFiles.Follower))
+    event_stream = Enum.find_index(ids, &(&1 == Shuttle.EventStream))
 
     assert is_integer(endpoint)
     assert is_integer(poller)
     assert is_integer(tailnet)
-    assert is_integer(sent_files_follower)
+    assert is_integer(event_stream)
     assert endpoint < poller
     assert endpoint < tailnet
-    assert endpoint < sent_files_follower
+    assert endpoint < event_stream
 
     task_supervisor =
       Enum.find_index(children, fn child ->

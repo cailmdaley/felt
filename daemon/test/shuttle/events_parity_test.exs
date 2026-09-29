@@ -2,8 +2,8 @@ defmodule Shuttle.EventsParityTest do
   @moduledoc """
   Cross-language guard on the event stream.
 
-  `felt hook event` (Go) writes the stream; `Shuttle.WaitingTracker` and
-  `Shuttle.SentFiles` (Elixir) read it. Nothing in the type system connects the
+  `felt hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
+  `Shuttle.WaitingTracker` and `Shuttle.SentFiles` (Elixir) project it. Nothing in the type system connects the
   two, so the contract is a checked-in fixture: `cmd/testdata/events_golden.jsonl`
   is produced byte-for-byte by `TestEventGoldenParity` in cmd/hook_event_test.go
   and parsed here.
@@ -15,8 +15,8 @@ defmodule Shuttle.EventsParityTest do
   """
   use ExUnit.Case, async: true
 
+  alias Shuttle.EventStream
   alias Shuttle.SentFiles
-  alias Shuttle.WaitingTracker
 
   # The fixture records: worker A (Claude) sending two files, writing a large
   # file, then stopping; worker B (Codex) ending blocked on a human; worker C
@@ -42,7 +42,7 @@ defmodule Shuttle.EventsParityTest do
       name = :"parity_tracker_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
-        WaitingTracker.start_link(
+        EventStream.start_link(
           events_file: @golden,
           poll_interval_ms: 60_000,
           clock: fn -> @now end,
@@ -51,7 +51,7 @@ defmodule Shuttle.EventsParityTest do
 
       on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
 
-      activity = WaitingTracker.session_activity(name)
+      activity = EventStream.session_activity(name)
 
       # Worker A's last event is `stop` — the turn finished.
       assert %{phase: "waiting", last_event_at: 1_753_900_005_000} = activity[@worker_a]

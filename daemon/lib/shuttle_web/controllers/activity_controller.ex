@@ -6,7 +6,7 @@ defmodule ShuttleWeb.ActivityController do
        "buckets": [{"m": …, "s": "…-shuttle", "cwd": "/repo", "k": "attention", "n": 3}]}
 
   `Shuttle.Activity` does the reading — a slice of the fold
-  `Shuttle.Activity.Follower` keeps in memory; this controller parses the
+  `Shuttle.EventStream` keeps in memory; this controller parses the
   window and stamps the host. Keys are short because a busy day is thousands
   of buckets.
 
@@ -116,7 +116,7 @@ defmodule ShuttleWeb.ActivityController do
     buckets
   end
 
-  defp events_tokens, do: rotating_file_tokens(Shuttle.WaitingTracker.default_events_file())
+  defp events_tokens, do: rotating_file_tokens(Shuttle.EventStream.default_events_file())
 
   # The covered window, as the object the UI reads. `nil` when a remote has
   # never been polled successfully — "no idea", which is not the same claim as

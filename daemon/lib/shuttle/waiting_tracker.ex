@@ -1,8 +1,10 @@
 defmodule Shuttle.WaitingTracker do
   @moduledoc """
-  Tracks the *most recent hook event* per worker session by tailing this host's
+  The *most recent hook event* per worker session, projected from this host's
   agent hook-event stream (`~/.shuttle/events.jsonl`), so the feed can rank
-  in-flight workers by how long they've been idle.
+  in-flight workers by how long they've been idle. This module is the pure
+  projection; `Shuttle.EventStream` reads the stream and holds the map, and
+  `Shuttle.EventStream.session_activity/1` serves `phases/2` of it.
 
   ## Why tail the local stream
 
@@ -30,7 +32,7 @@ defmodule Shuttle.WaitingTracker do
 
   ## Phase category, derived at READ time
 
-  `session_activity/1` resolves each stored record to `%{last_event_at, phase}`,
+  `phases/2` resolves each stored record to `%{last_event_at, phase}`,
   where `phase` is the category of the last event type:
 
     * `notification` → `"attention"` for permission, elicitation, and untyped
@@ -100,121 +102,49 @@ defmodule Shuttle.WaitingTracker do
 
   ## Reading the past (boot seeding)
 
-  On boot the tracker SEEDS from the existing `events.jsonl` in a single forward
-  pass (last-event-wins, pruning sessions whose last event is older than
-  `@max_age_ms`), THEN tails forward from the file's current end. So a worker
-  that stopped before the daemon restarted — e.g. a review left idle 24h ago —
-  is known on the very first serve, instead of being invisible until its next
-  event (which, being idle, may never come).
+  On boot `Shuttle.EventStream` SEEDS the map from the existing
+  `events.jsonl.1` and `events.jsonl` in a single forward pass (last-event-wins,
+  pruning sessions whose last event is older than `@max_age_ms`), THEN follows
+  forward from the live file's current end. So a worker that stopped before the
+  daemon restarted — e.g. a review left idle 24h ago — is known on the very
+  first serve, instead of being invisible until its next event (which, being
+  idle, may never come).
+
+  A truncated or replaced file cannot make a remembered session wrong, only
+  unrefreshed, so when the stream rebuilds from the files the map keeps what it
+  knew (`merge_known/2`).
 
   Only `*-shuttle` sessions are tracked; events from interactive (non-shuttle)
   sessions are ignored, mirroring the dispatch gate.
   """
 
-  use GenServer
-  require Logger
-
-  @poll_interval_ms 1_000
   # How long a remembered background-task count may keep a session out of the
   # attention column. See "The suppression is BOUNDED" above.
   @bg_suppress_ms 60 * 60 * 1_000
   @max_age_ms 48 * 60 * 60 * 1_000
 
-  defmodule State do
-    @moduledoc false
-    # `sessions` is `session => %{type: String.t(), at: ms}` — the raw type and
-    # real timestamp of the session's most recent hook event (last-event-wins).
-    # `clock` is a 0-arity fn returning the current epoch ms (injectable for tests).
-    defstruct [:events_file, :poll_interval_ms, :clock, offset: 0, sessions: %{}]
-  end
-
-  # ── Client ──
-
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
-  end
+  @typedoc """
+  `session => %{type, at, kind, bg}` — the raw type, real timestamp,
+  notification kind and carried background-task count of each tracked
+  session's most recent hook event (last-event-wins).
+  """
+  @type sessions :: %{optional(String.t()) => map()}
 
   @doc """
   A `session => %{last_event_at: ms, phase: phase}` map over every tracked
-  `*-shuttle` session, where `last_event_at` is the real timestamp of the
-  session's most recent hook event and `phase` is its category — `"attention"`,
-  `"waiting"`, or `"working"` (see the moduledoc). The caller (poller) joins
-  this against `state.running` in O(1) and computes idle from `last_event_at`;
-  no gating happens here. Defaults to the singleton tracker; pass a pid/name
-  for tests.
+  `*-shuttle` session in `sessions`, at wall-clock `now`: `last_event_at` is
+  the real timestamp of the session's most recent hook event and `phase` its
+  category — `"attention"`, `"waiting"`, or `"working"` (see the moduledoc).
+  The caller (poller) joins this against `state.running` in O(1) and computes
+  idle from `last_event_at`; no gating happens here.
   """
-  @spec session_activity(GenServer.server()) ::
+  @spec phases(sessions(), integer()) ::
           %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
-  def session_activity(server \\ __MODULE__) do
-    GenServer.call(server, :session_activity)
-  catch
-    :exit, _ -> %{}
-  end
-
-  @doc """
-  Default host-local events stream path, honoring the same env the hook writes.
-
-  Shuttle owns its own stream: `SHUTTLE_EVENTS_FILE`, else
-  `$SHUTTLE_DATA_DIR/events.jsonl`, default `~/.shuttle/events.jsonl` — written
-  by `felt hook event` (`cmd/shuttle_events.go` mirrors this resolver exactly;
-  `cmd/hook_event.go` writes the lines).
-  """
-  def default_events_file do
-    System.get_env("SHUTTLE_EVENTS_FILE") || Path.join(Shuttle.data_dir(), "events.jsonl")
-  end
-
-  # ── Server ──
-
-  @impl true
-  def init(opts) do
-    events_file = Keyword.get(opts, :events_file, default_events_file())
-    poll_interval_ms = Keyword.get(opts, :poll_interval_ms, @poll_interval_ms)
-    clock = Keyword.get(opts, :clock, &default_clock/0)
-
-    # Seed last-event-per-session from the existing file, then tail forward from
-    # its current end. A worker idle since before this boot is known immediately.
-    {sessions, offset} = seed_from_file(events_file, clock.())
-
-    schedule_poll(poll_interval_ms)
-
-    {:ok,
-     %State{
-       events_file: events_file,
-       poll_interval_ms: poll_interval_ms,
-       clock: clock,
-       offset: offset,
-       sessions: sessions
-     }}
-  end
-
-  # Single forward pass over the whole file building last-event-per-session
-  # (last-event-wins, so the plain reduce naturally keeps the final event),
-  # pruning sessions whose last event is older than @max_age_ms. Returns the
-  # seeded sessions and the byte offset to resume tailing from. Reuses
-  # `apply_event`, so blank/malformed lines are ignored the same way the tail
-  # ignores them — one parse path. `Shuttle.FileTail` owns the bytes.
-  defp seed_from_file(path, now) do
-    {lines, offset} = Shuttle.FileTail.seed(path)
-
-    sessions =
-      lines
-      |> Enum.reduce(%{}, &apply_event(&1, &2, now))
-      |> prune_old(now)
-
-    {sessions, offset}
-  end
-
-  @impl true
-  def handle_call(:session_activity, _from, state) do
-    now = now_ms(state)
-
-    result =
-      Map.new(state.sessions, fn {session, %{type: type, at: at} = rec} ->
-        bg = if now - at >= @bg_suppress_ms, do: 0, else: rec.bg
-        {session, %{last_event_at: at, phase: category(type, rec.kind, bg)}}
-      end)
-
-    {:reply, result, state}
+  def phases(sessions, now) do
+    Map.new(sessions, fn {session, %{type: type, at: at} = rec} ->
+      bg = if now - at >= @bg_suppress_ms, do: 0, else: rec.bg
+      {session, %{last_event_at: at, phase: category(type, rec.kind, bg)}}
+    end)
   end
 
   # The phase category of the most-recent event type, read against the two
@@ -238,74 +168,62 @@ defmodule Shuttle.WaitingTracker do
   defp category(type, _kind, _bg) when type in ["stop", "subagent_stop"], do: "waiting"
   defp category(_type, _kind, _bg), do: "working"
 
-  @impl true
-  def handle_info(:poll, state) do
-    state =
-      state
-      |> ingest_new_lines()
-      |> update_in([Access.key(:sessions)], &prune_old(&1, now_ms(state)))
+  @doc """
+  One decoded event folded onto `sessions`. Last-event-wins: every event for a
+  `*-shuttle` session unconditionally overwrites its record with the event's
+  own type and real timestamp. The `"timestamp"` field is on every hook line;
+  `now` is only a fallback for a line missing it (we never invent a
+  worse-than-now age). A `file_sent` event is a delivery, not activity, and
+  leaves the record alone.
 
-    schedule_poll(state.poll_interval_ms)
-    {:noreply, state}
-  end
+  The strings kept are copied out of the event, so the map never pins the
+  buffer a line was read from.
+  """
+  @spec apply_event(sessions(), map(), integer()) :: sessions()
+  def apply_event(sessions, %{"type" => "file_sent"}, _now), do: sessions
 
-  defp schedule_poll(ms), do: Process.send_after(self(), :poll, ms)
-
-  # Fold the lines appended since the last offset into the session map.
-  # `Shuttle.FileTail` owns the offset arithmetic, the partial-trailing-line
-  # rule, and the shrink report; what to DO about a shrink is this projection's
-  # call — last-event-wins keeps what it already knows and simply resumes at
-  # the new end, because a truncated file cannot make a remembered session
-  # wrong, only unrefreshed. A missing file leaves state untouched.
-  defp ingest_new_lines(%State{events_file: path, offset: offset} = state) do
-    case Shuttle.FileTail.advance(path, offset) do
-      {:append, lines, new_offset} ->
-        now = now_ms(state)
-        sessions = Enum.reduce(lines, state.sessions, &apply_event(&1, &2, now))
-        %{state | offset: new_offset, sessions: sessions}
-
-      {:reset, size} ->
-        %{state | offset: size}
-
-      :noop ->
-        state
-    end
-  end
-
-  # Last-event-wins: every event for a `*-shuttle` session unconditionally
-  # overwrites its record with the event's own type and real timestamp. The
-  # `"timestamp"` field is on every hook line; `now` is only a fallback for a
-  # line missing it (shouldn't happen, but we never invent a worse-than-now age).
-  defp apply_event(line, sessions, now) do
-    case Jason.decode(line) do
-      {:ok, %{"type" => "file_sent"}} ->
-        sessions
-
-      {:ok, %{"type" => type, "tmuxSession" => session} = ev}
-      when is_binary(type) and is_binary(session) and session != "" ->
-        if Shuttle.Dispatcher.shuttle_session?(session) do
-          at =
-            case Map.get(ev, "timestamp") do
-              ts when is_integer(ts) -> ts
-              _ -> now
-            end
-
-          Map.put(sessions, session, %{
-            type: type,
-            at: at,
-            kind: notification_kind(ev),
-            bg: background_tasks(type, ev, Map.get(sessions, session))
-          })
-        else
-          sessions
+  def apply_event(sessions, %{"type" => type, "tmuxSession" => session} = ev, now)
+      when is_binary(type) and is_binary(session) and session != "" do
+    if Shuttle.Dispatcher.shuttle_session?(session) do
+      at =
+        case Map.get(ev, "timestamp") do
+          ts when is_integer(ts) -> ts
+          _ -> now
         end
 
-      _ ->
-        sessions
+      Map.put(sessions, :binary.copy(session), %{
+        type: :binary.copy(type),
+        at: at,
+        kind: notification_kind(ev),
+        bg: background_tasks(type, ev, Map.get(sessions, session))
+      })
+    else
+      sessions
     end
   end
 
-  defp notification_kind(%{"notificationKind" => kind}) when is_binary(kind), do: kind
+  def apply_event(sessions, _event, _now), do: sessions
+
+  @doc "`sessions` without those whose last event is older than 48 hours at `now`."
+  @spec prune(sessions(), integer()) :: sessions()
+  def prune(sessions, now) do
+    cutoff = now - @max_age_ms
+    Map.reject(sessions, fn {_s, %{at: at}} -> at < cutoff end)
+  end
+
+  @doc """
+  `rebuilt` over `known`: a session only `known` mentions stays, and where
+  both do, the record with the newer event wins, so a rebuild from a truncated
+  or replaced file never moves a record back to an older event.
+  """
+  @spec merge_known(sessions(), sessions()) :: sessions()
+  def merge_known(known, rebuilt) do
+    Map.merge(known, rebuilt, fn _session, old, new -> if new.at >= old.at, do: new, else: old end)
+  end
+
+  defp notification_kind(%{"notificationKind" => kind}) when is_binary(kind),
+    do: :binary.copy(kind)
+
   defp notification_kind(_), do: ""
 
   # How much detached work this session is leaving behind, as of this event.
@@ -329,13 +247,4 @@ defmodule Shuttle.WaitingTracker do
 
   defp background_tasks(_type, _ev, %{bg: bg}) when is_integer(bg), do: bg
   defp background_tasks(_type, _ev, _prev), do: 0
-
-  defp prune_old(sessions, now) do
-    cutoff = now - @max_age_ms
-    Map.reject(sessions, fn {_s, %{at: at}} -> at < cutoff end)
-  end
-
-  defp now_ms(%State{clock: clock}), do: clock.()
-
-  defp default_clock, do: System.system_time(:millisecond)
 end

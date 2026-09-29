@@ -1,7 +1,7 @@
 defmodule Shuttle.Test.LegacyActivityScan do
   @moduledoc """
   A verbatim copy of `Shuttle.Activity`'s windowed per-request scan, as it
-  stood before the fold moved into `Shuttle.Activity.Follower`. The
+  stood before the fold was held in memory. The
   characterization tests pin the fold-then-slice reader against it: for any
   window, the two agree except where the moduledoc of `Shuttle.Activity`
   names a difference.
@@ -85,7 +85,7 @@ defmodule Shuttle.Test.LegacyActivityScan do
   def max_range_days, do: @max_range_days
 
   defp scan(from_ms, to_ms, opts) do
-    live = Keyword.get(opts, :events_file, Shuttle.WaitingTracker.default_events_file())
+    live = Keyword.get(opts, :events_file, Shuttle.EventStream.default_events_file())
 
     live
     |> files_to_scan(from_ms)
