@@ -2,8 +2,9 @@ defmodule Shuttle.Poller do
   @moduledoc """
   Polls the felt fiber tree and dispatches workers for eligible constitutions.
 
-  A single GenServer owns the dispatch tick, eligibility predicate, retry
-  scheduling, and reconciliation. It starts `Shuttle.WorkerWatcher` processes
+  A single GenServer owns the dispatch tick, the eligibility predicate, and
+  reconciliation; there is no retry queue — a oneshot whose worker exited
+  while its fiber is still active is simply eligible again on the next tick. It starts `Shuttle.WorkerWatcher` processes
   under a `DynamicSupervisor` to track each worker's tmux session from outside.
 
   ## Felt stores
@@ -914,7 +915,7 @@ defmodule Shuttle.Poller do
 
   # The poll Task finished its reads. Apply the world it observed to the
   # GenServer's CURRENT state — anything that changed during the Task (a sync
-  # :dispatch, a :worker_exited retry, a :retry firing) is already reflected
+  # :dispatch, a claim, a :worker_exited) is already reflected
   # and is simply respected by the re-validating apply, never clobbered by a
   # stale snapshot.
   def handle_info(
