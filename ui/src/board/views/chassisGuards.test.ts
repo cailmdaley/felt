@@ -5,9 +5,10 @@
 // D1 — a temporal tab with no board response painted a completely blank page:
 //      no heading, no message, no way back. A blank page and a broken app are
 //      indistinguishable, so the two states now name themselves.
-// M1 — bare view hotkeys switched views out from under an open Stash form,
-//      because the guard only knew Radix's `data-state` and StashForm is
-//      hand-rolled with `aria-modal` and no data-state.
+// M1 — bare view hotkeys switched views out from under an open form that was
+//      hand-rolled with `aria-modal` and no data-state, because the guard only
+//      knew Radix's `data-state`. Every form now renders through AppDialog;
+//      the aria clause stays so a dialog built outside it is still covered.
 // S1 — `⌘,` and bare `,` both open settings, and they are guarded
 //      DIFFERENTLY: the chord survives a focused text field, the bare key does
 //      not. That asymmetry is the whole reason `settingsHotkey` reports WHICH
@@ -94,7 +95,7 @@ describe('isBlockingDialog', () => {
 
   it('treats a dialog layered over the board as blocking', () => {
     expect(isBlockingDialog(el('kbn-detail-overlay'))).toBe(true)
-    expect(isBlockingDialog(el('stash-form'))).toBe(true)
+    expect(isBlockingDialog(el('app-dialog-card'))).toBe(true)
     expect(isBlockingDialog(el())).toBe(true)
   })
 
@@ -112,7 +113,7 @@ describe('isBlockingDialog', () => {
 
 describe('BLOCKING_DIALOG_SELECTOR', () => {
   it('covers Radix, hand-rolled aria dialogs, and the fiber panel', () => {
-    // StashForm is the hand-rolled case that M1 missed: role="dialog"
+    // A hand-rolled dialog is the case M1 missed: role="dialog"
     // aria-modal="true", no data-state anywhere.
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][data-state="open"]')
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][aria-modal="true"]')
@@ -227,8 +228,8 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
     classes: ['app-dialog-card', 'app-dialog-card-wide'],
     attrs: { role: 'dialog', 'data-state': 'open' },
   })
-  // StashForm: hand-rolled, aria-modal, no data-state. M1's element.
-  const stashForm = el({ classes: ['stash-form'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
+  // A hand-rolled dialog: aria-modal, no data-state. M1's shape.
+  const handRolled = el({ classes: ['hand-rolled-dialog'], attrs: { role: 'dialog', 'aria-modal': 'true' } })
   const searchBox = el({ tag: 'INPUT' })
 
   it('both read a bare board as free', () => {
@@ -272,8 +273,8 @@ describe('blockingDialogOpen beside keystrokeIsSpokenFor', () => {
     expect(keystrokeIsSpokenFor()).toBe(true)
   })
 
-  it('both see a hand-rolled dialog too — M1 at the element it happened to', () => {
-    stubDOM([boardRoot, stashForm], searchBox)
+  it('both see a hand-rolled dialog too — M1 at the shape it happened to', () => {
+    stubDOM([boardRoot, handRolled], searchBox)
     expect(blockingDialogOpen()).toBe(true)
     expect(keystrokeIsSpokenFor()).toBe(true)
   })

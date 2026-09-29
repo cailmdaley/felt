@@ -307,7 +307,7 @@ try {
   assert.match(verdict, /composted|"tempered":false/, `Discard writes the false verdict: ${verdict}`)
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
-  await page.getByRole('button', { name: 'Stash a new fiber (n)', exact: true }).click()
+  await page.getByRole('button', { name: 'Stash a new fiber', exact: true }).click()
   const stashSurface = page.getByRole('combobox', { name: 'Session', exact: true })
   assert.equal(await stashSurface.count(), 0, 'a default (Claude) stash has no session choice')
   const stashAgent = page.locator('select').filter({ has: page.locator('option[value="codex-luna"]') })
@@ -315,6 +315,22 @@ try {
   assert.equal(await stashSurface.inputValue(), 'app', 'new Codex stash defaults to app')
   await stashSurface.selectOption('cli')
   assert.equal(await stashSurface.inputValue(), 'cli', 'Codex stash still offers Terminal')
+  // Escape in the open parent list closes the list; the next one closes Stash.
+  const stashDialog = page.getByRole('dialog', { name: 'Stash a constitution', exact: true })
+  const parentField = page.getByRole('combobox', { name: 'Parent fiber', exact: true })
+  await parentField.click()
+  await page.locator('.stash-parent-dropdown').waitFor()
+  await parentField.press('Escape')
+  assert.equal(await page.locator('.stash-parent-dropdown').count(), 0, 'Escape closes the parent list')
+  assert.ok(await stashDialog.isVisible(), 'Escape in the parent list keeps Stash open')
+  await page.keyboard.press('Escape')
+  await stashDialog.waitFor({ state: 'detached' })
+  // Stash shares Capture's phone sheet: the submit stays on screen.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Stash a new fiber', exact: true }).click()
+  const stashSubmit = await page.getByRole('button', { name: 'Stash', exact: true }).boundingBox()
+  assert.ok(stashSubmit && stashSubmit.y >= 0 && stashSubmit.y + stashSubmit.height <= 844, 'phone: Stash submit remains visible')
+  await page.setViewportSize({ width: 1200, height: 900 })
   assert.deepEqual(errors, [])
   // On a phone every Claude chat opens on claude.ai, and nothing asks for a desktop app.
   const phone = await browser.newPage({
@@ -411,7 +427,7 @@ try {
   assert.ok((await reach('.kbn-detail-prose')).visible, 'phone: swiping back reaches the page')
   await touch.close()
 
-  console.log('Capture/Stash/session choices, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), phone sheet touch-scrolls to the drawer end, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  console.log('Capture/Stash/session choices, Stash parent Escape and phone submit, desktop/phone geometry, live settings without dispatch, drawer strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), phone sheet touch-scrolls to the drawer end, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }

@@ -177,12 +177,13 @@ export function isBlockingDialog(
 /**
  * Selector for anything that takes keystrokes away from the board.
  *
- * `[data-state="open"]` is Radix's stamp (Stash/Capture went through
- * `AppDialog`). `[aria-modal="true"]` catches every OTHER modal dialog — the
- * hand-rolled `StashForm` sets `role="dialog" aria-modal="true"` and NO
- * data-state, which is exactly the gap that let `1`-`3` switch views out from
- * under an open form. Matching on aria rather than on a library's attribute
- * means the next hand-rolled dialog is covered without a code change here.
+ * `[data-state="open"]` is Radix's stamp — Stash, Capture and the settings
+ * sheet all render through `AppDialog`. `[aria-modal="true"]` catches every
+ * OTHER modal dialog: a hand-rolled one carries `role="dialog"
+ * aria-modal="true"` and no data-state, and without this clause `1`-`3` would
+ * switch views out from under it. Matching on aria rather than on a library's
+ * attribute means a dialog built outside AppDialog is covered without a code
+ * change here.
  */
 export const BLOCKING_DIALOG_SELECTOR =
   '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], .kbn-detail-overlay'

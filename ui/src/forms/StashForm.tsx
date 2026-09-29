@@ -22,24 +22,33 @@
  * `origin` rides the POST: a local origin writes here, a remote origin forwards
  * to its owning daemon (which auto-stamps its own `shuttle.host`).
  *
- * Esc closes; Cmd/Ctrl+Enter submits.
+ * Capture's sibling: the same AppDialog card and the same formKit column —
+ * lead field, the host · project · agent · effort row, session and `--chrome`,
+ * the footer — with Stash's own parts (slug receipt, tags, parent picker, kind
+ * segments, schedule) slotted into that rhythm. Esc closes (Radix);
+ * Cmd/Ctrl+Enter submits.
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
+import { agentGroups, resolveEffort, useAgentRegistry } from './agents'
+import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
+import { AddProjectPath, useProjectSelection } from './ProjectPicker'
 import {
-  AddProjectPath,
-  HostPicker,
-  ProjectPicker,
-  injectProjectPickerStyles,
-  useProjectSelection,
-} from './ProjectPicker'
+  ChromeFlag,
+  EffortField,
+  Field,
+  FormError,
+  FormFoot,
+  HostProjectFields,
+  SessionField,
+  injectFormKitStyles,
+} from './formKit'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
 import { daemonErrorMessage } from '../board/daemonApi'
 import type { Host, Project } from './projectModel'
-import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
+import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,7 +71,7 @@ export interface StashFormProps {
    *  (the island re-derives it from the daemon). Absent → the picker offers no
    *  "+ Add project…" row. */
   onProjectAdded?: (path: string) => Promise<Project[]>
-  /** Called on Esc / cancel / backdrop click. */
+  /** Called on Esc / cancel / overlay click. */
   onCancel: () => void
 }
 
@@ -133,14 +142,9 @@ function validateParentSlug(raw: string): string | null {
 }
 
 const KIND_SEGMENTS = [
-  ['oneshot', 'One-shot', 'drafts, manual launch'],
-  ['standing', 'Standing', 'cron-scheduled role'],
+  ['oneshot', 'One-shot', 'lands in Drafts'],
+  ['standing', 'Standing', 'on a schedule'],
 ] as const
-
-/** Human-readable label for an agent entry. */
-function agentLabel(a: AgentEntry): string {
-  return a.model ? `${a.id} · ${a.model}` : a.id
-}
 
 // ---------------------------------------------------------------------------
 // Parent-fiber picker — project-scoped, project-relative
@@ -223,14 +227,9 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
         commit(results[highlight])
       }
     } else if (e.key === 'Escape') {
-      if (open) {
-        // Consume Escape so it dismisses only the dropdown — without
-        // stopPropagation it bubbles to the dialog's handler and closes the
-        // whole form.
-        e.preventDefault()
-        e.stopPropagation()
-        setOpen(false)
-      }
+      // The dialog leaves Escape to an expanded combobox (see AppDialog), so
+      // this closes only the dropdown.
+      if (open) setOpen(false)
     }
   }
 
@@ -239,13 +238,14 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
       <input
         ref={inputRef}
         type="text"
-        className="stash-input"
+        className="form-input"
         value={value}
         onChange={handleInput}
         onFocus={() => fetchResults(value.trim())}
         onKeyDown={handleKeyDown}
         placeholder="standalone-kanban  ·  backend/…"
         autoComplete="off"
+        aria-label="Parent fiber"
         role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -448,23 +448,18 @@ export function StashForm({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      onCancel()
-    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       void submit()
     }
   }
 
   const defaultAgentEntry = agents.find((a) => a.default)
-  const defaultAgentLabel = defaultAgentEntry ? agentLabel(defaultAgentEntry) : 'default'
+  const defaultAgentLabel = defaultAgentEntry?.id ?? 'default'
   const parentValidation = validateParentSlug(parentSlug)
 
   // The agent whose constraint metadata gates the dependent axes.
   const constraintAgent = agents.find((a) => a.id === agentId) ?? defaultAgentEntry
-  const effortLevels = constraintAgent?.effort_levels ?? []
   const effectiveEffort = resolveEffort(constraintAgent, effort)
   const chromeCapable = agents.length === 0 ? true : constraintAgent?.chrome_capable ?? false
 
@@ -483,621 +478,233 @@ export function StashForm({
   }
 
   return (
-    <div
-      className="stash-scrim"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel()
+    <AppDialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
       }}
-      onKeyDown={handleKeyDown}
+      title="Stash a constitution"
+      eyebrow="shuttle · stash"
     >
-      <div
-        className="stash-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Stash a new fiber"
-      >
-        <div className="stash-header">
-          <div className="stash-header-row">
-            <h2 className="stash-title">Stash a constitution</h2>
-            <span className="stash-eyebrow">shuttle · kanban</span>
-          </div>
-          <div className="stash-subtitle">
-            Drop an idea. Lands in Drafts — promote to dispatch via the kanban.
-          </div>
-          <span className="stash-header-rule" aria-hidden="true" />
-        </div>
-
-        <div className="stash-body">
-          {/* ── Section: WHERE — project + parent fiber ── */}
-          <section className="stash-section">
-            <div className="stash-section-head">
-              <span className="stash-section-label">Where</span>
-              <span className="stash-section-rule" aria-hidden="true" />
-            </div>
-            <div className="stash-row stash-row-3">
-              {/* Host, then project */}
-              {/* Rendered even with no projects, as long as there is a way to
-                  add one: the project select's first option, "Add a new
-                  project…", is how a host with an empty list bootstraps its
-                  first. */}
-              {(projects.length > 0 || onProjectAdded) && (
-                <>
-                  <div className="stash-field">
-                    <span className="stash-label">Host</span>
-                    <HostPicker
-                      hosts={hosts}
-                      selectedId={selectedHostId}
-                      onSelect={handleHostChange}
-                      className="stash-select"
-                    />
-                  </div>
-                  <div className="stash-field">
-                    <span className="stash-label">Project</span>
-                    <ProjectPicker
-                      projects={hostProjects}
-                      selectedId={selectedProjectId}
-                      onSelect={setSelectedProjectId}
-                      onAddProject={onProjectAdded ? addProject.begin : undefined}
-                      className="stash-select"
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Parent fiber */}
-              <label className="stash-field">
-                <span className="stash-label">
-                  Parent fiber <span className="stash-optional">opt</span>
-                </span>
-                <ParentPicker
-                  value={parentSlug}
-                  onChange={setParentSlug}
-                  scopePrefix={selectedProject?.loomPrefix ?? ''}
-                  shuttleBase={shuttleBase}
-                />
-              </label>
-            </div>
-            {addProject.pathOpen && onProjectAdded && (
-              <AddProjectPath
-                hostLabel={selectedHost.label}
-                busy={addProject.busy}
-                error={addProject.pathError}
-                onSubmit={addProject.submitPath}
-                onCancel={addProject.closePath}
-              />
-            )}
-            {parentValidation && (
-              <div className="stash-hint stash-hint-warn">{parentValidation}</div>
-            )}
-          </section>
-
-          {/* ── Section: WHAT — title, body, tags ── */}
-          <section className="stash-section">
-            <div className="stash-section-head">
-              <span className="stash-section-label">What</span>
-              <span className="stash-section-rule" aria-hidden="true" />
-            </div>
-
-            {/* Title */}
-            <label className="stash-field">
-              <span className="stash-label">Title</span>
-              <input
-                ref={titleRef}
-                type="text"
-                className="stash-input stash-input-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Look into garden lens"
-                required
-                maxLength={200}
-              />
-              {title.trim() && (
-                <div className="stash-receipt">
-                  <span className="stash-receipt-key">slug</span>
-                  <span className="stash-receipt-sep">›</span>
-                  <code className="stash-receipt-val">
-                    {parentSlug ? `${parentSlug}/` : ''}{slugStem(title) || 'stash-…'}
-                  </code>
-                </div>
-              )}
-            </label>
-
-            {/* Body */}
-            <label className="stash-field">
-              <span className="stash-label">
-                Body <span className="stash-optional">opt</span>
-              </span>
-              <textarea
-                className="stash-textarea"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Free-form blabbing — paragraphs, code, whatever. Skip if title is enough."
-                rows={3}
-              />
-            </label>
-
-            {/* Tags */}
-            <div className="stash-field">
-              <span className="stash-label">
-                Tags <span className="stash-optional">opt</span>
-              </span>
-              <div className="stash-chips">
-                {tags.map((t) => (
-                  <span key={t} className="stash-chip">
-                    {t}
-                    <button
-                      type="button"
-                      className="stash-chip-x"
-                      onClick={() => removeTag(t)}
-                      aria-label={`Remove tag ${t}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  type="text"
-                  className="stash-tag-input"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleTagKeyDown}
-                  placeholder={tags.length === 0 ? 'tag, then Enter' : ''}
-                />
-              </div>
-              {filteredSuggestions.length > 0 && tagInput && (
-                <div className="stash-suggestions" role="listbox">
-                  {filteredSuggestions.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      className="stash-suggestion"
-                      onClick={() => addTag(t)}
-                      role="option"
-                      aria-selected="false"
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* ── Section: DISPATCH — agent + kind (+ schedule when standing) ── */}
-          <section className="stash-section">
-            <div className="stash-section-head">
-              <span className="stash-section-label">Dispatch</span>
-              <span className="stash-section-rule" aria-hidden="true" />
-            </div>
-            <div className="stash-row stash-row-dispatch">
-              {/* Agent */}
-              <div className="stash-field">
-                <span className="stash-label">Agent</span>
-                {agents.length > 0 ? (
-                  <select
-                    className="stash-select"
-                    value={agentId}
-                    onChange={(e) => handleAgentChange(e.target.value)}
-                  >
-                    <option value="">Default ({defaultAgentLabel})</option>
-                    {agentGroups(agents).map((group) => (
-                      <optgroup key={group.label} label={group.label}>
-                        {group.agents.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {agentLabel(a)}{a.default ? ' (default)' : ''}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    className="stash-input"
-                    value={agentId}
-                    onChange={(e) => setAgentId(e.target.value)}
-                    placeholder="Use the registry default"
-                  />
-                )}
-              </div>
-
-              {/* Effort — registry-gated reasoning-effort axis. */}
-              <div className="stash-field">
-                <span className="stash-label">
-                  Effort
-                </span>
-                <select
-                  className="stash-select"
-                  value={effectiveEffort}
-                  onChange={(e) => setEffort(e.target.value)}
-                  disabled={effortLevels.length === 0}
+      <div className="form-sheet" onKeyDown={handleKeyDown}>
+        <Field label="Title">
+          <input
+            ref={titleRef}
+            type="text"
+            className="form-input stash-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Look into garden lens"
+            required
+            maxLength={200}
+          />
+          {title.trim() && (
+            <span className="stash-receipt">
+              <span className="stash-receipt-key">slug</span>
+              <span className="stash-receipt-sep">›</span>
+              <code className="stash-receipt-val">
+                {parentSlug ? `${parentSlug}/` : ''}{slugStem(title) || 'stash-…'}
+              </code>
+            </span>
+          )}
+        </Field>
+        <Field label="Body" optional>
+          <textarea
+            className="form-textarea"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Free-form — paragraphs, code, whatever. Skip it if the title is enough."
+            rows={3}
+          />
+        </Field>
+        <Field label="Tags" optional as="div">
+          <div className="stash-chips">
+            {tags.map((t) => (
+              <span key={t} className="stash-chip">
+                {t}
+                <button
+                  type="button"
+                  className="stash-chip-x"
+                  onClick={() => removeTag(t)}
+                  aria-label={`Remove tag ${t}`}
                 >
-                  {effortLevels.map((lvl) => (
-                    <option key={lvl} value={lvl}>
-                      {lvl}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {isCodexAgent(constraintAgent) && (
-                <label className="stash-field stash-session-field">
-                  <span className="stash-label">Session</span>
-                  <select className="stash-select"
-                    aria-label="Session"
-                    value={surface}
-                    onChange={(e) => setSurface(e.target.value as ExecutionSurface)}>
-                    <option value="app">ChatGPT app</option>
-                    <option value="cli">Terminal</option>
-                  </select>
-                  <span className="stash-session-help">{sessionHelp(surface)}</span>
-                </label>
-              )}
-
-              {/* Kind — segmented control */}
-              <div className="stash-field">
-                <span className="stash-label">Kind</span>
-                <div className="stash-segmented" role="radiogroup" aria-label="Dispatch kind">
-                  {KIND_SEGMENTS.map(([value, name, hint]) => (
-                    <label
-                      key={value}
-                      className={
-                        kind === value ? 'stash-segment stash-segment-active' : 'stash-segment'
-                      }
-                    >
-                      <input
-                        type="radio"
-                        name="stash-kind"
-                        value={value}
-                        checked={kind === value}
-                        onChange={() => setKind(value)}
-                      />
-                      <span className="stash-segment-name">{name}</span>
-                      <span className="stash-segment-hint">{hint}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Schedule + timezone, only when kind=standing */}
-            {kind === 'standing' && (
-              <div className="stash-row stash-row-schedule">
-                <label className="stash-field">
-                  <span className="stash-label">Schedule</span>
-                  <input
-                    type="text"
-                    className="stash-input stash-input-mono"
-                    value={schedule}
-                    onChange={(e) => setSchedule(e.target.value)}
-                    placeholder="0 9 * * 1-5"
-                    required
-                  />
-                  <div className="stash-hint">
-                    5-field cron · e.g. <code>0 9 * * 1-5</code> (weekdays 09:00)
-                  </div>
-                </label>
-                <label className="stash-field">
-                  <span className="stash-label">Timezone</span>
-                  <input
-                    type="text"
-                    className="stash-input"
-                    value={scheduleTz}
-                    onChange={(e) => setScheduleTz(e.target.value)}
-                    placeholder="Europe/Paris"
-                  />
-                  <div className="stash-hint">IANA name</div>
-                </label>
-              </div>
-            )}
-
-            {/* Worker-launch flags */}
-            <div className="stash-field stash-field-flags">
-              <span className="stash-label">Launch flags</span>
-              <div className="stash-flag-row">
-                <label className="stash-flag" style={chromeCapable ? undefined : { opacity: 0.45, cursor: 'not-allowed' }}>
-                  <input
-                    type="checkbox"
-                    checked={chrome}
-                    disabled={!chromeCapable}
-                    onChange={(e) => setChrome(e.target.checked)}
-                  />
-                  <span className="stash-flag-name">
-                    <code>--chrome</code>
-                  </span>
-                  <span className="stash-flag-hint">
-                    {chromeCapable ? 'browser automation mode' : 'claude harness only'}
-                  </span>
-                </label>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Error ── */}
-          {error && (
-            <div className="stash-error" role="alert">
-              {error}
+                  ×
+                </button>
+              </span>
+            ))}
+            <input
+              type="text"
+              className="stash-tag-input"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              placeholder={tags.length === 0 ? 'tag, then Enter' : ''}
+            />
+          </div>
+          {filteredSuggestions.length > 0 && tagInput && (
+            <div className="stash-suggestions" role="listbox">
+              {filteredSuggestions.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="stash-suggestion"
+                  onClick={() => addTag(t)}
+                  role="option"
+                  aria-selected="false"
+                >
+                  {t}
+                </button>
+              ))}
             </div>
           )}
+        </Field>
+        <div className="form-controls">
+          {/* Rendered even with no projects, as long as there is a way to add
+              one: the project select's "Add a new project…" entry is how a
+              host with an empty list bootstraps its first. */}
+          {(projects.length > 0 || onProjectAdded) && (
+            <HostProjectFields
+              hosts={hosts}
+              selectedHostId={selectedHostId}
+              onHostChange={handleHostChange}
+              projects={hostProjects}
+              selectedProjectId={selectedProjectId}
+              onProjectChange={setSelectedProjectId}
+              onAddProject={onProjectAdded ? addProject.begin : undefined}
+            />
+          )}
+          <Field label="Agent">
+            {agents.length > 0 ? (
+              <select
+                className="form-select"
+                value={agentId}
+                onChange={(e) => handleAgentChange(e.target.value)}
+              >
+                <option value="">Default ({defaultAgentLabel})</option>
+                {agentGroups(agents).map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.id}{a.default ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                className="form-input"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                placeholder="Registry default"
+              />
+            )}
+          </Field>
+          <EffortField agent={constraintAgent} effort={effort} onChange={setEffort} />
+          <Field label="Parent fiber" optional as="div" className="form-span-2">
+            <ParentPicker
+              value={parentSlug}
+              onChange={setParentSlug}
+              scopePrefix={selectedProject?.loomPrefix ?? ''}
+              shuttleBase={shuttleBase}
+            />
+          </Field>
+          <Field label="Kind" as="div" className="form-span-2">
+            <div className="stash-segmented" role="radiogroup" aria-label="Dispatch kind">
+              {KIND_SEGMENTS.map(([value, name, hint]) => (
+                <label
+                  key={value}
+                  className={kind === value ? 'stash-segment stash-segment-active' : 'stash-segment'}
+                >
+                  <input
+                    type="radio"
+                    name="stash-kind"
+                    value={value}
+                    checked={kind === value}
+                    onChange={() => setKind(value)}
+                  />
+                  <span className="stash-segment-name">{name}</span>
+                  <span className="stash-segment-hint">{hint}</span>
+                </label>
+              ))}
+            </div>
+          </Field>
+          {kind === 'standing' && (
+            <>
+              <Field label="Schedule" className="form-span-2">
+                <input
+                  type="text"
+                  className="form-input form-mono"
+                  value={schedule}
+                  onChange={(e) => setSchedule(e.target.value)}
+                  placeholder="0 9 * * 1-5"
+                  required
+                />
+                <span className="form-hint">
+                  5-field cron · e.g. <code>0 9 * * 1-5</code> (weekdays 09:00)
+                </span>
+              </Field>
+              <Field label="Timezone" className="form-span-2">
+                <input
+                  type="text"
+                  className="form-input"
+                  value={scheduleTz}
+                  onChange={(e) => setScheduleTz(e.target.value)}
+                  placeholder="Europe/Paris"
+                />
+                <span className="form-hint">IANA name</span>
+              </Field>
+            </>
+          )}
+          {isCodexAgent(constraintAgent) && (
+            <SessionField surface={surface} onChange={setSurface} />
+          )}
         </div>
-
-        <div className="stash-footer">
-          <div className="stash-hint stash-hint-foot">
-            <kbd>Esc</kbd> cancel <span className="stash-hint-dot">·</span> <kbd>⌘↵</kbd> save
-          </div>
-          <div className="stash-buttons">
-            <button
-              type="button"
-              className="stash-btn stash-btn-cancel"
-              onClick={onCancel}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="stash-btn stash-btn-save"
-              onClick={() => void submit()}
-              disabled={submitting || !title.trim()}
-            >
-              {submitting ? 'Stashing…' : 'Stash'}
-            </button>
-          </div>
-        </div>
+        {addProject.pathOpen && onProjectAdded && (
+          <AddProjectPath
+            hostLabel={selectedHost.label}
+            busy={addProject.busy}
+            error={addProject.pathError}
+            onSubmit={addProject.submitPath}
+            onCancel={addProject.closePath}
+          />
+        )}
+        {parentValidation && <div className="form-hint form-hint-warn">{parentValidation}</div>}
+        <ChromeFlag checked={chrome} capable={chromeCapable} onChange={setChrome} />
+        <FormError error={error} />
+        <FormFoot
+          verb="stash"
+          submitLabel={submitting ? 'Stashing…' : 'Stash'}
+          submitting={submitting}
+          disabled={submitting || !title.trim()}
+          tone="brass"
+          onCancel={onCancel}
+          onSubmit={() => void submit()}
+        />
       </div>
-    </div>
+    </AppDialog>
   )
 }
 
-/** Inject the StashForm's CSS, and the shared pickers' sheet it draws on. */
+/**
+ * Inject the Stash dialog's CSS: the shared form sheet, plus the parts only
+ * Stash has — the slug receipt, tag chips, the parent dropdown and the kind
+ * segments.
+ */
 export function injectStashFormStyles(): void {
+  injectFormKitStyles()
   injectStyles('stash-form-styles', `
-    .stash-scrim {
-      position: fixed;
-      inset: 0;
-      background: rgba(46, 42, 38, 0.45);
-      z-index: 10001;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      padding: 40px 20px 20px;
-      overflow: auto;
-      animation: stash-scrim-in 120ms ease-out;
-    }
-    @keyframes stash-scrim-in {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    .stash-card {
-      width: 100%;
-      max-width: 880px;
-      max-height: calc(100vh - 80px);
-      background: #F4F0E8;
-      background-image:
-        linear-gradient(135deg, rgba(154, 123, 53, 0.025) 0%, transparent 60%),
-        linear-gradient(315deg, rgba(46, 42, 38, 0.020) 0%, transparent 70%);
-      border: 1px solid rgba(46, 42, 38, 0.22);
-      border-radius: 4px;
-      box-shadow:
-        0 1px 0 rgba(255, 252, 245, 0.6) inset,
-        0 14px 36px rgba(46, 42, 38, 0.26),
-        0 2px 6px rgba(46, 42, 38, 0.12);
-      font-family: var(--font-main, 'EB Garamond', serif);
-      color: #2E2A26;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      animation: stash-card-in 160ms ease-out;
-    }
-    @keyframes stash-card-in {
-      from { transform: translateY(-6px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-    .stash-header {
-      position: relative;
-      padding: 14px 22px 12px;
-      background: #E5DED2;
-      border-bottom: 1px solid rgba(46, 42, 38, 0.10);
-      flex: none;
-    }
-    .stash-header-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 12px;
-    }
+    /* The title is Stash's lead field, as the yap is Capture's: 17px. */
     .stash-title {
-      margin: 0;
-      font-size: 19px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-    }
-    .stash-eyebrow {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: #9A8E80;
-    }
-    .stash-subtitle {
-      font-style: italic;
-      font-size: 13px;
-      color: #7A7068;
-      margin-top: 2px;
-    }
-    .stash-header-rule {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: -1px;
-      height: 1px;
-      background: linear-gradient(
-        to right,
-        transparent 0%,
-        rgba(154, 123, 53, 0.0) 6%,
-        rgba(154, 123, 53, 0.55) 50%,
-        rgba(154, 123, 53, 0.0) 94%,
-        transparent 100%
-      );
-    }
-    .stash-body {
-      padding: 14px 22px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      overflow-y: auto;
-      flex: 1 1 auto;
-    }
-    .stash-section {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .stash-section-head {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .stash-section-label {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: #C49333;
-      flex: none;
-    }
-    .stash-section-rule {
-      flex: 1;
-      height: 1px;
-      background: linear-gradient(
-        to right,
-        rgba(46, 42, 38, 0.18) 0%,
-        rgba(46, 42, 38, 0.05) 100%
-      );
-    }
-    .stash-row {
-      display: grid;
-      gap: 12px;
-    }
-    /* Host · project · parent fiber, in equal columns. Host and project are
-       both native selects now, and a select sized to its content would make
-       the row read as three unrelated widths; equal thirds of the 880px card
-       hold the project names without squeezing. */
-    .stash-row-3 {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .stash-row-schedule {
-      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-      margin-top: 2px;
-    }
-    .stash-row-dispatch {
-      grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
-    }
-    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-      .stash-row-3,
-      .stash-row-dispatch,
-      .stash-row-schedule {
-        grid-template-columns: 1fr;
-      }
-    }
-    .stash-session-field { grid-column: 1 / -1; }
-    .stash-session-help { font-size: 12px; line-height: 1.4; color: #756B60; }
-    .stash-field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-width: 0;
-    }
-    .stash-label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #5C544D;
-      display: inline-flex;
-      align-items: baseline;
-      gap: 6px;
-    }
-    .stash-optional {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 9.5px;
-      font-weight: 400;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: #B5A998;
-      padding: 0 4px;
-      border: 1px solid rgba(46, 42, 38, 0.10);
-      border-radius: 2px;
-    }
-    .stash-input,
-    .stash-textarea,
-    .stash-tag-input,
-    .stash-select {
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
-      color: #2E2A26;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
-      border-radius: 3px;
-      padding: 6px 9px;
-      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .stash-input-title {
       font-size: 17px;
-      padding: 7px 10px;
-    }
-    .stash-select {
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237A7068'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      padding-right: 28px;
-      cursor: pointer;
-    }
-    .stash-input-mono {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 13px;
-      letter-spacing: 0.02em;
-    }
-    .stash-textarea {
-      resize: vertical;
-      min-height: 64px;
-      line-height: 1.45;
-    }
-    .stash-input:focus,
-    .stash-textarea:focus,
-    .stash-tag-input:focus,
-    .stash-select:focus {
-      outline: none;
-      border-color: #C49333;
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
-    }
-    .stash-hint {
-      font-size: 12px;
-      color: #7A7068;
-      font-style: italic;
-    }
-    .stash-hint code {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 11px;
-      font-style: normal;
-      background: rgba(46, 42, 38, 0.06);
-      padding: 1px 5px;
-      border-radius: 2px;
-    }
-    .stash-hint-warn {
-      color: #8C5A1A;
-      font-style: normal;
+      padding: 8px 11px;
     }
     .stash-receipt {
       display: inline-flex;
       align-items: center;
       gap: 6px;
       align-self: flex-start;
-      margin-top: 2px;
       padding: 2px 8px;
       background: rgba(255, 252, 245, 0.7);
       border: 1px dashed rgba(154, 123, 53, 0.42);
@@ -1124,11 +731,12 @@ export function injectStashFormStyles(): void {
       flex-wrap: wrap;
       gap: 6px;
       align-items: center;
-      padding: 6px 8px;
+      box-sizing: border-box;
+      padding: 5px 8px;
       background: #FFFFFF;
       border: 1px solid rgba(46, 42, 38, 0.20);
       border-radius: 3px;
-      min-height: 34px;
+      min-height: 36px;
     }
     .stash-chips:focus-within {
       border-color: #C49333;
@@ -1163,15 +771,21 @@ export function injectStashFormStyles(): void {
       flex: 1;
       min-width: 100px;
       border: 0;
+      outline: none;
       padding: 2px 4px;
       background: transparent;
-      box-shadow: none !important;
+      font-family: var(--font-main, 'EB Garamond', serif);
+      font-size: 15px;
+      color: #2E2A26;
+    }
+    .stash-tag-input::placeholder {
+      color: #9A8E80;
+      font-style: italic;
     }
     .stash-suggestions {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
-      margin-top: 6px;
     }
     .stash-suggestion {
       background: rgba(46, 42, 38, 0.05);
@@ -1249,12 +863,16 @@ export function injectStashFormStyles(): void {
       font-style: italic;
       cursor: default;
     }
+    /* Two segments in one box the height of a select, so the kind sits on the
+       control row's baseline beside the parent picker. */
     .stash-segmented {
+      box-sizing: border-box;
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0;
-      padding: 3px;
-      background: #FFFFFF;
+      gap: 2px;
+      height: 36px;
+      padding: 2px;
+      background: rgba(46, 42, 38, 0.035);
       border: 1px solid rgba(46, 42, 38, 0.20);
       border-radius: 3px;
     }
@@ -1264,15 +882,16 @@ export function injectStashFormStyles(): void {
     }
     .stash-segment {
       display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1px;
-      padding: 5px 9px;
+      align-items: baseline;
+      gap: 7px;
+      padding: 0 10px;
+      line-height: 30px;
       border-radius: 2px;
       cursor: pointer;
-      transition: background 120ms ease-out, color 120ms ease-out;
-      color: #5C544D;
+      color: #7A7068;
       min-width: 0;
+      overflow: hidden;
+      transition: background 120ms ease-out, color 120ms ease-out;
     }
     .stash-segment input[type="radio"] {
       position: absolute;
@@ -1282,203 +901,26 @@ export function injectStashFormStyles(): void {
       height: 0;
     }
     .stash-segment-name {
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.2;
+      font-size: 15px;
+      flex: none;
     }
     .stash-segment-hint {
-      font-size: 11px;
+      font-size: 12px;
       font-style: italic;
       color: #9A8E80;
-      line-height: 1.2;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 100%;
+      min-width: 0;
     }
-    .stash-segment:hover {
-      background: rgba(154, 123, 53, 0.08);
+    .stash-segment:hover:not(.stash-segment-active) {
+      color: #2E2A26;
     }
     .stash-segment-active {
-      background: rgba(154, 123, 53, 0.18);
-      color: #5A4520;
-      box-shadow: inset 0 0 0 1px rgba(154, 123, 53, 0.42);
-    }
-    .stash-segment-active .stash-segment-hint {
-      color: #7A6028;
-    }
-    .stash-field-flags {
-      margin-top: 2px;
-    }
-    .stash-flag-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      padding: 6px 2px 0;
-    }
-    .stash-flag {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      user-select: none;
-      font-size: 13px;
       color: #2E2A26;
+      background: #FFFFFF;
+      box-shadow: 0 0 0 1px rgba(46, 42, 38, 0.12), 0 1px 2px rgba(46, 42, 38, 0.10);
+      cursor: default;
     }
-    .stash-flag input[type="checkbox"] {
-      width: 14px;
-      height: 14px;
-      margin: 0;
-      accent-color: #9A7B35;
-      cursor: pointer;
-    }
-    .stash-flag-name {
-      font-family: var(--font-main, 'EB Garamond', serif);
-    }
-    .stash-flag-name code {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 12px;
-      background: rgba(46, 42, 38, 0.06);
-      padding: 1px 5px;
-      border-radius: 2px;
-      color: #5A4520;
-    }
-    .stash-flag-hint {
-      font-style: italic;
-      font-size: 12px;
-      color: #7A7068;
-    }
-    .stash-error {
-      padding: 8px 10px;
-      background: rgba(178, 78, 60, 0.12);
-      border: 1px solid rgba(178, 78, 60, 0.5);
-      color: #8B3A28;
-      font-size: 13px;
-      border-radius: 2px;
-    }
-    .stash-footer {
-      padding: 10px 22px 14px;
-      border-top: 1px solid rgba(46, 42, 38, 0.10);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: #EFEAE0;
-      flex: none;
-    }
-    .stash-hint-foot {
-      font-style: normal;
-      color: #7A7068;
-      font-size: 11px;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .stash-hint-dot {
-      color: #B5A998;
-    }
-    .stash-hint-foot kbd {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10px;
-      background: rgba(46, 42, 38, 0.10);
-      padding: 1px 5px;
-      border-radius: 2px;
-      border: 1px solid rgba(46, 42, 38, 0.16);
-      color: #4C453F;
-    }
-    .stash-buttons {
-      display: flex;
-      gap: 8px;
-    }
-    .stash-btn {
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 14px;
-      padding: 6px 16px;
-      border-radius: 3px;
-      border: 1px solid transparent;
-      cursor: pointer;
-      transition: background 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
-      letter-spacing: 0.01em;
-    }
-    .stash-btn-cancel {
-      background: transparent;
-      color: #7A7068;
-      border-color: rgba(46, 42, 38, 0.20);
-    }
-    .stash-btn-cancel:hover:not(:disabled) {
-      background: rgba(46, 42, 38, 0.06);
-      color: #2E2A26;
-    }
-    .stash-btn-save {
-      background: #C49333;
-      color: #FFFFFF;
-      border-color: #7A6028;
-      box-shadow: 0 1px 0 rgba(255, 252, 245, 0.25) inset;
-    }
-    .stash-btn-save:hover:not(:disabled) {
-      background: #B08D3D;
-    }
-    .stash-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    /* ── The sheet: the form below 700px ──────────────────────────────────
-       LAST IN THE SHEET ON PURPOSE. Every rule here is a single class
-       answering another single class defined above it, so cascade order is
-       the only thing that decides — move this block up and the phone
-       silently gets the desktop's footer back. */
-    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-      /* The card stops being a card. A phone has no room to float paper over
-         anything, so the scrim's padding goes and the form takes the screen —
-         header, one scrolling body, and the footer pinned to the bottom edge,
-         which is the only place Save can be while a keyboard is up. */
-      .stash-scrim {
-        padding: 0;
-        overflow: hidden;
-        align-items: stretch;
-      }
-      .stash-card {
-        max-width: none;
-        /* dvh, not vh: mobile browser chrome collapses, and vh keeps promising
-           a taller screen than there is — which strands the footer below the
-           fold exactly when the keyboard needs it visible. */
-        height: 100dvh;
-        max-height: 100dvh;
-        border: none;
-        border-radius: 0;
-        box-shadow: none;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-      }
-      .stash-header { padding: 12px 16px 10px; }
-      .stash-body { padding: 12px 16px 16px; }
-      .stash-footer {
-        padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
-        flex-wrap: wrap;
-      }
-      /* The Esc / ⌘↵ hint is a keyboard's line; a phone has neither key. */
-      .stash-hint-foot { display: none; }
-      .stash-buttons {
-        flex: 1;
-        gap: 10px;
-      }
-      .stash-btn {
-        flex: 1;
-        min-height: 44px;
-        font-size: 15px;
-      }
-      /* iOS zooms the page on focus for any field under 16px, and a zoomed
-         page cannot be scrolled back. Every field, no exceptions. */
-      .stash-input,
-      .stash-textarea,
-      .stash-tag-input,
-      .stash-select,
-      .stash-input-title {
-        font-size: 16px;
-        padding: 9px 10px;
-      }
-      .stash-select { padding-right: 30px; }
-    }
-
   `)
-  injectProjectPickerStyles()
 }

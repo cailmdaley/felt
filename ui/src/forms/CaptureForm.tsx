@@ -17,16 +17,10 @@
  * project picker offers remote projects too.
  *
  * Built on AppDialog (Radix) — focus trap, Esc, portal, scroll lock for free.
- * Cmd/Ctrl+Enter submits.
- *
- * **One sheet, one grid.** Everything inside the card is styled by
- * `injectCaptureFormStyles` (below), not by inline objects. That is what keeps
- * the yap, the four-control row and the footer on a single alignment grid:
- * every block is a full-width child of `.capture-form`, and all four selects
- * share one `.capture-select` rule, so their boxes are identical by
- * construction rather than by two style sources agreeing. The type scale is
- * Stash's — 19px title, 15px controls, 11px labels — with the yap itself at
- * 17px, since it is the one field the whole dialog exists for.
+ * Cmd/Ctrl+Enter submits. The column, the control row, the session and
+ * `--chrome` controls and the footer are formKit's, shared with StashForm;
+ * the yap (17px, the one field the dialog exists for) and the meeting row are
+ * Capture's own.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -37,14 +31,18 @@ import { daemonErrorMessage } from '../board/daemonApi'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
 import type { Host, Project } from './projectModel'
-import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
+import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
+import { AddProjectPath, useProjectSelection } from './ProjectPicker'
 import {
-  AddProjectPath,
-  HostPicker,
-  ProjectPicker,
-  injectProjectPickerStyles,
-  useProjectSelection,
-} from './ProjectPicker'
+  ChromeFlag,
+  EffortField,
+  Field,
+  FormError,
+  FormFoot,
+  HostProjectFields,
+  SessionField,
+  injectFormKitStyles,
+} from './formKit'
 
 /**
  * Shown until the registry answers, and kept when it cannot. The live list
@@ -146,7 +144,6 @@ export function CaptureForm({
   }, [shuttleBase])
 
   const agentRec = agents.find((a) => a.id === agent)
-  const effortLevels = agentRec?.effort_levels ?? []
   const effectiveEffort = resolveEffort(agentRec, effort)
   const chromeCapable = agentRec?.chrome_capable ?? false
 
@@ -225,7 +222,7 @@ export function CaptureForm({
       title={meetingEnabled ? 'Start a meeting' : 'New idea'}
       eyebrow="shuttle · capture"
     >
-      <div className="capture-form" onKeyDown={handleKeyDown}>
+      <div className="form-sheet" onKeyDown={handleKeyDown}>
         <textarea
           ref={textareaRef}
           className="capture-yap"
@@ -241,42 +238,21 @@ export function CaptureForm({
             onChange={setMeetingMode}
           />
         )}
-        {/* Host · project · agent · effort — four equal grid columns rather
-            than flex children, so the last column's right edge is the
-            container's right edge exactly, and a narrow card breaks 2×2
-            instead of stranding one control on its own row. */}
-        <div className="capture-controls">
-          {/* Host, then project — the same pair Stash uses. The project half is
-              a native <select> too: its "Add a new project…" entry is a
-              sentinel option, restored on change, so it never becomes a
-              selected state (see ProjectPicker). */}
+        <div className="form-controls">
           {(projects.length > 0 || onProjectAdded) && (
-            <>
-              <div className="capture-field">
-                <span className="capture-label">Host</span>
-                <HostPicker
-                  hosts={hosts}
-                  selectedId={selectedHostId}
-                  onSelect={handleHostChange}
-                  className="capture-select"
-                />
-              </div>
-              <div className="capture-field">
-                <span className="capture-label">Project</span>
-                <ProjectPicker
-                  projects={hostProjects}
-                  selectedId={selectedProjectId}
-                  onSelect={setSelectedProjectId}
-                  onAddProject={onProjectAdded ? addProject.begin : undefined}
-                  className="capture-select"
-                />
-              </div>
-            </>
+            <HostProjectFields
+              hosts={hosts}
+              selectedHostId={selectedHostId}
+              onHostChange={handleHostChange}
+              projects={hostProjects}
+              selectedProjectId={selectedProjectId}
+              onProjectChange={setSelectedProjectId}
+              onAddProject={onProjectAdded ? addProject.begin : undefined}
+            />
           )}
-          <label className="capture-field">
-            <span className="capture-label">Agent</span>
+          <Field label="Agent">
             <select
-              className="capture-select capture-agent"
+              className="form-select"
               value={agent}
               onChange={(e) => handleAgentChange(e.target.value)}
             >
@@ -290,36 +266,10 @@ export function CaptureForm({
                 </optgroup>
               ))}
             </select>
-          </label>
-          <label className="capture-field">
-            <span className="capture-label">Effort</span>
-            <select
-              className="capture-select capture-effort"
-              value={effectiveEffort}
-              onChange={(e) => setEffort(e.target.value)}
-              disabled={effortLevels.length === 0}
-            >
-              {effortLevels.map((lvl) => (
-                <option key={lvl} value={lvl}>
-                  {lvl}
-                </option>
-              ))}
-            </select>
-          </label>
+          </Field>
+          <EffortField agent={agentRec} effort={effort} onChange={setEffort} />
           {isCodexAgent(agentRec) && !meetingEnabled && (
-            <label className="capture-field capture-session-field">
-              <span className="capture-label">Session</span>
-              <select
-                aria-label="Session"
-                className="capture-select"
-                value={surface}
-                onChange={(e) => setSurface(e.target.value as ExecutionSurface)}
-              >
-                <option value="app">ChatGPT app</option>
-                <option value="cli">Terminal</option>
-              </select>
-              <span className="capture-session-help">{sessionHelp(surface)}</span>
-            </label>
+            <SessionField surface={surface} onChange={setSurface} />
           )}
         </div>
         {addProject.pathOpen && onProjectAdded && (
@@ -331,48 +281,17 @@ export function CaptureForm({
             onCancel={addProject.closePath}
           />
         )}
-        <label
-          className={`capture-chrome${chromeCapable ? '' : ' capture-chrome-off'}`}
-        >
-          <input
-            type="checkbox"
-            checked={chrome}
-            disabled={!chromeCapable}
-            onChange={(e) => setChrome(e.target.checked)}
-          />
-          <code>--chrome</code>
-          <span className="capture-chrome-hint">
-            {chromeCapable ? 'browser automation mode' : 'claude harness only'}
-          </span>
-        </label>
-        {error && (
-          <div className="capture-error" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="capture-foot">
-          <span className="capture-foot-hint">
-            <kbd>Esc</kbd> cancel <span className="capture-foot-dot">·</span> <kbd>⌘↵</kbd> {meetingEnabled ? 'start meeting' : 'spawn'}
-          </span>
-          <div className="capture-buttons">
-            <button
-              type="button"
-              className="capture-btn capture-cancel"
-              onClick={onCancel}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="capture-btn capture-submit"
-              onClick={() => void submit()}
-              disabled={submitting || (!meetingEnabled && !prompt.trim())}
-            >
-              {submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
-            </button>
-          </div>
-        </div>
+        <ChromeFlag checked={chrome} capable={chromeCapable} onChange={setChrome} />
+        <FormError error={error} />
+        <FormFoot
+          verb={meetingEnabled ? 'start meeting' : 'spawn'}
+          submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
+          submitting={submitting}
+          disabled={submitting || (!meetingEnabled && !prompt.trim())}
+          tone="cobalt"
+          onCancel={onCancel}
+          onSubmit={() => void submit()}
+        />
       </div>
     </AppDialog>
   )
@@ -424,26 +343,12 @@ export function MeetingControl({ mode, disabled, onChange }: {
 }
 
 /**
- * Inject the Capture dialog's CSS, and the shared pickers' sheet
- * `AddProjectPath` draws on.
- *
- * Every measurable value the alignment depends on lives here and nowhere else:
- * `.capture-form`'s children are all full-width blocks on one column, and the
- * four controls share `.capture-select`, so equal boxes are a property of the
- * markup rather than a coincidence between two style sources.
+ * Inject the Capture dialog's CSS: the shared form sheet, plus the two parts
+ * only Capture has — the yap and the meeting row.
  */
 export function injectCaptureFormStyles(): void {
+  injectFormKitStyles()
   injectStyles('capture-form-styles', `
-    .capture-form {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      color: #2E2A26;
-    }
-    .capture-form > * {
-      box-sizing: border-box;
-    }
     /* The yap. 17px because this is the dialog's one piece of prose — the
        controls beneath it read at 15px, the labels at 11px. */
     .capture-yap {
@@ -563,174 +468,5 @@ export function injectCaptureFormStyles(): void {
       opacity: 0.5;
       cursor: not-allowed;
     }
-    .capture-controls {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }
-    @media (max-width: 640px) {
-      .capture-controls {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-    .capture-session-field { grid-column: 1 / -1; }
-    .capture-session-help { font-size: 12px; line-height: 1.4; color: #756B60; }
-    .capture-field {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      min-width: 0;
-    }
-    .capture-label {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #5C544D;
-      line-height: 1;
-    }
-    /* One rule for all four controls. Custom chevron (so the four boxes are
-       identical rather than at the mercy of native select metrics) and
-       border-box sizing, so each column's control fills its track exactly. */
-    .capture-select {
-      width: 100%;
-      box-sizing: border-box;
-      appearance: none;
-      -webkit-appearance: none;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
-      line-height: 1.3;
-      color: #2E2A26;
-      background-color: #FFFFFF;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237A7068'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      border: 1px solid rgba(46, 42, 38, 0.20);
-      border-radius: 3px;
-      padding: 7px 28px 7px 9px;
-      cursor: pointer;
-      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
-    }
-    .capture-select:focus {
-      outline: none;
-      border-color: #C49333;
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
-    }
-    .capture-select:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .capture-chrome {
-      display: inline-flex;
-      align-items: center;
-      align-self: flex-start;
-      gap: 8px;
-      font-size: 13px;
-      color: #2E2A26;
-      cursor: pointer;
-      user-select: none;
-    }
-    .capture-chrome-off {
-      cursor: not-allowed;
-      opacity: 0.45;
-    }
-    .capture-chrome input[type="checkbox"] {
-      width: 14px;
-      height: 14px;
-      margin: 0;
-      accent-color: #3D5BA0;
-      cursor: inherit;
-    }
-    .capture-chrome code {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 12px;
-      background: rgba(46, 42, 38, 0.06);
-      padding: 1px 5px;
-      border-radius: 2px;
-      color: #2C4378;
-    }
-    .capture-chrome-hint {
-      font-style: italic;
-      font-size: 12px;
-      color: #7A7068;
-    }
-    .capture-error {
-      padding: 8px 10px;
-      background: rgba(178, 78, 60, 0.12);
-      border: 1px solid rgba(178, 78, 60, 0.5);
-      color: #8B3A28;
-      font-size: 13px;
-      border-radius: 2px;
-    }
-    /* The footer sits below a hairline, the way Stash's does below its body. */
-    .capture-foot {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 2px;
-      padding-top: 13px;
-      border-top: 1px solid rgba(46, 42, 38, 0.10);
-    }
-    .capture-foot-hint {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 11px;
-      color: #7A7068;
-    }
-    .capture-foot-dot {
-      color: #B5A998;
-    }
-    .capture-foot-hint kbd {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10px;
-      background: rgba(46, 42, 38, 0.10);
-      padding: 1px 5px;
-      border-radius: 2px;
-      border: 1px solid rgba(46, 42, 38, 0.16);
-      color: #4C453F;
-    }
-    .capture-buttons {
-      display: flex;
-      gap: 8px;
-    }
-    .capture-btn {
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
-      letter-spacing: 0.01em;
-      padding: 6px 18px;
-      border-radius: 3px;
-      border: 1px solid transparent;
-      cursor: pointer;
-      transition: background 120ms ease-out, border-color 120ms ease-out;
-    }
-    .capture-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .capture-cancel {
-      background: transparent;
-      color: #7A7068;
-      border-color: rgba(46, 42, 38, 0.20);
-    }
-    .capture-cancel:hover:not(:disabled) {
-      background: rgba(46, 42, 38, 0.06);
-      color: #2E2A26;
-    }
-    /* Muted cobalt — matches the ✶ trigger and the In Flight lane accent. */
-    /* Wide enough for "Start meeting", so the meeting toggle leaves Cancel
-       where it was. */
-    .capture-submit {
-      min-width: 8em;
-      background: #3D5BA0;
-      color: #FFFFFF;
-      border-color: #2C4378;
-      box-shadow: 0 1px 0 rgba(255, 252, 245, 0.22) inset;
-    }
-    .capture-submit:hover:not(:disabled) {
-      background: #35508F;
-    }
   `)
-  injectProjectPickerStyles()
 }

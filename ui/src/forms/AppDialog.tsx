@@ -1,18 +1,16 @@
 /**
- * AppDialog — the paper card the Capture form and the settings sheet live in,
- * built on Radix Dialog.
+ * AppDialog — the paper card the Capture and Stash forms and the settings
+ * sheet live in, built on Radix Dialog.
  *
  * Gives focus trap, escape-to-close, accessible labelling, scroll lock, and
  * portal-to-body for free. The standalone UI has no competing modal stack, so
  * the z-index just needs to clear the board (10000/10001 for headroom).
  *
- * The chrome is the same manuscript language StashForm draws by hand: a warm
- * paper field (#F4F0E8) under a slightly darker header band, a brass hairline
- * under the header, and EB Garamond throughout. Stash builds its card from an
- * injected sheet because it has a dozen internal parts; this one is small
- * enough to carry its chrome inline, with a small sheet for the entrance
- * keyframes (CSS-only, so Radix's mount is what triggers it) and the geometry
- * a media query has to answer.
+ * The chrome is the board's manuscript language: a warm paper field (#F4F0E8)
+ * under a slightly darker header band, a brass hairline under the header, and
+ * EB Garamond throughout. It is small enough to carry inline, with a small
+ * sheet for the entrance keyframes (CSS-only, so Radix's mount is what
+ * triggers it) and the geometry a media query has to answer.
  */
 
 import * as Dialog from '@radix-ui/react-dialog'
@@ -86,10 +84,10 @@ function injectAppDialogStyles(): void {
          short (otherwise it floats mid-screen with a field of blank paper
          under it); sticky pins it when the content scrolls, which is the
          case that matters once the keyboard is up. */
-      .app-dialog-body > .capture-form {
+      .app-dialog-body > .form-sheet {
         min-height: 100%;
       }
-      .app-dialog-body > * > .capture-foot {
+      .app-dialog-body > * > .form-foot {
         margin-top: auto;
         position: sticky;
         bottom: -16px;
@@ -101,14 +99,14 @@ function injectAppDialogStyles(): void {
         border-top: 1px solid rgba(46, 42, 38, 0.10);
       }
       /* Esc and ⌘↵ are a keyboard's line, and a phone has neither key. */
-      .app-dialog-body > * > .capture-foot > .capture-foot-hint {
+      .app-dialog-body > * > .form-foot > .form-foot-hint {
         display: none;
       }
-      .app-dialog-body > * > .capture-foot > .capture-buttons {
+      .app-dialog-body > * > .form-foot > .form-buttons {
         flex: 1;
         gap: 10px;
       }
-      .app-dialog-body > * > .capture-foot > .capture-buttons > .capture-btn {
+      .app-dialog-body > * > .form-foot > .form-buttons > .form-btn {
         flex: 1;
       }
     }
@@ -158,7 +156,7 @@ const headerStyles: React.CSSProperties = {
   flex: 'none',
 }
 
-/** The brass hairline that fades out at both ends — Stash's `.stash-header-rule`. */
+/** The brass hairline under the header, fading out at both ends. */
 const headerRuleStyles: React.CSSProperties = {
   position: 'absolute',
   left: 0,
@@ -216,6 +214,14 @@ export function AppDialog({
           // explicitly opted out of. A dialog whose own fields say what it does
           // needs no gloss, so drop the attribute rather than invent one.
           aria-describedby={undefined}
+          // Escape from an open combobox closes its list, not the dialog. Radix
+          // hears the key first (a capture-phase listener), so the field's own
+          // handler cannot stop it; the field's aria-expanded is what says the
+          // key is spoken for.
+          onEscapeKeyDown={(event) => {
+            const target = event.target as Element | null
+            if (target?.getAttribute?.('aria-expanded') === 'true') event.preventDefault()
+          }}
         >
           <div style={headerStyles}>
             <div
