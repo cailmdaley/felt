@@ -531,15 +531,16 @@ func (s *Storage) Write(f *Felt) error {
 	return nil
 }
 
-// WriteFiberFile replaces the fiber file at path atomically (see
-// atomicfile). An existing file keeps its mode, as an in-place write would; a
-// new one is 0644.
+// WriteFiberFile replaces the fiber file at path atomically, so a concurrent
+// reader never sees it truncated, without fsync: fibers are git-tracked and
+// rewritten in bulk, which a per-file sync would make minutes slow (see
+// atomicfile). An existing file keeps its mode bits; a new one is 0644.
 func WriteFiberFile(path string, data []byte) error {
 	perm := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode().Perm()
 	}
-	return atomicfile.Write(path, data, perm)
+	return atomicfile.WriteUnsynced(path, data, perm)
 }
 
 // Read loads a felt from disk by ID.

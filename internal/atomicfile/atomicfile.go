@@ -3,10 +3,40 @@
 //
 // A replacement is written to a temp file in the target's own directory (a
 // rename is atomic only within one filesystem), under a hidden name ending in
-// .tmp that felt's store walkers never read as a fiber. The temp file is
-// fsynced, given the intended mode (os.CreateTemp makes it 0600), and renamed
-// over the target; the parent directory is then fsynced so the rename itself
-// survives power loss wherever the filesystem honours a directory sync.
+// .tmp that felt's store walkers never read as a fiber, given the intended
+// mode (os.CreateTemp makes it 0600), and renamed over the target.
+//
+// Two strengths, chosen by the caller:
+//
+//   - Write and Create are durable. The temp file is fsynced before the
+//     rename and the parent directory after it, so the new content survives
+//     power loss wherever the filesystem honours those syncs. They serve the
+//     small operator, config and receipt files that exist on one machine only
+//     (host.json, remotes.json, the dedup receipt, the mailbox, the plugin
+//     marker and journal, the transcript cache).
+//   - WriteUnsynced is atomic but not durable: no file or directory fsync. It
+//     serves fiber files, which are git-tracked (a crash loses at most what
+//     git can restore) and are rewritten in bulk by migrations, identity
+//     backfill and subtree moves. On macOS each fsync is an F_FULLFSYNC
+//     costing milliseconds, so a durable rewrite of a store of thousands of
+//     fibers takes minutes where an unsynced one takes about a second (see
+//     BenchmarkBulkRewrite).
+//
+// Once the rename has succeeded the new content is in place, so a failing
+// directory sync afterwards is not reported as a failed write.
+//
+// Because the target's inode is swapped rather than rewritten, a replacement
+// differs from an in-place os.WriteFile:
+//
+//   - only the mode bits are carried over (the caller passes them); owner,
+//     group, extended attributes and ACLs are those of a new file, and a hard
+//     link to the old file keeps the old content;
+//   - the target's directory must be writable, even when the file is;
+//   - a read-only file in a writable directory is replaced rather than
+//     refused;
+//   - a symlink is followed to the file it names, which is replaced while the
+//     link stays; a dangling symlink cannot be followed and is itself replaced
+//     by a regular file.
 package atomicfile
 
 import (
@@ -18,9 +48,20 @@ import (
 	"syscall"
 )
 
-// Write replaces path with data at mode perm.
+// Write durably replaces path with data at mode perm.
 func Write(path string, data []byte, perm os.FileMode) error {
-	f, err := Create(path, perm)
+	return write(path, data, perm, true)
+}
+
+// WriteUnsynced replaces path with data at mode perm, atomically for
+// concurrent readers but without fsync: after a crash the file may hold the
+// old content, or on some filesystems be empty.
+func WriteUnsynced(path string, data []byte, perm os.FileMode) error {
+	return write(path, data, perm, false)
+}
+
+func write(path string, data []byte, perm os.FileMode, durable bool) error {
+	f, err := create(path, perm, durable)
 	if err != nil {
 		return err
 	}
@@ -36,8 +77,9 @@ func Write(path string, data []byte, perm os.FileMode) error {
 // Commit does nothing, so `defer f.Abort()` is always safe.
 type File struct {
 	*os.File
-	target string
-	done   bool
+	target  string
+	durable bool
+	done    bool
 }
 
 // IsTemp reports whether name is the name of a temp file a replacement of a
@@ -46,10 +88,14 @@ func IsTemp(name, target string) bool {
 	return strings.HasPrefix(name, "."+target+"-") && strings.HasSuffix(name, ".tmp")
 }
 
-// Create starts a replacement of path at mode perm. The target's directory
-// must exist. A path that is a symlink is followed, as os.WriteFile follows
-// it: the file it names is replaced and the link stays.
+// Create starts a durable replacement of path at mode perm. The target's
+// directory must exist. A path that is a symlink is followed, as os.WriteFile
+// follows it: the file it names is replaced and the link stays.
 func Create(path string, perm os.FileMode) (*File, error) {
+	return create(path, perm, true)
+}
+
+func create(path string, perm os.FileMode, durable bool) (*File, error) {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		path = resolved
 	}
@@ -62,18 +108,23 @@ func Create(path string, perm os.FileMode) (*File, error) {
 		os.Remove(tmp.Name())
 		return nil, fmt.Errorf("setting mode of %s: %w", tmp.Name(), err)
 	}
-	return &File{File: tmp, target: path}, nil
+	return &File{File: tmp, target: path, durable: durable}, nil
 }
 
-// Commit syncs and closes the temp file, renames it over the target, and
-// syncs the target's directory.
+// Commit closes the temp file and renames it over the target. A durable
+// replacement syncs the temp file first and the target's directory after; a
+// directory sync failing once the rename has landed is ignored, since the
+// write itself has happened.
 func (f *File) Commit() error {
 	if f.done {
 		return fmt.Errorf("%s: replacement already finished", f.target)
 	}
 	f.done = true
 	name := f.Name()
-	err := f.Sync()
+	var err error
+	if f.durable {
+		err = f.Sync()
+	}
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -85,7 +136,10 @@ func (f *File) Commit() error {
 		os.Remove(name)
 		return fmt.Errorf("replacing %s: %w", f.target, err)
 	}
-	return SyncDir(filepath.Dir(f.target))
+	if f.durable {
+		_ = SyncDir(filepath.Dir(f.target))
+	}
+	return nil
 }
 
 // Abort discards an uncommitted replacement, leaving the target untouched.
