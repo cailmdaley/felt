@@ -15,7 +15,7 @@ defmodule Shuttle.FiberDoc do
   vanished from the kanban). Writes are atomic (tmp + rename).
   """
 
-  alias Shuttle.{FeltStores, FrontmatterEdit}
+  alias Shuttle.{FeltStores, FrontmatterEdit, Realpath}
 
   @doc """
   Read a fiber by id, returning `{:ok, path, raw_fm, frontmatter, body}`.
@@ -85,14 +85,46 @@ defmodule Shuttle.FiberDoc do
   the closing fence as bare `"---"` (no newline) — `body`'s leading `"\\n"`
   completes it. Writing `"---\\n"` here instead would double the newline and grow
   a blank line after the fence on every write.
+
+  The replacement goes through a hidden, per-write temp file beside the target
+  (`.<name>-<unique>.tmp`, the shape felt's own atomic writer uses and the
+  store `.gitignore` ignores), so concurrent writers never share a temp file.
+  A symlinked target is followed, as felt follows it: the file it names is
+  replaced and the link stays. The write takes no lock and does not fsync.
   """
   @spec write!(String.t(), String.t(), String.t(), [FrontmatterEdit.op()]) :: :ok
   def write!(path, raw_fm, body, ops) do
     new_fm = raw_fm |> FrontmatterEdit.apply(ops) |> ensure_single_trailing_newline()
-    tmp = path <> ".tmp"
-    File.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
-    File.rename!(tmp, path)
+    target = write_target(path)
+    tmp = temp_path(target)
+
+    try do
+      File.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
+      File.rename!(tmp, target)
+    rescue
+      error ->
+        File.rm(tmp)
+        reraise error, __STACKTRACE__
+    end
+
     :ok
+  end
+
+  # An existing symlink target is written through; a dangling link, which
+  # cannot be followed, is replaced like any other path.
+  defp write_target(path) do
+    with {:ok, %File.Stat{type: :symlink}} <- File.lstat(path),
+         true <- File.exists?(path),
+         {:ok, resolved} <- Realpath.resolve(path) do
+      resolved
+    else
+      _ -> path
+    end
+  end
+
+  defp temp_path(target) do
+    unique = "#{System.pid()}-#{System.unique_integer([:positive])}"
+    Path.join(Path.dirname(target), ".#{Path.basename(target)}-#{unique}.tmp")
   end
 
   defp resolve_path(fiber_id) do
