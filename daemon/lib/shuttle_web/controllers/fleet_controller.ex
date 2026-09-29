@@ -62,9 +62,9 @@ defmodule ShuttleWeb.FleetController do
   @registry_timeout_ms 1_500
   @cli_timeout_ms 60_000
   # The forward must outlast the work it forwards. `OriginRouter`'s default is
-  # 30s and the CLI on the far side is given 60s, so a tunnel install that took
-  # 40s used to surface here as "forward failed" while the jobs were being
-  # written — a page telling you a write did not land when it did. The margin
+  # 30s and the CLI on the far side is given 60s, so at the default a tunnel
+  # install that took 40s would surface here as "forward failed" while the jobs
+  # were being written — a page telling you a write did not land when it did. The margin
   # covers the far side's own bound plus a slow hop.
   @forward_timeout_ms 90_000
 

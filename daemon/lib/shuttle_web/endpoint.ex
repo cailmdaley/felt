@@ -16,8 +16,8 @@ defmodule ShuttleWeb.Endpoint do
   plug(ShuttleWeb.PeerGatePlug)
 
   # Serve the built Shuttle UI bundle so the daemon is one process (API + UI).
-  # `only:` restricts to the bundle's first-segment dirs/files, so `/api/*`,
-  # `/socket`, and the bare `/` fall through to the router (which serves
+  # `only:` restricts to the bundle's first-segment dirs/files, so `/api/*`
+  # and the bare `/` fall through to the router (which serves
   # `index.html` via SpaController). A missing bundle just 404s the asset — the
   # API stays fully usable.
   plug(Plug.Static,
