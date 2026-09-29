@@ -96,9 +96,6 @@ func RegisterClaudeNative(id, host, cwd, socket, transcript string, active bool)
 			return errCode("unavailable", "another live Claude receiver owns this session")
 		}
 	}
-	if err := ensureDir(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -108,7 +105,7 @@ func RegisterClaudeNative(id, host, cwd, socket, transcript string, active bool)
 
 func readClaudeNative(id string) (claudeNativeRegistration, error) {
 	var r claudeNativeRegistration
-	b, err := mailboxRead(filepath.Join(mailboxDir("claude", id), "native.json"), 16384)
+	b, err := readBounded(filepath.Join(mailboxDir("claude", id), "native.json"), 16384)
 	if err == nil {
 		err = json.Unmarshal(b, &r)
 	}
@@ -272,11 +269,6 @@ func claudeNativeAvailable(id, host string) bool {
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	return uint64(st.Dev) == r.Device && uint64(st.Ino) == r.Inode && r.PID > 0
-}
-
-func sendClaudeNative(ctx context.Context, a Address, req Request) (Receipt, error) {
-	receipt, err, _ := sendClaudeNativeWithMetadata(ctx, a, req)
-	return receipt, err
 }
 
 func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (Receipt, error, dedupMetadata) {

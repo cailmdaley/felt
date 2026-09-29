@@ -102,7 +102,7 @@ func TestParseProcNetTCP(t *testing.T) {
 		loopback4, loopback4, loopback4)
 	// ::1 port 4001, uid 0.
 	v6 := fmt.Sprintf("   0: %s:0FA1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 5151 1 0000000000000000 100 0 0 10 0\n", loopback6)
-	got := append(parseProcNetTCP(v4), parseProcNetTCP(v6)...)
+	got := listeningRows(append(parseProcNetTCPRows(v4), parseProcNetTCPRows(v6)...))
 	want := []procTCPRow{
 		{Address: "127.0.0.1", Port: 4000, RemoteAddress: "0.0.0.0", State: "0A", UID: 1000, Inode: "4242"},
 		{Address: "::1", Port: 4001, RemoteAddress: "::", State: "0A", UID: 0, Inode: "5151"},

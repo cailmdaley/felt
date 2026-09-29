@@ -107,6 +107,14 @@ func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
 	}
 }
 
+// plainSend adapts a context-free send to the dedup callback.
+func plainSend(send func() (Receipt, error)) func(context.Context) dedupSendResult {
+	return func(context.Context) dedupSendResult {
+		receipt, err := send()
+		return dedupSendResult{Receipt: receipt, Err: err}
+	}
+}
+
 func TestDedupReplayAndConflict(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "m1"}
@@ -115,16 +123,16 @@ func TestDedupReplayAndConflict(t *testing.T) {
 		calls.Add(1)
 		return Receipt{MessageID: "m1", Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
 	}
-	a, err := withDedup(context.Background(), req, send)
+	a, err := withDedup(context.Background(), req, plainSend(send))
 	if err != nil || a.Status != StatusAccepted {
 		t.Fatalf("first: %#v %v", a, err)
 	}
-	b, err := withDedup(context.Background(), req, send)
+	b, err := withDedup(context.Background(), req, plainSend(send))
 	if err != nil || !reflect.DeepEqual(b, a) || calls.Load() != 1 {
 		t.Fatalf("replay: %#v %v calls=%d", b, err, calls.Load())
 	}
 	req.Text = "different"
-	c, err := withDedup(context.Background(), req, send)
+	c, err := withDedup(context.Background(), req, plainSend(send))
 	if ErrorCode(err) != "message_id_conflict" || c.Status != StatusRejected || calls.Load() != 1 {
 		t.Fatalf("conflict: %#v %v", c, err)
 	}
@@ -149,11 +157,11 @@ func TestDedupConcurrentFirstSendersSendOnce(t *testing.T) {
 			go func(g int) {
 				defer wg.Done()
 				<-start
-				_, errs[g] = withDedup(context.Background(), req, func() (Receipt, error) {
+				_, errs[g] = withDedup(context.Background(), req, plainSend(func() (Receipt, error) {
 					calls.Add(1)
 					time.Sleep(5 * time.Millisecond)
 					return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
-				})
+				}))
 			}(g)
 		}
 		close(start)
@@ -174,7 +182,7 @@ func TestDedupPublishesOwnerDeadlineBeforeSend(t *testing.T) {
 	req := Request{Address: "shuttle://h/claude/session", Text: "hello", MessageID: "deadline-publish", Wake: true}
 	deadline := time.Now().Add(17 * time.Second)
 	var observed int64
-	r, err := withDedupDetailed(context.Background(), req, func(ctx context.Context) dedupSendResult {
+	r, err := withDedup(context.Background(), req, func(ctx context.Context) dedupSendResult {
 		if err := publishOwnerDeadline(ctx, deadline); err != nil {
 			return dedupSendResult{Err: err}
 		}
@@ -204,10 +212,10 @@ func TestDedupOwnNonceEEXISTIsTreatedAsReservationSuccess(t *testing.T) {
 		// reports EEXIST for our just-published nonce.
 		return false, os.ErrExist
 	}
-	result, err := withDedupDetailedTimingUsing(context.Background(), req, func(context.Context) dedupSendResult {
+	result, err := dedupOptions{timeout: time.Second, pollInterval: time.Millisecond, reserve: writer}.run(context.Background(), req, func(context.Context) dedupSendResult {
 		calls.Add(1)
 		return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}}
-	}, time.Second, time.Millisecond, nil, writer)
+	})
 	if err != nil || result.Status != StatusAccepted || calls.Load() != 1 {
 		t.Fatalf("own-nonce EEXIST: %+v %v sends=%d", result, err, calls.Load())
 	}
@@ -233,7 +241,7 @@ func TestDedupWaitUsesPublishedOwnerDeadlineAndCapsAtContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	r, err := withDedupTimeout(ctx, req, func() (Receipt, error) { return Receipt{}, nil }, 10*time.Millisecond)
+	r, err := dedupOptions{timeout: 10 * time.Millisecond}.run(ctx, req, plainSend(func() (Receipt, error) { return Receipt{}, nil }))
 	if time.Since(start) < 200*time.Millisecond || r.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("owner wait did not honor recorded deadline/context cap: %+v %v elapsed=%s", r, err, time.Since(start))
 	}
@@ -279,7 +287,7 @@ func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
 		return want, nil
 	}
 	go func() {
-		r, err := withDedup(context.Background(), req, send)
+		r, err := withDedup(context.Background(), req, plainSend(send))
 		firstDone <- struct {
 			receipt Receipt
 			err     error
@@ -294,9 +302,10 @@ func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
 	waiting := make(chan struct{})
 	var waitingOnce sync.Once
 	go func() {
-		r, err := withDedupTiming(context.Background(), req, send, time.Second, time.Millisecond, func() {
+		wait := dedupOptions{timeout: time.Second, pollInterval: time.Millisecond, onWait: func() {
 			waitingOnce.Do(func() { close(waiting) })
-		})
+		}}
+		r, err := wait.run(context.Background(), req, plainSend(send))
 		duplicateDone <- struct {
 			receipt Receipt
 			err     error
@@ -328,7 +337,7 @@ func TestDedupDeadOwnerIsAmbiguousAndNotRetried(t *testing.T) {
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "dead-owner"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: 1 << 30})
 	called := false
-	r, err := withDedup(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil })
+	r, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	const detail = "a previous attempt stopped mid-delivery; it may or may not have been delivered"
 	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
@@ -341,7 +350,7 @@ func TestDedupLiveReservationWaitExpires(t *testing.T) {
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "live-owner"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime()})
 	called := false
-	r, err := withDedupTimeout(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil }, 20*time.Millisecond)
+	r, err := dedupOptions{timeout: 20 * time.Millisecond}.run(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	const detail = "an identical delivery is still in progress; retry with the same message_id"
 	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
@@ -354,7 +363,7 @@ func TestDedupLegacyReservedRecordKeepsAmbiguousBehavior(t *testing.T) {
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "legacy"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved"})
 	called := false
-	r, err := withDedup(context.Background(), req, func() (Receipt, error) { called = true; return Receipt{}, nil })
+	r, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	if called || r.Status != StatusUnknown || r.Detail != "delivery may have been attempted" || ErrorCode(err) != "ambiguous_delivery" || err.Error() != "delivery may have been attempted; refusing to resend" {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
 	}
@@ -365,10 +374,10 @@ func TestDedupReleasesPreflightFailure(t *testing.T) {
 	req := Request{Address: "shuttle://h/codex/x", Text: "x", MessageID: "m"}
 	calls := 0
 	for range 2 {
-		_, err := withDedup(context.Background(), req, func() (Receipt, error) {
+		_, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) {
 			calls++
 			return rejected(req, "test", "offline"), errCode("preflight_failed", "offline")
-		})
+		}))
 		if ErrorCode(err) != "preflight_failed" {
 			t.Fatalf("got %v", err)
 		}

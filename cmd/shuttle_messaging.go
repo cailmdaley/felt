@@ -35,7 +35,6 @@ var (
 	messageAttachments []string
 )
 
-const maxMessageRequestFrame = messaging.MaxRequestFrame
 const maxMessageReceiptBytes = 512 << 10
 
 type messageRequestReceipt struct {
@@ -56,23 +55,7 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 		}
 		directory = messaging.Discover(ctx, host)
 	} else {
-		endpoint, urlErr := daemonEndpoint("/api/v1/peers")
-		if urlErr != nil {
-			return urlErr
-		}
-		u, parseErr := url.Parse(endpoint)
-		if parseErr != nil {
-			return parseErr
-		}
-		q := u.Query()
-		if sessionsDiscoveryHost != "" {
-			q.Set("host", sessionsDiscoveryHost)
-		}
-		if sessionsDiscoveryHarness != "" {
-			q.Set("harness", messaging.NormalizeHarness(strings.TrimSpace(sessionsDiscoveryHarness)))
-		}
-		u.RawQuery = q.Encode()
-		directory, err = getDaemonJSON[messaging.Directory](u.String(), "parsing peer directory")
+		directory, err = fetchPeerDirectory(sessionsDiscoveryHost, sessionsDiscoveryHarness)
 	}
 	if err != nil {
 		return fmt.Errorf("discovering sessions: %w", err)
@@ -83,6 +66,28 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 	}
 	printPeerDirectory(directory)
 	return nil
+}
+
+// fetchPeerDirectory reads the daemon's fleet-wide peer directory, narrowed
+// to one host or harness when either is given.
+func fetchPeerDirectory(host, harness string) (messaging.Directory, error) {
+	endpoint, err := daemonEndpoint("/api/v1/peers")
+	if err != nil {
+		return messaging.Directory{}, err
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return messaging.Directory{}, err
+	}
+	q := u.Query()
+	if host != "" {
+		q.Set("host", host)
+	}
+	if harness != "" {
+		q.Set("harness", messaging.NormalizeHarness(strings.TrimSpace(harness)))
+	}
+	u.RawQuery = q.Encode()
+	return getDaemonJSON[messaging.Directory](u.String(), "parsing peer directory")
 }
 
 func filterPeerDirectory(directory messaging.Directory, host, harness string) messaging.Directory {
@@ -273,10 +278,10 @@ func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, err
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
 	var request messaging.Request
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), maxMessageRequestFrame)
+	scanner.Buffer(make([]byte, 4096), messaging.MaxRequestFrame)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
-			return request, fmt.Errorf("reading message request frame (maximum %d bytes): %w", maxMessageRequestFrame, err)
+			return request, fmt.Errorf("reading message request frame (maximum %d bytes): %w", messaging.MaxRequestFrame, err)
 		}
 		return request, fmt.Errorf("reading message request frame: empty stdin")
 	}
@@ -394,8 +399,9 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 	}
 	timeout := 52 * time.Second
 	if len(request.Attachments) > 0 {
-		// A distinct route makes old daemons refuse the entire send instead of
-		// accepting text while silently discarding unsupported attachments.
+		// Attachments travel on their own route, which the daemon parses with a
+		// larger body limit; each route refuses the other's payload shape, so
+		// text is never accepted while its files are dropped.
 		endpoint += "/files"
 		timeout = 120 * time.Second
 	}

@@ -72,7 +72,6 @@ type bridgeOptions struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	args          []string
-	startup       time.Duration
 }
 
 func init() {
@@ -83,40 +82,27 @@ func init() {
 	shuttleCmd.AddCommand(codexDesktopBridgeCmd)
 }
 
-func normalizeBridgeOptions(o bridgeOptions) (bridgeOptions, error) {
-	if o.stderr == nil {
-		o.stderr = io.Discard
+func validateBridgeCodex(codex string) error {
+	if codex == "" {
+		return errors.New("--codex is required")
 	}
-	if o.stdin == nil {
-		o.stdin = os.Stdin
+	if !filepath.IsAbs(codex) {
+		return fmt.Errorf("--codex must be an absolute path: %q", codex)
 	}
-	if o.stdout == nil {
-		o.stdout = os.Stdout
-	}
-	if o.codex == "" {
-		return o, errors.New("--codex is required")
-	}
-	if !filepath.IsAbs(o.codex) {
-		return o, fmt.Errorf("--codex must be an absolute path: %q", o.codex)
-	}
-	if info, err := os.Stat(o.codex); err != nil {
-		return o, fmt.Errorf("stat native Codex %q: %w", o.codex, err)
+	if info, err := os.Stat(codex); err != nil {
+		return fmt.Errorf("stat native Codex %q: %w", codex, err)
 	} else if info.IsDir() {
-		return o, fmt.Errorf("native Codex path is a directory: %q", o.codex)
+		return fmt.Errorf("native Codex path is a directory: %q", codex)
 	}
-	if o.startup <= 0 {
-		o.startup = bridgeStartupTimeout
-	}
-	return o, nil
+	return nil
 }
 
 // runCodexDesktopBridgeProcess keeps the native executable in the desktop's
 // original process slot. A child relay owns the socket and the desktop
 // JSONL pipes; this preserves the signed Desktop -> Codex -> app-tools parent
 // chain required by macOS peer authorization.
-func runCodexDesktopBridgeProcess(ctx context.Context, raw bridgeOptions) error {
-	o, err := normalizeBridgeOptions(raw)
-	if err != nil {
+func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
+	if err := validateBridgeCodex(o.codex); err != nil {
 		return err
 	}
 	mode, err := classifyCodexInvocation(o.args)
@@ -172,7 +158,7 @@ func runCodexDesktopBridgeProcess(ctx context.Context, raw bridgeOptions) error 
 			ready <- fmt.Errorf("relay refused startup: %s", strings.TrimSpace(string(data)))
 		}
 	}()
-	startup := time.NewTimer(o.startup)
+	startup := time.NewTimer(bridgeStartupTimeout)
 	defer startup.Stop()
 	select {
 	case <-startup.C:
@@ -224,11 +210,10 @@ func execNativePassthroughInPlace(o bridgeOptions) error {
 	return nil
 }
 
-func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
+func runCodexDesktopRelay(ctx context.Context, o bridgeOptions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	o, err := normalizeBridgeOptions(raw)
-	if err != nil {
+	if err := validateBridgeCodex(o.codex); err != nil {
 		return err
 	}
 	readyFD, err := strconv.Atoi(os.Getenv("FELT_BRIDGE_READY_FD"))
@@ -255,7 +240,7 @@ func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
 		return err
 	}
 	if info, err := os.Lstat(socket); err == nil {
-		return fmt.Errorf("refusing pre-existing bridge endpoint %q (%s)", socket, describeFile(info))
+		return fmt.Errorf("refusing pre-existing bridge endpoint %q (%s)", socket, info.Mode())
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("checking bridge endpoint %q: %w", socket, err)
 	}
@@ -272,7 +257,7 @@ func runCodexDesktopRelay(ctx context.Context, raw bridgeOptions) error {
 
 		close(parentDone)
 	}()
-	endpoint, err := waitForBridgeEndpoint(ctx, socket, parentDone, func() error { return errors.New("native Codex parent exited") }, o.startup)
+	endpoint, err := waitForBridgeEndpoint(ctx, socket, parentDone)
 	if err != nil {
 		fmt.Fprintln(o.stderr, err)
 		return finishBridgeRelay(parentPID, parentDone, socket, endpoint, owner)
@@ -384,7 +369,6 @@ func bridgeSocketPath(explicit string) (string, error) {
 
 type bridgeOwner struct {
 	file   *os.File
-	path   string
 	socket string
 }
 
@@ -424,7 +408,7 @@ func acquireBridgeOwner(socket string) (*bridgeOwner, error) {
 		cleanup()
 		return nil, fmt.Errorf("write bridge owner lock: %w", err)
 	}
-	return &bridgeOwner{file: f, path: path, socket: socket}, nil
+	return &bridgeOwner{file: f, socket: socket}, nil
 }
 
 func (o *bridgeOwner) recordNativePID(pid int) error {
@@ -486,8 +470,10 @@ func ensureOwnedPrivate(info os.FileInfo, what string) error {
 	return nil
 }
 
-func waitForBridgeEndpoint(ctx context.Context, socket string, childDone <-chan struct{}, childError func() error, timeout time.Duration) (os.FileInfo, error) {
-	timer := time.NewTimer(timeout)
+// waitForBridgeEndpoint waits for native Codex (the relay's parent) to create
+// its private websocket endpoint, failing if the parent exits first.
+func waitForBridgeEndpoint(ctx context.Context, socket string, parentDone <-chan struct{}) (os.FileInfo, error) {
+	timer := time.NewTimer(bridgeStartupTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(bridgePollInterval)
 	defer ticker.Stop()
@@ -521,7 +507,7 @@ func waitForBridgeEndpoint(ctx context.Context, socket string, childDone <-chan 
 				return info, nil
 			}
 			if !info.Mode().IsRegular() && info.Mode()&os.ModeSocket == 0 {
-				return info, fmt.Errorf("bridge endpoint %q has unexpected type %s", socket, describeFile(info))
+				return info, fmt.Errorf("bridge endpoint %q has unexpected type %s", socket, info.Mode())
 			}
 			if info.Mode()&os.ModeSocket == 0 {
 				return info, fmt.Errorf("bridge endpoint %q is not a Unix socket", socket)
@@ -534,12 +520,8 @@ func waitForBridgeEndpoint(ctx context.Context, socket string, childDone <-chan 
 			return nil, fmt.Errorf("checking bridge endpoint: %w", err)
 		}
 		select {
-		case <-childDone:
-			err := childError()
-			if err == nil {
-				return nil, errors.New("native Codex exited before creating its websocket endpoint")
-			}
-			return nil, fmt.Errorf("native Codex exited before creating its websocket endpoint: %w", err)
+		case <-parentDone:
+			return nil, errors.New("native Codex exited before creating its websocket endpoint")
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timer.C:
@@ -769,11 +751,4 @@ func removeOwnedEndpoint(socket string, owned os.FileInfo) {
 	if err == nil && os.SameFile(owned, current) {
 		_ = os.Remove(socket)
 	}
-}
-
-func describeFile(info os.FileInfo) string {
-	if info == nil {
-		return "missing"
-	}
-	return info.Mode().String()
 }

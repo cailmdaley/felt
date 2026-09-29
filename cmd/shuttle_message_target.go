@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,7 +54,7 @@ func resolveMessageTarget(target string) (string, error) {
 	var lookupErrors []string
 	sessionCandidates := make([]messageTargetCandidate, 0)
 	var peerSessions []messaging.Session
-	directory, liveErr := discoverMessageDirectory()
+	directory, liveErr := fetchPeerDirectory("", "")
 	if liveErr != nil {
 		lookupErrors = append(lookupErrors, "session discovery: "+liveErr.Error())
 	} else {
@@ -83,20 +85,11 @@ func resolveMessageTarget(target string) (string, error) {
 	}
 	sessionCandidates = uniqueMessageCandidates(sessionCandidates)
 	if len(unmappedLedger) > 0 {
-		labels := make([]string, 0, len(sessionCandidates)+len(fiberLookup.Fibers)+len(fiberLookup.Guesses)+len(unmappedLedger))
-		for _, candidate := range sessionCandidates {
-			labels = append(labels, "session "+candidate.Address)
-		}
-		for _, candidate := range fiberLookup.candidateLabels() {
-			labels = append(labels, "fiber "+candidate)
-		}
-		labels = append(labels, unmappedLedger...)
-		sort.Strings(labels)
-		return "", fmt.Errorf("message target %q is ambiguous or has an unmapped Codex transcript candidate; use a peer address or explicit shuttle:// address: %s", target, strings.Join(labels, ", "))
+		return "", fmt.Errorf("message target %q is ambiguous or has an unmapped Codex transcript candidate; use a peer address or explicit shuttle:// address: %s", target, messageTargetLabels(sessionCandidates, fiberLookup, unmappedLedger))
 	}
 	matchCount := len(sessionCandidates) + len(fiberLookup.Fibers) + len(fiberLookup.Guesses)
 	if len(fiberLookup.Guesses) > 0 || matchCount > 1 {
-		return "", messageTargetAmbiguity(target, sessionCandidates, fiberLookup)
+		return "", fmt.Errorf("message target %q is ambiguous or guessed; candidates: %s", target, messageTargetLabels(sessionCandidates, fiberLookup, nil))
 	}
 	if len(sessionCandidates) == 1 {
 		return sessionCandidates[0].Address, nil
@@ -116,8 +109,10 @@ func resolveMessageTarget(target string) (string, error) {
 	return "", fmt.Errorf("message target %q did not match a discovered session or exact fiber", target)
 }
 
-func messageTargetAmbiguity(target string, sessions []messageTargetCandidate, fibers addressFiberLookup) error {
-	labels := make([]string, 0, len(sessions)+len(fibers.Fibers)+len(fibers.Guesses))
+// messageTargetLabels lists every candidate a target could name, sorted, for
+// an error that asks the sender to choose.
+func messageTargetLabels(sessions []messageTargetCandidate, fibers addressFiberLookup, extra []string) string {
+	labels := make([]string, 0, len(sessions)+len(fibers.Fibers)+len(fibers.Guesses)+len(extra))
 	for _, session := range sessions {
 		label := "session " + session.Address
 		if session.Fiber != "" {
@@ -128,20 +123,13 @@ func messageTargetAmbiguity(target string, sessions []messageTargetCandidate, fi
 	for _, fiber := range fibers.candidateLabels() {
 		labels = append(labels, "fiber "+fiber)
 	}
+	labels = append(labels, extra...)
 	sort.Strings(labels)
-	return fmt.Errorf("message target %q is ambiguous or guessed; candidates: %s", target, strings.Join(labels, ", "))
-}
-
-func discoverMessageDirectory() (messaging.Directory, error) {
-	endpoint, err := daemonEndpoint("/api/v1/peers")
-	if err != nil {
-		return messaging.Directory{}, err
-	}
-	return getDaemonJSON[messaging.Directory](endpoint, "parsing peer directory")
+	return strings.Join(labels, ", ")
 }
 
 func discoveredMessageCandidates(sessionID string, sessions []messaging.Session) []messageTargetCandidate {
-	candidates := make([]messageTargetCandidate, 0)
+	var candidates []messageTargetCandidate
 	for _, session := range sessions {
 		address, err := messaging.ParseAddress(session.Address)
 		if err != nil || address.ID != sessionID && session.TranscriptID != sessionID {
@@ -153,11 +141,11 @@ func discoveredMessageCandidates(sessionID string, sessions []messaging.Session)
 		}
 		candidates = append(candidates, messageTargetCandidate{Address: canonical, Fiber: session.Fiber})
 	}
-	return uniqueMessageCandidates(candidates)
+	return candidates
 }
 
 func ledgerMessageCandidates(sessionID string, records []SessionProvenance, sessions []messaging.Session) ([]messageTargetCandidate, []string) {
-	candidates := make([]messageTargetCandidate, 0)
+	var candidates []messageTargetCandidate
 	var unmapped []string
 	for _, record := range records {
 		if record.Session == "" || record.Session != sessionID && record.ThreadID != sessionID {
@@ -185,7 +173,7 @@ func ledgerMessageCandidates(sessionID string, records []SessionProvenance, sess
 		}
 		candidates = append(candidates, messageTargetCandidate{Address: address, Fiber: record.fiber()})
 	}
-	return uniqueMessageCandidates(candidates), unmapped
+	return candidates, unmapped
 }
 
 func peerHasNativeCodexAddress(record SessionProvenance, sessionID string, sessions []messaging.Session) bool {
@@ -201,7 +189,7 @@ func peerHasNativeCodexAddress(record SessionProvenance, sessionID string, sessi
 }
 
 func peerAddressesForTranscript(record SessionProvenance, sessions []messaging.Session) []messageTargetCandidate {
-	candidates := make([]messageTargetCandidate, 0)
+	var candidates []messageTargetCandidate
 	for _, session := range sessions {
 		address, err := messaging.ParseAddress(session.Address)
 		if err != nil || address.Host != record.Host || session.TranscriptID != record.Session ||
@@ -213,7 +201,7 @@ func peerAddressesForTranscript(record SessionProvenance, sessions []messaging.S
 			candidates = append(candidates, messageTargetCandidate{Address: canonical, Fiber: session.Fiber})
 		}
 	}
-	return uniqueMessageCandidates(candidates)
+	return candidates
 }
 
 func peerSessionMatchesFiber(session messaging.Session, fiber, uid string) bool {
@@ -257,9 +245,7 @@ func currentFiberMessageAddress(f *felt.Felt, records []SessionProvenance, origi
 	}
 	runtimeID := shuttleRuntimeSessionID(f)
 
-	worker, err := newestFiberLedgerRecord(f, records, func(row SessionProvenance) bool {
-		return row.Kind == "dispatch" || row.Kind == "resume" || row.Kind == "claim"
-	})
+	worker, err := newestFiberWorkerRecord(f, records)
 	if err != nil {
 		return "", err
 	}
@@ -328,7 +314,7 @@ func fiberWorkerAddress(f *felt.Felt, worker *SessionProvenance, harness, runtim
 	addresses := map[string]bool{}
 	for _, session := range peers {
 		address, err := messaging.ParseAddress(session.Address)
-		if err != nil || address.Host != worker.Host || !peerSessionBelongsToFiber(session, f) {
+		if err != nil || address.Host != worker.Host || !peerSessionMatchesFiber(session, f.ID, f.UID) {
 			continue
 		}
 		if !(nativeID != "" && address.ID == nativeID) && session.TranscriptID != worker.Session {
@@ -340,12 +326,7 @@ func fiberWorkerAddress(f *felt.Felt, worker *SessionProvenance, harness, runtim
 		}
 	}
 	if len(addresses) > 1 {
-		candidates := make([]string, 0, len(addresses))
-		for address := range addresses {
-			candidates = append(candidates, address)
-		}
-		sort.Strings(candidates)
-		return "", fmt.Errorf("fiber %q maps to multiple peer addresses for session %q: %s", f.ID, worker.Session, strings.Join(candidates, ", "))
+		return "", fmt.Errorf("fiber %q maps to multiple peer addresses for session %q: %s", f.ID, worker.Session, strings.Join(slices.Sorted(maps.Keys(addresses)), ", "))
 	}
 	for address := range addresses {
 		return address, nil
@@ -379,7 +360,7 @@ func noteFiberWorkerDisagreements(f *felt.Felt, runtimeID string, worker *Sessio
 func staleFiberPeerCandidates(f *felt.Felt, runtimeID string, worker *SessionProvenance, peers []messaging.Session) []string {
 	addresses := map[string]bool{}
 	for _, session := range peers {
-		if !peerSessionBelongsToFiber(session, f) {
+		if !peerSessionMatchesFiber(session, f.ID, f.UID) {
 			continue
 		}
 		address, err := messaging.ParseAddress(session.Address)
@@ -392,27 +373,17 @@ func staleFiberPeerCandidates(f *felt.Felt, runtimeID string, worker *SessionPro
 			addresses[canonical] = true
 		}
 	}
-
-	candidates := make([]string, 0, len(addresses))
-	for address := range addresses {
-		candidates = append(candidates, address)
-	}
-	sort.Strings(candidates)
-	return candidates
+	return slices.Sorted(maps.Keys(addresses))
 }
 
-func peerSessionBelongsToFiber(session messaging.Session, f *felt.Felt) bool {
-	if f.UID != "" && session.FiberUID != "" {
-		return f.UID == session.FiberUID
-	}
-	return session.Fiber == f.ID
-}
-
-func newestFiberLedgerRecord(f *felt.Felt, records []SessionProvenance, include func(SessionProvenance) bool) (*SessionProvenance, error) {
+// newestFiberWorkerRecord is the fiber's newest dispatch, resume or claim row;
+// rows tied at the newest time must agree on one session.
+func newestFiberWorkerRecord(f *felt.Felt, records []SessionProvenance) (*SessionProvenance, error) {
 	latestAt := int64(-1 << 63)
 	latest := map[string]SessionProvenance{}
 	for _, row := range records {
-		if !sessionRecordBelongsToFiber(row, f) || row.Session == "" || !include(row) {
+		if !sessionRecordBelongsToFiber(row, f) || row.Session == "" ||
+			(row.Kind != "dispatch" && row.Kind != "resume" && row.Kind != "claim") {
 			continue
 		}
 		key := row.Session + "\x00" + row.ThreadID + "\x00" + row.Host + "\x00" + messaging.NormalizeHarness(row.Harness)
@@ -456,14 +427,7 @@ func shuttleRuntimeSessionID(f *felt.Felt) string {
 	if err := node.Decode(&block); err != nil {
 		return ""
 	}
-	if runtime, ok := block["runtime"].(map[string]any); ok {
-		if sessionID, ok := runtime["session_uuid"].(string); ok && strings.TrimSpace(sessionID) != "" {
-			return strings.TrimSpace(sessionID)
-		}
-	}
-	// Read old flat runtime blocks while all new dispatches use runtime:.
-	if sessionID, ok := block["session_uuid"].(string); ok {
-		return strings.TrimSpace(sessionID)
-	}
-	return ""
+	runtime, _ := block["runtime"].(map[string]any)
+	sessionID, _ := runtime["session_uuid"].(string)
+	return strings.TrimSpace(sessionID)
 }

@@ -104,32 +104,33 @@ type claudeReceiptRefresh struct {
 	ErrorMessage string
 }
 
-func withDedup(ctx context.Context, req Request, send func() (Receipt, error)) (Receipt, error) {
-	return withDedupTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
+// dedupOptions tunes how a duplicate sender waits on a live reservation and
+// how the reservation is published. The zero value is the production policy;
+// tests shorten the wait, observe it, or substitute the reservation writer.
+type dedupOptions struct {
+	timeout      time.Duration
+	pollInterval time.Duration
+	onWait       func()
+	reserve      func(string, []byte) (bool, error)
 }
 
-func withDedupDetailed(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
-	return withDedupDetailedTiming(ctx, req, send, duplicateWaitTimeout, duplicatePollInterval, nil)
+// withDedup runs send at most once per message_id: a replay returns the stored
+// receipt, a concurrent duplicate waits for the live owner, and a different
+// request under the same id is rejected.
+func withDedup(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
+	return dedupOptions{}.run(ctx, req, send)
 }
 
-// withDedupTimeout permits tests to exercise the bounded wait without waiting
-// for the production timeout.
-func withDedupTimeout(ctx context.Context, req Request, send func() (Receipt, error), timeout time.Duration) (Receipt, error) {
-	return withDedupTiming(ctx, req, send, timeout, duplicatePollInterval, nil)
-}
-
-func withDedupTiming(ctx context.Context, req Request, send func() (Receipt, error), timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
-	return withDedupDetailedTiming(ctx, req, func(context.Context) dedupSendResult {
-		receipt, err := send()
-		return dedupSendResult{Receipt: receipt, Err: err}
-	}, timeout, pollInterval, onWait)
-}
-
-func withDedupDetailedTiming(ctx context.Context, req Request, send func(context.Context) dedupSendResult, timeout, pollInterval time.Duration, onWait func()) (Receipt, error) {
-	return withDedupDetailedTimingUsing(ctx, req, send, timeout, pollInterval, onWait, mailboxWriteReservation)
-}
-
-func withDedupDetailedTimingUsing(ctx context.Context, req Request, send func(context.Context) dedupSendResult, timeout, pollInterval time.Duration, onWait func(), reserve func(string, []byte) (bool, error)) (Receipt, error) {
+func (o dedupOptions) run(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
+	if o.timeout <= 0 {
+		o.timeout = duplicateWaitTimeout
+	}
+	if o.pollInterval <= 0 {
+		o.pollInterval = duplicatePollInterval
+	}
+	if o.reserve == nil {
+		o.reserve = mailboxWriteReservation
+	}
 	dir := filepath.Join(dataDir(), "messages")
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
@@ -158,13 +159,13 @@ func withDedupDetailedTimingUsing(ctx context.Context, req Request, send func(co
 		Nonce:                 nonce,
 	}
 	// Publish a complete reservation atomically: an O_EXCL-created empty file
-	// would let a concurrent duplicate mistake the brief write window for a
-	// malformed, legacy record. The nonce distinguishes an NFS link replay from
-	// a competing sender's reservation.
+	// would let a concurrent duplicate mistake the brief write window for an
+	// ownerless record. The nonce distinguishes an NFS link replay from a
+	// competing sender's reservation.
 	for {
-		owned, err := reserveDedupRecord(path, reservation, reserve)
+		owned, err := reserveDedupRecord(path, reservation, o.reserve)
 		if errors.Is(err, os.ErrExist) {
-			receipt, readErr, retry := duplicateResult(ctx, req, path, hash, timeout, pollInterval, onWait)
+			receipt, readErr, retry := duplicateResult(ctx, req, path, hash, o)
 			if retry {
 				continue
 			}
@@ -240,8 +241,8 @@ func sendReserved(ctx context.Context, dir, path, hash string, req Request, nonc
 	return receipt, sendErr
 }
 
-// duplicateResult returns retry=true only when the reservation disappeared,
-// which happens when its owner reports a preflight failure.
+// updateReservationOwnerDeadline republishes the owner's deadline so a waiting
+// duplicate extends its wait to cover the transport's observation window.
 func updateReservationOwnerDeadline(path, hash, nonce string, deadline time.Time) error {
 	old, err := readDedupRecord(path)
 	if err != nil {
@@ -265,92 +266,60 @@ func updateReservationOwnerDeadline(path, hash, nonce string, deadline time.Time
 	return nil
 }
 
-func duplicateResult(ctx context.Context, req Request, path, hash string, timeout, pollInterval time.Duration, onWait func()) (Receipt, error, bool) {
-	old, err := readDedupRecord(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return Receipt{}, nil, true
-	}
-	if err != nil {
-		return Receipt{}, errCode("dedup_unavailable", "cannot read message record: %v", err), false
-	}
-	if old.Hash == "" {
-		receipt, recordErr := incompleteRecord(req)
-		return receipt, recordErr, false
-	}
-	if old.Hash != hash {
-		return rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request"), false
-	}
-	if old.State == "complete" {
-		old = refreshCompletedClaudeReceipt(ctx, req, path, hash, old)
-		receipt, storedErr := storedResult(old)
-		return receipt, storedErr, false
-	}
-	if old.State != "reserved" || old.OwnerPID <= 0 {
-		receipt, ambiguousErr := legacyAmbiguous(req)
-		return receipt, ambiguousErr, false
-	}
-	if !processAlive(old.OwnerPID, old.OwnerStart) {
-		receipt, stoppedErr := stoppedAttempt(req)
-		return receipt, stoppedErr, false
-	}
-
-	ownerDeadlineStamp := old.OwnerDeadlineUnixNano
-	ownerDeadline := duplicateOwnerWaitDeadline(ownerDeadlineStamp, timeout)
-	deadline := capDedupWaitDeadline(ctx, ownerDeadline)
-	if onWait != nil {
-		onWait()
-	}
-	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			receipt, waitErr := inProgress(req)
-			return receipt, waitErr, false
-		}
-		interval := pollInterval
-		if interval <= 0 || interval > remaining {
-			interval = remaining
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			receipt, waitErr := inProgress(req)
-			return receipt, waitErr, false
-		case <-timer.C:
+// duplicateResult resolves a sender that found its message_id already
+// reserved. While a live owner holds the reservation it polls until the
+// owner's published deadline (plus a margin) or ctx ends. It returns
+// retry=true only when the reservation disappeared, which happens when its
+// owner reports a preflight failure.
+func duplicateResult(ctx context.Context, req Request, path, hash string, o dedupOptions) (Receipt, error, bool) {
+	var ownerDeadlineStamp int64
+	var deadline time.Time
+	for waited := false; ; waited = true {
+		if waited {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				receipt, waitErr := inProgress(req)
+				return receipt, waitErr, false
+			}
+			timer := time.NewTimer(min(o.pollInterval, remaining))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				receipt, waitErr := inProgress(req)
+				return receipt, waitErr, false
+			case <-timer.C:
+			}
 		}
 
-		old, err = readDedupRecord(path)
-		if errors.Is(err, os.ErrNotExist) {
+		old, err := readDedupRecord(path)
+		var receipt Receipt
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			return Receipt{}, nil, true
-		}
-		if err != nil {
+		case err != nil:
 			return Receipt{}, errCode("dedup_unavailable", "cannot read message record: %v", err), false
+		case old.Hash == "":
+			receipt, err = incompleteRecord(req)
+		case old.Hash != hash:
+			receipt, err = rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request")
+		case old.State == "complete":
+			receipt, err = storedResult(refreshCompletedClaudeReceipt(ctx, req, path, hash, old))
+		case old.State != "reserved" || old.OwnerPID <= 0:
+			receipt, err = ownerlessRecord(req)
+		case !processAlive(old.OwnerPID, old.OwnerStart):
+			receipt, err = stoppedAttempt(req)
+		default:
+			// A live owner: arm the wait, and follow a deadline it republishes.
+			if !waited || (old.OwnerDeadlineUnixNano > 0 && old.OwnerDeadlineUnixNano != ownerDeadlineStamp) {
+				ownerDeadlineStamp = old.OwnerDeadlineUnixNano
+				deadline = capDedupWaitDeadline(ctx, duplicateOwnerWaitDeadline(ownerDeadlineStamp, o.timeout))
+			}
+			if !waited && o.onWait != nil {
+				o.onWait()
+			}
+			continue
 		}
-		if old.Hash == "" {
-			receipt, recordErr := incompleteRecord(req)
-			return receipt, recordErr, false
-		}
-		if old.Hash != hash {
-			return rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request"), false
-		}
-		if old.State == "complete" {
-			old = refreshCompletedClaudeReceipt(ctx, req, path, hash, old)
-			receipt, storedErr := storedResult(old)
-			return receipt, storedErr, false
-		}
-		if old.OwnerDeadlineUnixNano > 0 && old.OwnerDeadlineUnixNano != ownerDeadlineStamp {
-			ownerDeadlineStamp = old.OwnerDeadlineUnixNano
-			ownerDeadline = time.Unix(0, ownerDeadlineStamp).Add(duplicateWaitMargin)
-			deadline = capDedupWaitDeadline(ctx, ownerDeadline)
-		}
-		if old.State != "reserved" || old.OwnerPID <= 0 {
-			receipt, ambiguousErr := legacyAmbiguous(req)
-			return receipt, ambiguousErr, false
-		}
-		if !processAlive(old.OwnerPID, old.OwnerStart) {
-			receipt, stoppedErr := stoppedAttempt(req)
-			return receipt, stoppedErr, false
-		}
+		return receipt, err, false
 	}
 }
 
@@ -369,7 +338,7 @@ func capDedupWaitDeadline(ctx context.Context, deadline time.Time) time.Time {
 }
 
 func readDedupRecord(path string) (record, error) {
-	b, err := mailboxRead(path, 2<<20)
+	b, err := readBounded(path, 2<<20)
 	if err != nil {
 		return record{}, err
 	}
@@ -454,7 +423,9 @@ func incompleteRecord(req Request) (Receipt, error) {
 	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: "dedup", Detail: "message record is incomplete"}, errCode("ambiguous_delivery", "message record is incomplete; refusing to resend")
 }
 
-func legacyAmbiguous(req Request) (Receipt, error) {
+// ownerlessRecord answers a record that is neither complete nor a reservation
+// with a recorded owner process, so no live sender can be waited on.
+func ownerlessRecord(req Request) (Receipt, error) {
 	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: "dedup", Detail: "delivery may have been attempted"}, errCode("ambiguous_delivery", "delivery may have been attempted; refusing to resend")
 }
 

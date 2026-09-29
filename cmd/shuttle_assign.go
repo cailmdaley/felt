@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -84,13 +85,17 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 		if err != nil {
 			return false, err
 		}
+		profiles, err := listRoleProfiles(st)
+		if err != nil {
+			return false, err
+		}
 		if assignment.Participants == nil {
-			assignment, err = normalizeLegacyCollaboration(st, assignment)
+			assignment, err = rosterFromUIDRefs(profiles, assignment)
 			if err != nil {
 				return false, err
 			}
 		}
-		if err := validateParticipantProfiles(st, assignment.Participants); err != nil {
+		if err := validateParticipantProfiles(profiles, assignment.Participants); err != nil {
 			return false, err
 		}
 		return true, f.SetExtraField(collaborationField, assignment)
@@ -99,13 +104,13 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 		return false, nil
 	}
 
-	assignment, err := readCollaboration(f, st)
+	profiles, err := listRoleProfiles(st)
 	if err != nil {
 		return false, err
 	}
-	profiles, err := roleProfileStorage(st).ListMetadata()
+	assignment, err := readCollaboration(f, profiles)
 	if err != nil {
-		return false, fmt.Errorf("listing local role fibers: %w", err)
+		return false, err
 	}
 	roleMatches := make([]*felt.Felt, 0, len(assignRoles))
 	for _, query := range assignRoles {
@@ -113,7 +118,7 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 		if err != nil {
 			return false, err
 		}
-		if !containsProfile(roleMatches, role.ID) {
+		if !slices.ContainsFunc(roleMatches, func(match *felt.Felt) bool { return match.ID == role.ID }) {
 			roleMatches = append(roleMatches, role)
 		}
 		if _, exists := assignment.Participants[path.Base(role.ID)]; !exists {
@@ -130,7 +135,7 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 			return false, err
 		}
 		roleSlug, collaboratorSlug := path.Base(role.ID), path.Base(collaborator.ID)
-		if !containsString(assignment.Participants[roleSlug], collaboratorSlug) {
+		if !slices.Contains(assignment.Participants[roleSlug], collaboratorSlug) {
 			assignment.Participants[roleSlug] = append(assignment.Participants[roleSlug], collaboratorSlug)
 		}
 	}
@@ -140,8 +145,9 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 	return true, f.SetExtraField(collaborationField, assignment)
 }
 
-// readCollaboration resolves UID snapshot input to current role slugs for edits.
-func readCollaboration(f *felt.Felt, st *felt.Storage) (shuttle.Collaboration, error) {
+// readCollaboration reads the fiber's roster for editing, resolving a
+// UID-addressed assignment to current role and collaborator slugs.
+func readCollaboration(f *felt.Felt, profiles []*felt.Felt) (shuttle.Collaboration, error) {
 	assignment := shuttle.Collaboration{Participants: map[string][]string{}}
 	node := f.ExtraFields[collaborationField]
 	if node == nil {
@@ -162,15 +168,14 @@ func readCollaboration(f *felt.Felt, st *felt.Storage) (shuttle.Collaboration, e
 	if parsed.Participants != nil {
 		return parsed, nil
 	}
-	return normalizeLegacyCollaboration(st, parsed)
+	return rosterFromUIDRefs(profiles, parsed)
 }
 
-func normalizeLegacyCollaboration(st *felt.Storage, parsed shuttle.Collaboration) (shuttle.Collaboration, error) {
-	profiles, err := roleProfileStorage(st).ListMetadata()
-	if err != nil {
-		return shuttle.Collaboration{}, fmt.Errorf("listing local collaboration profiles: %w", err)
-	}
+// rosterFromUIDRefs turns the UID-addressed form (one role and optionally one
+// collaborator, by intrinsic UID) into the readable slug roster.
+func rosterFromUIDRefs(profiles []*felt.Felt, parsed shuttle.Collaboration) (shuttle.Collaboration, error) {
 	var role, collaborator *felt.Felt
+	var err error
 	if parsed.Role != nil {
 		role, err = uniqueRoleByUID(profiles, parsed.Role.UID)
 		if err != nil {
@@ -184,7 +189,7 @@ func normalizeLegacyCollaboration(st *felt.Storage, parsed shuttle.Collaboration
 		}
 		collaboratorRole := path.Dir(collaborator.ID)
 		if role != nil && role.ID != collaboratorRole {
-			return shuttle.Collaboration{}, fmt.Errorf("assign: legacy collaborator %s does not belong to role %s", collaborator.ID, role.ID)
+			return shuttle.Collaboration{}, fmt.Errorf("assign: collaborator %s does not belong to role %s", collaborator.ID, role.ID)
 		}
 		if role == nil {
 			role, err = uniqueRoleByPath(profiles, collaboratorRole)
@@ -194,7 +199,7 @@ func normalizeLegacyCollaboration(st *felt.Storage, parsed shuttle.Collaboration
 		}
 	}
 	if role == nil {
-		return shuttle.Collaboration{}, fmt.Errorf("assign: legacy collaboration has no local role")
+		return shuttle.Collaboration{}, fmt.Errorf("assign: UID-addressed collaboration names no local role")
 	}
 	assignment := shuttle.Collaboration{Participants: map[string][]string{path.Base(role.ID): {}}}
 	if collaborator != nil {
@@ -244,11 +249,7 @@ func resolveCollaboratorProfile(profiles []*felt.Felt, query string, preferredRo
 	return role, collaborator, nil
 }
 
-func validateParticipantProfiles(st *felt.Storage, participants map[string][]string) error {
-	profiles, err := roleProfileStorage(st).ListMetadata()
-	if err != nil {
-		return fmt.Errorf("listing local collaboration profiles: %w", err)
-	}
+func validateParticipantProfiles(profiles []*felt.Felt, participants map[string][]string) error {
 	for roleSlug, collaborators := range participants {
 		role, err := uniqueRoleByPath(profiles, "roles/"+roleSlug)
 		if err != nil {
@@ -263,11 +264,24 @@ func validateParticipantProfiles(st *felt.Storage, participants map[string][]str
 	return nil
 }
 
-func roleProfileStorage(st *felt.Storage) *felt.Storage {
+// listRoleProfiles lists the fibers under roles/ in the store that owns them:
+// the project store for an external-refs checkout, else st itself.
+func listRoleProfiles(st *felt.Storage) ([]*felt.Felt, error) {
 	if external := st.ExternalRefs(); external != nil {
-		return felt.NewStorage(external.ProjectDir())
+		st = felt.NewStorage(external.ProjectDir())
 	}
-	return st
+	profiles, err := st.ListMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("listing local role fibers: %w", err)
+	}
+	return profiles, nil
+}
+
+// profileMatchesQuery accepts an intrinsic UID, the full path, or, for a query
+// without a slash, the profile's slug or display name.
+func profileMatchesQuery(f *felt.Felt, query string) bool {
+	return felt.LooksLikeUID(query) && f.MatchesUID(query) || query == f.ID ||
+		!strings.Contains(query, "/") && (query == path.Base(f.ID) || query == f.DisplayName())
 }
 
 func matchRoleProfiles(profiles []*felt.Felt, query string) []*felt.Felt {
@@ -276,10 +290,7 @@ func matchRoleProfiles(profiles []*felt.Felt, query string) []*felt.Felt {
 	}
 	var out []*felt.Felt
 	for _, f := range profiles {
-		if !isRoleRoot(f.ID) {
-			continue
-		}
-		if felt.LooksLikeUID(query) && f.MatchesUID(query) || query == f.ID || !strings.Contains(query, "/") && (query == path.Base(f.ID) || query == f.DisplayName()) {
+		if isRoleRoot(f.ID) && profileMatchesQuery(f, query) {
 			out = append(out, f)
 		}
 	}
@@ -295,13 +306,7 @@ func matchCollaboratorProfiles(profiles []*felt.Felt, query, rolePath string) []
 	}
 	var out []*felt.Felt
 	for _, f := range profiles {
-		if !strings.HasPrefix(f.ID, "roles/") || strings.Count(f.ID, "/") != 2 {
-			continue
-		}
-		if rolePath != "" && path.Dir(f.ID) != rolePath {
-			continue
-		}
-		if felt.LooksLikeUID(query) && f.MatchesUID(query) || query == f.ID || !strings.Contains(query, "/") && (query == path.Base(f.ID) || query == f.DisplayName()) {
+		if isCollaboratorPath(f.ID) && (rolePath == "" || path.Dir(f.ID) == rolePath) && profileMatchesQuery(f, query) {
 			out = append(out, f)
 		}
 	}
@@ -309,33 +314,25 @@ func matchCollaboratorProfiles(profiles []*felt.Felt, query, rolePath string) []
 }
 
 func uniqueRoleByUID(profiles []*felt.Felt, uid string) (*felt.Felt, error) {
-	if countProfileUID(profiles, uid) > 1 {
-		return nil, fmt.Errorf("assign: intrinsic UID %q is ambiguous across local fibers", uid)
-	}
-	var matches []*felt.Felt
-	for _, f := range profiles {
-		if isRoleRoot(f.ID) && f.MatchesUID(uid) {
-			matches = append(matches, f)
-		}
-	}
-	if len(matches) != 1 {
-		return nil, fmt.Errorf("assign: role UID %q resolves to %d local role fibers", uid, len(matches))
-	}
-	return matches[0], nil
+	return uniqueProfileByUID(profiles, uid, isRoleRoot, "role UID %q resolves to %d local role fibers")
 }
 
 func uniqueCollaboratorByUID(profiles []*felt.Felt, uid string) (*felt.Felt, error) {
+	return uniqueProfileByUID(profiles, uid, isCollaboratorPath, "collaborator UID %q resolves to %d local role collaborators")
+}
+
+func uniqueProfileByUID(profiles []*felt.Felt, uid string, kind func(string) bool, countError string) (*felt.Felt, error) {
 	if countProfileUID(profiles, uid) > 1 {
 		return nil, fmt.Errorf("assign: intrinsic UID %q is ambiguous across local fibers", uid)
 	}
 	var matches []*felt.Felt
 	for _, f := range profiles {
-		if strings.HasPrefix(f.ID, "roles/") && strings.Count(f.ID, "/") == 2 && f.MatchesUID(uid) {
+		if kind(f.ID) && f.MatchesUID(uid) {
 			matches = append(matches, f)
 		}
 	}
 	if len(matches) != 1 {
-		return nil, fmt.Errorf("assign: collaborator UID %q resolves to %d local role collaborators", uid, len(matches))
+		return nil, fmt.Errorf("assign: "+countError, uid, len(matches))
 	}
 	return matches[0], nil
 }
@@ -378,28 +375,10 @@ func uniqueCollaboratorByPath(profiles []*felt.Felt, collaboratorPath string) (*
 		}
 		match = profile
 	}
-	if match == nil || !strings.HasPrefix(match.ID, "roles/") || strings.Count(match.ID, "/") != 2 {
+	if match == nil || !isCollaboratorPath(match.ID) {
 		return nil, fmt.Errorf("no direct collaborator fiber at %s", collaboratorPath)
 	}
 	return match, nil
-}
-
-func containsProfile(profiles []*felt.Felt, id string) bool {
-	for _, f := range profiles {
-		if f.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(values []string, value string) bool {
-	for _, existing := range values {
-		if existing == value {
-			return true
-		}
-	}
-	return false
 }
 
 // createHint names the command that creates a missing profile, for a query
@@ -413,6 +392,11 @@ func createHint(query, id string) string {
 
 func isRoleRoot(id string) bool {
 	return strings.HasPrefix(id, "roles/") && strings.Count(id, "/") == 1
+}
+
+// isCollaboratorPath is a direct child of a role: roles/<role>/<collaborator>.
+func isCollaboratorPath(id string) bool {
+	return strings.HasPrefix(id, "roles/") && strings.Count(id, "/") == 2
 }
 
 func validProfileQuery(query string) bool {
