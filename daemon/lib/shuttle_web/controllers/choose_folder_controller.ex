@@ -40,7 +40,7 @@ defmodule ShuttleWeb.ChooseFolderController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 2]
 
   alias Shuttle.{FolderPicker, OriginRouter}
 
@@ -60,10 +60,7 @@ defmodule ShuttleWeb.ChooseFolderController do
           # plausibly have answered it.
           OriginRouter.forward(remote, "/api/v1/choose-folder", params,
             forward_timeout_ms: 330_000
-          ),
-          fn name, reason ->
-            %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-          end
+          )
         )
 
       :local ->

@@ -38,6 +38,15 @@ defmodule ShuttleWeb.RelayHelpers do
   end
 
   @doc """
+  `relay_json/3` with the settings-plane failure body,
+  `%{ok: false, error: "forward to <name> failed: …"}`.
+  """
+  def relay_json(conn, result), do: relay_json(conn, result, &forward_failure/2)
+
+  defp forward_failure(name, reason),
+    do: %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
+
+  @doc """
   Relay a byte-bodied forward verbatim, or render a 502 tunnel failure.
 
   The owning daemon already served the bytes through Phoenix, so `content_type`

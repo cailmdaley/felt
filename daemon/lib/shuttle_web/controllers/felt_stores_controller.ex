@@ -32,7 +32,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 2]
   import ShuttleWeb.TemporalComposite, only: [render_error: 1]
 
   alias Shuttle.{
@@ -45,6 +45,7 @@ defmodule ShuttleWeb.FeltStoresController do
     RegistryCommon,
     Remote
   }
+
   alias Shuttle.RemoteFiberRegistry
 
   def show(conn, _params) do
@@ -74,10 +75,7 @@ defmodule ShuttleWeb.FeltStoresController do
   def create(conn, %{"felt_stores" => hosts} = params) when is_list(hosts) do
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/felt-stores", params), fn name,
-                                                                                        reason ->
-          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-        end)
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/felt-stores", params))
 
       :local ->
         save_local(conn, hosts, Map.get(params, "expected_digest", :any))

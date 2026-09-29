@@ -54,7 +54,7 @@ defmodule ShuttleWeb.FleetController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
   alias Shuttle.{ConfigFiles, Felt, OriginRouter, Poller, Remotes}
@@ -357,10 +357,7 @@ defmodule ShuttleWeb.FleetController do
   defp forward(conn, remote, path, params) do
     relay_json(
       conn,
-      OriginRouter.forward(remote, path, params, forward_timeout_ms: @forward_timeout_ms),
-      fn name, reason ->
-        %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-      end
+      OriginRouter.forward(remote, path, params, forward_timeout_ms: @forward_timeout_ms)
     )
   end
 

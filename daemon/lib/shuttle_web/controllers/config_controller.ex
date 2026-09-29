@@ -51,7 +51,7 @@ defmodule ShuttleWeb.ConfigController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
 
   alias Shuttle.{ConfigFiles, OriginRouter, Poller}
 
@@ -95,10 +95,7 @@ defmodule ShuttleWeb.ConfigController do
     with {:ok, id} <- parse_id(raw) do
       case OriginRouter.route_host(Map.get(params, "origin")) do
         {:remote, remote} ->
-          relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{id}", params), fn name,
-                                                                                            reason ->
-            %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-          end)
+          relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{id}", params))
 
         :local ->
           write_local(conn, id, text, params)

@@ -32,7 +32,7 @@ defmodule ShuttleWeb.AgentsController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
 
   alias Shuttle.{OriginRouter, Poller}
 
@@ -59,10 +59,7 @@ defmodule ShuttleWeb.AgentsController do
   def effort(conn, %{"id" => id} = params) when is_binary(id) and id != "" do
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/agents/effort", params), fn name,
-                                                                                           reason ->
-          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-        end)
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/agents/effort", params))
 
       :local ->
         case Map.fetch(params, "effort") do
