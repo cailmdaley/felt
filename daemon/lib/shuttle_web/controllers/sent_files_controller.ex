@@ -19,14 +19,14 @@ defmodule ShuttleWeb.SentFilesController do
   not a 500.
 
   **Neither leg rescans the stream.** `Shuttle.SentFiles` reads an in-memory
-  projection kept by `Shuttle.SentFiles.Follower`, which seeds once at boot and
-  then reads only appended bytes. That, not the ETag below, is what makes the
+  projection kept by `Shuttle.EventStream`, which seeds once at boot and then
+  reads only appended bytes. That, not the ETag below, is what makes the
   detail panel's poll and the unconditional remote leg affordable.
 
-  **The local leg carries a weak `ETag`** over the request and both source
-  files' change tokens: `events.jsonl` and the session ledger. The ledger
-  matters for native sessions whose event predates the fiber↔session claim; its
-  rotated sibling is included because the reader streams it when present. The
+  **The local leg carries a weak `ETag`** over the request and both sources'
+  change tokens: the `events.jsonl` pair and the session ledger. The ledger
+  matters for native sessions whose event predates the fiber↔session claim.
+  Each source's rotated sibling is included because the reader reads it. The
   detail panel's live poll therefore re-reads the trail whenever either source
   changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
   forwards no request headers and drops response headers, so a client's
@@ -44,12 +44,11 @@ defmodule ShuttleWeb.SentFilesController do
       relay_bytes: 2,
       integer_param: 3,
       json_with_validator: 3,
-      file_token: 1,
       rotating_file_tokens: 1,
       bad_param: 2
     ]
 
-  alias Shuttle.{OriginRouter, Poller, SentFiles, SessionLedger, WaitingTracker}
+  alias Shuttle.{EventStream, OriginRouter, Poller, SentFiles, SessionLedger}
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
@@ -126,12 +125,12 @@ defmodule ShuttleWeb.SentFilesController do
   end
 
   # The reader joins event rows to the session ledger, so either source can
-  # change the response while the other stays untouched. The ledger reader
-  # also includes its rotated sibling during the retention window; include
-  # that token so rotation cannot leave a stale 304 behind.
+  # change the response while the other stays untouched. Both readers include
+  # their rotated sibling, so its token is included too and a rotation cannot
+  # leave a stale 304 behind.
   defp sent_files_tokens do
     %{
-      events: file_token(WaitingTracker.default_events_file()),
+      events: rotating_file_tokens(EventStream.default_events_file()),
       ledger: rotating_file_tokens(SessionLedger.default_path())
     }
   end

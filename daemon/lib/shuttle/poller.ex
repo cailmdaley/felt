@@ -1865,13 +1865,13 @@ defmodule Shuttle.Poller do
     Enum.map(entries, &Snapshot.put_runtime(&1, index))
   end
 
-  # The activity source. Defaults to the host-local WaitingTracker; overridable
+  # The activity source. Defaults to the host-local event stream; overridable
   # via app env so tests inject a deterministic `session => %{last_event_at,
   # phase}` map without writing to the real events.jsonl.
   defp session_activity do
     case Application.get_env(:shuttle, :waiting_phases_source) do
       fun when is_function(fun, 0) -> fun.()
-      _ -> Shuttle.WaitingTracker.session_activity()
+      _ -> Shuttle.EventStream.session_activity()
     end
   end
 

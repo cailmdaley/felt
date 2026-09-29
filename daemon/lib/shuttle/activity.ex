@@ -129,8 +129,8 @@ defmodule Shuttle.Activity do
 
   ## One fold, sliced at read time
 
-  The fold is window-independent: `new_acc/0`, then `fold_line/2` over every
-  line in file order, gives a tally whose content is a function of the stream
+  The fold is window-independent: `new_acc/0`, then `fold_event/2` over every
+  event in file order, gives a tally whose content is a function of the stream
   prefix alone, and `slice/3` reads a window out of it by minute. A bucket's
   count never depends on which window asks for it, which is what the
   whole-minutes rule below promises.
@@ -140,7 +140,7 @@ defmodule Shuttle.Activity do
   reads the rotated sibling first and the live file second, always — a window
   that reaches back past the last rotation is served from both, and a window
   that does not still gets the spell and pairing state the rotated file leaves
-  behind. `Shuttle.Activity.Follower` holds this fold in memory and continues
+  behind. `Shuttle.EventStream` holds this fold in memory and continues
   it across a rotation rather than starting over; see its moduledoc for what a
   rotation drops.
 
@@ -169,10 +169,10 @@ defmodule Shuttle.Activity do
   is a function of the canonical pair and the stream the fold has read, and
   nothing else — no wall clock enters the fold. That is the premise
   `ShuttleWeb.ActivityController` builds its validator on. The stream is the
-  two files on disk, except across a rotation: the follower keeps the spells
+  two files on disk, except across a rotation: the event stream keeps the spells
   still open and the tool calls still pending from the file the rotation
   overwrote, where a fresh fold of the two files cannot know them. The
-  follower's answer is the more correct one; it can differ from a fresh fold
+  stream's answer is the more correct one; it can differ from a fresh fold
   only in onsets and fills near the start of `events.jsonl.1`.
 
   An inverted window, or one wider than 120 days, is refused rather than
@@ -181,18 +181,16 @@ defmodule Shuttle.Activity do
 
   ## Cost: the stream is folded once, not per request
 
-  `Shuttle.Activity.Follower` seeds the fold from both files once at boot and
+  `Shuttle.EventStream` seeds the fold from both files once at boot and
   then folds only the bytes appended since (`Shuttle.FileTail`), on a timer and
   again before each read, so a read is as fresh as a full rescan. A request
   costs two `stat`s plus a range read of the tally proportional to the buckets
-  it returns; the files are read once. When the follower cannot answer — it is
+  it returns; the files are read once. When the stream cannot answer — it is
   following another path, or it is not running — `window/3` folds the files
   itself, which is correct and costs a full read of both.
   """
 
-  require Logger
-
-  alias Shuttle.Activity.Follower
+  alias Shuttle.EventStream
 
   @minute_ms 60_000
   # The widest tool call whose interior is drawn. See the moduledoc's cap note.
@@ -217,7 +215,7 @@ defmodule Shuttle.Activity do
   a range read in key order, which is also the order buckets are served in.
   `spells` holds the identities inside an unanswered waiting spell, `pending`
   each session's open tool call, and `names` one copy of every identity seen
-  (see `fold_line/2`).
+  (see `fold_event/2`).
   """
   @opaque acc :: %{
             tally: :gb_trees.tree(),
@@ -231,7 +229,7 @@ defmodule Shuttle.Activity do
   by `{m, s, cwd, k}`. The window is read through `canonical_window/2` (see the
   moduledoc's whole-minutes rule).
 
-  Served from `Shuttle.Activity.Follower` when it is following the requested
+  Served from `Shuttle.EventStream` when it is following the requested
   path; otherwise a one-off fold of that path and its rotated sibling.
 
   Returns `{:error, :inverted_range}` when `to_ms < from_ms` and
@@ -239,8 +237,8 @@ defmodule Shuttle.Activity do
   file is not an error — it yields an empty list.
 
   Opts (for tests): `:events_file`, the live stream path (its rotated sibling
-  is that path plus `.1`, exactly as the writer names it); `:follower`, the
-  follower process to ask.
+  is that path plus `.1`, exactly as the writer names it); `:stream`, the
+  `Shuttle.EventStream` process to ask.
   """
   @spec window(integer(), integer(), keyword()) ::
           {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
@@ -289,22 +287,15 @@ defmodule Shuttle.Activity do
   @spec max_range_days() :: pos_integer()
   def max_range_days, do: @max_range_days
 
-  @doc "The live stream this host's hook recorder appends to."
-  @spec default_events_file() :: Path.t()
-  def default_events_file, do: Shuttle.WaitingTracker.default_events_file()
-
   defp buckets(from_ms, to_ms, opts) do
-    path = Keyword.get(opts, :events_file, default_events_file())
+    path = Keyword.get(opts, :events_file, EventStream.default_events_file())
 
-    case Follower.slice(Keyword.get(opts, :follower, Follower), path, from_ms, to_ms) do
+    case EventStream.slice(Keyword.get(opts, :stream, EventStream), path, from_ms, to_ms) do
       {:ok, buckets} ->
         buckets
 
       :miss ->
-        if path == default_events_file() do
-          Shuttle.FileTail.warn_miss("activity", Follower, path)
-        end
-
+        EventStream.warn_miss("activity", path)
         path |> fold_stream() |> slice(from_ms, to_ms)
     end
   end
@@ -322,56 +313,38 @@ defmodule Shuttle.Activity do
   order they were written. A missing file contributes nothing.
   """
   @spec fold_stream(Path.t()) :: acc()
-  def fold_stream(live), do: new_acc() |> fold_file(live <> ".1") |> fold_file(live)
+  def fold_stream(live), do: EventStream.fold_files(live, new_acc(), &fold_event(&2, &1))
 
-  @doc """
-  Every line of `path` folded onto `acc`, streamed rather than slurped. A
-  missing or unreadable file leaves `acc` as it was.
-  """
-  @spec fold_file(acc(), Path.t()) :: acc()
-  def fold_file(acc, path) do
-    if File.regular?(path) do
-      fold_lines(acc, File.stream!(path))
-    else
-      acc
-    end
-  rescue
-    # The file vanished or became unreadable between the check and the stream —
-    # a rotation racing this read. Keep what was folded, but leave a trace: a
-    # silently-swallowed read is otherwise indistinguishable from a genuinely
-    # quiet hour, which is a miserable thing to debug from a graph.
-    error ->
-      Logger.debug("activity: skipped #{path} — #{Exception.message(error)}")
-      acc
-  end
-
-  @doc "`lines`, in file order, folded onto `acc`."
+  @doc "`lines`, in file order, decoded and folded onto `acc`."
   @spec fold_lines(acc(), Enumerable.t()) :: acc()
-  def fold_lines(acc, lines), do: Enum.reduce(lines, acc, &fold_line(&2, &1))
+  def fold_lines(acc, lines) do
+    Enum.reduce(lines, acc, fn line, acc ->
+      case EventStream.decode(line) do
+        nil -> acc
+        event -> fold_event(acc, event)
+      end
+    end)
+  end
 
   @doc """
-  One line folded onto `acc`: the spell machine, the tool-call pairing and the
-  tally advance together. Malformed lines and lines missing a
-  `timestamp`/`type` leave `acc` untouched.
+  One decoded event folded onto `acc`: the spell machine, the tool-call
+  pairing and the tally advance together. An event missing a
+  `timestamp`/`type` leaves `acc` untouched.
 
-  The strings the fold keeps are copied out of `line` once per distinct value
-  (`names`), so the tally never pins the buffer a line was split from.
+  The strings the fold keeps are copied out of the event once per distinct
+  value (`names`), so the tally never pins the buffer a line was split from.
   """
-  @spec fold_line(acc(), String.t()) :: acc()
-  def fold_line(acc, line) do
-    case Jason.decode(line) do
-      {:ok, %{"timestamp" => ts, "type" => type} = event}
-      when is_integer(ts) and is_binary(type) ->
-        {identity, acc} = identity(acc, event)
-        {kinds, spells} = classify(type, event, identity, acc.spells)
-        acc = track_span(%{acc | spells: spells}, type, event, identity, ts)
-        minute = floor_minute(ts)
-        Enum.reduce(kinds, acc, &bump(&2, minute, identity, &1))
-
-      _ ->
-        acc
-    end
+  @spec fold_event(acc(), map()) :: acc()
+  def fold_event(acc, %{"timestamp" => ts, "type" => type} = event)
+      when is_integer(ts) and is_binary(type) do
+    {identity, acc} = identity(acc, event)
+    {kinds, spells} = classify(type, event, identity, acc.spells)
+    acc = track_span(%{acc | spells: spells}, type, event, identity, ts)
+    minute = floor_minute(ts)
+    Enum.reduce(kinds, acc, &bump(&2, minute, identity, &1))
   end
+
+  def fold_event(acc, _event), do: acc
 
   @doc """
   The buckets whose minute lies in the canonical window of `from_ms..to_ms`,
@@ -431,10 +404,6 @@ defmodule Shuttle.Activity do
     end
   end
 
-  @doc "How many buckets `acc` holds — for diagnostics."
-  @spec size(acc()) :: non_neg_integer()
-  def size(%{tally: tally}), do: :gb_trees.size(tally)
-
   @doc """
   The timestamp of the first foldable line of `path`, or `nil` when it has
   none or cannot be read. Reads only as far as that line.
@@ -444,8 +413,8 @@ defmodule Shuttle.Activity do
     path
     |> File.stream!()
     |> Enum.find_value(fn line ->
-      case Jason.decode(line) do
-        {:ok, %{"timestamp" => ts, "type" => type}} when is_integer(ts) and is_binary(type) -> ts
+      case EventStream.decode(line) do
+        %{"timestamp" => ts, "type" => type} when is_integer(ts) and is_binary(type) -> ts
         _ -> nil
       end
     end)

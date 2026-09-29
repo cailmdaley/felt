@@ -13,16 +13,16 @@ defmodule Shuttle.SentFiles do
   sessions without a tmux name use the session ledger's fiber claim; an
   unclaimed session remains addressable by its raw `sessionId`.
 
-  ## No PERSISTED index; an in-memory follower instead
+  ## No PERSISTED index; an in-memory projection instead
 
   A derived index written to disk would be stale the moment the server that
   maintains it stops — events.jsonl is ground truth, and that has not changed
   (see finding 01KVC1N5XMAAMYXDAGR4V6QA9G). An **in-memory** projection is a
-  different thing and is not barred by that argument: `Shuttle.SentFiles.Follower`
-  seeds from the whole file at boot and then reads only appended bytes, so it
-  cannot outlive the file it was built from and cannot disagree with it — it is
-  a pure function of a prefix of ground truth, recomputed on every start. It is
-  a read strategy, not a second source of truth.
+  different thing and is not barred by that argument: `Shuttle.EventStream`
+  seeds it from the files at boot and then reads only appended bytes, so it
+  cannot outlive the files it was built from and cannot disagree with them — it
+  is a pure function of a prefix of ground truth, recomputed on every start. It
+  is a read strategy, not a second source of truth.
 
   Following is what makes these two functions affordable. A rescan costs a
   full re-stream and full `Jason.decode` of a 50 MB stream **per request** —
@@ -34,10 +34,10 @@ defmodule Shuttle.SentFiles do
   host and changes every few seconds, so the conditional request essentially
   never hits.
 
-  `for_uid/2` and `all_since/2` read the follower when it is following the same
+  `for_uid/2` and `all_since/2` read the stream when it is following the same
   path they resolve; otherwise (the test suite, an injected fixture, a crashed
-  follower) they fall back to streaming that file directly. Both paths share one
-  parse — `parse_line/1` — so the fallback cannot drift from the projection.
+  stream) they fall back to streaming those files directly. Both paths share one
+  projection — `project/1` — so the fallback cannot drift from the held one.
 
   **The `uid` is resolved at READ time, never stored.** The join is against the
   session ledger, which changes independently of `events.jsonl`; a `uid`
@@ -50,13 +50,14 @@ defmodule Shuttle.SentFiles do
   keeping the newest send, sorted newest-first, capped at `@cap`. An event from
   an unclaimed session matches its raw `sessionId`.
 
-  Only the live file is read — a trail that rolled over to `events.jsonl.1` is
-  gone, which costs nothing at the 50-entry cap. So on truncation or rotation
-  the follower rebuilds from the live file alone, reproducing exactly that. The
-  path honors the same env the hook reads, via
-  `Shuttle.WaitingTracker.default_events_file/0`, so the source can't drift from
-  the writer.
+  The trail is what `events.jsonl.1` and `events.jsonl` hold, in that order: a
+  send survives one rotation and is gone after the second, when the rename
+  overwrites the file it lived in. The path honors the same env the hook reads,
+  via `Shuttle.EventStream.default_events_file/0`, so the source can't drift
+  from the writer.
   """
+
+  alias Shuttle.EventStream
 
   @cap 50
 
@@ -77,9 +78,9 @@ defmodule Shuttle.SentFiles do
   `%{fullPath, basename, timestamp, sessionId}` maps — newest-first, deduped by
   `fullPath`, capped.
 
-  Opts (for tests): `:events_file` (path to the JSONL stream),
-  `:session_ledger_file` (path to the session ledger), `:cap`,
-  `:follower` (the follower process to read from).
+  Opts (for tests): `:events_file` (path to the live JSONL stream; its rotated
+  sibling is that path plus `.1`), `:session_ledger_file` (path to the session
+  ledger), `:cap`, `:stream` (the `Shuttle.EventStream` process to read from).
   """
   @spec for_uid(String.t(), keyword()) :: [map()]
   def for_uid(uid, opts \\ []) when is_binary(uid) do
@@ -106,10 +107,10 @@ defmodule Shuttle.SentFiles do
   dedup is the client's job (house rule: recorded evidence only, no server-side
   opinion about which send "wins").
 
-  Reads only the live `events.jsonl`, same as `for_uid/2` — no rotated `.1`
-  sibling — the source `Shuttle.WaitingTracker.default_events_file/0` resolves.
+  Reads `events.jsonl.1` and `events.jsonl`, same as `for_uid/2` — the pair
+  `Shuttle.EventStream.default_events_file/0` resolves.
 
-  Opts (for tests): `:events_file`, `:session_ledger_file`, `:follower`.
+  Opts (for tests): `:events_file`, `:session_ledger_file`, `:stream`.
   """
   @spec all_since(integer(), keyword()) :: [map()]
   def all_since(since_ms, opts \\ []) when is_integer(since_ms) do
@@ -122,76 +123,62 @@ defmodule Shuttle.SentFiles do
   end
 
   @doc """
-  Default host-local events stream path — the one place this module names its
-  source, delegated so it cannot drift from the writer.
+  One decoded event → the (possibly empty) list of projected events it
+  contributes.
+
+  Non-sent-file events and events naming no usable path collapse to `[]`, so a
+  single odd line never breaks ingest. This is the ONLY projection of the
+  stream: `Shuttle.EventStream` applies it to each line it reads, and the
+  fallback read applies it to each line of the files. The strings kept are
+  copied out of the event, so the projection never pins the buffer a line was
+  read from.
   """
-  @spec default_events_file() :: Path.t()
-  def default_events_file, do: Shuttle.WaitingTracker.default_events_file()
+  @spec project(map()) :: [event()]
+  def project(event) do
+    case sent_paths(event) do
+      files when is_list(files) ->
+        cwd = event["cwd"]
+        paths = for path <- files, is_binary(path), do: :binary.copy(absolutize(path, cwd))
 
-  @doc """
-  One JSONL line → the (possibly empty) list of projected events it contributes.
+        case paths do
+          [] ->
+            []
 
-  Malformed JSON, non-sent-file events, and events naming no usable path all
-  collapse to `[]`, so a single bad line never breaks ingest. This is the ONLY
-  parse of the stream: the follower folds it over appended lines and
-  `scan_file/1` folds it over a whole file.
-  """
-  @spec parse_line(String.t()) :: [event()]
-  def parse_line(line) do
-    with {:ok, event} <- Jason.decode(line),
-         files when is_list(files) <- sent_paths(event) do
-      cwd = event["cwd"]
-      paths = for path <- files, is_binary(path), do: absolutize(path, cwd)
+          paths ->
+            [
+              %{
+                paths: paths,
+                session_id: copy(event["sessionId"]),
+                tmux_session: copy(event["tmuxSession"]),
+                timestamp: event["timestamp"]
+              }
+            ]
+        end
 
-      case paths do
-        [] ->
-          []
-
-        paths ->
-          [
-            %{
-              paths: paths,
-              session_id: event["sessionId"],
-              tmux_session: event["tmuxSession"],
-              timestamp: event["timestamp"]
-            }
-          ]
-      end
-    else
-      _ -> []
+      _ ->
+        []
     end
   end
 
-  @doc """
-  Project a whole events file in one streaming pass — the fallback read, and
-  what the follower's boot seed is equivalent to. A missing file is `[]`.
-  """
-  @spec scan_file(Path.t()) :: [event()]
-  def scan_file(path) do
-    if File.regular?(path) do
-      path
-      |> File.stream!()
-      |> Stream.flat_map(&parse_line/1)
-      |> Enum.to_list()
-    else
-      []
-    end
-  end
+  defp copy(value) when is_binary(value), do: :binary.copy(value)
+  defp copy(value), do: value
 
   # The projected events to read, in file order (oldest-first — `dedupe_newest/1`
-  # depends on it). From the follower when it is following the very path we
+  # depends on it). From the stream when it is following the very path we
   # resolve; otherwise straight off disk.
   defp events(opts) do
-    path = Keyword.get(opts, :events_file, default_events_file())
-    follower = Keyword.get(opts, :follower, Shuttle.SentFiles.Follower)
+    path = Keyword.get(opts, :events_file, EventStream.default_events_file())
 
-    case Shuttle.SentFiles.Follower.events(follower, path) do
+    case EventStream.sent_events(Keyword.get(opts, :stream, EventStream), path) do
       {:ok, events} ->
         events
 
       :miss ->
-        Shuttle.FileTail.warn_miss("sent-files", Shuttle.SentFiles.Follower, path)
-        scan_file(path)
+        EventStream.warn_miss("sent-files", path)
+
+        path
+        |> EventStream.fold_files([], &Enum.reverse(project(&1), &2))
+        |> Enum.reverse()
     end
   end
 

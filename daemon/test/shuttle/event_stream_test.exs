@@ -1,17 +1,18 @@
-defmodule Shuttle.ActivityFollowerTest do
+defmodule Shuttle.EventStreamTest do
   @moduledoc """
-  `Shuttle.Activity.Follower`: seeds the fold from `events.jsonl.1` and
+  `Shuttle.EventStream`: seeds its projections from `events.jsonl.1` and
   `events.jsonl`, follows appends, answers only for its own path, rebuilds on
-  a shrink in place, and continues the fold across a real rename-rotation —
-  including a waiting spell and a tool call that straddle it.
+  a shrink in place, and continues across a real rename-rotation — including a
+  waiting spell and a tool call that straddle it. Most assertions read the
+  activity fold, the projection with the most state to carry; the last tests
+  read all three projections off the same pass.
 
-  The follower's poll interval is set far out, so every catch-up here is the
-  one a read performs; nothing depends on timing.
+  The poll interval is set far out, so every catch-up here is the one a read
+  performs; nothing depends on timing.
   """
   use ExUnit.Case, async: true
 
-  alias Shuttle.Activity
-  alias Shuttle.Activity.Follower
+  alias Shuttle.{Activity, EventStream, SentFiles}
 
   @t0 1_770_000_000_000
   @m 60_000
@@ -19,7 +20,7 @@ defmodule Shuttle.ActivityFollowerTest do
   @cwd "/repo/a"
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "activity_follower_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "event_stream_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     {:ok, path: Path.join(dir, "events.jsonl")}
@@ -40,13 +41,13 @@ defmodule Shuttle.ActivityFollowerTest do
   defp append(path, lines), do: File.write!(path, Enum.map(lines, &(&1 <> "\n")), [:append])
 
   defp start(path) do
-    name = :"activity_follower_#{System.unique_integer([:positive])}"
-    start_supervised!({Follower, events_file: path, poll_interval_ms: 3_600_000, name: name})
+    name = :"event_stream_#{System.unique_integer([:positive])}"
+    start_supervised!({EventStream, events_file: path, poll_interval_ms: 3_600_000, name: name})
     name
   end
 
   defp all(name, path) do
-    {:ok, buckets} = Follower.slice(name, path, @t0 - 1_000 * @m, @t0 + 1_000 * @m)
+    {:ok, buckets} = EventStream.slice(name, path, @t0 - 1_000 * @m, @t0 + 1_000 * @m)
     buckets
   end
 
@@ -93,15 +94,17 @@ defmodule Shuttle.ActivityFollowerTest do
     on_exit(fn -> File.rm(other) end)
     name = start(path)
 
-    assert Follower.slice(name, other, @t0, @t0 + @m) == :miss
-    assert Follower.events_file(name) == path
+    assert EventStream.slice(name, other, @t0, @t0 + @m) == :miss
+    assert EventStream.events_file(name) == path
 
     assert {:ok, [%{k: "agent"}, %{k: "reply"}]} =
-             Activity.window(@t0, @t0 + @m, events_file: other, follower: name)
+             Activity.window(@t0, @t0 + @m, events_file: other, stream: name)
   end
 
-  test "a follower that is not running is a miss" do
-    assert Follower.slice(:no_such_follower, "/x", @t0, @t0 + @m) == :miss
+  test "a stream that is not running is a miss" do
+    assert EventStream.slice(:no_such_stream, "/x", @t0, @t0 + @m) == :miss
+    assert EventStream.sent_events(:no_such_stream, "/x") == :miss
+    assert EventStream.session_activity(:no_such_stream) == %{}
   end
 
   test "a shrink in place rebuilds from the files", %{path: path} do
@@ -182,10 +185,10 @@ defmodule Shuttle.ActivityFollowerTest do
       end
     end
 
-    name = :"activity_follower_#{System.unique_integer([:positive])}"
+    name = :"event_stream_#{System.unique_integer([:positive])}"
 
     start_supervised!(
-      {Follower, events_file: path, poll_interval_ms: 3_600_000, name: name, seed_hook: hook}
+      {EventStream, events_file: path, poll_interval_ms: 3_600_000, name: name, seed_hook: hook}
     )
 
     assert all(name, path) == fresh(path)
@@ -203,5 +206,97 @@ defmodule Shuttle.ActivityFollowerTest do
     append(path <> ".new", [ev("user_prompt_submit", 4)])
     File.rename!(path <> ".new", path)
     assert kinds(all(name, path)) == [{4, "attention", 1}]
+  end
+
+  # ── Every projection off the same pass ──
+
+  defp waiting(name) do
+    name
+    |> EventStream.session_activity()
+    |> Map.new(fn {session, %{phase: phase}} -> {session, phase} end)
+  end
+
+  # The activity buckets of the ten minutes before `now`, after catching up.
+  defp recent(name, path, now) do
+    {:ok, buckets} = EventStream.slice(name, path, now - 10 * @m, now)
+    buckets
+  end
+
+  defp sent(name, path) do
+    {:ok, events} = EventStream.sent_events(name, path)
+    Enum.flat_map(events, & &1.paths)
+  end
+
+  test "one pass seeds all three projections from both files", %{path: path} do
+    now = System.system_time(:millisecond)
+    shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    at = fn minute -> %{"timestamp" => now + minute * @m, "tmuxSession" => shuttle} end
+
+    append(path <> ".1", [
+      ev("stop", -3, at.(-3)),
+      ev("file_sent", -3, Map.put(at.(-3), "files", ["/tmp/a.html"]))
+    ])
+
+    append(path, [ev("notification", -2, Map.put(at.(-2), "tmuxSession", "other-shuttle"))])
+    name = start(path)
+
+    # The session's last event lives only in the rotated file.
+    assert waiting(name) == %{shuttle => "waiting", "other-shuttle" => "attention"}
+    assert sent(name, path) == ["/tmp/a.html"]
+
+    assert Enum.map(recent(name, path, now), & &1.k) == ["agent", "reply", "notify"]
+  end
+
+  test "a rotation carries the waiting map and the sent trail; a second one drops the trail",
+       %{path: path} do
+    now = System.system_time(:millisecond)
+    shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    at = fn minute -> %{"timestamp" => now + minute * @m, "tmuxSession" => shuttle} end
+
+    sent_line = fn minute, file ->
+      ev("file_sent", minute, Map.put(at.(minute), "files", [file]))
+    end
+
+    append(path, [ev("stop", -5, at.(-5)), sent_line.(-5, "/tmp/one.html")])
+    name = start(path)
+
+    # Written after the last read and rotated away before the next.
+    append(path, [ev("pre_tool_use", -4, at.(-4))])
+    File.rename!(path, path <> ".1")
+    append(path, [sent_line.(-3, "/tmp/two.html")])
+
+    # `sent/2` catches up; `session_activity/1` reads what is held.
+    assert sent(name, path) == ["/tmp/one.html", "/tmp/two.html"]
+    assert waiting(name) == %{shuttle => "working"}
+    assert {:ok, events} = EventStream.sent_events(name, path)
+
+    assert events ==
+             EventStream.fold_files(path, [], &Enum.reverse(SentFiles.project(&1), &2))
+             |> Enum.reverse()
+
+    File.rename!(path, path <> ".1")
+    append(path, [ev("stop", -1, at.(-1))])
+
+    assert sent(name, path) == ["/tmp/two.html"]
+    assert waiting(name) == %{shuttle => "waiting"}
+  end
+
+  test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
+    now = System.system_time(:millisecond)
+    a = "a-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    b = "b-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+
+    append(path, [
+      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a}),
+      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a})
+    ])
+
+    name = start(path)
+    assert waiting(name) == %{a => "attention"}
+
+    # Shrunk in place: the rebuild sees only b, and still remembers a.
+    File.write!(path, ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => b}) <> "\n")
+    assert Enum.map(recent(name, path, now), & &1.k) == ["agent", "reply"]
+    assert waiting(name) == %{a => "attention", b => "waiting"}
   end
 end

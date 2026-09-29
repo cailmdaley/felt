@@ -11,16 +11,15 @@ import (
 // stream and the commit ledger live, when they may be written, and how the
 // stream is bounded. It sits beside shuttle_host.go and shuttle_stores.go as
 // the third "mirror the Elixir resolver in Go" module — the daemon reads these
-// files (daemon/lib/shuttle/waiting_tracker.ex, daemon/lib/shuttle/sent_files.ex,
-// daemon/lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
+// files (daemon/lib/shuttle/event_stream.ex, daemon/lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
 // write them, and the two sides must never disagree about the paths.
 
 const (
 	// eventsDefaultMaxBytes bounds the live stream. On rollover the file is
 	// renamed to <path>.1 (replacing any previous .1) and a fresh one starts.
-	// WaitingTracker self-heals — it resets its tail offset when the file
-	// shrinks — and SentFiles caps at the 50 most recent sends, so a rollover
-	// costs nothing either reader depends on.
+	// Shuttle.EventStream recognizes the rename by the live path's inode
+	// moving, reads the renamed file's last bytes, and continues from the new
+	// file's start, so a rollover costs no reader anything it depends on.
 	eventsDefaultMaxBytes = 64 << 20
 	eventsRotatedSuffix   = ".1"
 	// eventsLockSuffix names the sidecar file writers flock around a rotation.
@@ -55,7 +54,7 @@ func shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
 	return filepath.Join(dir, leaf), false
 }
 
-// eventsFilePath mirrors Shuttle.WaitingTracker.default_events_file/0 exactly.
+// eventsFilePath mirrors Shuttle.EventStream.default_events_file/0 exactly.
 func eventsFilePath() (path string, explicit bool) {
 	return shuttleStatePath("SHUTTLE_EVENTS_FILE", "events.jsonl")
 }

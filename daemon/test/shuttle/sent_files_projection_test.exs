@@ -1,25 +1,25 @@
-defmodule Shuttle.SentFilesFollowerTest do
+defmodule Shuttle.SentFilesProjectionTest do
   @moduledoc """
-  The in-memory sent-files projection: `Shuttle.SentFiles.Follower` seeds from a
-  whole `events.jsonl` once and then reads only appended bytes, and
-  `Shuttle.SentFiles` serves `for_uid/2` and `all_since/2` from it.
+  The in-memory sent-files projection: `Shuttle.EventStream` seeds it from the
+  events files once and then reads only appended bytes, and `Shuttle.SentFiles`
+  serves `for_uid/2` and `all_since/2` from it.
 
   The load-bearing test here is `legacy_*` — a verbatim copy of the full-rescan
-  reader this replaced, pinned against the follower's output over the same
-  fixture. Everything else checks the follower's own mechanics: appends, a
-  prefix it must not re-read, truncation, malformed lines, a partial trailing
-  line, and the ledger join that has to stay at read time.
+  reader, pinned against the held projection over the same fixture. Everything
+  else checks the projection's mechanics: appends, a prefix it must not
+  re-read, truncation, rotation, malformed lines, a partial trailing line, and
+  the ledger join that has to stay at read time.
   """
   use ExUnit.Case, async: false
 
-  alias Shuttle.SentFiles
+  alias Shuttle.{EventStream, SentFiles}
 
   @match_ulid "01KTS261GJMMRDRHS2QDMEFV3K"
   @other_ulid "01KTCA2CY6X6P126ZMBK9686SH"
   @session "0883ade1-08e0-4457-94c6-7ac12137eb0f"
 
   setup do
-    base = "sent_files_follower_#{System.unique_integer([:positive])}"
+    base = "sent_files_projection_#{System.unique_integer([:positive])}"
     events = Path.join(System.tmp_dir!(), base <> ".jsonl")
     ledger = Path.join(System.tmp_dir!(), base <> "_ledger.jsonl")
     File.write!(events, "")
@@ -51,25 +51,25 @@ defmodule Shuttle.SentFilesFollowerTest do
     )
   end
 
-  # ── follower ──
+  # ── stream ──
 
-  defp start_follower(events) do
-    name = :"sent_files_follower_#{System.unique_integer([:positive])}"
+  defp start_stream(events) do
+    name = :"sent_files_stream_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
-      SentFiles.Follower.start_link(events_file: events, poll_interval_ms: 10, name: name)
+      EventStream.start_link(events_file: events, poll_interval_ms: 10, name: name)
 
     on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     name
   end
 
-  # Options that force the FOLLOWER path, and options that force the direct
+  # Options that force the held projection, and options that force the direct
   # full-file scan — the same reader over the same file, two ways in.
   defp followed(events, ledger, name, extra \\ []),
-    do: [events_file: events, session_ledger_file: ledger, follower: name] ++ extra
+    do: [events_file: events, session_ledger_file: ledger, stream: name] ++ extra
 
   defp scanned(events, ledger, extra \\ []),
-    do: [events_file: events, session_ledger_file: ledger, follower: :no_such_follower] ++ extra
+    do: [events_file: events, session_ledger_file: ledger, stream: :no_such_stream] ++ extra
 
   defp wait_until(fun, tries \\ 100) do
     cond do
@@ -235,9 +235,9 @@ defmodule Shuttle.SentFilesFollowerTest do
     |> Enum.each(&append(events, &1))
   end
 
-  test "the follower reproduces the full-rescan reader, entry for entry", ctx do
+  test "the held projection reproduces the full-rescan reader, entry for entry", ctx do
     write_broad_fixture(ctx.events, ctx.ledger)
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     legacy_opts = [events_file: ctx.events, session_ledger_file: ctx.ledger]
 
@@ -256,9 +256,9 @@ defmodule Shuttle.SentFilesFollowerTest do
 
   test "seeding then tailing equals rescanning the same file", ctx do
     write_broad_fixture(ctx.events, ctx.ledger)
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
-    # Everything below was appended AFTER the seed, so the follower only ever
+    # Everything below was appended AFTER the seed, so the stream only ever
     # saw it through the tail.
     append(ctx.events, sent_line(ts: 7_000, files: ["/tmp/tailed.html"]))
     append(ctx.events, sent_line(ts: 8_000, files: ["/tmp/a.html"]))
@@ -277,14 +277,14 @@ defmodule Shuttle.SentFilesFollowerTest do
 
   test "an appended event appears without the prefix being re-read", ctx do
     append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/seeded.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     assert [%{fullPath: "/tmp/seeded.html"}] =
              SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name))
 
     # Overwrite the seeded prefix IN PLACE with the same number of bytes. A
     # reader that rescans would now see garbage where the first event was; a
-    # follower that only reads appended bytes still has it from memory.
+    # stream that only reads appended bytes still has it from memory.
     prefix_len = byte_size(File.read!(ctx.events))
     {:ok, fd} = File.open(ctx.events, [:read, :write, :binary])
     :ok = :file.pwrite(fd, 0, String.duplicate("x", prefix_len - 1) <> "\n")
@@ -306,13 +306,13 @@ defmodule Shuttle.SentFilesFollowerTest do
 
   test "truncation rebuilds from the live file and keeps nothing older", ctx do
     append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/before.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     assert [%{fullPath: "/tmp/before.html"}] =
              SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name))
 
-    # What rotation looks like to this reader: the live file starts over. The
-    # rolled-over trail is gone — the pre-follower behavior, deliberately kept.
+    # Truncated in place, with no rotated sibling to hold the old trail: the
+    # rebuild holds exactly what the live file holds.
     File.write!(ctx.events, "")
     append(ctx.events, sent_line(ts: 2_000, files: ["/tmp/after.html"]))
 
@@ -325,10 +325,47 @@ defmodule Shuttle.SentFilesFollowerTest do
            end)
   end
 
+  test "a send survives one rotation and is gone after the second", ctx do
+    rotated = ctx.events <> ".1"
+    on_exit(fn -> File.rm(rotated) end)
+    append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/first.html"]))
+    name = start_stream(ctx.events)
+
+    # Written after the last read, then rotated away before the next: the
+    # drain of the rotated file's tail picks it up.
+    append(ctx.events, sent_line(ts: 2_000, files: ["/tmp/second.html"]))
+    File.rename!(ctx.events, rotated)
+    append(ctx.events, sent_line(ts: 3_000, files: ["/tmp/third.html"]))
+
+    paths = fn ->
+      Enum.map(SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name)), & &1.fullPath)
+    end
+
+    assert paths.() == ["/tmp/first.html", "/tmp/second.html", "/tmp/third.html"]
+
+    assert SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name)) ==
+             SentFiles.all_since(0, scanned(ctx.events, ctx.ledger))
+
+    assert Enum.map(
+             SentFiles.for_uid(@match_ulid, followed(ctx.events, ctx.ledger, name)),
+             & &1.fullPath
+           ) ==
+             ["/tmp/third.html", "/tmp/second.html", "/tmp/first.html"]
+
+    # The second rename overwrites the file the first two sends lived in.
+    File.rename!(ctx.events, rotated)
+    append(ctx.events, sent_line(ts: 4_000, files: ["/tmp/fourth.html"]))
+
+    assert paths.() == ["/tmp/third.html", "/tmp/fourth.html"]
+
+    assert SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name)) ==
+             SentFiles.all_since(0, scanned(ctx.events, ctx.ledger))
+  end
+
   test "a shrink to a shorter file does not double-count or drop", ctx do
     append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/one.html"]))
     append(ctx.events, sent_line(ts: 2_000, files: ["/tmp/two.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     # Smaller than the seeded offset, but not empty.
     File.write!(ctx.events, sent_line(ts: 3_000, files: ["/tmp/three.html"]) <> "\n")
@@ -345,7 +382,7 @@ defmodule Shuttle.SentFilesFollowerTest do
   test "a malformed line is skipped at seed and at tail", ctx do
     append(ctx.events, "{ broken")
     append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/seeded.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     assert [%{fullPath: "/tmp/seeded.html"}] =
              SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name))
@@ -363,7 +400,7 @@ defmodule Shuttle.SentFilesFollowerTest do
   end
 
   test "a partial trailing line waits for its newline", ctx do
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
     File.write!(ctx.events, sent_line(ts: 1_000, files: ["/tmp/partial.html"]), [:append])
     Process.sleep(50)
     assert SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name)) == []
@@ -384,7 +421,7 @@ defmodule Shuttle.SentFilesFollowerTest do
     append(ctx.events, sent_line(ts: 2_000, files: ["/tmp/dup.html"]))
     append(ctx.events, sent_line(ts: 4_000, files: ["/tmp/b.html"]))
     append(ctx.events, sent_line(ts: 5_000, files: ["/tmp/c.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     assert [
              %{fullPath: "/tmp/c.html", timestamp: 5_000},
@@ -414,7 +451,7 @@ defmodule Shuttle.SentFilesFollowerTest do
       |> Jason.encode!()
     )
 
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
     opts = followed(ctx.events, ctx.ledger, name)
 
     assert Enum.map(SentFiles.all_since(0, opts), & &1.fullPath) ==
@@ -431,7 +468,7 @@ defmodule Shuttle.SentFilesFollowerTest do
 
   test "a ledger claim changes uid resolution with no new event appended", ctx do
     append(ctx.events, sent_line(ts: 1_000, tmux: "", files: ["/tmp/native.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     # Unclaimed: the raw sessionId is the only handle.
     assert [%{uid: @session}] = SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name))
@@ -448,9 +485,9 @@ defmodule Shuttle.SentFilesFollowerTest do
              SentFiles.for_uid(@other_ulid, followed(ctx.events, ctx.ledger, name))
   end
 
-  test "a missing events file neither crashes the follower nor invents entries", ctx do
+  test "a missing events file neither crashes the stream nor invents entries", ctx do
     File.rm!(ctx.events)
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
     assert SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name)) == []
     assert SentFiles.for_uid(@match_ulid, followed(ctx.events, ctx.ledger, name)) == []
@@ -466,21 +503,21 @@ defmodule Shuttle.SentFilesFollowerTest do
            end)
   end
 
-  test "a follower on a different file is a miss, and the caller reads that file itself", ctx do
+  test "a stream on a different file is a miss, and the caller reads that file itself", ctx do
     other = ctx.events <> ".other"
     File.write!(other, sent_line(ts: 1_000, files: ["/tmp/other-file.html"]) <> "\n")
     on_exit(fn -> File.rm(other) end)
 
     append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/followed.html"]))
-    name = start_follower(ctx.events)
+    name = start_stream(ctx.events)
 
-    assert SentFiles.Follower.events(name, other) == :miss
+    assert EventStream.sent_events(name, other) == :miss
 
     assert [%{fullPath: "/tmp/other-file.html"}] =
              SentFiles.all_since(0,
                events_file: other,
                session_ledger_file: ctx.ledger,
-               follower: name
+               stream: name
              )
   end
 end

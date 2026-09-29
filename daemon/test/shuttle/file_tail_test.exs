@@ -1,6 +1,6 @@
 defmodule Shuttle.FileTailTest do
   @moduledoc """
-  The byte mechanics the `events.jsonl` followers share: seed to the last
+  The byte mechanics behind `Shuttle.EventStream`: snapshot to the last
   newline, read only what was appended, never consume a partial line, report
   a shrink rather than deciding what it means, and drain a rotated file.
   """
@@ -14,19 +14,20 @@ defmodule Shuttle.FileTailTest do
     {:ok, path: path}
   end
 
-  test "a missing file seeds empty at offset zero and advances to nothing", %{path: path} do
-    assert FileTail.seed(path) == {[], 0}
+  test "a missing file snapshots empty at offset zero and advances to nothing", %{path: path} do
+    assert FileTail.snapshot(path) == {[], 0, nil}
     assert FileTail.advance(path, 0) == :noop
   end
 
-  test "seed returns whole lines and the offset just past the last newline", %{path: path} do
+  test "snapshot returns whole lines, the offset just past the last newline, and the inode",
+       %{path: path} do
     File.write!(path, "a\nb\n")
-    assert FileTail.seed(path) == {["a", "b"], 4}
+    assert FileTail.snapshot(path) == {["a", "b"], 4, FileTail.inode(path)}
   end
 
-  test "seed leaves a partial trailing line unconsumed", %{path: path} do
+  test "snapshot leaves a partial trailing line unconsumed", %{path: path} do
     File.write!(path, "a\npartial")
-    assert {["a"], 2} = FileTail.seed(path)
+    assert {["a"], 2, _inode} = FileTail.snapshot(path)
 
     # Completing the line makes it available to the very next advance, whole.
     File.write!(path, "-rest\n", [:append])
@@ -35,7 +36,7 @@ defmodule Shuttle.FileTailTest do
 
   test "advance reads only appended bytes", %{path: path} do
     File.write!(path, "a\n")
-    {_lines, offset} = FileTail.seed(path)
+    {_lines, offset, _inode} = FileTail.snapshot(path)
     File.write!(path, "b\nc\n", [:append])
     assert {:append, ["b", "c"], new_offset} = FileTail.advance(path, offset)
     assert new_offset == byte_size(File.read!(path))
@@ -60,7 +61,7 @@ defmodule Shuttle.FileTailTest do
 
   test "blank lines are dropped, not surfaced as empty records", %{path: path} do
     File.write!(path, "a\n\n\nb\n")
-    assert {["a", "b"], 6} = FileTail.seed(path)
+    assert {["a", "b"], 6, _inode} = FileTail.snapshot(path)
   end
 
   test "drain reads a finished file from an offset, unterminated last line included",

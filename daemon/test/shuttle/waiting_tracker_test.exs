@@ -1,7 +1,7 @@
 defmodule Shuttle.WaitingTrackerTest do
   use ExUnit.Case, async: false
 
-  alias Shuttle.WaitingTracker
+  alias Shuttle.EventStream
 
   @hour_ms 60 * 60 * 1_000
   # Ingestion clock. Events carry their OWN timestamp now (last-event-wins
@@ -23,7 +23,7 @@ defmodule Shuttle.WaitingTrackerTest do
     name = :"waiting_tracker_#{System.unique_integer([:positive])}"
 
     {:ok, pid} =
-      WaitingTracker.start_link(
+      EventStream.start_link(
         events_file: events,
         poll_interval_ms: 10,
         clock: fn -> @base end,
@@ -46,16 +46,22 @@ defmodule Shuttle.WaitingTrackerTest do
     File.write!(events, line <> "\n", [:append])
   end
 
-  defp activity(name, session), do: Map.get(WaitingTracker.session_activity(name), session)
+  defp activity(name, session), do: Map.get(EventStream.session_activity(name), session)
   defp phase(name, session), do: (activity(name, session) || %{})[:phase]
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
   defp wait_until(fun, tries \\ 50) do
     cond do
-      fun.() -> true
-      tries <= 0 -> false
-      true -> Process.sleep(10); wait_until(fun, tries - 1)
+      fun.() ->
+        true
+
+      tries <= 0 ->
+        false
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, tries - 1)
     end
   end
 
@@ -161,6 +167,7 @@ defmodule Shuttle.WaitingTrackerTest do
       notificationKind: "idle_prompt",
       timestamp: @base + 1
     })
+
     assert wait_until(fn -> activity(name, "foo-01J-shuttle")[:last_event_at] == @base + 1 end)
     assert phase(name, "foo-01J-shuttle") == "waiting"
   end
@@ -312,7 +319,9 @@ defmodule Shuttle.WaitingTrackerTest do
        %{events: events} do
     name = start(events)
 
-    line = Jason.encode!(%{type: "notification", tmuxSession: "foo-01J-shuttle", timestamp: @base})
+    line =
+      Jason.encode!(%{type: "notification", tmuxSession: "foo-01J-shuttle", timestamp: @base})
+
     File.write!(events, line, [:append])
     Process.sleep(40)
     refute ingested?(name, "foo-01J-shuttle")
@@ -330,5 +339,8 @@ defmodule Shuttle.WaitingTrackerTest do
     Process.sleep(40)
     append(events, "notification", "bar-01J-shuttle")
     assert wait_until(fn -> phase(name, "bar-01J-shuttle") == "attention" end)
+
+    # A truncated file cannot make a remembered session wrong, only unrefreshed.
+    assert phase(name, "foo-01J-shuttle") == "attention"
   end
 end

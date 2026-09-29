@@ -2,12 +2,11 @@ defmodule Shuttle.FileTail do
   @moduledoc """
   Follow an **append-only** line-oriented file forward from a byte offset.
 
-  This is the read mechanics shared by every in-memory follower of
-  `~/.shuttle/events.jsonl` — `Shuttle.WaitingTracker`,
-  `Shuttle.SentFiles.Follower` and `Shuttle.Activity.Follower`. Each owns its
-  own projection and its own offset; this module owns only the bytes: seed
-  once from the whole file, then read *only what was appended*, and say so
-  when the file shrank or was rotated away.
+  These are the read mechanics behind `Shuttle.EventStream`, the one follower
+  of `~/.shuttle/events.jsonl`. The stream owns the offset and the
+  projections; this module owns only the bytes: snapshot the whole file once,
+  then read *only what was appended*, and say so when the file shrank or was
+  rotated away.
 
   Every read opens the file `:raw`, in the calling process. A plain
   `File.read/1` goes through the `file_server_2` process, which then holds the
@@ -24,7 +23,7 @@ defmodule Shuttle.FileTail do
 
   ## Partial trailing lines are never consumed
 
-  A writer can be mid-line when a poll lands. Both `seed/1` and `advance/2`
+  A writer can be mid-line when a poll lands. Both `snapshot/1` and `advance/2`
   stop at the **last newline** and leave the remainder unconsumed, so the next
   poll re-reads that record whole. Advancing past it would silently drop the
   event; re-reading it costs one short read.
@@ -32,10 +31,8 @@ defmodule Shuttle.FileTail do
   ## Shrink is the caller's decision
 
   A file smaller than the offset means truncation or rotation, and what to do
-  about it depends on the projection: a last-event-wins map can keep what it
-  has, while an index of the file's whole contents must be rebuilt. So
-  `advance/2` reports `{:reset, size}` and does not guess. The offset the
-  caller adopts is the file's current size, which is where a rebuilt read ends.
+  about it depends on the caller. So `advance/2` reports `{:reset, size}` and
+  does not guess; `size` is where a rebuild from byte 0 ends.
 
   A rotation renames the followed file and starts a new one at the same path,
   and the new file can outgrow the old offset before anyone notices the
@@ -44,28 +41,16 @@ defmodule Shuttle.FileTail do
   file's last bytes with `drain/2`.
   """
 
-  require Logger
-
   @type offset :: non_neg_integer()
 
-  @miss_log_interval_ms 60_000
-
   @doc """
-  Every complete line of `path`, plus the offset to resume tailing from.
+  Every complete line of `path`, the offset to resume tailing from, and the
+  inode the lines were read from — taken from the open file rather than the
+  path, so it names the file that was read even when a rotation renames it
+  mid-read.
 
-  A missing or unreadable file is `{[], 0}` — not an error: the follower starts
-  empty and picks the file up on a later `advance/2`.
-  """
-  @spec seed(Path.t()) :: {[String.t()], offset()}
-  def seed(path) do
-    {lines, offset, _inode} = snapshot(path)
-    {lines, offset}
-  end
-
-  @doc """
-  `seed/1` plus the inode the lines were read from, taken from the open file
-  rather than the path — so it names the file that was read even when a
-  rotation renames it mid-read. `nil` for a missing or unreadable file.
+  A missing or unreadable file is `{[], 0, nil}` — not an error: the follower
+  starts empty and picks the file up on a later `advance/2`.
   """
   @spec snapshot(Path.t()) :: {[String.t()], offset(), non_neg_integer() | nil}
   def snapshot(path) do
@@ -147,37 +132,6 @@ defmodule Shuttle.FileTail do
       {:ok, %{inode: inode}} -> inode
       _ -> nil
     end
-  end
-
-  @doc """
-  Logs that `follower` could not answer for `path` and its caller is re-reading
-  the whole file — at most once a minute per follower.
-
-  A miss is correct but costs a full re-read of a stream that reaches tens of
-  megabytes, the very cost a follower exists to remove. Three unrelated
-  conditions collapse into it: the follower is following a different path, it
-  is not running, or the call timed out. Unlogged, a daemon in any of those
-  states looks exactly like one where the follower never helped, which on a
-  CPU-capped host is the worst thing to have to diagnose from load alone. The
-  limit is there because a miss repeats on every poll by construction.
-  `label` prefixes the line (`"activity"`, `"sent-files"`).
-  """
-  @spec warn_miss(String.t(), module(), Path.t()) :: :ok
-  def warn_miss(label, follower, path) do
-    now = System.monotonic_time(:millisecond)
-    key = {__MODULE__, :last_miss_log, follower}
-    last = :persistent_term.get(key, nil)
-
-    if is_nil(last) or now - last >= @miss_log_interval_ms do
-      :persistent_term.put(key, now)
-
-      Logger.warning(
-        "#{label}: follower miss for #{path}; re-reading the whole file. " <>
-          "Check that #{inspect(follower)} is running and following this path."
-      )
-    end
-
-    :ok
   end
 
   defp read_appended(path, offset, length) do
