@@ -33,17 +33,12 @@ defmodule Shuttle.Continuation do
 
   ## Reading: nested only
 
-  Readers read ONLY `shuttle.runtime.<key>`. No code writes a flat
-  runtime key (`internal/felt/shuttle.go`'s `SetShuttleField` still
-  supports it as a generic primitive, but the only production caller left is
-  `set-agent`'s `agent` field, never a runtime key) — so the dual-read was a
-  pure ambiguity surface: a STALE flat key left over from before the cutover
-  could shadow a since-written-but-since-cleared nested one, or simply mask
-  the fact that a fiber was never lifted. A fiber carrying only flat keys
-  reads as having no continuation state (the existing safe-default: absent
-  `dispatched_at` treats as fresh) rather than silently resurrecting a
-  possibly-stale flat value; `felt shuttle migrate-runtime <fiber>` lifts it
-  into the nested form.
+  Readers read ONLY `shuttle.runtime.<key>`. No code writes a flat runtime
+  key, and reading one too would let a stale flat key shadow a
+  since-written-but-since-cleared nested one. A fiber carrying only flat keys
+  reads as having no continuation state (the safe default: absent
+  `dispatched_at` treats as fresh); `felt shuttle migrate-runtime <fiber>`
+  lifts it into the nested form.
 
   ## Continuation decision
 
@@ -208,8 +203,7 @@ defmodule Shuttle.Continuation do
   must never force a surprising mid-transcript resume. Here the question is
   dispatch-vs-don't (the pinned autonomous-tick gate), where absent markers must
   read as "no worker asked for a relaunch" — a hand-edited-active or
-  marker-wiped pinned role sits idle until a human Resumes it, exactly as it
-  did under the blanket exclusion.
+  marker-wiped pinned role sits idle until a human Resumes it.
   """
   @spec deliberate_handoff_since_dispatch?(map()) :: boolean()
   def deliberate_handoff_since_dispatch?(fiber) do
@@ -302,11 +296,9 @@ defmodule Shuttle.Continuation do
 
   # Shell `felt shuttle mark-runtime <fiber_id> <flags...>` (cd: felt_store)
   # through the one audited write helper (`Shuttle.Felt.Shuttle`). `flags` is
-  # a list of `{flag, value}` pairs, already filtered to non-empty.
-  #
-  # Post-S1/C1, felt's own `resolveOwnHost` is pure local state — no
-  # re-entrant `--host` override needed here (or anywhere else in the
-  # daemon-shelled write plane); see `Shuttle.Felt.Shuttle`'s moduledoc.
+  # a list of `{flag, value}` pairs, already filtered to non-empty. felt
+  # resolves its own host from local state, so no `--host` override is
+  # passed; see `Shuttle.Felt.Shuttle`'s moduledoc.
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
     args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 

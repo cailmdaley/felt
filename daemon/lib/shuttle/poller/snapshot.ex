@@ -8,10 +8,9 @@ defmodule Shuttle.Poller.Snapshot do
   API and kanban consumers depend on it byte-for-byte — so changes here must
   preserve it exactly.
 
-  State-coupled helpers that the rest of the poller also relies on
-  (`fiber_address/1`, `metadata_uid/1`, `runtime_seconds/2`) stay in
-  `Shuttle.Poller` as the single source of truth and are called back into from
-  here. `standing_role_snapshots/3` lives in `Shuttle.Poller.StandingRoles`.
+  The identity helpers it shares with the rest of the poller (`fiber_address/1`,
+  `metadata_uid/1`) live in `Shuttle.Poller`; `standing_role_snapshots/3` lives
+  in `Shuttle.Poller.StandingRoles`.
   """
 
   require Shuttle.Dispatcher

@@ -2,10 +2,9 @@ defmodule Shuttle.Poller.DocumentCache do
   @moduledoc """
   The poll-cycle document cache for `Shuttle.Poller`.
 
-  Extracted from the poller as the most self-contained cluster: it owns how the
-  fiber-document feed is rebuilt each tick (`refresh/3`), how an entry is keyed
-  (`cache_key/1`, uid when present else id), and whether a prior entry can be
-  reused without rebuilding (`reusable_entry?/2`, mtime-equality).
+  It owns how the fiber-document feed is rebuilt each tick (`refresh/3`), how an
+  entry is keyed (`cache_key/1`, uid when present else id), and whether a prior
+  entry can be reused without rebuilding (`reusable_entry?/2`, mtime-equality).
 
   ## One walk, not N shell-outs
 

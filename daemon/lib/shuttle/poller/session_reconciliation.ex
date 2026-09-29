@@ -2,22 +2,18 @@ defmodule Shuttle.Poller.SessionReconciliation do
   @moduledoc """
   Orphan adoption / live-session reconciliation for the poller.
 
-  When the daemon restarts, the `shuttle-<id>` tmux sessions it launched keep
+  When the daemon restarts, the `*-shuttle` tmux sessions it launched keep
   running untouched (tmux owns the worker process; Shuttle only owns the
   watcher). This module re-adopts those live sessions so the daemon resumes
   supervising them — at boot (`adopt_orphans/1`) and on every poll
-  (`reconcile_orphaned_sessions/1`). Both walk the live `shuttle-*` tmux
+  (`reconcile_orphaned_sessions/1`). Both walk the live `*-shuttle` tmux
   sessions, map each back to its fiber through `candidate_session_lookup/1`
-  (which recognizes both the uid-keyed canonical name and the legacy leaf-only
-  name, guarding ambiguous leaves), and either start a watcher over the live
+  (which recognizes both the uid-keyed canonical name and the leaf-only name,
+  guarding ambiguous leaves), and either start a watcher over the live
   session, kill a session whose fiber has closed, or skip an unknown one.
 
-  State-shaped helpers take the `Shuttle.Poller.State` struct and return updated
-  state, mirroring the signatures they had inside `Shuttle.Poller`. Truly shared
-  helpers stay in `Shuttle.Poller` and are called from here:
-  `running_key/2`, `fiber_address/1`, `runtime_key_for_fiber/1`,
-  `list_shuttle_sessions/1`, `discover_candidates/1`, `fetch_fiber_full/2`,
-  `agent_id_from_fiber/1`, `start_watcher/3`, `live_session_for_fiber/3`.
+  Functions take the `Shuttle.Poller.State` struct and return updated state;
+  the helpers they share with the rest of the poller live in `Shuttle.Poller`.
   """
 
   require Logger
@@ -83,14 +79,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # `session` is the *live* tmux session name to adopt. Callers that discovered
-  # a live orphan pass its exact name (which may be the legacy leaf-only form on
-  # a worker launched before the uid-keyed cutover); the default picks whichever
-  # of the fiber's name forms is actually live (preferring the uid-keyed name),
-  # for callers that only have the fiber identity.
+  # a live orphan pass its exact name (either name form); the default picks
+  # whichever of the fiber's name forms is actually live (preferring the
+  # uid-keyed name), for callers that only have the fiber identity.
   def adopt_session(state, fiber_id, session \\ nil) do
     # Fetch first so the uid for the canonical session name comes straight off
-    # the fiber (the uid↔slug bridge and its cache are gone). The runtime maps
-    # key by the fiber's runtime key; felt I/O stays slug-addressed.
+    # the fiber. The runtime maps key by the fiber's runtime key; felt I/O stays
+    # slug-addressed.
     case Poller.fetch_fiber_full(fiber_id, state) do
       {:ok, fiber} ->
         uid = Map.get(fiber, "uid")
@@ -151,13 +146,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
               state
           end
         else
-          # Fiber is closed but tmux session still exists — the worker's
-          # deliberate exit (closed implies handoff), so stamp the clean-exit
-          # marker before killing the stale session.
-          Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-          Logger.info("Killing stale session for closed fiber: #{session}")
-          _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
-          state
+          kill_closed_session(state, fiber_id, fiber, session)
         end
 
       {:error, _} ->
@@ -198,9 +187,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # Maps every live tmux session name a candidate could carry — both the
-  # uid-keyed canonical name and the legacy leaf-only name — back to its fiber,
+  # uid-keyed canonical name and the leaf-only name — back to its fiber,
   # so orphan adoption recognizes a worker launched under either scheme. The
-  # uid-keyed entries are inherently collision-free; the legacy leaf-only
+  # uid-keyed entries are inherently collision-free; the leaf-only
   # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
   # to `:ambiguous` and are skipped rather than mis-adopted).
   defp candidate_session_lookup(%State{} = state) do
@@ -263,14 +252,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
         end
 
       {:kill_closed, fiber_id} ->
-        case Poller.fetch_fiber_full(fiber_id, state) do
-          {:ok, fiber} -> Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-          {:error, _} -> :ok
-        end
+        fiber =
+          case Poller.fetch_fiber_full(fiber_id, state) do
+            {:ok, fiber} -> fiber
+            {:error, _} -> nil
+          end
 
-        Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
-        _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
-        state
+        kill_closed_session(state, fiber_id, fiber, session)
 
       :ambiguous ->
         Logger.warning("Skipping orphan session with ambiguous leaf-only name: #{session}")
@@ -280,5 +268,15 @@ defmodule Shuttle.Poller.SessionReconciliation do
         Logger.debug("Skipping orphan session with no matching fiber: #{session}")
         state
     end
+  end
+
+  # A live session whose fiber is closed: the worker's deliberate exit (closed
+  # implies handoff), so stamp the clean-exit marker (when the fiber could be
+  # read) before killing the stale session.
+  defp kill_closed_session(%State{} = state, fiber_id, fiber, session) do
+    if fiber, do: Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
+    Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
+    _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
+    state
   end
 end

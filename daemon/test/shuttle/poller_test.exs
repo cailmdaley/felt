@@ -5693,36 +5693,6 @@ defmodule Shuttle.PollerTest do
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/collision-fiber")
   end
 
-  test "bust_fiber_host_cache allows re-resolution after a fiber moves" do
-    host_a = multi_host_dir("a")
-
-    host_b = multi_host_dir("b")
-
-    path_a = write_fiber_file(host_a, "tests/movable-fiber")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_bust,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a, host_b]
-      )
-
-    # Initially resolves to host_a
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-
-    # "Move" the fiber to host_b (delete from a, write to b)
-    File.rm_rf!(Path.dirname(path_a))
-    write_fiber_file(host_b, "tests/movable-fiber")
-
-    # Cache still returns host_a without busting
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-
-    # After bust, re-probes the file system → host_b
-    :ok = Poller.bust_fiber_host_cache(poller, "tests/movable-fiber")
-    assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-  end
-
   test "subdirectory symlink: loom-walks-into-project subtree skipped" do
     # Mirrors loom→lightcone topology: physical .felt lives in host_b
     # (project-canonical, like lightcone). host_a (loom) symlinks INTO
@@ -5803,7 +5773,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [loom, project]
       )
 
-    :ok = Poller.bust_fiber_host_cache(poller, "ai-futures/portolan/kanban-modal")
+    :sys.replace_state(poller, &%{&1 | fiber_host_cache: %{}})
 
     assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
   end

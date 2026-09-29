@@ -133,10 +133,7 @@ defmodule Shuttle.Host do
   def expected_peer_uid_config! do
     case System.get_env("SHUTTLE_PEER_UID") do
       nil ->
-        case System.cmd("id", ["-u"]) do
-          {out, 0} -> {parse_uid!(out, "id -u"), :euid}
-          {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
-        end
+        {effective_uid(), :euid}
 
       value ->
         {parse_uid!(value, "SHUTTLE_PEER_UID"), :env}
@@ -699,8 +696,10 @@ defmodule Shuttle.Host do
 
   # The BEAM exposes no geteuid. `id -u` is POSIX and runs once per boot.
   defp effective_uid do
-    {out, 0} = System.cmd("id", ["-u"])
-    out |> String.trim() |> String.to_integer()
+    case System.cmd("id", ["-u"]) do
+      {out, 0} -> parse_uid!(out, "id -u")
+      {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
+    end
   end
 
   @doc "The string form of a parsed listen address."

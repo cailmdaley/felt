@@ -6,7 +6,7 @@ defmodule Shuttle.Poller do
   scheduling, and reconciliation. It starts `Shuttle.WorkerWatcher` processes
   under a `DynamicSupervisor` to track each worker's tmux session from outside.
 
-  ## Multi-host support
+  ## Felt stores
 
   The Poller manages one or more felt stores on the same machine. Configure via:
 
@@ -16,13 +16,13 @@ defmodule Shuttle.Poller do
       # or persisted registration written through the HTTP API:
       ~/.config/felt/stores.json
 
-  The registry is the source of truth: when no env or config hosts are set, the
-  configured list comes straight from the registry (empty if none registered).
+  The registry is the source of truth: when no env or config stores are set,
+  the configured list comes straight from the registry (empty if none
+  registered).
 
-  Each fiber resolves to exactly one host: the first configured host whose
-  `.felt/` directory contains the fiber file. The resolution is cached in
-  `State.fiber_host_cache` for the daemon's lifetime. Call
-  `bust_fiber_host_cache/1` to evict an entry when a fiber moves between hosts.
+  Each fiber resolves to exactly one store: the one whose `.felt/` physically
+  roots the fiber file. The resolution is cached in `State.fiber_host_cache`
+  for the daemon's lifetime.
   """
 
   use GenServer
@@ -146,8 +146,7 @@ defmodule Shuttle.Poller do
       standing_roles: [],
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
-      # poll cycle and by host_for_fiber/2 on demand. Entries are never evicted
-      # automatically; call bust_fiber_host_cache/1 when a fiber moves hosts.
+      # poll cycle and by host_for_fiber/2 on demand. Entries are never evicted.
       fiber_host_cache: %{},
       # %{uid => slug} — boundary uid→slug RESOLUTION index, rebuilt each poll
       # from the candidate rows (every row carries both `id` and `uid`). It lets
@@ -528,7 +527,7 @@ defmodule Shuttle.Poller do
   Paste text into a fiber's live worker session without submitting it.
 
   The session is resolved using both the uid-keyed canonical name and the
-  legacy leaf-only name, preferring the canonical name. Text reaches tmux only
+  leaf-only name, preferring the canonical name. Text reaches tmux only
   through a temporary file, so arbitrary multiline content never enters a
   shell command.
   """
@@ -602,15 +601,6 @@ defmodule Shuttle.Poller do
           {:ok, String.t()} | {:error, :not_found | :timeout}
   def resolve_fiber_host(server, fiber_id) do
     GenServer.call(server, {:resolve_fiber_host, fiber_id})
-  end
-
-  @doc """
-  Evicts the cached felt-store resolution for `fiber_id`. The daemon
-  re-resolves on the next access. Use after a fiber moves between hosts.
-  """
-  @spec bust_fiber_host_cache(GenServer.server(), String.t()) :: :ok
-  def bust_fiber_host_cache(server, fiber_id) do
-    GenServer.call(server, {:bust_fiber_host_cache, fiber_id})
   end
 
   @doc """
@@ -1106,8 +1096,7 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:worker_status, fiber_id}, _from, state) do
-    # `running_worker` resolves a uid or slug input through `running_key`'s scan,
-    # so no separate uid→slug bridge is needed at this boundary.
+    # `running_worker` resolves a uid or slug input through `running_key`'s scan.
     {:reply, running_worker(state, fiber_id), state}
   end
 
@@ -1264,10 +1253,7 @@ defmodule Shuttle.Poller do
           error -> {:reply, error, state}
         end
 
-      running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key) ->
-        {:reply, {:error, :already_running}, state}
-
-      fiber_session_live?(state, fiber_id, uid) ->
+      open_session?(state, fiber_id, runtime_key, uid) ->
         {:reply, {:error, :already_running}, state}
 
       true ->
@@ -1333,10 +1319,6 @@ defmodule Shuttle.Poller do
       {:error, _} = error ->
         {:reply, error, state}
     end
-  end
-
-  def handle_call({:bust_fiber_host_cache, fiber_id}, _from, state) do
-    {:reply, :ok, %{state | fiber_host_cache: Map.delete(state.fiber_host_cache, fiber_id)}}
   end
 
   def handle_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
@@ -2172,7 +2154,7 @@ defmodule Shuttle.Poller do
     {resume, %{state | parked_launches: parked}}
   end
 
-  defp pinned_role?(fiber), do: fiber_role_kind(fiber) == "pinned"
+  defp pinned_role?(fiber), do: fiber_kind(fiber) == "pinned"
 
   # Does this role's worker exit close it to awaiting-review? Only STANDING
   # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
@@ -2180,14 +2162,7 @@ defmodule Shuttle.Poller do
   # again this cycle. A PINNED role's session end splits on the clean-handoff
   # signal instead (see `handle_worker_exit/2`), and a pinned worker that is
   # genuinely done self-closes to `status: closed`.
-  defp standing_role?(fiber), do: fiber_role_kind(fiber) == "standing"
-
-  defp fiber_role_kind(fiber) do
-    case Map.get(fiber, "shuttle") do
-      shuttle when is_map(shuttle) -> role_kind(shuttle)
-      _ -> nil
-    end
-  end
+  defp standing_role?(fiber), do: fiber_kind(fiber) == "standing"
 
   # PURE — fiber frontmatter and in-memory runtime maps only. Every gate that
   # needs the filesystem (only one: does the project_dir exist) lives in
@@ -2221,14 +2196,7 @@ defmodule Shuttle.Poller do
       status != "active" ->
         false
 
-      running_key(state, fiber_id) != nil ->
-        false
-
-      # Not subsumed by the clause above: a fiber renamed mid-flight has the
-      # OLD slug in its running meta, so only the uid-shaped runtime key finds
-      # it. `running` is keyed by runtime key (uid when present), so match the
-      # candidate's runtime key, not its slug.
-      Map.has_key?(state.running, runtime_key_for_fiber(fiber)) ->
+      tracked?(state, fiber_id, runtime_key_for_fiber(fiber)) ->
         false
 
       # Resume-loop circuit breaker is open: this fiber's workers keep dying
@@ -2956,7 +2924,7 @@ defmodule Shuttle.Poller do
     running = running_worker(state, fiber_id)
 
     # Pass the resolved uid so the pre-check sees the canonical
-    # `<leaf>-<uid>-shuttle` name, not just the legacy leaf-only one — a live
+    # `<leaf>-<uid>-shuttle` name, not just the leaf-only one — a live
     # canonical session of a not-yet-running fiber is then refused with
     # :already_running instead of degrading to a rename collision.
     live_session = live_session_for_fiber(state, fiber_id, uid)
@@ -3297,10 +3265,19 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # The role's dispatch kind, reading the new `kind:` shape and falling back to
-  # the legacy `mode:` field, defaulting to "oneshot".
+  # A shuttle block's dispatch kind: `kind:`, else its `mode:` alias, else
+  # "oneshot".
   @doc false
   def role_kind(shuttle), do: Map.get(shuttle, "kind", Map.get(shuttle, "mode", "oneshot"))
+
+  # A fiber's dispatch kind; "oneshot" when it carries no shuttle block.
+  @doc false
+  def fiber_kind(fiber) do
+    case Map.get(fiber, "shuttle") do
+      shuttle when is_map(shuttle) -> role_kind(shuttle)
+      _ -> "oneshot"
+    end
+  end
 
   # ── Worker Exit Handling ──
 
@@ -3578,11 +3555,18 @@ defmodule Shuttle.Poller do
     Shuttle.WorkerBackend.present?(state.runner, session)
   end
 
-  # Dual-recognition liveness: a fiber is running if a live tmux session exists
-  # under either its uid-keyed name or the legacy leaf-only name. Used wherever
-  # the caller has the fiber identity but not a stored session name.
-  defp fiber_session_live?(%State{} = state, fiber_id, uid) do
-    live_session_for_fiber(state, fiber_id, uid) != nil
+  # Does this daemon track a worker for the fiber? Matched by slug and by
+  # runtime key: a fiber renamed mid-flight has the OLD slug in its running
+  # meta, so only the uid-shaped runtime key finds it.
+  defp tracked?(%State{} = state, fiber_id, runtime_key) do
+    running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key)
+  end
+
+  # A tracked worker, or a live session under either of the fiber's names that
+  # nothing tracks yet.
+  defp open_session?(%State{} = state, fiber_id, runtime_key, uid) do
+    tracked?(state, fiber_id, runtime_key) or
+      live_session_for_fiber(state, fiber_id, uid) != nil
   end
 
   # The fiber's *live* tmux session name (either form), preferring the uid-keyed
@@ -3650,12 +3634,7 @@ defmodule Shuttle.Poller do
     forced_fresh? =
       Keyword.get(opts, :force, false) and Keyword.get(opts, :resume_mode) == "fresh"
 
-    open? =
-      running_key(state, fiber_id) != nil or
-        Map.has_key?(state.running, runtime_key) or
-        fiber_session_live?(state, fiber_id, uid)
-
-    if forced_fresh? and open? do
+    if forced_fresh? and open_session?(state, fiber_id, runtime_key, uid) do
       cut_open_session(state, fiber_id, uid)
     else
       state

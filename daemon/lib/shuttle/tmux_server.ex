@@ -128,16 +128,14 @@ defmodule Shuttle.TmuxServer do
     end
   end
 
-  @doc """
-  Asks kitty to fork a tmux server holding an anchor session.
-
-  `tmux start-server` alone is useless here: it exits 0 and the server
-  immediately dies to `exit-empty` (verified). The server needs one session to
-  hold it up, and the anchor's payload is an effectively-infinite sleep rather
-  than a shell, so nothing is attached to it and nothing can wander off.
-  """
+  # Asks kitty to fork a tmux server holding an anchor session.
+  #
+  # `tmux start-server` alone is useless here: it exits 0 and the server
+  # immediately dies to `exit-empty` (verified). The server needs one session to
+  # hold it up, and the anchor's payload is an effectively-infinite sleep rather
+  # than a shell, so nothing is attached to it and nothing can wander off.
   @spec start_via_kitty() :: :ok | {:error, String.t()}
-  def start_via_kitty do
+  defp start_via_kitty do
     kitty_impl().run_background([
       "tmux",
       "new-session",
@@ -151,11 +149,9 @@ defmodule Shuttle.TmuxServer do
     ])
   end
 
-  @doc """
-  Polls `presence/1` until a server answers, or `budget_ms` elapses.
-  """
+  # Polls `presence/1` until a server answers, or `budget_ms` elapses.
   @spec await_server(module(), non_neg_integer()) :: :ok | :timeout
-  def await_server(runner, budget_ms) do
+  defp await_server(runner, budget_ms) do
     deadline = System.monotonic_time(:millisecond) + budget_ms
     do_await(runner, deadline)
   end
@@ -175,25 +171,23 @@ defmodule Shuttle.TmuxServer do
     end
   end
 
-  @doc """
-  Turns `exit-empty` off on this host's tmux server.
-
-  A server with no sessions exits by default, and the window between
-  `presence/1` answering `:present` and the dispatcher's `tmux new-session` is
-  real: a human who detaches and closes their last session in it loses the
-  server, and `new-session` then forks a fresh one — rooted at the daemon,
-  which is the entire state this module exists to prevent. Disarming
-  `exit-empty` makes an anchor-less, human-started server survive that window.
-
-  Server-scoped and idempotent (`set-option -s`), and — unlike `new-session` —
-  it never forks a server of its own: with no server running it just fails
-  ("error connecting to /tmp/tmux-<uid>/default", verified). It is called only
-  with a server present or just started anyway, and a failure is deliberately
-  ignored: losing the hardening must not refuse a dispatch that would have
-  worked.
-  """
+  # Turns `exit-empty` off on this host's tmux server.
+  #
+  # A server with no sessions exits by default, and the window between
+  # `presence/1` answering `:present` and the dispatcher's `tmux new-session` is
+  # real: a human who detaches and closes their last session in it loses the
+  # server, and `new-session` then forks a fresh one — rooted at the daemon,
+  # which is the entire state this module exists to prevent. Disarming
+  # `exit-empty` makes an anchor-less, human-started server survive that window.
+  #
+  # Server-scoped and idempotent (`set-option -s`), and — unlike `new-session` —
+  # it never forks a server of its own: with no server running it just fails
+  # ("error connecting to /tmp/tmux-<uid>/default", verified). It is called only
+  # with a server present or just started anyway, and a failure is deliberately
+  # ignored: losing the hardening must not refuse a dispatch that would have
+  # worked.
   @spec disarm_exit_empty(module()) :: :ok
-  def disarm_exit_empty(runner) do
+  defp disarm_exit_empty(runner) do
     runner.cmd("tmux", ["set-option", "-s", "exit-empty", "off"], stderr_to_stdout: true)
     :ok
   end

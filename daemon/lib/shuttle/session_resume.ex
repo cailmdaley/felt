@@ -211,11 +211,10 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  @doc false
   # The script tmux runs: the release's Erlang scrubbed out, a short wait for the
   # kitty tab to attach (so the harness first draws at the tab's size), the
   # resume, and — if it fails — a pause so the tab says why instead of closing.
-  def run_script(plan) do
+  defp run_script(plan) do
     """
     #!/bin/bash
     trap 'rm -f "$0"' EXIT

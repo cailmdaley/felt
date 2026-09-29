@@ -12,11 +12,8 @@ defmodule Shuttle.Poller.StandingRoles do
 
   It is distinct from `Shuttle.StandingRole`, the pure parser/cron module these
   functions read through. State-shaped helpers take the `Shuttle.Poller.State`
-  struct and return updated state or values, mirroring the signatures they had
-  inside `Shuttle.Poller`. Truly shared helpers (`role_kind/1`,
-  `host_owned?/2`, `running_key/2`, `iso_to_unix_ms/1`,
-  `list_shuttle_sessions/1`, `runtime_key_for_fiber/1`) stay in
-  `Shuttle.Poller` and are called from here.
+  struct and return updated state or values; the helpers they share with the
+  rest of the poller live in `Shuttle.Poller`.
   """
 
   require Logger
@@ -219,21 +216,9 @@ defmodule Shuttle.Poller.StandingRoles do
   # (a worker that died without handing off was re-closed to awaiting on every reconcile).
   # Git-native, durable across a daemon restart, and needs no separate re-arm
   # field — the same `handed_off_at` covers both worker exit and human re-arm.
-  defp standing_role_dispatched_unexited?(fiber) do
-    case Shuttle.Continuation.dispatched_at(fiber) do
-      nil ->
-        false
-
-      dispatch_dt ->
-        not at_or_after?(Shuttle.Continuation.handed_off_at(fiber), dispatch_dt)
-    end
-  rescue
-    _ -> false
-  end
-
-  # True iff `dt` is non-nil and at or after `reference`.
-  defp at_or_after?(nil, _reference), do: false
-  defp at_or_after?(%DateTime{} = dt, reference), do: DateTime.compare(dt, reference) != :lt
+  # Exactly the negation of `Continuation.clean_handoff_since_dispatch?/1`.
+  defp standing_role_dispatched_unexited?(fiber),
+    do: not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
 
   # True iff the fiber's markers are TIME-INVERTED: BOTH `dispatched_at` and
   # `handed_off_at` are present and `handed_off_at` is strictly EARLIER than

@@ -128,7 +128,7 @@ defmodule Shuttle.Dispatcher do
             felt_store: felt_store,
             surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
-            kind: fiber_kind(fiber),
+            kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
@@ -231,7 +231,7 @@ defmodule Shuttle.Dispatcher do
         continuation(fiber, session_id, opts, :resume_if_warm)
 
       _ ->
-        if fiber_kind(fiber) == "oneshot",
+        if Shuttle.Poller.fiber_kind(fiber) == "oneshot",
           do: continuation(fiber, session_id, opts, :resume_if_warm),
           else: :fresh
     end
@@ -392,13 +392,13 @@ defmodule Shuttle.Dispatcher do
   # felt already computes that local address: `felt -C work_dir show <id> -j`
   # resolves the fiber against the worker's felt view and carries its
   # view-relative `id`. Read it directly rather than reconstructing it from a
-  # globbed path. On any felt miss/error fall back to the global `fiber_id`,
-  # preserving the previous safe-fail. The worker's view is `work_dir`, not the
-  # configured store root, so no felt_store is needed here.
-  # Runs through the injected `runner` — this sits on the Poller's dispatch
-  # path (via `create_tmux_session/7`), so a bare System.cmd here was the one
-  # unbounded felt call left in it: a wedged felt would block the Poller
-  # GenServer. Bounded, a timeout degrades to the global-id fallback.
+  # globbed path. On any felt miss/error fall back to the global `fiber_id`.
+  # The worker's view is `work_dir`, not the configured store root, so no
+  # felt_store is needed here.
+  # Runs through the injected, bounded `runner`: this sits on the Poller's
+  # dispatch path (via `create_tmux_session/7`), where a wedged felt would
+  # otherwise block the Poller GenServer. A timeout degrades to the global-id
+  # fallback.
   def prompt_fiber_id(fiber_id, work_dir, runner \\ Shuttle.Runner.Default) do
     case felt_show_id(work_dir, fiber_id, runner) do
       {:ok, local_id} -> local_id
@@ -644,11 +644,11 @@ defmodule Shuttle.Dispatcher do
   The form is `<leaf>-<uid>-shuttle`: the human-readable leaf keeps tmux/kitty
   titles legible from the left edge when truncated, and the uid (the fiber's
   intrinsic ULID) makes the name collision-free and rename-safe — two fibers
-  sharing a leaf no longer collide, and renaming a fiber leaves the running
+  sharing a leaf do not collide, and renaming a fiber leaves the running
   worker's session addressable by the uid that does not change.
 
-  When `uid` is `nil` or empty (legacy/test callers without a resolved uid),
-  falls back to the leaf-only `<leaf>-shuttle` form.
+  When `uid` is `nil` or empty (a fiber without a uid), falls back to the
+  leaf-only `<leaf>-shuttle` form.
   """
   @spec session_name(String.t(), String.t() | nil) :: String.t()
   def session_name(fiber_id, uid) when is_binary(uid) and uid != "" do
@@ -658,12 +658,9 @@ defmodule Shuttle.Dispatcher do
   def session_name(fiber_id, _uid), do: session_name(fiber_id)
 
   @doc """
-  Legacy leaf-only tmux session name (`<leaf>-shuttle`).
-
-  Retained for **dual-recognition** during the uid-keyed cutover: live workers
-  launched under the old scheme carry this name, and matching/adoption paths
-  that lack a uid still recognize them. New sessions are launched under
-  `session_name/2`.
+  Leaf-only tmux session name (`<leaf>-shuttle`): the name a fiber without a
+  uid launches under, and the second form every recognition/adoption path
+  matches (`session_names/2`).
   """
   @spec session_name(String.t()) :: String.t()
   def session_name(fiber_id) do
@@ -672,9 +669,9 @@ defmodule Shuttle.Dispatcher do
 
   @doc """
   Both tmux session-name forms for a fiber — the uid-keyed canonical name and
-  the legacy leaf-only name — so recognition/adoption matches a live worker
-  regardless of which scheme launched it. Returns `[new, legacy]` when a uid is
-  available, or just `[legacy]` when it is not.
+  the leaf-only name — so recognition/adoption matches a live worker under
+  either. Returns `[uid_keyed, leaf_only]` when a uid is available, or just
+  `[leaf_only]` when it is not.
   """
   @spec session_names(String.t(), String.t() | nil) :: [String.t()]
   def session_names(fiber_id, uid) when is_binary(uid) and uid != "" do
@@ -686,7 +683,7 @@ defmodule Shuttle.Dispatcher do
   @doc """
   Returns true when a tmux session name belongs to a Shuttle worker.
 
-  Both name forms — `<leaf>-<uid>-shuttle` and the legacy `<leaf>-shuttle` —
+  Both name forms — `<leaf>-<uid>-shuttle` and the leaf-only `<leaf>-shuttle` —
   end in `-shuttle`, so the suffix test recognizes either.
   """
   @spec shuttle_session?(String.t()) :: boolean()
@@ -855,7 +852,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Dual-recognition: a live worker under either the uid-keyed name or the
-  # legacy leaf-only name blocks a fresh dispatch OR a resume. `present?` treats
+  # leaf-only name blocks a fresh dispatch OR a resume. `present?` treats
   # an inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
@@ -1083,20 +1080,6 @@ defmodule Shuttle.Dispatcher do
     case String.trim(to_string(output)) do
       "" -> ""
       detail -> ": #{detail}"
-    end
-  end
-
-  # The shuttle block's `kind` (new-format) / `mode` (old-format), defaulting to
-  # "oneshot". Threaded into the prompt so the exit contract can diverge for
-  # pinned interactive roles (stay alive at idle, or handoff for an autonomous
-  # arc) vs oneshot/standing work (rewrite `## Status`, then handoff).
-  defp fiber_kind(fiber) do
-    case Map.get(fiber, "shuttle") do
-      shuttle when is_map(shuttle) ->
-        Shuttle.Poller.role_kind(shuttle)
-
-      _ ->
-        "oneshot"
     end
   end
 
