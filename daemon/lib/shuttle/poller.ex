@@ -1330,11 +1330,8 @@ defmodule Shuttle.Poller do
         new_state = %{state | fiber_host_cache: Map.put(state.fiber_host_cache, fiber_id, host)}
         {:reply, {:ok, host}, new_state}
 
-      {:error, :not_found} ->
-        {:reply, {:error, :not_found}, state}
-
-      {:error, :timeout} ->
-        {:reply, {:error, :timeout}, state}
+      {:error, _} = error ->
+        {:reply, error, state}
     end
   end
 
@@ -2683,8 +2680,7 @@ defmodule Shuttle.Poller do
       nil ->
         case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
           {:ok, %{host: host}} -> {:ok, host}
-          {:error, :not_found} -> {:error, :not_found}
-          {:error, :timeout} -> {:error, :timeout}
+          {:error, _} = error -> error
         end
     end
   end
@@ -2851,18 +2847,9 @@ defmodule Shuttle.Poller do
            resume_mode: Keyword.get(opts, :resume_mode)
          ) do
       {:ok, session} ->
-        now = DateTime.utc_now()
-
         running_meta =
-          %{
-            fiber_id: fiber_id,
-            session: session,
-            agent_id: agent_id_from_fiber(fiber),
-            uid: Map.get(fiber, "uid"),
-            felt_store: felt_store,
-            started_at: now,
-            last_activity_at: now
-          }
+          fiber_id
+          |> new_running_meta(fiber, session, agent_id_from_fiber(fiber), felt_store)
           |> Map.merge(running_prompt_metadata(prompt_context))
 
         case register_running(state, fiber_id, runtime_key, running_meta) do
@@ -2908,17 +2895,14 @@ defmodule Shuttle.Poller do
              agent_id: explicit_claim_agent(opts)
            ),
          :ok <- ensure_app_claim_marker(state, fiber_id, fiber, id) do
-      now = DateTime.utc_now()
-
-      meta = %{
-        fiber_id: fiber_id,
-        uid: fiber["uid"],
-        felt_store: owning_store(fiber_id, state),
-        session: session,
-        agent_id: Keyword.get(opts, :agent) || agent_id_from_fiber(fiber),
-        started_at: now,
-        last_activity_at: now
-      }
+      meta =
+        new_running_meta(
+          fiber_id,
+          fiber,
+          session,
+          Keyword.get(opts, :agent) || agent_id_from_fiber(fiber),
+          owning_store(fiber_id, state)
+        )
 
       if running do
         {state, {:ok, %{session: session, agent_id: meta.agent_id}}}
@@ -3070,17 +3054,8 @@ defmodule Shuttle.Poller do
   end
 
   defp register_renamed_session(%State{} = state, fiber_id, fiber, session, agent_id, opts) do
-    now = DateTime.utc_now()
-
-    running_meta = %{
-      fiber_id: fiber_id,
-      session: session,
-      agent_id: agent_id,
-      uid: Map.get(fiber, "uid"),
-      felt_store: owning_store(fiber_id, state),
-      started_at: now,
-      last_activity_at: now
-    }
+    running_meta =
+      new_running_meta(fiber_id, fiber, session, agent_id, owning_store(fiber_id, state))
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->
@@ -3725,6 +3700,21 @@ defmodule Shuttle.Poller do
         Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
         state
     end
+  end
+
+  # The running entry for a worker that starts, or is claimed, now.
+  defp new_running_meta(fiber_id, fiber, session, agent_id, felt_store) do
+    now = DateTime.utc_now()
+
+    %{
+      fiber_id: fiber_id,
+      session: session,
+      agent_id: agent_id,
+      uid: Map.get(fiber, "uid"),
+      felt_store: felt_store,
+      started_at: now,
+      last_activity_at: now
+    }
   end
 
   # The one "a worker just started for this fiber" seam, shared by dispatch and

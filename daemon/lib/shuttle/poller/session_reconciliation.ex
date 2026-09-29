@@ -203,7 +203,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # uid-keyed entries are inherently collision-free; the legacy leaf-only
   # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
   # to `:ambiguous` and are skipped rather than mis-adopted).
-  def candidate_session_lookup(%State{} = state) do
+  defp candidate_session_lookup(%State{} = state) do
     {candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
 
     candidates
@@ -253,7 +253,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     |> Map.new()
   end
 
-  def adopt_known_orphan_session(%State{} = state, lookup, session) do
+  defp adopt_known_orphan_session(%State{} = state, lookup, session) do
     case Map.get(lookup, session) do
       {:adopt, fiber_id} ->
         if Poller.running_key(state, fiber_id) != nil do
