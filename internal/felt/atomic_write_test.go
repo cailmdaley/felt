@@ -20,7 +20,7 @@ func TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber(t *testing.T) {
 	versions := make(map[string]bool)
 	docs := make([]*Felt, 2)
 	for i := range docs {
-		docs[i] = &Felt{ID: "f", Name: "f", Status: StatusOpen, Body: strings.Repeat(fmt.Sprintf("line %d of a long body\n", i), 20000)}
+		docs[i] = &Felt{ID: "f", UID: "01KTHDNZS287ZSSG8X8V59XKWB", Name: "f", Status: StatusOpen, Body: strings.Repeat(fmt.Sprintf("line %d of a long body\n", i), 20000)}
 		data, err := docs[i].Marshal()
 		if err != nil {
 			t.Fatal(err)

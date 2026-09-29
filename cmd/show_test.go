@@ -46,7 +46,7 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show --body: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Body start line: 6") {
+	if !strings.Contains(out, "Body start line: 7") {
 		t.Fatalf("show --body missing start line:\n%s", out)
 	}
 	if !strings.Contains(out, "first line\nsecond line") {
@@ -73,8 +73,8 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, out)
 	}
-	if got := payload["body_start_line"]; got != float64(6) {
-		t.Fatalf("body_start_line = %#v, want 6", got)
+	if got := payload["body_start_line"]; got != float64(7) {
+		t.Fatalf("body_start_line = %#v, want 7", got)
 	}
 	if got := payload["body"]; got != "body text" {
 		t.Fatalf("body = %#v, want %q", got, "body text")
