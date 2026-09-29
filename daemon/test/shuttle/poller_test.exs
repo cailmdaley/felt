@@ -3878,8 +3878,6 @@ defmodule Shuttle.PollerTest do
     notify_worker_exit(poller, "tests/standing-due")
     Process.sleep(50)
 
-    refute Enum.any?(Poller.snapshot(poller).retrying, &(&1.fiber_id == "tests/standing-due"))
-
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
@@ -4149,14 +4147,14 @@ defmodule Shuttle.PollerTest do
     end)
 
     # Simulate worker exit (tmux session dies). The claim is released; the fiber
-    # is no longer running and no longer retrying (the retry queue is gone).
+    # is no longer running, and the snapshot carries no retry queue.
     MockRunner.remove_tmux_session(Dispatcher.session_name("tests/haiku-retry"))
     notify_worker_exit(poller, "tests/haiku-retry")
 
     assert_eventually(fn ->
       snap2 = Poller.snapshot(poller)
       assert length(snap2.eligible) == 0
-      assert snap2.retrying == []
+      refute Map.has_key?(snap2, :retrying)
     end)
 
     # The next poll re-dispatches it: a second new-session call.
@@ -4353,7 +4351,6 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
       assert snap.claimed_count == 0
-      assert length(snap.retrying) == 0
     end)
   end
 

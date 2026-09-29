@@ -32,10 +32,8 @@ defmodule ShuttleWeb.StateController do
           reason: render_error(reason),
           eligible: [],
           blocked: [],
-          retrying: [],
           running: [],
-          running_detail: [],
-          waiters: []
+          running_detail: []
         })
     end
   end

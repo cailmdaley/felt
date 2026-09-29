@@ -143,13 +143,6 @@ defmodule Shuttle.Host do
     end
   end
 
-  @doc "The uid the TCP peer gate admits."
-  @spec expected_peer_uid!() :: non_neg_integer()
-  def expected_peer_uid! do
-    {uid, _source} = expected_peer_uid_config!()
-    uid
-  end
-
   @doc "`{:ok, uid}` for a decimal string (surrounding whitespace allowed), else `:error`."
   @spec parse_uid(String.t()) :: {:ok, non_neg_integer()} | :error
   def parse_uid(value) when is_binary(value) do

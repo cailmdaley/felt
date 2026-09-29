@@ -37,7 +37,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
     # reconcile_orphaned_sessions adopts them as soon as tmux answers.
     case Poller.list_shuttle_sessions(state) do
       {:ok, sessions} ->
-        lookup = candidate_session_lookup(state)
+        {candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
+        lookup = candidate_session_lookup(candidates)
 
         state =
           Enum.reduce(sessions, state, fn session, state_acc ->
@@ -55,18 +56,19 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # Per-poll reconcile: find live tmux sessions that have no watcher and adopt
-  # them. Sessions already covered by a running entry are left alone.
-  def reconcile_orphaned_sessions(%State{} = state) do
+  # them, mapping each back through this poll's `candidates`. Sessions already
+  # covered by a running entry are left alone.
+  def reconcile_orphaned_sessions(%State{} = state, candidates) do
     state = adopt_app_sessions(state)
     # Find tmux sessions that exist but have no watcher. On an :unknown scan
     # there is nothing safe to reconcile — retry next poll.
     case Poller.list_shuttle_sessions(state) do
-      {:ok, sessions} -> reconcile_orphaned_sessions(state, sessions)
+      {:ok, sessions} -> adopt_orphan_sessions(state, sessions, candidates)
       {:error, :unknown} -> state
     end
   end
 
-  defp reconcile_orphaned_sessions(%State{} = state, sessions) do
+  defp adopt_orphan_sessions(%State{} = state, sessions, candidates) do
     running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
 
     orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))
@@ -74,7 +76,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     if orphan_sessions == [] do
       state
     else
-      lookup = candidate_session_lookup(state)
+      lookup = candidate_session_lookup(candidates)
 
       Enum.reduce(orphan_sessions, state, fn session, state_acc ->
         adopt_known_orphan_session(state_acc, lookup, session)
@@ -203,9 +205,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # uid-keyed entries are inherently collision-free; the legacy leaf-only
   # entries keep the existing ambiguity guard (two fibers sharing a leaf resolve
   # to `:ambiguous` and are skipped rather than mis-adopted).
-  def candidate_session_lookup(%State{} = state) do
-    {candidates, _host_map, _host_listings} = Poller.discover_candidates(state)
-
+  def candidate_session_lookup(candidates) do
     candidates
     |> Enum.reduce(%{}, fn fiber, acc ->
       case {Map.get(fiber, "id"), Map.get(fiber, "status")} do

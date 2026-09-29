@@ -180,12 +180,6 @@ defmodule Shuttle.DaemonHeartbeat do
   @spec default_write_interval_ms() :: pos_integer()
   def default_write_interval_ms, do: @default_write_interval_ms
 
-  @spec grace_ms() :: pos_integer()
-  def grace_ms, do: @default_grace_ms
-
-  @spec min_healthy_run_ms() :: pos_integer()
-  def min_healthy_run_ms, do: @min_healthy_run_ms
-
   @doc """
   Read the heartbeat left by the previous incarnation.
 
