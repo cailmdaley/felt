@@ -55,13 +55,13 @@
     "id": "codex-sol",
     "cli": "codex",
     "wrapper": "codex",
-    "model": "gpt-6-sol",
+    "model": "gpt-6.1-sol",
     "extra_flags": "--approve-for-me",
     "effort_levels": ["low", "medium", "high", "xhigh", "max", "ultra"],
     "default_effort": "low",
     "chrome_capable": false,
     "cost_class": "premium",
-    "aliases": ["gpt-6-sol"],
+    "aliases": ["gpt-sol", "gpt-6-sol"],
     "default": false
   },
   {

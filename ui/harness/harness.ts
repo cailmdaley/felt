@@ -136,7 +136,7 @@ const MOCK_AGENTS = [
   { id: 'claude-opus', cli: 'claude', model: 'opus', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'xhigh', chrome_capable: true, default: true },
   { id: 'claude-sonnet', cli: 'claude', model: 'sonnet', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true },
   { id: 'claude-fable', cli: 'claude', model: 'fable', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium', chrome_capable: true },
-  { id: 'codex-sol', cli: 'codex', model: 'gpt-6-sol', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default_effort: 'high' },
+  { id: 'codex-sol', cli: 'codex', model: 'gpt-6.1-sol', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default_effort: 'high' },
   { id: 'codex-luna', cli: 'codex', model: 'gpt-6-luna', effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium' },
   { id: 'pi-grok', cli: 'pi', model: 'grok-4.6', effort_levels: ['low', 'medium', 'high'], default_effort: 'medium' },
   { id: 'pi-kimi', cli: 'pi', model: 'moonshotai/kimi-latest' },

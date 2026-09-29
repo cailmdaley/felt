@@ -39,7 +39,7 @@ func TestCodexModelFamily(t *testing.T) {
 		maxEffort     string
 	}{
 		{name: "codex-astra", model: "gpt-6-astra", defaultEffort: "medium", maxEffort: "ultra"},
-		{name: "codex-sol", model: "gpt-6-sol", defaultEffort: "low", maxEffort: "ultra"},
+		{name: "codex-sol", model: "gpt-6.1-sol", defaultEffort: "low", maxEffort: "ultra"},
 		{name: "codex-luna", model: "gpt-6-luna", defaultEffort: "max", maxEffort: "max"},
 	}
 
