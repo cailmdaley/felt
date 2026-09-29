@@ -676,8 +676,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
   end
 
-  # Regression for the launch deadlock (the CNRS own-words fiber): a resume whose
-  # target session is GONE must not flap. The run script tries `--resume <id>`
+  # Regression for the launch deadlock: a resume whose target session is GONE
+  # must not flap. The run script tries `--resume <id>`
   # and, on failure (claude exits non-zero with "No conversation found"), falls
   # back to a FRESH launch that REUSES the same id (`--session-id <id>`), so the
   # transcript is recreated under it and the next resume succeeds — self-healing.
