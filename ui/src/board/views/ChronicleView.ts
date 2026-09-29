@@ -726,7 +726,7 @@ export interface ChronicleRow {
  *  freshness by), then the daemon's own host, then the fiber's dispatch host —
  *  each rung only consulted when the one above says the uninformative `local`. */
 function hostLabel(card: KanbanCard, response: KanbanResponse): string {
-  const origin = response.staleness?.[card.originId]?.hostname ?? card.originId.replace(/^remote-/, '')
+  const origin = response.staleness?.[card.originId]?.hostname ?? shuttleOrigin(card.originId)
   if (origin && origin !== 'local') return origin.toLowerCase()
   if (response.feltHost && response.feltHost !== 'local') return response.feltHost.toLowerCase()
   return (card.shuttleHost ?? 'local').toLowerCase()
@@ -752,7 +752,7 @@ export function rowWaitingOn(
   origins: TemporalOrigins,
 ): string | null {
   if (card.originId === 'local') return null
-  const keys = [card.originId, card.originId.replace(/^remote-/, ''), hostname]
+  const keys = [card.originId, shuttleOrigin(card.originId), hostname]
   return keys.some((key) => isOriginStale(origins, key)) ? hostname : null
 }
 

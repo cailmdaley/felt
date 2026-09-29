@@ -175,7 +175,8 @@ function sortHits(hits: SearchHit[]): SearchHit[] {
   })
 }
 
-/** Fetch the record half. Errors answer `[]` — the local half still stands. */
+/** Fetch the record half. Rejects on a failed request; the caller keeps the
+ *  local half standing. */
 export async function fetchRecordHits(
   shuttleBase: string,
   query: string,
