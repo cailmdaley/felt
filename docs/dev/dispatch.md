@@ -6,11 +6,17 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 ## How dispatch works
 
 - **Poller** (`daemon/lib/shuttle/poller.ex`) owns the tick. It walks each
-  configured felt store, pulls candidate metadata via `felt ls --json` and
-  per-fiber detail via `felt show -j`, and considers a fiber eligible iff
-  it carries a `shuttle:` block owned by this host (`shuttle.host` matches),
-  felt `status` is `active`, and it isn't already running/claimed (see
-  `eligible?/2` in poller.ex).
+  configured felt store with one projected listing (`felt ls --json
+  --has-field shuttle --json-field …`), and considers a fiber eligible iff it
+  carries a `shuttle:` block owned by this host (`shuttle.host` matches), felt
+  `status` is `active`, and it isn't already running/claimed (see `eligible?/2`
+  in poller.ex). A listing that fails or times out degrades that store to its
+  last-known rows for the tick; there is no broader fallback listing. A felt
+  too old for the projection flags shows up at boot as a contract skew.
+- **Host identity is felt's.** The Poller takes `SHUTTLE_HOST` (trimmed) or
+  asks `felt shuttle host --json` once at boot and freezes the answer; a felt
+  that cannot answer stops the daemon from booting. The host-file and hostname
+  chain lives only in the Go CLI (`cmd/shuttle_host.go`).
 - **Eligibility is pure; the filesystem is the dispatch action's business.**
   `eligible?/2` reads fiber frontmatter and in-memory runtime maps and nothing
   else. Whether a `project_dir` exists is decided inside
@@ -34,22 +40,20 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `File.dir?` answer — will not appear between two ticks, so it is retried once
   per window rather than once per tick.
 - **Workers are NOT excluded from sharing a checkout.** Several workers may run
-  in one `project_dir` at once, and shuttle says nothing about it. An earlier
-  rule refused the second with `:project_dir_held`, on the grounds that two
-  workers in one clone clobber each other's uncommitted edits; it is gone,
-  along with the symlink resolution that existed only to decide when two
-  spellings named one directory. Coordinating concurrent work in a shared
-  checkout is the operator's call, not the dispatcher's.
+  in one `project_dir` at once, and shuttle says nothing about it. Coordinating
+  concurrent work in a shared checkout is the operator's call, not the
+  dispatcher's.
 - **Configured stores** come from `FELT_STORES` (comma-separated env var) →
-  persisted `~/.config/felt/stores.json`. There is no implicit default store
-  and no legacy shuttle-named registry authority. `POST
-  /api/v1/felt-stores` rewrites the persisted file.
+  persisted `~/.config/felt/stores.json`. There is no implicit default store.
+  `POST /api/v1/felt-stores` rewrites the persisted file. Inside the daemon,
+  `Shuttle.FeltStores` maps a fiber to the store that holds it
+  (`store_for_fiber`, `resolve_fiber` → `%{store, fiber_id, path, uid}`).
 - **Picker projects** are a separate list — `FELT_PROJECTS` → persisted
   `~/.config/felt/projects.json` (`Shuttle.Projects`) — and answer a different
   question: which checkouts a human can file INTO from the Stash/Capture forms.
   Kept out of the poll list on purpose, so polling never walks TCC-protected
   paths. Served at `origins.<host>.projects` of `GET /api/v1/felt-stores`. The
-  file is hand-editable, but no longer hand-edit-only. Both forms show the
+  file is hand-editable, and the forms add to it too. Both forms show the
   destination as **host then project** (`ui/src/forms/ProjectPicker.tsx` —
   `HostPicker` and `ProjectPicker`, both plain `<select>`s, sized to match the
   agent and effort selects beside them). The host list is the origins of `GET
@@ -58,12 +62,10 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   the project list is `projectsForHost` of the selection — one host's projects,
   no host suffix on the rows.
 
-  The project half was briefly a bespoke filtering combobox, on the belief that
-  a `<select>` could not carry a row acting as a button. It can, and the
-  combobox's floating list — portalled into `<body>`, which is the PARENT of
-  the forms' React root — never saw a click, because React 18 delegates at the
-  root container the portalled nodes bubble past. The magic option is safe
-  because it is a sentinel, not a state: `interpretProjectChange` maps its
+  The "add" row is a `<select>` option, not a custom combobox: a floating list
+  portalled into `<body>` sits outside the React root and never sees React
+  18's delegated clicks. The option is safe because it is a sentinel, not a
+  state: `interpretProjectChange` maps its
   value to `{kind: 'add'}`, so `onChange` runs the add flow and restores the
   previous selection (controlled `value` untouched, plus a direct write back to
   the DOM node), and it sits alone in a leading `<optgroup>` so it never reads
@@ -84,17 +86,16 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `/api/v1/projects`, showing the owning daemon's own 400 ("not a directory:
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
-  (There was a third shape — an in-browser directory browser over `GET
-  /api/v1/browse`. It is gone: once the host is chosen up front, walking a
-  remote filesystem a click at a time bought nothing a pasted path doesn't.)
 - **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent, spawns
   the `<leaf>-<uid>-shuttle` tmux session.
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
-  Scheduled runs dispatch only when `next_due_at` is due AND `review.state`
-  is `scheduled` or `accepted`. Manual dispatch is ad-hoc (`adhoc-...`
-  run id) and preserves `next_due_at`; worker exit flips state to
-  `awaiting`, and `felt shuttle accept` advances `next_due_at` only for
-  scheduled runs.
+  Nothing due is stored: an armed (`active`, untempered) role is due when a
+  cron occurrence has passed since it was last serviced — the later of
+  `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation
+  (`StandingRoles.standing_role_due?/1`). Manual dispatch is ad-hoc
+  (`adhoc-<ms>` run id). Worker exit closes the role into Awaiting review, and
+  `felt shuttle accept` or `resume` re-arms it and stamps `handed_off_at` in
+  the same write, so the just-served occurrence never fires again.
 - **A finished run is finished — there is no reopen.** When a oneshot's
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than

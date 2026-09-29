@@ -3,12 +3,12 @@
 ## Quick start — operating without rebuilding
 
 ```bash
-bin/shuttle snapshot                          # JSON snapshot of daemon state
-bin/shuttle dispatch <fiber-id>               # one-shot dispatch
+# bin/shuttle — daemon lifecycle
+bin/shuttle status                            # state JSON (a version receipt while booting); exit 2 when down
 bin/shuttle release                           # release the boot quarantine (parked launches dispatch next tick)
 bin/shuttle reset <remote>                    # reset a tripped remote circuit breaker (revive cascade resumes)
 
-# felt shuttle — agent-facing CLI; offline; schema-validating
+# felt shuttle — agent-facing CLI; schema-validating
 felt shuttle status                            # fibers with shuttle: blocks (closed hidden; --closed)
 felt shuttle status --all                      # local + every configured remote
 felt shuttle status --remote <name>            # single remote
@@ -20,14 +20,14 @@ felt shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an exist
 felt shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
 felt shuttle resume / accept / reopen <fiber>
 felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
-felt shuttle dispatch <fiber>
+felt shuttle snapshot                            # the daemon's state snapshot
+felt shuttle dispatch <fiber> [--ad-hoc]         # dispatch now
 felt shuttle handoff <fiber>                     # worker's clean-exit ritual: stamp
                                                 #   shuttle.runtime.handed_off_at (→ next
                                                 #   is fresh) + end own tmux session. The
                                                 #   single final action; folds in kill $PPID.
-felt shuttle snapshot
-felt shuttle abort / attach <fiber>
-felt shuttle validate-identity                # UID migration/cross-city validation
+felt shuttle attach <fiber>
+felt shuttle validate-identity                # fiber UID invariants across daemon feeds
 felt setup receipt --json                     # loaded plugins/skills/hooks/binary + daemon contract
 ```
 
@@ -35,23 +35,23 @@ felt setup receipt --json                     # loaded plugins/skills/hooks/bina
 
 ```bash
 felt shuttle status                      # offline walker view (independent of daemon)
-bin/shuttle snapshot                     # raw JSON snapshot
+felt shuttle snapshot                    # raw JSON snapshot
 make status                              # daemon-side view (ps + snapshot)
 make logs                                # daemon stdout/stderr — ~/Library/Logs/shuttle.log
                                          # (macOS) / ~/.shuttle/shuttle.log (Linux)
-tmux ls | grep '^shuttle-'               # live workers
+tmux ls | grep -- '-shuttle:'            # live workers (<leaf>-<uid>-shuttle)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
 curl -s http://127.0.0.1:4000/api/v1/state/composite | jq
 felt setup receipt --json | jq
-felt shuttle validate-identity                # checks :4000/:4001/:4002/:4003 by default
+felt shuttle validate-identity           # the local daemon plus every configured remote
 ```
 
 Dispatch sanity ladder:
 
 1. `felt shuttle status` shows the fiber with `KIND oneshot` and an
    active/idle state? → fiber is well-formed and the offline walker sees it.
-2. `bin/shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
+2. `felt shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
 3. Fiber is `active` but sitting in `pending_launch`? → the daemon restarted
    and the boot quarantine is armed. `bin/shuttle release`. Check this before
    reaching for `make restart` — a restart *re-arms* the quarantine. (On a host
@@ -87,7 +87,7 @@ parks that fiber for 5 minutes rather than re-probing a login shell every tick;
 a force-dispatch skips the wait.
 
 Every snapshot carries `poll_health`: `state` is `reading` or `idle`,
-`stall_timeout_ms` is the configured watchdog bound (300 seconds by default),
+`stall_timeout_ms` is the watchdog bound (300 seconds),
 and `stalls` plus `last_stalled_at` show whether a world read was reaped. Slow
 store and remote discovery run in one supervised, unlinked task while the
 poller continues serving its cached state. At the bound the task is killed, a

@@ -46,13 +46,14 @@ They open over `file://` without a running daemon.
 ## Tests
 
 ```bash
-make test                  # go test ./... + mix test + the board suite + the plugin hooks
+make test                  # go test ./... + mix test + the board suite + the plugin hooks + the bootstrap shims
 go test ./...              # Go (felt CLI)
-make mix-test              # full Elixir suite
+make mix-test              # full Elixir suite; shells the felt on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; runs vitest TWICE, under two
                            # pinned TZs (America/Los_Angeles, Europe/Paris)
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
+bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast checks, HOME sandboxed
 
 # Opt-in real harness smoke. Opens real Claude/Codex/Pi CLIs in tmux,
 # sends no prompt, captures the idle pane, then kills the smoke sessions.
@@ -64,6 +65,31 @@ second pinned offset is where the civil-day logic breaks, so a hand-run `npx
 vitest run` can go green on a change `make test` would fail. CI runs `npm test`
 under America/Los_Angeles and Europe/Paris, then type-checks and builds the
 bundle with `npm run build`.
+
+### The stranger test: bootstrap in a clean container
+
+`scripts/linux-container-acceptance.sh` checks that a stranger with a fresh
+Linux account can go from a clone to a running daemon with
+`scripts/bootstrap.sh` alone. It runs as root inside a disposable
+`elixir:1.19` (Debian) container with the checkout mounted read-only at
+`/src`: it installs the prerequisites a stranger would (tmux, git, jq, curl,
+Node, npm, and the Go toolchain `go.mod` pins), creates an unprivileged user
+with no systemd, clones `/src` as that user, and runs `bootstrap.sh --dry-run`
+and then the full bootstrap. It passes when the felt CLI is installed and runs,
+the release is built, `~/.shuttle/repo` names the clone, `shuttle-launch` is
+installed, the tmux respawn loop is up, and `/api/v1/version` answers with a
+healthy contract (`contract.ok`, expected equal to observed):
+
+```bash
+docker run --rm -v "$PWD:/src:ro" elixir:1.19 bash /src/scripts/linux-container-acceptance.sh
+```
+
+It prints `ACCEPTANCE-PASS`, or `ACCEPTANCE-FAIL: <step>` and exits 1. It
+downloads packages and builds everything from scratch, so it takes minutes and
+is not part of `make test` or CI; run it when changing `bootstrap.sh`,
+`install-agent`, `shuttle-launch` or the build's prerequisites.
+
+### Real harness smoke
 
 The real harness smoke is deliberately outside ordinary `mix test`. It uses
 tmux session names like `shuttle-harness-smoke-<harness>-<unique>`, records

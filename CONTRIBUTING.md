@@ -70,7 +70,7 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 ## Opening issues
 
 - **Bugs:** include steps to reproduce. For a shuttle/daemon bug, also include
-  the output of `bin/shuttle snapshot`; a felt-CLI-only bug report doesn't need
+  the output of `felt shuttle snapshot`; a felt-CLI-only bug report doesn't need
   it.
 - **Features:** describe the problem, not just the solution. A concrete
   use-case helps.

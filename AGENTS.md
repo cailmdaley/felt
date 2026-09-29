@@ -55,7 +55,13 @@ lives in the docs site (`docs/`, published to
   identity across daemon restarts; never substitute a CLI launch for an app
   failure.
 - **felt is the data layer; the daemon shells out to the felt CLI.** Don't
-  import felt internals into the daemon.
+  import felt internals into the daemon. Every human lifecycle verb is felt's:
+  the board's `accept` and `resume` run `felt shuttle <verb> --local` inside
+  the owning daemon's Poller, between poll cycles. The daemon writes a document
+  itself only on worker exit or force-dispatch (`Shuttle.LifecycleStore`). It
+  checks `felt shuttle contract` at boot
+  (`cmd/shuttle_contract.go` and `daemon/lib/shuttle/contract.ex` move in
+  lockstep) and holds on a skew.
 - **Live host-addressed content and control use `Shuttle.OriginRouter`.**
   The composite board carries each row's `origin` back to the daemon for
   requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display
@@ -99,9 +105,12 @@ lives in the docs site (`docs/`, published to
   `agent:` field resolves against the registry. Default agent is
   `claude-opus` (from `internal/shuttle/agents.builtin.json`).
 - **`shuttle.host` field drives daemon affinity — strictly.** A daemon
-  dispatches a block iff `block.host == own_host_id` (`SHUTTLE_HOST`, else
-  `~/.shuttle/host`, else the normalized OS hostname, seeded into that file so
-  the CLI and the daemon cannot drift apart). There is no `"local"` default and
+  dispatches a block iff `block.host == own_host_id`. felt alone resolves the
+  id (`cmd/shuttle_host.go`: `SHUTTLE_HOST`, else `~/.shuttle/host`, else the
+  normalized OS hostname, seeded into that file; `felt shuttle host seed` seeds
+  it explicitly). The daemon takes `SHUTTLE_HOST` or asks `felt shuttle host
+  --json` once at boot and freezes the answer; it does not boot if felt cannot
+  answer. There is no `"local"` default and
   no `nil` wildcard: an absent or empty `host:` is unowned and ineligible on
   *every* daemon. `felt shuttle install`/`repeat` stamp `host` by default so blocks
   are born owned. The same predicate gates the orphan-resurrection path, so
@@ -110,7 +119,9 @@ lives in the docs site (`docs/`, published to
   install` and `repeat` require `--project-dir`; workers start there instead
   of falling back to the felt store.
 - **felt shuttle is the agent-facing CLI.** Local write verbs validate before
-  write and work offline. `bin/shuttle` handles daemon lifecycle and dispatch.
+  write and work offline; `snapshot` and `dispatch` ask the daemon.
+  `bin/shuttle` handles daemon lifecycle only (`start`, `status`, `release`,
+  `reset`, `version`, `install-agent`).
 - **No tag predicate for dispatch — two gates, both explicit.** A fiber is
   shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
   felt `status` is `active` AND (2) the boot quarantine is released: every
@@ -160,7 +171,7 @@ To cycle a supervised daemon directly, use
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks
 go test ./...              # Go (felt CLI)
-make mix-test              # full Elixir suite
+make mix-test              # full Elixir suite (shells the felt on PATH: make cli-install first)
 cd ui && npm test          # vitest, run TWICE under two pinned TZs
                            # (America/Los_Angeles, Europe/Paris)
 ```

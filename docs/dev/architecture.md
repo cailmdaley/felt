@@ -22,7 +22,7 @@ the network and the surface.
 **The Elixir/OTP daemon is the production dispatcher.** Dispatch, the
 per-worker watcher, and the `:4000` API are where OTP earns its keep. A Go
 rewrite collapsing everything into a single binary is a deferred, must-earn-
-itself idea, not planned now.
+itself idea.
 
 **Continuity across dispatches lives in frontmatter and git, not an event log.**
 The daemon detects clean worker exits via the `shuttle.runtime.handed_off_at`
@@ -71,9 +71,10 @@ The verb contract, in one line each:
 
 **The `shuttle:` block is non-native frontmatter felt owns the *shape* of.**
 felt validates and stamps the `shuttle:` block (the `felt shuttle <verb>` Go
-subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it. This
-is the merge end-state — the contract lives in one place (felt) rather than
-being validated on both sides.
+subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it, and
+shells felt for the human lifecycle verbs. The contract lives in one place
+(felt) rather than being validated on both sides; `kind:` is its only spelling
+of the block's kind.
 
 ## Execution surfaces
 
@@ -125,14 +126,17 @@ layer.
 
 A host declares its trust class — `single-user`, `shared-multi-user`, or
 `exposed` — in `~/.config/felt/host.json`, set with `felt shuttle host class`
-and read with `felt shuttle host --json`. The class is a declared fact the
+and read with `felt shuttle host --json`, which also reports the host id. The
+daemon reads `host.json` with the same rules (`Shuttle.Host`, held to felt by
+shared fixtures), but takes its host id from felt at boot. The class is a declared fact the
 operator asserts, not something the daemon infers from the host; `felt setup
 receipt` is the check that the assertion still holds against reality (logged-in
 users, the socket directory's mode, every fleet-owned listening socket).
 
 The class determines where the daemon binds. `single-user` listens on
 `tcp://127.0.0.1:4000` (`SHUTTLE_PORT`). `shared-multi-user` and `exposed`
-listen on the Unix socket `~/.shuttle/sock/daemon.sock`, inside a `0700`
+listen on the Unix socket `$SHUTTLE_DATA_DIR/sock/daemon.sock` (default
+`~/.shuttle/sock/daemon.sock`), inside a `0700`
 directory the daemon creates and verifies before binding — a directory found
 with looser permissions is a refusal to bind, not a downgrade. `host.json`'s
 `listen` key or `SHUTTLE_LISTEN` overrides either default, and the CLI

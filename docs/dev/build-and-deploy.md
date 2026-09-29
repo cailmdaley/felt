@@ -14,7 +14,9 @@ make cli-install  # felt CLI → ~/.local/bin (go install .)
 make ui           # install UI dependencies and build ui/dist
 make daemon       # daemon release only → bin/rel (MIX_ENV=prod)
 make daemon SKIP_CLI=1 # same, trusting the felt already on PATH
-make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks
+make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks  +  the bootstrap shims
+make go-test / mix-test / js-test / plugin-hooks-test / bootstrap-test   # one suite each
+make lint-personal   # the hygiene test alone: no maintainer host or account names in tracked source
 make restart      # rebuild UI and release, then stop + start
 make all          # restart
 make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
@@ -29,10 +31,18 @@ make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / s
 Source builds require Go, Elixir/OTP, Node 22+, and npm on every build host.
 `make build` compiles all three components; `make daemon` builds only the daemon release.
 The fleet helper builds in each host's login shell, where its toolchain is configured.
-Fetched releases include the runtime and UI, so users need none of these build tools.
+Fetched releases include the runtime and UI, so users need none of these build tools;
+the target must match the release's OS and CPU architecture.
 
-The daemon runs compiled modules under `bin/rel`.
-Use `make restart` after source edits to build the UI and release, then restart the daemon.
+**`bin/rel` is a Mix release** — an ERTS-bundled directory with compiled
+modules, assembled by `make daemon` and launched through the tracked
+`bin/shuttle` shim (`bin/rel/bin/shuttled`). A running BEAM keeps using the
+release it booted, so a restart without `make daemon` picks up no source edit:
+use `make restart`, then verify both `booted_at` and `git_short_sha` on
+`/api/v1/version` so the answer proves the new process is serving. If `mix
+release` warns about a stale build shadowing a fresh one, run `make clean`
+first — stray `.beam` files at the project root shadow the real ones.
+
 Terminal workers live in tmux and app conversations live in the managed Codex
 App Server. Both survive Shuttle restarts; the daemon re-adopts their ownership.
 
@@ -40,17 +50,52 @@ App Server. Both survive Shuttle restarts; the daemon re-adopts their ownership.
 launchd (`io.shuttle.daemon`) or the systemd user unit starts the daemon with an
 absolute path. `make stop` identifies the release boot path under `bin/rel`
 whether that path is absolute or relative, but a supervisor immediately
-respawns a process that it owns. Use the supervisor for an explicit cycle:
+respawns a process that it owns, so `make stop` is not a durable stop while the
+supervisor is enabled. Use the supervisor for an explicit cycle:
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
 systemctl --user restart shuttle-daemon                 # Linux
 ```
 
-`make restart` also works: it rebuilds, stops the
-matching release process and `make start` waits for the supervisor's replacement
-to answer. A daemon started by `make start` follows the same target without a
-supervisor.
+`make restart` also works: it rebuilds, stops the matching release process and
+`make start` waits for the supervisor's replacement to answer. A daemon started
+by `make start` follows the same target without a supervisor. Where
+`shuttle-launch --loop` runs in tmux session `shuttle-daemon`, kill the `:4000`
+listener directly so the loop respawns it from the rebuilt release:
+
+```bash
+lsof -ti:4000 -sTCP:LISTEN | xargs kill
+```
+
+### The CLI/daemon contract
+
+The daemon shells the felt CLI for its writes, so the two are versioned
+together: `felt shuttle contract` prints an integer level (4), and a daemon
+whose expected level differs holds at boot with a contract skew reported on
+`/api/v1/version` and `/api/v1/state`. `make daemon` therefore rebuilds and
+installs the CLI first (`SKIP_CLI=1` trusts the felt already on `PATH`). The
+Elixir suite shells the real CLI too — `dispatch_integration_test` drives
+`felt shuttle accept|resume --local` — so after pulling a change that moves the
+level, run `make cli-install` before `make mix-test`.
+
+### The release's runtime stays out of workers and builds
+
+A daemon started from `bin/rel` runs with the release's ERTS first on `PATH`
+and `ROOTDIR`, `BINDIR`, `PROGNAME` and `EMU` set. Nothing it launches should
+inherit them: a worker's `mix`, `erl` or `elixir` resolved from that ERTS dies
+with `cannot get bootfile …/bin/rel/bin/start.boot`, and `bash -l` does not
+help, because a login profile prepends to the inherited `PATH`. Every shell the
+daemon starts in tmux — a worker's run script, a History resume — therefore
+drops each `PATH` entry at or under the release root (written into the script
+at launch) and unsets those variables and the release's `RELEASE_*` ones before
+anything else runs. A daemon running under Mix leaves `PATH` alone.
+
+The Makefile's mix targets (`make daemon`, `make mix-test`) run `mix` with the
+same variables unset and every `PATH` entry under this checkout's
+`bin/rel*` removed, so they work from a shell that inherited the release
+environment. A bare `mix` in such a shell still needs `PATH` fixed by hand, as
+does a shell carrying another checkout's release.
 
 ## Deploying
 
@@ -97,10 +142,14 @@ with `bin/shuttle-launch` touches the same marker before it kills the old
 session (see
 [the boot quarantine](../shuttle/lifecycle.md#boot-quarantine)).
 
-Message receipt changes require a fleet-wide CLI and daemon upgrade. An older
-daemon treats Claude-native wake receipts with `queued` or `submitted` as
-malformed and returns HTTP 502, so do not roll out the new CLI ahead of the
-matching daemon version.
+Confirm `git_short_sha` flipped and `/api/v1/version` reports `ready: true`; if
+not, the old process may still be bound or the new daemon is still initializing.
+The listener binds before store resolution, orphan adoption, event-stream
+seeding, and Tailnet bridge reconciliation finish. While that synchronous boot
+work runs, `/api/v1/version` answers with `ready: false`; state-dependent routes
+return a fast 503. The respawn loop treats the bound listener as alive, polls
+booting daemons every five seconds, and falls through to `start --force` if the
+listener stops answering.
 
 For a manual remote build:
 
@@ -130,29 +179,6 @@ reads it — the felt CLI and the daemon carry it through untouched.
 `make daemon` copies `ui/dist` into the release's `priv/ui/dist`, and
 `ShuttleWeb.Assets` serves the release's copy in preference to the checkout's. A
 bundle that landed after the build would sit in the checkout unserved.
-
-Packaged releases carry their own Erlang runtime and native components.
-The target must match the release's OS and CPU architecture and provide a compatible runtime environment.
-
-**A supervisor owns the live daemon.** Under systemd, use
-`systemctl --user restart shuttle-daemon`; under launchd, use the `launchctl`
-command above. `make stop` can find a release started by either a relative or an
-absolute path, but it is not a durable stop while the supervisor is enabled.
-Where `shuttle-launch --loop` runs in tmux session `shuttle-daemon`, kill the
-`:4000` listener directly so the loop respawns it from the rebuilt release:
-
-```bash
-lsof -ti:4000 -sTCP:LISTEN | xargs kill
-```
-
-Confirm `git_short_sha` flipped and `/api/v1/version` reports `ready: true`; if
-not, the old process may still be bound or the new daemon is still initializing.
-The listener binds before store resolution, orphan adoption, event-stream
-seeding, and Tailnet bridge reconciliation finish. While that synchronous boot
-work runs, `/api/v1/version` answers with `ready: false`; state-dependent routes
-return a fast 503. The respawn loop treats the bound listener as alive, polls
-booting daemons every five seconds, and falls through to `start --force` if the
-listener stops answering.
 
 **`RemoteRegistry`'s circuit breaker paces revival attempts; it never abandons
 a remote.** Each configured remote is driven by a recovery state machine; after
@@ -195,32 +221,11 @@ either builds with `SKIP_UI=1` and takes its `ui/dist` from elsewhere — see
 When changing API routes, update the matching UI and `docs/reference/api.md` in the same change.
 Deploy with `make build` so the daemon and UI come from the same revision.
 
-**The repo builds three things.** The **felt CLI** (Go: `main.go`, `cmd/`,
-`internal/`) — including the `felt shuttle <verb>` subcommands, which ARE Go code
-built here (`cmd/shuttle*.go` + `internal/shuttle/`); the **daemon release**
-(`bin/rel`, from `daemon/lib/`, launched through the tracked `bin/shuttle` shim); and
-the **UI bundle** (`ui/dist`, from `ui/`).
-Editing `daemon/lib/*.ex` needs `make restart`; editing the Go CLI needs `make cli` (or
-`make cli-install`); editing the UI needs `cd ui && npm test` (the two pinned
-time zones also run in CI), then `make restart` from the root.
-
-**`bin/rel` is a Mix release** — an ERTS-bundled directory built by
-`(cd daemon && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel)`, launched via
-`bin/rel/bin/shuttled`. A restart without `make daemon` is a no-op for picking
-up source edits. `make restart` always.
-
-**A running release does not switch to a newly built release.** `bin/rel` is a
-Mix release — an ERTS-bundled directory with compiled modules — and a running
-BEAM process keeps using the release it booted. Rebuild and restart together;
-then verify both `booted_at` and `git_short_sha` so the response proves that the
-new process is serving. `bin/shuttle` itself is a tracked POSIX shell shim, not a
-build artifact — it execs the release launcher for `start` and speaks HTTP to
-the running daemon for the read verbs (snapshot, status, dispatch, release,
-reset, version).
-
-If `mix release` warns about a stale build shadowing a fresh one, run
-`make clean` first — stray `.beam` files at the project root shadow the real
-ones. They should never be committed.
+`bin/shuttle` is a tracked POSIX shell shim, not a build artifact: it execs the
+release launcher for `start`, installs the keep-alive (`install-agent`,
+`uninstall-agent`), and speaks HTTP to the running daemon for `status`,
+`release`, `reset` and `version`. Everything else an operator asks of a running
+daemon — `snapshot`, `dispatch` — is a `felt shuttle` verb.
 
 ## Plugin maintenance and authentication
 

@@ -147,8 +147,9 @@ The installer verifies those version identities before replacing an existing
 binary or daemon tree. The daemon line goes through `eval` rather than the
 launcher's `version` verb because only `eval` starts the bundled BEAM, so it
 fails loudly on a host whose glibc is older than the build machine's. The
-native release matrix boots each assembled daemon artifact before upload, while the Linux container acceptance harness builds
-from a clean image and polls `/api/v1/version` until its contract is healthy.
+native release matrix boots each assembled daemon artifact before upload, while the
+[Linux container acceptance test](layout.md#the-stranger-test-bootstrap-in-a-clean-container)
+builds from a clean image and polls `/api/v1/version` until its contract is healthy.
 
 Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`
 version cuts a prerelease. Three things then keep it away from everyone who
