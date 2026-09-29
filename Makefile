@@ -328,7 +328,7 @@ logs:
 status:
 	@felt shuttle ps 2>/dev/null || echo "(felt shuttle ps unavailable)"
 	@echo
-	@bin/shuttle snapshot 2>/dev/null | python3 -c "import json,sys; o=json.load(sys.stdin); \
+	@felt shuttle snapshot 2>/dev/null | python3 -c "import json,sys; o=json.load(sys.stdin); \
 	  print('felt_hosts:', o.get('felt_hosts','MISSING (binary pre-297a24d)')); \
 	  print('running:', [e.get('fiber_id') for e in o.get('eligible',[])]); \
 	  print('claimed:', o.get('claimed_count'),'/',o.get('max_concurrent'))" \

@@ -66,7 +66,7 @@ defmodule Shuttle.MixProject do
   # tracked files, copied — never forked — so a fetched tarball and a checkout
   # answer the same verbs from the same source:
   #
-  #   bin/shuttle        the front-door shim (start / snapshot / install-agent …)
+  #   bin/shuttle        the lifecycle shim (start / status / release / install-agent …)
   #   bin/shuttle-launch the tmux respawn loop, the only durable keep-alive on
   #                      a host with no systemd user session (an HPC login
   #                      node); `shuttle install-agent` points at it when the

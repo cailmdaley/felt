@@ -1,17 +1,16 @@
 #!/bin/sh
-# bin/shuttle — the Shuttle daemon's front door.
+# bin/shuttle — the Shuttle daemon's lifecycle front door.
 #
-# Historically this file was the built escript itself. The daemon now ships as
-# a Mix release (an ERTS-bundled directory: bin/rel in a checkout, the tarball
-# root in a fetched install) whose launcher is `shuttled`. This tracked shim
-# keeps the verb surface every caller already speaks — launchd/systemd
-# templates, shuttle-launch, the Makefile all run `bin/shuttle start [--force]`
-# — and answers the read verbs over the daemon's HTTP API, which is where the
-# old escript's bare-BEAM implementations of them already pointed.
+# The daemon ships as a Mix release (an ERTS-bundled directory: bin/rel in a
+# checkout, the tarball root in a fetched install) whose launcher is
+# `shuttled`. This tracked shim owns the daemon's lifecycle — start, status,
+# release, reset, version and the keep-alive supervisor — which launchd/systemd
+# templates, shuttle-launch and the Makefile all drive through it. Everything
+# an agent asks of a running daemon (snapshot, dispatch, ...) is a
+# `felt shuttle` verb.
 #
-# Exit codes kept from the escript contract:
-#   snapshot/status exit 2 when the daemon is down (callers distinguish
-#   "daemon down" from "request failed").
+# Exit codes: status exits 2 when the daemon is down (callers distinguish
+# "daemon down" from "request failed").
 set -eu
 
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -676,12 +675,6 @@ case "$CMD" in
     exec "$LAUNCHER" start
     ;;
 
-  snapshot)
-    resolve_listen
-    api_get /api/v1/state || { echo "(daemon down at $ADDR)" >&2; exit 2; }
-    echo
-    ;;
-
   status)
     resolve_listen
     # A bound listener is alive even while its Poller and other boot work are
@@ -736,21 +729,6 @@ case "$CMD" in
     fi
     ;;
 
-  dispatch)
-    FIBER="${1:-}"
-    [ -n "$FIBER" ] || { echo "Usage: shuttle dispatch <fiber-id>" >&2; exit 1; }
-    # Dispatch goes through the running daemon (same as `felt shuttle
-    # dispatch`). The escript-era daemonless in-process dispatch is gone:
-    # start the daemon first.
-    resolve_listen
-    if api_post /api/v1/dispatch "{\"fiber_id\":\"$FIBER\"}"; then
-      echo
-    else
-      echo "dispatch failed: daemon unreachable at $ADDR (start it first)" >&2
-      exit 1
-    fi
-    ;;
-
   install-agent)
     install_agent "$@"
     ;;
@@ -777,9 +755,7 @@ case "$CMD" in
     echo "Commands:"
     echo "  start                Start the daemon (refuses if already running)"
     echo "  start --force        Start even if another daemon is detected"
-    echo "  snapshot             Print JSON snapshot of current state"
     echo "  status               State JSON, or a live version receipt if state is unavailable"
-    echo "  dispatch <fiber-id>  Ask the running daemon to dispatch a fiber"
     echo "  release              Release the boot quarantine (after ready:true)"
     echo "  reset <remote>       Reset a remote's tripped circuit breaker"
     echo "  version              Print the daemon's build stamp"
