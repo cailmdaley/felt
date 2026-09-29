@@ -57,7 +57,9 @@ lives in the docs site (`docs/`, published to
 - **felt is the data layer; the daemon shells out to the felt CLI.** Don't
   import felt internals into the daemon. Every human lifecycle verb is felt's:
   the board's `accept` and `resume` run `felt shuttle <verb> --local` inside
-  the owning daemon's Poller, between poll cycles. The daemon writes a document
+  the owning daemon's Poller, serialized with its state changes; a poll read
+  in flight sees the old document or the new one, whose status and
+  `handed_off_at` land in one atomic write. The daemon writes a document
   itself only on worker exit or force-dispatch (`Shuttle.LifecycleStore`). It
   checks `felt shuttle contract` at boot
   (`cmd/shuttle_contract.go` and `daemon/lib/shuttle/contract.ex` move in

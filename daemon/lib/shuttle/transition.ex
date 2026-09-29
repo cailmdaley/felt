@@ -136,7 +136,7 @@ defmodule Shuttle.Transition do
     do: run_felt("reopen", fiber_id, ["--as-draft"], felt_store)
 
   # accept-run goes through `Shuttle.LifecycleService`, which runs felt's
-  # `accept` writer inside the Poller, between poll cycles.
+  # `accept` writer inside the Poller, serialized with its state changes.
   defp invoke_action(fiber_id, "accept-run", _felt_store) do
     :accept |> LifecycleService.transition(fiber_id) |> invoke_result()
   end

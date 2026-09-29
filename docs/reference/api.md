@@ -76,8 +76,10 @@ fields, and runs the matching `felt shuttle <action>` on the owning host:
 `install`, `pin`, `repeat`, `reshape`, `pause`, `resume`, `accept`,
 `set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept` and `resume`
 run felt's writer (`felt shuttle <verb> <fiber> --local`) inside the owning
-daemon's Poller, between poll cycles, which then refreshes that fiber's
-document cache; the outcome is always kept. A success is 200 with felt's
+daemon's Poller, serialized with its state changes, which then refreshes that
+fiber's document cache; a poll read in flight sees the old document or the new
+one, whose status and `handed_off_at` land in one atomic write. The outcome is
+always kept. A success is 200 with felt's
 output as text. A felt refusal is 422 with `shuttle exited <status>:
 <message>`; an unknown action or a missing field is 400.
 

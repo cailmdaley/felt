@@ -22,8 +22,9 @@ import (
 // surgically (SetShuttleField / SetShuttleNodeField) so the daemon-owned runtime
 // keys ride through untouched. Every write passes the ownership guard. felt is
 // the one writer of every lifecycle transition: resume and accept hop through
-// the owning daemon, which runs the same verb with --local inside its poll loop
-// (serialized with polling, its document cache refreshed after), and write here
+// the owning daemon, which runs the same verb with --local inside its Poller
+// (serialized with its state changes, its document cache refreshed after), and
+// write here
 // with --local or when no connection to the daemon can be made.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
@@ -169,8 +170,10 @@ the boot quarantine is released).
 For a standing role awaiting review (status: closed + untempered), resume re-arms
 it and concludes the run it reviewed (shuttle.runtime.handed_off_at = now), so
 the role runs at its schedule's next tick. That write routes through the owning
-daemon, which applies it with --local between poll cycles; --local, or a
-daemon that cannot be reached, writes the document here. A daemon that takes
+daemon, which applies it with --local inside its Poller, serialized with the
+daemon's own state changes; a poll read in flight sees the old document or the
+new one, written in one atomic step. --local, or a daemon that cannot be
+reached, writes the document here. A daemon that takes
 the request but does not answer in time is reported, not bypassed: the
 transition may still apply there. A draft (status: open) is armed
 straight to active. Every other closed fiber — a oneshot or pinned role, or any
@@ -536,8 +539,10 @@ status: active while its run is still in flight), kind-aware:
 The outcome is kept: the last run's digest stays the card's headline until the
 next run writes its own.
 
-Routes to the owning daemon, which applies it with --local between poll
-cycles; --local, or a daemon that cannot be reached, writes the document here.
+Routes to the owning daemon, which applies it with --local inside its Poller,
+serialized with the daemon's own state changes; a poll read in flight sees the
+old document or the new one, written in one atomic step. --local, or a daemon
+that cannot be reached, writes the document here.
 A daemon that takes the request but does not answer in time is reported, not
 bypassed: the accept may still apply there.`,
 	Args: cobra.ExactArgs(1),

@@ -10,9 +10,12 @@ defmodule Shuttle.LifecycleService do
 
   `/api/v1/lifecycle` and the kanban's `accept-run` transition both come
   through `transition/2`. With the Poller running, the write happens inside it
-  (`Poller.lifecycle_transition/3`) — between poll cycles, with the fiber's
-  document-cache entry refreshed after; without one (a controller test, a
-  restart window) it is shelled directly.
+  (`Poller.lifecycle_transition/3`), serialized with the Poller's state
+  changes, and the fiber's document-cache entry is refreshed after. A poll read
+  already in flight (poll reads run in their own task) sees the old document or
+  the new one, whose status and `handed_off_at` land in one atomic write.
+  Without a Poller (a controller test, a restart window) it is shelled
+  directly.
   """
 
   alias Shuttle.{FeltStores, Poller}

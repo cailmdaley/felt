@@ -67,7 +67,7 @@ defmodule ShuttleWeb.LifecycleController do
   defp action(_), do: {:error, "missing lifecycle action"}
 
   # accept and resume go through `Shuttle.LifecycleService`, which runs felt's
-  # writer inside the Poller so the document write lands between poll cycles.
+  # writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
 

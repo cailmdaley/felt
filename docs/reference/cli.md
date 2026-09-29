@@ -85,7 +85,9 @@ work offline, and validate before they touch disk. `snapshot`, `dispatch`,
 `status --all`/`--remote`, `sessions`, `transcript`, `message`, and
 `validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
 per `felt shuttle host`). `accept` and `resume` go through the owning daemon
-when it answers, which applies them with `--local` between poll cycles;
+when it answers, which applies them with `--local` inside its Poller,
+serialized with the Poller's state changes (a poll read in flight sees the old
+document or the new one, written in one atomic step);
 `--local`, or a daemon that cannot be reached, writes the document directly.
 A daemon that takes the request but does not answer within 5 s is reported
 ("did not answer in time … may still apply"), never bypassed with a local

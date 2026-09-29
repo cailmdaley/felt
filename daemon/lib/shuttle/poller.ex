@@ -536,9 +536,10 @@ defmodule Shuttle.Poller do
 
   @doc """
   Run felt's `accept` / `resume` writer (`Shuttle.LifecycleService.write/3`)
-  inside the Poller, so the document write lands between poll cycles rather
-  than under one, then refresh the fiber's document-cache entry so the board
-  reads the transition at once.
+  inside the Poller, serialized with its state changes, then refresh the
+  fiber's document-cache entry so the board reads the transition at once. A
+  poll read in flight sees the old document or the new one, whose status and
+  `handed_off_at` land in one atomic write.
   """
   @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t()) ::
           Shuttle.Felt.result()
