@@ -54,7 +54,7 @@ func NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAgent {
 		CLI:           rec.CLI,
 		Wrapper:       rec.Wrapper,
 		Provider:      rec.Provider,
-		Model:         rec.Model,
+		Model:         resolveModelFamily(rec),
 		ExtraFlags:    rec.ExtraFlags,
 		RequiresModel: rec.RequiresModel,
 		Effort:        axes.Effort,

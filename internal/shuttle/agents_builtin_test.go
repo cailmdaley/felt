@@ -65,7 +65,7 @@ func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
 
 	want := map[string]struct{ provider, model string }{
 		"pi-luna":        {provider: "github-copilot", model: "gpt-6-luna"},
-		"pi-openai-luna": {provider: "openai-codex", model: "gpt-6-luna"},
+		"pi-openai-luna": {provider: "openai-codex", model: "gpt-luna"},
 		"pi-union-alpha": {provider: "openrouter", model: "stealth/union-alpha"},
 	}
 	for id, expected := range want {
