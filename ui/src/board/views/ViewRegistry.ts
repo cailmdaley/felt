@@ -3,8 +3,8 @@
  *
  * The board is three full-page views behind one hotkey row:
  *
- *   1  desk       the kanban page (Timeline ribbon + Now board + Pinned +
- *                 Stash). Owned by KanbanModal itself, NOT a TemporalView.
+ *   1  desk       the kanban page (Now board + Pinned + Resting). Owned by
+ *                 KanbanModal itself, NOT a TemporalView.
  *   2  chronicle  ┐ registered views — each mounts into a full-width host
  *   3  shelf      ┘ where the Desk surfaces would otherwise be.
  *
@@ -23,8 +23,8 @@
  * `refresh` fires on every successful 15s poll, INCLUDING polls where the
  * fiber data is byte-identical (the Desk skips those re-renders; views do not,
  * because their content also moves with the clock). Keep it cheap and
- * idempotent — a view that reads the temporal feeds decides its own cadence
- * for them rather than refetching per poll.
+ * idempotent — Chronicle reads the temporal feeds on its own cadence
+ * (./chronicleFeeds.ts) rather than refetching per poll.
  */
 
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
@@ -53,8 +53,6 @@ export interface TemporalView {
  * sessions apart. Likewise `commits`: join `record.session` through
  * `buildSessionIndex(...).bySession` (with `lookupSession`, host-scoped) and
  * the fiber is a recorded fact rather than a reading of the subject line.
- * Both degrade to an empty ledger on an older daemon, so a view that adopts
- * either must keep its existing rungs.
  */
 export interface ViewContext extends TemporalFetchers {
   response: KanbanResponse
@@ -123,10 +121,8 @@ export type ViewFallbackKind = 'none' | 'loading' | 'error'
  * Which stand-in a temporal view needs right now.
  *
  * A view is only ever mounted with a real `KanbanResponse`, so before the first
- * one lands there is nothing to mount — and the chassis used to bail silently,
- * leaving the page COMPLETELY blank: no heading, no message, no way back. A
- * blank page cannot be told from a broken one, so the two states now say which
- * they are.
+ * one lands there is nothing to mount. A blank page cannot be told from a
+ * broken one, so the chassis puts up a stand-in that says which it is.
  *
  * `error` outranks `loading`: once a fetch has failed, "waiting" is a lie, and
  * a stale error is still the truest thing we know.

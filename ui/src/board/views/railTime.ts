@@ -9,17 +9,7 @@
  * the whole board uses; what is here is the part only the temporal views need.
  */
 
-import {
-  civilDayToLocalDate,
-  formatSpanMinutes,
-  isoDayLocal,
-  RAIL_START_HOUR,
-} from '../civilDay.js'
-
-// The dawn boundary and the span formatter are owned by ../civilDay.js — one
-// authority, so the views and the fiber detail panel cannot drift apart on
-// either. Re-exported here because this is the module the views import.
-export { formatSpanMinutes, RAIL_START_HOUR }
+import { civilDayToLocalDate, isoDayLocal, RAIL_START_HOUR } from '../civilDay.js'
 
 /**
  * A civil day materialized as a local `Date` parked at NOON — the safe anchor

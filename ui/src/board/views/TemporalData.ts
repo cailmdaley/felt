@@ -139,18 +139,6 @@ export function foldActiveMinutes(
   return { all: all.size, attention: attention.size, agent: agent.size }
 }
 
-/** `slug: what happened` — felt's commit-subject convention. The slug is the
- *  bold/mono token the writer already chose as the grouping; the remainder is
- *  the sentence. A subject with no prefix parses to a null slug and its own
- *  text as the rest — each view decides where those land. */
-const COMMIT_SLUG_RE = /^([A-Za-z0-9][A-Za-z0-9._/-]*):[ \t]+(\S.*)$/
-
-export function parseCommitSlug(subject: string): { rest: string } {
-  const trimmed = subject.trim()
-  const match = COMMIT_SLUG_RE.exec(trimmed)
-  return match ? { rest: match[2].trim() } : { rest: trimmed }
-}
-
 /**
  * One line of this host's session ledger — a fiber↔session pairing and its
  * provenance, as `Shuttle.SessionLedger` wrote it.
@@ -192,12 +180,12 @@ export interface SessionsResult {
  * One line of the COMMIT LEDGER — a commit and the harness session that made
  * it, as the commit hook wrote it.
  *
- * This is the record that retired prefix-parsing. A `slug: ` prefix is a
- * convention a human types and can mistype; `session` is the id the harness was
- * running under at the moment of the commit, so joining it through the session
- * ledger names the fiber as a FACT rather than as a reading of the subject
- * line. It covers only commits made after the hook existed — a page simply has
- * no prose for the days before that, which is the honest answer.
+ * A `slug: ` prefix is a convention a human types and can mistype; `session` is
+ * the id the harness was running under at the moment of the commit, so joining
+ * it through the session ledger names the fiber as a FACT rather than as a
+ * reading of the subject line. It covers only commits made after the hook
+ * existed — a page simply has no prose for the days before that, which is the
+ * honest answer.
  *
  *   at          epoch-ms the commit was recorded
  *   sha         the commit's 40-hex sha — the commit's identity
@@ -273,10 +261,6 @@ export interface TemporalFetchers {
    * Both ends are INSTANTS, for the reason the whole module is: a civil window
    * resolved in the daemon's zone is a different window from the same one
    * resolved in the browser's.
-   *
-   * Degrades to an empty ledger on a daemon that has no such route, so a view
-   * that adopts it must keep its prefix-parsing fallback for the history the
-   * hook never saw.
    */
   commits(sinceMs: number, untilMs: number): Promise<CommitsResult>
 }

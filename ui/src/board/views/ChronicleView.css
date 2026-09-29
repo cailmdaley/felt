@@ -106,9 +106,9 @@
   color: #A89B83;
 }
 
-/* Weekday small-caps over an oldstyle numeral — the timeline ribbon's day
+/* Weekday small-caps over an oldstyle numeral — the drag horizon's day
    vocabulary, stacked instead of inline because a chronicle column is a
-   quarter the width of a ribbon column. */
+   fraction of the width of a horizon cell. */
 .chr-head {
   position: sticky;
   top: 0;
@@ -139,8 +139,8 @@
 }
 .chr-head-weekend { background: #E6DCC5; }
 .chr-head-week { border-right-color: rgba(122, 111, 92, 0.42); }
-/* Today is bracketed by a gold seam on both edges, the way the Desk ribbon
-   brackets its today column — so "now" reads as a column, not as a boundary. */
+/* Today is bracketed by a gold seam on both edges, the way the drag horizon
+   brackets its today cell — so "now" reads as a column, not as a boundary. */
 .chr-head-today {
   background: rgba(154, 123, 53, 0.16);
   box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;

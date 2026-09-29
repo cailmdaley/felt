@@ -51,9 +51,8 @@ export function createViewPage(title: string): ViewPage {
  *
  * Built here, in the same idiom as a real view page, so a board that cannot
  * reach its daemon still looks like the board: the illuminated title tells you
- * which page you are on, and the marginal line tells you why it is empty.
- * Previously this state was rendered as literally nothing, which reads as a
- * broken app rather than an unreachable daemon.
+ * which page you are on, and the marginal line tells you why it is empty —
+ * an unreachable daemon, not a broken app.
  *
  * `onRetry` adds a retry affordance; omit it for the loading state, where there
  * is nothing to retry yet.

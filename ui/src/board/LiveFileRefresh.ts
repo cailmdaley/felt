@@ -1,11 +1,12 @@
 /**
  * One change-aware watcher for every live file-reading surface.
  *
- * A watcher sends conditional GETs when the daemon exposes validators. Older
- * remote daemons may return the full file every time, so each 200 also gets a
- * client-side content fingerprint; views update only when that fingerprint
- * moves. Watchers for the same URL share one request; inactive tabs pause until
- * activation revalidates them, and hidden pages do no work.
+ * A watcher sends conditional GETs against the file endpoint's content-digest
+ * ETag. Every 200 also gets a client-side content fingerprint, and views
+ * update only when that fingerprint moves — so a forced re-read, or an owner
+ * that answers without a digest validator, repaints nothing when the body is
+ * unchanged. Watchers for the same URL share one request; inactive tabs pause
+ * until activation revalidates them, and hidden pages do no work.
  */
 
 export const LIVE_FILE_POLL_INTERVAL_MS = 4_000
@@ -24,7 +25,6 @@ type FileSubscriber = {
 type WatchedFile = {
   subscribers: Set<FileSubscriber>
   etag: string | null
-  lastModified: string | null
   fingerprint: string | null
   content: string | null
   failures: number
@@ -43,8 +43,6 @@ export interface LiveFileRefreshOptions {
   fetch?: typeof fetch
   now?: () => number
   isVisible?: () => boolean
-  intervalMs?: number
-  maxBackoffMs?: number
   setInterval?: typeof globalThis.setInterval
   clearInterval?: typeof globalThis.clearInterval
   onVisibilityChange?: (listener: () => void) => () => void
@@ -59,8 +57,6 @@ export class LiveFileRefresh {
   private readonly fetchFile: typeof fetch
   private readonly now: () => number
   private readonly isVisible: () => boolean
-  private readonly intervalMs: number
-  private readonly maxBackoffMs: number
   private readonly schedule: typeof globalThis.setInterval
   private readonly cancelSchedule: typeof globalThis.clearInterval
   private readonly listenVisibility: (listener: () => void) => () => void
@@ -72,8 +68,6 @@ export class LiveFileRefresh {
     this.fetchFile = options.fetch ?? globalThis.fetch.bind(globalThis)
     this.now = options.now ?? Date.now
     this.isVisible = options.isVisible ?? (() => typeof document === 'undefined' || !document.hidden)
-    this.intervalMs = options.intervalMs ?? LIVE_FILE_POLL_INTERVAL_MS
-    this.maxBackoffMs = options.maxBackoffMs ?? MAX_ERROR_BACKOFF_MS
     this.schedule = options.setInterval ?? globalThis.setInterval.bind(globalThis)
     this.cancelSchedule = options.clearInterval ?? globalThis.clearInterval.bind(globalThis)
     this.listenVisibility = options.onVisibilityChange ?? ((listener) => {
@@ -89,7 +83,6 @@ export class LiveFileRefresh {
       file = {
         subscribers: new Set(),
         etag: null,
-        lastModified: null,
         fingerprint: null,
         content: null,
         failures: 0,
@@ -159,19 +152,17 @@ export class LiveFileRefresh {
 
   private async forceRead(url: string, file: WatchedFile): Promise<void> {
     file.etag = null
-    file.lastModified = null
     file.nextPollAt = 0
     if (file.inFlight) await file.inFlight
     if (this.files.get(url) !== file || !this.isVisible()) return
     file.etag = null
-    file.lastModified = null
     file.nextPollAt = 0
     await this.pollFile(url, file, true)
   }
 
   private start(): void {
     if (this.timer !== null) return
-    this.timer = this.schedule(() => void this.pollNow(), this.intervalMs)
+    this.timer = this.schedule(() => void this.pollNow(), LIVE_FILE_POLL_INTERVAL_MS)
     this.stopListening = this.listenVisibility(() => {
       if (this.isVisible()) void this.pollNow()
     })
@@ -197,8 +188,8 @@ export class LiveFileRefresh {
     const controller = new AbortController()
     file.controller = controller
     // Only a content-digest validator can prove a file unchanged. An owner that
-    // offers anything else (an older daemon's metadata ETag, or a timestamp) is
-    // polled unconditionally and its body compared by fingerprint instead.
+    // offers anything else is polled unconditionally and its body compared by
+    // fingerprint instead.
     const headers: Record<string, string> = {}
     if (file.etag && DIGEST_ETAG.test(file.etag)) headers['If-None-Match'] = file.etag
 
@@ -214,9 +205,8 @@ export class LiveFileRefresh {
 
         if (response.status === 304) {
           file.etag = response.headers.get('etag') ?? file.etag
-          file.lastModified = response.headers.get('last-modified') ?? file.lastModified
           file.failures = 0
-          file.nextPollAt = this.now() + this.intervalMs
+          file.nextPollAt = this.now() + LIVE_FILE_POLL_INTERVAL_MS
           return
         }
         if (!response.ok) throw new Error(`file request failed: ${response.status}`)
@@ -225,9 +215,8 @@ export class LiveFileRefresh {
         if (this.files.get(url) !== file) return
         const fingerprint = contentFingerprint(content)
         file.etag = response.headers.get('etag')
-        file.lastModified = response.headers.get('last-modified')
         file.failures = 0
-        file.nextPollAt = this.now() + this.intervalMs
+        file.nextPollAt = this.now() + LIVE_FILE_POLL_INTERVAL_MS
         if (fingerprint !== file.fingerprint) {
           file.fingerprint = fingerprint
           file.content = content
@@ -238,7 +227,7 @@ export class LiveFileRefresh {
       } catch (error) {
         if (this.files.get(url) !== file || controller.signal.aborted) return
         file.failures += 1
-        file.nextPollAt = this.now() + Math.min(this.intervalMs * 2 ** file.failures, this.maxBackoffMs)
+        file.nextPollAt = this.now() + Math.min(LIVE_FILE_POLL_INTERVAL_MS * 2 ** file.failures, MAX_ERROR_BACKOFF_MS)
         for (const subscriber of file.subscribers) {
           if (subscriber.active) subscriber.onError?.(error)
         }
@@ -269,8 +258,9 @@ export class LiveFileRefresh {
   }
 }
 
-/** A fast 128-bit fingerprint for legacy daemons that do not return validators. */
-export function contentFingerprint(content: string): string {
+/** A fast 128-bit fingerprint of a file body — what decides whether a 200
+ *  actually changed anything a view shows. */
+function contentFingerprint(content: string): string {
   let a = 0x811c9dc5
   let b = 0x9e3779b9
   let c = 0x85ebca6b
@@ -285,7 +275,7 @@ export function contentFingerprint(content: string): string {
   return `${content.length}:${a >>> 0}:${b >>> 0}:${c >>> 0}:${d >>> 0}`
 }
 
-export const liveFileRefresh = new LiveFileRefresh()
+const liveFileRefresh = new LiveFileRefresh()
 
 export function watchLiveFile(
   url: string,

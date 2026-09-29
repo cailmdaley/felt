@@ -52,7 +52,7 @@ import {
   type DiffTotal,
   type LifecycleState,
 } from './vocabulary.js'
-import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
+import { civilDayNoon, shiftCivilDay } from './railTime.js'
 import {
   foldActiveMinutes,
   isOriginStale,
@@ -68,6 +68,7 @@ import {
   civilDayToLocalDate,
   dueCivilDay,
   dueSortMs,
+  formatSpanMinutes,
   instantMs,
   isoDayLocal,
   railCivilDay,
@@ -85,6 +86,7 @@ import {
   type SearchHit,
 } from './chronicleSearch.js'
 import { cycleSpan } from '../KanbanRules.js'
+import { shuttleOrigin } from '../../forms/projectModel.js'
 import { restingCards } from '../KanbanReadModel.js'
 import './ChronicleView.css'
 
@@ -120,13 +122,11 @@ const SEARCH_DEBOUNCE_MS = 250
 const DAY_W_MIN_PX = 16
 const DAY_W_MAX_PX = 56
 
-// NO ROW CAP. The page used to draw 40 rows and hide the rest behind a
-// "+N more" click, which was a display default rather than a budget: a row is
-// a label and a track plus one segment per day it was worked, and the drawn
-// window holds ~90 rows today against ~415 shuttle fibers in the whole record —
-// a few thousand elements at the extreme of scrolling back a year, which is
-// nothing a grid struggles with. The chronicle IS the record; asking to see all
-// of it should not be a gesture. It scrolls.
+// NO ROW CAP. A row is a label and a track plus one segment per day it was
+// worked, and the drawn window holds ~90 rows against ~415 shuttle fibers in
+// the whole record — a few thousand elements at the extreme of scrolling back a
+// year, which is nothing a grid struggles with. The chronicle IS the record;
+// asking to see all of it should not be a gesture. It scrolls.
 /**
  * Where today sits across the day area on the first render. This is the same
  * statement as the visible split — 14 past of 22 visible days IS 65% — so the
@@ -145,7 +145,7 @@ const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
  * column PAST its own today line, on a page whose rule is that the future
  * carries no solid ink. Columns are still LABELLED by calendar date, because
  * that is what a rail is named by: the date it opened on. The boundary itself
- * is `RAIL_START_HOUR` in ./railTime.js, which `railCivilDay` defaults to.
+ * is `RAIL_START_HOUR` in ../civilDay.js, which `railCivilDay` defaults to.
  */
 
 /** The current rail as a local Date at noon — the shape `buildTimelineDays`
@@ -158,22 +158,9 @@ export function railDate(nowMs: number): Date {
   return d
 }
 
-/**
- * The origin key a write is routed by — `local`, or a bare hostname for a
- * remote-owned fiber. Mirrors `shuttleOrigin` in src/forms/projectModel.ts;
- * duplicated rather than imported because the board does not otherwise depend
- * on the forms layer, and a one-line regex is a cheaper coupling than a
- * cross-layer import.
- */
-export function shuttleOrigin(originId: string | undefined): string {
-  return (originId ?? 'local').replace(/^remote-/, '')
-}
-
 /** Origin for a write with no card behind it yet — a cycle being created. The
  *  board is never pinned to a remote, so such a write lands on this daemon. */
-function boardOrigin(): string {
-  return shuttleOrigin(undefined)
-}
+const BOARD_ORIGIN = 'local'
 
 // ── Pure join + aggregation (exported for chronicleJoin.test.ts) ─────────────
 
@@ -229,7 +216,7 @@ export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<str
     else if (b.k === 'attention') cell.attention += n
     // `notify` and `reply` fold into nothing: neither is a state of the work.
     // A reply's minute is already inked by its agent bucket, and a notify is
-    // an idle nudge the board no longer draws anywhere.
+    // an idle nudge the board draws nowhere.
   }
   return out
 }
@@ -668,10 +655,8 @@ export function fiberDocUrl(shuttleBase: string, id: string): string {
  *
  * The endpoint answers with the LIST envelope — `{ fibers: [{ fiber: {…} }] }`
  * — and the body rides the fiber object, only when the request asked for it
- * (`?body=1`). Reading `doc.fiber.body` off the envelope, as this once did,
- * finds nothing on every response the daemon has ever sent: the intention line
- * was not missing on some cycles, it was missing on all of them. The flatter
- * shapes are still accepted so a relayed or older daemon reads the same.
+ * (`?body=1`); `doc.fiber.body` read off the envelope finds nothing. The
+ * flatter shapes are accepted too, so a relayed or older daemon reads the same.
  */
 export function fiberBodyOf(doc: unknown): string | undefined {
   if (typeof doc !== 'object' || doc === null) return undefined
@@ -732,8 +717,8 @@ export interface ChronicleRow {
   sortMs: number
   /** Creation time, kept ONLY as the last-resort tiebreak among rows with no
    *  work and no due signal (`sortMs === 0`) — never mixed into `sortMs`
-   *  itself, or a freshly-touched, never-worked fiber floats back to the top
-   *  on `createdAt` exactly the way it used to on `modifiedAt`. */
+   *  itself, or a freshly-touched, never-worked fiber floats to the top on
+   *  `createdAt` alone. */
   createdMs: number
 }
 
@@ -741,7 +726,7 @@ export interface ChronicleRow {
  *  freshness by), then the daemon's own host, then the fiber's dispatch host —
  *  each rung only consulted when the one above says the uninformative `local`. */
 function hostLabel(card: KanbanCard, response: KanbanResponse): string {
-  const origin = response.staleness?.[card.originId]?.hostname ?? card.originId.replace(/^remote-/, '')
+  const origin = response.staleness?.[card.originId]?.hostname ?? shuttleOrigin(card.originId)
   if (origin && origin !== 'local') return origin.toLowerCase()
   if (response.feltHost && response.feltHost !== 'local') return response.feltHost.toLowerCase()
   return (card.shuttleHost ?? 'local').toLowerCase()
@@ -767,7 +752,7 @@ export function rowWaitingOn(
   origins: TemporalOrigins,
 ): string | null {
   if (card.originId === 'local') return null
-  const keys = [card.originId, card.originId.replace(/^remote-/, ''), hostname]
+  const keys = [card.originId, shuttleOrigin(card.originId), hostname]
   return keys.some((key) => isOriginStale(origins, key)) ? hostname : null
 }
 
@@ -1961,7 +1946,7 @@ class ChronicleView implements TemporalView {
     const ghosts: CycleCard[] = this.pendingCycles.map((p) => ({
       id: p.id ?? `pending:${p.name}`,
       name: p.name,
-      originId: boardOrigin(),
+      originId: BOARD_ORIGIN,
       cycleStart: p.startDay,
       // A spoken era has no end yet: `cycleSpan` runs an open-ended cycle to
       // today, which is exactly what an era you have just entered looks like.
@@ -1995,18 +1980,14 @@ class ChronicleView implements TemporalView {
       gutter.style.gridColumn = '1'
       gutter.style.gridRow = String(lane + 2)
       // Names the strip once, on the lane nearest the headers — and says, in
-      // the same breath, that the strip is something you can write on. The
-      // gesture is a drag, so there is nothing to click here; the `+` is a
-      // legend for the lane beside it, not a button that would lie about it.
+      // the same breath, that the strip is something you can write on.
       if (lane === 0) {
         const tag = document.createElement('span')
         tag.className = 'chr-cycle-tag'
         tag.textContent = 'cycles'
-        // The `+` used to be a legend for the drag gesture — a mark that could
-        // not be clicked, on a page where the only way to make an era was to
-        // draw one. It is a real button now: it opens the composer, where an
-        // era is SPOKEN rather than measured. The two gestures answer different
-        // questions. A drag says when; the composer says what.
+        // The `+` opens the composer, where an era is SPOKEN rather than
+        // measured. The two ways of making one answer different questions: a
+        // drag across the lanes says when; the composer says what.
         const plus = document.createElement('button')
         plus.type = 'button'
         plus.className = 'chr-cycle-plus'
@@ -2035,13 +2016,11 @@ class ChronicleView implements TemporalView {
       out.push(track)
     }
 
-    // The invitation. It used to appear only on an EMPTY strip, which meant the
-    // one gesture on this page that creates something was undiscoverable the
-    // moment you had a single cycle — and a hint you only see before you have
-    // ever used the feature is the wrong way round. So it now rides the LAST
-    // lane always, right-aligned out of the bands' way, and fades in when the
-    // cursor is over the strip. On an empty strip it is centered, because there
-    // is nothing to keep clear of.
+    // The invitation. It rides the LAST lane always — not only on an empty
+    // strip, or the one gesture on this page that creates something would be
+    // undiscoverable the moment you had a single cycle — right-aligned out of
+    // the bands' way, and fades in when the cursor is over the strip. On an
+    // empty strip it is centered, because there is nothing to keep clear of.
     const hint = document.createElement('div')
     hint.className = `chr-cycle-hint${bands.length === 0 ? ' chr-cycle-hint-empty' : ''}`
     hint.textContent = bands.length === 0 ? `· ${ERA_HINT} ·` : `· ${ERA_HINT}`
@@ -2175,8 +2154,7 @@ class ChronicleView implements TemporalView {
     stat('fibers touched', String(touched))
     stat('dues inside', String(dues))
     stat('closed', String(closed.length))
-    // `toMs + 1` keeps the old inclusive right bound literally intact; the
-    // shared fold's span is half-open.
+    // `toMs` is inclusive here and the fold's span is half-open, hence `+ 1`.
     const spend = foldActiveMinutes(buckets, { fromMs, toMs: toMs + 1 })
     // Human presence is counted in MESSAGES, not minutes. Nobody remembers an
     // era as forty minutes of steering; they remember how many times they came
@@ -3126,19 +3104,12 @@ class ChronicleView implements TemporalView {
   }
 
   /**
-   * Write the cycle. ONE call, both dates.
-   *
-   * This used to be two — create with `start`, then a `felt-edit` for `due` —
-   * because the daemon dropped a `due` sent at create: `@felt_native_keys`
-   * excluded it from the frontmatter splice as "felt's to write", and `felt add`
-   * was never told. Both halves disowned it. b71787b passes `-D`/`-o` through,
-   * so `due` and `outcome` now round-trip in the create itself.
-   *
-   * Worth the change beyond tidiness: two non-atomic writes meant a failed
-   * second call left a real, saved, open-ended cycle nobody drew. There is no
-   * intermediate state to fail into now. `start` still rides the frontmatter as
-   * an opaque key; `due` rides it as a native one. The band still appears
-   * immediately — `pendingCycles` holds it until a poll returns the real card.
+   * Write the cycle. ONE call, both dates: the create passes `due` and
+   * `outcome` through to `felt add`, so there is no second write that could
+   * fail and leave a saved, open-ended cycle nobody drew. `start` rides the
+   * frontmatter as an opaque key; `due` rides it as a native one. The band
+   * appears immediately — `pendingCycles` holds it until a poll returns the
+   * real card.
    *
    * `endDay` may be null: a spoken era is open-ended, and its span is settled
    * later with the same drag grips that reshape any other band. `prose` carries
@@ -3161,7 +3132,7 @@ class ChronicleView implements TemporalView {
 
     // No card exists yet, so this is the board's own scope rather than a
     // fiber's — the same resolution the capture forms use.
-    const origin = boardOrigin()
+    const origin = BOARD_ORIGIN
     const slug =
       name
         .toLowerCase()

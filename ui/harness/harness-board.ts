@@ -102,8 +102,10 @@ const shuttleBlock = (kind = 'oneshot') => ({
   project_dir: '/home/ada/loom',
 })
 
-/** A shuttle block carrying a concluded run's `runtime` stamps — what the
- *  detail panel's session-window line reads (dispatched → handed off → span). */
+/** The host serving this page — what every temporal result stamps itself with,
+ *  and the note a row suppresses because it is the page's constant. */
+const LOCAL_HOST = 'ada-workstation'
+
 /**
  * A block whose worker runs somewhere OTHER than the host serving this page.
  *
@@ -116,15 +118,14 @@ const shuttleBlock = (kind = 'oneshot') => ({
  * fiber wears this so both branches are visible at once: one row with a
  * hostname, the rest bare.
  */
-/** The host serving this page — what every temporal result stamps itself with,
- *  and the note a lane suppresses because it is the page's constant. */
-const LOCAL_HOST = 'ada-workstation'
 const shuttleBlockElsewhere = () => ({
   ...shuttleBlock(),
   host: FOREIGN_HOST,
   project_dir: '/leonardo_work/spt3g/papers',
 })
 
+/** A shuttle block carrying a concluded run's `runtime` stamps — what the
+ *  detail panel's session-window line reads (dispatched → handed off → span). */
 const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   ...shuttleBlock(),
   runtime: {
@@ -147,11 +148,10 @@ const civilDay = (offsetDays: number) => {
 }
 
 /**
- * Every mock fiber carries a ULID, because the temporal views join a bucket to
- * a fiber THROUGH one: a Shuttle worker runs in `<slug>-<ULID>-shuttle` and
- * that ULID is the fiber's `uid` (see `sessionUlid` in views/sessionNames.ts). With uids
- * missing the join can never succeed, and the views would only ever exercise
- * their unjoined path offline — which is how this started.
+ * Every mock fiber that runs carries a ULID, as a real one does: a Shuttle
+ * worker runs in `<leaf>-<ULID>-shuttle`, the session ledger records the
+ * fiber's `uid` beside its id (Chronicle's join falls back to it when the id
+ * does not resolve), and the card drawer's History asks the ledger BY uid.
  *
  * Crockford base32 (0-9 A-Z minus I, L, O, U), 26 characters, checked at boot
  * by `assertUlids` below so a typo fails loudly instead of silently unjoining.
@@ -381,11 +381,10 @@ const STANDING: MockFiber[] = [
 
 /**
  * PINNED — resting `kind:pinned` umbrella roles, parked on the Desk's launcher
- * band. Enough of them to overflow the old two-row cap several times over: the
- * band used to page anything past that behind a "+N more" cycler, which is
- * exactly the affordance a launcher must not have (a role you reach for daily
- * should not sometimes be on page 2). None carry a `uid` — the band never
- * joins a pinned chip to the activity plane, only the temporal views do.
+ * band. Enough of them to wrap the band several rows deep, because the band
+ * has no row cap and no "+N more" pager (a role you reach for daily should
+ * never be on page 2). None carry a `uid` — the band never joins a pinned chip
+ * to the activity plane, only Chronicle does.
  */
 const PINNED: MockFiber[] = [
   'null-suite/quick launch',
@@ -412,16 +411,15 @@ const PINNED: MockFiber[] = [
 }))
 
 /**
- * CYCLES — `cycle`-tagged fibers, each a named span of time. They are drawn as
- * bands behind the work by the temporal views and appear on NO desk surface:
- * `classifyFiber` routes a cycle to `response.cycles` and nowhere else, so the
- * column counts never see one.
+ * CYCLES — `cycle`-tagged fibers, each a named span of time. Chronicle draws
+ * them as bands above the work, the Desk offers them as lenses, and they
+ * appear in NO desk column: `classifyFiber` routes a cycle to `response.cycles`
+ * and nowhere else, so the column counts never see one.
  *
- * The harness carried none until now, which is exactly why a dead cycle click
- * survived to a browser session — with no band on screen there was nothing to
- * click offline. One live cycle spanning today (so a band is always visible
- * whenever the harness is opened) and one closed last week, so the views get
- * both a current and a past span to place.
+ * Without a band on screen there is nothing to click offline, so one live
+ * cycle spans today (a band is visible whenever the harness is opened), one
+ * runs open-ended, and one closed last week, giving Chronicle current, unbounded
+ * and past spans to place.
  */
 const CYCLES: MockFiber[] = [
   {
@@ -449,9 +447,8 @@ const CYCLES: MockFiber[] = [
   },
   {
     // WHOLLY PAST — started and ended before today, closed last week. The two
-    // above both reach the present, so without this one no view ever draws a
-    // band that lies entirely behind the cursor: Chronicle's past bands, and
-    // any "this week sits after the cycle" branch, would go unexercised.
+    // above both reach the present, so without this one Chronicle never draws a
+    // band that lies entirely behind today.
     id: 'work/cycles/summer-school-block',
     uid: ULID.summerSchool,
     name: 'summer-school block',
@@ -557,8 +554,8 @@ const MOCK_FEED = {
 
 // ── Mock temporal read plane ─────────────────────────────────────────────────
 //
-// `GET /api/v1/activity`, `/sessions` and `/commits` exist on the daemon now,
-// but the harness has no daemon at all — it runs off `file://` with a stubbed
+// The daemon serves `GET /api/v1/activity`, `/sessions` and `/commits`, but
+// the harness has no daemon at all — it runs off `file://` with a stubbed
 // `fetch`. So it injects a `TemporalFetchers` set directly, standing in for
 // those routes and mirroring their wire contract rather than the transport.
 //
@@ -997,10 +994,9 @@ const MOCK_TEMPORAL: TemporalFetchers = {
 }
 
 /**
- * A malformed ULID is invisible: the join just quietly fails and every lane
- * falls to the interactive path, which is exactly the failure this table was
- * added to fix. So check the alphabet and the length at boot and throw — the
- * mount's catch renders the message over the page.
+ * A malformed ULID is invisible: the uid lookups just quietly miss. So check
+ * the alphabet and the length at boot and throw — the mount's catch renders
+ * the message over the page.
  */
 const CROCKFORD_ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/
 function assertUlids(): void {

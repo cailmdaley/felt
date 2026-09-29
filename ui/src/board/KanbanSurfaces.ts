@@ -7,6 +7,7 @@ import {
   dueCivilDay,
   dueSortMs,
   instantMs,
+  isoDayLocal,
 } from './civilDay.js'
 import type {
   ColumnKind,
@@ -71,12 +72,9 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // the WIDTH OF A GESTURE SURFACE and nothing else — no card is filed by it, no
 // list is partitioned by it.
 //
-// THREE WEEKS, not two: the chapter chips used to sit at the right end of this
-// strip and eat a third of it, and they now live on the Desk's own always-
-// visible cycle row (`renderCycleLensBar`), which is a live drop target for the
-// length of a drag. The freed width goes back to the calendar, which is what a
-// day strip is for. Three weeks is still inside "a day you can picture"; past
-// that you write a `due:`.
+// THREE WEEKS: the strip is all calendar — the chapter chips are drop targets
+// on the Desk's own always-visible cycle row (`renderCycleLensBar`) — and three
+// weeks is still inside "a day you can picture"; past that you write a `due:`.
 const DRAG_HORIZON_DAYS = 21
 
 /** The dataTransfer type a peek-list row drag carries. Its own MIME type on
@@ -599,21 +597,16 @@ export class KanbanSurfaceRenderer {
   }
 
   /** Render the Pinned band: a dense wrap of at-rest pinned-role launcher
-   *  chips, sitting between the Timeline ribbon and the Now board. These are
-   *  schedule-less `kind:pinned` roles the poller never auto-fires; you
-   *  dispatch one by dragging it onto the Now In-flight column (the chips are
-   *  draggable and `findCardColumn` returns 'pinned' so the drag routes through
-   *  `transition(card,'inFlight')`). Chips are stable-ordered by fiber path so
-   *  the launcher band holds still, and EVERY ONE OF THEM RENDERS — the band
-   *  used to cap itself to two rows and page the rest behind a "+N more"
-   *  cycler, which is a click tax on a launcher whose whole point is muscle
-   *  memory: a role you reach for daily should not sometimes be on page 2. The
-   *  band simply grows: it wraps to as many rows as the pinned set needs, and
-   *  the row cap is on the person doing the pinning, not on the strip. ALWAYS
-   *  rendered — even with zero parked roles — because the band IS the drop
-   *  target for parking a role, so hiding it when empty made parking
-   *  impossible exactly when nothing was parked. The empty state shrinks to a
-   *  slim "drag a role here" hint.
+   *  chips. These are schedule-less `kind:pinned` roles the poller never
+   *  auto-fires; you dispatch one by dragging it onto the Now In-flight column
+   *  (the chips are draggable and `findCardColumn` returns 'pinned' so the drag
+   *  routes through `transition(card,'inFlight')`). Chips are stable-ordered by
+   *  fiber path so the launcher band holds still, and EVERY ONE OF THEM
+   *  RENDERS — no row cap, no "+N more" pager, because a launcher runs on
+   *  muscle memory and a role you reach for daily must never be on page 2. The
+   *  band wraps to as many rows as the pinned set needs. ALWAYS rendered — even
+   *  with zero parked roles — because the band IS the drop target for parking
+   *  a role; the empty state shrinks to a slim "drag a role here" hint.
    */
   renderPinnedSection(
     pinned: KanbanCard[],
@@ -662,21 +655,21 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * One pinned role as a compact launcher chip — the launcher-not-monitor
-   * rework. The user arrives with intent ("start X") and scans for the role,
+   * One pinned role as a compact launcher chip — a launcher, not a monitor.
+   * The user arrives with intent ("start X") and scans for the role,
    * so the chip carries only what locates and launches it: an actor glyph,
    * the role name, a status/staleness dot, and the agent/host hint. No outcome
    * text (it lives on the `title` tooltip for the rare glance). The two
    * human-attention phases (`attention`/`waiting`) still earn a small marker —
-   * they're genuinely "this one needs you." Click opens the fiber detail (same
-   * as the old card); the chip stays draggable so drag-to-In-flight dispatches
+   * they're genuinely "this one needs you." Click opens the fiber detail, as
+   * a desk card does; the chip stays draggable so drag-to-In-flight dispatches
    * it and drag-off-strip is handled upstream.
    *
    * A PINNED ROLE IS A HEAD LIKE ANY OTHER. Filing a pile of related work under
-   * an umbrella role is the canonical use of the queue, and for as long as this
-   * chip drew no "+N queued" that pile was invisible from the only surface the
-   * role appears on. So the chip takes stack drops (`installStackTarget`) and
-   * wears the compact chip, and the peek list hangs off a WRAPPER rather than
+   * an umbrella role is the canonical use of the queue, and the strip is the
+   * only surface the role appears on, so the pile must be visible here. The
+   * chip takes stack drops (`installStackTarget`) and wears the compact
+   * "+N queued" chip, and the peek list hangs off a WRAPPER rather than
    * the chip itself — the chip is a `<button>`, and a list of buttons nested
    * inside one is neither valid nor clickable.
    */
@@ -746,8 +739,7 @@ export class KanbanSurfaceRenderer {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-pin-chip-wrap'
     wrap.append(el)
-    // No queue, no wrapper: the ordinary role's layout on the strip is exactly
-    // what it was.
+    // No queue, no wrapper: an ordinary role is just its chip.
     return this.renderQueuedChip(card, wrap, { compact: true }) ? wrap : el
   }
 
@@ -756,29 +748,24 @@ export class KanbanSurfaceRenderer {
    * the tab strip for the duration of a drag, and nothing at all the rest of
    * the time.
    *
-   * The Desk used to carry a permanent timeline ribbon. Three chronological
-   * views now tell that story better, so the ribbon's DISPLAY job is gone —
-   * but its DROP job was load-bearing, and it was the only way to say "this one
-   * on Tuesday." So the day axis survives as a pure gesture surface: it appears
-   * when you pick a card up, and it is gone the moment you let go. That's why
+   * Chronicle is where the Desk's days are READ; this strip is only where
+   * they are AIMED AT — the one way to say "this one on Tuesday." It appears
+   * when you pick a card up and is gone the moment you let go, which is why
    * there are no mini-cards on it. A drop target does not need to show you what
    * it already holds; you are aiming at a date, not reading a schedule.
    *
-   * FUTURE DAYS ONLY, today first. The past was never a legal drop (the old
-   * ribbon's drop guard refused it), so rendering it only ever offered targets
-   * that bounced. Today means "onto the desk now" and the future days mean
-   * schedule-or-snooze — `dayDropHorizon` decides which, exactly as it did when
-   * the ribbon was permanent.
+   * FUTURE DAYS ONLY, today first. The past is never a legal drop (the drop
+   * guard refuses it), so rendering it would only offer targets that bounce.
+   * Today means "onto the desk now" and the future days mean
+   * schedule-or-snooze — `dayDropHorizon` decides which.
    *
    * Cells flex to fill the width and scroll (with drag edge-scroll) only when
    * they cannot: a wide board gets generous targets, a narrow one keeps all
    * three weeks reachable.
    *
-   * DAYS ONLY. The chapter chips used to sit past the last day cell, which put
-   * a second copy of the cycle row on screen every time a drag started — the
-   * Desk already shows those chips at the top right, all the time. They are
-   * drop targets THERE now (`renderCycleLensBar`), so "next sprint" is still a
-   * date you can aim at, and the calendar gets the whole strip.
+   * DAYS ONLY. The cycle chips are drop targets on the Desk's own cycle row
+   * (`renderCycleLensBar`), always on screen, so "next sprint" is a date you
+   * can aim at without a second copy of that row here.
    */
   renderDragHorizon(): HTMLElement {
     const outer = document.createElement('div')
@@ -794,13 +781,11 @@ export class KanbanSurfaceRenderer {
     row.className = 'kbn-draghorizon-row'
 
     for (const day of buildTimelineDays(0, DRAG_HORIZON_DAYS)) {
-      // One element is both the date label and the drop target. The old ribbon
-      // split them (an axis cell above a full-height column) only because cards
-      // stacked in between; with nothing in between, the split would be two
-      // nodes pretending to be one.
+      // One element is both the date label and the drop target: nothing is
+      // drawn between the two, so there is nothing to split them for.
       const cell = buildDayCell(day)
       cell.classList.add('kbn-timeline-dropcol', 'kbn-draghorizon-day')
-      this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day), cell)
+      this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day))
       row.append(cell)
     }
 
@@ -1014,9 +999,8 @@ export class KanbanSurfaceRenderer {
    *
    * The columns scroll independently of the board body, so the body's own
    * auto-scroll cannot reach a card at the bottom of a full column: you could
-   * see the card, but never get to it while holding something. (That is also
-   * half of why one card looked like it refused every drop — the other half
-   * was the hot zone being measured on the clipped box; see `visibleRectOf`.)
+   * see the card, but never get to it while holding something. (The hot zone
+   * is measured on the visible box for the same reason; see `visibleRectOf`.)
    *
    * Registered in the CAPTURE phase on purpose. A card that claims a stack and
    * a peek row mid-reorder both call `stopPropagation`, and in the bubble
@@ -1042,10 +1026,7 @@ export class KanbanSurfaceRenderer {
    *  Velocity rises with how far into the 80px margin the cursor has pushed.
    *
    *  A PEEK ROW deliberately does not edge-scroll the horizon: the liveness
-   *  predicate is `getDragSourceId` alone, not `isDragging()`.
-   *
-   *  (It used to also toggle the ribbon's `.kbn-drag-open` expand class. The
-   *  horizon has no closed state to open now: it exists only during a drag.) */
+   *  predicate is `getDragSourceId` alone, not `isDragging()`. */
   private installEdgeScroll(wrap: HTMLElement): void {
     this.installAxisEdgeScroll(wrap, {
       axis: 'x',
@@ -1127,10 +1108,9 @@ export class KanbanSurfaceRenderer {
     dropCol: HTMLElement,
     iso: string,
     aimLabel: string,
-    axisCell?: HTMLElement,
   ): void {
     const isDropEligible = (id: string): boolean => {
-      const today = isoDay(new Date())
+      const today = isoDayLocal(Date.now())
       if (iso < today) return false
       return !!findCardById(this.o.getLastResponse(), id)
     }
@@ -1145,12 +1125,11 @@ export class KanbanSurfaceRenderer {
     }
     const setActive = (active: boolean): void => {
       dropCol.classList.toggle('kbn-timeline-dropcol-active', active)
-      axisCell?.classList.toggle('kbn-timeline-day-drop-active', active)
       this.setAim(dropCol, active ? aimLabel : null)
     }
     /** What this day means for `id`, as the drop payload both paths share. */
     const dayMeaning = (id: string): { horizon: HorizonKind; due: string | null } =>
-      iso === isoDay(new Date())
+      iso === isoDayLocal(Date.now())
         ? { horizon: 'now', due: null }
         : { horizon: dayDropHorizon(this.o.getLastResponse(), id), due: iso }
     dropCol.addEventListener('dragover', (e) => {
@@ -1739,9 +1718,8 @@ export class KanbanSurfaceRenderer {
 
     // The title is plain text — clicking anywhere on the card (title
     // included) opens the fiber-detail panel, which IS the fiber as a
-    // vellum page. The old title-click → vellum-proper shortcut retired
-    // with the kanban-card-vellum-page rework; drill-out to the full
-    // workspace lives in the panel (id slug, dropdown, wikilinks).
+    // vellum page; drill-out to the full workspace lives in the panel (id
+    // slug, dropdown, wikilinks).
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name
@@ -1773,8 +1751,8 @@ export class KanbanSurfaceRenderer {
       const due = document.createElement('span')
       due.className = 'kbn-card-due'
       due.textContent = formatDue(card.due)
-      // Drift used to be its own yellow ↑ chip; the due date is what drifted
-      // the card, so the due chip carries the story on hover instead.
+      // The due date is what drifted the card, so the due chip carries that
+      // story on hover rather than a chip of its own.
       due.title = card.drifted
         ? `${card.due} — promoted from ${card.storedHorizon ?? 'unset'} by due date`
         : card.due
@@ -2087,7 +2065,7 @@ export class KanbanSurfaceRenderer {
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
     // element, not on the element pressed — so a press on this list's padding
-    // used to resolve straight past it to the card (or Resting cluster item)
+    // would resolve straight past it to the card (or Resting cluster item)
     // hosting it, and arm a drag of the HEAD fiber. Marking the list draggable
     // makes it that ancestor: a press on a row still resolves to the row (it is
     // nearer), and a press on anything else in here resolves to the list, whose
@@ -2132,8 +2110,8 @@ export class KanbanSurfaceRenderer {
         // A closed member reads dimmer and says which closed state it is in —
         // it is in the queue, but it is not what the queue is waiting on next.
         // It also wears the state's OWN pigment: verdigris for awaiting review,
-        // the board's verdict colour, so the thing the chip no longer counts is
-        // findable at a glance the moment the list is open.
+        // the board's verdict colour, so a settled member is findable at a
+        // glance the moment the list is open.
         li.classList.add('kbn-card-queued-row--settled')
         li.classList.add(
           note === 'awaiting review'
@@ -2602,13 +2580,6 @@ export function appendCappedText(el: HTMLElement, label: string): void {
   if (rest) el.append(document.createTextNode(rest))
 }
 
-function isoDay(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
 export interface TimelineDay {
   iso: string
   label: string
@@ -2643,7 +2614,7 @@ export function buildTimelineDays(
     cursor.setDate(cursor.getDate() + 1)
     const dow = d.getDay()
     days.push({
-      iso: isoDay(d),
+      iso: isoDayLocal(d.getTime()),
       label: String(d.getDate()),
       weekdayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
       isToday: offset === 0,
@@ -2869,10 +2840,10 @@ export function formatLaunchDay(iso: string): string {
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
- *  the same way the timeline places the card — otherwise one render pass showed
- *  two different days: the card sat on the Thursday column while its own chip
- *  read Wednesday. The day is materialized as a local date, never re-parsed as
- *  an instant (see civilDay.ts). */
+ *  the same way Chronicle places the card's due mark — otherwise one board
+ *  would name two different days for one due, Thursday on the column and
+ *  Wednesday on the chip. The day is materialized as a local date, never
+ *  re-parsed as an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
   const date = civilDayToLocalDate(dueCivilDay(iso))
   if (!date) return iso

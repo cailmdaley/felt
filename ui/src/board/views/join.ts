@@ -31,7 +31,6 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import {
   lookupSession,
   lookupTmux,
-  parseCommitSlug,
   type ActivityBucket,
   type CommitRecord,
   type SessionPairing,
@@ -164,10 +163,21 @@ export function buildLedgerNarration(
       byCard.set(card.id, fiber)
     }
     fiber.commits += 1
-    const { rest } = parseCommitSlug(record.subject)
-    if (rest) fiber.subjects.push(rest)
+    const prose = commitProse(record.subject)
+    if (prose) fiber.subjects.push(prose)
     fiber.insertions += record.insertions
     fiber.deletions += record.deletions
   }
   return { byCard }
+}
+
+/** `slug: what happened` — felt's commit-subject convention. The slug is only
+ *  a label (the fiber comes from the ledger), so the prose is the remainder; a
+ *  subject with no prefix is all prose. */
+const COMMIT_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*:[ \t]+(\S.*)$/
+
+function commitProse(subject: string): string {
+  const trimmed = subject.trim()
+  const match = COMMIT_SLUG_RE.exec(trimmed)
+  return match ? match[1].trim() : trimmed
 }
