@@ -15,10 +15,9 @@ import (
 // unrelated `ls` flag.
 //
 // Bump this integer whenever a change to the daemon-shelled surface could break
-// an already-running daemon shelling an old/new CLI, or vice versa — the exact
-// skew that shipped 80ce7b3 (a post-fix daemon shelling a pre-fix CLI that
-// didn't know --host, silently failing every dispatch write). Concretely, bump
-// on:
+// an already-running daemon shelling an old/new CLI, or vice versa — a daemon
+// passing a flag the installed CLI does not know fails every dispatch write.
+// Concretely, bump on:
 //   - a flag added, removed, or renamed on mark-runtime, reopen, or any other
 //     lifecycle verb the daemon shells (see daemon/lib/shuttle/continuation.ex,
 //     daemon/lib/shuttle/dispatcher.ex run_reopen, daemon/lib/shuttle/transition.ex)
@@ -33,14 +32,8 @@ import (
 // At daemon boot, the Poller shells `felt shuttle contract`, parses the bare
 // integer it prints on stdout, and compares it to its own baked expectation —
 // surfacing a version-skew warning/refusal at startup instead of failing one
-// shelled write at a time.
-//
-// Level 2 (C1): removed `--host` from mark-runtime and reopen — post-S1,
-// `resolveOwnHost` is pure local state, so the daemon-shelled ownership
-// override carried no correctness and a CLI that still expects it (or a
-// daemon that still sends it against a CLI that dropped it) is exactly the
-// kind of flag-shape skew this level exists to catch. Bumped in lockstep
-// with daemon/lib/shuttle/contract.ex's @expected_level.
+// shelled write at a time. Bumped in lockstep with
+// daemon/lib/shuttle/contract.ex's @expected_level.
 const ShuttleContractLevel = 3
 
 var shuttleContractCmd = &cobra.Command{

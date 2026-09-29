@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,7 +176,8 @@ func unixListen(path string) (listenAddr, error) {
 }
 
 // parsePort reads a decimal port in 1..65535. strconv.Atoi alone would accept
-// "+4000".
+// "+4000" and "-0"; a port is digits. Leading zeros parse as the integer they
+// denote.
 func parsePort(text string) (int, error) {
 	if text == "" || strings.TrimLeft(text, "0123456789") != "" {
 		return 0, fmt.Errorf("port %q is not a number", text)
@@ -527,13 +527,6 @@ func describeHostSource(source, file string) string {
 		return "class default"
 	}
 	return "default; no class in " + file
-}
-
-// isHostConfigError reports whether err is a host-file refusal of the given
-// kind, through any wrapping.
-func isHostConfigError(err error, kind string) bool {
-	var hc hostConfigError
-	return errors.As(err, &hc) && hc.Kind == kind
 }
 
 func init() {

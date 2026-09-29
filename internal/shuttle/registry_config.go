@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -22,13 +23,9 @@ import (
 //
 // This mirrors the stores registry (cmd/shuttle_stores.go) one step short: there
 // is no inline-value env var, because a comma list of paths inlines into an
-// environment and a JSON registry does not.
-//
-// Because every Go call site already funnels through LoadAgentRegistry(), the
-// whole feature is a change *inside* that function. No caller, no signature and
-// no wire shape moves — including install-time validation (schema.go's Validate
-// resolves against whatever registry it is handed) and the daemon (which shells
-// `felt shuttle agents`).
+// environment and a JSON registry does not. Every consumer — install-time
+// validation, the daemon (which shells `felt shuttle agents`) — reads the
+// folded result through LoadAgentRegistry.
 
 // Provenance values for AgentRecord.Source.
 const (
@@ -156,7 +153,7 @@ func applyOverrides(agents []AgentRecord, overrides map[string]json.RawMessage) 
 			return fmt.Errorf("overrides %q and %q both name agent %q", prev, key, agents[i].ID)
 		}
 		claimed[i] = key
-		if !containsString(agents[i].EffortLevels, ov.DefaultEffort) {
+		if !slices.Contains(agents[i].EffortLevels, ov.DefaultEffort) {
 			if len(agents[i].EffortLevels) == 0 {
 				return fmt.Errorf("overrides[%q]: agent %q has no effort axis", key, agents[i].ID)
 			}
@@ -191,15 +188,6 @@ func canonicalIndex(agents []AgentRecord, name string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("unknown agent %q", name)
-}
-
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // parseAgentsFile reads the user registry envelope (or a bare array) and
@@ -341,7 +329,7 @@ func unknownFieldWarning(data []byte, path string) string {
 }
 
 // isBareArray reports whether the payload's first meaningful byte opens an
-// array — the legacy/terse shape, read as a merge layer.
+// array — the terse shape, read as a merge layer.
 func isBareArray(data []byte) bool {
 	trimmed := bytes.TrimLeft(data, " \t\r\n")
 	return len(trimmed) > 0 && trimmed[0] == '['

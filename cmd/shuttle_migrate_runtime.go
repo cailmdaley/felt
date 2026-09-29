@@ -13,20 +13,15 @@ var (
 	migrateRuntimeHost   string
 )
 
-// migrateRuntimeCmd lifts the legacy FLAT runtime keys (session_uuid /
-// dispatched_at / handed_off_at / run_id) that sit as direct children of a
-// shuttle: block into the nested shuttle.runtime sub-mapping (Stage 5). It is the
-// one-time, dry-runnable migration that rides the runtime-nesting flip: once the
-// daemon writes nested (via mark-runtime) and reads nested-OR-flat, this lifts
-// the existing fibers so the on-disk shape matches.
+// migrateRuntimeCmd lifts FLAT runtime keys (session_uuid / dispatched_at /
+// handed_off_at / run_id) that sit as direct children of a shuttle: block into
+// the nested shuttle.runtime sub-mapping, the only shape writers emit and the
+// daemon reads. It is dry-runnable and idempotent.
 //
-// Scoped to fibers THIS host owns (shuttle.host == resolved own-host). That is
-// load-bearing under loom git-sync: the same fiber file exists on every host, so
-// nesting a fiber owned by a not-yet-flipped remote and syncing it would blind
-// that remote's flat-only daemon to its own handoffs (standing-role oscillation).
-// Each host migrates only its own fibers when it flips; the daemon's
-// nested-OR-flat readers carry any fiber that hasn't been migrated yet. Pass
-// --host to target a different owner (e.g. when dry-running on a copy).
+// Scoped to fibers THIS host owns (shuttle.host == resolved own-host): under
+// loom git-sync the same fiber file exists on every host, and only its owner
+// writes it. Pass --host to target a different owner (e.g. when dry-running on
+// a copy).
 var migrateRuntimeCmd = &cobra.Command{
 	Use:   "migrate-runtime",
 	Short: "Lift flat shuttle runtime keys into the nested shuttle.runtime block",

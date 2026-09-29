@@ -271,6 +271,17 @@ func renderForTest(t *testing.T, tmplText string, spec tunnelSpec) string {
 	return string(out)
 }
 
+// managedSpecs is the convergent install's selection: every tunnel the fleet
+// file asks this host to supervise.
+func managedSpecs(t *testing.T) []tunnelSpec {
+	t.Helper()
+	doc, err := loadRemotesFile()
+	if err != nil {
+		t.Fatalf("loadRemotesFile: %v", err)
+	}
+	return resolveManagedTunnelSpecs(doc)
+}
+
 // TestResolveTunnelSpecs_FromFleetFile — the fleet file is the only source, and
 // every field a job needs comes from it.
 func TestResolveTunnelSpecs_FromFleetFile(t *testing.T) {
@@ -280,10 +291,7 @@ func TestResolveTunnelSpecs_FromFleetFile(t *testing.T) {
 	  {"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}
 	]}`)
 
-	specs, err := resolveTunnelSpecs(nil)
-	if err != nil {
-		t.Fatalf("resolveTunnelSpecs: %v", err)
-	}
+	specs := managedSpecs(t)
 	if len(specs) != 2 {
 		t.Fatalf("got %d specs, want 2", len(specs))
 	}
@@ -316,10 +324,7 @@ func TestResolveTunnelSpecs_ManagedByEitherSupervisor(t *testing.T) {
 	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}},
 	  {"name":"beta","port":4002,"tunnel":{"manager":"systemd"}},
 	  {"name":"direct","port":4003,"tunnel":{"manager":"none"}}]`)
-	specs, err := resolveTunnelSpecs(nil)
-	if err != nil {
-		t.Fatalf("resolveTunnelSpecs: %v", err)
-	}
+	specs := managedSpecs(t)
 	if len(specs) != 2 || specs[0].Name != "alpha" || specs[1].Name != "beta" {
 		t.Fatalf("want the two managed remotes, got %+v", specs)
 	}
@@ -333,10 +338,7 @@ func TestResolveTunnelSpecs_DefaultManagerFollowsTheHost(t *testing.T) {
 		t.Run(goos+" manages it", func(t *testing.T) {
 			writeRemotes(t, `[{"name":"alpha","port":4001}]`)
 			useHostGOOS(t, goos)
-			specs, err := resolveTunnelSpecs(nil)
-			if err != nil {
-				t.Fatalf("resolveTunnelSpecs: %v", err)
-			}
+			specs := managedSpecs(t)
 			if len(specs) != 1 {
 				t.Fatalf("got %d specs, want 1", len(specs))
 			}
@@ -346,8 +348,8 @@ func TestResolveTunnelSpecs_DefaultManagerFollowsTheHost(t *testing.T) {
 	t.Run("elsewhere the remote is assumed reachable", func(t *testing.T) {
 		writeRemotes(t, `[{"name":"alpha","port":4001}]`)
 		useHostGOOS(t, "windows")
-		if _, err := resolveTunnelSpecs(nil); err == nil {
-			t.Fatal("want no supervisor-managed tunnels")
+		if specs := managedSpecs(t); len(specs) != 0 {
+			t.Fatalf("want no supervisor-managed tunnels, got %+v", specs)
 		}
 	})
 }
@@ -374,10 +376,7 @@ func TestResolveTunnelSpecs_DefaultLabelPrefix(t *testing.T) {
 func TestResolveTunnelSpecs_LabelOverride(t *testing.T) {
 	writeRemotes(t, `[{"name":"x","port":4001,"tunnel":{"manager":"launchd","label":"custom.tunnel"}},
 	  {"name":"y","port":4002,"tunnel":{"manager":"systemd","label":"custom-y.service"}}]`)
-	specs, err := resolveTunnelSpecs(nil)
-	if err != nil {
-		t.Fatalf("resolveTunnelSpecs: %v", err)
-	}
+	specs := managedSpecs(t)
 	if specs[0].Label != "custom.tunnel" || specs[0].UnitName != "custom.tunnel.service" {
 		t.Errorf("x = %+v", specs[0])
 	}
@@ -400,23 +399,10 @@ func TestResolveTunnelSpecs_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("empty fleet points at the fix", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "remotes.json")
-		t.Setenv("FELT_REMOTES_FILE", path)
-		_, err := resolveTunnelSpecs(nil)
-		if err == nil {
-			t.Fatal("want an error with no remotes configured")
-		}
-		if !strings.Contains(err.Error(), "felt shuttle remotes add") || !strings.Contains(err.Error(), path) {
-			t.Fatalf("error should name the fix and the file, got %q", err)
-		}
-	})
-
 	t.Run("manager none is not a supervised tunnel", func(t *testing.T) {
 		writeRemotes(t, `[{"name":"direct","port":4001,"tunnel":{"manager":"none"}}]`)
-		_, err := resolveTunnelSpecs(nil)
-		if err == nil || !strings.Contains(err.Error(), "supervisor-managed") {
-			t.Fatalf("want a supervisor-managed error, got %v", err)
+		if specs := managedSpecs(t); len(specs) != 0 {
+			t.Fatalf("manager none selected a tunnel: %+v", specs)
 		}
 	})
 }
@@ -851,10 +837,7 @@ func TestResolveTunnelSpecs_RemoteSocket(t *testing.T) {
 	writeRemotes(t, `{"version":1,"remotes":[
 	  {"name":"alpha","port":4001,"remote_socket":"/srv/shuttle/sock/daemon.sock","tunnel":{"manager":"launchd"}}
 	]}`)
-	specs, err := resolveTunnelSpecs(nil)
-	if err != nil {
-		t.Fatalf("resolveTunnelSpecs: %v", err)
-	}
+	specs := managedSpecs(t)
 	if len(specs) != 1 || specs[0].RemoteSocket != "/srv/shuttle/sock/daemon.sock" || specs[0].RemotePort != 0 {
 		t.Fatalf("spec = %+v, want the socket and no remote port", specs)
 	}

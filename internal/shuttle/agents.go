@@ -2,6 +2,7 @@ package shuttle
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -187,14 +188,7 @@ func (r *AgentRegistry) validateAxes(base AgentRecord, eff Axes) error {
 		if len(base.EffortLevels) == 0 {
 			return fmt.Errorf("agent %q does not support an effort axis", base.ID)
 		}
-		found := false
-		for _, lvl := range base.EffortLevels {
-			if lvl == eff.Effort {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(base.EffortLevels, eff.Effort) {
 			return fmt.Errorf("effort %q not allowed for agent %q (allowed: %s)", eff.Effort, base.ID, strings.Join(base.EffortLevels, ", "))
 		}
 	}

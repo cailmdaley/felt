@@ -146,10 +146,8 @@ func normalizeFeltStores(stores []string) []string {
 // felt's aggregate walk names such a fiber by its full outer path (…/lightcone/foo),
 // but the daemon polls the project store DIRECTLY (it expands the aggregate's
 // symlinks into the real store roots) and so identifies — and dispatches, and routes
-// write verbs by — the SUBSTORE id (lightcone/foo). shuttle-ctl re-canonicalized
-// the same way (schema.FiberRefFromPath); status/ps must too, or a status
-// fiber_id won't round-trip into a daemon-routed verb (and the Stage 3.4 shim
-// would change shuttle-ctl's output). Ported from shuttle's pkg/schema/fiber.go.
+// write verbs by — the SUBSTORE id (lightcone/foo). status/ps must too, or a
+// status fiber_id won't round-trip into a daemon-routed verb.
 //
 // Returns "" with an error when the path is not under a .felt store (caller falls
 // back to felt's native id). felt already carries f.Path symlink-resolved, but

@@ -17,8 +17,7 @@ import (
 // setters the lifecycle config verbs use. The block is born owned: resolveOwnHost
 // stamps an explicit host so the daemon's strict dispatch predicate (block.host
 // == own_host_id) has a value to match. status (the sole dispatch gate) is set
-// felt-native: install/repeat arm to active, pin parks at open. Ported from
-// shuttle-ctl's install.go/repeat.go/pin.go.
+// felt-native: install/repeat arm to active, pin parks at open.
 
 var (
 	installModel      string
@@ -63,8 +62,7 @@ func refuseExistingBlock(fiberID string, f *felt.Felt, b *shuttle.Block) error {
 }
 
 // printShuttleValidationErrors renders a constructed block's validation failures
-// CLI-style and returns a terminal error, matching shuttle-ctl's output. Writes
-// to os.Stderr (felt's verbs print directly, not via cmd.OutOrStdout).
+// CLI-style and returns a terminal error. Writes to os.Stderr (felt's verbs print directly, not via cmd.OutOrStdout).
 func printShuttleValidationErrors(errs shuttle.ValidationErrors) error {
 	fmt.Fprintln(os.Stderr, "shuttle: validation failed:")
 	for _, e := range errs {
@@ -161,8 +159,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 		statusChanged := false
 		if installDisabled {
 			if statusBefore != felt.StatusOpen {
-				f.Status = felt.StatusOpen
-				clearClosedAt(f)
+				f.Status, f.ClosedAt = felt.StatusOpen, nil
 				statusChanged = true
 			}
 		} else {
@@ -397,8 +394,7 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 		statusBefore := f.Status
 		statusChanged := false
 		if statusBefore != felt.StatusOpen {
-			f.Status = felt.StatusOpen
-			clearClosedAt(f)
+			f.Status, f.ClosedAt = felt.StatusOpen, nil
 			statusChanged = true
 		}
 
