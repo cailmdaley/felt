@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ascByKey,
   civilDayToLocalDate,
-  dayIndexForDue,
   descByKey,
   dueCivilDay,
   formatSpanMinutes,
@@ -70,33 +69,6 @@ describe('civil-day handling of a `due:` value', () => {
     expect(dueCivilDay('   ')).toBeUndefined();
     expect(dueCivilDay('not a date')).toBeUndefined();
     expect(dueCivilDay(20260730)).toBeUndefined();
-  });
-});
-
-describe('dayIndexForDue', () => {
-  // A three-day window, keyed by local civil days exactly as buildTimelineDays
-  // keys the timeline strip.
-  const dayIndex = new Map<string, number>([
-    ['2026-07-29', 0],
-    ['2026-07-30', 1],
-    ['2026-07-31', 2],
-  ]);
-
-  it('places both spellings of a civil day on that day’s column', () => {
-    expect(dayIndexForDue('2026-07-30', dayIndex)).toBe(1);
-    expect(dayIndexForDue('2026-07-30T00:00:00Z', dayIndex)).toBe(1);
-    expect(dayIndexForDue('2026-07-30T00:00:00.000Z', dayIndex)).toBe(1);
-  });
-
-  it('places a real timestamp by its local day', () => {
-    expect(dayIndexForDue('2026-07-30T22:00:00Z', dayIndex)).toBe(
-      dayIndex.get(LOCAL_DAY_OF_22Z),
-    );
-  });
-
-  it('is null for no value and for a day outside the window', () => {
-    expect(dayIndexForDue(undefined, dayIndex)).toBeNull();
-    expect(dayIndexForDue('2026-08-15', dayIndex)).toBeNull();
   });
 });
 
@@ -172,11 +144,6 @@ describe('one value, one day: the chip, the column and the drop guard agree', ()
     '2026-07-30T00:00:00+02:00',
     '2026-07-30T00:00:00-07:00',
   ];
-  const dayIndex = new Map<string, number>([
-    ['2026-07-29', 0],
-    ['2026-07-30', 1],
-    ['2026-07-31', 2],
-  ]);
   // Built from local date parts, independently of anything under test — the
   // label a human in this zone would read for July 30.
   const JUL_30_LABEL = new Date(2026, 6, 30).toLocaleDateString(undefined, {
@@ -189,7 +156,7 @@ describe('one value, one day: the chip, the column and the drop guard agree', ()
       // The bug this pins: the card was PLACED on the Jul 30 column while its
       // own chip read Jul 29 — one card, one render pass, two days.
       expect(formatDue(value)).toBe(JUL_30_LABEL);
-      expect(dayIndexForDue(value, dayIndex)).toBe(1);
+      expect(dueCivilDay(value)).toBe('2026-07-30');
       expect(sameCivilDue(value, '2026-07-30')).toBe(true);
       expect(sameCivilDue(value, '2026-07-31')).toBe(false);
     });
@@ -321,13 +288,10 @@ describe('the timeline strip across a DST transition', () => {
   });
 
   it('lands a due date on the far side of the transition on its own column', () => {
-    const dayIndex = new Map(days.map((d, i) => [d.iso, i]));
-    // Nov 3 — past both transitions. With the ms stride this column had drifted
+    // Nov 3 — past both transitions. A millisecond stride drifts this column
     // off the strip entirely in one zone or the other.
-    expect(dayIndexForDue('2026-11-03T00:00:00+01:00', dayIndex)).toBe(
-      dayIndex.get('2026-11-03'),
-    );
-    expect(dayIndexForDue('2026-11-03', dayIndex)).not.toBeNull();
+    expect(dueCivilDay('2026-11-03T00:00:00+01:00')).toBe('2026-11-03');
+    expect(days.some((d) => d.iso === '2026-11-03')).toBe(true);
   });
 });
 

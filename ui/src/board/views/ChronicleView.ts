@@ -52,7 +52,7 @@ import {
   type DiffTotal,
   type LifecycleState,
 } from './vocabulary.js'
-import { civilDayNoon, formatSpanMinutes, shiftCivilDay } from './railTime.js'
+import { civilDayNoon, shiftCivilDay } from './railTime.js'
 import {
   foldActiveMinutes,
   isOriginStale,
@@ -68,6 +68,7 @@ import {
   civilDayToLocalDate,
   dueCivilDay,
   dueSortMs,
+  formatSpanMinutes,
   instantMs,
   isoDayLocal,
   railCivilDay,
@@ -145,7 +146,7 @@ const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
  * column PAST its own today line, on a page whose rule is that the future
  * carries no solid ink. Columns are still LABELLED by calendar date, because
  * that is what a rail is named by: the date it opened on. The boundary itself
- * is `RAIL_START_HOUR` in ./railTime.js, which `railCivilDay` defaults to.
+ * is `RAIL_START_HOUR` in ../civilDay.js, which `railCivilDay` defaults to.
  */
 
 /** The current rail as a local Date at noon — the shape `buildTimelineDays`

@@ -40,12 +40,6 @@ export function isMobileViewport(win: Pick<Window, 'matchMedia'> = window): bool
   return win.matchMedia?.(MOBILE_MEDIA)?.matches ?? false
 }
 
-/** True on a hand-held viewport with no room to spare vertically — the phone
- *  in landscape. Always also `isMobileViewport()`. */
-export function isShortViewport(win: Pick<Window, 'matchMedia'> = window): boolean {
-  return win.matchMedia?.(SHORT_MEDIA)?.matches ?? false
-}
-
 export function coarsePointer(win: Pick<Window, 'matchMedia'> = window): boolean {
   return win.matchMedia?.('(pointer: coarse)')?.matches ?? false
 }

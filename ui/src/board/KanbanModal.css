@@ -643,9 +643,9 @@
   min-width: 58px;
 }
 
-/* Day cells. Kept verbatim from the retired ribbon's axis — same small-caps
-   serif weekday, same oldstyle numeral, same gold-leaf today — because the
-   horizon should read as the ribbon returning, not as a new control. */
+/* Day cells: small-caps serif weekday, oldstyle numeral, gold-leaf today —
+   the board's almanac hand, so the horizon reads as a calendar rather than a
+   new control. */
 .kbn-timeline-day {
   display: flex;
   flex-direction: row;
@@ -688,18 +688,19 @@
   color: #9A7B35;
   font-weight: 600;
 }
-/* Hovered drop target. Both classes land on the same element now (the day cell
-   IS the drop column), so they are written to compose rather than compete.
+/* Hovered drop target. The day cell IS the drop column, so the fill below and
+   the outline on `.kbn-timeline-dropcol-active` compose on one element; a cycle
+   chip taking the same drop wears only the outline.
 
    The hovered target has to win against a card ghost passing over it, so it
    is a filled block with a solid gold edge, not a dashed hint. Its unhovered
    neighbours step back (see the :has rule below) so the candidate is the only
    lit thing on the strip. */
-.kbn-timeline-day-drop-active {
+.kbn-timeline-day.kbn-timeline-dropcol-active {
   background: rgba(196, 147, 51, 0.42);
 }
-.kbn-timeline-day-drop-active .kbn-timeline-day-num,
-.kbn-timeline-day-drop-active .kbn-timeline-day-dow {
+.kbn-timeline-day.kbn-timeline-dropcol-active .kbn-timeline-day-num,
+.kbn-timeline-day.kbn-timeline-dropcol-active .kbn-timeline-day-dow {
   color: #4A3C1C;
   font-weight: 600;
 }
@@ -710,7 +711,7 @@
 }
 /* Quiet the field while one target is lit. Pure CSS so nothing has to track
    which sibling is active; if :has is unavailable the strip simply stays at
-   full strength, which is where it was before. */
+   full strength. */
 .kbn-draghorizon-row:has(.kbn-timeline-dropcol-active)
   .kbn-timeline-dropcol:not(.kbn-timeline-dropcol-active) {
   opacity: 0.42;

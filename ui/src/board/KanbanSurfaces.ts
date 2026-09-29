@@ -7,6 +7,7 @@ import {
   dueCivilDay,
   dueSortMs,
   instantMs,
+  isoDayLocal,
 } from './civilDay.js'
 import type {
   ColumnKind,
@@ -794,13 +795,11 @@ export class KanbanSurfaceRenderer {
     row.className = 'kbn-draghorizon-row'
 
     for (const day of buildTimelineDays(0, DRAG_HORIZON_DAYS)) {
-      // One element is both the date label and the drop target. The old ribbon
-      // split them (an axis cell above a full-height column) only because cards
-      // stacked in between; with nothing in between, the split would be two
-      // nodes pretending to be one.
+      // One element is both the date label and the drop target: nothing is
+      // drawn between the two, so there is nothing to split them for.
       const cell = buildDayCell(day)
       cell.classList.add('kbn-timeline-dropcol', 'kbn-draghorizon-day')
-      this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day), cell)
+      this.installTimelineDayDropHandlers(cell, day.iso, dayAimLabel(day))
       row.append(cell)
     }
 
@@ -1127,10 +1126,9 @@ export class KanbanSurfaceRenderer {
     dropCol: HTMLElement,
     iso: string,
     aimLabel: string,
-    axisCell?: HTMLElement,
   ): void {
     const isDropEligible = (id: string): boolean => {
-      const today = isoDay(new Date())
+      const today = isoDayLocal(Date.now())
       if (iso < today) return false
       return !!findCardById(this.o.getLastResponse(), id)
     }
@@ -1145,12 +1143,11 @@ export class KanbanSurfaceRenderer {
     }
     const setActive = (active: boolean): void => {
       dropCol.classList.toggle('kbn-timeline-dropcol-active', active)
-      axisCell?.classList.toggle('kbn-timeline-day-drop-active', active)
       this.setAim(dropCol, active ? aimLabel : null)
     }
     /** What this day means for `id`, as the drop payload both paths share. */
     const dayMeaning = (id: string): { horizon: HorizonKind; due: string | null } =>
-      iso === isoDay(new Date())
+      iso === isoDayLocal(Date.now())
         ? { horizon: 'now', due: null }
         : { horizon: dayDropHorizon(this.o.getLastResponse(), id), due: iso }
     dropCol.addEventListener('dragover', (e) => {
@@ -2602,13 +2599,6 @@ export function appendCappedText(el: HTMLElement, label: string): void {
   if (rest) el.append(document.createTextNode(rest))
 }
 
-function isoDay(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
 export interface TimelineDay {
   iso: string
   label: string
@@ -2643,7 +2633,7 @@ export function buildTimelineDays(
     cursor.setDate(cursor.getDate() + 1)
     const dow = d.getDay()
     days.push({
-      iso: isoDay(d),
+      iso: isoDayLocal(d.getTime()),
       label: String(d.getDate()),
       weekdayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
       isToday: offset === 0,

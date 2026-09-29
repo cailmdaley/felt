@@ -44,9 +44,9 @@ export function isoDayLocal(ms: number): string {
 
 /** The hour a rail opens, and the next one closes. Work past midnight belongs
  *  to the day it started, so the day boundary is dawn, not midnight. Every
- *  surface that asks "which day is it" draws from this one value (re-exported
- *  by views/railTime.ts) — two surfaces disagreeing about which day it is, is
- *  the defect it exists to prevent. */
+ *  surface that asks "which day is it" draws from this one value — two
+ *  surfaces disagreeing about which day it is, is the defect it exists to
+ *  prevent. */
 export const RAIL_START_HOUR = 6;
 
 /**
@@ -159,23 +159,6 @@ export function ascByKey(a: number | undefined, b: number | undefined): number {
   if (a === undefined) return 1;
   if (b === undefined) return -1;
   return a - b;
-}
-
-/**
- * The timeline day-column for a `due:` value. Due values and instants must be
- * placed separately: the day columns
- * are keyed by local civil days, so a genuine instant (closedAt, modifiedAt,
- * nextLaunchAt) is placed by its LOCAL day, while a `due:` is placed by the
- * civil day it names. Null when there's no value or the day is outside the
- * rendered window.
- */
-export function dayIndexForDue(
-  due: string | undefined,
-  dayIndex: Map<string, number>,
-): number | null {
-  const day = dueCivilDay(due);
-  if (day === undefined) return null;
-  return dayIndex.get(day) ?? null;
 }
 
 /**

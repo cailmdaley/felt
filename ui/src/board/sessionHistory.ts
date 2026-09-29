@@ -20,7 +20,7 @@ import { isoDayLocal } from './civilDay.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
 /** Rows shown before "all N" unfolds the rest. */
-export const SESSIONS_SHOWN = 6
+const SESSIONS_SHOWN = 6
 /** The route's batch ceiling. */
 const LINKS_BATCH = 50
 
@@ -198,8 +198,6 @@ export interface SessionHistoryContext extends TargetContext {
   uid: string
   /** Where a failed terminal open is said. */
   onError?: (message: string) => void
-  fetch?: typeof fetch
-  now?: () => number
 }
 
 /**
@@ -207,7 +205,6 @@ export interface SessionHistoryContext extends TargetContext {
  * first unfolded.
  */
 export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
-  const doFetch: typeof fetch = (input, init) => (ctx.fetch ?? globalThis.fetch)(input, init)
   const el = document.createElement('div')
   el.className = 'kbn-ctl-history'
 
@@ -245,7 +242,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
    *  failure is said. */
   const openTerminal = async (attach: AttachBody): Promise<void> => {
     try {
-      const res = await doFetch(`${ctx.shuttleBase}/api/v1/attach`, {
+      const res = await fetch(`${ctx.shuttleBase}/api/v1/attach`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(attach),
@@ -319,8 +316,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
       if (title) span.title = title
       li.append(span)
     }
-    const nowMs = ctx.now?.() ?? Date.now()
-    put('kbn-ctl-session-when', sessionWhen(record.at, nowMs), new Date(record.at).toLocaleString())
+    put('kbn-ctl-session-when', sessionWhen(record.at), new Date(record.at).toLocaleString())
     put('kbn-ctl-session-agent', record.agent ?? record.harness ?? 'session')
     if (record.kind !== 'dispatch') put('kbn-ctl-session-kind', record.kind)
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)
@@ -361,7 +357,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
         return batches.map(async (batch) => {
           const query = `sessions=${batch.join(',')}${host ? `&host=${encodeURIComponent(host)}` : ''}`
           try {
-            const res = await doFetch(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`)
+            const res = await fetch(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`)
             if (!res.ok) return
             const answered = parseSessionLinks(await res.json())
             const asked = new Set(batch)
@@ -377,7 +373,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   const load = async (): Promise<void> => {
     let records: SessionRecord[] = []
     try {
-      const res = await doFetch(
+      const res = await fetch(
         `${ctx.shuttleBase}/api/v1/sessions/composite?since_ms=0&uid=${encodeURIComponent(ctx.uid)}`,
       )
       if (res.ok) {

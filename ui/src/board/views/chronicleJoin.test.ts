@@ -48,7 +48,6 @@ import { buildLedgerNarration } from './join.js'
 import type { LedgerNarration } from './join.js'
 import { diffClause } from './vocabulary.js'
 import type { CommitRecord, SessionPairing } from './TemporalData.js'
-import { formatSpanMinutes } from './railTime.js'
 import { buildSessionIndex, foldActiveMinutes } from './TemporalData.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -62,7 +61,7 @@ import {
   TODAY_IDX,
   WINDOW_DAYS,
 } from '../testFixtures.js'
-import { civilDayToLocalDate, isoDayLocal } from '../civilDay.js'
+import { civilDayToLocalDate, formatSpanMinutes, isoDayLocal } from '../civilDay.js'
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 

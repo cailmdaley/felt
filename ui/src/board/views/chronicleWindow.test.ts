@@ -28,9 +28,9 @@ import {
   windowOf,
   type ScrollProbe,
 } from './chronicleWindow.js';
-import { civilDayToLocalDate } from '../civilDay.js';
+import { civilDayToLocalDate, RAIL_START_HOUR } from '../civilDay.js';
 import { expectPinnedZone } from '../testFixtures.js';
-import { RAIL_START_HOUR, shiftCivilDay } from './railTime.js';
+import { shiftCivilDay } from './railTime.js';
 
 
 /** An instant at a LOCAL wall-clock time on a civil day — never a UTC literal,
