@@ -6,7 +6,7 @@ defmodule Shuttle.RemoteRegistry do
 
   The laptop's local Shuttle daemon uses this registry to:
 
-    * **Composite snapshot** — `Shuttle.Web.StateController` returns
+    * **Composite snapshot** — `ShuttleWeb.StateController` returns
       the local snapshot plus per-origin remote snapshots so the
       kanban frontend has cross-host visibility.
 
@@ -359,32 +359,21 @@ defmodule Shuttle.RemoteRegistry do
   # remotes add` is live without a daemon bounce. Existing entries keep their
   # recovery state (see `RegistryCommon.reconcile/3`), so a reload never
   # restarts a cascade in flight.
-  defp reload_remotes(%State{reload_from_file?: false} = state), do: state
-
   defp reload_remotes(%State{} = state) do
-    case Shuttle.Remotes.config_token() do
-      token when token == state.remotes_token ->
-        state
+    next = RegistryCommon.reload_fleet(state, :snapshots, &initial_entry/1)
+    added = remote_names(next) -- remote_names(state)
+    removed = remote_names(state) -- remote_names(next)
 
-      token ->
-        remotes = RegistryCommon.configured_remotes()
-        added = Enum.map(remotes, & &1.name) -- Enum.map(state.remotes, & &1.name)
-        removed = Enum.map(state.remotes, & &1.name) -- Enum.map(remotes, & &1.name)
-
-        if added != [] or removed != [] do
-          Logger.info(
-            "RemoteRegistry: fleet reloaded (added: #{inspect(added)}, removed: #{inspect(removed)})"
-          )
-        end
-
-        %{
-          state
-          | remotes: remotes,
-            remotes_token: token,
-            snapshots: RegistryCommon.reconcile(state.snapshots, remotes, &initial_entry/1)
-        }
+    if added != [] or removed != [] do
+      Logger.info(
+        "RemoteRegistry: fleet reloaded (added: #{inspect(added)}, removed: #{inspect(removed)})"
+      )
     end
+
+    next
   end
+
+  defp remote_names(%State{remotes: remotes}), do: Enum.map(remotes, & &1.name)
 
   # ── Polling ──
 
@@ -1250,21 +1239,77 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   @impl true
   def get(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
+    case request(:get, url, [], nil, timeout_ms) do
+      {:ok, 200, _headers, body} -> {:ok, body}
+      {:ok, status, _headers, _body} -> {:error, {:http_status, status}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
+  # with the last etag) and return the raw status + response headers so the
+  # caller can treat 304 as "unchanged".
+  @impl true
+  def get(url, req_headers, timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms),
+      do: request(:get, url, req_headers, nil, timeout_ms)
+
+  @impl true
+  def post(url, body, content_type, timeout_ms)
+      when is_binary(url) and is_binary(body) and is_binary(content_type) and
+             is_integer(timeout_ms) do
+    case request(:post, url, [], {content_type, body}, timeout_ms) do
+      {:ok, status, _headers, resp_body} -> {:ok, status, resp_body}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # File fetch used by owner-routed byte reads. The header-aware form carries
+  # validators across the tunnel and returns the owner's response headers for
+  # the local daemon to relay; non-200 statuses (including 304) stay intact.
+  @impl true
+  def get_file(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
+    case get_file(url, [], timeout_ms) do
+      {:ok, status, _headers, content_type, body} -> {:ok, status, content_type, body}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def get_file(url, req_headers, timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
+    case request(:get, url, req_headers, nil, timeout_ms) do
+      {:ok, status, headers, body} -> {:ok, status, headers, content_type_header(headers), body}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # The one httpc call every callback makes: `{:ok, status, headers, body}`
+  # with lowercased string headers, or `{:error, reason}`.
+  #
+  # `body_format: :binary` returns the response body as a raw binary. Without
+  # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
+  # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
+  # every multibyte char (— × é …) and corrupting images and PDFs.
+  defp request(method, url, req_headers, payload, timeout_ms) do
     with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
-      request = {String.to_charlist(request_url), []}
+      headers =
+        Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+
+      request =
+        case payload do
+          nil ->
+            {String.to_charlist(request_url), headers}
+
+          {type, body} ->
+            {String.to_charlist(request_url), headers, String.to_charlist(type), body}
+        end
+
       http_opts = http_opts(request_url, timeout_ms, private_dial?)
 
-      # `body_format: :binary` returns the response body as a raw binary. Without
-      # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
-      # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
-      # every multibyte char (— × é …). ASCII survives (< 128), so the corruption
-      # hides until a special character appears. Keep this binary-safe like get_file/2.
-      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-        {:ok, {{_, 200, _}, _headers, body}} ->
-          {:ok, body}
-
-        {:ok, {{_, status, _}, _headers, _body}} ->
-          {:error, {:http_status, status}}
+      case :httpc.request(method, request, http_opts, [body_format: :binary], profile) do
+        {:ok, {{_, status, _}, resp_headers, body}} ->
+          {:ok, status, normalize_headers(resp_headers), body}
 
         {:error, reason} ->
           transport_error(reason, private_dial?, url)
@@ -1300,113 +1345,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   defp transport_error(reason, false, _url), do: {:error, reason}
 
-  # Conditional GET: send request headers (the fiber feed sends `If-None-Match`
-  # with the last etag) and return the raw status + response headers so the
-  # caller can treat 304 as "unchanged". Binary-safe like get/2.
-  @impl true
-  def get(url, req_headers, timeout_ms)
-      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
-      headers =
-        Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
-
-      request = {String.to_charlist(request_url), headers}
-      http_opts = http_opts(request_url, timeout_ms, private_dial?)
-
-      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-        {:ok, {{_, status, _}, resp_headers, body}} ->
-          {:ok, status, normalize_headers(resp_headers), body}
-
-        {:error, reason} ->
-          transport_error(reason, private_dial?, url)
-      end
-    end
-  rescue
-    e -> {:error, {:exception, Exception.message(e)}}
-  catch
-    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
-    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
-    # uncaught exit here would take the registry — and its whole recovery
-    # state — down with the request.
-    :exit, reason -> {:error, {:exit, reason}}
-  end
-
   # httpc returns header keys/values as charlists; normalize to lowercased-key
   # string tuples so the caller reads `etag` case-insensitively.
   defp normalize_headers(headers) do
     Enum.map(headers, fn {k, v} -> {k |> to_string() |> String.downcase(), to_string(v)} end)
-  end
-
-  @impl true
-  def post(url, body, content_type, timeout_ms)
-      when is_binary(url) and is_binary(body) and is_binary(content_type) and
-             is_integer(timeout_ms) do
-    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
-      request =
-        {String.to_charlist(request_url), [], String.to_charlist(content_type), body}
-
-      http_opts = http_opts(request_url, timeout_ms, private_dial?)
-
-      case :httpc.request(:post, request, http_opts, [body_format: :binary], profile) do
-        {:ok, {{_, status, _}, _headers, resp_body}} ->
-          {:ok, status, resp_body}
-
-        {:error, reason} ->
-          transport_error(reason, private_dial?, url)
-      end
-    end
-  rescue
-    e -> {:error, {:exception, Exception.message(e)}}
-  catch
-    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
-    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
-    # uncaught exit here would take the registry — and its whole recovery
-    # state — down with the request.
-    :exit, reason -> {:error, {:exit, reason}}
-  end
-
-  # Binary-safe file fetch used by owner-routed byte reads. The header-aware
-  # form carries validators across the tunnel and returns the owner's response
-  # headers for the local daemon to relay. `body_format: :binary` keeps images
-  # and PDFs intact, and non-200 statuses (including 304) remain intact too.
-  @impl true
-  def get_file(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
-    case get_file(url, [], timeout_ms) do
-      {:ok, status, _headers, content_type, body} -> {:ok, status, content_type, body}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @impl true
-  def get_file(url, req_headers, timeout_ms)
-      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
-    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
-      headers =
-        Enum.map(req_headers, fn {key, value} ->
-          {String.to_charlist(key), String.to_charlist(value)}
-        end)
-
-      request = {String.to_charlist(request_url), headers}
-      http_opts = http_opts(request_url, timeout_ms, private_dial?)
-
-      case :httpc.request(:get, request, http_opts, [body_format: :binary], profile) do
-        {:ok, {{_, status, _}, response_headers, body}} ->
-          normalized_headers = normalize_headers(response_headers)
-
-          {:ok, status, normalized_headers, content_type_header(normalized_headers), body}
-
-        {:error, reason} ->
-          transport_error(reason, private_dial?, url)
-      end
-    end
-  rescue
-    e -> {:error, {:exception, Exception.message(e)}}
-  catch
-    # `:httpc` is a gen_server behind a facade; a caller must not inherit its
-    # death. `Shuttle.RemoteRegistry` polls inline in its own GenServer, so an
-    # uncaught exit here would take the registry — and its whole recovery
-    # state — down with the request.
-    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # ── Transport setup ──
@@ -1584,7 +1526,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
   # Idempotent, and never paired with a stop: a profile this process starts is
   # one another process may already be mid-request on. Returns the profile's
-  # pid, which is what `apply_proxy/3` pins its memo to.
+  # pid, which is what `apply_proxy/4` pins its memo to.
   defp ensure_profile(profile) do
     case :inets.start(:httpc, profile: profile) do
       {:ok, pid} -> pid
@@ -1648,7 +1590,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
       _ ->
         # Only record it if httpc took it. A discarded failure here would
-        # memoize a proxy that was never applied, and `sync_proxy/0` would
+        # memoize a proxy that was never applied, and `apply_proxy/4` would
         # never try again for the life of the VM — every https remote silently
         # direct, which is the failure this path exists to prevent.
         case :httpc.set_options(
@@ -1689,11 +1631,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     ]
   end
 
-  # httpc returns headers as charlist tuples; pull content-type (case-insensitive)
-  # and fall back to octet-stream so the relayed response always has a type.
+  # Headers arrive normalized; fall back to octet-stream so the relayed
+  # response always has a type.
   defp content_type_header(headers) do
-    Enum.find_value(headers, "application/octet-stream", fn {key, value} ->
-      if String.downcase(to_string(key)) == "content-type", do: to_string(value)
+    Enum.find_value(headers, "application/octet-stream", fn
+      {"content-type", value} -> value
+      _ -> nil
     end)
   end
 end
