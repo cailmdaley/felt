@@ -61,9 +61,12 @@ defmodule Shuttle.EventStream do
   itself (`fold_files/3`). That is what keeps an injected fixture, or a crashed
   stream, correct rather than silently served stale.
 
-  `session_activity/1` is a pure read of held state with no file I/O: the
-  poller calls it inside the owner-feed request, which must never wait on the
-  filesystem. It is as fresh as the last poll or catch-up read.
+  `session_activity/1` never enters this process's mailbox: the stream
+  publishes its waiting map to a protected ETS table named after the server
+  whenever a poll, catch-up read or seed settles, and readers compute phases
+  from that row. The poller calls it inside the owner-feed request, which must
+  wait neither on the filesystem nor behind a full reseed of a shrunken file.
+  It is as fresh as the last poll, catch-up read or seed to complete.
   """
 
   use GenServer
@@ -86,8 +89,12 @@ defmodule Shuttle.EventStream do
     # a prepend. `seed_hook` runs between reading the live file and reading the
     # rotated one — the window a racing rotation lands in. Tests rotate there.
     # `clock` returns epoch ms; the waiting projection prunes and reads by it.
+    # `table` is the ETS table `session_activity/1` reads; `published` is the
+    # waiting map last written there.
     defstruct [
       :events_file,
+      :table,
+      :published,
       :poll_interval_ms,
       :clock,
       :seed_hook,
@@ -152,17 +159,21 @@ defmodule Shuttle.EventStream do
   end
 
   @doc """
-  `Shuttle.WaitingTracker.phases/2` of the held waiting map, at the stream's
-  clock: `session => %{last_event_at: ms, phase: phase}` over every tracked
-  `*-shuttle` session. A stream that is not running, or does not answer in
-  time, is `%{}`.
+  `Shuttle.WaitingTracker.phases/2` of the published waiting map, at the
+  stream's clock: `session => %{last_event_at: ms, phase: phase}` over every
+  tracked `*-shuttle` session. An ETS read, never a call, so it answers at once
+  even while the stream is mid-reseed. A stream that is not running is `%{}`.
   """
-  @spec session_activity(GenServer.server()) ::
+  @spec session_activity(atom()) ::
           %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
-  def session_activity(server \\ __MODULE__) do
-    GenServer.call(server, :session_activity)
-  catch
-    :exit, _ -> %{}
+  def session_activity(server \\ __MODULE__) when is_atom(server) do
+    case :ets.lookup(server, :waiting) do
+      [{:waiting, waiting, clock}] -> WaitingTracker.phases(waiting, clock.())
+      [] -> %{}
+    end
+  rescue
+    # No table: the stream is not running under this name.
+    ArgumentError -> %{}
   end
 
   @doc "The file this stream follows — for tests and diagnostics."
@@ -256,7 +267,17 @@ defmodule Shuttle.EventStream do
 
   @impl true
   def init(opts) do
+    # Named after the server so each stream (tests run several) publishes to
+    # its own table; ETS names do not collide with registered process names.
+    table =
+      :ets.new(Keyword.get(opts, :name, __MODULE__), [
+        :named_table,
+        :protected,
+        read_concurrency: true
+      ])
+
     state = %State{
+      table: table,
       events_file: Keyword.get(opts, :events_file, default_events_file()),
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @poll_interval_ms),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
@@ -265,17 +286,17 @@ defmodule Shuttle.EventStream do
 
     state = seed(state)
     schedule_poll(state.poll_interval_ms)
-    {:ok, state}
+    {:ok, publish(state)}
   end
 
   @impl true
   def handle_call({:slice, path, from_ms, to_ms}, _from, %State{events_file: path} = state) do
-    state = follow(state)
+    state = state |> follow() |> publish()
     {:reply, {:ok, Activity.slice(state.activity, from_ms, to_ms)}, state}
   end
 
   def handle_call({:sent_events, path}, _from, %State{events_file: path} = state) do
-    state = follow(state)
+    state = state |> follow() |> publish()
     events = Enum.reverse(state.sent_rotated, Enum.reverse(state.sent_live))
     {:reply, {:ok, events}, state}
   end
@@ -284,10 +305,6 @@ defmodule Shuttle.EventStream do
 
   def handle_call({:sent_events, _other}, _from, state), do: {:reply, :miss, state}
 
-  def handle_call(:session_activity, _from, state) do
-    {:reply, WaitingTracker.phases(state.waiting, state.clock.()), state}
-  end
-
   def handle_call(:events_file, _from, state), do: {:reply, state.events_file, state}
 
   @impl true
@@ -295,7 +312,7 @@ defmodule Shuttle.EventStream do
     state = follow(state)
     state = %{state | waiting: WaitingTracker.prune(state.waiting, state.clock.())}
     schedule_poll(state.poll_interval_ms)
-    {:noreply, state}
+    {:noreply, publish(state)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -407,4 +424,13 @@ defmodule Shuttle.EventStream do
   end
 
   defp schedule_poll(ms), do: Process.send_after(self(), :poll, ms)
+
+  # The waiting map `session_activity/1` reads, with the clock its phases are
+  # read against. Written only when the map changed.
+  defp publish(%State{waiting: waiting, published: waiting} = state), do: state
+
+  defp publish(%State{table: table, waiting: waiting, clock: clock} = state) do
+    :ets.insert(table, {:waiting, waiting, clock})
+    %{state | published: waiting}
+  end
 end

@@ -281,6 +281,26 @@ defmodule Shuttle.EventStreamTest do
     assert waiting(name) == %{shuttle => "waiting"}
   end
 
+  test "session_activity answers at once while the stream is busy", %{path: path} do
+    now = System.system_time(:millisecond)
+    shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    append(path, [ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => shuttle})])
+    name = start(path)
+    assert waiting(name) == %{shuttle => "waiting"}
+
+    # A suspended stream stands in for one mid-reseed: its mailbox is not
+    # served, yet the owner feed's read neither blocks nor loses the phase.
+    :sys.suspend(name)
+
+    try do
+      {micros, activity} = :timer.tc(fn -> EventStream.session_activity(name) end)
+      assert %{^shuttle => %{phase: "waiting"}} = activity
+      assert micros < 1_000_000
+    after
+      :sys.resume(name)
+    end
+  end
+
   test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
     now = System.system_time(:millisecond)
     a = "a-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
