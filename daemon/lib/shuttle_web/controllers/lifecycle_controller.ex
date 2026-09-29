@@ -16,9 +16,8 @@ defmodule ShuttleWeb.LifecycleController do
   `reshape`, alongside `set-model`/`set-agent`/`set-outcome`: it rewrites only
   those keys and never touches status, `closed_at`, `tempered`, `outcome` or
   the daemon-owned `runtime:` keys. That is what lets a role sitting in
-  Awaiting review (`status: closed`) be switched standing → oneshot, which the
-  old create-with-`--reshape` route refused. `uninstall` remains for genuine
-  removals.
+  Awaiting review (`status: closed`) be switched standing → oneshot, which a
+  create verb refuses. `uninstall` remains for genuine removals.
   """
 
   use Phoenix.Controller, formats: [:json]

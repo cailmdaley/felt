@@ -163,8 +163,8 @@ defmodule Shuttle.WorkerWatcher do
     # `send/2` resolves it at delivery time, so this survives a Poller
     # supervisor restart. When unresolved (crash-loop window, or test
     # tearing the poller down), `send/2` raises ArgumentError; we trap and
-    # log so the watcher's exit notification isn't silently dropped.
-    # See [[ai-futures/shuttle/finding-ghost-workers-stuck-running]].
+    # log so the watcher's exit notification isn't silently dropped — a
+    # dropped one would leave the worker in `state.running` forever.
     try do
       send(state.poller, {:worker_exited, state.fiber_id, self(), state.session, reason})
     rescue

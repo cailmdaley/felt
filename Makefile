@@ -212,12 +212,15 @@ mix-test:
 js-test:
 	cd ui && npm test
 
-# The shell shim layer the Go and Elixir suites cannot reach: hooks.json's
-# ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT} fallback and felt-bin.sh's PATH
-# resolution for GUI-launched agents. Runs with HOME and PATH sandboxed.
+# scripts/bootstrap.sh's login-PATH handling and fail-fast boundaries, with
+# every tool it would run stubbed: nothing is installed, registered, or
+# touched in the caller's home or services.
 bootstrap-test:
 	bash scripts/test-bootstrap.sh
 
+# The shell shim layer the Go and Elixir suites cannot reach: hooks.json's
+# ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT} fallback and felt-bin.sh's PATH
+# resolution for GUI-launched agents. Runs with HOME and PATH sandboxed.
 plugin-hooks-test:
 	bash scripts/test-plugin-hooks.sh
 	node --experimental-strip-types extensions/pi/test.mjs

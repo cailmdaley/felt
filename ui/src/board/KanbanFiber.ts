@@ -1,16 +1,11 @@
-// Browser-safe fiber model for the kanban frontend.
+// Browser-safe fiber model for the kanban.
 //
-// This is the frontend twin of the pure half of `server/src/FiberReader.ts`:
-// the `Fiber` type and `mapFeltJsonToFiber`, which turn one entry of felt's
+// The `Fiber` type and `mapFeltJsonToFiber`, which turn one entry of felt's
 // `felt ls -j` JSON (the shape carried per-row by Shuttle's
-// `/api/v1/fibers/composite` feed) into a typed object. The node-only
-// collection half of FiberReader (`getAllFibers`, `felt` shell-outs) does NOT
-// belong here — the daemon now owns collection and the frontend only parses
-// the rows it serves.
-//
-// Kept deliberately faithful to the backend parser so cross-host rows classify
-// identically whoever reads them. Once the kanban reads Shuttle directly, this
-// is the sole fiber-parsing path the board depends on.
+// `/api/v1/fibers/composite` feed) into a typed object. The daemon owns
+// collection; the board only parses the rows it serves, and this is the one
+// fiber parser it depends on, so every row — local or remote — classifies the
+// same way.
 
 export interface Fiber {
   id: string;        // slug path under .felt/ — bare for top-level (`foo`) or

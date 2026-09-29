@@ -19,9 +19,8 @@ defmodule Shuttle.Remote do
   or from `config :shuttle, :remotes, [...]`. Each entry may be a map
   (string- or atom-keyed) or a keyword list.
 
-  See [[constitution-shuttle-remote-dispatch]] for the cross-host contract:
-  each daemon owns its host's `.felt/`, the hub is a viewer that composites
-  snapshots over HTTP.
+  The cross-host contract: each daemon owns its host's `.felt/`, and the hub
+  is a viewer that composites snapshots over HTTP.
   """
 
   @enforce_keys [:name, :url]

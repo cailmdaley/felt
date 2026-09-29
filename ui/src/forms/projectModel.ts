@@ -32,8 +32,8 @@
 // `workflow-era-rework`); a plain longest-common-prefix collapses to `''` on
 // any such set, and a greedy majority over-deepens past the substore root into
 // the dominant sub-cluster. Basename-matching sidesteps both. No basename
-// segment (a store-root project like `~/loom`, or a private store like the
-// iCloud `wedding`) → `''`, which is correct: the substore IS the store root.
+// segment (a store-root project like `~/loom`, or a separate private store)
+// → `''`, which is correct: the substore IS the store root.
 // The residual mis-inference never mis-places a top-level stash (the daemon
 // resolves the substore from `project_dir`); only nesting candidates are
 // affected. A fully exact project_dir→substore map needs a daemon-side

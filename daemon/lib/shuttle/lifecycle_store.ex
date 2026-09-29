@@ -17,9 +17,10 @@ defmodule Shuttle.LifecycleStore do
 
   alias Shuttle.{Continuation, FiberDoc}
 
-  # Legacy + daemon-owned shuttle keys wiped from the block on every rewrite
-  # here: `enabled` and `review` no longer exist; `next_due_at` / `last_run_at` /
-  # `session` are daemon-owned and don't live in the synced document.
+  # Shuttle keys wiped from the block on every rewrite here: `enabled` and
+  # `review` are not part of the block, so a document still carrying them is
+  # cleaned; `next_due_at` / `last_run_at` / `session` are daemon-owned and
+  # don't live in the synced document.
   @runtime_keys ~w(enabled review next_due_at last_run_at session)
 
   @doc """
@@ -163,7 +164,7 @@ defmodule Shuttle.LifecycleStore do
     [{:put, "status", "active"}, {:delete, "tempered"}, {:delete, "closed-at"}]
   end
 
-  # Drop the daemon-owned / legacy runtime keys from inside the `shuttle:` block.
+  # Drop the `@runtime_keys` from inside the `shuttle:` block.
   # Surgical: each is a {:delete_nested, "shuttle", key} that removes just that
   # child line (and its value span) if present, no-op if absent.
   defp evict_runtime_ops do

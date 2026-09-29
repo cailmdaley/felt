@@ -109,8 +109,7 @@ defmodule Shuttle.Poller do
       # scenarios). Watchers store this as `:poller` and `send/2` resolves
       # the registered atom at delivery time, which survives a Poller
       # supervisor restart — pids do not (the old pid is dead, sends are
-      # silently dropped, and `state.running` ghosts forever). See
-      # [[ai-futures/shuttle/finding-ghost-workers-stuck-running]].
+      # silently dropped, and `state.running` ghosts forever).
       :self_ref,
       :poll_interval_ms,
       :max_concurrent_workers,
@@ -252,8 +251,7 @@ defmodule Shuttle.Poller do
       # deploy and operator restart — touches the stop marker
       # (`Shuttle.Application.prep_stop/1`, and the stop scripts before they
       # signal) and so holds, as do an unreleased hold, a real gap, a crash
-      # loop, or no evidence at all.
-      # See [[ai-futures/shuttle/restart-not-dispatch-authority]].
+      # loop, or no evidence at all: a restart is not dispatch authority.
       boot_quarantine: false,
       # Where this daemon records its own liveness, how often, when THIS
       # incarnation booted (epoch ms), and the ring of recent boot times carried
@@ -1967,8 +1965,8 @@ defmodule Shuttle.Poller do
   # oneshot/standing are unconditionally eligible here (their own gates live in
   # `eligible?`). Force-dispatch bypasses this filter entirely, and a plain
   # `felt shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
-  # a human can always start or continue a pinned role by hand.
-  # See [[ai-futures/shuttle/findings/finding-pinned-roles-are-interfaces-not-loops]].
+  # a human can always start or continue a pinned role by hand: a pinned role
+  # is an interface a human drives, not a loop.
   defp filter_eligible(candidates, state) do
     Enum.filter(candidates, fn fiber ->
       tick_kind_eligible?(fiber) and eligible?(fiber, state)

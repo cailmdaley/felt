@@ -47,7 +47,7 @@ function orderedIds(cards: KanbanCard[], attribution: Map<string, ActivityBucket
 
 describe('chronicle row ordering', () => {
   it('sinks a fiber whose only recent touch was metadata below one actually worked', () => {
-    // The wedding-desk bug: a due-date/frontmatter edit bumps modifiedAt to
+    // A due-date/frontmatter edit bumps modifiedAt to
     // today with no work behind it. That must not outrank a fiber worked
     // three days ago.
     const untouched = card({

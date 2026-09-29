@@ -1404,16 +1404,16 @@ describe('the cycle lens — membership is derived, never assigned', () => {
 })
 
 describe('Resting holds standing roles asleep between runs', () => {
-  // The hole this closes: `classifyFiber` calls an armed standing role
-  // `scheduled` and the read model files it on the timeline surface. The Desk
-  // stopped drawing a timeline, so `finances/cc-bills-monthly` — armed, monthly,
-  // perfectly healthy — was on no surface a human could see.
+  // `classifyFiber` calls an armed standing role `scheduled` and the read model
+  // files it on the timeline surface, which the Desk does not draw; without the
+  // Resting join `ops/monthly-report` — armed, monthly, perfectly healthy —
+  // would be on no surface a human could see.
   const role = (over: Partial<Fiber> = {}): CompositeEntry => ({
     origin: 'laptop',
     feltStore: '/store/laptop',
-    path: '.felt/finances/cc-bills-monthly.md',
+    path: '.felt/ops/monthly-report.md',
     fiber: {
-      id: 'finances/cc-bills-monthly',
+      id: 'ops/monthly-report',
       name: 'CC bills',
       status: 'active',
       createdAt: at0,
@@ -1432,7 +1432,7 @@ describe('Resting holds standing roles asleep between runs', () => {
   it('draws an armed standing role in Resting, with a next launch to show', () => {
     const resp = boardOf([role()])
     const resting = restingCards(resp)
-    expect(resting.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(resting.map((c) => c.id)).toEqual(['ops/monthly-report'])
     expect(isSleepingOnSchedule(resting[0])).toBe(true)
     // The day the chip names comes from the cron, and it is a real instant.
     expect(resting[0].nextLaunchAt).toBeDefined()
@@ -1455,9 +1455,9 @@ describe('Resting holds standing roles asleep between runs', () => {
       },
     }
     const resting = restingCards(boardOf([role(), snoozed]))
-    expect(resting.map((c) => c.id).sort()).toEqual(['finances/cc-bills-monthly', 'work/later'])
+    expect(resting.map((c) => c.id).sort()).toEqual(['ops/monthly-report', 'work/later'])
     const bySleep = Object.fromEntries(resting.map((c) => [c.id, isSleepingOnSchedule(c)]))
-    expect(bySleep).toEqual({ 'finances/cc-bills-monthly': true, 'work/later': false })
+    expect(bySleep).toEqual({ 'ops/monthly-report': true, 'work/later': false })
   })
 
   it('sends a RUNNING standing role to In flight, not to Resting', () => {
@@ -1471,7 +1471,7 @@ describe('Resting holds standing roles asleep between runs', () => {
       },
       { nowMs: NOW },
     )
-    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['ops/monthly-report'])
     expect(restingCards(resp)).toEqual([])
   })
 
@@ -1482,7 +1482,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     // So a closed role is not parked — it is holding a work product for you —
     // and drawing it asleep in Resting would hide the one thing it needs.
     const resp = boardOf([role({ status: 'closed', outcome: 'Paid 3 bills' })])
-    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['ops/monthly-report'])
     expect(restingCards(resp)).toEqual([])
   })
 
@@ -1490,7 +1490,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     // `felt shuttle pause` writes status:open and preserves the schedule. An
     // open role is not armed, so it has no next launch to sleep until.
     const resp = boardOf([role({ status: 'open' })])
-    expect(resp.now.drafts.map((c) => c.id)).toEqual(['finances/cc-bills-monthly'])
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['ops/monthly-report'])
     expect(restingCards(resp)).toEqual([])
     expect(resp.now.drafts[0].nextLaunchAt).toBeUndefined()
     expect(isSleepingOnSchedule(resp.now.drafts[0])).toBe(false)
@@ -1506,9 +1506,9 @@ describe('Resting holds standing roles asleep between runs', () => {
       role({ id: 'work/standup', name: 'Standup', shuttleSchedule: { expr: '0 9 * * *', tz: 'UTC' } }),
     ])
     expect(resp.timeline.futureDated.map((c) => c.id).sort())
-      .toEqual(['finances/cc-bills-monthly', 'work/standup'])
+      .toEqual(['ops/monthly-report', 'work/standup'])
     expect(restingCards(resp).map((c) => c.id).sort())
-      .toEqual(['finances/cc-bills-monthly', 'work/standup'])
+      .toEqual(['ops/monthly-report', 'work/standup'])
     expect(resp.totals.futureDated).toBe(2)
   })
 
@@ -1517,7 +1517,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     // handler resolves through, and the yearly role is exactly the card the old
     // two-list split rendered in Resting and then failed to resolve.
     const resp = boardOf([role({ shuttleSchedule: { expr: '0 9 1 1 *', tz: 'UTC' } })])
-    expect(findCardById(resp, 'finances/cc-bills-monthly')?.id).toBe('finances/cc-bills-monthly')
+    expect(findCardById(resp, 'ops/monthly-report')?.id).toBe('ops/monthly-report')
   })
 })
 

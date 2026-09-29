@@ -2,7 +2,7 @@
  * wikilinks — turning a fiber body's `[[…]]` references into openable cards.
  *
  * A fiber body cites its neighbours the way felt does, in double brackets:
- * `[[ai-futures/application/interview/slides]]`. Those citations were dead
+ * `[[project/analysis/results]]`. Those citations were dead
  * text on the reading surface; here they become the reading surface's own
  * navigation — click one and the fiber it names opens as another card beside
  * this one, itself carrying live wikilinks, so a body's references are a path

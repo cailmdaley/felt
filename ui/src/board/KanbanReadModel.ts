@@ -411,11 +411,9 @@ function assembleSurfaces(
  *     returning on its `due:` day.
  *   • A STANDING ROLE BETWEEN RUNS — `status:active` + a cron. `classifyFiber`
  *     calls it `scheduled` and the read model files it on the timeline surface
- *     at its next launch. That was right when the Desk carried a permanent
- *     timeline ribbon. The ribbon is gone (it survives only as the drag
- *     horizon, which draws no cards), so `scheduled` meant INVISIBLE: an armed
- *     monthly role like `finances/cc-bills-monthly` was on the board's data and
- *     on no surface the human could see.
+ *     at its next launch. The Desk draws no timeline cards (the timeline is
+ *     only the drag horizon), so without this join an armed monthly role
+ *     would be in the board's data and on no surface the human could see.
  *
  * A role asleep on its cron is resting in every sense that matters to a person
  * reading the desk — it is not gone, it is not waiting on them, it comes back

@@ -23,18 +23,18 @@ func TestTreeDisplayID(t *testing.T) {
 		},
 		{
 			name: "deep id with short leaf shows leaf",
-			id:   "ai-futures/application/interview",
-			want: ".../interview",
+			id:   "research/applications/review",
+			want: ".../review",
 		},
 		{
 			name: "deep id with long leaf keeps full leaf",
-			id:   "ai-futures/application/cnrs-ai-rising-talents-interview-prep",
-			want: ".../cnrs-ai-rising-talents-interview-prep",
+			id:   "research/applications/grant-proposal-draft-and-budget-review",
+			want: ".../grant-proposal-draft-and-budget-review",
 		},
 		{
 			name: "long top-level id unchanged",
-			id:   "anthropic-stem-fellowship",
-			want: "anthropic-stem-fellowship",
+			id:   "top-level-fellowship-proposal",
+			want: "top-level-fellowship-proposal",
 		},
 	}
 

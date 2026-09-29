@@ -130,8 +130,8 @@ defmodule Shuttle.Transition do
 
   # reopen-draft: status:open + verdict cleared — a paused draft, NOT armed.
   # The kanban's "drag a closed card to Drafts" verb, and the park-as-draft
-  # half it composes before a planning-surface drop on a closed card (the
-  # slides snap-back fix; see Portolan kanban-ux-rework/placement-pipeline-invariants).
+  # half it composes before a planning-surface drop on a closed card, so the
+  # card lands where it was dropped instead of snapping back.
   defp invoke_action(fiber_id, "reopen-draft", felt_store),
     do: run_felt("reopen", fiber_id, ["--as-draft"], felt_store)
 

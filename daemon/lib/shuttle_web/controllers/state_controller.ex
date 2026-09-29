@@ -6,8 +6,7 @@ defmodule ShuttleWeb.StateController do
     parked dispatches, standing roles).
 
   * `GET /api/v1/state/composite` — local state plus per-origin remote
-    snapshots, for the laptop's cross-host kanban view. See
-    [[constitution-shuttle-remote-dispatch]].
+    snapshots, for a hub's cross-host view.
   """
 
   use Phoenix.Controller, formats: [:json]

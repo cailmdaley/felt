@@ -140,9 +140,8 @@ defmodule Shuttle.Actions do
       # verdict cleared — `shuttle reopen --as-draft`): the gesture means
       # "plan this again," not "run it now," so it must not arm the dispatch
       # gate. This is also the park-as-draft verb the kanban composes before
-      # a planning-surface drop (timeline date / stash) on a closed card —
-      # the slides snap-back fix (see Portolan
-      # kanban-ux-rework/placement-pipeline-invariants).
+      # a planning-surface drop (timeline date / stash) on a closed card, so
+      # the card lands where it was dropped instead of snapping back.
       status == "closed" and target == "drafts" ->
         :reopen_draft
 
