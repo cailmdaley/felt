@@ -159,12 +159,14 @@ export function escapeHtml(text: string): string {
 // daemon's owner-routed file route (GET /api/v1/file?path=&origin=). Relative,
 // so both the daemon-served bundle and the dev proxy reach :4000 without CORS.
 // Fiber bodies render with a basePath (FiberDetailModal passes the fiber's
-// dir), so relative paths resolve through this route; card outcomes render
-// without one and leave relative paths untouched.
+// dir), as do sent markdown files (the file's own dir), so relative paths
+// resolve through this route; card outcomes render without one and leave
+// relative paths untouched.
 const FILE_ROUTE = `/api/v1/file`
 
 interface RenderMarkdownOptions {
-  /** Base directory for resolving relative image paths (e.g. city path) */
+  /** Absolute directory relative image and link paths resolve against (a
+   *  fiber's dir, or a sent markdown file's dir) */
   basePath?: string
   /** Origin ID for remote (owner-routed) file access */
   originId?: string
@@ -318,9 +320,21 @@ export function prepareIframeExternalLinks(iframe: HTMLIFrameElement): void {
  * (the fiber's dir); otherwise `null`.
  */
 export function resolveAbs(rawPath: string, opts?: RenderMarkdownOptions): string | null {
-  if (rawPath.startsWith('/')) return rawPath
-  if (opts?.basePath) return `${opts.basePath}/${rawPath}`
+  if (rawPath.startsWith('/')) return normalizeAbs(rawPath)
+  if (opts?.basePath) return normalizeAbs(`${opts.basePath}/${rawPath}`)
   return null
+}
+
+/** Fold `.` and `..` segments and repeated slashes out of an absolute path, so
+ *  `../figs/a.png` names the file itself rather than a detour through it. */
+function normalizeAbs(abs: string): string {
+  const out: string[] = []
+  for (const seg of abs.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') out.pop()
+    else out.push(seg)
+  }
+  return `/${out.join('/')}`
 }
 
 /**
@@ -400,6 +414,12 @@ export const TEXT_EXTS = new Set([
 /** The two extensions that are markdown rather than merely text — they render
  *  as prose, not as a code block. */
 export const MARKDOWN_EXTS = new Set(['md', 'markdown'])
+/** The directory holding an absolute path: `/a/b/c.md` → `/a/b`, `/c.md` → `/`. */
+export function dirname(path: string): string {
+  const cut = path.replace(/\/+$/, '').lastIndexOf('/')
+  return cut <= 0 ? '/' : path.slice(0, cut)
+}
+
 export function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
 }

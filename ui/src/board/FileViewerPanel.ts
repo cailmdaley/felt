@@ -17,6 +17,7 @@ import {
   MARKDOWN_EXTS,
   TEXT_EXTS,
   basename,
+  dirname,
   escapeHtml,
   fileBytesUrl,
   fileExt,
@@ -82,7 +83,7 @@ export function buildFileViewer(
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
   if (TEXT_EXTS.has(ext)) {
-    return buildTextViewer(src, fullPath, ext, onTextPane)
+    return buildTextViewer(src, fullPath, originId, ext, onTextPane)
   }
 
   if (ext === 'html' || ext === 'htm') {
@@ -252,6 +253,7 @@ export function htmlWithBase(html: string, src: string): string {
 function buildTextViewer(
   src: string,
   fullPath: string,
+  originId: string,
   ext: string,
   onReady?: (scroller: HTMLElement) => void,
 ): HTMLElement {
@@ -271,7 +273,7 @@ function buildTextViewer(
       const scrollTop = hasContent ? wrap.scrollTop : 0
       if (MARKDOWN_EXTS.has(ext)) {
         pane.classList.add('kbn-detail-prose')
-        pane.innerHTML = renderMarkdown(text)
+        pane.innerHTML = renderMarkdown(text, sentMarkdownOptions(fullPath, originId))
       } else {
         pane.innerHTML =
           `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +
@@ -288,6 +290,20 @@ function buildTextViewer(
   )
   liveViewSubscriptions.set(wrap, stop)
   return wrap
+}
+
+/**
+ * A sent markdown file's images and relative links mean paths on the host that
+ * owns the file, relative to the file's own directory — not URLs on the board's
+ * origin. Resolving them against that directory through the owner-routed
+ * `/file` route is what lets `![](fig.png)` beside `report.md` render, on any
+ * host. http(s) and data: URIs pass through unchanged.
+ */
+export function sentMarkdownOptions(
+  fullPath: string,
+  originId: string,
+): { basePath: string; originId: string } {
+  return { basePath: dirname(fullPath.startsWith('/') ? fullPath : `/${fullPath}`), originId }
 }
 
 /** The "Loading <file>…" veil every instrument shows until its file lands. */
