@@ -97,7 +97,7 @@ defmodule ShuttleWeb.FeltEditController do
     end
   end
 
-  # An empty diff is a no-op, mirroring Portolan's local felt-edit path.
+  # An empty diff is a no-op.
   defp run(_host, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
 
   defp run(host, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do

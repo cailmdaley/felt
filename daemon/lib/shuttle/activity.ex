@@ -59,8 +59,8 @@ defmodule Shuttle.Activity do
   of one. Claude Code re-fires the idle notification every 60 s for as long as
   a worker sits blocked, so counting raw notifications answers "how many
   minutes was this session stuck?" when the question a temporal view asks is
-  "how many times did it need me?". An hour of one unanswered permission
-  prompt used to paint sixty consecutive marks; it is one event.
+  "how many times did it need me?". Counted raw, an hour of one unanswered
+  permission prompt would paint sixty consecutive marks; it is one event.
 
   So the unit here is the **waiting spell**, the same phase notion
   `Shuttle.WaitingTracker` derives per session at read time — lifted from "the
@@ -557,8 +557,8 @@ defmodule Shuttle.Activity do
   end
 
   # A prompt the HARNESS injected — a task notification, a teammate's message,
-  # a system notice — fires the same hook a person typing does, and used to draw
-  # the same attention mark. It is not attention: nobody was there. The recorder
+  # a system notice — fires the same hook a person typing does. It is not
+  # attention: nobody was there. The recorder
   # decides (the hook stamps `machine: true`; see the moduledoc), because only
   # the hook can see the prompt text, and the daemon must never sniff content to
   # guess. So this is a two-clause classification on a flag, and an event with no

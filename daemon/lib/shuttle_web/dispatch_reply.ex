@@ -134,7 +134,7 @@ defmodule ShuttleWeb.DispatchReply do
 
   # Turns a structured ineligibility detail into a stable `detail` code plus a
   # human `message`. The kanban renders `detail` to accurate copy and falls
-  # back to `message`; both beat the old flat "not_eligible".
+  # back to `message`.
   defp ineligible_detail({:homed_elsewhere, fiber_host, own_host}) do
     %{
       detail: "homed_elsewhere",

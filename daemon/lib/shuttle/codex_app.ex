@@ -137,15 +137,12 @@ defmodule Shuttle.CodexApp do
     %{}
     |> maybe_put("cwd", opts[:cwd])
     |> maybe_put("model", opts[:model])
-    |> maybe_put("approvalPolicy", opts[:approval_policy])
-    |> maybe_put("approvalsReviewer", opts[:approvals_reviewer])
     |> maybe_put("runtimeWorkspaceRoots", workspace_roots(opts))
-    |> maybe_put("serviceName", opts[:service_name])
   end
 
+  # The worker's checkout and the felt store it reports to.
   defp workspace_roots(opts) do
-    roots = [opts[:cwd], opts[:felt_store] | List.wrap(opts[:runtime_workspace_roots])]
-    roots = roots |> Enum.filter(&is_binary/1) |> Enum.uniq()
+    roots = [opts[:cwd], opts[:felt_store]] |> Enum.filter(&is_binary/1) |> Enum.uniq()
     if roots == [], do: nil, else: roots
   end
 
@@ -230,25 +227,21 @@ defmodule Shuttle.CodexApp do
     end
   end
 
+  # The App Server project whose roots include the worker's cwd, created on
+  # first use.
   defp ensure_project(opts) do
-    case opts[:project_id] do
-      id when is_binary(id) and id != "" ->
-        {:ok, id}
+    cwd = opts[:cwd]
 
-      _ ->
-        cwd = opts[:cwd]
+    if is_binary(cwd) and Path.type(cwd) == :absolute do
+      cwd = Path.expand(cwd)
 
-        if is_binary(cwd) and Path.type(cwd) == :absolute do
-          cwd = Path.expand(cwd)
-
-          case find_project(cwd, nil, MapSet.new()) do
-            {:ok, id} -> {:ok, id}
-            :missing -> create_project(cwd)
-            {:error, _} = error -> error
-          end
-        else
-          {:error, {:transport, :missing_absolute_cwd}}
-        end
+      case find_project(cwd, nil, MapSet.new()) do
+        {:ok, id} -> {:ok, id}
+        :missing -> create_project(cwd)
+        {:error, _} = error -> error
+      end
+    else
+      {:error, {:transport, :missing_absolute_cwd}}
     end
   end
 

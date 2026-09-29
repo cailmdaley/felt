@@ -78,10 +78,8 @@ defmodule Shuttle.Messaging do
     do: build_address(host, %{harness: harness, native: native})
 
   def send_message(payload) when is_map(payload), do: send_message(payload, :text)
-  def send_message(_), do: {:error, 400, "body must be a JSON object"}
 
   def send_message_with_files(payload) when is_map(payload), do: send_message(payload, :files)
-  def send_message_with_files(_), do: {:error, 400, "body must be a JSON object"}
 
   defp send_message(payload, mode) do
     with {:ok, request} <- validate_message(payload, mode),
@@ -100,29 +98,16 @@ defmodule Shuttle.Messaging do
            timeout_ms: @local_discovery_timeout_ms
          ) do
       {:ok, output} ->
-        case Jason.decode(output) do
-          {:ok, %{"sessions" => sessions} = directory} when is_list(sessions) ->
-            gaps = Map.get(directory, "gaps", [])
+        case decode_directory(output) do
+          {:ok, %{sessions: sessions, gaps: gaps}} ->
+            %{
+              host: host,
+              sessions: sessions |> alias_sessions(host) |> attach_session_fibers(host),
+              gaps: alias_gaps(gaps, host)
+            }
 
-            if Enum.all?(sessions, &valid_session?/1) and valid_gaps?(gaps),
-              do: %{
-                host: host,
-                sessions: sessions |> alias_sessions(host) |> attach_session_fibers(host),
-                gaps: alias_gaps(gaps, host)
-              },
-              else: malformed_local_directory(host)
-
-          {:ok, sessions} when is_list(sessions) ->
-            if Enum.all?(sessions, &valid_session?/1),
-              do: %{
-                host: host,
-                sessions: sessions |> alias_sessions(host) |> attach_session_fibers(host),
-                gaps: []
-              },
-              else: malformed_local_directory(host)
-
-          _ ->
-            malformed_local_directory(host)
+          :error ->
+            %{host: host, sessions: [], gaps: [%{host: host, error: "malformed local response"}]}
         end
 
       {:command_error, :timeout, _} ->
@@ -136,15 +121,12 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  defp malformed_local_directory(host),
-    do: %{host: host, sessions: [], gaps: [%{host: host, error: "malformed local response"}]}
-
   defp remote_peers(%Remote{} = remote) do
     url = Remote.url_for(remote, "/api/v1/peers") <> "?local=true"
 
     case OriginRouter.forward_client().get(url, @remote_discovery_timeout_ms) do
       {:ok, body} ->
-        decode_remote(body)
+        with :error <- decode_directory(body), do: {:error, "malformed peer response"}
 
       {:error, {:http_status, 404}} ->
         {:error, "peer discovery unsupported"}
@@ -158,17 +140,15 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  defp decode_remote(body) do
-    case Jason.decode(body) do
-      {:ok, %{"sessions" => sessions} = directory} when is_list(sessions) ->
-        gaps = Map.get(directory, "gaps", [])
-
-        if Enum.all?(sessions, &valid_session?/1) and valid_gaps?(gaps),
-          do: {:ok, %{sessions: sessions, gaps: gaps}},
-          else: {:error, "malformed peer response"}
-
-      _ ->
-        {:error, "malformed peer response"}
+  # A session directory, as `felt shuttle sessions --local --json` and a peer's
+  # `/api/v1/peers?local=true` both serve it; a missing `gaps` is none.
+  defp decode_directory(body) do
+    with {:ok, %{"sessions" => sessions} = directory} when is_list(sessions) <- Jason.decode(body),
+         gaps = Map.get(directory, "gaps", []),
+         true <- Enum.all?(sessions, &valid_session?/1) and valid_gaps?(gaps) do
+      {:ok, %{sessions: sessions, gaps: gaps}}
+    else
+      _ -> :error
     end
   end
 
@@ -196,25 +176,12 @@ defmodule Shuttle.Messaging do
       Enum.map(sessions, fn session ->
         session = stringify_keys(session)
 
-        case Map.get(session, "address") do
-          address when is_binary(address) ->
-            case parse_address(address) do
-              {:ok, %{native: native}} ->
-                case Map.get(fibers_by_session, native) do
-                  %{"fiber" => fiber} = pairing ->
-                    Map.merge(session, Map.take(pairing, ["fiber", "fiber_uid", "transcript_id"]))
-                    |> Map.put("fiber", fiber)
-
-                  _ ->
-                    session
-                end
-
-              _ ->
-                session
-            end
-
-          _ ->
-            session
+        with address when is_binary(address) <- Map.get(session, "address"),
+             {:ok, %{native: native}} <- parse_address(address),
+             %{"fiber" => _} = pairing <- Map.get(fibers_by_session, native) do
+          Map.merge(session, Map.take(pairing, ["fiber", "fiber_uid", "transcript_id"]))
+        else
+          _ -> session
         end
       end)
 
@@ -396,7 +363,7 @@ defmodule Shuttle.Messaging do
     end)
   end
 
-  defp deliver(:local, request, address) when address.host in ["local"] do
+  defp deliver(:local, request, address) when address.host == "local" do
     case deliver_local(request, %{address | host: Poller.own_host_id()}) do
       {:ok, status, receipt} -> {:ok, status, Map.put(receipt, "address", request.address)}
       other -> other
@@ -418,27 +385,13 @@ defmodule Shuttle.Messaging do
 
     case OriginRouter.forward(remote, path, forwarded, forward_timeout_ms: timeout) do
       {:forwarded, status, body} ->
-        case Jason.decode(body) do
-          {:ok, receipt} when is_map(receipt) ->
-            case validate_receipt(receipt, request, forwarded["address"]) do
-              :ok ->
-                status = receipt_http_status(status, receipt)
-
-                {:ok, status,
-                 receipt
-                 |> Map.delete("_felt_error_code")
-                 |> Map.delete("_felt_receipt_produced")
-                 |> Map.put("address", request.address)}
-
-              :error ->
-                {:ok, 502,
-                 unknown_receipt(
-                   request,
-                   "daemon",
-                   "#{remote.name} returned a malformed message receipt; outcome is unknown"
-                 )}
-            end
-
+        with {:ok, receipt} when is_map(receipt) <- Jason.decode(body),
+             :ok <- validate_receipt(receipt, request, forwarded["address"]) do
+          {:ok, receipt_http_status(status, receipt),
+           receipt
+           |> Map.drop(["_felt_error_code", "_felt_receipt_produced"])
+           |> Map.put("address", request.address)}
+        else
           _ ->
             {:ok, 502,
              unknown_receipt(
@@ -474,18 +427,10 @@ defmodule Shuttle.Messaging do
            input: frame
          ) do
       {:ok, output} ->
-        case Jason.decode(output) do
-          {:ok, receipt} when is_map(receipt) ->
-            if validate_receipt(receipt, request, payload["address"]) == :ok,
-              do: local_receipt_response(receipt, request),
-              else:
-                {:ok, 502,
-                 unknown_receipt(
-                   request,
-                   "daemon",
-                   "felt returned a malformed message receipt; outcome is unknown"
-                 )}
-
+        with {:ok, receipt} when is_map(receipt) <- Jason.decode(output),
+             :ok <- validate_receipt(receipt, request, payload["address"]) do
+          local_receipt_response(receipt, request)
+        else
           _ ->
             {:ok, 502,
              unknown_receipt(

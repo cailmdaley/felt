@@ -4,12 +4,9 @@ defmodule Shuttle.ConfigFiles do
   can read and rewrite them.
 
   Everything shuttle can be told about a host lives in five JSON files under
-  `~/.config/felt/`, and until the board grew a settings page the only way to
-  turn one of those knobs was an editor on the machine that owns it. That was
-  fine while the board was something you opened beside a terminal. It stopped
-  being fine once the board became reachable from a phone and from a second
-  hub: the surface that steers the fleet cannot be the one surface that cannot
-  configure it.
+  `~/.config/felt/`. The board is reachable from a phone and from a second hub,
+  and the surface that steers the fleet has to be able to configure it, not
+  only an editor on the machine that owns each file.
 
   | id | file | what it says |
   |---|---|---|
@@ -136,7 +133,9 @@ defmodule Shuttle.ConfigFiles do
   it is replacing the bytes it read.
   """
   @spec summary(id()) :: map()
-  def summary(id) do
+  def summary(id), do: id |> stat_row() |> Map.put(:digest, digest(id))
+
+  defp stat_row(id) do
     path = path(id)
 
     base =
@@ -148,9 +147,17 @@ defmodule Shuttle.ConfigFiles do
           %{id: id, path: path, exists: false, size: 0, updated_at: nil}
       end
 
-    base
-    |> Map.put(:env_override, env_override(id))
-    |> Map.put(:digest, digest(id))
+    Map.put(base, :env_override, env_override(id))
+  end
+
+  # A `summary/1` row plus the file's text, `nil` for no file. The digest is of
+  # THESE bytes, never of a second read: a write landing between two reads
+  # would hand the caller old text under the new file's digest, and its next
+  # save would then pass the precondition and overwrite bytes it never saw.
+  defp content_row(id, text) do
+    id
+    |> stat_row()
+    |> Map.merge(%{text: text || "", digest: text && hash(text), entries: entries(id)})
   end
 
   @doc """
@@ -237,28 +244,10 @@ defmodule Shuttle.ConfigFiles do
   def read(id) do
     path = path(id)
 
-    cond do
-      not File.exists?(path) ->
-        {:ok, summary(id) |> Map.put(:text, "") |> Map.put(:entries, entries(id))}
-
-      true ->
-        case File.read(path) do
-          # The digest is of THESE bytes, not of a second read. `summary/1`
-          # would hash the file again, and a write landing between the two
-          # reads would hand the caller old text under the new file's digest —
-          # which its next save would then pass cleanly, overwriting the newer
-          # bytes. That is exactly the outcome the digest exists to prevent, so
-          # the guarantee must not have a hole where it is issued.
-          {:ok, text} ->
-            {:ok,
-             summary(id)
-             |> Map.put(:text, text)
-             |> Map.put(:digest, hash(text))
-             |> Map.put(:entries, entries(id))}
-
-          {:error, reason} ->
-            {:error, "#{path}: #{:file.format_error(reason)}"}
-        end
+    case File.read(path) do
+      {:ok, text} -> {:ok, content_row(id, text)}
+      {:error, :enoent} -> {:ok, content_row(id, nil)}
+      {:error, reason} -> {:error, "#{path}: #{:file.format_error(reason)}"}
     end
   end
 
@@ -293,9 +282,8 @@ defmodule Shuttle.ConfigFiles do
     end
   end
 
-  # `:any` is an editor that did not tell us what it read — a script, an older
-  # client — and it keeps the old last-write-wins behaviour rather than being
-  # refused. A caller that DID send a digest is asking to be stopped, and the
+  # `:any` is an editor that did not tell us what it read — a script — and it
+  # gets last-write-wins rather than being refused. A caller that DID send a digest is asking to be stopped, and the
   # refusal names the situation rather than the hashes, which are no use to
   # anybody reading them.
   defp check_expected(_id, :any), do: :ok
@@ -360,7 +348,6 @@ defmodule Shuttle.ConfigFiles do
     case decoded do
       %{^key => paths} when is_list(paths) -> all_strings(paths, key)
       paths when is_list(paths) -> all_strings(paths, key)
-      %{} -> {:error, ~s(expected an object with a "#{key}" array, or a bare array of paths)}
       _ -> {:error, ~s(expected an object with a "#{key}" array, or a bare array of paths)}
     end
   end
@@ -439,8 +426,8 @@ defmodule Shuttle.ConfigFiles do
   # The replacement is positional, not textual, and that distinction is load
   # bearing. Stripping `"<tmp>: "` anywhere it appears works for the fleet
   # validator, whose path leads the line, and MANGLES the agent one, whose
-  # path sits mid-sentence: `parsing <tmp>: unsupported version 99` became
-  # `parsing unsupported version 99`, eating the colon that held the sentence
+  # path sits mid-sentence: `parsing <tmp>: unsupported version 99` would become
+  # `parsing unsupported version 99`, eating the colon that holds the sentence
   # together. So only a LEADING occurrence is stripped; anywhere else the path
   # is replaced by a name, leaving the grammar around it intact.
   defp scrub_path(output, tmp) do
@@ -463,7 +450,7 @@ defmodule Shuttle.ConfigFiles do
   # calls reporting success. `expected_digest` cannot catch it, because at the
   # moment both writers check, neither has committed and both digests are
   # legitimately current. That interleaving is exactly the one this surface
-  # invites, since the same file is now reachable from two hubs and a phone.
+  # invites, since the same file is reachable from two hubs and a phone.
   defp commit(id, text) do
     path = path(id)
     tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
@@ -472,17 +459,9 @@ defmodule Shuttle.ConfigFiles do
          :ok <- File.write(tmp, text),
          :ok <- File.rename(tmp, path) do
       Logger.info("ConfigFiles: wrote #{path} (#{byte_size(text)} bytes)")
-      # The digest is of the bytes just written, NOT of a fresh read — the same
-      # hole `read/1` closes, at the other end. A writer landing between the
-      # rename and a re-read would hand this caller its own text under someone
-      # else's digest, and the caller stores that pair as its new base: the
-      # next save would then pass the precondition and overwrite bytes it never
-      # saw. An editor's guarantee cannot have a gap at the moment it is issued.
-      {:ok,
-       summary(id)
-       |> Map.put(:text, text)
-       |> Map.put(:digest, hash(text))
-       |> Map.put(:entries, entries(id))}
+      # The digest is of the bytes just written, not of a fresh read — the
+      # same hole `read/1` closes, at the other end (see `content_row/2`).
+      {:ok, content_row(id, text)}
     else
       {:error, reason} ->
         File.rm(tmp)
@@ -496,19 +475,10 @@ defmodule Shuttle.ConfigFiles do
     case File.rm(path) do
       :ok ->
         Logger.info("ConfigFiles: removed #{path}")
-
-        {:ok,
-         summary(id)
-         |> Map.put(:text, "")
-         |> Map.put(:digest, nil)
-         |> Map.put(:entries, entries(id))}
+        {:ok, content_row(id, nil)}
 
       {:error, :enoent} ->
-        {:ok,
-         summary(id)
-         |> Map.put(:text, "")
-         |> Map.put(:digest, nil)
-         |> Map.put(:entries, entries(id))}
+        {:ok, content_row(id, nil)}
 
       {:error, reason} ->
         {:error, "#{path}: #{:file.format_error(reason)}"}

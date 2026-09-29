@@ -6,8 +6,7 @@ defmodule ShuttleWeb.SentFilesController do
   newest-first, deduped by `fullPath`, capped — the artifacts a worker pushed
   with `SendUserFile` on the card whose fiber id is `uid`. Source is the owning
   host's `events.jsonl` hook stream (`Shuttle.SentFiles`), the always-fresh
-  ground truth that replaces Portolan's retired `:4004` `/sent-files` (see
-  finding 01KVC1N5XMAAMYXDAGR4V6QA9G).
+  ground truth (see finding 01KVC1N5XMAAMYXDAGR4V6QA9G).
 
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/file`.** The composite
   board stamps each fiber with its `origin`; the panel carries that origin back. A

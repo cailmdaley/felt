@@ -30,7 +30,7 @@ defmodule ShuttleWeb.Router do
     get("/meeting", MeetingController, :show)
     # The unified kanban write-plane: one call hides resolve + invoke +
     # owner-routing (local invoke, or forward to the owning remote daemon's
-    # own /transition). Supersedes the kanban's prior two-leg resolve/invoke.
+    # own /transition).
     post("/transition", TransitionController, :create)
     # Hard-kill a fiber's live worker (owner-routed). The kanban fires this when
     # a running card is dragged off the in-flight column; the column write follows.

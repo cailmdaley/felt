@@ -154,9 +154,8 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  # Keep the endpoint self-sufficient the way the old raw-write was: a daemon
-  # store is normally already a felt repo, but `project_dir` may be a fresh
-  # checkout. `felt init` is idempotent ("creates or repairs"), so this is a
+  # Keep the endpoint self-sufficient: a daemon store is normally already a
+  # felt repo, but `project_dir` may be a fresh checkout. `felt init` is idempotent ("creates or repairs"), so this is a
   # no-op on existing stores and the missing-repo fix on new ones. felt's
   # `init` ignores `-C` for placement and writes `.felt/` at its working
   # directory, so we drive it with `cd:` rather than `-C`.
@@ -200,11 +199,10 @@ defmodule ShuttleWeb.FiberController do
   defp tag_args(_frontmatter), do: []
 
   # `due` and `outcome` are on `@felt_native_keys`, so the splice deliberately
-  # skips them as "felt's to write" — which means felt has to actually be told.
-  # They used to fall between the two owners and vanish: not spliced by us, not
-  # passed to felt, so a one-shot create of a dated fiber silently dropped its
-  # date. `felt add` takes both (`-D`, `-o`), so no follow-up edit is needed and
-  # the create stays one call.
+  # skips them as "felt's to write" — which means felt has to actually be told,
+  # or a one-shot create of a dated fiber would silently drop its date. `felt
+  # add` takes both (`-D`, `-o`), so no follow-up edit is needed and the create
+  # stays one call.
   defp native_field_args(frontmatter) do
     [{"due", "-D"}, {"outcome", "-o"}]
     |> Enum.flat_map(fn {key, flag} ->
@@ -293,5 +291,4 @@ defmodule ShuttleWeb.FiberController do
       _ -> {:error, "#{key} must be a string"}
     end
   end
-
 end

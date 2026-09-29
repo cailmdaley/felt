@@ -51,7 +51,7 @@ defmodule ShuttleWeb.ProjectsController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_json: 2]
 
   alias Shuttle.{ConfigFiles, OriginRouter, Poller, Projects}
 
@@ -63,10 +63,7 @@ defmodule ShuttleWeb.ProjectsController do
   def create(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/projects", params), fn name,
-                                                                                     reason ->
-          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-        end)
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/projects", params))
 
       :local ->
         register_local(conn, path)
@@ -81,10 +78,7 @@ defmodule ShuttleWeb.ProjectsController do
   def create(conn, %{"projects" => projects} = params) when is_list(projects) do
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
-        relay_json(conn, OriginRouter.forward(remote, "/api/v1/projects", params), fn name,
-                                                                                     reason ->
-          %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-        end)
+        relay_json(conn, OriginRouter.forward(remote, "/api/v1/projects", params))
 
       :local ->
         set_local(conn, projects, Map.get(params, "expected_digest", :any))
@@ -99,7 +93,10 @@ defmodule ShuttleWeb.ProjectsController do
   def create(conn, _params) do
     conn
     |> put_status(400)
-    |> json(%{ok: false, error: ~s(send a "path" to add one project, or a "projects" array to set the list)})
+    |> json(%{
+      ok: false,
+      error: ~s(send a "path" to add one project, or a "projects" array to set the list)
+    })
   end
 
   # Carries the same `expected_digest` precondition as the text plane: setting
@@ -117,9 +114,14 @@ defmodule ShuttleWeb.ProjectsController do
          {:ok, saved} <- Projects.save(projects) do
       json(conn, %{ok: true, host: Poller.own_host_id(), projects: saved})
     else
-      {:bad_request, message} -> conn |> put_status(400) |> json(%{ok: false, error: message})
-      {:conflict, message} -> conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
-      {:error, reason} -> failed(conn, "failed to persist projects: #{inspect(reason)}")
+      {:bad_request, message} ->
+        conn |> put_status(400) |> json(%{ok: false, error: message})
+
+      {:conflict, message} ->
+        conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
+
+      {:error, reason} ->
+        failed(conn, "failed to persist projects: #{inspect(reason)}")
     end
   end
 

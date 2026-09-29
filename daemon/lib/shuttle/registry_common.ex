@@ -247,14 +247,14 @@ defmodule Shuttle.RegistryCommon do
 
   @doc """
   Re-resolve the fleet from the file when its change token has moved, and
-  re-key `state`'s per-remote entry map (held under `key` — `:feeds` or
-  `:entries`) onto it, so a fleet edit lands without a daemon bounce. A no-op
+  re-key `state`'s per-remote entry map (held under `key` — `:snapshots`,
+  `:feeds` or `:entries`) onto it, so a fleet edit lands without a daemon bounce. A no-op
   while the token is unchanged, so the ordinary tick never re-parses the file,
   and a no-op entirely when the state was started with an explicit remote list
   (`reload_from_file?: false`). Kept entries retain their ETag and cache
   metadata, so a reload never forces a full refetch.
   """
-  @spec reload_fleet(struct(), :feeds | :entries, (Remote.t() -> map())) :: struct()
+  @spec reload_fleet(struct(), :snapshots | :feeds | :entries, (Remote.t() -> map())) :: struct()
   def reload_fleet(%{reload_from_file?: false} = state, _key, _init_fun), do: state
 
   def reload_fleet(state, key, init_fun) do

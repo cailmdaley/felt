@@ -54,7 +54,7 @@ defmodule ShuttleWeb.FleetController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
   alias Shuttle.{ConfigFiles, Felt, OriginRouter, Poller, Remotes}
@@ -62,9 +62,9 @@ defmodule ShuttleWeb.FleetController do
   @registry_timeout_ms 1_500
   @cli_timeout_ms 60_000
   # The forward must outlast the work it forwards. `OriginRouter`'s default is
-  # 30s and the CLI on the far side is given 60s, so a tunnel install that took
-  # 40s used to surface here as "forward failed" while the jobs were being
-  # written — a page telling you a write did not land when it did. The margin
+  # 30s and the CLI on the far side is given 60s, so at the default a tunnel
+  # install that took 40s would surface here as "forward failed" while the jobs
+  # were being written — a page telling you a write did not land when it did. The margin
   # covers the far side's own bound plus a slow hop.
   @forward_timeout_ms 90_000
 
@@ -357,10 +357,7 @@ defmodule ShuttleWeb.FleetController do
   defp forward(conn, remote, path, params) do
     relay_json(
       conn,
-      OriginRouter.forward(remote, path, params, forward_timeout_ms: @forward_timeout_ms),
-      fn name, reason ->
-        %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-      end
+      OriginRouter.forward(remote, path, params, forward_timeout_ms: @forward_timeout_ms)
     )
   end
 

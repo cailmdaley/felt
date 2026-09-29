@@ -5,8 +5,9 @@ defmodule Shuttle.SentFiles do
 
   The standalone Shuttle board shows artifacts registered with
   `felt shuttle send-file`. The command writes `file_sent` events with top-level
-  `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. Legacy
-  `SendUserFile` hook events carry paths in `toolInput.files` and remain readable.
+  `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. A harness's
+  `SendUserFile` tool call, recorded by the hook, carries its paths in
+  `toolInput.files`.
   Paths are absolute or resolved against the owning host's recorded `cwd`.
   A worker's tmux-embedded ULID associates the delivery with its fiber. Native
   sessions without a tmux name use the session ledger's fiber claim; an
@@ -23,11 +24,10 @@ defmodule Shuttle.SentFiles do
   a pure function of a prefix of ground truth, recomputed on every start. It is
   a read strategy, not a second source of truth.
 
-  Following is what makes these two functions affordable. Rescanning cost the
-  daemon a full re-stream and full `Jason.decode` of a 50 MB stream **per
-  request** — measured at ~50 MB of `rchar` and ~0.7 CPU-seconds a call, at a
-  dozen calls a minute, which was essentially the daemon's whole read and CPU
-  budget. The interesting content is tiny (a couple hundred `file_sent` events
+  Following is what makes these two functions affordable. A rescan costs a
+  full re-stream and full `Jason.decode` of a 50 MB stream **per request** —
+  measured at ~50 MB of `rchar` and ~0.7 CPU-seconds a call, at a dozen calls
+  a minute, essentially the daemon's whole read and CPU budget. The interesting content is tiny (a couple hundred `file_sent` events
   among sixty thousand lines, growing a few hundred lines a day), so holding it
   in memory costs nothing. A 304 could not defend these endpoints: the ETag is
   over `events.jsonl`, which is the live hook stream for every session on the
@@ -47,8 +47,8 @@ defmodule Shuttle.SentFiles do
   **The trail for a `uid`** = sent-file events whose tmux-embedded ULID — or
   claimed session-ledger UID — matches the requested `uid`, with the event's
   file paths flattened into one entry per path, deduped by `fullPath`
-  keeping the newest send, sorted newest-first, capped at `@cap`. Unclaimed
-  sessions retain the raw `sessionId` fallback for legacy deliveries.
+  keeping the newest send, sorted newest-first, capped at `@cap`. An event from
+  an unclaimed session matches its raw `sessionId`.
 
   Only the live file is read — a trail that rolled over to `events.jsonl.1` is
   gone, which costs nothing at the 50-entry cap. So on truncation or rotation
@@ -195,7 +195,7 @@ defmodule Shuttle.SentFiles do
     end
   end
 
-  # Explicit CLI deliveries are harness-independent. Keep legacy hook events readable.
+  # `felt shuttle send-file` events, then a harness's SendUserFile tool call.
   defp sent_paths(%{"type" => "file_sent", "files" => files}), do: files
   defp sent_paths(%{"tool" => "SendUserFile", "toolInput" => %{"files" => files}}), do: files
   defp sent_paths(_), do: nil
@@ -245,7 +245,7 @@ defmodule Shuttle.SentFiles do
   # here, in `SentFiles`, which runs on the OWNING host (owner-routed): that cwd
   # is a path on the same host where the file actually lives. An already-absolute
   # path passes through verbatim; a relative path with no recorded cwd is left
-  # as-is (nothing to resolve against — the pre-cwd-capture behavior).
+  # as-is, with nothing to resolve it against.
   defp absolutize(path, cwd) do
     if Path.type(path) == :relative and is_binary(cwd) and cwd != "",
       do: Path.expand(path, cwd),

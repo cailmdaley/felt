@@ -124,10 +124,6 @@ defmodule Shuttle.Meeting do
     end)
   end
 
-  @doc "The validated hark executable selected for this daemon."
-  @spec hark_executable() :: String.t() | nil
-  def hark_executable, do: find_hark([])
-
   @doc "Derive the meeting name and title from the first line of a note."
   @spec name_and_title(String.t() | nil, NaiveDateTime.t()) :: {String.t(), String.t()}
   def name_and_title(note, now \\ NaiveDateTime.local_now()) do
@@ -476,8 +472,7 @@ defmodule Shuttle.Meeting do
       pid_alive? = pid_mentions_hark?(usable_meeting, opts)
       tail = if failed_dead_pane?(tmux, usable_meeting), do: pane_tail(opts), else: nil
       {meeting, reap?} = derive(tmux, raw_meeting, pid_alive?, tail)
-      identity = meeting_identity(tmux, usable_meeting, pid_alive?)
-      :ok = Shuttle.Meeting.Control.reconcile(identity)
+      :ok = Shuttle.Meeting.Control.reconcile(meeting_identity(tmux, usable_meeting, pid_alive?))
 
       with :ok <- if(reap?, do: with_meeting_lock(fn -> kill_launch(tmux, opts) end), else: :ok) do
         meeting =
@@ -490,7 +485,7 @@ defmodule Shuttle.Meeting do
           end
 
         {:ok, %{available: not is_nil(find_hark(opts)), meeting: meeting},
-         %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting, identity: identity}}
+         %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting}}
       end
     end
   end
@@ -503,8 +498,7 @@ defmodule Shuttle.Meeting do
        when state in ["loading", "live"] do
     with pid when not is_nil(pid) <- valid_pid(context.meeting_json),
          :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch_from(context.meeting_json)}),
-         {output, 0} <- run(opts, "kill", ["-INT", pid]) do
-      _ = output
+         {_output, 0} <- run(opts, "kill", ["-INT", pid]) do
       show(opts)
     else
       :already_claimed ->
@@ -557,10 +551,12 @@ defmodule Shuttle.Meeting do
 
   defp valid_pid(_), do: nil
 
+  # An absent session answers `has-session` with tmux's absence message, which
+  # `parse_tmux_result/2` reads as `:absent`.
   defp tmux_status(opts) do
-    case run(opts, "tmux", ["has-session", "-t", "=" <> @session]) do
-      {_output, 0} ->
-        {output, status} =
+    {output, status} =
+      case run(opts, "tmux", ["has-session", "-t", "=" <> @session]) do
+        {_output, 0} ->
           run(opts, "tmux", [
             "display-message",
             "-p",
@@ -569,13 +565,11 @@ defmodule Shuttle.Meeting do
             @tmux_status_format
           ])
 
-        parse_tmux_result(output, status)
+        missing_or_failed ->
+          missing_or_failed
+      end
 
-      {output, _status} ->
-        if Tmux.absence_message?(output),
-          do: {:ok, :absent},
-          else: {:error, {:tmux, String.trim(output)}}
-    end
+    parse_tmux_result(output, status)
   end
 
   defp parse_dead("0", _status), do: {:ok, :alive}

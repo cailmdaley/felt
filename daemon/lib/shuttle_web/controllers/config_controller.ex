@@ -7,7 +7,7 @@ defmodule ShuttleWeb.ConfigController do
       GET  /api/v1/config/:id          one file's bytes
       POST /api/v1/config/:id          replace one file's bytes, validated
 
-  `:id` is `stores`, `projects`, `agents` or `remotes` — see
+  `:id` is `stores`, `projects`, `agents`, `remotes` or `host` — see
   `Shuttle.ConfigFiles`, which owns the paths, the validation, and the reason
   this is a text plane rather than a structured one.
 
@@ -41,8 +41,7 @@ defmodule ShuttleWeb.ConfigController do
   file's current hash disagrees, the write is refused: the board is reachable
   from two hubs and a phone at once, so an editor left open while a CLI writes
   the same file would otherwise save its stale text back over the new one.
-  Omitting the key keeps the old last-write-wins behaviour, which is what a
-  script wants.
+  Omitting the key is last-write-wins, which is what a script wants.
 
   A refused edit is a 400 carrying felt's own diagnostic verbatim — "remote
   \"hub-a\": port 4001 already used by \"hub-b\"" reaches the human's screen as
@@ -52,7 +51,7 @@ defmodule ShuttleWeb.ConfigController do
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 3]
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
 
   alias Shuttle.{ConfigFiles, OriginRouter, Poller}
 
@@ -96,10 +95,7 @@ defmodule ShuttleWeb.ConfigController do
     with {:ok, id} <- parse_id(raw) do
       case OriginRouter.route_host(Map.get(params, "origin")) do
         {:remote, remote} ->
-          relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{id}", params), fn name,
-                                                                                           reason ->
-            %{ok: false, error: "forward to #{name} failed: #{inspect(reason)}"}
-          end)
+          relay_json(conn, OriginRouter.forward(remote, "/api/v1/config/#{id}", params))
 
         :local ->
           write_local(conn, id, text, params)
@@ -119,8 +115,7 @@ defmodule ShuttleWeb.ConfigController do
   # ── Local branches ───────────────────────────────────────────────────────
 
   defp write_local(conn, id, text, params) do
-    # An ABSENT key is `:any` — last-write-wins, which is what a script or an
-    # older client gets. A PRESENT one, including an explicit null meaning "I
+    # An ABSENT key is `:any` — last-write-wins, which is what a script gets. A PRESENT one, including an explicit null meaning "I
     # read no file", is a caller asking to be stopped if the bytes moved. The
     # distinction is read off the params this clause matched, not off
     # `conn.params`: the same map either way here, but the load-bearing
@@ -144,8 +139,7 @@ defmodule ShuttleWeb.ConfigController do
       # the one refusal with a recovery move attached ("show me what it says
       # now"), and an affordance that keys off a status survives a rewording of
       # the sentence, which keying off the prose does not. The two whole-list
-      # endpoints already answered 409; this one answered 400 and the button
-      # that reads it was therefore dead.
+      # endpoints answer 409 for the same reason.
       {:conflict, message} ->
         conn |> put_status(409) |> json(%{ok: false, error: message, conflict: true})
 
