@@ -33,9 +33,8 @@ import (
 // daemon reads too — so the job a tunnel is installed as and the launchd label
 // the recovery cascade kickstarts cannot drift.
 //
-// Ported from shuttle-ctl's tunnels verb in the shuttle->felt merge. The job
-// templates are go:embed'd (like the agents registry) so there is no on-disk
-// share/ lookup — the binary is self-contained.
+// The job templates are go:embed'd (like the agents registry) so there is no
+// on-disk share/ lookup — the binary is self-contained.
 
 //go:embed shuttle-tunnel.plist.tmpl
 var tunnelPlistTemplate string
@@ -97,7 +96,7 @@ var (
 // tunnelSupervisor is the host's job supervisor. It answers the questions
 // install has to ask per platform: where a job file lives, what it is called,
 // which template renders it, whether the host can run it at all, and how a
-// written job is brought up.
+// written job is brought up and torn down.
 type tunnelSupervisor struct {
 	Name        string
 	JobDir      string
@@ -105,6 +104,11 @@ type tunnelSupervisor struct {
 	AutoSSHHint string
 	// JobFile is the file name a spec's job is written as, inside JobDir.
 	JobFile func(tunnelSpec) string
+	// JobPattern matches only the file names JobFile generates from the
+	// default naming — never a hand-written job, and never one installed under
+	// an explicit tunnel.label, which is indistinguishable from hand-written.
+	// Its one capture group is the remote name. Prune touches nothing else.
+	JobPattern *regexp.Regexp
 	// Preflight refuses, before anything is written, on a host that cannot run
 	// the jobs. Nil where the supervisor is part of the OS and always there.
 	Preflight func() error
@@ -203,14 +207,11 @@ func installTunnels(requested []string) error {
 		jobDir = sup.JobDir
 	}
 
-	// --dry-run is a preview of the WHOLE command, not of its last step. It
-	// creates no directories, writes no job files, and shells no supervisor —
-	// which means it also skips the systemd probe and the autossh lookup, since
-	// both are questions only an install that is about to act needs answered,
-	// and failing a preview on a missing autossh would hide the very listing the
-	// operator asked for. Everything it would have done is printed instead, and
-	// the command exits 0: the orphan listing below is the half people run this
-	// for, and it used to be unreachable whenever an Activate failed first.
+	// --dry-run previews the whole command. It creates no directories, writes
+	// no job files, and shells no supervisor — so it also skips the systemd
+	// probe and the autossh lookup, which only an install about to act needs
+	// answered; failing a preview on a missing autossh would hide the orphan
+	// listing the operator asked for. It prints everything and exits 0.
 	if tunnelsDryRun {
 		for _, spec := range specs {
 			fmt.Printf("would install %s -> %s\n", spec.Name, filepath.Join(jobDir, sup.JobFile(spec)))
@@ -338,6 +339,10 @@ func launchdSupervisor(home string) tunnelSupervisor {
 		Template:    tunnelPlistTemplate,
 		AutoSSHHint: "brew install autossh",
 		JobFile:     func(spec tunnelSpec) string { return spec.Label + ".plist" },
+		// Any reverse-DNS prefix, not the fleet file's current one: a job
+		// installed under an earlier launchd_label_prefix must still be
+		// pruned. The `.shuttle-tunnel-` infix is what makes the name ours.
+		JobPattern: regexp.MustCompile(`^[A-Za-z0-9._-]+\.shuttle-tunnel-(.+)\.plist$`),
 		Activate: func(spec tunnelSpec, path string) error {
 			target := fmt.Sprintf("gui/%d/%s", uid, spec.Label)
 			// bootstrap refuses a label that is already loaded, and on a
@@ -378,6 +383,7 @@ func systemdSupervisor(home string) tunnelSupervisor {
 		Template:    tunnelServiceTemplate,
 		AutoSSHHint: "apt install autossh",
 		JobFile:     func(spec tunnelSpec) string { return spec.UnitName },
+		JobPattern:  regexp.MustCompile(`^shuttle-tunnel-(.+)\.service$`),
 		Preflight:   requireSystemdUserSession,
 		Activate: func(spec tunnelSpec, _ string) error {
 			// daemon-reload per unit rather than once for the batch: it is
@@ -437,30 +443,13 @@ Or hold one up by hand, in a tmux session that outlives your login:
 	return nil
 }
 
-// resolveTunnelSpecs turns the configured fleet into the tunnels to install.
-//
-// With no arguments it is every enabled remote whose tunnel is supervisor-
-// managed. With arguments it is exactly those remotes, and an unknown one is an
-// error that names what IS configured — the fleet lives in one file, so the
+// resolveTunnelSpecs is exactly the named remotes' tunnels. An unknown name is
+// an error that names what IS configured — the fleet lives in one file, so the
 // error can always be specific.
 func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 	doc, err := loadRemotesFile()
 	if err != nil {
 		return nil, err
-	}
-
-	if len(requested) == 0 {
-		if len(doc.Remotes) == 0 {
-			path, _ := feltRemotesPath()
-			return nil, fmt.Errorf(
-				"no remotes configured; run 'felt shuttle remotes add <name> --port <n>' (file: %s)", path)
-		}
-		resolved := resolveManagedTunnelSpecs(doc)
-		if len(resolved) == 0 {
-			return nil, fmt.Errorf("no remotes use a supervisor-managed tunnel (configured: %s)",
-				remoteNameList(doc.Remotes))
-		}
-		return resolved, nil
 	}
 
 	byName := make(map[string]remoteSpec, len(doc.Remotes))
@@ -479,14 +468,9 @@ func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 			continue
 		}
 		seen[name] = true
-		// Belt and braces against a portless entry reaching the templates.
-		// normalizeRemotes already refuses `manager: launchd|systemd` without a
-		// port, so this is unreachable through the fleet file today; it stays
-		// because the failure it guards is silent and durable — a rendered
-		// `-L 0:localhost:4000` with no ssh destination is a job that can never
-		// come up, and once written the convergent prune protects it, because
-		// the file still names it. Refusing here costs one comparison and means
-		// no future path into the resolvers can reintroduce that job.
+		// A portless (url) remote has nothing to forward; rendering it would
+		// write `-L 0:localhost:4000`, a job that installs cleanly and never
+		// comes up.
 		if r.Port == 0 {
 			return nil, fmt.Errorf(
 				"remote %q has no local port to forward; a tunnel needs one (or set tunnel.manager to \"none\")", name)
@@ -500,24 +484,13 @@ func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
 // resolveManagedTunnelSpecs is every remote the fleet file currently asks THIS
 // host to supervise a tunnel for: enabled, and carrying manager launchd or
 // systemd. It never errors — an empty result (no remotes at all, or none of
-// them managed) is a legitimate steady state, not a misconfiguration, and it
-// is exactly the state that leaves the convergent install with nothing to
-// write but everything to prune.
+// them managed) is a legitimate steady state, and it is exactly the state that
+// leaves the convergent install with nothing to write but everything to prune.
+// normalizeRemotes has already refused a managed tunnel with no port.
 func resolveManagedTunnelSpecs(doc remotesFile) []tunnelSpec {
 	resolved := make([]tunnelSpec, 0, len(doc.Remotes))
 	for _, r := range doc.Remotes {
 		if !r.enabledOr() || !managedTunnel(r.tunnelOpts().Manager) {
-			continue
-		}
-		// Unreachable through the fleet file: normalizeRemotes already refuses
-		// a managed manager on a portless entry, and defaults a portless entry
-		// to none, so nothing that gets here can be both managed and port-0.
-		// It stays because this function takes a remotesFile, and the day
-		// something builds one in memory rather than reading it, a port-0
-		// tunnel spec would render `-L 0:localhost:4000` — a job that installs
-		// cleanly and forwards nothing. See resolveTunnelSpecs, which refuses
-		// the same shape loudly because the named arm is allowed to.
-		if r.Port == 0 {
 			continue
 		}
 		resolved = append(resolved, tunnelSpecFor(r, doc.LaunchdLabelPrefix))
@@ -559,40 +532,6 @@ func (s tunnelSpec) remoteEnd() string {
 	return fmt.Sprintf(":%d", s.RemotePort)
 }
 
-// tunnelJobPattern matches ONLY the filename shape this command itself
-// generates for supervisor sup — never a hand-written plist or unit, and never
-// a remote installed under an explicit tunnel.label (see
-// resolveManagedTunnelSpecs/label/unitName): a custom label is, by the same
-// construction that makes the generated shape recognizable, indistinguishable
-// from something the operator wrote by hand, so prune must not touch it either
-// way. The one capture group is the remote name embedded in the generated
-// shape, used only for the removal message.
-//
-// The launchd arm matches ANY reverse-DNS prefix, not the fleet file's current
-// `launchd_label_prefix`. Pinning the current prefix was the bug this shape
-// fixes: change the prefix and every job installed under the old one matches
-// neither the kept-files set nor the pattern, so prune walks straight past an
-// autossh loop that keeps running forever — the exact haunting prune exists to
-// end. Widening it is safe because the recognizable part was never the prefix:
-// the `.shuttle-tunnel-` infix is ours, nothing else on a machine writes a
-// label shaped that way, and a custom tunnel.label (which by definition does
-// not contain it) stays untouchable as before. The systemd arm needs no such
-// widening — a unit name is a file name and carries no prefix at all, so it has
-// always been prefix-agnostic.
-func tunnelJobPattern(sup tunnelSupervisor) *regexp.Regexp {
-	switch sup.Name {
-	case "launchd":
-		return regexp.MustCompile(`^[A-Za-z0-9._-]+\.shuttle-tunnel-(.+)\.plist$`)
-	case "systemd":
-		return regexp.MustCompile(`^shuttle-tunnel-(.+)\.service$`)
-	}
-	// A supervisor this function has never been taught is one whose job files
-	// we cannot recognize, and the failure mode of guessing is deleting
-	// someone else's. nil means prune finds nothing, which is the only safe
-	// answer; add the arm here when you add the supervisor.
-	return nil
-}
-
 // pruneOrphanTunnels is the other half of convergent install. Having just
 // written and started a job for every remote the fleet file currently names
 // with a managed tunnel, it walks the same job directory for anything else
@@ -602,13 +541,11 @@ func tunnelJobPattern(sup tunnelSupervisor) *regexp.Regexp {
 // `manager: none` or `enabled: false`, stops haunting the host as an autossh
 // loop running forever against a daemon nothing polls that way anymore.
 //
-// It is deliberately conservative about what counts as "ours": only a
-// filename matching tunnelJobPattern is a candidate, so a hand-written plist
-// or unit, or one installed under a custom tunnel.label, is never touched —
-// see tunnelJobPattern's own comment for the custom-label case in both
-// directions. Removing a job that was never there, or that the supervisor had
-// already forgotten, is success, not an error: prune runs on every convergent
-// install, so "nothing to clean up" is the ordinary outcome.
+// Only a file name matching the supervisor's JobPattern is a candidate, so a
+// hand-written plist or unit, or one installed under a custom tunnel.label, is
+// never touched. Removing a job that was never there, or that the supervisor
+// had already forgotten, is success: prune runs on every convergent install,
+// so "nothing to clean up" is the ordinary outcome.
 func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, dryRun bool) error {
 	entries, err := os.ReadDir(jobDir)
 	if err != nil {
@@ -624,10 +561,6 @@ func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, 
 	for _, spec := range keep {
 		keptFiles[sup.JobFile(spec)] = true
 	}
-	pattern := tunnelJobPattern(sup)
-	if pattern == nil || sup.Deactivate == nil {
-		return nil
-	}
 
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -639,7 +572,7 @@ func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, 
 		if keptFiles[name] {
 			continue
 		}
-		match := pattern.FindStringSubmatch(name)
+		match := sup.JobPattern.FindStringSubmatch(name)
 		if match == nil {
 			continue
 		}

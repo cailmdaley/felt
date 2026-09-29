@@ -100,11 +100,9 @@ type remoteDefaults struct {
 // integer. The zero value means "no proxy configured", which is a perfectly
 // ordinary fleet — only a hub whose mesh VPN runs in userspace needs one.
 //
-// Host and port are kept apart rather than re-joined into one string because
-// the string form is where the two readers used to drift: "localhost:1055" and
-// "localhost:01055" are the same endpoint but different strings, and an
-// expectation written as a string cannot say which one it means. The parity
-// fixture asserts the pair, so there is nothing left to render ambiguously.
+// Host and port are kept apart rather than joined into one string:
+// "localhost:1055" and "localhost:01055" are the same endpoint but different
+// strings, so the parity fixture asserts the parsed pair.
 type proxyEndpoint struct {
 	Host string
 	Port int
@@ -204,13 +202,9 @@ func parseProxyEndpoint(raw string) (proxyEndpoint, error) {
 	if host == "" {
 		return proxyEndpoint{}, fmt.Errorf("no host")
 	}
-	// strconv.Atoi alone would accept "+1055" and "-0"; a port is digits.
-	if portText == "" || strings.TrimLeft(portText, "0123456789") != "" {
-		return proxyEndpoint{}, fmt.Errorf("port %q is not a number", portText)
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port < 1 || port > 65535 {
-		return proxyEndpoint{}, fmt.Errorf("port %q out of range 1-65535", portText)
+	port, err := parsePort(portText)
+	if err != nil {
+		return proxyEndpoint{}, err
 	}
 	return proxyEndpoint{Host: host, Port: port}, nil
 }
@@ -239,11 +233,11 @@ type remoteSpec struct {
 	RequestTimeoutMS int `json:"request_timeout_ms,omitempty"`
 	StaleMultiplier  int `json:"stale_multiplier,omitempty"`
 
-	// Deploy-side fields. Carried so the fleet stops being described in four
-	// places; not read by the CLI or the daemon yet. They are declared here
-	// because this struct is also the WRITER: `remotes add`/`rm` re-encode the
-	// whole document from it, so a key no field names is silently dropped from
-	// every entry the next time the fleet is edited.
+	// Deploy-side fields, read by bin/shuttle-deploy and by neither the CLI
+	// nor the daemon. They are declared here because this struct is also the
+	// WRITER: `remotes add`/`rm` re-encode the whole document from it, so a
+	// key no field names is silently dropped from every entry the next time
+	// the fleet is edited.
 	//
 	// BuildUI false marks a host that does not build the board bundle — a
 	// cluster login node where `npm ci` against a network home filesystem costs

@@ -518,3 +518,10 @@ func TestPostLifecycle_BrokenHostFileDoesNotFallBack(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// isHostConfigError reports whether err is a host-file refusal of the given
+// kind, through any wrapping.
+func isHostConfigError(err error, kind string) bool {
+	var hc hostConfigError
+	return errors.As(err, &hc) && hc.Kind == kind
+}
