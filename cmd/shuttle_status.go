@@ -13,16 +13,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The local-read verbs — status and ps — reimplemented on felt's own data model.
-// Where shuttle-ctl shelled `felt -C <store> ls --json` per configured store, felt
-// lists in-process: felt.NewStorage(store).ListMetadataHavingFrontmatterFields
-// over each store the daemon would poll (shuttleStores), keeping only fibers that
-// carry a well-formed shuttle: facet. Liveness comes from tmux. Ported faithfully
-// from shuttle-ctl's cmd/shuttle/status.go.
+// The local-read verbs — status and ps. They list in-process:
+// felt.NewStorage(store).ListMetadataHavingFrontmatterFields over each store the
+// daemon would poll (shuttleStores), keeping only fibers that carry a
+// well-formed shuttle: facet. Liveness comes from tmux.
 //
 // The cross-host arm (--all / --remote, which queries the daemon's
-// /api/v1/state/composite) is the daemon-HTTP slice (Stage 3.3), not here; this is
-// the local view only.
+// /api/v1/state/composite) lives in shuttle_status_cross_host.go; this is the
+// local view only.
 
 var (
 	statusIncludeOrphans bool
@@ -109,9 +107,9 @@ The daemon's boot quarantine can still hold an eligible fiber until
 		rows := make([]FiberStatus, 0, len(entries))
 		seenSessions := map[string]bool{}
 		for _, entry := range entries {
-			// The canonical (uid-keyed) name is the row's display session, but
-			// liveness recognizes either form so a worker launched before the
-			// uid-keyed cutover still reads as running.
+			// The canonical (uid-keyed) name is the row's display session;
+			// liveness recognizes both forms the daemon launches under
+			// (shuttleTmuxSessionNames).
 			session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
 			running := false
 			for _, candidate := range shuttleTmuxSessionNames(entry.FiberID, entry.UID) {

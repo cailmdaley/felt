@@ -40,11 +40,8 @@ import (
 // a read-only home, or a machine with no ~/.shuttle at all, still resolves,
 // just without the durability.
 //
-// Deliberately no daemon round-trip: the old path called GET /api/v1/state,
-// which is re-entrant when the daemon shells this CLI (the Poller is blocked
-// on the subprocess, so the request times out and the fallback silently gave
-// the wrong name on a host whose identity is an alias, e.g. a friendly name
-// vs the raw login-node hostname).
+// Deliberately no daemon round-trip: the daemon shells this CLI while its
+// Poller waits on the subprocess, so asking the daemon would be re-entrant.
 // This resolver is pure local state, so it's correct offline and can never
 // deadlock against the process that invoked it.
 //
@@ -214,27 +211,16 @@ func (e ownerMismatchError) Error() string {
 // writer; cross-host lifecycle must reach it (the kanban routes there).
 //
 // Fail-open only where there is genuinely nothing to guard: a fiber with
-// no/invalid shuttle block, or a host-less block (legacy, pre-"born-owned"),
-// falls through to a normal local write rather than hard-blocking — the guard
-// closes the known mirror-write footgun, it is not a gate on every edit.
+// no/invalid shuttle block, or a host-less block, falls through to a normal
+// local write rather than hard-blocking — the guard closes the known
+// mirror-write footgun, it is not a gate on every edit.
 //
 // An UNRESOLVABLE own-host identity is different and fails loud (returns the
-// wrapped resolveOwnHost error) rather than falling through. Pre-S1, own-host
-// resolution round-tripped to the local daemon, so a resolution failure could
-// mean nothing worse than "daemon briefly down" — permitting the write was the
-// lesser risk. Post-S1, resolution is pure local state (env var, host file,
-// os.Hostname), so a failure means those are ALL absent/empty — something
-// genuinely broken, not a transient daemon hiccup. Silently permitting the
-// write in that state is how a wrong-host mirror-write (and the resurrecting
-// git-sync bug this guard exists to prevent) would happen invisibly; failing
-// loud surfaces it instead.
-// C1: previously delegated to `ensureOwnedHereAs(f, fiber, "")` — an explicit
-// own-host override the daemon passed on mark-runtime/reopen so the guard
-// never round-tripped back to GET /api/v1/state (re-entrant while the Poller
-// is blocked on the felt subprocess). Post-S1, `resolveOwnHost` is pure local
-// state (env var → host file → os.Hostname, no daemon call), so there is
-// nothing left to avoid round-tripping to — every caller resolves the same
-// way now.
+// wrapped resolveOwnHost error) rather than falling through. Resolution is
+// pure local state (env var, host file, os.Hostname), so a failure means those
+// are ALL absent/empty — something genuinely broken. Silently permitting the
+// write in that state is how a wrong-host mirror-write would happen
+// invisibly; failing loud surfaces it instead.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	block, ok, err := f.ShuttleBlock()
 	if err != nil || !ok || block == nil {

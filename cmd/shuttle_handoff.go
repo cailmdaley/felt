@@ -66,15 +66,15 @@ func init() {
 // caller is NOT treated as exiting. The env path is used when the argument
 // resolves to the same fiber (the normal self-handoff, where the env path is the
 // authoritative one) or when argument resolution fails outright (cwd/store
-// ambiguity — the pre-existing fallback). Paths are compared through
+// ambiguity). Paths are compared through
 // EvalSymlinks because loom stores reach fibers through symlinked .felt trees.
 //
 // Belt against fuzzy resolution: felt's resolver slug/suffix-matches, so an
 // argument can land on a fiber the caller didn't mean (the dispatch prompt's
 // global-id fallback is the realistic trigger). A DIFFERENT-fiber result is
 // honored only when the argument names it exactly (id or UID); a fuzzy match
-// that disagrees with the env is treated as ambiguity and the env wins — the
-// pre-fix behavior, which at worst stamps the caller's own fiber.
+// that disagrees with the env is treated as ambiguity and the env wins, which
+// at worst stamps the caller's own fiber.
 func resolveHandoffPath(fiber string) (string, bool, error) {
 	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
 	f, _, err := shuttleResolveFiber(fiber, false)
@@ -132,7 +132,7 @@ func canonicalPath(p string) (string, error) {
 // atomic rename) rather than through Storage, because SHUTTLE_FIBER_PATH may name
 // a fiber in a store other than the worker's cwd; the path is unambiguous.
 //
-// F4: acquires path's cross-process advisory lock (internal/felt/lock.go)
+// It acquires path's cross-process advisory lock (internal/felt/lock.go)
 // BEFORE the read, and holds it through the write. A worker's handoff and a
 // daemon-shelled `mark-runtime` (the dispatch stamp, or a conclude re-arm) can
 // race the same fiber file; without the lock, whichever writes last silently

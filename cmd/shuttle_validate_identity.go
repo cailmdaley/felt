@@ -15,7 +15,7 @@ import (
 // checks the intrinsic-identity migration invariants: ULID uids present, document
 // id == uid, no uid describing two slug addresses in one feed, and host ownership
 // on open/active shuttle fibers. A multi-daemon HTTP auditor with no felt-internal
-// analogue, ported unchanged from shuttle-ctl so the daemon contract is identical.
+// analogue.
 
 var (
 	identityDaemonURLs []string

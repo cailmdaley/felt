@@ -15,8 +15,7 @@ import (
 
 // The single-fiber address verbs — session-name and attach. Both resolve a fiber
 // to its canonical id + intrinsic uid (shuttleAddressFiber) and derive the
-// worker's tmux session name. Ported from shuttle-ctl's session_name.go /
-// attach.go.
+// worker's tmux session name.
 
 // addressFiberLookup keeps exact matches and rejected guesses separate so a
 // caller never turns a storage hint into a recipient choice.
@@ -122,7 +121,7 @@ configured store, so it works from any directory.`,
 		}
 		session := shuttleTmuxSessionName(f.ID, f.UID)
 		if jsonOutput {
-			// Emit the dispatch-canonical id (matches the daemon + shuttle-ctl);
+			// Emit the dispatch-canonical id (matches the daemon);
 			// the session name itself is leaf+uid keyed, so prefix-independent.
 			id := f.ID
 			if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {

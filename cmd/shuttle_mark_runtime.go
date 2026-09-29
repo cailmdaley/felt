@@ -20,20 +20,13 @@ var (
 // key. It is felt's single channel for the daemon's runtime writes (the dispatch
 // marker, the re-arm conclude) — the daemon shells this instead of editing the
 // fiber .md itself, so ALL runtime nesting lives in felt's yaml.Node engine, not
-// in the daemon's text surgery (Stage 5, Option B).
+// in daemon-side text surgery.
 //
 // Unlike `handoff` (the worker's exit ritual, which also ends the tmux session),
 // mark-runtime only writes the fields — no session management. An empty flag
 // value removes that key (omitempty), so a re-stamp can clear a field.
-//
-// C1: this verb used to take an explicit `--host` override so the ownership
-// guard resolved locally instead of calling back to GET /api/v1/state (that
-// callback was RE-ENTRANT — a daemon-shelled write runs while the Poller is
-// blocked on this subprocess, so /api/v1/state would time out and
-// resolveOwnHost would fall back to os.Hostname(), wrong on an alias host).
-// Post-S1, resolveOwnHost is pure local state — no round-trip, no re-entrancy
-// — so `--host` carried no correctness and is gone; ownership resolves the
-// same way `resolveOwnedShuttleFiber` resolves it for every other verb.
+// Ownership resolves the way resolveOwnedShuttleFiber resolves it for every
+// other verb.
 var markRuntimeCmd = &cobra.Command{
 	Use:   "mark-runtime <fiber>",
 	Short: "Stamp machine-managed shuttle.runtime fields (daemon-facing)",

@@ -8,17 +8,12 @@ import (
 // :4000 HTTP client whose primitives (daemonURL, the lifecycle hop) live in
 // shuttle_daemon.go. Most `felt shuttle` verbs are pure local-frontmatter writes;
 // these types back the daemon-coupled READ verbs: snapshot (raw passthrough) and
-// status --all / --remote (composite render). Own-host identity resolution
-// (resolveOwnHost, shuttle_host.go) no longer round-trips through here — it
-// reads SHUTTLE_HOST / ~/.shuttle/host / os.Hostname() locally.
+// status --all / --remote (composite render).
 //
 // Cross-host visibility goes through the local daemon's composite endpoint: the
 // daemon's RemoteRegistry already polls each configured remote over its
 // SSH-tunnel-mapped port and caches snapshots with freshness, so the CLI just
-// renders that one response — remote configuration never leaks into felt. Ported
-// from shuttle-ctl's state_client.go; the wire format (endpoint paths, JSON keys)
-// is unchanged so the transitional `shuttle-ctl` -> `felt shuttle` shim is
-// transparent to the Elixir daemon.
+// renders that one response.
 
 // SnapshotEntry mirrors a single row from `Shuttle.Poller.build_snapshot/1`'s
 // `eligible` list.

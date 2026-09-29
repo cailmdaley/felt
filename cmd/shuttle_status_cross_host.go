@@ -23,8 +23,7 @@ import (
 // standing role — not idle/scheduled one-shot fibers. Cross-host rows therefore
 // reflect runtime state, not the full installed-fiber inventory; the local table
 // (felt-native, this machine's full inventory) is unchanged, so the laptop's
-// installed fibers stay visible alongside remote runtime. Ported from shuttle-ctl's
-// status_cross_host.go.
+// installed fibers stay visible alongside remote runtime.
 
 // runStatusCrossHost handles `--all` (local + every remote) and `--remote NAME`
 // (filter to one remote). It fetches the composite state from the local daemon,

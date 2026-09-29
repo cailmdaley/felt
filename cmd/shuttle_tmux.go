@@ -7,9 +7,9 @@ import (
 
 // tmux session naming + management for the felt CLI's worker-facing verbs (pause
 // kills a live worker; attach/session-name address one). The names MUST match the
-// daemon's own scheme — a uid-keyed canonical form with a legacy leaf-only
-// fallback — so the CLI recognizes a session the daemon launched. Ported from
-// shuttle-ctl (pkg/schema/fiber.go); the daemon owns the launch, the CLI only
+// daemon's own scheme (Shuttle.Dispatcher.session_names/2) — a uid-keyed canonical
+// form, and a leaf-only form recognized alongside it — so the CLI recognizes a
+// session the daemon launched. The daemon owns the launch; the CLI only
 // recognizes and kills.
 
 // fiberLeaf extracts the human-readable leaf (last path component) of a fiber id,

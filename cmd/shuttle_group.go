@@ -6,19 +6,17 @@ import (
 )
 
 // The `felt shuttle <verb>` command group is felt's active/weaving mode: the
-// dispatch surface absorbed from the standalone shuttle-ctl. Grouping it under
-// `shuttle` keeps `felt --help` about notes and `felt shuttle --help` about
+// dispatch surface. Grouping it under `shuttle` keeps `felt --help` about notes and `felt shuttle --help` about
 // dispatch, and the group name is also the on-disk block name (`shuttle:`) and
 // the runtime namespace — one word, three roles. The verbs are reimplemented on
 // felt's own internals (resolve -> read -> mutate -> validate -> write), not on a
 // copied fiber-I/O layer; felt owns the data model.
 
-// shuttleFeltStore mirrors shuttle-ctl's --felt-store flag. The networked daemon
-// shells the lifecycle verbs as `shuttle-ctl --felt-store <store> <verb>`, reached
-// (post-cutover) through the transitional `shuttle-ctl` -> `felt shuttle` shim, so
-// `felt shuttle` must honor that exact flag. It is an alias for felt's -C store
-// selector: a PersistentPreRun feeds it into the same `changeDir` the rest of the
-// cmd package resolves the store from, so no verb needs store logic of its own.
+// shuttleFeltStore is --felt-store, the store selector the daemon passes when
+// it shells `felt shuttle --felt-store <store> <verb>`
+// (daemon/lib/shuttle/felt/shuttle.ex). It is an alias for felt's -C: a
+// PersistentPreRun feeds it into the same `changeDir` the rest of the cmd
+// package resolves the store from, so no verb needs store logic of its own.
 var shuttleFeltStore string
 
 var shuttleCmd = &cobra.Command{

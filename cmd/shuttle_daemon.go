@@ -18,14 +18,11 @@ import (
 )
 
 // The daemon HTTP client — the felt CLI's window onto the running shuttle
-// daemon. Most `felt shuttle` verbs are pure local-frontmatter writes, but a few
-// need the daemon: host identity (so a freshly installed block is born owned with
-// the host the poller will compare against), and the soft lifecycle hop for
-// standing-role resume/accept (which the daemon re-arms atomically against its
-// poll cycle, falling back to a local write when it is down). Ported from
-// shuttle-ctl's state_client.go; the daemon contract — endpoint paths, env vars,
-// payload shapes — is unchanged so the transitional `shuttle-ctl` -> `felt
-// shuttle` shim is transparent to the Elixir daemon that shells these verbs.
+// daemon. Most `felt shuttle` verbs are pure local-frontmatter writes; the
+// daemon-coupled ones are the read verbs (snapshot, sessions, status --all) and
+// the soft lifecycle hop for standing-role resume/accept, which the daemon
+// re-arms atomically against its poll cycle, falling back to a local write when
+// it is down.
 
 // daemonURL is the local shuttle daemon's base URL. No CLI flag by design — the
 // daemon is a per-machine service. SHUTTLE_DAEMON_URL overrides it outright
