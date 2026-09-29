@@ -260,6 +260,13 @@ jobs:
             sleep 1
             if [ "$i" = 60 ]; then echo "daemon never bound"; cat /tmp/daemon.log; exit 1; fi
           done
+          # Bound is not booted: the contract and /state answer only once the
+          # daemon reports ready.
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4390/api/v1/version | jq -e '.ready == true' >/dev/null; then break; fi
+            sleep 1
+            if [ "$i" = 60 ]; then echo "daemon never became ready"; cat /tmp/daemon.log; exit 1; fi
+          done
           # The artifact must report the tag it was stamped with. Only a built
           # release can show this — mix.exs's fallback compiles fine either
           # way, so a broken stamp is silent until someone reads mix_vsn.
@@ -276,6 +283,10 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
           # And the shim's HTTP verbs must answer.
           SHUTTLE_PORT=4390 out/shuttle/bin/shuttle status >/dev/null
+          # `status` passes whenever /version answers, even if /state fails;
+          # a ready daemon must serve a real snapshot there too.
+          curl -fsS http://127.0.0.1:4390/api/v1/state |
+            jq -e '(.eligible | type) == "array" and .host == "ci-boot-test" and .contract.ok == true' >/dev/null
           kill "$DAEMON_PID"
 
       - name: Attach the tarball to the release
