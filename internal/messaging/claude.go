@@ -11,7 +11,7 @@ import (
 type claudeAdapter struct{}
 
 func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := MailboxSessions("claude", host)
+	hookSessions := mailboxSessions("claude", host)
 	for i := range hookSessions {
 		if claudeNativeAvailable(hookSessions[i].ID, host) {
 			hookSessions[i].Capabilities = append(hookSessions[i].Capabilities, "wake")
@@ -60,7 +60,7 @@ func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, erro
 		}
 		ss = append(ss, Session{Address: addr, Host: host, Harness: "claude", ID: id, Title: stringField(m, "name"), CWD: stringField(m, "cwd", "workspace"), State: stringField(m, "status"), Capabilities: capabilities})
 	}
-	return mergeNativeAndHookSessions(ss, hookSessions), nil
+	return mergeSessions(ss, hookSessions), nil
 }
 
 type cappedBuffer struct{ bytes.Buffer }
@@ -88,6 +88,6 @@ func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, a Address, r Req
 	if r.Wake {
 		return sendClaudeNativeWithMetadata(ctx, a, r)
 	}
-	receipt, err := QueueMailbox(a, r)
+	receipt, err := queueMailbox(a, r)
 	return receipt, err, dedupMetadata{}
 }

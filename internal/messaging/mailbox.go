@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -77,7 +78,7 @@ func MailboxAvailable(harness, id, host string) bool {
 }
 
 func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
-	b, err := mailboxRead(filepath.Join(mailboxDir(harness, id), "receiver.json"), 16384)
+	b, err := readBounded(filepath.Join(mailboxDir(harness, id), "receiver.json"), 16384)
 	var r mailboxRegistration
 	if err != nil {
 		return r, err
@@ -88,7 +89,7 @@ func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
 	return r, nil
 }
 
-func QueueMailbox(a Address, r Request) (Receipt, error) {
+func queueMailbox(a Address, r Request) (Receipt, error) {
 	transport := a.Harness + "-hook"
 	if (a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi") || !MailboxAvailable(a.Harness, a.ID, a.Host) {
 		return rejected(r, transport, "session has not registered a Shuttle message hook on this host"), errCode("unavailable", "session has not registered a Shuttle message hook on this host")
@@ -158,7 +159,7 @@ func OfferMailbox(harness, id, host string, emit func([]Request) error) error {
 			continue
 		}
 		path := filepath.Join(dir, "pending", e.Name())
-		b, err := mailboxRead(path, 512<<10)
+		b, err := readBounded(path, 512<<10)
 		if err != nil {
 			continue
 		}
@@ -215,9 +216,9 @@ func OfferMailbox(harness, id, host string, emit func([]Request) error) error {
 	return nil
 }
 
-// MailboxSessions returns hook-registered receivers for one harness and host.
+// mailboxSessions returns hook-registered receivers for one harness and host.
 // A registration means the hook was observed, not that a model turn is live.
-func MailboxSessions(harness, host string) []Session {
+func mailboxSessions(harness, host string) []Session {
 	root := filepath.Join(dataDir(), "mailboxes", harness)
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -228,7 +229,7 @@ func MailboxSessions(harness, host string) []Session {
 		if !entry.IsDir() {
 			continue
 		}
-		b, err := mailboxRead(filepath.Join(root, entry.Name(), "receiver.json"), 16384)
+		b, err := readBounded(filepath.Join(root, entry.Name(), "receiver.json"), 16384)
 		if err != nil {
 			continue
 		}
@@ -246,7 +247,9 @@ func MailboxSessions(harness, host string) []Session {
 	return out
 }
 
-func mailboxRead(path string, limit int64) ([]byte, error) {
+// readBounded reads a host-local state file (mailbox entry, registration,
+// dedup record, Confer job) and refuses one larger than limit.
+func readBounded(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -254,7 +257,7 @@ func mailboxRead(path string, limit int64) ([]byte, error) {
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err == nil && int64(len(b)) > limit {
-		return nil, errCode("invalid_mailbox", "mailbox entry exceeds bound")
+		return nil, fmt.Errorf("%s exceeds %d bytes", path, limit)
 	}
 	return b, err
 }

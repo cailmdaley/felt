@@ -34,7 +34,7 @@ func piNativePath(id string) string {
 
 func readPiNative(id string) (piNativeRegistration, error) {
 	var registration piNativeRegistration
-	b, err := mailboxRead(piNativePath(id), 16384)
+	b, err := readBounded(piNativePath(id), 16384)
 	if err == nil {
 		err = json.Unmarshal(b, &registration)
 	}
@@ -149,7 +149,7 @@ func piNativeSessions(host string) []Session {
 		if !entry.IsDir() {
 			continue
 		}
-		b, err := mailboxRead(filepath.Join(root, entry.Name(), "native.json"), 16384)
+		b, err := readBounded(filepath.Join(root, entry.Name(), "native.json"), 16384)
 		if err != nil {
 			continue
 		}

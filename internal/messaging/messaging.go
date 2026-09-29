@@ -67,7 +67,7 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedupDetailed(ctx, req, func(sendCtx context.Context) dedupSendResult {
+	return withDedup(ctx, req, func(sendCtx context.Context) dedupSendResult {
 		if err := sendCtx.Err(); err != nil {
 			receipt := rejected(req, "validation", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}

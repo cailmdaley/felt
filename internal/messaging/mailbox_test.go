@@ -153,7 +153,7 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 	if MailboxAvailable("codex", "thread/1", "other") {
 		t.Fatal("mailbox leaked across host ownership")
 	}
-	sessions := MailboxSessions("codex", "owner")
+	sessions := mailboxSessions("codex", "owner")
 	if len(sessions) != 1 {
 		t.Fatalf("sessions: %#v", sessions)
 	}
@@ -192,7 +192,7 @@ func TestMergeNativeAndHookSessionsPrefersNativeRecord(t *testing.T) {
 	native.State = "active"
 	native.LastSeen = 0
 	native.Capabilities = []string{"context", "steer"}
-	got := mergeNativeAndHookSessions([]Session{native}, []Session{hook, {Address: "shuttle://host/codex/other", Host: "host", Harness: "codex", ID: "other", State: "hook"}})
+	got := mergeSessions([]Session{native}, []Session{hook, {Address: "shuttle://host/codex/other", Host: "host", Harness: "codex", ID: "other", State: "hook"}})
 	if len(got) != 2 || got[0].State != "active" || got[0].LastSeen != 0 {
 		t.Fatalf("native session did not win exact address: %#v", got)
 	}
@@ -201,7 +201,7 @@ func TestMergeNativeAndHookSessionsPrefersNativeRecord(t *testing.T) {
 func TestMergeSessionsCollapsesRepeatedNativeAndHookAddresses(t *testing.T) {
 	native := Session{Address: "shuttle://host/claude/id", State: "idle"}
 	hook := Session{Address: "shuttle://host/claude/other", State: "hook"}
-	got := mergeNativeAndHookSessions([]Session{native, native}, []Session{native, hook, hook})
+	got := mergeSessions([]Session{native, native}, []Session{native, hook, hook})
 	if len(got) != 2 || got[0].Address != native.Address || got[1].Address != hook.Address {
 		t.Fatalf("discovery repeated a routable address: %#v", got)
 	}

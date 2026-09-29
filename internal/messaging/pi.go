@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -60,20 +59,6 @@ type piJob struct {
 	PiSessionID                              string `json:"piSessionId"`
 }
 
-func mergePiSessions(primary, additions []Session) []Session {
-	seen := make(map[string]bool, len(primary)+len(additions))
-	merged := make([]Session, 0, len(primary)+len(additions))
-	for _, session := range append(primary, additions...) {
-		if seen[session.Address] {
-			continue
-		}
-		seen[session.Address] = true
-		merged = append(merged, session)
-	}
-	sort.Slice(merged, func(i, j int) bool { return merged[i].Address < merged[j].Address })
-	return merged
-}
-
 func conferStateDir() string {
 	if p := os.Getenv("SHUTTLE_CONFER_STATE_DIR"); p != "" {
 		return p
@@ -86,14 +71,14 @@ func liveSocket(path string) bool {
 	return err == nil && st.Mode()&os.ModeSocket != 0
 }
 func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := MailboxSessions("pi", host)
+	hookSessions := mailboxSessions("pi", host)
 	nativeSessions := piNativeSessions(host)
 	nativeIDs := make(map[string]bool, len(nativeSessions))
 	for _, session := range nativeSessions {
 		nativeIDs[session.ID] = true
 	}
 	root := conferStateDir()
-	ss := mergeNativeAndHookSessions(nativeSessions, hookSessions)
+	ss := mergeSessions(nativeSessions, hookSessions)
 	var conferSessions []Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		select {
@@ -107,12 +92,7 @@ func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 		if d.IsDir() || !strings.HasSuffix(path, ".json") || filepath.Base(filepath.Dir(path)) != "jobs" {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		b, e := readBoundedFile(path, 512<<10)
+		b, e := readBounded(path, 512<<10)
 		if e != nil {
 			return nil
 		}
@@ -134,7 +114,7 @@ func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 	if os.IsNotExist(err) {
 		return ss, nil
 	}
-	return mergePiSessions(ss, conferSessions), err
+	return mergeSessions(ss, conferSessions), err
 }
 func findPi(ctx context.Context, id string) (piJob, error) {
 	var matches []piJob
@@ -150,7 +130,7 @@ func findPi(ctx context.Context, id string) (piJob, error) {
 		if d.IsDir() || filepath.Base(path) != id+".json" || filepath.Base(filepath.Dir(path)) != "jobs" {
 			return nil
 		}
-		b, e := readBoundedFile(path, 512<<10)
+		b, e := readBounded(path, 512<<10)
 		if e != nil {
 			return nil
 		}
@@ -171,22 +151,10 @@ func findPi(ctx context.Context, id string) (piJob, error) {
 	}
 	return matches[0], nil
 }
-func readBoundedFile(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err == nil && int64(len(b)) > limit {
-		return nil, fmt.Errorf("file exceeds %d bytes", limit)
-	}
-	return b, err
-}
 func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
 	if !r.Wake {
 		if MailboxAvailable("pi", a.ID, a.Host) {
-			return QueueMailbox(a, r)
+			return queueMailbox(a, r)
 		}
 		return rejected(r, "pi-rpc+unix-socket", "Confer messages can start a turn; wake is required"), errCode("wake_required", "Confer requires wake=true")
 	}

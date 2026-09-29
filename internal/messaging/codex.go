@@ -122,7 +122,7 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 }
 
 func (codexAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := MailboxSessions("codex", host)
+	hookSessions := mailboxSessions("codex", host)
 	r, err := dialCodex(ctx)
 	if err != nil {
 		return hookSessions, err
@@ -162,15 +162,17 @@ func (codexAdapter) discover(ctx context.Context, host string) ([]Session, error
 		ss = append(ss, Session{Address: addr, Host: host, Harness: "codex", ID: id, Title: title, CWD: out.Thread.CWD, State: out.Thread.Status.Type, Capabilities: caps})
 	}
 	if failed > 0 {
-		return mergeNativeAndHookSessions(ss, hookSessions), fmt.Errorf("%d loaded Codex thread(s) could not be inspected", failed)
+		return mergeSessions(ss, hookSessions), fmt.Errorf("%d loaded Codex thread(s) could not be inspected", failed)
 	}
-	return mergeNativeAndHookSessions(ss, hookSessions), nil
+	return mergeSessions(ss, hookSessions), nil
 }
 
-func mergeNativeAndHookSessions(native, hooks []Session) []Session {
-	seen := make(map[string]bool, len(native))
-	merged := make([]Session, 0, len(native)+len(hooks))
-	for _, source := range [][]Session{native, hooks} {
+// mergeSessions lists each address once, keeping the first record seen, so a
+// harness's native record wins over its hook registration.
+func mergeSessions(primary, additions []Session) []Session {
+	seen := make(map[string]bool, len(primary)+len(additions))
+	merged := make([]Session, 0, len(primary)+len(additions))
+	for _, source := range [][]Session{primary, additions} {
 		for _, session := range source {
 			if !seen[session.Address] {
 				seen[session.Address] = true
@@ -211,7 +213,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 	r, err := dialCodex(ctx)
 	if err != nil {
 		if !req.Wake {
-			return QueueMailbox(a, req)
+			return queueMailbox(a, req)
 		}
 		return rejected(req, "codex-app-server", "Codex control socket unavailable"), errCode("preflight_failed", "Codex control socket unavailable: %v", err)
 	}
@@ -222,19 +224,19 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 	if err = r.call(ctx, "thread/read", map[string]any{"threadId": a.ID, "includeTurns": false}, &read); err != nil {
 		if _, ok := err.(*rpcPeerError); ok {
 			if !req.Wake {
-				return QueueMailbox(a, req)
+				return queueMailbox(a, req)
 			}
 			return rejected(req, "codex-app-server", err.Error()), errCode("session_not_found", "Codex thread unavailable: %v", err)
 		}
 		if !req.Wake {
-			return QueueMailbox(a, req)
+			return queueMailbox(a, req)
 		}
 		return rejected(req, "codex-app-server", "Codex thread lookup failed"), errCode("preflight_failed", "Codex thread lookup failed: %v", err)
 	}
 	t := read.Thread
 	if t.ID != a.ID {
 		if !req.Wake {
-			return QueueMailbox(a, req)
+			return queueMailbox(a, req)
 		}
 		return rejected(req, "codex-app-server", "thread identity mismatch"), errCode("session_not_found", "thread identity mismatch")
 	}
@@ -291,7 +293,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 		}
 	case "notLoaded", "notFound":
 		if !req.Wake {
-			return QueueMailbox(a, req)
+			return queueMailbox(a, req)
 		}
 		return rejected(req, "codex-app-server", "thread is not loaded by this Codex runtime"), errCode("session_unavailable", "thread is not loaded by this Codex runtime")
 	default:
