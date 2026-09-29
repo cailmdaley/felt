@@ -374,7 +374,6 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		}
 	}
 
-	const restartRepair = "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
 	socketClass := hostClass(h.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()
 	portOwnerMismatch := ev.daemonPortOwner != nil && !ev.daemonPortOwner.IsCaller
 	if ev.daemonPortOwner != nil {
@@ -495,7 +494,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 			"restart the daemon so it binds the resolved listener")
 	}
 	if socketClass && strings.HasPrefix(ev.daemonListen, "tcp://") && !gatedDaemonTCP {
-		mismatch(fmt.Sprintf("the running daemon reports a TCP listener %s on a %s host", ev.daemonListen, h.Class), restartRepair)
+		mismatch(fmt.Sprintf("the running daemon reports a TCP listener %s on a %s host", ev.daemonListen, h.Class), listenerRepair("daemon"))
 	}
 
 	if hostClass(h.Class).usesSocket() {
@@ -906,18 +905,17 @@ func parseTCPEndpoint(endpoint string) (string, int, error) {
 	return ip.String(), port, nil
 }
 
+// readProcTCP returns the LISTEN rows of /proc/net/tcp{,6}.
 func readProcTCP(procRoot string) ([]procTCPRow, error) {
 	rows, err := readProcTCPRows(procRoot)
 	if err != nil {
 		return nil, err
 	}
-	var listeners []procTCPRow
-	for _, row := range rows {
-		if row.State == "0A" {
-			listeners = append(listeners, row)
-		}
-	}
-	return listeners, nil
+	return listeningRows(rows), nil
+}
+
+func listeningRows(rows []procTCPRow) []procTCPRow {
+	return slices.DeleteFunc(rows, func(row procTCPRow) bool { return row.State != "0A" })
 }
 
 func readProcTCPRows(procRoot string) ([]procTCPRow, error) {
@@ -947,8 +945,8 @@ type procTCPRow struct {
 	Inode         string
 }
 
-// parseProcNetTCP reads rows from /proc/net/tcp or tcp6. Addresses are hex in
-// host byte order, one 32-bit word at a time.
+// parseProcNetTCPRows reads rows from /proc/net/tcp or tcp6. Addresses are hex
+// in host byte order, one 32-bit word at a time.
 func parseProcNetTCPRows(data string) []procTCPRow {
 	var rows []procTCPRow
 	sc := bufio.NewScanner(strings.NewReader(data))
@@ -994,17 +992,6 @@ func parseProcEndpoint(endpoint string) (string, int, bool) {
 		address = v4
 	}
 	return address.String(), int(port), true
-}
-
-// parseProcNetTCP retains the LISTEN-only contract used by listener evidence.
-func parseProcNetTCP(data string) []procTCPRow {
-	var listeners []procTCPRow
-	for _, row := range parseProcNetTCPRows(data) {
-		if row.State == "0A" {
-			listeners = append(listeners, row)
-		}
-	}
-	return listeners
 }
 
 func decodeProcAddr(h string) string {

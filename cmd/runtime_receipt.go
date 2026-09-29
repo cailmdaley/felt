@@ -234,28 +234,19 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
 	}
-	applyTmuxServerRepair(&r)
+	if r.TmuxServer != nil {
+		foldComponentRepair(&r, r.TmuxServer.Status, r.TmuxServer.Repair)
+	}
 	foldComponentRepair(&r, r.Host.Status, r.Host.Repair)
 	return r
 }
 
-// applyTmuxServerRepair folds the tmux-server remedy into the receipt's
-// top-level repair line. A daemon-forked tmux server has a remedy nobody would
-// guess from the generic repair line, so it names itself — but it must never
-// DISPLACE another component's repair: a missing felt and a mis-rooted tmux
-// server are independent problems and the human needs both strings. The
-// generation repair is the one exception that wins outright; a wrong install is
-// more fundamental than a wrongly-rooted server.
-func applyTmuxServerRepair(r *RuntimeReceipt) {
-	if r.TmuxServer != nil {
-		foldComponentRepair(r, r.TmuxServer.Status, r.TmuxServer.Repair)
-	}
-}
-
-// foldComponentRepair folds one component's specific remedy into the
-// top-level repair line when that component shares the receipt's status. It
-// replaces an empty or generic line, is appended to another component's
-// specific one, and yields to a generation repair.
+// foldComponentRepair folds one component's specific remedy (a daemon-forked
+// tmux server, a host finding) into the top-level repair line when that
+// component shares the receipt's status. It replaces an empty or generic
+// line, is appended to another component's specific one so independent
+// problems both reach the human, and yields to a generation repair, since a
+// wrong install is more fundamental than anything else here.
 func foldComponentRepair(r *RuntimeReceipt, status receiptStatus, repair string) {
 	if status == receiptHealthy || status != r.Status || repair == "" {
 		return
@@ -802,8 +793,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 		return d
 	}
 	if response.Ready != nil && !*response.Ready {
-		d.Status = receiptBooting
-		d.Repair = "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true"
+		d.Status, d.Repair = receiptBooting, receiptRepair(receiptBooting)
 		return d
 	}
 	if len(response.Contract.Expected) == 0 || len(response.Contract.Observed) == 0 {
@@ -851,7 +841,7 @@ func receiptJSONValue(raw json.RawMessage) any {
 }
 
 // collectGenerationReceipt compares the marker in the active promoted
-// source with every enabled harness cache. Legacy installs without markers are
+// source with every enabled harness cache. An install without markers is
 // reported as partial and repaired by rerunning setup; once either side has a
 // marker, both sides must be present, internally valid, and agree.
 func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) ReceiptGenerationReceipt {

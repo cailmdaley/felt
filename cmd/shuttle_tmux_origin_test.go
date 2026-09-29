@@ -247,7 +247,7 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 			Generation: ReceiptGenerationReceipt{Status: receiptHealthy},
 			TmuxServer: tmuxRec,
 		}
-		applyTmuxServerRepair(&r)
+		foldComponentRepair(&r, tmuxRec.Status, tmuxRec.Repair)
 		if !strings.Contains(r.Repair, "reinstall the felt executable") {
 			t.Fatalf("dropped the other component's repair: %q", r.Repair)
 		}
@@ -258,7 +258,7 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 
 	t.Run("fills an empty repair", func(t *testing.T) {
 		r := RuntimeReceipt{Status: receiptMismatch, Generation: ReceiptGenerationReceipt{Status: receiptHealthy}, TmuxServer: tmuxRec}
-		applyTmuxServerRepair(&r)
+		foldComponentRepair(&r, tmuxRec.Status, tmuxRec.Repair)
 		if r.Repair != tmuxOriginRepair {
 			t.Fatalf("repair = %q, want the tmux repair", r.Repair)
 		}
@@ -271,7 +271,7 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 			Generation: ReceiptGenerationReceipt{Status: receiptMismatch, Repair: "rebuild the install"},
 			TmuxServer: tmuxRec,
 		}
-		applyTmuxServerRepair(&r)
+		foldComponentRepair(&r, tmuxRec.Status, tmuxRec.Repair)
 		if r.Repair != "rebuild the install" {
 			t.Fatalf("repair = %q, want the generation repair untouched", r.Repair)
 		}
