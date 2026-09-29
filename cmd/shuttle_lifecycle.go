@@ -14,22 +14,21 @@ import (
 )
 
 // The lifecycle write verbs — pause/resume/reopen/close/set-outcome/accept/
-// set-model/set-agent/uninstall — reimplemented on felt's own data model. A
-// fiber's lifecycle is felt-native: status (the sole dispatch gate) is f.Status,
-// the human verdict is the top-level `tempered` ExtraField, closed-at is
-// f.ClosedAt; only set-model/set-agent touch the shuttle: block, and they do it
+// set-model/set-agent/reshape/uninstall. A fiber's lifecycle is felt-native:
+// status (the sole dispatch gate) is f.Status, the human verdict is the
+// top-level `tempered` ExtraField, closed-at is f.ClosedAt; only the config
+// verbs (set-model/set-agent/reshape) touch the shuttle: block, and they do it
 // surgically (SetShuttleField / SetShuttleNodeField) so the daemon-owned runtime
 // keys ride through untouched. Every write passes the ownership guard. resume and
 // accept take a soft hop through the daemon (atomic re-arm against its poll
-// cycle) with a correct local-write fallback when it is down. Ported faithfully
-// from shuttle-ctl's cmd/shuttle/lifecycle.go.
+// cycle) with a correct local-write fallback when it is down.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
 // write verb: a full read (body preserved for the re-serialize), a required
 // shuttle: block, and the ownership guard. Returns the fiber, its storage, the
 // typed block, and an unlock func the caller MUST defer immediately (before any
-// other return) so the fiber's cross-process lock (see internal/felt/lock.go,
-// F4) is held for the caller's entire read-modify-write cycle and released
+// other return) so the fiber's cross-process lock (see internal/felt/lock.go)
+// is held for the caller's entire read-modify-write cycle and released
 // exactly once no matter which return path fires.
 //
 // missingBlockHint is appended parenthetically to the no-block error: the
@@ -45,12 +44,6 @@ import (
 // lookup and the lock. That reload is the "acquire lock -> read" half of the
 // acquire/read/modify/write/release cycle this function starts on behalf of
 // every lifecycle verb.
-//
-// C1: previously took an explicit own-host override for the daemon-shelled
-// mark-runtime/reopen verbs (`resolveOwnedShuttleFiberAs`), so the ownership
-// guard never round-tripped back to the daemon it was being shelled from.
-// Post-S1, `resolveOwnHost` (see ensureOwnedHere) is pure local state — no
-// round-trip to guard against — so every caller now takes this same path.
 //
 // The returned ref carries where the fiber turned out to live: a shuttle verb
 // crosses the view boundary like rm and edit do, and every verb appends
@@ -83,8 +76,8 @@ func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt
 	return f, st, block, ref, unlock, nil
 }
 
-// lockAndReloadFiber acquires f.ID's cross-process advisory lock (F4,
-// internal/felt/lock.go) and re-reads it fresh from disk, so a resolver that
+// lockAndReloadFiber acquires f.ID's cross-process advisory lock
+// (internal/felt/lock.go) and re-reads it fresh from disk, so a resolver that
 // already did an unlocked read to match a query doesn't hand its caller a copy
 // that a concurrent writer could have raced between that read and lock
 // acquisition. On any error the lock (if acquired) is released before
@@ -125,11 +118,9 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 		defer unlock()
 
 		statusBefore := f.Status
-		f.Status = felt.StatusOpen
-		if err := setTempered(f, nil); err != nil {
+		if err := unclose(f, felt.StatusOpen); err != nil {
 			return err
 		}
-		clearClosedAt(f)
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
@@ -145,8 +136,6 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			return nil
 		}
 
-		// Dual-recognition: kill whichever session form is live (a worker launched
-		// before the uid-keyed cutover carries the legacy name).
 		session, _ := liveWorkerSession(f)
 		if session == "" {
 			fmt.Printf("  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
@@ -216,11 +205,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			} else if !isLifecycleTransportError(err) {
 				return err
 			}
-			f.Status = felt.StatusActive
-			if err := setTempered(f, nil); err != nil {
+			if err := unclose(f, felt.StatusActive); err != nil {
 				return err
 			}
-			clearClosedAt(f)
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
@@ -396,11 +383,9 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			return err
 		}
 		statusBefore := f.Status
-		f.Status = status
-		if err := setTempered(f, nil); err != nil {
+		if err := unclose(f, status); err != nil {
 			return err
 		}
-		clearClosedAt(f)
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
@@ -523,11 +508,9 @@ falls back to a local document write when the daemon is down.`,
 			} else if !isLifecycleTransportError(err) {
 				return err
 			}
-			f.Status = felt.StatusOpen
-			if err := setTempered(f, nil); err != nil {
+			if err := unclose(f, felt.StatusOpen); err != nil {
 				return err
 			}
-			clearClosedAt(f)
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
@@ -563,11 +546,9 @@ falls back to a local document write when the daemon is down.`,
 		if err != nil {
 			return fmt.Errorf("computing next occurrence: %w", err)
 		}
-		f.Status = felt.StatusActive
-		if err := setTempered(f, nil); err != nil {
+		if err := unclose(f, felt.StatusActive); err != nil {
 			return err
 		}
-		clearClosedAt(f)
 		if !acceptKeepOutcome {
 			f.Outcome = ""
 		}
@@ -765,14 +746,9 @@ var (
 	reshapeTZ       string
 )
 
-// reshape is the surgical setter for `kind` — the one field on the shuttle:
-// block that had no set-* verb of its own. Without it, changing a role's kind
-// meant routing through a CREATE verb (the since-removed install/repeat/pin
-// --reshape flag), which
-// rebuilds the whole block from scratch: re-resolving project_dir and host,
-// echoing agent, and (historically) settling status as a side effect. That
-// indirection was a real bug source — a role in Awaiting review could not be
-// re-shaped because armed-install refuses closed fibers. Here kind (and, for a
+// reshape is the surgical setter for `kind`. The create verbs rebuild the
+// whole block (re-resolving project_dir and host) and refuse a closed fiber,
+// so they cannot re-shape a role in Awaiting review; here kind (and, for a
 // standing role, the schedule) is set exactly the way set-model sets agent:
 // f.SetShuttleField on the live node, so the daemon-owned runtime: keys ride
 // through and nothing else on the block or the fiber is disturbed.
@@ -953,8 +929,7 @@ and a live worker is left running.`,
 	},
 }
 
-// registerShuttleLifecycleFlags binds the lifecycle verbs' flags.
-func registerShuttleLifecycleFlags() {
+func init() {
 	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none)")
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
@@ -967,10 +942,6 @@ func registerShuttleLifecycleFlags() {
 	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
 	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
-}
-
-func init() {
-	registerShuttleLifecycleFlags()
 
 	shuttleCmd.AddCommand(pauseCmd)
 	shuttleCmd.AddCommand(resumeCmd)

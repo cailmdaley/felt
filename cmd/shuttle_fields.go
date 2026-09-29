@@ -13,16 +13,15 @@ import (
 // felt-native field helpers shared by the shuttle write verbs. A fiber's
 // lifecycle state lives in felt-native fields, NOT in the shuttle: block: status
 // (the sole dispatch gate) is f.Status, closed-at is f.ClosedAt, and the human
-// verdict `tempered` is a top-level ExtraField. These helpers mirror shuttle-ctl's
-// FiberFile setters onto felt's data model so the ported verbs read/write the
-// same fields the board and daemon already interpret.
+// verdict `tempered` is a top-level ExtraField — the fields the board and the
+// daemon interpret.
 
 // shuttleTemperedKey is the top-level frontmatter key holding the human review
 // verdict (true=tempered, false=discarded, absent=awaiting review).
 const shuttleTemperedKey = "tempered"
 
 // readTempered returns the fiber's tempered verdict: a *bool that is nil when the
-// key is absent (awaiting review), matching shuttle-ctl's FiberFile.Tempered().
+// key is absent (awaiting review).
 func readTempered(f *felt.Felt) *bool {
 	node, ok := f.ExtraFields[shuttleTemperedKey]
 	if !ok || node == nil || node.Kind != yaml.ScalarNode {
@@ -45,14 +44,16 @@ func setTempered(f *felt.Felt, value *bool) error {
 	return f.SetExtraField(shuttleTemperedKey, *value)
 }
 
-// clearClosedAt drops the native closed-at field (a fiber returning to
-// open/active is no longer closed).
-func clearClosedAt(f *felt.Felt) {
+// unclose moves a fiber to status (open or active), clearing the review
+// verdict and closed-at: the card leaves Awaiting review entirely.
+func unclose(f *felt.Felt, status string) error {
+	f.Status = status
 	f.ClosedAt = nil
+	return setTempered(f, nil)
 }
 
-// setClosedAtIfMissing stamps closed-at = now only when it is absent, matching
-// shuttle-ctl: re-closing a fiber preserves the original close time.
+// setClosedAtIfMissing stamps closed-at = now only when it is absent:
+// re-closing a fiber preserves the original close time.
 func setClosedAtIfMissing(f *felt.Felt) {
 	if f.ClosedAt == nil {
 		now := time.Now().UTC()
