@@ -48,7 +48,7 @@ felt shuttle ps                             # live workers
 felt shuttle snapshot                       # the daemon's state
 ```
 
-The daemon acts on each change at its next poll. `accept` and `resume` go through the owning daemon when it answers (`--local` writes here), and both keep the outcome: the last run's digest stays the card's headline until the next run writes its own.
+The daemon acts on each change at its next poll. Lifecycle verbs, from `reshape` to `uninstall`, work from any host in the fleet: for a fiber another host owns, they go through the owner's daemon, as the board does. `accept` and `resume` keep the outcome, so the last run's digest stays the card's headline until the next run writes its own.
 
 ## Claiming a fiber into your session
 
@@ -83,11 +83,7 @@ Reach runs one way: a hub that lists a spoke sees the spoke's cards and sessions
 To talk back from a spoke, register the hub with `felt shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`.
 On a host running userspace `tailscaled` that also needs an outbound proxy, which opens an unauthenticated gateway into the whole tailnet: set it up only on a single-user hub, never on a shared login node (the installation guide's "Tailscale as fleet transport" has the recipe).
 
-`felt shuttle reopen <fiber>` starts a worker on the fiber's own host when that host is a configured remote.
-The CLI sends the request through the local daemon, which uses the same owner routing as the board.
-`felt shuttle dispatch <fiber>` and board-supported lifecycle verbs such as `pause`, `resume`, `close`, `accept`, `set-agent`, `set-model`, `set-outcome`, `reshape`, and `uninstall` use that route too.
-On remote `reopen` and on `dispatch`, `--message <text>` or `--message-file <path>` passes a launch directive as the worker's From User prompt.
-If the local daemon is unreachable or the owner is missing from `remotes.json`, the CLI refuses to write the hub's Git mirror and gives the reason plus a command to run on the owner.
+From a hub, `felt shuttle reopen <fiber> --message "<directive>"` starts a worker on the fiber's own host, with the directive as its From User; the other lifecycle verbs reach remote fibers the same way.
 
 Cards from a remote host reach the hub's board over this transport, not through git.
 If a remote card is missing, debug the tunnel and the store registration; pushing the store won't make it appear.

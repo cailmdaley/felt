@@ -94,19 +94,17 @@ Only the human sets `tempered`. Leave the shuttle block in place when you close;
 
 ## Other sessions and the human
 
-`felt shuttle sessions --json` lists conversations across the hosts and harnesses this machine knows about, with `fiber` when the host's session ledger records the pairing; `felt shuttle sessions <fiber>` shows a fiber's session history with each row's canonical address. `felt shuttle message` takes that address, a unique native session ID, or a fiber path, slug, or UID with a recorded worker. A fiber resolves to the worker in its newest session-ledger row, which the owning host writes. Resolution fails closed: a fiber needs one exact match across configured stores and a ledger row, and an ambiguous session ID lists its candidate addresses; pass an explicit address instead.
-
 ```bash
-felt shuttle message <address> "Please investigate this"
-felt shuttle message <address> "Background for later" --context-only
-felt shuttle message <address> "Results attached" --attach results.csv
+felt shuttle sessions --json                        # conversations across the fleet, with addresses
+felt shuttle message <target> "Please investigate this"
+felt shuttle message <target> "Background for later" --context-only
+felt shuttle message <target> "Results attached" --attach results.csv
+felt shuttle reopen <fiber> --message "Pick up X"     # start a worker on the fiber's own host
 ```
 
-A plain message starts a turn or steers one in progress; `--context-only` arrives at the next natural pause without asking for a turn. `--file <path>` sends multiline text, and `--from` labels you when detection fails. felt prints `sending <message-id> to <resolved address>` to stderr before delivery. The receiver needs a live, supported integration; shuttle won't bypass an unavailable one or a pending approval. Receipts report observed delivery stages, not completed work: for Claude, `submitted` means native admission without a model reply, and `accepted` means a correlated assistant reply. If a call is interrupted, or you want to know whether a `queued`, `submitted`, or `unknown` receipt has advanced, retry the identical request with `--message-id <printed id>`: felt returns the stored receipt, rechecking a Claude transcript for later evidence, and never delivers twice. A fresh ID could repeat the work. Reach runs one way — this host sees only the hosts in its own fleet file (`felt shuttle remotes list`), so the hub that dispatched you may be out of sight. Where you have no route, use the store: leave a note in the fiber and `felt sync --push`.
+A target is an address, a session ID, or a fiber, meaning its current worker. A plain message starts or steers a turn; `--context-only` waits for the receiver's next pause. The receipt says how far delivery got (`accepted` means the receiver's model replied), never that the work is done. felt prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`felt shuttle remotes list`); without a route, leave a note in the fiber and `felt sync --push`.
 
-From any host in the fleet, `felt shuttle reopen <fiber>` starts a worker on the fiber's own host.
-
-To put a finished file in front of the human, use your harness's own file tool when it has one (Claude Code's `SendUserFile`); otherwise `felt shuttle send-file <path>...` puts it on the Board tab. Shuttle detects your session automatically; if it can't, pass `--session <native-id>`, and never invent one.
+To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `felt shuttle send-file <path>...` for the Board tab.
 
 ## Where to go next
 
