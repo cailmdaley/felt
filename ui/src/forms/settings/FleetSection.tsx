@@ -34,10 +34,11 @@
  * `--dry-run` — it reports both halves and touches nothing.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
 import { useSettingsDraft } from './SettingsDraftContext'
+import { ago as agoMs, useQuietPoll } from './live'
 import {
   loadFleet,
   removeRemote,
@@ -55,29 +56,11 @@ export interface FleetSectionProps {
   onChanged: () => void
 }
 
-/**
- * How often the open sheet re-reads the fleet.
- *
- * Slower than the board's own 15s, deliberately. This read is not free on the
- * far side: it shells `felt shuttle remotes list` on the host being looked at,
- * and that host can be a shared cluster login node where the Runner's own
- * moduledoc records a felt call taking ~11s under IO pressure. Half a minute
- * is still far inside the window where a staleness clock reads honestly, and
- * it is a third of the subprocesses. A hidden tab skips the tick entirely — a
- * sheet left open behind another window should cost the fleet nothing.
- */
-const FLEET_POLL_MS = 30_000
-
 /** "3m ago" / "2h ago" — a poll's age, which is what staleness is made of. */
 function ago(iso: string | null): string {
   if (!iso) return 'never'
   const then = Date.parse(iso)
-  if (Number.isNaN(then)) return 'unknown'
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (secs < 60) return `${secs}s ago`
-  if (secs < 3600) return `${Math.round(secs / 60)}m ago`
-  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`
-  return `${Math.round(secs / 86400)}d ago`
+  return Number.isNaN(then) ? 'unknown' : agoMs(then)
 }
 
 /** How this host reaches that one, in one line. */
@@ -115,10 +98,9 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
       .then((data) => {
         if (cancelled) return
         setFleet(data)
-        // Any successful read clears it, not only the timer's. A manual
-        // refresh that worked left the page insisting the ages were frozen
-        // for a further poll interval — which is itself a stale claim about
-        // staleness.
+        // Any successful read clears it, not only the timer's: a manual
+        // refresh that worked must not leave the page insisting the ages are
+        // frozen for a further poll interval.
         setDrifted(false)
       })
       .catch((err: Error) => {
@@ -130,7 +112,7 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
   }, [shuttleBase, host.origin, token])
 
   /**
-   * Keep the rows live while the sheet is open, on the board's own cadence.
+   * Keep the rows live while the sheet is open.
    *
    * Not a nicety. “answering · 4s ago” is computed from a fixed timestamp at
    * render, so without this the row would still read “4s ago” twenty minutes
@@ -138,32 +120,23 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
    * it stopped knowing about. The refetch is quiet: it replaces the rows on
    * success and leaves a failure, and whatever a button last said, alone,
    * because a poll landing mid-edit must not blank the page under you.
+   *
+   * A failed refetch is NOT swallowed: silence would leave every row asserting
+   * that freshness. The rows stay (the last good read is still the truest
+   * thing we have) and say they have stopped moving.
    */
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      // `busy` is read through a ref rather than a dependency: putting it in
-      // the deps restarted this timer on every button press, so a run of
-      // clicks could hold the refresh off indefinitely.
-      if (busyRef.current) return
-      if (document.hidden) return
+  useQuietPoll(
+    () => {
       loadFleet(shuttleBase, host)
         .then((data) => {
           setFleet(data)
           setDrifted(false)
         })
-        // A failed refetch must NOT be swallowed. Every row's "answering · 4s
-        // ago" is computed at render from a fixed stamp, so silence here is
-        // the page going on asserting a freshness it has stopped knowing
-        // about — verbatim the thing this timer was added to prevent. The rows
-        // stay (the last good read is still the truest thing we have) and say
-        // they have stopped moving.
         .catch(() => setDrifted(true))
-    }, FLEET_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [shuttleBase, host.origin])
-
-  const busyRef = useRef(busy)
-  busyRef.current = busy
+    },
+    busy,
+    `${shuttleBase}|${host.origin}`,
+  )
 
   const refresh = (): void => {
     setToken((n) => n + 1)

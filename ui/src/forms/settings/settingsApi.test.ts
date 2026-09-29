@@ -110,8 +110,6 @@ const local: SettingsHost = {
   isLocal: true,
   stale: false,
   nativeFolderPicker: true,
-  feltStores: [],
-  projects: [],
   expandedFeltStores: [],
   hubHost: 'laptop',
 }
@@ -186,20 +184,14 @@ describe('loadHosts', () => {
     expect(rows[0]).toMatchObject({ origin: '', isLocal: true, host: 'laptop' })
   })
 
-  it('carries each host’s own lists through untouched', async () => {
+  it('carries each host’s own flags and store expansion through untouched', async () => {
     const rows = await hosts()
     expect(rows[0]).toMatchObject({
       stale: false,
       nativeFolderPicker: true,
-      feltStores: ['/Users/x/loom'],
-      projects: ['/Users/x/dev/felt'],
       expandedFeltStores: ['/Users/x/loom', '/Users/x/loom/sub'],
     })
-    expect(rows[2]).toMatchObject({
-      stale: true,
-      feltStores: ['/home/x/loom'],
-      projects: ['/home/x/dev/cmbx'],
-    })
+    expect(rows[2]).toMatchObject({ stale: true })
   })
 
   it('leaves a remote’s missing expansion NULL rather than empty', async () => {

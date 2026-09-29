@@ -106,10 +106,6 @@ export interface SettingsHost {
    * caller offering the affordance for a remote should say so.
    */
   nativeFolderPicker: boolean
-  /** Its store registry and picker list, as the origins feed already carries
-   *  them, so the two list sections render before their own fetch lands. */
-  feltStores: string[]
-  projects: string[]
   /**
    * The store list AFTER symlinked substores are followed — what the daemon
    * actually enumerates. Local hosts only: a remote's origin block drops it,
@@ -377,9 +373,7 @@ interface OriginsResponse {
       display?: string
       stale?: boolean
       native_folder_picker?: boolean
-      felt_stores?: string[]
       expanded_felt_stores?: string[]
-      projects?: string[]
     }
   >
 }
@@ -387,10 +381,9 @@ interface OriginsResponse {
 /**
  * Every host the page can configure, local first, remotes alphabetical.
  *
- * Read off `GET /api/v1/felt-stores`, which is already the fleet's origins map
- * and carries each host's store registry and picker list with it — so the two
- * list sections have their data before they ask for it, and a stale remote
- * shows its last known lists rather than an empty page.
+ * Read off `GET /api/v1/felt-stores`, which is already the fleet's origins map,
+ * with each host's staleness, folder-dialog flag and (for the local host) its
+ * symlink-expanded store list.
  */
 export async function loadHosts(base: string): Promise<SettingsHost[]> {
   const data = await getJSON<OriginsResponse>(base, '/api/v1/felt-stores', '')
@@ -403,8 +396,6 @@ export async function loadHosts(base: string): Promise<SettingsHost[]> {
       isLocal,
       stale: origin.stale === true,
       nativeFolderPicker: origin.native_folder_picker === true,
-      feltStores: origin.felt_stores ?? [],
-      projects: origin.projects ?? [],
       expandedFeltStores: origin.expanded_felt_stores ?? null,
       hubHost: data.host,
     }
