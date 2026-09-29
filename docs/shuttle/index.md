@@ -70,7 +70,7 @@ Two state channels cross sessions. Keep them apart:
 | Channel | Fields | Who writes it |
 |---|---|---|
 | Handoff prose | `outcome:`, the body's `## Status` | The worker, rewritten every session |
-| Machine continuation | `shuttle.runtime.{session_uuid, dispatched_at, run_id, handed_off_at}` | The daemon at dispatch; the worker at clean exit |
+| Machine continuation | `shuttle.runtime.{session_uuid, dispatched_at, run_id, handed_off_at}` | The daemon at dispatch; the worker at clean exit; `accept`/`resume` when they re-arm a role |
 
 `handed_off_at` newer than `dispatched_at` marks a clean exit, so the next
 worker starts fresh. Otherwise the worker died dirty: a oneshot resumes the

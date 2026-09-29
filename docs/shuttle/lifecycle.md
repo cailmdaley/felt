@@ -6,7 +6,7 @@ accepts the result."
 ## The worker loop
 
 The daemon starts one worker per eligible fiber. A terminal worker is a tmux session named
-`<slug-leaf>-<uid>-shuttle` (legacy `<slug-leaf>-shuttle` for a fiber with no
+`<slug-leaf>-<uid>-shuttle` (`<slug-leaf>-shuttle` for a fiber with no
 ULID), running the agent CLI in `shuttle.project_dir`. `felt shuttle
 session-name <fiber>` prints the canonical name. It composes a deliberately thin
 prompt: the fiber id, the felt store path, an exit contract, and an optional
@@ -242,18 +242,20 @@ validates the schema, and writes to disk. The
 verb and flag.
 
 `bin/shuttle` drives daemon lifecycle. It is a shell shim around the daemon
-release: `start` launches it, and every verb below asks the running daemon over
-HTTP, so each one needs a daemon up. A checkout has the shim at `bin/shuttle`,
-a fetched install at `$SHUTTLE_HOME/bin/shuttle`.
+release: `start` launches it, `install-agent`/`uninstall-agent` manage the
+[keep-alive](installation.md#keep-alive), and the verbs below ask the running
+daemon over HTTP, so each one needs a daemon up. A checkout has the shim at
+`bin/shuttle`, a fetched install at `$SHUTTLE_HOME/bin/shuttle`.
 
 ```bash
-bin/shuttle status
-bin/shuttle snapshot
-bin/shuttle dispatch <fiber>
+bin/shuttle status            # state JSON; exit 2 when the daemon is down
 bin/shuttle release           # clear the boot quarantine
 bin/shuttle reset <remote>    # reset a remote's circuit breaker
 bin/shuttle version
 ```
+
+Asking the daemon for its state or for a dispatch is a `felt shuttle` verb:
+`felt shuttle snapshot`, `felt shuttle dispatch <fiber> [--ad-hoc]`.
 
 The daemon also speaks HTTP under `/api/v1`, in four groups: a **write plane**
 (`dispatch`, `transition`, `kill`, `lifecycle`, `felt-edit`, …), a **read

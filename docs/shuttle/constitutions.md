@@ -139,7 +139,9 @@ nothing. So no dispatch can silently consume a slot. The
 
 A standing role carries at most one unaccepted work product. While a run waits
 for review, scheduled runs do not fire and ad-hoc dispatch refuses. Accepting it
-(`felt shuttle accept`) re-arms the role and clears the outcome.
+(`felt shuttle accept`) re-arms the role for the schedule's next tick and
+keeps the outcome, which stays the card's headline until the next run writes
+its own.
 
 ### `pinned`
 
@@ -220,9 +222,10 @@ list the daemon evaluates.
   gate last, because that gate alone touches the filesystem. On macOS a stat
   inside a synced folder can raise a permission prompt nobody can grant.
 - **`host`** — the owning daemon's host id. A daemon dispatches a block if and
-  only if `block.host` equals its own id (`SHUTTLE_HOST`, else the file
-  `~/.shuttle/host`, else the system hostname — consulted once and then
-  written to that file, so the name cannot drift). shuttle offers no `"local"`
+  only if `block.host` equals its own id, which felt resolves (`felt shuttle
+  host`): `SHUTTLE_HOST`, else the file `~/.shuttle/host`, else the system
+  hostname — consulted once and then written to that file, so the name cannot
+  drift. shuttle offers no `"local"`
   default and no wildcard. An absent host leaves the fiber unowned and
   ineligible on every daemon. `install`, `repeat`, and `pin` stamp it by
   default.

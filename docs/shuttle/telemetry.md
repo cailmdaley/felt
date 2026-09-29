@@ -10,8 +10,9 @@ append-only JSONL files in the daemon's state directory.
 | `~/.shuttle/sessions.jsonl` | the daemon, at dispatch / claim / resume | one line per session: which fiber it belonged to |
 | `~/.shuttle/commits.jsonl` | the plugin's `PostToolUse` hook on `Bash` (`felt hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
 
-All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`), and each
-has its own override: `SHUTTLE_EVENTS_FILE`, `SHUTTLE_SESSIONS_FILE`,
+All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`; the value
+is trimmed and a leading `~` expands to your home), and each has its own
+override: `SHUTTLE_EVENTS_FILE`, `SHUTTLE_SESSIONS_FILE`,
 `SHUTTLE_COMMITS_FILE`.
 
 They are host-local by design. Every file records what happened on the machine
@@ -68,11 +69,11 @@ Nothing installs this — the daemon writes it itself, at each moment it
 certainly knows the pairing (`kind` names which: `dispatch`, `claim`, or
 `resume`).
 
-It exists because that pairing used to be *inferred*: read the tmux session
-name, pull the ULID out of it, hope the worker is still alive. The inference
-disappears the moment the session ends, so nothing downstream could answer
-"which sessions has this card had?" after the fact. The ledger makes the
-association structural, and the line outlives the session.
+The alternative is inference — read the tmux session name, pull the ULID out
+of it, hope the worker is still alive — and that disappears the moment the
+session ends, so nothing downstream could answer "which sessions has this card
+had?" after the fact. The ledger makes the association structural, and the
+line outlives the session.
 
 Everything on Chronicle is joined through it. A minute that does not
 resolve to a fiber the board carries is not drawn at all, so work started
@@ -150,10 +151,13 @@ A composite's validator adds each remote's cached copy of the feed.
 
 The `304` is a bandwidth saving, not a cost model. A validator over
 `events.jsonl` moves every few seconds on a busy host, so no route over it
-relies on one: `Shuttle.Activity.Follower` keeps the activity histogram and
-`Shuttle.SentFiles.Follower` the parsed sent-file events in memory, each
-reading only what has been appended since its last poll, which is what makes a
-request cost a `stat` and an in-memory read rather than a full re-stream.
+relies on one: `Shuttle.EventStream` reads `events.jsonl.1` and `events.jsonl`
+once at boot and holds three projections in memory — the activity fold, the
+sent-file events and each session's last event — then reads only what has been
+appended since its last poll, following a rotation by the file's inode. That is
+what makes a request cost a `stat` and an in-memory read rather than a full
+re-stream. A sent file therefore stays on the trail through one rotation and
+leaves it with the second.
 
-For the design behind the joins, see the [Architecture
-notes](https://github.com/cailmdaley/felt/blob/main/AGENTS.md).
+For the writer/reader contract behind the joins, see [The event stream and the
+ledgers — internals](../dev/event-stream.md).

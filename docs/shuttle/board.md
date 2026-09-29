@@ -23,9 +23,9 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 ## Desk — the kanban
 
-Four surfaces: a **Timeline** ribbon of scheduled launches, the **Now** board
-of cards that need something, a **Pinned** strip of perennial roles, and
-**Resting**, where snoozed work waits.
+Three surfaces: the **Now** board of cards that need something, a **Pinned**
+strip of perennial roles, and **Resting**, where snoozed work and standing
+roles between runs wait.
 
 ![The Desk: Drafts, In Flight and Awaiting Review columns, each card carrying a
 fiber's title, path, latest outcome and the agent assigned to it, with the
@@ -51,7 +51,7 @@ evaluates in this order:
 | Awaiting review | `closed`, `tempered` absent |
 | In flight | live tmux worker with a shuttle block — liveness wins over everything below |
 | Pinned | resting `kind: pinned` (`open` or `active`) |
-| Scheduled | `active` + `kind: standing` — placed on the timeline at next launch |
+| Scheduled | `active` + `kind: standing` — drawn in Resting, wearing its next launch |
 | In flight | `active`, other kinds |
 | Drafts | anything left, including `open` |
 
@@ -92,7 +92,8 @@ state. **Modal buttons** give you another worker on the same run.
 
 Drag-to-tempered acts by kind: on a standing role it accepts and re-arms, on a
 pinned role it accepts and re-parks to the strip, on a oneshot it writes the
-terminus. Only `accept` clears the outcome.
+terminus. The outcome stays: the last run's digest is the card's headline until
+the next run writes its own.
 
 Beyond the columns the Desk offers a fiber and file viewer, Stash and Capture
 dialogs, and Attach. Each card's panel folds a drawer under its title: a message

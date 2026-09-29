@@ -2,7 +2,7 @@
 
 A standing role is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
 
-This reference covers what is specific to standing roles. Board gestures, columns, and verbs are shared across kinds and live in [operating.md](operating.md), "Gestures by card state".
+This reference covers what is specific to standing roles. Board gestures, columns, and verbs are shared across kinds and live in [operating.md](operating.md).
 
 ---
 
@@ -12,8 +12,8 @@ Lifecycle is `status` + `tempered`, uniform across kinds.
 
 ```
                       ┌──────────────┐
-                      │ status:active │ ← armed; dispatches when cron.next(now) is due
-                      │  (in flight)  │
+                      │ status:active │ ← armed; dispatches when an occurrence is due
+                      │  (scheduled)  │
                       └──────┬───────┘
                              │
                   cron tick │  daemon dispatches
@@ -33,21 +33,23 @@ Lifecycle is `status` + `tempered`, uniform across kinds.
                   user accepts │  via drag or felt shuttle accept
                              ▼
                       ┌──────────────┐
-                      │ status:active │ ← re-armed; next run = cron.next(now)
-                      │  (in flight)  │
+                      │ status:active │ ← re-armed; next run = the schedule's next tick
+                      │  (scheduled)  │
                       └──────────────┘
 ```
 
 The `active → closed → active` document transition encodes "already ran this
-occurrence." Due-ness is computed `cron.next(now)` — there is no stored
-`next_due_at` gate, so a manual ad-hoc dispatch **cannot consume the next
+occurrence." Due-ness is computed from the cron against the role's last
+service (`shuttle.runtime.dispatched_at` or `handed_off_at`) — nothing due is
+stored, so a manual ad-hoc dispatch **cannot consume the next
 scheduled slot** (the slot is computed, never a stored timestamp a dispatch
 could spend). While a run awaits review (`status: closed` + untempered),
 scheduled runs do not fire and ad-hoc dispatch refuses — a standing role has
 at most one unaccepted work product.
 
-Two verbs, two scopes: **`felt shuttle accept` closes a run** (re-arms,
-clears the outcome); **`felt shuttle close` retires the responsibility** —
+Two verbs, two scopes: **`felt shuttle accept` closes a run** (re-arms and
+stamps `handed_off_at`, so the served occurrence never re-fires; the outcome
+is kept); **`felt shuttle close` retires the responsibility** —
 a verdict on the constitution, not on any single run (`reopen` brings a
 retired role back).
 
@@ -142,10 +144,12 @@ dispatch is gated by the `shuttle:` block, never a tag.
 it is the user's daily skim. A three-section template (Action needed /
 Upcoming / Worth noting) works well.
 
-**Read the outcome at start.** In normal scheduled/ad-hoc runs it is empty
-(accept cleared it). If a resume path carries a non-empty outcome, that is
-the still-active awaiting run you are continuing — not a second digest to
-stack on top.
+**Read the outcome at start.** Accept keeps it, so a fresh run finds the
+previous run's digest there: read it for continuity, then replace it with
+this run's own rather than stacking a second digest on top. On a resume it is
+the awaiting run you are continuing.
 
 **Resume of an awaiting run** (the modal, with a directive) is the
-"rerun this with this directive" path; it re-arms for immediate dispatch.
+"rerun this with this directive" path: it dispatches now, into the awaiting
+run's session. `felt shuttle resume` instead re-arms the role and concludes
+the run, so the next run comes at the schedule's next tick.

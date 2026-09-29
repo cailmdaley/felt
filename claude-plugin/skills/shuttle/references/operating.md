@@ -21,7 +21,7 @@ tmux owns the workers, so restarting the daemon never ends them; it re-adopts li
 The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` and whether a worker owns it:
 
 - **Drafts** — `status: open`.
-- **Scheduled** — an armed standing role between runs.
+- **Scheduled** — an armed standing role between runs, drawn in Resting with its next launch.
 - **Pinned** — a resting pinned role, waiting for a human to start it; once running, the skill's exits govern it.
 - **In flight** — a live worker or owned app conversation, or an armed oneshot, even one waiting on its dependencies.
 - **Awaiting review** — `status: closed` with no `tempered`, parked for the human.
@@ -37,8 +37,8 @@ felt shuttle pin     <fiber>                # pinned
 felt shuttle reshape <fiber> [kind]         # change kind or schedule in place
 felt shuttle set-agent <fiber> <agent-id>   # change the agent (--effort, --chrome)
 felt shuttle pause   <fiber>                # back to draft, schedule kept; kills a live worker unless --no-kill
-felt shuttle resume  <fiber>                # arm
-felt shuttle accept  <fiber>                # accept the pending run: standing re-arms, pinned re-parks to the strip
+felt shuttle resume  <fiber>                # arm; a standing role awaiting review re-arms for its next tick
+felt shuttle accept  <fiber>                # accept the run: standing re-arms for its next tick, pinned re-parks to the strip
 felt shuttle close   <fiber> [--tempered=true|false]
 felt shuttle reopen  <fiber> [--as-draft]   # requeue a closed fiber
 felt shuttle uninstall <fiber>              # remove the block (see below)
@@ -48,7 +48,7 @@ felt shuttle ps                             # live workers
 felt shuttle snapshot                       # the daemon's state
 ```
 
-The daemon acts on each change at its next poll. `accept` clears the outcome (unless `--keep-outcome`), since the next run should start with a fresh one.
+The daemon acts on each change at its next poll. `accept` and `resume` go through the owning daemon when it answers (`--local` writes here), and both keep the outcome: the last run's digest stays the card's headline until the next run writes its own.
 
 ## Claiming a fiber into your session
 

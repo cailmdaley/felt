@@ -23,7 +23,7 @@ Three things make it a cycle:
 - **the body's first paragraph**, read as the *intention* — what this stretch of
   time is for.
 
-The [Chronicle](board.md#day-week-chronicle-where-the-time-went) draws it as a
+The [Chronicle](board.md#chronicle-where-the-time-went) draws it as a
 named band over the day grid.
 
 ## Degenerate spans

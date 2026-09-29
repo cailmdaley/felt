@@ -688,7 +688,7 @@ without one is a store with no fibers, which the poller reads as empty rather
 than as an error.
 
 Everything in this section and the two below it is also reachable from the
-board's [settings sheet](board.md#settings--the-operator-files-on-any-host)
+board's [settings sheet](board.md#settings-the-operator-files-on-any-host)
 (`⌘,`), for any host in the fleet — which is how you configure a machine you
 have no shell on.
 
@@ -1122,10 +1122,12 @@ echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl fel
 ```
 
 The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
-renamed to `events.jsonl.1` and a fresh stream starts. The activity histogram
-is folded from both files, the rotated one first, and the daemon keeps that
-fold in memory and carries it across a rotation rather than re-reading. Only
-`events.jsonl.1` is kept; an older rotation is overwritten. Writers that find
+renamed to `events.jsonl.1` and a fresh stream starts. The daemon reads both
+files once at boot, the rotated one first, keeps what it derives from them in
+memory — activity, the sent-files trail, each session's last event — and
+carries that across a rotation rather than re-reading. Only `events.jsonl.1` is
+kept; an older rotation is overwritten, so a sent file leaves the trail with
+the second rotation after it. Writers that find
 the stream full at the same moment serialize the rename on a flock of
 `events.jsonl.lock`, so it rotates once. A `toolInput` over 8 KiB is trimmed to its
 file paths plus `truncated: true`, so a `Write` of a large file does not park
@@ -1209,24 +1211,24 @@ bin/shuttle release
 gates by hand on the fiber's `shuttle:` block. All three fail quietly, by simply
 not dispatching. `host` is strict: absent or empty leaves the fiber unowned and
 ineligible on *every* daemon. shuttle offers no `"local"` default and no
-wildcard. The host id comes from `SHUTTLE_HOST`, else the file
-`~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`), else the system
-hostname. For the full ordered predicate list the daemon evaluates, see
-[Dispatch eligibility](lifecycle.md#dispatch-eligibility).
+wildcard. The host id is what `felt shuttle host` reports: `SHUTTLE_HOST`,
+else the file `~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`),
+else the system hostname. For the full ordered predicate list the daemon
+evaluates, see [Dispatch eligibility](lifecycle.md#dispatch-eligibility).
 
-**`~/.shuttle/host` is the machine's name, and it is a file for a reason.** The
-system hostname is consulted exactly once: the first CLI command or daemon boot
-that needs an identity and finds none normalizes it (lowercased, cut at the
-first `.`) and writes it to `~/.shuttle/host`; everything afterwards reads the
-file. That fixes a name that would otherwise drift — DHCP renames a laptop
-mid-session, and the CLI and the daemon read the hostname through different
-runtimes that disagree about the DNS suffix. A drifted name is silent: fibers
-armed under one spelling are invisible to a daemon calling itself the other. To
-give a host a friendlier name, edit that file and restart the daemon. The file
-changes what *new* stamps say, not what old ones already say, so also set
-`host:` on any already-armed fiber to the new name — editing the block by hand
-is safe now that both the CLI and the daemon read their own identity from the
-same file.
+**`~/.shuttle/host` is the machine's name, and it is a file for a reason.**
+Only felt resolves the host id. The system hostname is consulted once: `felt
+shuttle host seed` — which `shuttle install-agent` runs — or the first CLI
+command that needs an identity and finds none normalizes it (lowercased, cut
+at the first `.`) and writes it to `~/.shuttle/host`; everything afterwards
+reads the file. The daemon takes `SHUTTLE_HOST` or asks `felt shuttle host
+--json` once at boot, and refuses to boot if felt cannot answer. That fixes a
+name that would otherwise drift when DHCP renames a laptop mid-session. A
+drifted name is silent: fibers armed under one spelling are invisible to a
+daemon calling itself the other. To give a host a friendlier name, edit that
+file and restart the daemon. The file changes what *new* stamps say, not what
+old ones already say, so also set `host:` on any already-armed fiber to the new
+name.
 
 **Every built-in agent assumes its CLI is installed.** The shipped records cover
 the configured Claude, Codex, and Pi fleet, with `claude-opus` as the
