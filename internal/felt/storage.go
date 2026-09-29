@@ -535,7 +535,8 @@ func (s *Storage) Read(id string) (*Felt, error) {
 // FindMetadataInScope returns the first felt matching the query using lexical
 // scoped resolution rooted at scopeID.
 func (s *Storage) FindMetadataInScope(scopeID, query string) (*Felt, error) {
-	return s.findWithModeAndScope(scopeID, query, ParseMetadataOnly)
+	f, _, err := s.find(scopeID, query, ParseMetadataOnly)
+	return f, err
 }
 
 // FindMetadataWithoutGuessing is FindMetadataInScope for commands that delete
@@ -879,7 +880,7 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 // relative to a scope stays relative to that scope, and one written from the
 // enclosing store's namespace stays in it. Failing that, it is the full id.
 func rewriteMovedRef(before, after *scopedIDResolver, sourceOld, sourceNew, target, oldID, newID string) (string, bool) {
-	target = cleanLookupQuery(target)
+	target = cleanLookupID(target)
 	resolved, ok := before.ResolvePath(sourceOld, target)
 	if !ok {
 		return "", false
@@ -1348,19 +1349,14 @@ func isEvictedFileError(err error) bool {
 // FindInScope returns the first felt matching the query using lexical scoped
 // resolution rooted at scopeID.
 func (s *Storage) FindInScope(scopeID, query string) (*Felt, error) {
-	return s.findWithModeAndScope(scopeID, query, ParseFull)
-}
-
-// findWithModeAndScope is the single fiber-resolution implementation behind
-// FindInScope / FindMetadataInScope / FindExistingMetadataInScope: it tries
-// direct on-disk scope-chain candidates first, then falls back to a full-store
-// scan with slug and (UID-shaped) exact-UID matching.
-func (s *Storage) findWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, error) {
-	f, _, err := s.find(scopeID, query, mode)
+	f, _, err := s.find(scopeID, query, ParseFull)
 	return f, err
 }
 
-// find is findWithModeAndScope, also reporting which rule answered.
+// find is the single fiber-resolution implementation behind the Find* methods,
+// also reporting which rule answered: it tries direct on-disk scope-chain
+// candidates first, then falls back to a full-store scan with slug and
+// (UID-shaped) exact-UID matching.
 func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution, error) {
 	if f, ok, err := s.findExistingPathWithModeAndScope(scopeID, query, mode); ok || err != nil {
 		return f, resolvedExact, err
@@ -1371,8 +1367,8 @@ func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution
 		return nil, resolvedExact, err
 	}
 
-	query = cleanLookupQuery(query)
-	scopeID = cleanLookupScope(scopeID)
+	query = cleanLookupID(query)
+	scopeID = cleanLookupID(scopeID)
 
 	pathByID := make(map[string]string, len(files))
 	ids := make([]string, 0, len(files))
@@ -1430,11 +1426,11 @@ func (s *Storage) findByUIDWithMode(files []fiberFile, query string, mode ParseM
 }
 
 func (s *Storage) findExistingPathWithModeAndScope(scopeID, query string, mode ParseMode) (*Felt, bool, error) {
-	query = cleanLookupQuery(query)
+	query = cleanLookupID(query)
 	if query == "" || !validLookupID(query) {
 		return nil, false, nil
 	}
-	scopeID = cleanLookupScope(scopeID)
+	scopeID = cleanLookupID(scopeID)
 	if scopeID != "" && !validLookupID(scopeID) {
 		return nil, false, nil
 	}
@@ -1632,9 +1628,7 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 					continue
 				}
 				// Symlink to a regular file (e.g. a fiber .md symlinked in from
-				// elsewhere): fall through to the normal file handling below —
-				// filepath.WalkDir used to visit these too, since it doesn't
-				// distinguish a symlink-to-file from a real file once resolved.
+				// elsewhere): fall through to the normal file handling below.
 			}
 			if d.IsDir() {
 				if err := walkDirFn(fullPath, walkBaseResolved, idPrefix); err != nil {
@@ -1923,8 +1917,8 @@ func (r *scopedIDResolver) Resolve(scopeID, query string) (string, error) {
 //  3. Inferred by the enclosing store's own slug, suffix and prefix rules.
 //  4. The basename rescue for a stale path.
 func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, error) {
-	query = cleanLookupQuery(query)
-	scopeID = cleanLookupScope(scopeID)
+	query = cleanLookupID(query)
+	scopeID = cleanLookupID(scopeID)
 	if query == "" {
 		return "", resolvedExact, &NoFiberMatchError{Query: query}
 	}
@@ -1981,8 +1975,8 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 // fiber in the enclosing store answers nothing here either — it is a link out
 // of this view, and a move inside the view leaves it alone.
 func (r *scopedIDResolver) ResolvePath(scopeID, query string) (string, bool) {
-	query = cleanLookupQuery(query)
-	scopeID = cleanLookupScope(scopeID)
+	query = cleanLookupID(query)
+	scopeID = cleanLookupID(scopeID)
 	if query == "" {
 		return "", false
 	}
@@ -2101,17 +2095,11 @@ func (r *scopedIDResolver) inferInStore(scopeID, query string) (string, resoluti
 // uniqueSuffixMatch resolves a query naming the tail of exactly one id.
 //
 // The match must land on a SEGMENT boundary, and the whole query has to
-// participate — which is the correction of the first cut, where the fallback
-// took `path.Base(query)` and asked only whether that one word was unique.
-// Everything before the last slash was discarded, so a link written out in
-// full to a fiber in ANOTHER store — [[ai-futures/portolan/debug]] — quietly
-// became a link to whatever local fiber happened to be called `debug`. In the
-// felt project's own store that was the fiber doing the linking: it listed
-// itself among its references, and `felt check` called it healthy.
-//
-// A path that fails here is a path with no home in this store, and saying so
-// is the honest answer. The bare-slug case is unchanged: a one-segment query
-// is its own tail.
+// participate: matching only `path.Base(query)` would turn a link written out
+// in full to a fiber in ANOTHER store — [[ai-futures/portolan/debug]] — into a
+// link to whatever local fiber happens to be called `debug`. A path that fails
+// here is a path with no home in this store, and saying so is the honest
+// answer. A one-segment query is its own tail.
 func (r *scopedIDResolver) uniqueSuffixMatch(query string) (string, bool) {
 	// Any id ending in `query` ends in its basename, so the basename bucket is
 	// the candidate set — the loop only has to reject the near misses.
@@ -2155,32 +2143,21 @@ func (r *scopedIDResolver) basenamePrefixMatches(scopeID, query string) []string
 	return matches
 }
 
-func cleanLookupQuery(query string) string {
-	query = strings.TrimSpace(query)
-	if query == "" {
+// cleanLookupID trims and cleans a query or scope id; an empty or "." one is "".
+func cleanLookupID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return ""
 	}
-	query = path.Clean(query)
-	if query == "." {
+	id = path.Clean(id)
+	if id == "." {
 		return ""
 	}
-	return query
-}
-
-func cleanLookupScope(scopeID string) string {
-	scopeID = strings.TrimSpace(scopeID)
-	if scopeID == "" {
-		return ""
-	}
-	scopeID = path.Clean(scopeID)
-	if scopeID == "." {
-		return ""
-	}
-	return scopeID
+	return id
 }
 
 func scopeChain(scopeID string) []string {
-	scopeID = cleanLookupScope(scopeID)
+	scopeID = cleanLookupID(scopeID)
 	if scopeID == "" {
 		return []string{""}
 	}

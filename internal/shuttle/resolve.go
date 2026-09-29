@@ -24,8 +24,7 @@ type ResolvedAgent struct {
 // Resolved is the resolved view of a shuttle: block — what felt emits additively
 // under shuttle.resolved in `felt show -j` / `felt ls --json`. The daemon reads
 // this instead of re-resolving the agent name and re-parsing cron itself; the
-// flat config/runtime fields beside it stay the source of truth and are
-// unchanged, so a daemon that ignores `resolved` (Stage 2) keeps working.
+// flat config/runtime fields beside it stay the source of truth.
 type Resolved struct {
 	Agent *ResolvedAgent `json:"agent,omitempty"`
 	// NextDue is the next occurrence strictly after now; PrevDue is the most

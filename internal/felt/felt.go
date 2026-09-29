@@ -118,10 +118,8 @@ type Felt struct {
 
 // MarshalJSON implements custom JSON marshaling for Felt. The default behavior
 // (omitting ExtraFields entirely via json:"-") would lose tool-owned
-// frontmatter namespaces such as `shuttle:`, `tempered:`, `depends_on:`, etc.
-// — the exact data the round-trip-the-bytes contract promises to preserve.
-// Without these, every JSON consumer would be forced into compensating
-// reads via `--field <key>`, which has bitten downstream tools in the past.
+// frontmatter namespaces such as `shuttle:` and `tempered:` — the exact data
+// the round-trip-the-bytes contract promises to preserve.
 //
 // We expand ExtraFields as flat top-level JSON keys, mirroring how they
 // appear in the YAML frontmatter. Each yaml.Node is decoded into a generic
@@ -454,16 +452,10 @@ const legacyFrontmatterTitleKey = "title"
 // derived from nativeFrontmatter's yaml tags plus the read-only `title` alias,
 // so it stays in lockstep with the parse/write field list.
 //
-// NOTE: all other top-level keys — including tool-owned namespaces like
-// `shuttle:` and domain schemas like `inputs:` / `decisions:` / `insights:` /
-// `tempered:` — round-trip unchanged via ExtraFields.
-//
-// NOTE: "depends-on" was previously listed here and silently absorbed at parse
-// time (without a corresponding struct field — net effect: a field shaped like
-// a dependency, dropped on read). It now lives in ExtraFields like any other
-// unknown key and round-trips through MarshalJSON. The migrate command's
-// depends-on stripping (in normalizeLegacyFrontmatter) is unaffected — it
-// operates directly on the raw YAML node, not on the parsed Felt.
+// All other top-level keys — tool-owned namespaces like `shuttle:`, domain
+// schemas like `inputs:` / `decisions:` / `insights:` / `tempered:`, and a
+// stray `depends-on:` (which `felt migrate` strips on the raw YAML node) —
+// round-trip unchanged via ExtraFields.
 var knownFrontmatterKeys = buildKnownFrontmatterKeys()
 
 func buildKnownFrontmatterKeys() map[string]struct{} {

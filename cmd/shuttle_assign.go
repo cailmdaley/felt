@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,7 +131,7 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 			return false, err
 		}
 		roleSlug, collaboratorSlug := path.Base(role.ID), path.Base(collaborator.ID)
-		if !containsString(assignment.Participants[roleSlug], collaboratorSlug) {
+		if !slices.Contains(assignment.Participants[roleSlug], collaboratorSlug) {
 			assignment.Participants[roleSlug] = append(assignment.Participants[roleSlug], collaboratorSlug)
 		}
 	}
@@ -387,15 +388,6 @@ func uniqueCollaboratorByPath(profiles []*felt.Felt, collaboratorPath string) (*
 func containsProfile(profiles []*felt.Felt, id string) bool {
 	for _, f := range profiles {
 		if f.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(values []string, value string) bool {
-	for _, existing := range values {
-		if existing == value {
 			return true
 		}
 	}

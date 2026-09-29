@@ -227,7 +227,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 		// local link gets, local twin or no.
 		if errors.Is(r.ResolveErr, ErrExternalReference) {
 			if ref, ok := AsExternalReference(r.ResolveErr); ok && ref.Inferred {
-				if local := resolver.byBase[path.Base(cleanLookupQuery(r.RawTarget))]; len(local) == 1 {
+				if local := resolver.byBase[path.Base(cleanLookupID(r.RawTarget))]; len(local) == 1 {
 					issues = append(issues, CheckIssue{
 						Level:   CheckLevelInfo,
 						FiberID: r.Source.ID,
