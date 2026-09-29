@@ -71,7 +71,7 @@ const sampleCompositeJSON = `{
 func TestCompositeRows_All(t *testing.T) {
 	c := &CompositeState{
 		Local: &Snapshot{
-			Eligible: []SnapshotEntry{{FiberID: "local/a", Agent: "claude-opus", State: "running", TmuxSession: "a-shuttle"}},
+			Eligible: []SnapshotEntry{{FiberID: "local/a", Agent: "claude-opus", State: "running", TmuxSession: "a-01KTHDNZS287ZSSG8X8V59XKWB-shuttle"}},
 			StandingRoles: []StandingRoleEntry{
 				{FiberID: "local/standing", State: "scheduled"},
 			},

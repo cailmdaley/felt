@@ -110,9 +110,10 @@ var sessionNameCmd = &cobra.Command{
 	Use:   "session-name <fiber>",
 	Short: "Print the canonical tmux session name for a fiber",
 	Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
-worker (<leaf>-<uid>-shuttle, or <leaf>-shuttle when the fiber has no intrinsic
-uid). It searches the -C / --felt-store store when set, otherwise every
-configured store, so it works from any directory.`,
+worker: <leaf>-<uid>-shuttle, keyed by the fiber's intrinsic id. A fiber
+without an id has no session name and the command fails. It searches the
+-C / --felt-store store when set, otherwise every configured store, so it
+works from any directory.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, err := shuttleAddressFiber(args[0])
@@ -120,6 +121,9 @@ configured store, so it works from any directory.`,
 			return err
 		}
 		session := shuttleTmuxSessionName(f.ID, f.UID)
+		if session == "" {
+			return errFiberWithoutUID(f.ID)
+		}
 		if jsonOutput {
 			// Emit the dispatch-canonical id (matches the daemon);
 			// the session name itself is leaf+uid keyed, so prefix-independent.
@@ -137,11 +141,9 @@ configured store, so it works from any directory.`,
 var attachCmd = &cobra.Command{
 	Use:   "attach <fiber>",
 	Short: "Attach to a running worker's tmux session",
-	Long: `Resolves the fiber to shuttle's canonical tmux session name and execs
-'tmux attach'. A worker may be live under either the uid-keyed or the
-leaf-only name; attach picks whichever exists, preferring the canonical form.
-Resolves the fiber from any directory, like session-name. Exits with a clear
-error if no session is live.`,
+	Long: `Resolves the fiber to its worker's tmux session name and execs
+'tmux attach'. Resolves the fiber from any directory, like session-name.
+Exits with a clear error if no session is live.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, err := shuttleAddressFiber(args[0])
@@ -149,9 +151,12 @@ error if no session is live.`,
 			return err
 		}
 
+		want := shuttleTmuxSessionName(f.ID, f.UID)
+		if want == "" {
+			return errFiberWithoutUID(f.ID)
+		}
 		session, _ := liveWorkerSession(f)
 		if session == "" {
-			want := shuttleTmuxSessionName(f.ID, f.UID)
 			return fmt.Errorf("no tmux session %q — fiber %s has no live worker\n(run 'felt shuttle ps' to list active workers)", want, args[0])
 		}
 

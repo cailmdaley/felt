@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -371,18 +370,23 @@ func TestEnsureOwnedHere_UnresolvableIdentityFailsLoud(t *testing.T) {
 	}
 }
 
-func TestShuttleTmuxSessionNames(t *testing.T) {
-	if got := shuttleTmuxSessionName("a/b/leaf", "01HXYZ"); got != "leaf-01HXYZ-shuttle" {
-		t.Fatalf("canonical name: got %q", got)
+func TestShuttleTmuxSessionName(t *testing.T) {
+	const uid = "01KTHDNZS287ZSSG8X8V59XKWB"
+	name := shuttleTmuxSessionName("a/b/leaf", uid)
+	if name != "leaf-"+uid+"-shuttle" {
+		t.Fatalf("session name: got %q", name)
 	}
-	if got := shuttleTmuxSessionName("a/b/leaf", ""); got != "leaf-shuttle" {
-		t.Fatalf("legacy name (empty uid): got %q", got)
+	if got := shuttleTmuxSessionName("a/b/leaf", ""); got != "" {
+		t.Fatalf("a fiber without a uid has no session name, got %q", got)
 	}
-	if got := shuttleTmuxSessionNames("leaf", "uid"); !reflect.DeepEqual(got, []string{"leaf-uid-shuttle", "leaf-shuttle"}) {
-		t.Fatalf("dual-recognition names: got %v", got)
+	// The name the CLI produces is exactly the name it recognizes.
+	if got := fiberUIDFromTmuxSession(name); got != uid {
+		t.Fatalf("parsed uid: got %q, want %q", got, uid)
 	}
-	if got := shuttleTmuxSessionNames("leaf", ""); !reflect.DeepEqual(got, []string{"leaf-shuttle"}) {
-		t.Fatalf("legacy-only names: got %v", got)
+	for _, notWorker := range []string{"leaf-shuttle", "leaf-01J-shuttle", "capture-deadbeef", "resume-" + uid, "leaf-" + uid} {
+		if isShuttleTmuxSessionName(notWorker) {
+			t.Fatalf("%q must not parse as a worker session", notWorker)
+		}
 	}
 }
 
