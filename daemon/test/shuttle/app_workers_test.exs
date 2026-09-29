@@ -791,7 +791,7 @@ defmodule Shuttle.AppWorkersTest do
 
     replacement = Poller.worker_status(poller, "tests/app")
     refute replacement.pid == original.pid
-    send(poller, {:worker_exited, "tests/app", original.pid, session, :normal_exit, false})
+    send(poller, {:worker_exited, "tests/app", original.pid, session, :normal_exit})
     assert %{pid: watcher, session: ^session} = Poller.worker_status(poller, "tests/app")
     assert watcher == replacement.pid
   end

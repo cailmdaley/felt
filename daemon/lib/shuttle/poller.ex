@@ -971,7 +971,7 @@ defmodule Shuttle.Poller do
   def handle_info({:poll_world, _poll_token, _result}, state), do: {:noreply, state}
   def handle_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
 
-  def handle_info({:worker_exited, fiber_id, watcher, session, _reason, _session_alive?}, state) do
+  def handle_info({:worker_exited, fiber_id, watcher, session, _reason}, state) do
     case running_worker(state, fiber_id) do
       %{pid: ^watcher, session: ^session} -> {:noreply, handle_worker_exit(state, fiber_id)}
       _ -> {:noreply, state}

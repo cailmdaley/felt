@@ -4346,7 +4346,7 @@ defmodule Shuttle.PollerTest do
     # Close the fiber
     MockRunner.set_fiber("tests/haiku-close", %{fiber | "status" => "closed"})
     MockRunner.remove_tmux_session(session)
-    send(poller, {:worker_exited, "tests/haiku-close", watcher, session, :normal_exit, false})
+    send(poller, {:worker_exited, "tests/haiku-close", watcher, session, :normal_exit})
 
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
@@ -6155,6 +6155,6 @@ defmodule Shuttle.PollerTest do
 
   defp notify_worker_exit(poller, fiber_id) do
     %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
-    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit, false})
+    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
   end
 end
