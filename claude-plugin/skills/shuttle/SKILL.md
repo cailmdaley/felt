@@ -104,7 +104,7 @@ felt shuttle reopen <fiber> --message "Pick up X"     # start a worker on the fi
 
 A target is an address, a session ID, or a fiber, meaning its current worker. A plain message starts or steers a turn; `--context-only` waits for the receiver's next pause. The receipt says how far delivery got (`accepted` means the receiver's model replied), never that the work is done. felt prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`felt shuttle remotes list`); without a route, leave a note in the fiber and `felt sync --push`.
 
-To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `felt shuttle send-file <path>...` for the Board tab.
+To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `felt shuttle send-file <path>...` for the Board tab. Images and links in a sent markdown file resolve relative to that file, or as absolute paths on the host that owns it; http(s) and `data:` URIs pass through. A sent HTML file must be self-contained (inline its CSS, scripts, and base64 plots), because its relative asset paths do not resolve.
 
 ## Where to go next
 
