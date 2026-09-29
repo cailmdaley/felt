@@ -31,10 +31,10 @@ func fiberLeaf(fiberID string) string {
 // shuttleTmuxSessionName is a worker's tmux session name: <leaf>-<uid>-shuttle.
 // The uid (the fiber's intrinsic ULID) makes it collision-free and rename-safe —
 // two fibers sharing a leaf do not collide, and renaming a fiber leaves the
-// running worker's session addressable. A fiber without a uid has no session
-// name (""): the daemon refuses to dispatch it.
+// running worker's session addressable. A fiber whose uid is missing or is not
+// a ULID has no session name (""): the daemon refuses to dispatch it.
 func shuttleTmuxSessionName(fiberID, uid string) string {
-	if uid == "" {
+	if !isSessionULID(uid) {
 		return ""
 	}
 	return fiberLeaf(fiberID) + "-" + uid + "-shuttle"
@@ -43,7 +43,7 @@ func shuttleTmuxSessionName(fiberID, uid string) string {
 // errFiberWithoutUID is the operator-facing error for a fiber that cannot have a
 // worker session because it carries no intrinsic id.
 func errFiberWithoutUID(fiberID string) error {
-	return fmt.Errorf("fiber %s has no intrinsic id, so it has no worker session name — run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter", fiberID)
+	return fmt.Errorf("fiber %s has no intrinsic ULID id, so it has no worker session name — run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter", fiberID)
 }
 
 // tmuxSessionExists / killTmuxSession are func vars so tests can stub tmux
@@ -60,6 +60,12 @@ var killTmuxSession = func(session string) error {
 // shuttleSessionULID matches the uid a worker session name embeds:
 // <leaf>-<ULID>-shuttle, Crockford base32 (no I, L, O, U).
 var shuttleSessionULID = regexp.MustCompile(`-([0-9A-HJKMNP-TV-Z]{26})-shuttle$`)
+
+// sessionULID is the uid shape a worker session can carry — the daemon's
+// Shuttle.ULID.valid?/1, character for character.
+var sessionULID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+
+func isSessionULID(uid string) bool { return sessionULID.MatchString(uid) }
 
 // fiberUIDFromTmuxSession returns the fiber uid embedded in a worker session
 // name, or "" when the name is not a shuttle worker's.

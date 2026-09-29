@@ -1164,8 +1164,10 @@ func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) erro
 }
 
 // BackfillIntrinsicIDs assigns an intrinsic ULID to every fiber missing one.
-// This is intentionally separate from Migrate: replicas must not run it
-// casually, or the same git-synced fiber can split into multiple identities.
+// Every fiber write also stamps a missing id (WriteFiberFile), so this sweep is
+// for fibers nothing has written since they were hand-made. Two replicas that
+// stamp the same id-less fiber before syncing mint different ids, which surfaces
+// as a git conflict on the `id:` line; sync first.
 func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, error) {
 	files, err := s.listFiberFiles()
 	if err != nil {

@@ -283,8 +283,8 @@ func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) st
 		own, _ := resolveOwnHost("")
 		var verdict string
 		switch {
-		case uid == "":
-			return "→ Armed, but the fiber has no intrinsic id — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter."
+		case !isSessionULID(uid):
+			return "→ Armed, but the fiber has no intrinsic id, or its id is not an uppercase ULID — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter."
 		case block.Host == "":
 			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `felt shuttle uninstall` then install / repeat / pin, which stamp this host."
 		case block.Host != own:
