@@ -87,7 +87,10 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
 - **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent, spawns
-  the `<leaf>-<uid>-shuttle` tmux session.
+  the `<leaf>-<uid>-shuttle` tmux session. That is the only worker name, and
+  `Shuttle.ULID.from_tmux/1` is its only parser: a fiber without a ULID `id:`
+  is refused with `{:uid_missing, message}`, a preflight refusal like the
+  others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
   Nothing due is stored: an armed (`active`, untempered) role is due when a
   cron occurrence has passed since it was last serviced — the later of

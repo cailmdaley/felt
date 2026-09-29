@@ -79,6 +79,13 @@ depends on your bash: 5.x reports `alias` and you get the alias-specific text;
 3.2, still the system bash on macOS, exits non-zero instead and you get the
 generic "did not resolve" text. Both refuse the dispatch.)
 
+**The card sits blocked with "has no intrinsic id".** A worker's tmux session
+is `<leaf>-<uid>-shuttle`, so a fiber whose frontmatter carries no `id:` (a
+file made by hand and never backfilled) has no worker name, and the daemon
+refuses it before anything else. Run `felt backfill-ids` in its store, or add
+an `id:` ULID by hand; any felt write to the fiber also stamps one. The refusal
+parks the fiber like the ones below, so a force-dispatch launches it at once.
+
 The same preflight refuses a fiber whose `project_dir` is not a directory on
 this host — a checkout that lives on another machine. The autonomous path
 already skipped those; this catches the force-dispatch path (Requeue,

@@ -6,9 +6,12 @@ accepts the result."
 ## The worker loop
 
 The daemon starts one worker per eligible fiber. A terminal worker is a tmux session named
-`<slug-leaf>-<uid>-shuttle` (`<slug-leaf>-shuttle` for a fiber with no
-ULID), running the agent CLI in `shuttle.project_dir`. `felt shuttle
-session-name <fiber>` prints the canonical name. It composes a deliberately thin
+`<slug-leaf>-<uid>-shuttle`, keyed by the fiber's intrinsic `id:` (a ULID),
+running the agent CLI in `shuttle.project_dir`. A fiber without an id has no
+worker name, so the daemon refuses to dispatch it and the board shows it
+blocked; `felt backfill-ids` gives every fiber in a store one, and every felt
+write stamps one on a fiber that lacks it. `felt shuttle session-name <fiber>`
+prints the name. The daemon composes a deliberately thin
 prompt: the fiber id, the felt store path, an exit contract, and an optional
 per-dispatch "From User" directive.
 
