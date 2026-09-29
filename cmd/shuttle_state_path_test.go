@@ -87,6 +87,32 @@ func TestShuttleHostJSON_ReportsTheResolvedDataDir(t *testing.T) {
 	}
 }
 
+// TestShuttleHostJSON_PrintsAmpersandPathsVerbatim: the shells pull data_dir
+// out with sed, not a JSON decoder, so '&' must not come out as &.
+func TestShuttleHostJSON_PrintsAmpersandPathsVerbatim(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "a&b<c>")
+	setHostEnv(t, filepath.Join(t.TempDir(), "absent.json"), nil, map[string]string{
+		"SHUTTLE_DATA_DIR": dataDir,
+		"SHUTTLE_HOST":     "fixture-host",
+	})
+	out, err := runCommand(t, t.TempDir(), "shuttle", "host", "--json")
+	if err != nil {
+		t.Fatalf("host --json: %v\n%s", err, out)
+	}
+	if want := `"data_dir": "` + dataDir + `"`; !strings.Contains(out, want) {
+		t.Fatalf("output lacks %s verbatim:\n%s", want, out)
+	}
+	var got struct {
+		DataDir string `json:"data_dir"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decoding %q: %v", out, err)
+	}
+	if got.DataDir != dataDir {
+		t.Fatalf("data_dir = %q, want %q", got.DataDir, dataDir)
+	}
+}
+
 // scriptFunction extracts `name() { ... }` from the shell script at path.
 func scriptFunction(t *testing.T, path, name string) string {
 	t.Helper()

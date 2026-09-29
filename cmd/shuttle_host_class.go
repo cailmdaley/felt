@@ -447,7 +447,12 @@ Examples:
 		}
 		s.ID = id
 		if jsonOutput {
-			return outputJSON(s)
+			// Shells scrape data_dir and listen out of this with sed, so a
+			// path's & < > print as themselves rather than &-style.
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			return enc.Encode(s)
 		}
 		fmt.Printf("id      %s (%s)\n", s.ID, source.describe())
 		fmt.Printf("class   %s (%s)\n", s.Class, describeHostSource(s.ClassSource, s.File))
