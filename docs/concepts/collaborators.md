@@ -12,7 +12,8 @@ collaboration:
 Role fibers live at `roles/<role>/`; collaborator fibers live at
 `roles/<role>/<collaborator>/`, named for the model that plays the role
 (`roles/vizier/fable`), so the next session of that model can find its own
-page. Model pages stay thin, voice and stance only; the role holds what the
+page. Collaborator pages give a model a stable identity to own its work by,
+and to reason about other models' work by. Model pages stay thin, voice and stance only; the role holds what the
 office knows. A role may carry a name that emerges from its first run, which
 passes to every holder and which any holder may decline with a note. `roles/` is fixed at the top level of the store; create profiles by path
 with `felt add roles/<role> "<Name>"` and `felt add roles/<role>/<model>
@@ -24,8 +25,10 @@ The roster names identities; it does not select a model or execution backend.
 Startup prompts name an actor only when the roster contains exactly one
 role/collaborator pair. With multiple entries, the worker reads the task's
 YAML directly and takes the collaborator named for its model. A task without a
-roster gets one from its worker: a fitting role from `roles/`, or a new one,
-with the worker as collaborator.
+roster needs none to proceed: its worker consults the relevant charters in
+`roles/` before substantive work, and assigns a roster (a fitting role, or a
+new one, with the worker as collaborator) when responsibility needs to persist
+across sessions.
 
 Keep specific notes in a collaborator's own fiber. Shared information belongs
 in the task or global role/project fibers. Optional task-local notes may live
