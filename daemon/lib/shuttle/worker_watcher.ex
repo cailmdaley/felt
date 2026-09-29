@@ -26,13 +26,14 @@ defmodule Shuttle.WorkerWatcher do
     * `:fiber_id` — required. The fiber being watched.
     * `:session` — required. The terminal session name or durable app worker reference.
     * `:uid` and `:felt_store` — the captured ownership identity used to recover an unloaded app thread.
-    * `:poller` — required. The pid of the Poller GenServer to notify on exit.
+    * `:poller` — required. The Poller to notify on exit: its registered name,
+      or a pid.
     * `:runner` — module implementing `Shuttle.Runner` behavior. Defaults to `Shuttle.Runner.Default`.
     * `:heartbeat_interval_ms` — interval between backend liveness checks. Default 5_000.
-    * `:max_consecutive_failures` — how many consecutive non-zero exits from
-      `tmux has-session` are tolerated before declaring the worker dead. Protects
-      against transient tmux hiccups (suspect 4 in ghost-workers bug). Default 3,
-      which means a truly dead session is detected within `3 × heartbeat_interval_ms`.
+    * `:max_consecutive_failures` — how many consecutive confirmed absences are
+      tolerated before declaring the worker dead, so a transient tmux hiccup
+      never reads as a death. Default 3, which means a truly dead session is
+      detected within `3 × heartbeat_interval_ms`.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -165,10 +166,7 @@ defmodule Shuttle.WorkerWatcher do
     # log so the watcher's exit notification isn't silently dropped.
     # See [[ai-futures/shuttle/finding-ghost-workers-stuck-running]].
     try do
-      send(
-        state.poller,
-        {:worker_exited, state.fiber_id, self(), state.session, reason, session_alive?(state)}
-      )
+      send(state.poller, {:worker_exited, state.fiber_id, self(), state.session, reason})
     rescue
       ArgumentError ->
         Logger.error(
@@ -178,10 +176,4 @@ defmodule Shuttle.WorkerWatcher do
         )
     end
   end
-
-  # Reported alongside the exit so the poller knows whether the tmux session is
-  # still up (a genuine death vs an in-flight teardown). `:unknown` counts as
-  # present here — the same uncertainty-is-presence rule the rest of the system
-  # uses, so a flaky check doesn't report a live worker as gone.
-  defp session_alive?(state), do: Shuttle.WorkerBackend.present?(state.runner, state.session)
 end

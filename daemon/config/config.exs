@@ -3,41 +3,31 @@ import Config
 # Attachment bytes belong in the receiver's file store, never request logs.
 config :phoenix, :filter_parameters, ["password", "attachments"]
 
-# NOTE: `Shuttle.Application.start/2` sets this again at runtime. That was
-# mandatory in the escript era — escript boot loaded no compile-time config, so
-# this line never reached the daemon at all. A release bakes the key into
-# releases/*/sys.config, so both paths now land on the same DB: this line covers
-# Mix/test contexts and the release, the runtime call covers every boot
-# regardless.
+# `Shuttle.Application.start/2` sets this again at runtime, so every boot path
+# lands on the same DB; this line covers Mix/test contexts and the release's
+# sys.config.
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
-config :shuttle,
-  # `:host` is intentionally left unset here — the key is read nowhere. Each
-  # daemon's identity resolves at runtime in
-  # `Shuttle.Poller.resolve_own_host_id/0`, which documents the chain; there is
-  # no app-config step and no `"local"` default, because a literal "local" is a
-  # no-op filter that lets remote and local daemons fight over the same fibers.
-  start_poller: true,
-  # `:boot_quarantine` is intentionally left unset here: the default (true —
-  # restart is not dispatch authority) lives in one place,
-  # Shuttle.Poller's @default_boot_quarantine. Set the key only to override
-  # (config/test.exs sets false so dispatch tests exercise the tick directly).
-  start_remote_registry: true,
-  # Sibling of the remote registry: polls each remote's owner-only `/fibers`
-  # feed and caches it for the local daemon's composite cross-host board. Kept
-  # separate so a slow/failing fiber feed never perturbs the health-probe
-  # recovery cascade. See Shuttle.RemoteFiberRegistry.
-  start_remote_fiber_registry: true
-
-# `:remotes` is intentionally left unset here — the same move `:host` makes
-# above, for the same reason. The remote fleet resolves at runtime through
-# `Shuttle.Remotes.configured/0`: application config when set, else the
-# operator's `~/.config/felt/remotes.json`, else none. An `unset` key is what
-# lets the file speak; a `remotes: []` default here would shadow it on every
-# host and silently reduce the hub to a local-only board.
+# The :shuttle keys below are deliberately left unset here:
 #
-# `[]` therefore means "explicitly no remotes" — which is exactly what
-# config/test.exs sets, so the suite never reaches a real fleet file.
+#   * `:host` — read nowhere. Each daemon's identity resolves at runtime in
+#     `Shuttle.Poller.resolve_own_host_id/0`, which documents the chain; there
+#     is no app-config step and no `"local"` default, because a literal
+#     "local" is a no-op filter that lets remote and local daemons fight over
+#     the same fibers.
+#   * `:boot_quarantine` — the default (true: restart is not dispatch
+#     authority) lives in Shuttle.Poller's @default_boot_quarantine. Set the
+#     key only to override (config/test.exs sets false so dispatch tests
+#     exercise the tick directly).
+#   * `:remotes` — the remote fleet resolves at runtime through
+#     `Shuttle.Remotes.configured/0`: application config when set, else the
+#     operator's `~/.config/felt/remotes.json`, else none. An unset key is
+#     what lets the file speak; a `remotes: []` default here would shadow it
+#     on every host and silently reduce the hub to a local-only board. `[]`
+#     means "explicitly no remotes" — which is exactly what config/test.exs
+#     sets, so the suite never reaches a real fleet file.
+#   * the `start_*` child flags — each defaults to on in
+#     `Shuttle.Application`; config/test.exs turns them off.
 
 # Bandit keeps an HTTP/1 connection's process dictionary across keep-alive
 # requests, which is where `ShuttleWeb.PeerPlug` remembers the connection's

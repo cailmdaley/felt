@@ -61,12 +61,10 @@ defmodule Shuttle.Dispatcher do
       Defaults to `Shuttle.Runner.Default`.
     * `:work_dir` — working directory for the tmux session. Defaults to `File.cwd!()`.
     * `:felt_store` — directory containing the `.felt/` index this dispatch
-      should read fibers from. Defaults to `default_felt_store/0`.
-      The Poller passes its configured `state.felt_store` here so each shuttle
-      instance is consistent within itself; running multiple shuttle instances
-      against different felt stores (e.g. one for `~/loom`, another for a
-      standalone project root) is the supported way to span felt stores.
-    * `:prompt_context` — `:constitution` (default) or `:standing_run`.
+      should read fibers from. Defaults to the first configured store; the
+      Poller passes the fiber's owning store.
+    * `:prompt_context` — `:constitution` (default), or
+      `{:standing_run, run_id}` / `{:standing_run, run_id, :ad_hoc}`.
     * `:force` — explicit manual dispatch override. When true, the dispatcher
       stops refusing closed fibers (the Poller already relaxes eligibility
       under force) and `resolve_resume_intent` ignores the ad-hoc
@@ -130,7 +128,7 @@ defmodule Shuttle.Dispatcher do
             felt_store: felt_store,
             surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
-            kind: fiber_kind(fiber),
+            kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
@@ -233,7 +231,7 @@ defmodule Shuttle.Dispatcher do
         continuation(fiber, session_id, opts, :resume_if_warm)
 
       _ ->
-        if fiber_kind(fiber) == "oneshot",
+        if Shuttle.Poller.fiber_kind(fiber) == "oneshot",
           do: continuation(fiber, session_id, opts, :resume_if_warm),
           else: :fresh
     end
@@ -291,14 +289,8 @@ defmodule Shuttle.Dispatcher do
     %{uuid: session_id, harness: harness, cut_off: true, transcript: transcript}
   end
 
-  @doc """
-  Returns shuttle's default felt store.
-
-  Mirrors `Shuttle.FeltStores.configured_hosts/0` and keeps `Dispatcher`
-  working standalone (e.g. via the CLI) without a running Poller.
-  """
-  @spec default_felt_store() :: String.t() | nil
-  def default_felt_store do
+  # The first configured felt store: the default when a caller names none.
+  defp default_felt_store do
     Shuttle.FeltStores.configured_hosts() |> List.first()
   end
 
@@ -400,13 +392,13 @@ defmodule Shuttle.Dispatcher do
   # felt already computes that local address: `felt -C work_dir show <id> -j`
   # resolves the fiber against the worker's felt view and carries its
   # view-relative `id`. Read it directly rather than reconstructing it from a
-  # globbed path. On any felt miss/error fall back to the global `fiber_id`,
-  # preserving the previous safe-fail. The worker's view is `work_dir`, not the
-  # configured store root, so no felt_store is needed here.
-  # Runs through the injected `runner` — this sits on the Poller's dispatch
-  # path (via `create_tmux_session/7`), so a bare System.cmd here was the one
-  # unbounded felt call left in it: a wedged felt would block the Poller
-  # GenServer. Bounded, a timeout degrades to the global-id fallback.
+  # globbed path. On any felt miss/error fall back to the global `fiber_id`.
+  # The worker's view is `work_dir`, not the configured store root, so no
+  # felt_store is needed here.
+  # Runs through the injected, bounded `runner`: this sits on the Poller's
+  # dispatch path (via `create_tmux_session/7`), where a wedged felt would
+  # otherwise block the Poller GenServer. A timeout degrades to the global-id
+  # fallback.
   def prompt_fiber_id(fiber_id, work_dir, runner \\ Shuttle.Runner.Default) do
     case felt_show_id(work_dir, fiber_id, runner) do
       {:ok, local_id} -> local_id
@@ -494,7 +486,7 @@ defmodule Shuttle.Dispatcher do
 
     surface = Keyword.get(opts, :surface) || "cli"
 
-    with {:ok, agent} <- capture_resolve_axes(agent_name, effort, chrome, runner),
+    with {:ok, agent} <- resolve_agent_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
          :ok <- preflight_surface(surface, agent, work_dir, runner) do
@@ -539,8 +531,9 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Capture/Stash resolves an agent name + axes with no fiber on disk, so it
-  # shells felt — the registry owner — rather than re-resolving locally:
+  # Resolves an agent name + axes with no fiber on disk (a capture, or
+  # `Shuttle.SessionResume`'s ledger-named agent), so it shells felt — the
+  # registry owner — rather than re-resolving locally:
   #   felt shuttle agents resolve <name> [--effort <E>] [--chrome] --json
   # emits the same shape felt inlines as `shuttle.resolved.agent`. The daemon
   # turns it into a command record via from_resolved/1. felt exits non-zero with
@@ -549,7 +542,8 @@ defmodule Shuttle.Dispatcher do
   # layer can answer 422 (client error) without string-sniffing — other capture
   # failures (tmux spawn, missing model config) stay 500-shaped. Routed through
   # the injected `runner` so tests need no live `felt shuttle agents` verb.
-  defp capture_resolve_axes(agent_name, effort, chrome, runner) do
+  @doc false
+  def resolve_agent_axes(agent_name, effort, chrome, runner) do
     args =
       ["shuttle", "agents", "resolve", agent_name] ++
         if(is_binary(effort) and effort != "", do: ["--effort", effort], else: []) ++
@@ -652,11 +646,11 @@ defmodule Shuttle.Dispatcher do
   The form is `<leaf>-<uid>-shuttle`: the human-readable leaf keeps tmux/kitty
   titles legible from the left edge when truncated, and the uid (the fiber's
   intrinsic ULID) makes the name collision-free and rename-safe — two fibers
-  sharing a leaf no longer collide, and renaming a fiber leaves the running
+  sharing a leaf do not collide, and renaming a fiber leaves the running
   worker's session addressable by the uid that does not change.
 
-  When `uid` is `nil` or empty (legacy/test callers without a resolved uid),
-  falls back to the leaf-only `<leaf>-shuttle` form.
+  When `uid` is `nil` or empty (a fiber without a uid), falls back to the
+  leaf-only `<leaf>-shuttle` form.
   """
   @spec session_name(String.t(), String.t() | nil) :: String.t()
   def session_name(fiber_id, uid) when is_binary(uid) and uid != "" do
@@ -666,12 +660,9 @@ defmodule Shuttle.Dispatcher do
   def session_name(fiber_id, _uid), do: session_name(fiber_id)
 
   @doc """
-  Legacy leaf-only tmux session name (`<leaf>-shuttle`).
-
-  Retained for **dual-recognition** during the uid-keyed cutover: live workers
-  launched under the old scheme carry this name, and matching/adoption paths
-  that lack a uid still recognize them. New sessions are launched under
-  `session_name/2`.
+  Leaf-only tmux session name (`<leaf>-shuttle`): the name a fiber without a
+  uid launches under, and the second form every recognition/adoption path
+  matches (`session_names/2`).
   """
   @spec session_name(String.t()) :: String.t()
   def session_name(fiber_id) do
@@ -680,9 +671,9 @@ defmodule Shuttle.Dispatcher do
 
   @doc """
   Both tmux session-name forms for a fiber — the uid-keyed canonical name and
-  the legacy leaf-only name — so recognition/adoption matches a live worker
-  regardless of which scheme launched it. Returns `[new, legacy]` when a uid is
-  available, or just `[legacy]` when it is not.
+  the leaf-only name — so recognition/adoption matches a live worker under
+  either. Returns `[uid_keyed, leaf_only]` when a uid is available, or just
+  `[leaf_only]` when it is not.
   """
   @spec session_names(String.t(), String.t() | nil) :: [String.t()]
   def session_names(fiber_id, uid) when is_binary(uid) and uid != "" do
@@ -694,7 +685,7 @@ defmodule Shuttle.Dispatcher do
   @doc """
   Returns true when a tmux session name belongs to a Shuttle worker.
 
-  Both name forms — `<leaf>-<uid>-shuttle` and the legacy `<leaf>-shuttle` —
+  Both name forms — `<leaf>-<uid>-shuttle` and the leaf-only `<leaf>-shuttle` —
   end in `-shuttle`, so the suffix test recognizes either.
   """
   @spec shuttle_session?(String.t()) :: boolean()
@@ -776,8 +767,7 @@ defmodule Shuttle.Dispatcher do
   # immediately closes" symptom) while the card stays in its closed column. So
   # a missing felt store (`{:error, :reopen_unavailable}`) or a non-zero
   # `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the dispatch and
-  # propagates through the `with` chain to the caller. (This reverses the prior
-  # deliberate "reopen is non-fatal" choice for the closed case.)
+  # propagates through the `with` chain to the caller.
   #
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
   # reopen stays best-effort: the worker has a live mandate regardless, so a
@@ -847,10 +837,8 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Shell `felt shuttle reopen` through the one audited write helper
-  # (`Shuttle.Felt.Shuttle`). Post-S1/C1, felt's own `resolveOwnHost` is pure
-  # local state (no re-entrant daemon round-trip), so this no longer needs to
-  # hand felt an explicit `--host` override the way it once did — see
-  # `Shuttle.Felt.Shuttle`'s moduledoc.
+  # (`Shuttle.Felt.Shuttle`). felt resolves its own host from local state, so
+  # no `--host` override is passed — see `Shuttle.Felt.Shuttle`'s moduledoc.
   defp run_reopen(fiber_id, runner, felt_store) do
     Shuttle.Felt.Shuttle.run("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
   end
@@ -866,7 +854,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Dual-recognition: a live worker under either the uid-keyed name or the
-  # legacy leaf-only name blocks a fresh dispatch OR a resume. `present?` treats
+  # leaf-only name blocks a fresh dispatch OR a resume. `present?` treats
   # an inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
@@ -917,10 +905,10 @@ defmodule Shuttle.Dispatcher do
   # operator is told their harness is broken when the real fact is that the
   # fiber's checkout lives on another machine.
   #
-  # The Poller's `project_dir_available?/1` already disqualifies such a fiber on
-  # the autonomous path, but a human force-dispatch (kanban Requeue, drag to
-  # launch) bypasses eligibility entirely and lands straight here — so this is
-  # the only place the forced path can learn it.
+  # The Poller never hands this a missing declared `project_dir`: it refuses a
+  # plain dispatch and starts a forced one in the felt store
+  # (`project_dir_for_dispatch/2`). This check covers every other work_dir — a
+  # capture's, a direct caller's — and one that vanished between the two.
   defp check_work_dir(work_dir) when is_binary(work_dir) and work_dir != "" do
     if File.dir?(work_dir) do
       :ok
@@ -953,7 +941,7 @@ defmodule Shuttle.Dispatcher do
   # records every dispatch error there), and the dispatch API's 422.
   #
   # The result is not cached, but a refusal is not re-probed every tick either —
-  # the Poller parks the fiber for a cooldown (see `wrapper_preflight_open?/2`).
+  # the Poller parks the fiber for a cooldown (see `preflight_cooldown_open?/2`).
   # Caching the ANSWER would be wrong at exactly the moment it mattered (the
   # operator installs the wrapper and the daemon goes on refusing); parking the
   # FIBER expires on its own and a force-dispatch skips it.
@@ -1097,20 +1085,6 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # The shuttle block's `kind` (new-format) / `mode` (old-format), defaulting to
-  # "oneshot". Threaded into the prompt so the exit contract can diverge for
-  # pinned interactive roles (stay alive at idle, or handoff for an autonomous
-  # arc) vs oneshot/standing work (rewrite `## Status`, then handoff).
-  defp fiber_kind(fiber) do
-    case Map.get(fiber, "shuttle") do
-      shuttle when is_map(shuttle) ->
-        Shuttle.Poller.role_kind(shuttle)
-
-      _ ->
-        "oneshot"
-    end
-  end
-
   # The previous worker's session, for the prompt's lineage line. The session
   # ledger is authoritative (UUID + harness, newest line for the fiber's uid);
   # the runtime marker is the fallback for fibers whose sessions predate the
@@ -1190,20 +1164,10 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, %{"id" => id} = thread} <- start,
          :ok <-
-           Shuttle.AppWorkers.put(%{
-             "session_uuid" => id,
-             "thread_id" => id,
-             "transcript_session_uuid" =>
-               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
-             "project_id" => thread["projectId"],
+           put_app_worker(thread, agent, work_dir, %{
              "fiber_id" => fiber_id,
              "uid" => Keyword.get(opts, :uid),
-             "felt_store" => Keyword.get(opts, :felt_store),
-             "cwd" => work_dir,
-             "agent_id" => agent.id,
-             "active" => true,
-             "launch_state" => "starting",
-             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+             "felt_store" => Keyword.get(opts, :felt_store)
            }) do
       # Identity is durable before naming, turning, or adopting the conversation.
       if intent == :fresh, do: name_app_thread(client, id, Path.basename(fiber_id))
@@ -1217,7 +1181,7 @@ defmodule Shuttle.Dispatcher do
       if marker == :ok do
         append_session_ledger(
           fiber_id,
-          thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
+          app_transcript_id(thread),
           Keyword.merge(opts,
             harness: "codex",
             ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume),
@@ -1283,20 +1247,10 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, %{"id" => id} = thread} <- client.start_thread(app_opts(agent, work_dir, opts)),
          :ok <-
-           Shuttle.AppWorkers.put(%{
-             "session_uuid" => id,
-             "thread_id" => id,
-             "transcript_session_uuid" =>
-               thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id),
-             "project_id" => thread["projectId"],
+           put_app_worker(thread, agent, work_dir, %{
              "fiber_id" => nil,
              "uid" => nil,
-             "felt_store" => felt_store,
-             "cwd" => work_dir,
-             "agent_id" => agent.id,
-             "active" => true,
-             "launch_state" => "starting",
-             "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+             "felt_store" => felt_store
            }),
          :ok <- name_app_thread(client, id, yap),
          {:ok, _} <-
@@ -1323,6 +1277,27 @@ defmodule Shuttle.Dispatcher do
        }}
     end
   end
+
+  # The durable record of a just-started app conversation; `fiber` carries its
+  # `fiber_id`, `uid` and `felt_store` (nil fiber and uid for a capture).
+  defp put_app_worker(%{"id" => id} = thread, agent, work_dir, fiber) do
+    Shuttle.AppWorkers.put(
+      Map.merge(fiber, %{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "transcript_session_uuid" => app_transcript_id(thread),
+        "project_id" => thread["projectId"],
+        "cwd" => work_dir,
+        "agent_id" => agent.id,
+        "active" => true,
+        "launch_state" => "starting",
+        "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+    )
+  end
+
+  defp app_transcript_id(%{"id" => id} = thread),
+    do: thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id)
 
   defp name_app_thread(client, id, title) do
     label =
@@ -1597,8 +1572,8 @@ defmodule Shuttle.Dispatcher do
   # heuristic compares `handed_off_at` against — it must exist the moment the
   # tmux session starts doing work, not some seconds later. So for EVERY
   # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
-  # `store_session_id` returns (Runner-bounded felt shell-outs now make this a
-  # bounded, not unbounded, blocking call — see F3). Only the piece that
+  # `store_session_id` returns (a bounded blocking call: the Runner bounds
+  # every felt shell-out). Only the piece that
   # genuinely can't be known yet — codex/pi's session UUID, scraped from a
   # JSONL file the harness hasn't necessarily written when tmux launches — is
   # deferred to an async task, and that task only BACKFILLS `session_uuid`
@@ -1954,7 +1929,7 @@ defmodule Shuttle.Dispatcher do
     # cases where that auto-attach can't run — kitty isn't running, or the
     # daemon was dispatched with no human in the loop (CLI, scheduled
     # standing role). After the timeout the harness proceeds at the
-    # default-size, same as the world before this gate existed.
+    # default-size.
     wait_for_client_block =
       if session != "" and not headless, do: wait_for_client_block(session), else: ""
 
@@ -1994,13 +1969,10 @@ defmodule Shuttle.Dispatcher do
   #
   # The daemon is a Mix release with a bundled ERTS, and `erl` exports ROOTDIR,
   # BINDIR, PROGNAME and EMU into the BEAM's environment — which every tmux
-  # worker then inherits. Under the escript those pointed at the host's
-  # Erlang install and were harmless. Under a release they point INTO
-  # `bin/rel`, whose ERTS ships no `mix`, no `start.boot` for anything but the
-  # daemon, and no full OTP lib tree. A worker that runs `mix`, `elixir`,
-  # `erl`, `iex` or `escript` then dies with
-  # `cannot get bootfile .../bin/rel/bin/start.boot` — which is exactly how
-  # this was found: a worker dispatched onto this very repo could not build it.
+  # worker then inherits. They point INTO `bin/rel`, whose ERTS ships no
+  # `mix`, no `start.boot` for anything but the daemon, and no full OTP lib
+  # tree. A worker that runs `mix`, `elixir`, `erl`, `iex` or `escript` then
+  # dies with `cannot get bootfile .../bin/rel/bin/start.boot`.
   #
   # `bash -l` does not fix it: the login profile PREPENDS to the inherited
   # PATH, so the release's erts bin keeps shadowing the real toolchain, and
@@ -2008,8 +1980,7 @@ defmodule Shuttle.Dispatcher do
   #
   # So the worker's script drops the four exported vars and filters the
   # release's own directories out of PATH before anything else runs. A worker
-  # with no Erlang on PATH is correct — it sees whatever the host installs,
-  # the same as before the daemon shipped its own.
+  # with no Erlang on PATH is correct — it sees whatever the host installs.
   @doc false
   # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
   # must drop the release's Erlang first.

@@ -86,13 +86,10 @@ defmodule Shuttle.Application do
   require Logger
 
   # Optional children, in start order. Each is gated by an app-config flag that
-  # defaults to on; config/test.exs turns most of them off so the suite drives
-  # them explicitly. Note that :start_waiting_tracker,
-  # :start_sent_files_follower, :start_activity_follower and
-  # :start_remote_temporal_registry have no prod config entry at all — they
-  # ride the inline `true` default. The endpoint starts before these children
-  # so it binds before slow store, event-stream, follower seed, or bridge
-  # initialization.
+  # defaults to on here and is set nowhere else but config/test.exs, which turns
+  # them off so the suite drives them explicitly. The endpoint starts before
+  # these children so it binds before slow store, event-stream, follower seed,
+  # or bridge initialization.
   @optional_children [
     {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},
@@ -115,13 +112,10 @@ defmodule Shuttle.Application do
     configure_endpoint()
     configure_log_level()
 
-    # The time zone database, set again at runtime. In the escript era this
-    # call was the only thing setting it — escript boot loaded no compile-time
-    # config, so `config :elixir, :time_zone_database` (config/config.exs) never
-    # arrived and DateTime.shift_zone/2 (cron scheduling) fell back to the
-    # UTC-only DB. A release does carry that key in its sys.config, so the
-    # config path now works too; the call stays because it costs nothing and
-    # keeps `tz` wired on every boot path, config-loading or not.
+    # The time zone database, set again at runtime. A release carries
+    # `config :elixir, :time_zone_database` (config/config.exs) in its
+    # sys.config; this call keeps `tz` wired on every boot path, config-loading
+    # or not, so DateTime.shift_zone/2 never falls back to the UTC-only DB.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
 
     # Boot stamp for /api/v1/version's `booted_at`. Load-bearing for deploy
@@ -343,9 +337,9 @@ defmodule Shuttle.Application do
   # is the correct choice here: this endpoint is JSON-only, bound to 127.0.0.1,
   # with no Plug.Session, no cookies, and no LiveView — nothing signed by this
   # key needs to survive a restart. An ephemeral key is strictly safer than a
-  # persisted one and needs no file, no permissions, and no migration. The
-  # previous behavior shipped a fixed key as a source literal: inert today, a
-  # real vulnerability the day anything signed appears.
+  # persisted one and needs no file, no permissions, and no migration — and,
+  # unlike a key shipped as a source literal, is no vulnerability the day
+  # anything signed appears.
   #
   # If signed state ever must outlive a restart, the upgrade is local to this
   # function: persist to ~/.config/felt/secret_key_base with 0600 on first boot.

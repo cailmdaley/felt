@@ -8,10 +8,9 @@ defmodule Shuttle.Poller.Snapshot do
   API and kanban consumers depend on it byte-for-byte — so changes here must
   preserve it exactly.
 
-  State-coupled helpers that the rest of the poller also relies on
-  (`fiber_address/1`, `metadata_uid/1`, `runtime_seconds/2`) stay in
-  `Shuttle.Poller` as the single source of truth and are called back into from
-  here. `standing_role_snapshots/3` lives in `Shuttle.Poller.StandingRoles`.
+  The identity helpers it shares with the rest of the poller (`fiber_address/1`,
+  `metadata_uid/1`) live in `Shuttle.Poller`; `standing_role_snapshots/3` lives
+  in `Shuttle.Poller.StandingRoles`.
   """
 
   require Shuttle.Dispatcher
@@ -29,27 +28,15 @@ defmodule Shuttle.Poller.Snapshot do
       Enum.map(state.running, fn {_runtime_key, meta} ->
         fiber_id = Poller.fiber_address(meta)
 
-        %{
+        meta
+        |> worker_fields()
+        |> Map.merge(%{
           fiber_id: fiber_id,
           uid: Poller.metadata_uid(meta),
           felt_store: Map.get(state.fiber_host_cache, fiber_id),
-          tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
-          surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
-          session_uuid: Shuttle.AppWorkers.id(meta.session),
-          thread_id: Shuttle.AppWorkers.id(meta.session),
-          desktop_link: Shuttle.SessionLink.desktop_url(Shuttle.AppWorkers.id(meta.session)),
-          transcript_session_uuid:
-            if(Shuttle.AppWorkers.app?(meta.session),
-              do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))
-            ),
-          agent: meta.agent_id,
-          state: Map.get(meta, :state, "running"),
-          launch_error: Map.get(meta, :launch_error),
-          run_id: Map.get(meta, :run_id),
-          started_at: DateTime.to_unix(meta.started_at, :millisecond),
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
-        }
+        })
         |> native_activity(meta.session)
       end)
 
@@ -86,7 +73,7 @@ defmodule Shuttle.Poller.Snapshot do
 
     blocked = dispatch_blocked ++ loop_blocked
 
-    # Autonomous dispatches the boot quarantine (or an S2 contract skew) is
+    # Autonomous dispatches the boot quarantine (or a contract skew) is
     # withholding — all of them, resumes included. First-class rows, not
     # `blocked`: nothing failed — the daemon is deliberately withholding
     # autonomous dispatch authority until a human releases it (quarantine) or
@@ -110,7 +97,7 @@ defmodule Shuttle.Poller.Snapshot do
         }
       end)
 
-    snap = %{
+    %{
       poll_at: now_ms,
       # Reflect the dispatch-filter identity, not just :inet.gethostname().
       # When SHUTTLE_HOST is set this matches the host operators read in logs
@@ -119,46 +106,31 @@ defmodule Shuttle.Poller.Snapshot do
       # What this daemon IS, not just what it is doing. It rides the snapshot
       # so a hub's `/state/composite` answers "which host is on which build"
       # from the one fetch it already makes — the question every fleet deploy
-      # ends on, previously answerable only by a `/version` round trip per host.
+      # ends on — without a `/version` round trip per host.
       build: Shuttle.BuildStamp.stamp(),
       felt_stores: state.felt_stores,
       eligible: eligible,
       blocked: blocked,
       boot_quarantine: state.boot_quarantine,
-      # S2: the boot-time `felt shuttle contract` handshake result — always
+      # The boot-time `felt shuttle contract` handshake result — always
       # present (not just on skew) so /api/v1/state and /api/v1/version can
       # both show "what we expect" and "what we saw" even when they match.
       contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),
       pending_launch: pending_launch,
       orphans: state.orphans,
-      # Retries collapsed into the poll loop: a status:active fiber with
-      # no live tmux session is simply eligible again on the next tick. The key
-      # stays (empty) for snapshot-shape stability with API/kanban consumers.
-      retrying: [],
       standing_roles: StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
       claimed_count: map_size(state.running),
       max_concurrent: state.max_concurrent_workers,
+      # The refresh's hit/miss/eviction/entry counts plus the feed envelope's
+      # freshness fields (its `entries` is the live cache size; the stats'
+      # count from the last refresh is the one reported here).
       document_cache:
-        state.document_cache_stats
+        state
+        |> Poller.document_cache_meta()
+        |> Map.delete(:entries)
+        |> Map.merge(state.document_cache_stats)
         |> stringify_keys()
-        |> Map.put("state", Poller.document_cache_state(state))
-        |> Map.put("last_refresh_ms", state.document_cache_last_refresh_ms)
-        |> Map.put(
-          "refreshed_at",
-          case state.document_cache_refreshed_at do
-            %DateTime{} = dt -> DateTime.to_iso8601(dt)
-            _ -> nil
-          end
-        )
     }
-
-    # No separate per-fiber runtime index. The runtime store and the
-    # review overlay it fed are gone; liveness rides the `eligible`/`running`
-    # rows (each carries uid, tmux_session, state), standing-role due-ness rides
-    # `standing_roles`, and a viewer computes next_due from the document
-    # `schedule` it already reads off the owner-only feed. There is nothing left
-    # for a `:runtime` overlay to add.
-    snap
   end
 
   @spec build_full_state(State.t()) :: map()
@@ -180,12 +152,7 @@ defmodule Shuttle.Poller.Snapshot do
         }
       end)
 
-    Map.merge(snap, %{
-      running_detail: running_detail,
-      # No waiters: the Channel transport (the only producer) was removed; the
-      # key stays for payload-shape stability and is always empty.
-      waiters: []
-    })
+    Map.put(snap, :running_detail, running_detail)
   end
 
   @doc """
@@ -270,37 +237,41 @@ defmodule Shuttle.Poller.Snapshot do
     |> Enum.find_value(fn k -> is_binary(k) and k != "" and Map.get(index, k) end)
   end
 
-  # The eligible-row subset of a worker's meta, as a wire payload. Mirrors the
-  # `eligible` snapshot row so the feed's `runtime` and the snapshot agree on
-  # shape; the viewer reads `tmux_session` for liveness and may surface the rest.
-  #
-  # `last_activity_at` + `phase` come from the activity tracker keyed by this
-  # worker's tmux session: the REAL timestamp of its most recent hook event and
-  # the event's phase category ("attention" / "waiting" / "working"). This is
-  # what lets the in-flight column rank by idle duration. The old served
-  # `last_activity_at` was `meta.last_activity_at`, which equals `started_at`
-  # (only the tmux liveness heartbeat ever bumps it) — useless for ranking.
-  #
-  # Fallback: a just-dispatched worker with no hook event yet has no tracker
-  # record, so we fall back to `meta.last_activity_at` (≈ `started_at`) and omit
-  # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
-  defp runtime_payload(meta, activity) do
-    base = %{
+  # The worker fields the `eligible` snapshot row and the feed's `runtime`
+  # payload share, so the two agree on shape; the viewer reads `tmux_session`
+  # for liveness and may surface the rest.
+  defp worker_fields(meta) do
+    app_id = Shuttle.AppWorkers.id(meta.session)
+
+    %{
       tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
-      surface: if(Shuttle.AppWorkers.app?(meta.session), do: "app", else: "cli"),
-      session_uuid: Shuttle.AppWorkers.id(meta.session),
-      thread_id: Shuttle.AppWorkers.id(meta.session),
-      desktop_link: Shuttle.SessionLink.desktop_url(Shuttle.AppWorkers.id(meta.session)),
-      transcript_session_uuid:
-        if(Shuttle.AppWorkers.app?(meta.session),
-          do: Shuttle.AppWorkers.transcript_id(Shuttle.AppWorkers.id(meta.session))
-        ),
+      surface: if(app_id, do: "app", else: "cli"),
+      session_uuid: app_id,
+      thread_id: app_id,
+      desktop_link: Shuttle.SessionLink.desktop_url(app_id),
+      transcript_session_uuid: app_id && Shuttle.AppWorkers.transcript_id(app_id),
       agent: Map.get(meta, :agent_id),
       state: Map.get(meta, :state, "running"),
       launch_error: Map.get(meta, :launch_error),
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
+  end
+
+  # The feed's `runtime` payload: the shared worker fields plus activity.
+  #
+  # `last_activity_at` + `phase` come from the activity tracker keyed by this
+  # worker's tmux session: the REAL timestamp of its most recent hook event and
+  # the event's phase category ("attention" / "waiting" / "working"). This is
+  # what lets the in-flight column rank by idle duration; `meta.last_activity_at`
+  # equals `started_at` (only the tmux liveness heartbeat ever bumps it), which
+  # is useless for ranking.
+  #
+  # Fallback: a just-dispatched worker with no hook event yet has no tracker
+  # record, so we fall back to `meta.last_activity_at` (≈ `started_at`) and omit
+  # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
+  defp runtime_payload(meta, activity) do
+    base = worker_fields(meta)
 
     activity_key =
       case Shuttle.AppWorkers.id(meta.session) do

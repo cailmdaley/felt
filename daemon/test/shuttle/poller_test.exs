@@ -3878,8 +3878,6 @@ defmodule Shuttle.PollerTest do
     notify_worker_exit(poller, "tests/standing-due")
     Process.sleep(50)
 
-    refute Enum.any?(Poller.snapshot(poller).retrying, &(&1.fiber_id == "tests/standing-due"))
-
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
@@ -4149,14 +4147,14 @@ defmodule Shuttle.PollerTest do
     end)
 
     # Simulate worker exit (tmux session dies). The claim is released; the fiber
-    # is no longer running and no longer retrying (the retry queue is gone).
+    # is no longer running, and the snapshot carries no retry queue.
     MockRunner.remove_tmux_session(Dispatcher.session_name("tests/haiku-retry"))
     notify_worker_exit(poller, "tests/haiku-retry")
 
     assert_eventually(fn ->
       snap2 = Poller.snapshot(poller)
       assert length(snap2.eligible) == 0
-      assert snap2.retrying == []
+      refute Map.has_key?(snap2, :retrying)
     end)
 
     # The next poll re-dispatches it: a second new-session call.
@@ -4348,12 +4346,11 @@ defmodule Shuttle.PollerTest do
     # Close the fiber
     MockRunner.set_fiber("tests/haiku-close", %{fiber | "status" => "closed"})
     MockRunner.remove_tmux_session(session)
-    send(poller, {:worker_exited, "tests/haiku-close", watcher, session, :normal_exit, false})
+    send(poller, {:worker_exited, "tests/haiku-close", watcher, session, :normal_exit})
 
     assert_eventually(fn ->
       snap = Poller.snapshot(poller)
       assert snap.claimed_count == 0
-      assert length(snap.retrying) == 0
     end)
   end
 
@@ -5696,36 +5693,6 @@ defmodule Shuttle.PollerTest do
     assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/collision-fiber")
   end
 
-  test "bust_fiber_host_cache allows re-resolution after a fiber moves" do
-    host_a = multi_host_dir("a")
-
-    host_b = multi_host_dir("b")
-
-    path_a = write_fiber_file(host_a, "tests/movable-fiber")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_bust,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a, host_b]
-      )
-
-    # Initially resolves to host_a
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-
-    # "Move" the fiber to host_b (delete from a, write to b)
-    File.rm_rf!(Path.dirname(path_a))
-    write_fiber_file(host_b, "tests/movable-fiber")
-
-    # Cache still returns host_a without busting
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-
-    # After bust, re-probes the file system → host_b
-    :ok = Poller.bust_fiber_host_cache(poller, "tests/movable-fiber")
-    assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/movable-fiber")
-  end
-
   test "subdirectory symlink: loom-walks-into-project subtree skipped" do
     # Mirrors loom→lightcone topology: physical .felt lives in host_b
     # (project-canonical, like lightcone). host_a (loom) symlinks INTO
@@ -5806,7 +5773,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [loom, project]
       )
 
-    :ok = Poller.bust_fiber_host_cache(poller, "ai-futures/portolan/kanban-modal")
+    :sys.replace_state(poller, &%{&1 | fiber_host_cache: %{}})
 
     assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
   end
@@ -6188,6 +6155,6 @@ defmodule Shuttle.PollerTest do
 
   defp notify_worker_exit(poller, fiber_id) do
     %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
-    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit, false})
+    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
   end
 end

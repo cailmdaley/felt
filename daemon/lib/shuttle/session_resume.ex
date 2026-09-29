@@ -211,11 +211,10 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  @doc false
   # The script tmux runs: the release's Erlang scrubbed out, a short wait for the
   # kitty tab to attach (so the harness first draws at the tab's size), the
   # resume, and — if it fails — a pause so the tab says why instead of closing.
-  def run_script(plan) do
+  defp run_script(plan) do
     """
     #!/bin/bash
     trap 'rm -f "$0"' EXIT
@@ -252,12 +251,7 @@ defmodule Shuttle.SessionResume do
   end
 
   defp resolve_agent(id, runner) do
-    case runner.cmd("felt", ["shuttle", "agents", "resolve", id, "--json"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> {:ok, output |> Jason.decode!() |> Agents.from_resolved()}
-      _ -> :error
-    end
+    Dispatcher.resolve_agent_axes(id, nil, false, runner)
   rescue
     _ -> :error
   end

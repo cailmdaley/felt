@@ -12,11 +12,8 @@ defmodule Shuttle.Poller.StandingRoles do
 
   It is distinct from `Shuttle.StandingRole`, the pure parser/cron module these
   functions read through. State-shaped helpers take the `Shuttle.Poller.State`
-  struct and return updated state or values, mirroring the signatures they had
-  inside `Shuttle.Poller`. Truly shared helpers (`role_kind/1`,
-  `host_for_fiber/2`, `host_owned?/2`, `running_key/2`, `iso_to_unix_ms/1`,
-  `fetch_shuttle_block/2`, `list_shuttle_sessions/1`,
-  `runtime_key_for_fiber/1`) stay in `Shuttle.Poller` and are called from here.
+  struct and return updated state or values; the helpers they share with the
+  rest of the poller live in `Shuttle.Poller`.
   """
 
   require Logger
@@ -44,15 +41,16 @@ defmodule Shuttle.Poller.StandingRoles do
   # `adopt_orphans` (init) and `reconcile_orphaned_sessions` (per-poll) handle
   # the *live* analog: a tmux session exists, we just aren't watching it. This
   # pass is the *dead* analog for the kind that must NOT re-fire on its own.
-  def reconcile_dead_standing_roles(%State{} = state, candidates) do
+  def reconcile_dead_standing_roles(%State{} = state, candidates, scan) do
     # This pass WRITES to fibers (status:closed/open) on the strength of "no
-    # live session", so it may only act on POSITIVE evidence: {:ok, sessions}
-    # — including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
-    # (a wedged `tmux ls`, a timeout) the scan is skipped wholesale —
+    # live session", so it may only act on POSITIVE evidence: `scan` (the
+    # cycle's `Poller.list_shuttle_sessions/1` result) is {:ok, sessions} —
+    # including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
+    # (a wedged `tmux ls`, a timeout) the pass is skipped wholesale —
     # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
     # never mass-mark live standing/pinned roles dead. A truly dead orphan is
     # simply caught by the next healthy scan.
-    case Poller.list_shuttle_sessions(state) do
+    case scan do
       {:ok, sessions} ->
         live = MapSet.new(sessions)
 
@@ -70,7 +68,7 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  def maybe_mark_dead_standing_role(%State{} = state, fiber, live_sessions) do
+  defp maybe_mark_dead_standing_role(%State{} = state, fiber, live_sessions) do
     fiber_id = Map.get(fiber, "id", "")
     shuttle = Map.get(fiber, "shuttle", %{})
     status = Map.get(fiber, "status", "")
@@ -130,9 +128,8 @@ defmodule Shuttle.Poller.StandingRoles do
       # safe reading of that shape with no live session is "conclude the
       # phantom run and stay armed" — stamping `handed_off_at = now` is
       # harmless because the CRON gates the next fire, and it avoids the
-      # re-close-every-poll oscillation this branch was born for (a
-      # corrupt-marker inference must never override the file's
-      # `status: active`; commit 3d51276, "restart is not dispatch authority").
+      # re-close-every-poll oscillation (a corrupt-marker inference must never
+      # override the file's `status: active`).
       #
       # For a PINNED role the same stamp is catastrophic: `handed_off_at >=
       # dispatched_at` IS the pinned autonomous relaunch trigger
@@ -220,21 +217,9 @@ defmodule Shuttle.Poller.StandingRoles do
   # (a worker that died without handing off was re-closed to awaiting on every reconcile).
   # Git-native, durable across a daemon restart, and needs no separate re-arm
   # field — the same `handed_off_at` covers both worker exit and human re-arm.
-  def standing_role_dispatched_unexited?(fiber) do
-    case Shuttle.Continuation.dispatched_at(fiber) do
-      nil ->
-        false
-
-      dispatch_dt ->
-        not at_or_after?(Shuttle.Continuation.handed_off_at(fiber), dispatch_dt)
-    end
-  rescue
-    _ -> false
-  end
-
-  # True iff `dt` is non-nil and at or after `reference`.
-  defp at_or_after?(nil, _reference), do: false
-  defp at_or_after?(%DateTime{} = dt, reference), do: DateTime.compare(dt, reference) != :lt
+  # Exactly the negation of `Continuation.clean_handoff_since_dispatch?/1`.
+  defp standing_role_dispatched_unexited?(fiber),
+    do: not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
 
   # True iff the fiber's markers are TIME-INVERTED: BOTH `dispatched_at` and
   # `handed_off_at` are present and `handed_off_at` is strictly EARLIER than
@@ -243,7 +228,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # "dispatched, no handoff at all" orphan, where `handed_off_at` is nil). Only
   # the inverted subset is impossible in a real run, so only it self-heals; a
   # genuine handoff-less orphan still closes.
-  def standing_role_markers_inverted?(fiber) do
+  defp standing_role_markers_inverted?(fiber) do
     with %DateTime{} = dispatched <- Shuttle.Continuation.dispatched_at(fiber),
          %DateTime{} = handed_off <- Shuttle.Continuation.handed_off_at(fiber) do
       DateTime.compare(handed_off, dispatched) == :lt
@@ -256,7 +241,7 @@ defmodule Shuttle.Poller.StandingRoles do
 
   # True iff the dead run's `run_id` marks it an ad-hoc (force-dispatched extra)
   # run — `StandingRole.ad_hoc_run_id/1`'s `adhoc-<ms>` form.
-  def dead_run_is_adhoc?(fiber) do
+  defp dead_run_is_adhoc?(fiber) do
     StandingRole.ad_hoc_run_id?(Shuttle.Continuation.run_id(fiber))
   end
 
@@ -309,16 +294,18 @@ defmodule Shuttle.Poller.StandingRoles do
     |> Enum.reverse()
   end
 
-  # Standing roles are parsed straight from the felt document's `shuttle:` block.
-  # The document is the truth — status,
-  # tempered, and the cron schedule — and the StandingRole reads exactly that.
+  # A standing role parsed straight from a fiber map's `shuttle:` block — a poll
+  # candidate row or a `felt show` read alike, since both carry felt's resolved
+  # view of the block (`shuttle.resolved.{next_due,prev_due}` included). The
+  # document is the truth — status, tempered, and the cron schedule — and the
+  # StandingRole reads exactly that, with no further felt read.
   def standing_role_from_fiber(fiber) do
     fiber_id = Map.get(fiber, "id", "")
 
     case Map.get(fiber, "shuttle") do
       shuttle when is_map(shuttle) ->
-        # Carry the candidate's uid onto the role so the snapshot's `:uid` join
-        # key survives without the deleted uid cache.
+        # Carry the candidate's uid onto the role for the snapshot's `:uid`
+        # join key.
         StandingRole.from_map(fiber_id, shuttle, Map.get(fiber, "uid"))
 
       _ ->
@@ -326,18 +313,7 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  def fetch_standing_role(fiber_id, state) do
-    case Poller.fetch_shuttle_block(fiber_id, state) do
-      {:ok, shuttle} ->
-        StandingRole.from_map(fiber_id, shuttle)
-
-      {:error, _} ->
-        {:error, :no_shuttle_block}
-    end
-  end
-
-  # Standing dispatch is gated entirely by the FELT DOCUMENT — not a runtime
-  # review overlay and not a stored `next_due_at`.
+  # Standing dispatch is gated entirely by the felt document.
   # A role dispatches iff its document says `status: active` with no verdict
   # (`tempered` unset) AND the cron schedule fired a tick inside the poll window
   # ending at now. `status: closed` (untempered) is the awaiting-review /
@@ -366,11 +342,9 @@ defmodule Shuttle.Poller.StandingRoles do
   # excludes closed before this is ever reached. So this rule only governs an
   # already-armed role; it never resurrects one pending review.
   def standing_role_due?(fiber, state) do
-    fiber_id = Map.get(fiber, "id", "")
-
     with true <- Map.get(fiber, "status", "") == "active",
          true <- is_nil(Map.get(fiber, "tempered")),
-         {:ok, role} <- fetch_standing_role(fiber_id, state) do
+         {:ok, role} <- standing_role_from_fiber(fiber) do
       now = DateTime.utc_now()
       now_ms = DateTime.to_unix(now, :millisecond)
       lookback = now_ms - last_serviced_at_ms(fiber, state, now_ms)
@@ -383,7 +357,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # Unix-ms the role was last serviced — the most recent of its marker
   # timestamps, its in-memory re-arm stamp, and its creation. Defaults to `now_ms`
   # (⇒ zero lookback ⇒ not due) only in the impossible case that none are known.
-  def last_serviced_at_ms(fiber, state, now_ms) do
+  defp last_serviced_at_ms(fiber, state, now_ms) do
     [
       last_service_event_ms(fiber),
       # `rearmed_at` is keyed by runtime key (uid when present), so look it up by
@@ -407,7 +381,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # run). The cron self-catching invariant hinges on this advancing each run: a
   # fresh dispatch writes a newer `dispatched_at`, so the next poll sees only the
   # next FUTURE occurrence.
-  def last_service_event_ms(fiber) do
+  defp last_service_event_ms(fiber) do
     [
       Shuttle.Continuation.dispatched_at(fiber),
       Shuttle.Continuation.handed_off_at(fiber)
@@ -426,10 +400,9 @@ defmodule Shuttle.Poller.StandingRoles do
 
       role
       |> StandingRole.to_snapshot(now, running?)
-      # Display next_due is computed cron.next(now): `active` means
-      # armed-for-the-next-occurrence, so the upcoming run is the schedule's next
-      # tick, not a stored timestamp (the slice-2 cutover). Falls back to the
-      # snapshot's stored value when the schedule won't parse.
+      # Display next_due is the schedule's next tick after now: `active` means
+      # armed-for-the-next-occurrence. Falls back to the snapshot's value when
+      # felt resolved no occurrence.
       |> put_computed_next_due(role)
       |> Map.put(:uid, role.uid)
     end)

@@ -52,8 +52,6 @@ defmodule Shuttle.Readiness do
     end
   end
 
-  def ready?, do: status().ready
-
   defp default_state do
     %{ready: false, started_at: System.monotonic_time(:millisecond), duration_ms: nil}
   end

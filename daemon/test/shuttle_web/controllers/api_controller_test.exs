@@ -717,8 +717,6 @@ defmodule ShuttleWeb.APIControllerTest do
                "tmux_session" => ^expected_session
              }
            ] = body["eligible"]
-
-    assert is_list(body["waiters"])
   end
 
   test "state degrades to JSON when the poller is unavailable" do
