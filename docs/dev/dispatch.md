@@ -73,8 +73,8 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   so type-ahead and arrows cannot land there either.
 
   The project select's FIRST option is "Add a new project…", over `POST
-  /api/v1/projects` (`{"path": …, "origin": …}` — initializes `<path>/.felt`
-  when absent, exactly as `felt init` does, then appends the path; idempotent).
+  /api/v1/projects` (`{"path": …, "origin": …}` — runs `felt -C <path> init`,
+  which creates `<path>/.felt` when absent, then appends the path; idempotent).
   With the host already settled, that has exactly two shapes: on the **local**
   host with a dialog, `POST /api/v1/choose-folder` raises the host's own
   (`Shuttle.FolderPicker` — Finder via `osascript`, else zenity, else kdialog)
