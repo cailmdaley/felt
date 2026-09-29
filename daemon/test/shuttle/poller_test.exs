@@ -1125,6 +1125,89 @@ defmodule Shuttle.PollerTest do
     assert Shuttle.Tmux.present?(MockRunner, second_session)
   end
 
+  # A cut worker's run script outlives `tmux kill-session` for as long as its
+  # harness takes to exit; the fresh session reuses the name, so the cut waits
+  # for the worker to go rather than refusing the fresh dispatch as
+  # :already_running (with no running entry left to name).
+  defp start_live_cut_fiber!(fiber_id, uid, name) do
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+      "active"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: name,
+        runner: MockRunner,
+        own_host_id: "test-host",
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert {:ok, _} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+    poller
+  end
+
+  test "New session waits out a cut worker that outlives kill-session, then dispatches fresh" do
+    fiber_id = "tests/cut-lingering-worker"
+
+    poller =
+      start_live_cut_fiber!(fiber_id, "01JZ00000000000000000000WG", :test_poller_cut_linger)
+
+    MockRunner.set_worker_linger(3)
+    before_cut = length(MockRunner.commands())
+
+    assert {:ok, session} =
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               resume_mode: "fresh"
+             )
+
+    assert Shuttle.Tmux.present?(MockRunner, session)
+    cut_commands = MockRunner.commands() |> Enum.drop(before_cut)
+
+    refute Enum.any?(cut_commands, &match?({"kill", _}, &1)),
+           "a worker that exits needs no signal"
+  end
+
+  test "New session escalates to SIGTERM on a cut worker that survives its grace" do
+    previous = Application.get_env(:shuttle, :worker_stop_ladder)
+
+    Application.put_env(:shuttle, :worker_stop_ladder, [
+      {nil, 100},
+      {"TERM", 2_000},
+      {"KILL", 100}
+    ])
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:shuttle, :worker_stop_ladder, previous),
+        else: Application.delete_env(:shuttle, :worker_stop_ladder)
+    end)
+
+    fiber_id = "tests/cut-stubborn-worker"
+
+    poller =
+      start_live_cut_fiber!(fiber_id, "01JZ00000000000000000000SB", :test_poller_cut_stubborn)
+
+    MockRunner.set_worker_linger(:until_signalled)
+
+    assert {:ok, _} =
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               resume_mode: "fresh"
+             )
+
+    assert {"kill", ["-TERM", "--", "-4242", "4242"]} in MockRunner.commands()
+    refute Enum.any?(MockRunner.commands(), &match?({"kill", ["-KILL" | _]}, &1))
+  end
+
   test "Resume (force + resume_mode:previous) does NOT cut a live session — it refuses with :already_running" do
     fiber_id = "tests/resume-no-cut"
     uid = "01JZ00000000000000000000RC"

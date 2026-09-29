@@ -97,6 +97,75 @@ defmodule Shuttle.Tmux do
   def present?(runner, session), do: session_status(runner, session) != :gone
 
   @doc """
+  Stops tmux session `session` and returns once its worker is gone.
+
+  `kill-session` removes the session and hangs up its pane; the run script
+  and its harness then exit on their own schedule — usually within
+  milliseconds, sometimes seconds (a harness flushing its transcript on a
+  loaded host). Until they do, `session_status/2` reads the session
+  `:unknown`, and a fresh dispatch under the same name is refused as already
+  running. So a successful kill waits for `:gone`, walking the stop ladder
+  (`:worker_stop_ladder`: `{signal | nil, wait_ms}` steps): each step signals
+  the run script's process group, then waits up to `wait_ms` for the worker
+  to go. The default hangs up and waits, then escalates to SIGTERM, then
+  SIGKILL.
+
+  Returns the `kill-session` result as-is when the kill fails (including
+  tmux's "already gone" messages, which the caller classifies); `{"", 0}`
+  once the worker is gone; `{message, 1}` when it survives the ladder.
+  """
+  @spec stop(module(), String.t()) :: {String.t(), integer()}
+  def stop(runner, session) do
+    case runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true) do
+      {_output, 0} -> await_gone(runner, session, stop_ladder())
+      failure -> failure
+    end
+  end
+
+  @stop_ladder [{nil, 3_000}, {"TERM", 2_000}, {"KILL", 1_000}]
+  @stop_poll_ms 50
+
+  defp stop_ladder, do: Application.get_env(:shuttle, :worker_stop_ladder, @stop_ladder)
+
+  defp await_gone(_runner, session, []),
+    do: {"worker of #{session} is still running after SIGKILL", 1}
+
+  defp await_gone(runner, session, [{signal, wait_ms} | rest]) do
+    if signal, do: signal_worker(runner, session, signal)
+    deadline = System.monotonic_time(:millisecond) + wait_ms
+
+    if gone_by?(runner, session, deadline),
+      do: {"", 0},
+      else: await_gone(runner, session, rest)
+  end
+
+  defp gone_by?(runner, session, deadline) do
+    cond do
+      session_status(runner, session) == :gone ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
+      true ->
+        Process.sleep(@stop_poll_ms)
+        gone_by?(runner, session, deadline)
+    end
+  end
+
+  # The run script is the pane's process and so leads its own process group,
+  # which holds the harness; the group and the process are both signalled in
+  # case it does not lead one.
+  defp signal_worker(runner, session, signal) do
+    with {:ok, procs} <- WorkerProcess.scan(runner),
+         %{pid: pid} <- WorkerProcess.session_process(procs, session) do
+      runner.cmd("kill", ["-#{signal}", "--", "-#{pid}", "#{pid}"], stderr_to_stdout: true)
+    end
+
+    :ok
+  end
+
+  @doc """
   True when `output` is one of tmux's own absence messages ("no server
   running", "can't find session", …) — POSITIVE evidence that the server or
   session is not there, as opposed to a command that merely failed. Shared by

@@ -489,8 +489,8 @@ defmodule Shuttle.Poller do
   Hard-kill a fiber's live worker and tear down its runtime state synchronously.
 
   The user-gesture twin of a natural worker exit: the kanban fires this when a
-  card is dragged off the in-flight column. `tmux kill-session` SIGKILLs the
-  worker, the liveness watcher is stopped, and the running entry + claim are
+  card is dragged off the in-flight column. The worker is stopped
+  (`Shuttle.WorkerBackend.stop/2`), the liveness watcher is stopped, and the running entry + claim are
   dropped NOW (not on the watcher's next 5s poll) so the very next composite
   feed reads the card as not-running. Crucially this does NOT write a lifecycle
   verdict — unlike `handle_worker_exit`, which marks a cyclical role
@@ -3393,11 +3393,12 @@ defmodule Shuttle.Poller do
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the
   # kanban New-session button and drag-launch both send these) stamps the
-  # clean-exit marker, kills the live `shuttle-<id>`, and drops the runtime
-  # entry, THEN lets the caller's `cond` fall through to a fresh dispatch —
-  # instead of returning `:already_running`. Without this, starting fresh on an
-  # open session meant the costly resume → reload-stale-transcript → handoff
-  # dance this fiber's constitution set out to kill.
+  # clean-exit marker, stops the live worker — waiting until its processes are
+  # gone (`Shuttle.Tmux.stop/2`), since the fresh session reuses its name — and
+  # drops the runtime entry, THEN lets the caller's `cond` fall through to a
+  # fresh dispatch instead of returning `:already_running`. Without this,
+  # starting fresh on an open session meant the costly resume →
+  # reload-stale-transcript → handoff dance.
   #
   # Gated strictly on `force` + `resume_mode:"fresh"`: the autonomous poll never
   # carries `resume_mode`, so it can NEVER cut a live worker — only an explicit

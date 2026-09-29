@@ -255,6 +255,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_ps_result(result),
     do: Agent.update(__MODULE__, &Map.put(&1, :ps_result, result))
 
+  # A worker that outlives `tmux kill-session`: after the next successful kill,
+  # the killed session's run script stays in the process scan for `scans` more
+  # `ps` calls, or — with `:until_signalled` — until a `kill` names its pid.
+  def set_worker_linger(scans),
+    do: Agent.update(__MODULE__, &Map.put(&1, :worker_linger, scans))
+
+  @linger_pid 4242
+
   def add_tmux_session(session),
     do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
@@ -472,7 +480,21 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "ps" ->
-        Agent.get(__MODULE__, &Map.get(&1, :ps_result, {"", 0}))
+        Agent.get_and_update(__MODULE__, fn state ->
+          case Map.get(state, :lingering) do
+            {session, scans} when scans == :until_signalled or scans > 0 ->
+              line = "#{@linger_pid} 1 bash -l /tmp/shuttle-run-#{session}.1.sh\n"
+              left = if is_integer(scans), do: {session, scans - 1}, else: {session, scans}
+              {{line, 0}, Map.put(state, :lingering, left)}
+
+            _ ->
+              {Map.get(state, :ps_result, {"", 0}), state}
+          end
+        end)
+
+      command == "kill" ->
+        Agent.update(__MODULE__, &Map.delete(&1, :lingering))
+        {"", 0}
 
       command == "tmux" and hd(args) == "has-session" ->
         session = Enum.at(args, 2)
@@ -495,8 +517,20 @@ defmodule Shuttle.Test.FeltStoreRunner do
         session = Enum.at(args, 2)
 
         case Agent.get(__MODULE__, &Map.get(&1, :kill_session_failure, false)) do
-          {output, status} -> {output, status}
-          false -> remove_tmux_session(session) && {"", 0}
+          {output, status} ->
+            {output, status}
+
+          false ->
+            remove_tmux_session(session)
+
+            Agent.update(__MODULE__, fn state ->
+              case Map.pop(state, :worker_linger) do
+                {nil, state} -> state
+                {scans, state} -> Map.put(state, :lingering, {session, scans})
+              end
+            end)
+
+            {"", 0}
         end
 
       command == "tmux" and hd(args) == "rename-session" ->

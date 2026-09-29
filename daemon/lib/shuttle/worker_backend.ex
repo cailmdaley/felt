@@ -81,7 +81,7 @@ defmodule Shuttle.WorkerBackend do
   def stop(runner, session) do
     case AppWorkers.id(session) do
       nil ->
-        runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
+        Shuttle.Tmux.stop(runner, session)
 
       id ->
         result =
