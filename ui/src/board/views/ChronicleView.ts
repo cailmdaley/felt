@@ -86,7 +86,6 @@ import {
   type SearchHit,
 } from './chronicleSearch.js'
 import { cycleSpan } from '../KanbanRules.js'
-import { shuttleOrigin } from '../../forms/projectModel.js'
 import { restingCards } from '../KanbanReadModel.js'
 import './ChronicleView.css'
 
@@ -156,6 +155,14 @@ export function railDate(nowMs: number): Date {
   if (!d) return new Date(nowMs)
   d.setHours(12, 0, 0, 0)
   return d
+}
+
+/**
+ * The origin key a write is routed by — `local`, or a bare hostname for a
+ * remote-owned fiber.
+ */
+export function shuttleOrigin(originId: string | undefined): string {
+  return (originId ?? 'local').replace(/^remote-/, '')
 }
 
 /** Origin for a write with no card behind it yet — a cycle being created. The

@@ -32,8 +32,8 @@ try {
     function DialogApp() {
       const [open, setOpen] = useState(true);
       return open ? <SettingsDialog shuttleBase="" hosts={[
-        {...host, feltStores:[], projects:[]},
-        {...host, origin:'remote', host:'remote', label:'Remote', isLocal:false, feltStores:[], projects:[]}
+        {...host},
+        {...host, origin:'remote', host:'remote', label:'Remote', isLocal:false}
       ]} onClose={() => setOpen(false)}/> : <p>Settings closed</p>;
     }
     createRoot(document.getElementById('root')).render(location.search ? <DialogApp/> : <App/>);

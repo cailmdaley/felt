@@ -20,8 +20,8 @@ export type ChooseFolderResult =
   | { status: 'unavailable' }
 
 /** Parse a `/api/v1/choose-folder` body into the three outcomes. Exported for
- *  the unit test: an old daemon, a proxy error page or a forwarded remote
- *  failure must degrade to `unavailable` (→ type the path), never throw. */
+ *  the unit test: a 501, a proxy error page or any other unexpected body must
+ *  degrade to `unavailable` (→ type the path), never throw. */
 export function parseChooseFolder(status: number, body: unknown): ChooseFolderResult {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 'unavailable' }
   const rec = body as Record<string, unknown>

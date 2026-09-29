@@ -8,12 +8,11 @@
  * (`onStashClick` / `onNewIdeaClick` / `onSettingsClick`). Only one is open at
  * a time, so a single shared root suffices; closing renders `null`.
  *
- * Both forms need the "project" set — the map-less replacement for Portolan's
- * pinned cities. The authoritative list comes from `/api/v1/felt-stores`; the
- * composite feed supplies activity/ranking metadata only (see projectModel).
- * Both create endpoints are owner-routed now, so both forms get every
- * registered project: a local origin writes/spawns here, a remote origin
- * forwards to its owning daemon.
+ * Both forms need the host and project sets (see projectModel). The
+ * authoritative list comes from `/api/v1/felt-stores`; the composite feed
+ * supplies recency and the loom prefix. Both create endpoints are
+ * owner-routed, so both forms get every registered project: a local origin
+ * writes/spawns here, a remote origin forwards to its owning daemon.
  *
  * The store payload also carries the origin list both forms' HOST picker
  * offers, and whether each daemon can raise a native folder dialog
@@ -24,9 +23,9 @@
 import { createRoot, type Root } from 'react-dom/client'
 import { parseCompositeFeed } from '../board/KanbanComposite.js'
 import { daemonFetch } from '../board/daemonApi.js'
-import { deriveProjects, type ProjectModel } from './projectModel'
-import { StashForm, injectStashFormStyles, type StashProject } from './StashForm'
-import { CaptureForm, injectCaptureFormStyles, type CaptureProject } from './CaptureForm'
+import { deriveProjects, type Project, type ProjectModel } from './projectModel'
+import { StashForm, injectStashFormStyles } from './StashForm'
+import { CaptureForm, injectCaptureFormStyles } from './CaptureForm'
 import { SettingsDialog } from './settings/SettingsDialog'
 import { loadHosts } from './settings/settingsApi'
 
@@ -69,57 +68,42 @@ async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
     daemonFetch(`${shuttleBase}/api/v1/felt-stores`).catch(() => null),
   ])
   if (!res.ok) throw new Error(`composite ${res.status}`)
-  const json: unknown = await res.json()
+  const feed = parseCompositeFeed(await res.json())
   const storesJson: unknown = storesRes?.ok ? await storesRes.json().catch(() => undefined) : undefined
-  const model = deriveProjects(json, storesJson)
-  const feed = parseCompositeFeed(json)
   const tagSet = new Set<string>()
   for (const e of feed.entries) for (const t of e.fiber.tags ?? []) tagSet.add(t)
-  return { model, tags: [...tagSet].sort() }
-}
-
-/** The project set both forms consume, in the shape they consume it. Stash's
- *  extra `loomPrefix` rides along harmlessly for Capture. */
-function toProjects(model: ProjectModel): StashProject[] {
-  return model.projects.map((p) => ({
-    id: p.id,
-    name: p.name,
-    path: p.path,
-    originId: p.isLocal ? 'local' : p.originId,
-    loomPrefix: p.loomPrefix,
-  }))
+  return { model: deriveProjects(feed, storesJson), tags: [...tagSet].sort() }
 }
 
 /**
  * Re-derive the project set after a directory was registered through
- * `POST /api/v1/projects`. Deliberately a full reload rather than trusting the
- * POST response's `projects`: `deriveProjects` stays the one place a project's
+ * `POST /api/v1/projects`. A full reload rather than trusting the POST
+ * response's `projects`: `deriveProjects` stays the one place a project's
  * shape (origin, loomPrefix, felt store) is decided, and the added path is a
  * bare string until it has been through it.
  */
-async function refreshProjects(shuttleBase: string): Promise<StashProject[]> {
-  const feed = await loadFeed(shuttleBase)
-  return toProjects(feed.model)
+async function refreshProjects(shuttleBase: string): Promise<Project[]> {
+  return (await loadFeed(shuttleBase)).model.projects
+}
+
+/** The feed a form opens on, or null after telling the board it is out of reach. */
+async function feedOrReport(opts: OpenFormOptions): Promise<LoadedFeed | null> {
+  try {
+    return await loadFeed(opts.shuttleBase)
+  } catch {
+    opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
+    return null
+  }
 }
 
 export async function openStash(opts: OpenFormOptions): Promise<void> {
   injectStashFormStyles()
-  let feed: LoadedFeed
-  try {
-    feed = await loadFeed(opts.shuttleBase)
-  } catch {
-    opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
-    return
-  }
-  // Create is owner-routed — offer every project; local origin writes here,
-  // remote origins forward to their owning daemon.
-  const projects: StashProject[] = toProjects(feed.model)
-
+  const feed = await feedOrReport(opts)
+  if (!feed) return
   ensureRoot().render(
     <StashForm
-      availableCities={projects}
-      availableHosts={feed.model.hosts}
-      cityActivityById={feed.model.activityById}
+      projects={feed.model.projects}
+      hosts={feed.model.hosts}
       tagSuggestions={feed.tags}
       shuttleBase={opts.shuttleBase}
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
@@ -133,28 +117,15 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
 }
 
 export async function openCapture(opts: OpenFormOptions): Promise<void> {
-  // Capture has its own sheet now (which pulls the shared pickers' in), the
-  // same shape as Stash's injection point.
   injectCaptureFormStyles()
-  let feed: LoadedFeed
-  try {
-    feed = await loadFeed(opts.shuttleBase)
-  } catch {
-    opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
-    return
-  }
-  // Capture is owner-routed — offer every project; local origin routes local,
-  // remote origins forward to their owning daemon.
-  const projects: CaptureProject[] = toProjects(feed.model)
-
+  const feed = await feedOrReport(opts)
+  if (!feed) return
   ensureRoot().render(
     <CaptureForm
-      availableCities={projects}
-      availableHosts={feed.model.hosts}
-      cityActivityById={feed.model.activityById}
+      projects={feed.model.projects}
+      hosts={feed.model.hosts}
       shuttleBase={opts.shuttleBase}
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
-      nativeFolderPicker={feed.model.nativeFolderPicker}
       onCancel={close}
       onSpawned={({ tmuxSession: session, surface }) => {
         close()

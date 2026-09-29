@@ -26,56 +26,31 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { agentGroups } from './agentGroups'
+import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
+import { injectStyles } from './injectStyles'
 import {
   AddProjectPath,
   HostPicker,
   ProjectPicker,
   injectProjectPickerStyles,
-  type PickerHost,
-  type PickerProject,
   useProjectSelection,
 } from './ProjectPicker'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
-import { shuttleOrigin } from './projectModel'
+import type { Host, Project } from './projectModel'
 import { defaultSurface, isCodexAgent, sessionHelp, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AgentEntry {
-  id: string
-  cli?: string
-  model?: string
-  default: boolean
-  /** Harness-native effort tokens this agent accepts; empty/absent = no effort axis. */
-  effort_levels?: string[]
-  /** Concrete token applied when the fiber omits an explicit effort. */
-  default_effort?: string | null
-  /** Whether the harness supports `--chrome` (claude only). */
-  chrome_capable?: boolean
-  /** Alias records resolve to base + axes; the composing picker supersedes them. */
-  alias_of?: string | null
-}
-
-/** A destination project, derived by the island from the composite feed. */
-export interface StashProject extends PickerProject {
-  /** Loom-relative substore prefix; `''` when the project is a store root.
-   *  Used to scope/strip parent candidates to project-relative slugs. */
-  loomPrefix: string
-}
-
 export interface StashFormProps {
-  /** Connected projects (the island supplies the local-only set for create). */
-  availableCities?: StashProject[]
+  /** Every project, in picker order, on every host (create is owner-routed). */
+  projects: Project[]
   /** Every host the picker can point at — the store registry's origins. The
    *  host control is the left half of the pair; the project list is whatever
    *  the selected host owns. */
-  availableHosts?: PickerHost[]
-  /** Optional activity timestamps per project id, for the recency sort. */
-  cityActivityById?: Record<string, number>
+  hosts: Host[]
   /** Existing tag set for autocomplete (island-supplied, from the feed). */
   tagSuggestions?: string[]
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
@@ -85,7 +60,7 @@ export interface StashFormProps {
   /** Register a new project directory and hand back the refreshed project set
    *  (the island re-derives it from the daemon). Absent → the picker offers no
    *  "+ Add project…" row. */
-  onProjectAdded?: (path: string) => Promise<StashProject[]>
+  onProjectAdded?: (path: string) => Promise<Project[]>
   /** Called on Esc / cancel / backdrop click. */
   onCancel: () => void
 }
@@ -122,14 +97,14 @@ function buildShuttleBlock(input: {
   surface: ExecutionSurface
 }): Record<string, unknown> {
   const block: Record<string, unknown> = {
-    kind: input.kind === 'standing' ? 'standing' : 'oneshot',
+    kind: input.kind,
     project_dir: input.projectDir,
   }
   if (input.agent) block.agent = input.agent
   if (input.effort.trim()) block.effort = input.effort.trim()
   if (input.chrome) block.chrome = true
   if (input.surface !== 'cli') block.surface = input.surface
-  if (block.kind === 'standing') {
+  if (input.kind === 'standing') {
     block.schedule = { expr: input.schedule.trim(), tz: input.tz.trim() || 'UTC' }
   }
   return block
@@ -309,9 +284,8 @@ function ParentPicker({ value, onChange, scopePrefix, shuttleBase }: ParentPicke
 // ---------------------------------------------------------------------------
 
 export function StashForm({
-  availableCities = [],
-  availableHosts = [],
-  cityActivityById = {},
+  projects: availableProjects,
+  hosts,
   tagSuggestions = [],
   shuttleBase = '',
   onCreated,
@@ -326,7 +300,8 @@ export function StashForm({
   const [parentSlug, setParentSlug] = useState<string>('')
 
   // Dispatch fields (shuttle)
-  const [agents, setAgents] = useState<AgentEntry[]>([])
+  const registry = useAgentRegistry(shuttleBase)
+  const agents = registry ?? []
   const [agentId, setAgentId] = useState<string>('') // '' = registry default
   const [effort, setEffort] = useState<string>('')
   const [kind, setKind] = useState<'oneshot' | 'standing'>('oneshot')
@@ -340,21 +315,19 @@ export function StashForm({
   const [error, setError] = useState<string | null>(null)
 
   const {
-    hosts,
     selectedHostId,
     selectedHost,
     handleHostChange,
-    cities,
-    hostCities,
-    selectedCityId,
-    setSelectedCityId,
-    selectedCity,
+    projects,
+    hostProjects,
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
     addProject,
-  } = useProjectSelection<StashProject>({
+  } = useProjectSelection<Project>({
     shuttleBase,
-    availableCities,
-    availableHosts,
-    cityActivityById,
+    projects: availableProjects,
+    hosts,
     onProjectAdded,
   })
 
@@ -365,23 +338,13 @@ export function StashForm({
     titleRef.current?.focus()
   }, [])
 
-  // The agent registry straight from the daemon — a bare array. Best-effort:
-  // absence or a malformed body degrades to a free-text agent input.
+  // The agent registry straight from the daemon. Best-effort: absence or a
+  // malformed body degrades to a free-text agent input. Once it lands, the
+  // select starts on the registry's default agent.
   useEffect(() => {
-    let cancelled = false
-    fetch(`${shuttleBase}/api/v1/agents`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | null) => {
-        if (cancelled || !Array.isArray(raw)) return
-        const list = raw.filter((a) => !a.alias_of)
-        if (!list.length) return
-        setAgents(list)
-        const def = list.find((a) => a.default)
-        if (def) setAgentId(def.id)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [shuttleBase])
+    const def = registry?.find((a) => a.default)
+    if (def) setAgentId(def.id)
+  }, [registry])
 
   const tagInputLower = tagInput.trim().toLowerCase()
   const filteredSuggestions = tagSuggestions
@@ -426,7 +389,7 @@ export function StashForm({
       setError('Schedule (cron expression) is required for standing roles.')
       return
     }
-    if (!selectedCity) {
+    if (!selectedProject) {
       setError('Pick a project — the stash needs a felt store to land in.')
       return
     }
@@ -452,7 +415,7 @@ export function StashForm({
         kind,
         schedule,
         tz: scheduleTz,
-        projectDir: selectedCity.path,
+        projectDir: selectedProject.path,
         chrome,
         surface,
       }),
@@ -465,11 +428,11 @@ export function StashForm({
         body: JSON.stringify({
           id,
           name: trimmedTitle,
-          body: body.length > 0 ? body : '',
+          body,
           frontmatter,
           // Owner-routing key — the daemon writes locally when this is its own
           // origin (or 'local') and forwards to the owning remote otherwise.
-          origin: shuttleOrigin(selectedCity.originId),
+          origin: selectedProject.originId,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
@@ -502,25 +465,20 @@ export function StashForm({
   // The agent whose constraint metadata gates the dependent axes.
   const constraintAgent = agents.find((a) => a.id === agentId) ?? defaultAgentEntry
   const effortLevels = constraintAgent?.effort_levels ?? []
-  const effectiveEffort = effortLevels.includes(effort)
-    ? effort
-    : constraintAgent?.default_effort && effortLevels.includes(constraintAgent.default_effort)
-      ? constraintAgent.default_effort
-      : ''
+  const effectiveEffort = resolveEffort(constraintAgent, effort)
   const chromeCapable = agents.length === 0 ? true : constraintAgent?.chrome_capable ?? false
 
   // Clamp axes whenever the constraint agent shifts under them.
   useEffect(() => {
     if (chrome && !chromeCapable) setChrome(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [constraintAgent?.id, agents])
+  }, [constraintAgent?.id, registry])
 
   const handleAgentChange = (id: string): void => {
     const wasCodex = isCodexAgent(agents.find((a) => a.id === agentId) ?? defaultAgentEntry)
     setAgentId(id)
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
-    const levels = rec?.effort_levels ?? []
-    setEffort(rec?.default_effort && levels.includes(rec.default_effort) ? rec.default_effort : '')
+    setEffort(resolveEffort(rec, ''))
     if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
@@ -562,7 +520,7 @@ export function StashForm({
                   add one: the project select's first option, "Add a new
                   project…", is how a host with an empty list bootstraps its
                   first. */}
-              {(cities.length > 0 || onProjectAdded) && (
+              {(projects.length > 0 || onProjectAdded) && (
                 <>
                   <div className="stash-field">
                     <span className="stash-label">Host</span>
@@ -576,9 +534,9 @@ export function StashForm({
                   <div className="stash-field">
                     <span className="stash-label">Project</span>
                     <ProjectPicker
-                      projects={hostCities}
-                      selectedId={selectedCityId}
-                      onSelect={setSelectedCityId}
+                      projects={hostProjects}
+                      selectedId={selectedProjectId}
+                      onSelect={setSelectedProjectId}
                       onAddProject={onProjectAdded ? addProject.begin : undefined}
                       className="stash-select"
                     />
@@ -594,7 +552,7 @@ export function StashForm({
                 <ParentPicker
                   value={parentSlug}
                   onChange={setParentSlug}
-                  scopePrefix={selectedCity?.loomPrefix ?? ''}
+                  scopePrefix={selectedProject?.loomPrefix ?? ''}
                   shuttleBase={shuttleBase}
                 />
               </label>
@@ -772,7 +730,7 @@ export function StashForm({
                     <option value="app">ChatGPT app</option>
                     <option value="cli">Terminal</option>
                   </select>
-                  <span className="stash-session-help">{sessionHelp(constraintAgent, surface)}</span>
+                  <span className="stash-session-help">{sessionHelp(surface)}</span>
                 </label>
               )}
 
@@ -891,15 +849,9 @@ export function StashForm({
   )
 }
 
-/**
- * Inject the StashForm's CSS once. Idempotent — safe to call on every open.
- */
+/** Inject the StashForm's CSS, and the shared pickers' sheet it draws on. */
 export function injectStashFormStyles(): void {
-  if (typeof document === 'undefined') return
-  if (document.getElementById('stash-form-styles')) return
-  const style = document.createElement('style')
-  style.id = 'stash-form-styles'
-  style.textContent = `
+  injectStyles('stash-form-styles', `
     .stash-scrim {
       position: fixed;
       inset: 0;
@@ -1527,9 +1479,6 @@ export function injectStashFormStyles(): void {
       .stash-select { padding-right: 30px; }
     }
 
-  `
-  document.head.appendChild(style)
-  // The shared directory picker rides along: both forms that open it are opened
-  // through this same injection point (Stash directly, Capture via mountForms).
+  `)
   injectProjectPickerStyles()
 }

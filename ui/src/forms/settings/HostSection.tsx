@@ -3,7 +3,7 @@
  * file under it, because it edits nothing.
  *
  * It exists because the questions it answers are the ones you have while
- * changing everything else on this page, and every one of them used to need a
+ * changing everything else on this page, and each would otherwise need a
  * terminal on that machine: which build is it running, did it boot since I
  * deployed, is the CLI it shells the one it expects, is its poll loop healthy,
  * is it holding fresh launches behind the boot quarantine.
@@ -26,7 +26,9 @@
  * dispatch authority, and the sentence beside it says so.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+
+import { ago, useQuietPoll } from './live'
 
 import {
   loadHostState,
@@ -46,16 +48,7 @@ function when(iso: string | undefined): string {
   if (!iso || iso === 'unknown') return 'unknown'
   const then = Date.parse(iso)
   if (Number.isNaN(then)) return iso
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  const rel =
-    secs < 60
-      ? `${secs}s ago`
-      : secs < 3600
-        ? `${Math.round(secs / 60)}m ago`
-        : secs < 86400
-          ? `${Math.round(secs / 3600)}h ago`
-          : `${Math.round(secs / 86400)}d ago`
-  return `${iso.replace('T', ' ').replace(/\.\d+Z?$/, '')} · ${rel}`
+  return `${iso.replace('T', ' ').replace(/\.\d+Z?$/, '')} · ${ago(then)}`
 }
 
 export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Element {
@@ -118,14 +111,8 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
   // would leave “booted 2m ago” asserting a freshness this page had stopped
   // knowing about. The last good read stays on screen, because it is still the
   // truest thing we have, and says it has stopped moving.
-  const busyRef = useRef(busy)
-  busyRef.current = busy
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      // Through a ref, not a dependency: in the deps the timer restarted on
-      // every button press, so a run of clicks could hold the refresh off.
-      if (busyRef.current || document.hidden) return
+  useQuietPoll(
+    () => {
       loadHostState(shuttleBase, host)
         .then((data) => {
           if (!data) return
@@ -133,9 +120,10 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
           setDrifted(false)
         })
         .catch(() => setDrifted(true))
-    }, 30_000)
-    return () => window.clearInterval(id)
-  }, [shuttleBase, host.origin])
+    },
+    busy,
+    `${shuttleBase}|${host.origin}`,
+  )
 
   const build = state?.build
   const contract = state?.contract

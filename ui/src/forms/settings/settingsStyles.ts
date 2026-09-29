@@ -15,23 +15,13 @@
  * green anywhere: a healthy remote is drawn by the absence of a mark, not by a
  * dot claiming everything is fine.
  *
- * Injected by element id on first render, the same pattern as
- * `injectStashFormStyles` and `injectCaptureFormStyles`.
+ * Injected by element id on first render, like every form sheet.
  */
 
-let injected = false
+import { injectStyles } from '../injectStyles'
 
 export function injectSettingsStyles(): void {
-  if (typeof document === 'undefined') return
-  if (injected || document.getElementById('shuttle-settings-styles')) {
-    injected = true
-    return
-  }
-  injected = true
-  const style = document.createElement('style')
-  style.id = 'shuttle-settings-styles'
-  style.textContent = SHEET
-  document.head.appendChild(style)
+  injectStyles('shuttle-settings-styles', SHEET)
 }
 
 const SHEET = `

@@ -45,6 +45,7 @@ import { useSettingsDraft } from './SettingsDraftContext'
 import {
   addProject,
   chooseFolder,
+  CONFIG_FILENAME,
   loadConfigFile,
   saveProjects,
   saveStores,
@@ -66,10 +67,9 @@ export interface PathListSectionProps {
 
 const COPY: Record<
   PathListKind,
-  { lede: JSX.Element; addLabel: string; empty: string; filename: string }
+  { lede: JSX.Element; addLabel: string; empty: string }
 > = {
   stores: {
-    filename: 'stores.json',
     lede: (
       <>
         Where this daemon reads fibers and finds work to run. Add a directory containing{' '}
@@ -80,7 +80,6 @@ const COPY: Record<
     empty: 'No stores configured — this daemon polls nothing and dispatches nothing.',
   },
   projects: {
-    filename: 'projects.json',
     lede: (
       <>
         Where <strong>Stash and Capture</strong> can create work. Adding a project creates{' '}
@@ -188,7 +187,7 @@ export function PathListSection({
       setTyped('')
       // The note is set BEFORE the refresh and survives it. It is the
       // confirmation for the only call here that creates anything on disk, and
-      // a refresh that cleared it made that confirmation flash and vanish.
+      // a refresh that cleared it would make it flash and vanish.
       if (result.initialized) setNote(`Initialized a new felt store at ${result.path}.`)
       else if (!result.registered) setNote(`${result.path} was already registered.`)
       await read(true)
@@ -214,8 +213,8 @@ export function PathListSection({
         return
       }
       // No path, no error. The dialog was dismissed — or it never opened, which
-      // every mechanism reports the same way a dismissal looks. Saying so beats
-      // the silence this used to answer with after a long wait.
+      // every mechanism reports the same way a dismissal looks. Say so rather
+      // than answer a long wait with silence.
       setNote(
         host.isLocal
           ? 'No folder chosen.'
@@ -229,6 +228,7 @@ export function PathListSection({
   }
 
   const copy = COPY[kind]
+  const filename = CONFIG_FILENAME[kind]
 
   // Read the override with the list itself, so controls never briefly offer
   // a write while the separate config index is still loading.
@@ -261,7 +261,7 @@ export function PathListSection({
           <p>Using <span className="set-mono">{overridden.value}</span>.</p>
           <p>To edit this list here, remove <span className="set-mono">{overridden.var}</span> from
             this host’s daemon startup configuration and restart it with the same paths in{' '}
-            <span className="set-mono">{copy.filename}</span>.</p>
+            <span className="set-mono">{filename}</span>.</p>
           <p>The saved file below is inactive.</p>
         </div>
       )}
@@ -277,7 +277,7 @@ export function PathListSection({
 
       {loaded !== null &&
         (paths.length === 0 ? (
-          <div className="set-empty">{overridden ? `No paths saved in ${copy.filename}. The environment setting above is active.` : copy.empty}</div>
+          <div className="set-empty">{overridden ? `No paths saved in ${filename}. The environment setting above is active.` : copy.empty}</div>
         ) : (
           <ul className="set-list">
             {paths.map((path) => (

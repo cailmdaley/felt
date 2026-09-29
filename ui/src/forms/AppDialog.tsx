@@ -1,5 +1,6 @@
 /**
- * AppDialog — the paper card the Capture form lives in, built on Radix Dialog.
+ * AppDialog — the paper card the Capture form and the settings sheet live in,
+ * built on Radix Dialog.
  *
  * Gives focus trap, escape-to-close, accessible labelling, scroll lock, and
  * portal-to-body for free. The standalone UI has no competing modal stack, so
@@ -9,21 +10,19 @@
  * paper field (#F4F0E8) under a slightly darker header band, a brass hairline
  * under the header, and EB Garamond throughout. Stash builds its card from an
  * injected sheet because it has a dozen internal parts; this one is small
- * enough to carry its chrome inline, with a single tiny sheet for the entrance
- * keyframes (CSS-only, so Radix's mount is what triggers it).
+ * enough to carry its chrome inline, with a small sheet for the entrance
+ * keyframes (CSS-only, so Radix's mount is what triggers it) and the geometry
+ * a media query has to answer.
  */
 
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ReactNode } from 'react'
+import { injectStyles } from './injectStyles'
 
-/** Entrance keyframes — the one thing inline styles cannot express. Idempotent
- *  by element id, the same pattern as `injectStashFormStyles`. */
+/** Entrance keyframes and viewport geometry — the things inline styles
+ *  cannot express. */
 function injectAppDialogStyles(): void {
-  if (typeof document === 'undefined') return
-  if (document.getElementById('app-dialog-styles')) return
-  const style = document.createElement('style')
-  style.id = 'app-dialog-styles'
-  style.textContent = `
+  injectStyles('app-dialog-styles', `
     @keyframes app-dialog-scrim-in { from { opacity: 0; } to { opacity: 1; } }
     @keyframes app-dialog-card-in {
       from { transform: translate(-50%, calc(-50% - 6px)); opacity: 0; }
@@ -120,8 +119,7 @@ function injectAppDialogStyles(): void {
     @media (prefers-reduced-motion: reduce) {
       .app-dialog-card { animation: none; }
     }
-  `
-  document.head.appendChild(style)
+  `)
 }
 
 const appDialogOverlayStyles: React.CSSProperties = {

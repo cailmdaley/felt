@@ -99,8 +99,5 @@ export async function joinMeeting(
   if (response.status === 409 && payload.meeting) {
     return { kind: 'error', message: 'A meeting is already starting or running.' }
   }
-  if (response.status === 404) {
-    return { kind: 'error', message: 'This daemon cannot join meetings yet — deploy the current build.' }
-  }
   return { kind: 'error', message: responseError(payload, response.status) }
 }

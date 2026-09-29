@@ -108,10 +108,11 @@ export function SettingsDialog({
    * The config index, STAMPED with the host it describes.
    *
    * Stamped rather than bare, because clearing it in an effect is one render
-   * too late: the first paint after a host switch still held the previous
-   * host's rows, and a section that latched an environment-override flag out
-   * of that paint carried one machine's warning onto another's page. A stamp
-   * makes the staleness unrepresentable instead of racing to erase it.
+   * too late: the first paint after a host switch would still hold the
+   * previous host's rows, and a section that latched an environment-override
+   * flag out of that paint would carry one machine's warning onto another's
+   * page. A stamp makes the staleness unrepresentable instead of racing to
+   * erase it.
    */
   const [index, setIndex] = useState<{ origin: string; files: ConfigFileSummary[] } | null>(null)
 
@@ -120,8 +121,9 @@ export function SettingsDialog({
     [liveHosts, originKey],
   )
 
-  // Re-read the origins feed after a write, so the store and project rows
-  // reflect what the host now holds rather than what it held on open.
+  // Re-read the origins feed after a write, so the host bar and the store
+  // section's symlink expansion reflect what the host now holds rather than
+  // what it held on open.
   useEffect(() => {
     if (revision === 0) return
     let cancelled = false
@@ -143,9 +145,9 @@ export function SettingsDialog({
     let cancelled = false
     // Deliberately NOT cleared first on a revision bump. The index carries the
     // environment-override flag a section uses to disable editing, and a blank
-    // index reads as "not overridden" — so clearing it here blinked those
+    // index reads as "not overridden" — so clearing it here would blink those
     // controls back on for the length of a round trip, which is the one moment
-    // they were guarding against. A host switch does clear it, below.
+    // they guard. A host switch needs no clear: the stamp above covers it.
     const origin = host.origin
     loadConfigIndex(shuttleBase, host)
       .then((data) => {
@@ -163,7 +165,7 @@ export function SettingsDialog({
   }, [shuttleBase, host?.origin, revision])
 
   // Undefined for a host the index is not about — including for the render
-  // immediately after a switch, which is the one that used to leak.
+  // immediately after a switch.
   const summaryFor = (id: ConfigFileSummary['id']): ConfigFileSummary | undefined =>
     index && host && index.origin === host.origin
       ? index.files.find((f) => f.id === id)
