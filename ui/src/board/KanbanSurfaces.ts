@@ -2840,10 +2840,10 @@ export function formatLaunchDay(iso: string): string {
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
- *  the same way the timeline places the card — otherwise one render pass showed
- *  two different days: the card sat on the Thursday column while its own chip
- *  read Wednesday. The day is materialized as a local date, never re-parsed as
- *  an instant (see civilDay.ts). */
+ *  the same way Chronicle places the card's due mark — otherwise one board
+ *  would name two different days for one due, Thursday on the column and
+ *  Wednesday on the chip. The day is materialized as a local date, never
+ *  re-parsed as an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
   const date = civilDayToLocalDate(dueCivilDay(iso))
   if (!date) return iso

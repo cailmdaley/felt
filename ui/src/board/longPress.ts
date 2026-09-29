@@ -5,7 +5,8 @@
  * card's "what can I do with this" has to come from somewhere. It comes from
  * holding the card still. The rules are the platform's own, written out because
  * the browser will not do it for us: a press fires once it has been held for
- * `holdMs` WITHOUT travelling more than `slopPx`, and any movement past that
+ * `LONG_PRESS_HOLD_MS` WITHOUT travelling more than `LONG_PRESS_SLOP_PX`, and
+ * any movement past that
  * radius, any lift, any cancel (a scroll taking over, a drag starting) takes it
  * back down. A finger that is on its way somewhere else is not a long press.
  *
@@ -14,10 +15,12 @@
  * pointer events into calls on it.
  */
 
-import { suppressNextClick } from './dismissGesture.js'
+import { clearSelection, suppressNextClick } from './dismissGesture.js'
 
-export const LONG_PRESS_HOLD_MS = 450
-export const LONG_PRESS_SLOP_PX = 8
+/** Held this long without travelling, the press fires. */
+const LONG_PRESS_HOLD_MS = 450
+/** Travel past this radius (in CSS px) and the press is abandoned. */
+const LONG_PRESS_SLOP_PX = 8
 
 export interface LongPressPoint {
   x: number
@@ -25,10 +28,6 @@ export interface LongPressPoint {
 }
 
 export interface LongPressOptions {
-  /** Held this long without travelling, the press fires. */
-  holdMs?: number
-  /** Travel past this radius (in CSS px) and the press is abandoned. */
-  slopPx?: number
   onFire: () => void
   /** Called when a press begins and when it ends, fired or not — the hook the
    *  DOM binding uses to tint the card under the thumb. */
@@ -38,8 +37,6 @@ export interface LongPressOptions {
 }
 
 export class LongPressTracker {
-  private readonly holdMs: number
-  private readonly slopPx: number
   private readonly onFire: () => void
   private readonly onPressChange: (pressing: boolean) => void
   private readonly setTimer: (fn: () => void, ms: number) => number
@@ -50,8 +47,6 @@ export class LongPressTracker {
   private pointerId: number | null = null
 
   constructor(opts: LongPressOptions) {
-    this.holdMs = opts.holdMs ?? LONG_PRESS_HOLD_MS
-    this.slopPx = opts.slopPx ?? LONG_PRESS_SLOP_PX
     this.onFire = opts.onFire
     this.onPressChange = opts.onPressChange ?? (() => {})
     this.setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms) as unknown as number)
@@ -79,9 +74,9 @@ export class LongPressTracker {
       this.onPressChange(false)
       // Any selection iOS started under the held finger goes before the menu
       // rises, or its Copy/Look Up callout follows the menu up.
-      globalThis.getSelection?.()?.removeAllRanges()
+      clearSelection()
       this.onFire()
-    }, this.holdMs)
+    }, LONG_PRESS_HOLD_MS)
     this.onPressChange(true)
   }
 
@@ -89,7 +84,7 @@ export class LongPressTracker {
     if (this.pointerId !== pointerId || !this.origin) return
     const dx = at.x - this.origin.x
     const dy = at.y - this.origin.y
-    if (Math.hypot(dx, dy) > this.slopPx) this.cancel()
+    if (Math.hypot(dx, dy) > LONG_PRESS_SLOP_PX) this.cancel()
   }
 
   /** Lift, cancel, drag start, scroll — every way a press stops being one. */
@@ -102,7 +97,6 @@ export class LongPressTracker {
     this.origin = null
     this.pointerId = null
   }
-
 }
 
 /**

@@ -61,6 +61,14 @@ function cancel(e: GestureEvent): void {
   e.stopImmediatePropagation?.()
 }
 
+/** The injected timers, or the real ones. */
+function resolveTimers({ setTimer, clearTimer }: GestureTimers): Required<GestureTimers> {
+  return {
+    setTimer: setTimer ?? ((fn, ms) => setTimeout(fn, ms) as unknown as number),
+    clearTimer: clearTimer ?? ((id) => clearTimeout(id)),
+  }
+}
+
 /**
  * Swallow the next click, if one arrives soon.
  *
@@ -71,12 +79,8 @@ function cancel(e: GestureEvent): void {
  * Returns a disarm function; arming twice is harmless, each arming swallows at
  * most one click.
  */
-export function suppressNextClick(
-  scope: GestureScope,
-  { setTimer, clearTimer, windowMs = CLICK_SWALLOW_MS }: GestureTimers & { windowMs?: number } = {},
-): () => void {
-  const arm = setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms) as unknown as number)
-  const disarmTimer = clearTimer ?? ((id: number) => clearTimeout(id))
+export function suppressNextClick(scope: GestureScope, timers: GestureTimers = {}): () => void {
+  const { setTimer, clearTimer } = resolveTimers(timers)
 
   let done = false
   const onClick = (e: GestureEvent): void => {
@@ -84,12 +88,12 @@ export function suppressNextClick(
     cancel(e)
     stop()
   }
-  const timer = arm(() => stop(), windowMs)
+  const timer = setTimer(() => stop(), CLICK_SWALLOW_MS)
 
   function stop(): void {
     if (done) return
     done = true
-    disarmTimer(timer)
+    clearTimer(timer)
     scope.removeEventListener('click', onClick, true)
   }
 
@@ -138,35 +142,31 @@ export function dismissOnScrim(
 export function onPressRelease(
   scope: GestureScope,
   fn: () => void,
-  { setTimer, clearTimer, windowMs = CLICK_SWALLOW_MS }: GestureTimers & { windowMs?: number } = {},
+  timers: GestureTimers = {},
 ): () => void {
-  const arm = setTimer ?? ((f: () => void, ms: number) => setTimeout(f, ms) as unknown as number)
-  const disarmTimer = clearTimer ?? ((id: number) => clearTimeout(id))
+  const { setTimer, clearTimer } = resolveTimers(timers)
 
   let done = false
-  const onEnd = (): void => finish()
-  const timer = arm(() => finish(), windowMs)
+  const onEnd = (): void => {
+    if (stop()) fn()
+  }
+  const timer = setTimer(onEnd, CLICK_SWALLOW_MS)
 
-  function finish(): void {
-    if (done) return
+  /** Detach everything; true only the first time. */
+  function stop(): boolean {
+    if (done) return false
     done = true
-    disarmTimer(timer)
+    clearTimer(timer)
     scope.removeEventListener('pointerup', onEnd, true)
     scope.removeEventListener('pointercancel', onEnd, true)
-    fn()
+    return true
   }
 
   scope.addEventListener('pointerup', onEnd, true)
   scope.addEventListener('pointercancel', onEnd, true)
 
   /** Teardown for the caller that closes before the finger ever lifts. */
-  return () => {
-    if (done) return
-    done = true
-    disarmTimer(timer)
-    scope.removeEventListener('pointerup', onEnd, true)
-    scope.removeEventListener('pointercancel', onEnd, true)
-  }
+  return () => void stop()
 }
 
 /**
