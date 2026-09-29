@@ -10,13 +10,12 @@
  *   a drag on a header   →  the card is PLACED: it leaves the flow and keeps
  *                           the exact position you gave it, forever.
  *
- * Treating the two the same was the shelf's worst bug. A bare click on a
- * card's name committed the card's *current* flow position to storage, which
- * took it out of the flow — and the flow, closing over the gap it left, slid
- * the next card up into the slot the clicked card was still sitting in. Two
- * cards, one place, one of them a card the user had just been looking at: it
- * read as the card having spawned a copy of itself. Nothing was created; a
- * click was mistaken for a placement.
+ * Treating the two the same breaks the canvas. A bare click that committed the
+ * card's *current* flow position to storage would take it out of the flow —
+ * and the flow, closing over the gap it left, would slide the next card up
+ * into the slot the clicked card still sits in. Two cards, one place: it reads
+ * as the card having spawned a copy of itself, when a click was only mistaken
+ * for a placement.
  *
  * So the machine has three phases and a threshold:
  *
@@ -149,8 +148,7 @@ export function travelled(gesture: ShelfGesture, clientX: number, clientY: numbe
  *
  * Returns the gesture (promoted to `active` once it has travelled) and the
  * geometry the view should paint — `null` while the gesture is still a maybe,
- * because a card that shifts under a click that was never a drag is exactly
- * the jump the old code had.
+ * because a card must not shift under a click that was never a drag.
  */
 export function advanceGesture(
   gesture: ShelfGesture,

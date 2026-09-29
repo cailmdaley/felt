@@ -18,11 +18,10 @@
  *
  * THE FLOW IS MADE OF STACKS, NOT OF FILES. A fiber that sent ten files is one
  * tile on the surface, ten sheets deep, its newest send face up — see
- * buildStacks. There used to be a lens toggle here (by recency / by fiber) and
- * it is gone: two orderings of the same hundred cards are two ways of being
- * overwhelmed, whereas one tile per fiber is a board you can read across. The
- * ordering the fiber lens existed for — "everything from the shear run
- * together" — is now the shape of the tile itself.
+ * buildStacks. There is one ordering, not a lens toggle: two orderings of the
+ * same hundred cards are two ways of being overwhelmed, whereas one tile per
+ * fiber is a board you can read across, and "everything from the shear run
+ * together" is the shape of the tile itself.
  *
  * Pure: no DOM, no storage side effects beyond the two localStorage helpers at
  * the bottom, which swallow their own failures the way FiberDetailModal's do.

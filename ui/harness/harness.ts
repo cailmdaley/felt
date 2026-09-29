@@ -115,16 +115,15 @@ const MOCK_CARD: KanbanCard = {
   // A real LOCAL card's originId is the daemon's own host id (a hostname), NOT
   // the literal 'local' — the composite feed stamps local rows with
   // own_host_id() and sets feed.host to the same. Using the realistic shape
-  // here is what lets the ?fallback scenario exercise the (previously broken)
-  // local-ness gate; 'local' would have masked the bug.
+  // here is what lets the ?fallback scenario exercise the local-ness gate;
+  // 'local' would pass it trivially.
   originId: 'ada-workstation',
   status: 'active',
   outcome: 'BUILDING: chrome redesign + the new two-column multi-file viewer for the fiber panel. This lede shows the manuscript outcome treatment.',
   tags: ['constitution', 'kanban', 'portolan', 'design'],
   createdAt: '2026-06-17T23:33:19+02:00',
   // The four derived fields the board's classifier computes and every consumer
-  // assumes present. They drifted out of this fixture while `harness/` sat
-  // outside the type checker; an ordinary active oneshot is what they read as.
+  // assumes present; an ordinary active oneshot is what they read as.
   effectiveHorizon: 'now',
   drifted: false,
   isCycle: false,

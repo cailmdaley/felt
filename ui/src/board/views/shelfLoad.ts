@@ -7,13 +7,12 @@
  * placeholder for content, it IS content. The BODY is the file itself: an
  * iframe, an image, a page of text. Bodies are expensive and finite.
  *
- * The rule the old board broke: it mounted a body the first time a card came
- * near the viewport and then set a `mounted` flag it never once cleared. Live
- * iframes only accumulated. Scroll a canvas of seventy-five reports and you
- * end up with seventy-five live documents in one tab, each with its own
- * scripts and its own layout, and the surface that was supposed to be
- * skimmable becomes the slowest page on the machine. Bodies must be able to
- * DIE, and something has to decide which.
+ * Bodies must be able to DIE. A body mounted the first time a card came near
+ * the viewport and never taken down means live iframes only accumulate: scroll
+ * a canvas of seventy-five reports and you hold seventy-five live documents in
+ * one tab, each with its own scripts and its own layout, and the surface that
+ * was supposed to be skimmable becomes the slowest page on the machine. So
+ * something has to decide which bodies live.
  *
  * That is this module: two pure decisions, kept away from the DOM so they can
  * be tested as arithmetic rather than as a browser.

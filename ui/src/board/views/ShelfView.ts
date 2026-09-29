@@ -14,16 +14,15 @@
  * is not a placeholder for content, it is content. The BODY — the iframe, the
  * image, the page of text — is expensive, finite, and mortal: it mounts when
  * the card comes near the viewport and is taken down again when the board has
- * more live bodies than it can carry (shelfLoad). The old board mounted bodies
- * and never took one down, which is how a skimmable surface became the
- * slowest page in the browser.
+ * more live bodies than it can carry (shelfLoad), so a skimmable surface never
+ * becomes the slowest page in the browser.
  *
  * CARDS ARE HANDLES, NEVER FACTORIES. Everything you can do to a card here
  * rearranges the canvas; nothing on a card makes another card. Drag the header
  * to move it, the corner to resize it, the ✶ to hold it where it is, click its
  * body to make the frame live. The one rule behind all of it is that a CLICK
- * IS NOT A DRAG — see shelfGesture, which exists because conflating the two
- * made a click on a card's name look like the card had spawned a copy.
+ * IS NOT A DRAG — see shelfGesture, which keeps a click on a card's name from
+ * committing a placement that reads as the card having spawned a copy.
  *
  * NOTHING OVERLAPS, except a pile of one fiber's work. Cards are bodies with
  * volume: drag one onto its neighbours and they move out of the way, live,
@@ -1224,7 +1223,7 @@ class ShelfView implements TemporalView {
    *
    * A remote board (`shuttleBase` pointing at another host) serves frames
    * cross-origin, and reaching for `contentWindow` there throws. Those cards
-   * keep the old limit rather than the whole card failing to mount.
+   * go without in-frame zoom rather than the whole card failing to mount.
    */
   private hearFrameWheel(handle: CardHandle, frame: HTMLIFrameElement): void {
     handle.unframeWheel?.()
