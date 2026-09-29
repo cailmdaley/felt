@@ -137,6 +137,12 @@ defmodule Shuttle.Application do
 
     Shuttle.Readiness.begin_boot()
 
+    # The host identity, resolved exactly once and before any child starts:
+    # every caller — the endpoint's first requests, the Poller, the owned-feed
+    # filter — reads this frozen value and none shells felt for it. A daemon
+    # felt cannot name does not boot.
+    Shuttle.Poller.freeze_daemon_host_id!()
+
     case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
       {:ok, pid} ->
         duration_ms = Shuttle.Readiness.mark_ready()
@@ -167,7 +173,7 @@ defmodule Shuttle.Application do
     optional =
       for {flag, mod} <- @optional_children,
           Application.get_env(:shuttle, flag, true),
-          do: mod
+          do: optional_child(mod)
 
     # The endpoint binds before any synchronous child that may walk stores,
     # seed events.jsonl or reconcile Tailnet bridges. Its start callback logs
@@ -180,6 +186,13 @@ defmodule Shuttle.Application do
     Enum.map(core, &Supervisor.child_spec(&1, [])) ++
       [endpoint] ++ Enum.map(optional, &Supervisor.child_spec(&1, []))
   end
+
+  # The Poller takes the identity `start/2` froze rather than resolving its
+  # own, so a supervisor restart of it keeps the same identity too.
+  defp optional_child(Shuttle.Poller),
+    do: {Shuttle.Poller, own_host_id: Shuttle.Poller.daemon_host_id()}
+
+  defp optional_child(mod), do: mod
 
   # A graceful stop (SIGTERM → `init:stop/0`) calls this before any child is
   # terminated — the Poller does not trap exits, so its `terminate/2` never runs

@@ -63,6 +63,9 @@ defmodule Shuttle.Poller do
   # see init/1). A plain atom tag, not `__MODULE__`, so it reads unambiguously
   # in `:persistent_term.info/0` dumps.
   @own_host_pt_namespace :shuttle_own_host_id
+  # The daemon-wide identity `freeze_daemon_host_id!/1` resolves once at
+  # application start; per-Poller slots fall back to it.
+  @daemon_host_key {@own_host_pt_namespace, :daemon}
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
 
@@ -2324,14 +2327,12 @@ defmodule Shuttle.Poller do
   anywhere else in the daemon: the identity comes from `SHUTTLE_HOST` or from
   `felt shuttle host --json`, the same resolver the CLI stamps with.
 
-  Reads the value `init/1` froze into a `:persistent_term` at boot
-  (keyed by `server`'s registered name/pid), NOT a fresh lookup — post-launch
-  drift (an operator editing `~/.shuttle/host` while the daemon runs, a
-  respawn exporting a different `SHUTTLE_HOST`) must not split routing from
-  ownership mid-run: every consumer within one daemon lifetime sees the SAME
-  identity, computed once. Resolves afresh only when no Poller by that name
-  has booted yet — pure-unit tests with no live Poller, and callers that run
-  before the daemon's Poller starts.
+  A pure `:persistent_term` read, never a shell. `server`'s own slot (the
+  value its `init/1` froze) wins; otherwise this reads the daemon identity
+  `freeze_daemon_host_id!/1` resolved once at application start, before the
+  endpoint bound. Post-launch drift (an operator editing `~/.shuttle/host`
+  while the daemon runs, a respawn exporting a different `SHUTTLE_HOST`)
+  therefore cannot split routing from ownership mid-run.
 
   `own_host_id/0` targets the default-named `#{inspect(__MODULE__)}` — the
   production singleton every external consumer (controllers, `Shuttle.Kitty`,
@@ -2345,7 +2346,37 @@ defmodule Shuttle.Poller do
   @spec own_host_id(GenServer.server()) :: String.t()
   def own_host_id(server) do
     case :persistent_term.get({@own_host_pt_namespace, server}, nil) do
-      nil -> resolve_own_host_id([])
+      nil -> daemon_host_id()
+      frozen -> frozen
+    end
+  end
+
+  @doc """
+  Resolves this daemon's identity and freezes it for the daemon's life.
+
+  `Shuttle.Application.start/2` calls this once, before any child starts, so
+  no request, poll read or per-row feed filter ever shells felt for it; the
+  production Poller receives the frozen value as its `:own_host_id`. Raises
+  when felt cannot answer: a daemon with no identity would match no
+  `shuttle.host` and dispatch nothing, silently, so it does not boot.
+  `felt_opts` go to `Shuttle.Felt.run/2`.
+  """
+  @spec freeze_daemon_host_id!(keyword()) :: String.t()
+  def freeze_daemon_host_id!(felt_opts \\ []) do
+    id = resolve_own_host_id(felt_opts)
+    :persistent_term.put(@daemon_host_key, id)
+    id
+  end
+
+  @doc """
+  The daemon identity frozen at application start. Code running with no
+  application (a bare script, a unit test that stopped it) resolves and
+  freezes it on first use, so even there felt is asked at most once.
+  """
+  @spec daemon_host_id() :: String.t()
+  def daemon_host_id do
+    case :persistent_term.get(@daemon_host_key, nil) do
+      nil -> freeze_daemon_host_id!()
       frozen -> frozen
     end
   end
@@ -2355,9 +2386,8 @@ defmodule Shuttle.Poller do
   # the one resolver of the host file and the OS-hostname fallback (see
   # cmd/shuttle_host.go), so the CLI's `host:` stamp and this daemon's dispatch
   # predicate cannot disagree about which machine this is. Runs once per
-  # Poller boot (`init/1` freezes the result) plus as `own_host_id/1`'s
-  # fallback when nothing has frozen a value yet. `felt_opts` go to
-  # `Shuttle.Felt.run/2` (`init/1` passes its `:runner`).
+  # daemon (`freeze_daemon_host_id!/1`) and once per Poller started without an
+  # `:own_host_id` opt (test pollers; `init/1` passes its `:runner`).
   #
   # Raises when felt cannot answer: a daemon with no identity would match no
   # `shuttle.host` and dispatch nothing, silently.

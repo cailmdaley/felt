@@ -355,7 +355,11 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp filter_rows(rows, :owned), do: Enum.filter(rows, &owned_kanban_fiber?/1)
+  defp filter_rows(rows, :owned) do
+    own_host_id = own_host_id()
+    Enum.filter(rows, &owned_kanban_fiber?(&1, own_host_id))
+  end
+
   defp filter_rows(rows, _all), do: rows
 
   defp unique_entries(entries) do
@@ -402,8 +406,8 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_aux_admissible?/1` enforces the host-less half of that sentence, so
   # a due-dated fiber pinned to another host cannot ride the aux clause into
   # this feed.
-  defp owned_kanban_fiber?(fiber) do
-    (shuttle_fiber?(fiber) and host_owned?(fiber)) or kanban_aux_admissible?(fiber)
+  defp owned_kanban_fiber?(fiber, own_host_id) do
+    (shuttle_fiber?(fiber) and host_owned?(fiber, own_host_id)) or kanban_aux_admissible?(fiber)
   end
 
   # A fiber is owner-feed-relevant iff it carries a non-empty `shuttle:` block.
@@ -417,11 +421,12 @@ defmodule Shuttle.FiberDocuments do
   # unowned everywhere (no wildcard), so it never appears in any daemon's feed.
   # Mirrors `Shuttle.Poller`'s dispatch-side predicate; the feed and the
   # dispatch plane agree on exactly one owner per fiber.
-  defp host_owned?(%{"shuttle" => %{"host" => host}}) when is_binary(host) and host != "" do
-    host == own_host_id()
+  defp host_owned?(%{"shuttle" => %{"host" => host}}, own_host_id)
+       when is_binary(host) and host != "" do
+    host == own_host_id
   end
 
-  defp host_owned?(_), do: false
+  defp host_owned?(_fiber, _own_host_id), do: false
 
   defp entry_for(store, %{"id" => id} = fiber, report_mode) when is_binary(id) and id != "" do
     # Three values, all read from felt, none reverse-derived or guessed by Shuttle:

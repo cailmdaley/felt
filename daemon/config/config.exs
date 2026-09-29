@@ -10,11 +10,12 @@ config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
 # The :shuttle keys below are deliberately left unset here:
 #
-#   * `:host` — read nowhere. Each daemon's identity resolves at runtime in
-#     `Shuttle.Poller.resolve_own_host_id/0`, which documents the chain; there
-#     is no app-config step and no `"local"` default, because a literal
-#     "local" is a no-op filter that lets remote and local daemons fight over
-#     the same fibers.
+#   * `:host` — read nowhere. felt owns the identity chain
+#     (cmd/shuttle_host.go); the daemon takes `SHUTTLE_HOST` or asks
+#     `felt shuttle host --json` once at boot and freezes the answer
+#     (`Shuttle.Poller.freeze_daemon_host_id!/1`). There is no app-config step
+#     and no `"local"` default, because a literal "local" is a no-op filter
+#     that lets remote and local daemons fight over the same fibers.
 #   * `:boot_quarantine` — the default (true: restart is not dispatch
 #     authority) lives in Shuttle.Poller's @default_boot_quarantine. Set the
 #     key only to override (config/test.exs sets false so dispatch tests

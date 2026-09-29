@@ -23,6 +23,11 @@ defmodule Shuttle.ApplicationBootTest do
     assert endpoint < tailnet
     assert endpoint < event_stream
 
+    # The Poller takes the identity application start froze instead of
+    # shelling felt for its own.
+    assert %{start: {Shuttle.Poller, :start_link, [poller_opts]}} = Enum.at(children, poller)
+    assert Keyword.fetch!(poller_opts, :own_host_id) == Shuttle.Poller.daemon_host_id()
+
     task_supervisor =
       Enum.find_index(children, fn child ->
         match?({Task.Supervisor, :start_link, _}, child.start)

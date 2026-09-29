@@ -23,9 +23,9 @@ config :shuttle,
   https_proxy: false,
   tailnet_dial_test_cacerts_enabled: true
 
-# Test daemon identity. `Shuttle.Poller.own_host_id/1` takes SHUTTLE_HOST when
-# it is set and asks `felt shuttle host --json` otherwise, so pinning it keeps
-# the suite off the real felt and stable across machines. Nothing is pinned at
+# Test daemon identity. Application start freezes SHUTTLE_HOST when it is set
+# and asks `felt shuttle host --json` otherwise, so pinning it keeps the suite
+# off the real felt and stable across machines. Nothing is pinned at
 # the Application config layer, where a value would ride into any artifact
 # built with MIX_ENV=test. Tests that exercise host-pin matching pass explicit
 # `own_host_id:` opts to `Poller.start_link`.
