@@ -86,15 +86,20 @@ async function refreshProjects(shuttleBase: string): Promise<Project[]> {
   return (await loadFeed(shuttleBase)).model.projects
 }
 
-export async function openStash(opts: OpenFormOptions): Promise<void> {
-  injectStashFormStyles()
-  let feed: LoadedFeed
+/** The feed a form opens on, or null after telling the board it is out of reach. */
+async function feedOrReport(opts: OpenFormOptions): Promise<LoadedFeed | null> {
   try {
-    feed = await loadFeed(opts.shuttleBase)
+    return await loadFeed(opts.shuttleBase)
   } catch {
     opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
-    return
+    return null
   }
+}
+
+export async function openStash(opts: OpenFormOptions): Promise<void> {
+  injectStashFormStyles()
+  const feed = await feedOrReport(opts)
+  if (!feed) return
   ensureRoot().render(
     <StashForm
       projects={feed.model.projects}
@@ -113,13 +118,8 @@ export async function openStash(opts: OpenFormOptions): Promise<void> {
 
 export async function openCapture(opts: OpenFormOptions): Promise<void> {
   injectCaptureFormStyles()
-  let feed: LoadedFeed
-  try {
-    feed = await loadFeed(opts.shuttleBase)
-  } catch {
-    opts.onResult?.('Couldn’t reach the Shuttle daemon (:4000).', false)
-    return
-  }
+  const feed = await feedOrReport(opts)
+  if (!feed) return
   ensureRoot().render(
     <CaptureForm
       projects={feed.model.projects}

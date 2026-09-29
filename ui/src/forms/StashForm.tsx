@@ -97,14 +97,14 @@ function buildShuttleBlock(input: {
   surface: ExecutionSurface
 }): Record<string, unknown> {
   const block: Record<string, unknown> = {
-    kind: input.kind === 'standing' ? 'standing' : 'oneshot',
+    kind: input.kind,
     project_dir: input.projectDir,
   }
   if (input.agent) block.agent = input.agent
   if (input.effort.trim()) block.effort = input.effort.trim()
   if (input.chrome) block.chrome = true
   if (input.surface !== 'cli') block.surface = input.surface
-  if (block.kind === 'standing') {
+  if (input.kind === 'standing') {
     block.schedule = { expr: input.schedule.trim(), tz: input.tz.trim() || 'UTC' }
   }
   return block
@@ -428,7 +428,7 @@ export function StashForm({
         body: JSON.stringify({
           id,
           name: trimmedTitle,
-          body: body.length > 0 ? body : '',
+          body,
           frontmatter,
           // Owner-routing key — the daemon writes locally when this is its own
           // origin (or 'local') and forwards to the owning remote otherwise.
@@ -730,7 +730,7 @@ export function StashForm({
                     <option value="app">ChatGPT app</option>
                     <option value="cli">Terminal</option>
                   </select>
-                  <span className="stash-session-help">{sessionHelp(constraintAgent, surface)}</span>
+                  <span className="stash-session-help">{sessionHelp(surface)}</span>
                 </label>
               )}
 

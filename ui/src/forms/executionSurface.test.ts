@@ -11,12 +11,11 @@ describe('execution surface choice', () => {
 })
 
 describe('session destination explanation', () => {
-  it('makes the app choice discoverable for terminal agents', () => {
-    expect(sessionHelp({ cli: 'claude' }, 'cli')).toContain('Choose a Codex agent')
+  it('keeps terminal agents on the terminal', () => {
     expect(defaultSurface({ cli: 'claude' })).toBe('cli')
   })
   it('qualifies app access by the selected host', () => {
-    expect(sessionHelp({ cli: 'codex' }, 'app')).toContain('Requires an app connection on the selected host')
-    expect(sessionHelp({ cli: 'codex' }, 'cli')).toContain('terminal')
+    expect(sessionHelp('app')).toContain('Requires an app connection on the selected host')
+    expect(sessionHelp('cli')).toContain('terminal')
   })
 })

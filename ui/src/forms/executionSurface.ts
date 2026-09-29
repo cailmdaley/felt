@@ -18,10 +18,9 @@ export function persistedSurface(surface: string | undefined | null): ExecutionS
   return surface === 'app' ? 'app' : 'cli'
 }
 
-/** User-facing destination, shared by creation and existing task controls. */
-export function sessionHelp(agent: SurfaceAgent | undefined, surface: ExecutionSurface): string {
-  if (!agent) return 'Session availability depends on the selected agent and host.'
-  if (!isCodexAgent(agent)) return 'Terminal session. Choose a Codex agent to use the ChatGPT app.'
+/** Where a Codex agent's session runs, for the forms' Session choice (shown
+ *  only for Codex agents). */
+export function sessionHelp(surface: ExecutionSurface): string {
   return surface === 'app'
     ? 'Continue in the ChatGPT app. Requires an app connection on the selected host.'
     : 'Runs in a terminal on the selected host. Open it through Shuttle.'

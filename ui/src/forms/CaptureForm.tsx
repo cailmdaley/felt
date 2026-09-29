@@ -318,7 +318,7 @@ export function CaptureForm({
                 <option value="app">ChatGPT app</option>
                 <option value="cli">Terminal</option>
               </select>
-              <span className="capture-session-help">{sessionHelp(agentRec, surface)}</span>
+              <span className="capture-session-help">{sessionHelp(surface)}</span>
             </label>
           )}
         </div>
