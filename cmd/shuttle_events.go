@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // This file is the Go half of the host-local state contract: where the hook
 // stream and the commit ledger live, when they may be written, and how the
-// stream is bounded. It sits beside shuttle_host.go and shuttle_stores.go as
-// the third "mirror the Elixir resolver in Go" module — the daemon reads these
+// stream is bounded. It sits beside shuttle_stores.go as a "mirror the Elixir
+// resolver in Go" module — the daemon reads these
 // files (daemon/lib/shuttle/waiting_tracker.ex, daemon/lib/shuttle/sent_files.ex,
 // daemon/lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
 // write them, and the two sides must never disagree about the paths.
@@ -30,27 +32,18 @@ const (
 // shuttleStatePath resolves one host-local state file the way the Elixir side
 // resolves it — an explicit env var, else the data directory, else ~/.shuttle:
 //
-//	$<envVar> → $SHUTTLE_DATA_DIR/<leaf> → ~/.shuttle/<leaf>
+//	$<envVar> → <shuttle.DataDir()>/<leaf>
 //
 // explicit reports whether the env var named the path — an explicit path is
-// explicit intent, so it also overrides the write gate below.
-//
-// Deliberately NO tilde expansion, unlike hostConfigFilePath: the Elixir
-// resolvers do not expand either, and a literal `~/x` resolved the same
-// (wrong) way by both sides is still one path. Diverging here would be worse
-// than the odd directory.
+// explicit intent, so it also overrides the write gate below. The path is ""
+// when the data directory cannot be resolved (no home to expand against).
 func shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
 	if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
 		return v, true
 	}
-	dir := strings.TrimSpace(os.Getenv("SHUTTLE_DATA_DIR"))
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil || strings.TrimSpace(home) == "" {
-			// Matches the Elixir side's `System.user_home!() || "/root"`.
-			home = "/root"
-		}
-		dir = filepath.Join(home, ".shuttle")
+	dir, err := shuttle.DataDir()
+	if err != nil {
+		return "", false
 	}
 	return filepath.Join(dir, leaf), false
 }
@@ -77,6 +70,9 @@ func commitsFilePath() (path string, explicit bool) {
 // An explicit path (SHUTTLE_EVENTS_FILE, SHUTTLE_COMMITS_FILE) is explicit
 // intent: it bypasses the gate and creates its parent.
 func shuttleSink(path string, explicit bool) (string, bool) {
+	if path == "" {
+		return "", false
+	}
 	dir := filepath.Dir(path)
 	if explicit {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

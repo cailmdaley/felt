@@ -31,16 +31,25 @@ defmodule Shuttle do
 
   @doc """
   The daemon's host-local state directory: `$SHUTTLE_DATA_DIR`, else
-  `~/.shuttle`.
+  `~/.shuttle`. The variable is trimmed and a leading `~` or `~/` is expanded
+  to the home directory; it is otherwise neither cleaned nor made absolute, so
+  the socket-path checks in `Shuttle.Host` see what the operator wrote.
 
   One resolver for every host-local file the daemon keeps — `sessions.jsonl`,
-  `commits.jsonl`, `events.jsonl`, the remote caches. Per-file override env
-  vars (`SHUTTLE_SESSIONS_FILE`, `SHUTTLE_COMMITS_FILE`,
-  `SHUTTLE_EVENTS_FILE`) are consulted by their own modules *ahead* of this.
+  `commits.jsonl`, `events.jsonl`, the remote caches, the class-default
+  socket. Per-file override env vars (`SHUTTLE_SESSIONS_FILE`,
+  `SHUTTLE_COMMITS_FILE`, `SHUTTLE_EVENTS_FILE`) are consulted by their own
+  modules *ahead* of this. The Go CLI's `shuttle.DataDir` applies the same
+  rule; `test/fixtures/data_dir/cases.json` holds both to it.
   """
   @spec data_dir() :: String.t()
   def data_dir do
-    System.get_env("SHUTTLE_DATA_DIR") || Path.join(System.user_home!(), ".shuttle")
+    case String.trim(System.get_env("SHUTTLE_DATA_DIR", "")) do
+      "" -> Path.join(System.user_home!(), ".shuttle")
+      "~" -> System.user_home!()
+      "~/" <> rest -> System.user_home!() <> "/" <> rest
+      dir -> dir
+    end
   end
 
   @doc """

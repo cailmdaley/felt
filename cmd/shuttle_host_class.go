@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -337,7 +338,7 @@ func resolveHostSettings() (hostSettings, error) {
 // classDefaultListen is the listener a class gets when nothing overrides it.
 func classDefaultListen(class hostClass) (listenAddr, error) {
 	if class.usesSocket() {
-		dir, err := shuttleDataDir()
+		dir, err := shuttle.DataDir()
 		if err != nil {
 			return listenAddr{}, err
 		}
@@ -358,28 +359,6 @@ func classDefaultListen(class hostClass) (listenAddr, error) {
 		port = p
 	}
 	return listenAddr{Network: "tcp", Address: "127.0.0.1:" + strconv.Itoa(port)}, nil
-}
-
-// shuttleDataDir is $SHUTTLE_DATA_DIR, else ~/.shuttle. Only a leading "~"
-// is expanded: the value is neither cleaned nor made absolute against the
-// working directory, so the socket-path checks see what the operator wrote,
-// exactly as the daemon does.
-func shuttleDataDir() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("SHUTTLE_DATA_DIR")); v != "" {
-		if v != "~" && !strings.HasPrefix(v, "~/") {
-			return v, nil
-		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving home directory: %w", err)
-		}
-		return home + v[1:], nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".shuttle"), nil
 }
 
 func hostClassList() string {
