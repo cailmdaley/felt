@@ -42,8 +42,8 @@ import {
   rowWaitingOn,
   type CycleCard,
   saysNothingHere,
-  shuttleOrigin,
 } from './ChronicleView.js'
+import { shuttleOrigin } from '../../forms/projectModel.js'
 import { buildLedgerNarration } from './join.js'
 import type { LedgerNarration } from './join.js'
 import { diffClause } from './vocabulary.js'

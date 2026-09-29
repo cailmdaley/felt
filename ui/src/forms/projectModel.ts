@@ -48,9 +48,11 @@ import { parseCompositeFeed } from '../board/KanbanComposite.js'
  * `remote-` prefix (Portolan's old `'remote-<host>'` city-origin shape) that
  * would otherwise match no configured remote and silently fall through to a
  * mis-routed LOCAL write. Both owner-routed forms (Stash + Capture) send their
- * origin through here, so the guard is enforced in exactly one place.
+ * origin through here, as do the Chronicle's writes, so the guard is enforced
+ * in exactly one place. No origin at all is this daemon: `local`.
  */
-export const shuttleOrigin = (originId: string): string => originId.replace(/^remote-/, '')
+export const shuttleOrigin = (originId: string | undefined): string =>
+  (originId ?? 'local').replace(/^remote-/, '')
 
 /** Trailing-slash-insensitive path compare — store-root detection. */
 const norm = (p: string): string => p.replace(/\/+$/, '')

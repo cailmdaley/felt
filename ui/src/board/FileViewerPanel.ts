@@ -74,8 +74,8 @@ export function buildFileViewer(
   // TEXT. An iframe is the wrong instrument here: the daemon serves most text
   // suffixes as `application/octet-stream`, so the frame either downloads the
   // file or shows unwrapped monospace source with no reading comfort at all —
-  // and a `.md` deliverable, the most common thing a worker sends, arrived as
-  // raw markdown syntax. Fetching the bytes and rendering them in-page costs
+  // and a `.md` deliverable, the most common thing a worker sends, would read
+  // as raw markdown syntax. Fetching the bytes and rendering them in-page costs
   // one request and turns both into something readable: markdown through the
   // same `renderMarkdown` the fiber body uses, wearing the same
   // `.kbn-detail-prose` skin so a sent report looks like the fiber it came
@@ -93,9 +93,7 @@ export function buildFileViewer(
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
-  const veil = document.createElement('div')
-  veil.className = 'kbn-fileview-loading'
-  veil.textContent = `Loading ${basename(fullPath)}…`
+  const veil = loadingVeil(fullPath)
 
   const iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
@@ -103,18 +101,13 @@ export function buildFileViewer(
   iframe.title = basename(fullPath)
   wrap.append(iframe, veil)
 
-  /** Show the failure, whether or not `load` already lifted the veil. */
-  const failed = (detail: string): void => {
-    veil.classList.add('kbn-fileview-loading-error')
-    veil.textContent = `Couldn't load ${basename(fullPath)} — ${detail}`
-    if (!veil.isConnected) wrap.append(veil)
-  }
+  const failed = (detail: string): void => showLoadFailure(veil, wrap, fullPath, detail)
 
   iframe.addEventListener('load', () => {
     // The 404 document loads too, and it loads AFTER the probe has usually
     // answered. Lifting the veil unconditionally here would erase the error the
-    // probe just wrote — which is the original blank frame, reintroduced from
-    // the other direction. Only a frame nobody has faulted gets revealed.
+    // probe just wrote and leave a blank frame. Only a frame nobody has faulted
+    // gets revealed.
     if (veil.classList.contains('kbn-fileview-loading-error')) return
     veil.remove()
     prepareIframeExternalLinks(iframe)
@@ -122,9 +115,8 @@ export function buildFileViewer(
   })
   // `error` on an iframe fires for NETWORK failures only. An HTTP 404 is a
   // perfectly successful navigation to an error document, so `load` fires, the
-  // veil lifts, and the reader is left looking at an empty frame with nothing
-  // saying why. That was the whole defect: the file viewer's one failure mode
-  // rendered as a blank rectangle.
+  // veil lifts, and the reader would be left looking at an empty frame with
+  // nothing saying why.
   iframe.addEventListener('error', () => failed('the daemon could not be reached'))
 
   // So ASK. A HEAD settles what the iframe's own events cannot tell us apart.
@@ -166,9 +158,7 @@ function buildHtmlViewer(
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
-  const veil = document.createElement('div')
-  veil.className = 'kbn-fileview-loading'
-  veil.textContent = `Loading ${basename(fullPath)}…`
+  const veil = loadingVeil(fullPath)
 
   let iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
@@ -268,9 +258,7 @@ function buildTextViewer(
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-text-wrap'
 
-  const veil = document.createElement('div')
-  veil.className = 'kbn-fileview-loading'
-  veil.textContent = `Loading ${basename(fullPath)}…`
+  const veil = loadingVeil(fullPath)
 
   const pane = document.createElement('div')
   pane.className = 'kbn-fileview-text'
@@ -302,14 +290,29 @@ function buildTextViewer(
   return wrap
 }
 
+/** The "Loading <file>…" veil every instrument shows until its file lands. */
+function loadingVeil(fullPath: string): HTMLElement {
+  const veil = document.createElement('div')
+  veil.className = 'kbn-fileview-loading'
+  veil.textContent = `Loading ${basename(fullPath)}…`
+  return veil
+}
+
+/** Turn the veil into the failure note, whether or not it was already lifted. */
+function showLoadFailure(veil: HTMLElement, wrap: HTMLElement, fullPath: string, detail: string): void {
+  veil.classList.add('kbn-fileview-loading-error')
+  veil.textContent = `Couldn't load ${basename(fullPath)} — ${detail}`
+  if (!veil.isConnected) wrap.append(veil)
+}
+
+/** The failure note for a live-file poll error: the HTTP status when the
+ *  daemon answered, otherwise that it could not be reached. */
 function showLoadError(veil: HTMLElement, wrap: HTMLElement, fullPath: string, error: unknown): void {
   const message = error instanceof Error ? error.message : ''
   const detail = message.startsWith('file request failed: ')
     ? message.slice('file request failed: '.length)
     : 'the daemon could not be reached'
-  veil.classList.add('kbn-fileview-loading-error')
-  veil.textContent = `Couldn't load ${basename(fullPath)} — ${detail}`
-  if (!veil.isConnected) wrap.append(veil)
+  showLoadFailure(veil, wrap, fullPath, detail)
 }
 
 /** True when a deliverable scrolls — an iframe (HTML/PDF) or the text

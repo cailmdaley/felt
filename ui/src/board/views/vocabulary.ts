@@ -1,27 +1,26 @@
 /**
- * The words and marks the temporal views hold in common.
+ * The Chronicle's words and marks — its glyphs, state names and figures.
  *
- * Nothing here draws anything — it is the vocabulary the pages agree on, so a
- * glyph that means one thing on one page cannot come to mean something else on
- * another, and the same pigment is never explained two ways. Each view still
- * owns its own shapes: the CSS behind these marks differs per view on purpose.
+ * Kept apart from the view so the vocabulary is pure and testable: a glyph
+ * spent on one meaning cannot come to mean something else, and the same
+ * pigment is never explained two ways. The shapes behind the marks are the
+ * view's CSS.
  */
 
 // ── Obligations ──────────────────────────────────────────────────────────────
 
 /**
- * What a board surface draws for work that is owed but not yet done.
+ * What a row draws for work that is owed but not yet done.
  *
  *   ◴ due      a card whose `due:` names this civil day
  *   ◐ launch   a standing role's next firing, an instant
- *   ◌ snooze   a stashed card whose due lands here — deferred work returning
  *
  * NOT closure (✓ tempered · ✗ discarded · ◦ awaiting a verdict) and not the
  * Kanban card-kind glyphs. Those are different claims that happen to share ink.
  */
-export type MarkKind = 'due' | 'launch' | 'snooze'
+type MarkKind = 'due' | 'launch'
 
-export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐', snooze: '◌' }
+export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐' }
 
 // ── Lifecycle state ──────────────────────────────────────────────────────────
 
