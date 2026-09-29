@@ -75,7 +75,7 @@
     "id": "pi-luna",
     "cli": "pi",
     "provider": "github-copilot",
-    "model": "gpt-6-luna",
+    "model": "gpt-luna",
     "requires_model": true,
     "effort_levels": ["low", "medium", "high", "max"],
     "default_effort": "max",

@@ -10,40 +10,48 @@ import (
 )
 
 // A registry model written as a bare family ("gpt-sol") names the newest
-// listed release of that family — "gpt-6.1-sol" today, whatever ships next
-// without a registry edit. The Codex CLI keeps its catalog of listed models in
-// $CODEX_HOME/models_cache.json; the highest version in the family wins. With
-// no catalog, or no release of the family in it, the family name passes
-// through unchanged.
+// release of that family the host's CLI lists — "gpt-6.1-sol" today, whatever
+// ships next without a registry edit. Codex agents read the Codex CLI's model
+// catalog ($CODEX_HOME/models_cache.json); Pi agents read Pi's per-provider
+// catalog ($PI_CODING_AGENT_DIR/models-store.json). The highest version in the
+// family wins. With no catalog, or no release of the family in it, the family
+// name passes through unchanged.
 var bareFamily = regexp.MustCompile(`^gpt-([a-z]+)$`)
 var familyRelease = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)-([a-z]+)$`)
 
 func resolveModelFamily(rec AgentRecord) string {
-	if rec.CLI != "codex" && rec.Provider != "openai-codex" {
-		return rec.Model
-	}
 	m := bareFamily.FindStringSubmatch(rec.Model)
 	if m == nil {
 		return rec.Model
 	}
-	if best := newestRelease(m[1]); best != "" {
+	var slugs []string
+	switch rec.CLI {
+	case "codex":
+		slugs = codexCatalog()
+	case "pi":
+		slugs = piCatalog(rec.Provider)
+	}
+	if best := newestRelease(m[1], slugs); best != "" {
 		return best
 	}
 	return rec.Model
 }
 
-func newestRelease(family string) string {
-	home := os.Getenv("CODEX_HOME")
-	if home == "" {
-		h, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		home = filepath.Join(h, ".codex")
+func homeDir(env, rel string) string {
+	if d := os.Getenv(env); d != "" {
+		return d
 	}
-	data, err := os.ReadFile(filepath.Join(home, "models_cache.json"))
+	h, err := os.UserHomeDir()
 	if err != nil {
 		return ""
+	}
+	return filepath.Join(h, rel)
+}
+
+func codexCatalog() []string {
+	data, err := os.ReadFile(filepath.Join(homeDir("CODEX_HOME", ".codex"), "models_cache.json"))
+	if err != nil {
+		return nil
 	}
 	var cache struct {
 		Models []struct {
@@ -52,12 +60,42 @@ func newestRelease(family string) string {
 		} `json:"models"`
 	}
 	if json.Unmarshal(data, &cache) != nil {
-		return ""
+		return nil
 	}
+	var out []string
+	for _, m := range cache.Models {
+		if m.Visibility == "list" {
+			out = append(out, m.Slug)
+		}
+	}
+	return out
+}
+
+func piCatalog(provider string) []string {
+	data, err := os.ReadFile(filepath.Join(homeDir("PI_CODING_AGENT_DIR", ".pi/agent"), "models-store.json"))
+	if err != nil {
+		return nil
+	}
+	var store map[string]struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if json.Unmarshal(data, &store) != nil {
+		return nil
+	}
+	var out []string
+	for _, m := range store[provider].Models {
+		out = append(out, m.ID)
+	}
+	return out
+}
+
+func newestRelease(family string, slugs []string) string {
 	best, bestVer := "", []int(nil)
-	for _, mod := range cache.Models {
-		r := familyRelease.FindStringSubmatch(mod.Slug)
-		if r == nil || r[2] != family || mod.Visibility != "list" {
+	for _, slug := range slugs {
+		r := familyRelease.FindStringSubmatch(slug)
+		if r == nil || r[2] != family {
 			continue
 		}
 		var ver []int
@@ -66,7 +104,7 @@ func newestRelease(family string) string {
 			ver = append(ver, n)
 		}
 		if best == "" || versionLess(bestVer, ver) {
-			best, bestVer = mod.Slug, ver
+			best, bestVer = slug, ver
 		}
 	}
 	return best

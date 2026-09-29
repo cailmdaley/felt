@@ -18,6 +18,13 @@ func TestResolveModelFamily(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "models_cache.json"), []byte(cache), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	pi := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", pi)
+	store := `{"github-copilot":{"models":[{"id":"gpt-6-luna"},{"id":"gpt-6.1-luna"}]},
+	  "openai-codex":{"models":[{"id":"gpt-6-sol"},{"id":"gpt-7-sol"}]}}`
+	if err := os.WriteFile(filepath.Join(pi, "models-store.json"), []byte(store), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		rec  AgentRecord
 		want string
@@ -26,7 +33,8 @@ func TestResolveModelFamily(t *testing.T) {
 		{AgentRecord{CLI: "codex", Model: "gpt-luna"}, "gpt-6-luna"},
 		{AgentRecord{CLI: "codex", Model: "gpt-astra"}, "gpt-astra"},
 		{AgentRecord{CLI: "codex", Model: "gpt-6-sol"}, "gpt-6-sol"},
-		{AgentRecord{CLI: "pi", Provider: "openai-codex", Model: "gpt-sol"}, "gpt-6.1-sol"},
+		{AgentRecord{CLI: "pi", Provider: "openai-codex", Model: "gpt-sol"}, "gpt-7-sol"},
+		{AgentRecord{CLI: "pi", Provider: "github-copilot", Model: "gpt-luna"}, "gpt-6.1-luna"},
 		{AgentRecord{CLI: "pi", Provider: "github-copilot", Model: "gpt-sol"}, "gpt-sol"},
 		{AgentRecord{CLI: "claude", Model: "opus"}, "opus"},
 	}
