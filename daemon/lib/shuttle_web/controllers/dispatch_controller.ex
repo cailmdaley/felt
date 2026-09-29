@@ -11,11 +11,11 @@ defmodule ShuttleWeb.DispatchController do
       (origin stripped), where the worker must run, and the response is relayed
       verbatim.
 
-  STORE 3 — the kanban requeue carries the user's directive (`user_message`) and
+  The kanban requeue carries the user's directive (`user_message`) and
   continuation mode (`resume_mode ∈ {"previous", "fresh"}` or absent) inline in
-  the body, replacing the prior file-a-review-comment-then-dispatch two-step.
-  Both ride the dispatch call into the prompt at launch; the remote forward
-  passes `conn.body_params` verbatim, so they survive owner-routing intact.
+  the body. Both ride the dispatch call into the prompt at launch; the remote
+  forward passes `conn.body_params` verbatim, so they survive owner-routing
+  intact.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -52,7 +52,6 @@ defmodule ShuttleWeb.DispatchController do
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
           ad_hoc: ad_hoc,
-          # STORE 3: the directive + continuation mode ride the dispatch.
           user_message: normalize_message(Map.get(params, "user_message")),
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode"))
         )
