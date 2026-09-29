@@ -511,9 +511,8 @@ func TestDaemonURL_BrokenHostFileFailsLoud(t *testing.T) {
 func TestPostLifecycle_BrokenHostFileDoesNotFallBack(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host.json")
 	setHostEnv(t, path, nil, nil)
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
 	_ = os.WriteFile(path, []byte(`{"class":"shared"}`), 0o600)
-	_, err := postLifecycle("resume", map[string]any{"fiber": "x"})
+	_, err := postLifecycle("resume", "x")
 	if err == nil || isLifecycleTransportError(err) || !strings.Contains(err.Error(), path) {
 		t.Fatalf("err = %v", err)
 	}

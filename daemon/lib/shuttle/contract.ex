@@ -19,11 +19,9 @@ defmodule Shuttle.Contract do
 
   require Logger
 
-  # Level 2 (C1): removed `--host` from mark-runtime and reopen — post-S1,
-  # `resolveOwnHost` is pure local state, so the daemon-shelled ownership
-  # override carried no correctness. Bumped in lockstep with
-  # cmd/shuttle_contract.go's ShuttleContractLevel.
-  @expected_level 3
+  # Bumped in lockstep with cmd/shuttle_contract.go's ShuttleContractLevel.
+  # Level 4: the daemon shells `felt shuttle accept|resume <fiber> --local`.
+  @expected_level 4
 
   @doc "The daemon's expected `felt shuttle contract` level."
   @spec expected_level() :: pos_integer()
@@ -112,7 +110,9 @@ defmodule Shuttle.Contract do
     result = check(runner)
 
     if result.ok do
-      Logger.debug("felt shuttle contract level #{result.observed} matches expected #{result.expected}")
+      Logger.debug(
+        "felt shuttle contract level #{result.observed} matches expected #{result.expected}"
+      )
     else
       Logger.error(
         "CLI/daemon contract skew at boot: #{result.reason}. " <>

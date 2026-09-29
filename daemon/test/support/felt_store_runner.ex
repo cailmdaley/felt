@@ -25,7 +25,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
     # concurrent user's `/tmp/.felt` (or its own leftover state) must never
     # be read from or `rm -rf`'d by this suite.
     root =
-      Path.join(System.tmp_dir!(), "shuttle-felt-store-mock-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-felt-store-mock-#{System.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(Path.join(root, ".felt"))
 
@@ -244,8 +247,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
     do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
   def remove_tmux_session(session),
-    do:
-      Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+    do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
 
   def set_new_session_delay(ms),
     do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
@@ -357,8 +359,23 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "felt" and match?(["shuttle", "contract"], args) ->
-        level = Agent.get(__MODULE__, &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level())))
+        level =
+          Agent.get(
+            __MODULE__,
+            &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level()))
+          )
+
         {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
+
+      # `felt shuttle [--felt-store s] accept|resume <id> --local` — felt's
+      # lifecycle writer. Mirror its document effect on both surfaces (the
+      # fiber map `felt ls`/`show` answer from, and the real file): a pinned
+      # accept re-parks to `status: open`, everything else re-arms to `active`;
+      # the verdict and closed-at clear; a standing re-arm concludes the run.
+      command == "felt" and lifecycle_write?(args) ->
+        [verb, id, "--local"] = args |> Enum.drop(1) |> drop_felt_store()
+        apply_lifecycle_write(verb, id)
+        {"#{verb} #{id}\n", 0}
 
       # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
       # resolution. The daemon shells felt (registry owner) rather than
@@ -506,6 +523,37 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
       true ->
         {"", 0}
+    end
+  end
+
+  defp lifecycle_write?(["shuttle" | rest]),
+    do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_felt_store(rest))
+
+  defp lifecycle_write?(_), do: false
+
+  defp drop_felt_store(["--felt-store", _store | rest]), do: rest
+  defp drop_felt_store(args), do: args
+
+  defp apply_lifecycle_write(verb, id) do
+    fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
+    kind = get_in(fiber, ["shuttle", "kind"])
+    status = if verb == "accept" and kind == "pinned", do: "open", else: "active"
+
+    if kind == "standing",
+      do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
+
+    Agent.update(__MODULE__, fn state ->
+      update_in(state.fibers[id], fn fiber ->
+        fiber |> Map.put("status", status) |> Map.drop(["tempered", "closed-at"])
+      end)
+    end)
+
+    with path when is_binary(path) <- Map.get(fiber, "path"),
+         {:ok, text} <- File.read(path) do
+      File.write!(
+        path,
+        Regex.replace(~r/^status: \S+$/m, text, "status: #{status}", global: false)
+      )
     end
   end
 

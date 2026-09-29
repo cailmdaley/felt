@@ -25,7 +25,6 @@ defmodule Shuttle.Dispatcher do
           | {:error, :not_found}
           | {:error, :closed}
           | {:error, :already_running}
-          | {:error, :reopen_unavailable}
           | {:error, :reopen_failed}
           | {:error, :missing_session_id}
           | {:error, {:wrapper_unresolved, String.t()}}
@@ -702,28 +701,19 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # First tries the runner's default cwd (so tests / one-off CLI invocations
-  # in a project's working directory still resolve the fiber against that
-  # project's `.felt/`). Falls back to the configured `felt_store` so the
-  # daemon path always lands in the right index regardless of where the BEAM
-  # process happens to be running. The default `felt_store` is
-  # `default_felt_store/0` (~/loom) — pass `:felt_store` explicitly to point at
-  # a different root.
+  # Read the fiber from the store this dispatch was given — the Poller passes
+  # the fiber's owning store; the default is `default_felt_store/0`. With no
+  # store there is nothing to read. felt's stderr stays out of the JSON: felt
+  # can exit 0 while warning about an unrelated unreadable fiber.
+  defp fetch_fiber(_fiber_id, _runner, nil), do: {:error, :not_found}
+
   defp fetch_fiber(fiber_id, runner, felt_store) do
-    case run_felt(runner, ["show", fiber_id, "--json"]) do
-      {:ok, output} ->
-        decode_fiber(output)
-
-      # Retry inside the resolved store — but only when there IS one. With an
-      # empty registry `felt_store` is nil, and `System.cmd(cd: nil)` would raise.
-      {:error, _} when is_binary(felt_store) ->
-        case run_felt(runner, ["show", fiber_id, "--json"], cd: felt_store) do
-          {:ok, output} -> decode_fiber(output)
-          {:error, _} -> {:error, :not_found}
-        end
-
-      {:error, _} ->
-        {:error, :not_found}
+    case runner.cmd("felt", ["show", fiber_id, "--json"],
+           cd: felt_store,
+           stderr_to_stdout: false
+         ) do
+      {output, 0} -> decode_fiber(output)
+      _ -> {:error, :not_found}
     end
   end
 
@@ -765,9 +755,8 @@ defmodule Shuttle.Dispatcher do
   # worker spawns. A worker dispatched against a still-`closed` fiber has no
   # live mandate — it boots and dies within seconds (the "terminal opens and
   # immediately closes" symptom) while the card stays in its closed column. So
-  # a missing felt store (`{:error, :reopen_unavailable}`) or a non-zero
-  # `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the dispatch and
-  # propagates through the `with` chain to the caller.
+  # a non-zero `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the
+  # dispatch and propagates through the `with` chain to the caller.
   #
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
   # reopen stays best-effort: the worker has a live mandate regardless, so a
@@ -783,23 +772,9 @@ defmodule Shuttle.Dispatcher do
   end
 
   # One reopen, two severities. `fatal?` is the closed-fiber case above: a
-  # failure aborts the dispatch (`:reopen_unavailable` / `:reopen_failed`).
+  # failure aborts the dispatch (`:reopen_failed`).
   # Otherwise the worker has a live mandate regardless, so a failure only risks
   # a sticky kanban column and we log loudly and continue.
-  defp reopen(fiber_id, _runner, nil, fatal?) do
-    if fatal? do
-      Logger.error(
-        "Force-dispatch aborted for #{fiber_id}: fiber is closed and no felt store is " <>
-          "configured, so it cannot be reopened — refusing to spawn a worker with no live mandate"
-      )
-
-      {:error, :reopen_unavailable}
-    else
-      Logger.warning("Force-dispatch reopen skipped for #{fiber_id}: no felt store configured")
-      :ok
-    end
-  end
-
   defp reopen(fiber_id, runner, felt_store, fatal?) do
     case run_reopen(fiber_id, runner, felt_store) do
       {:ok, output} ->
@@ -1997,21 +1972,5 @@ defmodule Shuttle.Dispatcher do
           RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
     """
-  end
-
-  defp run_felt(runner, args, opts \\ []) do
-    cd = Keyword.get(opts, :cd)
-
-    cmd_opts =
-      if cd do
-        [cd: cd, stderr_to_stdout: true]
-      else
-        [stderr_to_stdout: true]
-      end
-
-    case runner.cmd("felt", args, cmd_opts) do
-      {output, 0} -> {:ok, output}
-      {output, _} -> {:error, output}
-    end
   end
 end

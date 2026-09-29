@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -311,20 +315,29 @@ func TestEditOfArmedFiberWithoutProjectDirIsNotArming(t *testing.T) {
 	}
 }
 
-func TestShuttleResume_StandingAwaitingOfflineFallback(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+// TestShuttleResume_StandingAwaitingRearmsAndConcludes: resume on a standing
+// role awaiting review re-arms it and concludes the reviewed run in the same
+// write — the handed_off_at stamp that keeps the poller from re-firing the
+// occurrence that just ran.
+func TestShuttleResume_StandingAwaitingRearmsAndConcludes(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	if out, err := runCommand(t, dir, "shuttle", "resume", "f"); err != nil {
-		t.Fatalf("resume (offline): %v\n%s", err, out)
+	before := time.Now().UTC()
+	if out, err := runCommand(t, dir, "shuttle", "resume", "f", "--local"); err != nil {
+		t.Fatalf("resume --local: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
 	if f.Status != felt.StatusActive || f.ClosedAt != nil {
-		t.Fatalf("offline re-arm should set active + clear closed-at, got status=%q closedAt=%v", f.Status, f.ClosedAt)
+		t.Fatalf("re-arm should set active + clear closed-at, got status=%q closedAt=%v", f.Status, f.ClosedAt)
+	}
+	raw, _ := shuttleRuntimeMap(t, f)["handed_off_at"].(string)
+	handedOff, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || handedOff.Before(before) {
+		t.Fatalf("resume must stamp a fresh shuttle.runtime.handed_off_at, got %q (%v)", raw, err)
 	}
 }
 
@@ -338,7 +351,6 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	if !kernelShowsUnacceptedRowAsUIDZero(t) {
 		t.Skip("this kernel stamps an unaccepted connection with our own uid, so a non-root test cannot stage a refused owner")
 	}
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "")
 	withOwnHost(t, "test-host")
 
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -386,8 +398,7 @@ func TestShuttleSetOutcome(t *testing.T) {
 
 // ---- accept ----------------------------------------------------------------
 
-func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+func TestShuttleAccept_RearmsAndKeepsOutcome(t *testing.T) {
 	dir, storage := newStore(t)
 	// Awaiting review: standing, closed, untempered, with a prior outcome.
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, Outcome: "prior digest", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -401,32 +412,30 @@ func TestShuttleAccept_OfflineRearmsAndClearsOutcome(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
-		t.Fatalf("accept (offline): %v\n%s", err, out)
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err != nil {
+		t.Fatalf("accept --local: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
 	if got.Status != felt.StatusActive {
 		t.Fatalf("status = %q, want active", got.Status)
 	}
-	if got.Outcome != "" {
-		t.Fatalf("accept should clear outcome, got %q", got.Outcome)
+	// The last run's digest stays the card's headline until the next run
+	// writes its own.
+	if got.Outcome != "prior digest" {
+		t.Fatalf("accept must keep the outcome, got %q", got.Outcome)
 	}
 }
 
-// TestShuttleAccept_OfflineStampsHandedOffAt locks in the fix for the
-// scheduling-idempotency bug the audit surfaced: the daemon-unreachable branch
-// of accept re-arms and prints a next occurrence, but must ALSO stamp
-// shuttle.runtime.handed_off_at = now — the same conclude-the-run signal the
-// daemon-reachable path folds in via LifecycleStore.accept -> conclude_run
-// (standing_roles.ex:253). The poller's repeat-firing guard is
-// `prev_due > last_serviced`, and last_serviced_at_ms (standing_roles.ex:385)
-// is the max of dispatched_at / handed_off_at / rearmed_at / created_at.
-// Without a fresh handed_off_at, last_serviced stays pinned at the prior
-// dispatched_at, the guard is immediately satisfied, and the role fires on the
-// very next poll — while this command just printed "next due: tomorrow
+// TestShuttleAccept_StampsHandedOffAt: accept re-arms and prints a next
+// occurrence, and must ALSO stamp shuttle.runtime.handed_off_at = now — the
+// conclude-the-run signal. The poller's repeat-firing guard is
+// `prev_due > last_serviced`, where last_serviced (standing_roles.ex
+// last_serviced_at_ms) is the max of dispatched_at / handed_off_at /
+// created_at. Without a fresh handed_off_at, last_serviced stays pinned at the
+// prior dispatched_at, the guard is immediately satisfied, and the role fires
+// on the very next poll — while this command just printed "next due: tomorrow
 // morning" to the user.
-func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
 	dir, storage := newStore(t)
 
 	// A prior dispatch from days ago is the run being accepted now. If accept
@@ -446,8 +455,8 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	}
 
 	before := time.Now().UTC()
-	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
-		t.Fatalf("accept (offline): %v\n%s", err, out)
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err != nil {
+		t.Fatalf("accept --local: %v\n%s", err, out)
 	}
 	after := time.Now().UTC()
 
@@ -455,7 +464,7 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	rt := shuttleRuntimeMap(t, got)
 	raw, ok := rt["handed_off_at"].(string)
 	if !ok || raw == "" {
-		t.Fatalf("shuttle.runtime.handed_off_at missing after offline accept: %#v", rt)
+		t.Fatalf("shuttle.runtime.handed_off_at missing after accept: %#v", rt)
 	}
 	handedOff, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil {
@@ -471,7 +480,7 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	}
 
 	// The actual guard this closes: last_serviced (the max of dispatched_at /
-	// handed_off_at / rearmed_at / created_at) must now be the fresh stamp, not
+	// handed_off_at / created_at) must now be the fresh stamp, not
 	// the prior dispatch — so any prev_due at or before "now" does NOT satisfy
 	// `prev_due > last_serviced` and the role stays quiet until its real next
 	// occurrence.
@@ -483,32 +492,141 @@ func TestShuttleAccept_OfflineStampsHandedOffAt(t *testing.T) {
 	}
 }
 
-func TestShuttleAccept_RequiresAwaiting(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
+// TestShuttleAccept_RefusesDraftsAndVerdicts: accept resolves an untempered
+// role only. A draft (status: open) and a closed role that already carries a
+// verdict (tempered true or false) are refused and left as they were.
+func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
+	standing := map[string]any{
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}
+	yes, no := true, false
+	for _, tc := range []struct {
+		name     string
+		status   string
+		tempered *bool
+	}{
+		{"draft", felt.StatusOpen, nil},
+		{"tempered", felt.StatusClosed, &yes},
+		{"composted", felt.StatusClosed, &no},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "f", tc.status, standing, tc.tempered)
+			if _, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err == nil {
+				t.Fatal("accept must refuse")
+			}
+			if got := mustRead(t, storage, "f").Status; got != tc.status {
+				t.Fatalf("refused accept wrote status %q", got)
+			}
+		})
+	}
+}
+
+// TestShuttleAccept_ActiveStandingRoleConcludesRun: the board's Temper gesture
+// can land while a standing run is still in flight (status: active, the exit
+// writer not yet run). Accept keeps the role armed and concludes the run, so
+// the schedule's next tick is the next dispatch; an already-armed role is not
+// re-held to the arming gate.
+func TestShuttleAccept_ActiveStandingRoleConcludesRun(t *testing.T) {
 	dir, storage := newStore(t)
-	// Active (not awaiting) standing role → accept refuses.
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, nil)
+
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err != nil {
+		t.Fatalf("accept on an active standing role: %v\n%s", err, out)
+	}
+	got := mustRead(t, storage, "f")
+	if got.Status != felt.StatusActive {
+		t.Fatalf("status = %q, want active", got.Status)
+	}
+	if raw, _ := shuttleRuntimeMap(t, got)["handed_off_at"].(string); raw == "" {
+		t.Fatal("accept must conclude the in-flight run (shuttle.runtime.handed_off_at)")
+	}
+}
+
+// TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock: with a daemon
+// reachable, accept hands the fiber to it — {"action":"accept","fiber":<id>},
+// nothing else — and relays its answer. The daemon's writer is this same verb
+// run with --local, which takes the fiber lock, so the CLI must not hold that
+// lock while it waits: the stand-in daemon takes it inside the request.
+func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	if _, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
-		t.Fatal("accept on a non-awaiting role must refuse")
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/lifecycle" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		unlock, err := storage.LockFiber("f")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = unlock()
+		fmt.Fprint(w, "accepted by the daemon\n")
+	}))
+	defer server.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+
+	out, err := runCommand(t, dir, "shuttle", "accept", "f")
+	if err != nil {
+		t.Fatalf("routed accept: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "accepted by the daemon") {
+		t.Fatalf("daemon answer not relayed: %q", out)
+	}
+	if want := map[string]any{"action": "accept", "fiber": "f"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("lifecycle request = %v, want %v", got, want)
+	}
+	if status := mustRead(t, storage, "f").Status; status != felt.StatusClosed {
+		t.Fatalf("a routed accept also wrote locally: status = %q", status)
+	}
+}
+
+// TestShuttleAccept_UnreachableDaemonWritesLocally: a daemon that cannot be
+// reached leaves the write to this process.
+func TestShuttleAccept_UnreachableDaemonWritesLocally(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, nil)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+addr)
+
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
+		t.Fatalf("accept with the daemon down: %v\n%s", err, out)
+	}
+	if status := mustRead(t, storage, "f").Status; status != felt.StatusActive {
+		t.Fatalf("status = %q, want active", status)
 	}
 }
 
 func TestShuttleAccept_RejectsOneshot(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
-	if _, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
+	if _, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err == nil {
 		t.Fatal("accept on a oneshot must refuse (standing/pinned only)")
 	}
 }
 
 func TestShuttleAccept_PinnedReParks(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	// Awaiting review: pinned, closed, untempered — the arc finished and is
 	// pending the human verdict. Accept RE-PARKS it to the strip (status: open),
@@ -524,8 +642,8 @@ func TestShuttleAccept_PinnedReParks(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err != nil {
-		t.Fatalf("accept pinned (offline): %v\n%s", err, out)
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err != nil {
+		t.Fatalf("accept pinned --local: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
 	if got.Status != felt.StatusOpen {
@@ -816,18 +934,17 @@ func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
 	}
 }
 
-// TestShuttleRetiredAgent_AcceptRefuses covers the offline-accept arming gate:
-// a standing role awaiting review with a retired agent must refuse rather
-// than silently re-arm.
+// TestShuttleRetiredAgent_AcceptRefuses covers accept's arming gate: a
+// standing role awaiting review with a retired agent must refuse rather than
+// silently re-arm.
 func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
-	t.Setenv("SHUTTLE_LIFECYCLE_OFFLINE", "1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "retired-agent", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	if out, err := runCommand(t, dir, "shuttle", "accept", "f"); err == nil {
+	if out, err := runCommand(t, dir, "shuttle", "accept", "f", "--local"); err == nil {
 		t.Fatalf("accept must refuse a retired agent\n%s", out)
 	} else if !strings.Contains(err.Error()+out, "retired-agent") {
 		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)

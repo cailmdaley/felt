@@ -1420,7 +1420,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   # oscillation: interactive/ad-hoc runs the daemon didn't observe exiting left a
   # dispatch marker with no handoff, so the dead-orphan reconciler re-closed the
   # role to awaiting on every restart/reconcile, undoing each accept. The handoff
-  # marker is durable across a restart (the in-memory rearmed_at map is not).
+  # marker is durable across a restart.
   #
   # The CONTROL role (dispatch, no handoff, NO accept) flips to awaiting in the
   # same poll — proving the reconciler actually ran this cycle, so the accepted
@@ -1589,9 +1589,9 @@ defmodule Shuttle.DispatchIntegrationTest do
   # closed→active while the just-served cron tick was still inside the ~90s
   # backward due-window, so the next poll re-dispatched it and the card popped
   # straight back to awaiting review. An every-minute schedule (always a tick in
-  # the window) is the sharpest probe; the poller's rearm-instant clamp keeps it
-  # at rest. Also asserts the second half of the fix: accept preserves the prior
-  # run's outcome (no longer blanks it).
+  # the window) is the sharpest probe; the handed_off_at stamp felt writes with
+  # the re-arm keeps it at rest. Also asserts accept keeps the prior run's
+  # outcome.
   test "accept re-arms a standing role without re-firing the just-served tick", %{host: host} do
     write_fiber(host, "tests/standing-temper-rest", """
     ---
@@ -1606,12 +1606,23 @@ defmodule Shuttle.DispatchIntegrationTest do
       kind: standing
       agent: claude-sonnet
       host: test-host
+      project_dir: #{host}
       schedule:
         expr: "* * * * *"
         tz: Europe/Paris
     ---
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
+
+    # The run under review was dispatched ten minutes ago, so the current
+    # minute's tick is newer than every service marker until accept concludes
+    # the run with a fresh handed_off_at.
+    write_dispatch_marker(
+      host,
+      "tests/standing-temper-rest",
+      "standing-temper-rest-uuid",
+      DateTime.add(DateTime.utc_now(), -600, :second)
+    )
 
     prev_loom = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", host)
@@ -1641,7 +1652,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       # The kanban drag-to-tempered on a standing awaiting role resolves to accept.
       assert {:ok, _} =
-               Poller.lifecycle_transition(poller, :accept, "tests/standing-temper-rest", [])
+               Poller.lifecycle_transition(poller, :accept, "tests/standing-temper-rest")
 
       # Re-armed AND the prior outcome survives (accept no longer blanks it).
       fm = read_frontmatter(host, "tests/standing-temper-rest")

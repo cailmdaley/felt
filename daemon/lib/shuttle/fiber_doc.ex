@@ -4,11 +4,8 @@ defmodule Shuttle.FiberDoc do
   primitive the daemon uses to flip fields on a felt `.md` without disturbing the
   rest of the file.
 
-  Shared by two consumers:
-
-    * `Shuttle.LifecycleStore` — felt-native lifecycle fields (`status`,
-      `tempered`, `closed-at`, `outcome`) on accept / resume / mark-awaiting /
-      park / rearm.
+  `Shuttle.LifecycleStore` writes the felt-native lifecycle fields (`status`,
+  `tempered`, `closed-at`) through it on mark-awaiting / park / rearm.
 
   The write path edits the raw frontmatter TEXT directly (via
   `Shuttle.FrontmatterEdit`) and never round-trips the parsed map through an

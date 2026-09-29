@@ -7,6 +7,7 @@ defmodule Shuttle.PollerTest do
 
   alias Shuttle.ActionQueries
   alias Shuttle.DaemonHeartbeat
+  alias Shuttle.FeltStores
   alias Shuttle.Poller
   alias Shuttle.Poller.Snapshot
   alias Shuttle.Dispatcher
@@ -2593,7 +2594,7 @@ defmodule Shuttle.PollerTest do
     # The quarantine was released by a human, but the skew kept parking fresh
     # work, so the incarnation was still holding it back. Once the CLI is fixed
     # the next boot must not release that backlog on a hard kill.
-    MockRunner.set_contract_level("4")
+    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
     fiber_id = fresh_candidate!("tests/hb-skew-release")
     {:ok, first} = start_quarantined_poller!(:test_poller_hb_skew_release_1)
     assert :ok = Poller.release_boot_quarantine(first)
@@ -2827,7 +2828,7 @@ defmodule Shuttle.PollerTest do
   test "a contract skew holds even with an otherwise-auto-releasable heartbeat" do
     # Skew has no release endpoint by design: every shelled write is suspect, so
     # the auto-release must not become a back door into dispatching under one.
-    MockRunner.set_contract_level("4")
+    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
     fiber_id = fresh_candidate!("tests/hb-skew")
     write_heartbeat!()
 
@@ -2892,6 +2893,9 @@ defmodule Shuttle.PollerTest do
   # `pending_launch`. `config/test.exs` disables `boot_quarantine`, so these
   # tests exercise the skew gate in isolation from it.
 
+  # A CLI level the daemon does not expect.
+  defp skewed_contract_level, do: Shuttle.Contract.expected_level() + 1
+
   test "a matching contract level dispatches normally and reports ok in the snapshot" do
     MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
     fiber_id = "tests/contract-match"
@@ -2906,7 +2910,14 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert Poller.snapshot(poller).contract == %{expected: 3, observed: 3, ok: true, reason: nil}
+    level = Shuttle.Contract.expected_level()
+
+    assert Poller.snapshot(poller).contract == %{
+             expected: level,
+             observed: level,
+             ok: true,
+             reason: nil
+           }
 
     send(poller, :run_poll_cycle)
 
@@ -2920,7 +2931,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "a mismatched contract level holds fresh launches and surfaces the skew" do
-    MockRunner.set_contract_level("4")
+    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
     fiber_id = "tests/contract-mismatch"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
@@ -2935,9 +2946,11 @@ defmodule Shuttle.PollerTest do
 
     snap = Poller.snapshot(poller)
 
-    assert %{expected: 3, observed: 4, ok: false, reason: reason} = snap.contract
-    assert reason =~ "expected contract level 3"
-    assert reason =~ "CLI reports 4"
+    level = Shuttle.Contract.expected_level()
+    skewed = skewed_contract_level()
+    assert %{expected: ^level, observed: ^skewed, ok: false, reason: reason} = snap.contract
+    assert reason =~ "expected contract level #{level}"
+    assert reason =~ "CLI reports #{skewed}"
 
     send(poller, :run_poll_cycle)
 
@@ -2948,7 +2961,7 @@ defmodule Shuttle.PollerTest do
                Poller.snapshot(poller).pending_launch
 
       assert parked_reason =~ "contract skew"
-      assert parked_reason =~ "CLI reports 4"
+      assert parked_reason =~ "CLI reports #{skewed}"
     end)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -2974,7 +2987,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert %{expected: 3, ok: false} = Poller.snapshot(poller).contract
+    level = Shuttle.Contract.expected_level()
+    assert %{expected: ^level, ok: false} = Poller.snapshot(poller).contract
 
     send(poller, :run_poll_cycle)
 
@@ -2991,7 +3005,7 @@ defmodule Shuttle.PollerTest do
     # Same was-running exemption as boot quarantine: skew means "no NEW
     # autonomous work", not "abandon what's alive". A worker this daemon
     # observed running (adopted at boot) must still re-dispatch on exit.
-    MockRunner.set_contract_level("4")
+    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
     fiber_id = "tests/contract-skew-was-running"
     session = Dispatcher.session_name(fiber_id)
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
@@ -3289,7 +3303,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id, [])
+    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
 
     # The document is re-armed to status:active.
     armed = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md")
@@ -3301,6 +3315,50 @@ defmodule Shuttle.PollerTest do
     # Still active after the poll — nothing clobbers the document back to awaiting.
     assert File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md") =~
              "status: active"
+  end
+
+  # felt is the one writer of accept/resume: the Poller shells `felt shuttle
+  # --felt-store <owning store> <verb> <slug> --local` between poll cycles,
+  # then re-reads the fiber into its document cache so the board shows the
+  # re-arm without waiting for the next poll.
+  test "lifecycle_transition shells felt's --local writer and refreshes the document cache" do
+    fiber_id = "tests/standing-accept-refresh"
+    store = MockRunner.felt_root()
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
+    )
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      kind: standing
+      schedule:
+        expr: "0 9 * * 1"
+        tz: Europe/Paris
+      """,
+      "closed"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_accept_refresh,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [store]
+      )
+
+    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
+
+    assert {"felt", ["shuttle", "--felt-store", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
+
+    assert {:ok, body} = Poller.cached_fiber_documents(poller)
+
+    assert %{fiber: %{"status" => "active"}} =
+             Enum.find(body.fibers, &(&1.fiber["id"] == fiber_id))
   end
 
   test "an accept that lands during a poll read is not clobbered when the poll completes" do
@@ -3355,7 +3413,7 @@ defmodule Shuttle.PollerTest do
            end)
 
     # Accept while the poll is still reading (the GenServer stays responsive).
-    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id, [])
+    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
     assert File.read!(doc_path) =~ "status: active"
 
     # Let the held poll complete and apply against current state.
@@ -5566,9 +5624,8 @@ defmodule Shuttle.PollerTest do
   #
   # These tests exercise the multi-felt-store path directly against the file
   # system; they bypass MockRunner's in-memory fiber store and write real
-  # .felt/ directories instead. They use `resolve_fiber_host/2` (the public
-  # GenServer call) to verify host_for_fiber resolution without depending on
-  # dispatch (which requires the full OTP tree).
+  # .felt/ directories instead. Store resolution is the Poller's cold path,
+  # `FeltStores.host_for_fiber/2` over its configured `felt_stores`.
 
   # Helper: write a minimal fiber .md file with a shuttle: block into
   # <host>/.felt/<id>/<basename>.md so read_fiber_shuttle_block can find it.
@@ -5622,54 +5679,30 @@ defmodule Shuttle.PollerTest do
     {loom, project}
   end
 
-  test "resolve_fiber_host finds a fiber in the first configured host" do
+  test "host_for_fiber finds a fiber in the first configured host" do
     host_a = multi_host_dir("a")
 
     host_b = multi_host_dir("b")
 
     write_fiber_file(host_a, "tests/fiber-in-a")
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_resolve_a,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a, host_b]
-      )
-
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/fiber-in-a")
+    assert {:ok, ^host_a} = FeltStores.host_for_fiber("tests/fiber-in-a", [host_a, host_b])
   end
 
-  test "resolve_fiber_host finds a fiber in the second configured host" do
+  test "host_for_fiber finds a fiber in the second configured host" do
     host_a = multi_host_dir("a")
 
     host_b = multi_host_dir("b")
 
     write_fiber_file(host_b, "tests/fiber-in-b")
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_resolve_b,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a, host_b]
-      )
-
-    assert {:ok, ^host_b} = Poller.resolve_fiber_host(poller, "tests/fiber-in-b")
+    assert {:ok, ^host_b} = FeltStores.host_for_fiber("tests/fiber-in-b", [host_a, host_b])
   end
 
-  test "resolve_fiber_host returns :not_found for an unknown fiber" do
+  test "host_for_fiber returns :not_found for an unknown fiber" do
     host_a = multi_host_dir("a")
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_not_found,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a]
-      )
-
-    assert {:error, :not_found} = Poller.resolve_fiber_host(poller, "tests/no-such-fiber")
+    assert {:error, :not_found} = FeltStores.host_for_fiber("tests/no-such-fiber", [host_a])
   end
 
   test "first-configured host wins for ID collisions" do
@@ -5681,16 +5714,8 @@ defmodule Shuttle.PollerTest do
     write_fiber_file(host_a, "tests/collision-fiber")
     write_fiber_file(host_b, "tests/collision-fiber")
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_multi_host_collision,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [host_a, host_b]
-      )
-
     # host_a is first-configured → wins
-    assert {:ok, ^host_a} = Poller.resolve_fiber_host(poller, "tests/collision-fiber")
+    assert {:ok, ^host_a} = FeltStores.host_for_fiber("tests/collision-fiber", [host_a, host_b])
   end
 
   test "subdirectory symlink: loom-walks-into-project subtree skipped" do
@@ -5729,7 +5754,7 @@ defmodule Shuttle.PollerTest do
 
     # The fiber should resolve to host_b (canonical), not host_a (symlink view).
     assert {:ok, ^host_b} =
-             Poller.resolve_fiber_host(poller, "lightcone-ui/myst-as-ast/dual-branch")
+             FeltStores.host_for_fiber("lightcone-ui/myst-as-ast/dual-branch", [host_a, host_b])
 
     snap = Poller.snapshot(poller)
     candidate_ids = Enum.map(snap.eligible, & &1.fiber_id)
@@ -5753,7 +5778,8 @@ defmodule Shuttle.PollerTest do
       )
 
     # The fiber resolves to loom (canonical), not project (symlinked .felt).
-    assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
+    assert {:ok, ^loom} =
+             FeltStores.host_for_fiber("ai-futures/portolan/kanban-modal", [loom, project])
 
     snap = Poller.snapshot(poller)
     candidate_ids = Enum.map(snap.eligible, & &1.fiber_id)
@@ -5762,20 +5788,11 @@ defmodule Shuttle.PollerTest do
            "project-symlink alias surfaced: #{inspect(candidate_ids)}"
   end
 
-  test "resolve_fiber_host fallback ignores symlinked project view after cache bust" do
+  test "host_for_fiber ignores the symlinked project view" do
     {loom, project} = loom_project_symlink!()
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_symlinked_felt_cache_bust,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [loom, project]
-      )
-
-    :sys.replace_state(poller, &%{&1 | fiber_host_cache: %{}})
-
-    assert {:ok, ^loom} = Poller.resolve_fiber_host(poller, "ai-futures/portolan/kanban-modal")
+    assert {:ok, ^loom} =
+             FeltStores.host_for_fiber("ai-futures/portolan/kanban-modal", [loom, project])
   end
 
   test "snapshot includes felt_stores list" do

@@ -13,7 +13,8 @@ defmodule Shuttle.Continuation do
       JSONL), so nothing is plumbed to the worker.
     * `shuttle.runtime.handed_off_at` — **written by the WORKER at clean exit**
       via `felt shuttle handoff` (Go, nested surgical write), and by a human
-      re-arm (`Shuttle.LifecycleStore`, a second write after the status re-arm).
+      re-arm: felt's `accept` / `resume` in the same write as the status, a
+      force-dispatch `Shuttle.LifecycleStore.rearm` as a second write after it.
       A clean exit is the only thing that stamps it newer than the dispatch.
 
   The fields are **per-host by nature** but safe in git: only the owning host
@@ -281,8 +282,8 @@ defmodule Shuttle.Continuation do
   Stamp `shuttle.runtime.handed_off_at = now` — the clean-exit / human-re-arm
   signal — by shelling `felt shuttle mark-runtime --handed-off-at`
   (`cd: felt_store`). The worker's own exit uses the Go `felt shuttle handoff`;
-  this is the daemon-side entry point (the `LifecycleStore` conclude after an
-  accept/resume/rearm, and tests).
+  this is the daemon-side entry point (the `LifecycleStore` conclude after a
+  force-dispatch rearm or a self-healed standing role, and tests).
   """
   @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
   def mark_handed_off(runner, felt_store, fiber_id)

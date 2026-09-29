@@ -146,7 +146,7 @@ defmodule Shuttle.Poller.StandingRoles do
         )
 
         # Self-heal by concluding the run — the same `handed_off_at = now` stamp
-        # `LifecycleStore.conclude_run` folds into a human accept. Best-effort:
+        # a human accept or resume writes. Best-effort:
         # a stamp miss just means the next poll self-heals again, still without
         # closing.
         LifecycleStore.conclude_run(fiber_id,
@@ -210,8 +210,9 @@ defmodule Shuttle.Poller.StandingRoles do
   #   • otherwise (dispatched, no newer handoff)                          → orphan (true).
   #
   # A human accept / resume / force-rearm SUPERSEDES the dead-orphan inference by
-  # *concluding the run* — `LifecycleStore` folds `handed_off_at = now` into the
-  # re-arm write, the same signal a clean worker exit leaves, since a human
+  # *concluding the run* — each stamps `handed_off_at = now` as it re-arms (felt's
+  # accept/resume in the same write, `LifecycleStore.rearm` just after), the same
+  # signal a clean worker exit leaves, since a human
   # accepting the run IS concluding it. This is what stops the standing-role
   # temper oscillation observed on standing roles like morning-post / weekly-arxiv
   # (a worker that died without handing off was re-closed to awaiting on every reconcile).
@@ -341,13 +342,13 @@ defmodule Shuttle.Poller.StandingRoles do
   # human tempers (accepts) it back to `active`, and `eligible?`'s status gate
   # excludes closed before this is ever reached. So this rule only governs an
   # already-armed role; it never resurrects one pending review.
-  def standing_role_due?(fiber, state) do
+  def standing_role_due?(fiber) do
     with true <- Map.get(fiber, "status", "") == "active",
          true <- is_nil(Map.get(fiber, "tempered")),
          {:ok, role} <- standing_role_from_fiber(fiber) do
       now = DateTime.utc_now()
       now_ms = DateTime.to_unix(now, :millisecond)
-      lookback = now_ms - last_serviced_at_ms(fiber, state, now_ms)
+      lookback = now_ms - last_serviced_at_ms(fiber, now_ms)
       StandingRole.due_by_cron?(role, now, lookback)
     else
       _ -> false
@@ -355,16 +356,11 @@ defmodule Shuttle.Poller.StandingRoles do
   end
 
   # Unix-ms the role was last serviced — the most recent of its marker
-  # timestamps, its in-memory re-arm stamp, and its creation. Defaults to `now_ms`
-  # (⇒ zero lookback ⇒ not due) only in the impossible case that none are known.
-  defp last_serviced_at_ms(fiber, state, now_ms) do
+  # timestamps and its creation. Defaults to `now_ms` (⇒ zero lookback ⇒ not
+  # due) only in the impossible case that none are known.
+  defp last_serviced_at_ms(fiber, now_ms) do
     [
       last_service_event_ms(fiber),
-      # `rearmed_at` is keyed by runtime key (uid when present), so look it up by
-      # the candidate's runtime key — matching how `lifecycle_transition` stamps.
-      # It is the within-lifetime fast path; the durable handoff marker the
-      # re-arm stamps (in `last_service_event_ms`) is the restart-proof backstop.
-      Map.get(state.rearmed_at, Poller.runtime_key_for_fiber(fiber)),
       Poller.iso_to_unix_ms(Map.get(fiber, "created_at"))
     ]
     |> Enum.reject(&is_nil/1)

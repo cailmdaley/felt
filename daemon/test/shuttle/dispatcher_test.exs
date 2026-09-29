@@ -410,9 +410,8 @@ defmodule Shuttle.DispatcherTest do
     # `default_felt_store/0` resolves through `FeltStores.configured_hosts/0`,
     # which reads the FELT_STORES env / persisted stores.json — NOT the injected
     # test runner. On a machine with a configured loom it returns a store; in a
-    # bare CI environment it returns [] → `default_felt_store/0` is nil, so the
-    # "Felt store:" prompt line is dropped and force-dispatch on a closed fiber
-    # aborts with :reopen_unavailable before it can shell `felt shuttle reopen`.
+    # bare CI environment it returns [] → `default_felt_store/0` is nil, and a
+    # dispatch has no store to read the fiber from.
     # Pin a store here so store resolution is deterministic regardless of the
     # host's felt config; delete on exit so the setting never leaks to other
     # suites (the persistent_term cache in configured_hosts/0 is keyed by the
@@ -1075,11 +1074,11 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "dispatch with force: true on a closed fiber aborts when no felt store is configured" do
-    # Without a felt store the closed fiber cannot be reopened, so the reopen
-    # is neither attempted nor assumed — the dispatch aborts rather than
-    # spawning a worker against a still-closed fiber.
+    # Without a felt store there is no fiber to read, let alone reopen — the
+    # dispatch aborts rather than spawning a worker against a still-closed
+    # fiber.
     result = Dispatcher.dispatch("tests/closed", runner: MockRunner, force: true, felt_store: nil)
-    assert {:error, :reopen_unavailable} = result
+    assert {:error, :not_found} = result
 
     commands = MockRunner.commands()
 

@@ -43,7 +43,6 @@ defmodule ShuttleWeb.Router do
     # Start (or find) the tmux session resuming a past harness session on THIS
     # host — the leg /attach forwards to the host that ran it.
     post("/sessions/resume", SessionResumeController, :create)
-    post("/inject", InjectController, :create)
     # Put a message in front of a fiber's worker (owner-routed): message a live
     # session, else resume or dispatch it with the message as From User.
     post("/deliver", DeliverController, :create)
