@@ -38,18 +38,7 @@ defmodule Shuttle.TailnetDial do
       %{configured: Shuttle.Remotes.tailscale_socket_configured?(), socket: socket, bridges: []}
   end
 
-  @doc "Returns the dial bridge socket for a unique URL host, or nil when absent or ambiguous."
-  @spec socket_for(String.t()) :: String.t() | nil
-  def socket_for(host) do
-    case :ets.match_object(@table, {{:socket, host, :_}, :_}) do
-      [{{:socket, ^host, _port}, path}] -> path
-      _ -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
-
-  @doc false
+  @doc "The dial bridge socket for a URL host and port, or nil when absent."
   @spec socket_for(String.t(), pos_integer()) :: String.t() | nil
   def socket_for(host, port) do
     case :ets.lookup(@table, {:socket, host, port}) do

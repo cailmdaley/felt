@@ -22,12 +22,6 @@ defmodule Shuttle.CodexApp.Transport do
     :exit, _ -> {:error, :disconnected}
   end
 
-  def notify(server, method, params) when is_binary(method) do
-    GenServer.call(server, {:notify, method, params})
-  catch
-    :exit, _ -> {:error, :disconnected}
-  end
-
   def close(server) do
     GenServer.stop(server, :normal)
   catch
@@ -73,18 +67,6 @@ defmodule Shuttle.CodexApp.Transport do
         timer = Process.send_after(self(), {:rpc_timeout, id}, timeout)
         pending = Map.put(state.pending, id, {from, timer})
         {:noreply, %{state | next_id: id + 1, pending: pending}}
-
-      {:error, reason} ->
-        disconnect(state, {:transport, reason}, {:reply, {:error, {:transport, reason}}})
-    end
-  end
-
-  def handle_call({:notify, method, params}, _from, state) do
-    message = Jason.encode!(%{"method" => method, "params" => params})
-
-    case send_frame(state.socket, 0x1, message) do
-      :ok ->
-        {:reply, :ok, state}
 
       {:error, reason} ->
         disconnect(state, {:transport, reason}, {:reply, {:error, {:transport, reason}}})
