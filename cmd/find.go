@@ -52,7 +52,7 @@ included; --limit caps it only when given.`,
 
 		query := ""
 		if len(args) == 1 {
-			query = args[0]
+			query = plainQuery(args[0], findRegex)
 		}
 		hasFields := splitListFlag(findHasFields)
 		statusExplicit := cmd.Flags().Changed("status")

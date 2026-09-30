@@ -72,7 +72,7 @@ felt find searches the rest of it.`,
 		}
 		query := ""
 		if len(args) == 1 {
-			query = args[0]
+			query = plainQuery(args[0], lsRegex)
 		}
 		hasFields := splitListFlag(lsHasFields)
 		jsonFields := splitListFlag(lsJSONFields)
@@ -589,6 +589,16 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 		return nil, false, fmt.Errorf("decode extra field %q: %w", field, err)
 	}
 	return value, true, nil
+}
+
+// plainQuery drops a plain query with no words in it, so a blank or
+// whitespace-only argument reads as no query at all rather than as zero terms
+// that every fiber satisfies. A regex keeps its whitespace: it is a pattern.
+func plainQuery(arg string, regex bool) string {
+	if !regex && strings.TrimSpace(arg) == "" {
+		return ""
+	}
+	return arg
 }
 
 // matchesQuery reports whether f matches the query. A regex matches any of the

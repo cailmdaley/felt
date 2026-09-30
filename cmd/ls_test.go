@@ -133,6 +133,38 @@ func TestLsQueryMatchesEveryWord(t *testing.T) {
 	}
 }
 
+// A query with no words is no query: ls lists as it would bare, and find asks
+// for something to search for, rather than zero terms matching every fiber.
+func TestLsWhitespaceQueryIsNoQuery(t *testing.T) {
+	dir, storage := newStore(t)
+	for _, fiber := range []*felt.Felt{
+		{ID: "project/open", Name: "Open", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+		{ID: "project/closed", Name: "Closed", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	bare, err := runCommand(t, dir, "ls", "-j")
+	if err != nil {
+		t.Fatalf("ls -j: %v\n%s", err, bare)
+	}
+	blank, err := runCommand(t, dir, "ls", "-j", "   ")
+	if err != nil {
+		t.Fatalf("ls -j blank: %v\n%s", err, blank)
+	}
+	if blank != bare {
+		t.Fatalf("whitespace query listed\n%s\nwant the bare listing\n%s", blank, bare)
+	}
+	if strings.Contains(blank, "project/closed") {
+		t.Fatalf("whitespace query listed a closed fiber:\n%s", blank)
+	}
+	if out, err := runCommand(t, dir, "find", "  "); err == nil || !strings.Contains(err.Error()+out, "something to search for") {
+		t.Fatalf("find with a whitespace query = %v\n%s, want the needs-a-query error", err, out)
+	}
+}
+
 // A fiber directory with a report.html sibling surfaces report_path (absolute,
 // pointing at that sibling); a fiber without one omits/empties the field. Both
 // the plain walk and the --json-field projection must agree.
