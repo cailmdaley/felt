@@ -450,6 +450,35 @@ func TestResolveMessageSenderFromClaudeCodeSession(t *testing.T) {
 	}
 }
 
+// Pi's bash tool exports PI_SESSION_ID (the id its felt extension registers)
+// and Pi marks its process AI_AGENT=pi. A Pi sender must get a pi reply
+// address, including when Pi runs nested under a Claude or Codex session whose
+// ids it inherits.
+func TestResolveMessageSenderFromPiSession(t *testing.T) {
+	t.Setenv("SHUTTLE_HOST", "sender")
+	const pi = "019a8f2e-7c1d-7b3e-9f40-5d6c7b8a9e01"
+	for _, tc := range []struct{ name, aiAgent, codex, claude, piID, want string }{
+		{"pi alone", "pi", "", "", pi, "shuttle://sender/pi/" + pi},
+		{"pi without marker", "", "", "", pi, "shuttle://sender/pi/" + pi},
+		{"pi nested in claude", "pi", "", "claude-parent", pi, "shuttle://sender/pi/" + pi},
+		{"pi nested in codex", "pi", "codex-parent", "", pi, "shuttle://sender/pi/" + pi},
+		{"claude nested in pi", "claude-code_2-1-285_agent", "", "claude-child", pi, "shuttle://sender/claude/claude-child"},
+		{"pi marker without id", "pi", "", "claude-parent", "", "shuttle://sender/claude/claude-parent"},
+		{"outside a harness", "pi", "", "", "", "external"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AI_AGENT", tc.aiAgent)
+			t.Setenv("CODEX_THREAD_ID", tc.codex)
+			t.Setenv("CLAUDE_SESSION_ID", "")
+			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
+			t.Setenv("PI_SESSION_ID", tc.piID)
+			if got := resolveMessageSender(""); got != tc.want {
+				t.Fatalf("sender = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
 	directory := messaging.Directory{
 		Host: "hub",

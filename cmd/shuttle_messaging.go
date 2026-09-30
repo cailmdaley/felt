@@ -370,15 +370,30 @@ func resolveMessageSender(explicit string) string {
 // harnessSessionEnv lists, in precedence order, the environment variables a
 // harness exports with its native session id. Claude Code exports
 // CLAUDE_CODE_SESSION_ID; CLAUDE_SESSION_ID is accepted for wrappers that set it.
+// Pi (0.82+) exports PI_SESSION_ID to every command its bash tool runs, the
+// same id its felt extension registers, so a Pi sender's reply address matches
+// what `felt shuttle sessions` lists.
 var harnessSessionEnv = []struct{ key, harness string }{
 	{"CODEX_THREAD_ID", "codex"},
 	{"CLAUDE_CODE_SESSION_ID", "claude"},
 	{"CLAUDE_SESSION_ID", "claude"},
+	{"PI_SESSION_ID", "pi"},
 }
 
 // harnessSessionFromEnv returns the calling harness and its native session id,
 // or empty strings outside a recognised harness session.
+//
+// Harnesses nest (a Pi worker launched from a Claude session inherits
+// CLAUDE_CODE_SESSION_ID), so the list order alone would attribute the Pi
+// session's message to its parent. Pi sets AI_AGENT=pi on its own process, and
+// Claude Code overwrites AI_AGENT for its children, so AI_AGENT=pi alongside
+// PI_SESSION_ID means the innermost harness is Pi.
 func harnessSessionFromEnv() (harness, id string) {
+	if strings.TrimSpace(os.Getenv("AI_AGENT")) == "pi" {
+		if value := strings.TrimSpace(os.Getenv("PI_SESSION_ID")); value != "" {
+			return "pi", value
+		}
+	}
 	for _, candidate := range harnessSessionEnv {
 		if value := strings.TrimSpace(os.Getenv(candidate.key)); value != "" {
 			return candidate.harness, value
