@@ -2,8 +2,8 @@ defmodule Shuttle.PathListConfig do
   @moduledoc """
   The one storage mechanism behind felt's path-list config files.
 
-  Two files answer two different questions — `~/.config/felt/stores.json` (where
-  the daemon enumerates fibers) and `~/.config/felt/projects.json` (which
+  Two files answer two different questions — `~/.config/shuttle/stores.json` (where
+  the daemon enumerates fibers) and `~/.config/shuttle/projects.json` (which
   checkouts a human can file into) — and they must stay separate lists. But they
   are stored identically, and this module is that storage, parameterized by
   `{env_var, config_env_var, default_path, json_key}`:

@@ -5,7 +5,7 @@ defmodule ShuttleWeb.FleetControllerTest do
 
   Both halves are stubbed at the `:felt_runner` seam, so nothing here depends on
   a real felt being on the developer's PATH or on what that felt would say about
-  the developer's own fleet. `FELT_REMOTES_FILE` points at a throwaway path for
+  the developer's own fleet. `SHUTTLE_REMOTES_FILE` points at a throwaway path for
   the same reason `test_helper.exs` pins it suite-wide: the file summary in the
   response resolves through it.
   """
@@ -82,7 +82,7 @@ defmodule ShuttleWeb.FleetControllerTest do
   end
 
   setup do
-    previous_file = System.get_env("FELT_REMOTES_FILE")
+    previous_file = System.get_env("SHUTTLE_REMOTES_FILE")
     previous_runner = Application.get_env(:shuttle, :felt_runner)
     previous_remotes = Application.get_env(:shuttle, :remotes)
 
@@ -92,14 +92,14 @@ defmodule ShuttleWeb.FleetControllerTest do
         "shuttle-fleet-ctrl-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("FELT_REMOTES_FILE", path)
+    System.put_env("SHUTTLE_REMOTES_FILE", path)
     Application.put_env(:shuttle, :remotes, [])
     Application.put_env(:shuttle, :felt_runner, MockFelt)
     start_supervised!(MockFelt)
 
     on_exit(fn ->
       File.rm(path)
-      restore_env("FELT_REMOTES_FILE", previous_file)
+      restore_env("SHUTTLE_REMOTES_FILE", previous_file)
       restore_app_env(:felt_runner, previous_runner)
       restore_app_env(:remotes, previous_remotes)
     end)

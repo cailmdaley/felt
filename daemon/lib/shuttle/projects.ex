@@ -17,7 +17,7 @@ defmodule Shuttle.Projects do
   Reusing one list for both drags polling into TCC-protected territory (the bug
   this split exists to prevent). So the picker gets its own file.
 
-  Source: `~/.config/felt/projects.json` →
+  Source: `~/.config/shuttle/projects.json` →
   `%{"version" => 1, "projects" => [absolute path, ...]}` (a bare JSON array is
   also accepted). Absent/empty file → `[]`, and the forms fall back to their
   store-registry + current-cards derivation, so an uncurated host is never worse
@@ -28,9 +28,9 @@ defmodule Shuttle.Projects do
   alias Shuttle.PathListConfig
 
   @spec_ %{
-    env: "FELT_PROJECTS",
-    config_env: "FELT_PROJECTS_FILE",
-    default_path: "~/.config/felt/projects.json",
+    env: "SHUTTLE_PROJECTS",
+    config_env: "SHUTTLE_PROJECTS_FILE",
+    default_path: "~/.config/shuttle/projects.json",
     json_key: "projects"
   }
 
@@ -39,8 +39,8 @@ defmodule Shuttle.Projects do
   @doc """
   The curated project directories for this host, in file order (de-duplicated).
 
-  Resolution: `FELT_PROJECTS` env (comma-separated) when set, else the persisted
-  `~/.config/felt/projects.json`. Empty everywhere → `[]`.
+  Resolution: `SHUTTLE_PROJECTS` env (comma-separated) when set, else the persisted
+  `~/.config/shuttle/projects.json`. Empty everywhere → `[]`.
   """
   @spec configured_projects() :: project_list()
   def configured_projects, do: PathListConfig.configured(@spec_)
@@ -56,11 +56,10 @@ defmodule Shuttle.Projects do
   def save(projects) when is_list(projects), do: PathListConfig.save(@spec_, projects)
 
   @doc """
-  Where the picker list resolves: `FELT_PROJECTS_FILE`, else
-  `~/.config/felt/projects.json`. As with the store registry, `FELT_PROJECTS`
+  Where the picker list resolves: `SHUTTLE_PROJECTS_FILE`, else
+  `~/.config/shuttle/projects.json`. As with the store registry, `SHUTTLE_PROJECTS`
   overrides the contents rather than the location.
   """
   @spec config_path() :: String.t()
   def config_path, do: PathListConfig.config_path(@spec_)
-
 end

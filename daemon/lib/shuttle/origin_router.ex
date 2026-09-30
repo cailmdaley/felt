@@ -33,7 +33,7 @@ defmodule Shuttle.OriginRouter do
   lives on exactly one host, so a local daemon asked for one it does not own
   answers "not found" and nothing happens. A **host-addressed** write — a
   config file, a store list, a tunnel job — has no such arbiter: every host has
-  a `~/.config/felt/stores.json`, so degrading finds a perfectly good local file
+  a `~/.config/shuttle/stores.json`, so degrading finds a perfectly good local file
   and writes it, under a UI header naming a different machine. Those endpoints
   use `route_host/2`, which refuses instead.
   """

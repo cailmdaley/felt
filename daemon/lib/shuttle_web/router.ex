@@ -79,7 +79,7 @@ defmodule ShuttleWeb.Router do
     # The operator files as text, owner-routed: the settings page reads and
     # rewrites `stores/projects/agents/remotes.json` on whichever host owns
     # them. Reads are owner-routed too — a config file describes the daemon
-    # that reads it, and only that daemon can see its own `~/.config/felt/`.
+    # that reads it, and only that daemon can see its own `~/.config/shuttle/`.
     get("/config", ConfigController, :index)
     get("/config/:id", ConfigController, :show)
     post("/config/:id", ConfigController, :create)

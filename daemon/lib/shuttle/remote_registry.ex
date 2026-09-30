@@ -22,7 +22,7 @@ defmodule Shuttle.RemoteRegistry do
 
   ## Configuration
 
-  The fleet comes from `Shuttle.Remotes` — `~/.config/felt/remotes.json`, or
+  The fleet comes from `Shuttle.Remotes` — `~/.config/shuttle/remotes.json`, or
   `config :shuttle, :remotes, [...]` when set:
 
       config :shuttle, :remotes, [
@@ -1548,7 +1548,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   #
   # The cache key is the whole input — selected fleet path and its `{mtime,
   # size}` token, plus the application-config override — so switching
-  # `FELT_REMOTES_FILE` cannot reuse a value from another file with matching
+  # `SHUTTLE_REMOTES_FILE` cannot reuse a value from another file with matching
   # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
     key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}

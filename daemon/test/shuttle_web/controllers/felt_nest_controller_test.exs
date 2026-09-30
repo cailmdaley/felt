@@ -100,7 +100,6 @@ defmodule ShuttleWeb.FeltNestControllerTest do
     assert forwarded["parent"] == "tests/parent"
   end
 
-
   # A fake felt on PATH: `show <id> -j` answers FeltStores.resolve_fiber with
   # felt-shaped JSON echoing the requested id; any other invocation (the
   # nest/unnest under test) records its args and prints ok.
@@ -144,16 +143,16 @@ defmodule ShuttleWeb.FeltNestControllerTest do
 
     old_path = System.get_env("PATH")
     old_args_file = System.get_env("FELT_ARGS_FILE")
-    old_loom_homes = System.get_env("FELT_STORES")
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
 
     System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
     System.put_env("FELT_ARGS_FILE", args_file)
-    System.put_env("FELT_STORES", store)
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
       restore_env("PATH", old_path)
       restore_env("FELT_ARGS_FILE", old_args_file)
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 

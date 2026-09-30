@@ -22,7 +22,7 @@ config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 #     exercise the tick directly).
 #   * `:remotes` — the remote fleet resolves at runtime through
 #     `Shuttle.Remotes.configured/0`: application config when set, else the
-#     operator's `~/.config/felt/remotes.json`, else none. An unset key is
+#     operator's `~/.config/shuttle/remotes.json`, else none. An unset key is
 #     what lets the file speak; a `remotes: []` default here would shadow it
 #     on every host and silently reduce the hub to a local-only board. `[]`
 #     means "explicitly no remotes" — which is exactly what config/test.exs

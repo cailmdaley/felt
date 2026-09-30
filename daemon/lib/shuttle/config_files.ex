@@ -4,7 +4,7 @@ defmodule Shuttle.ConfigFiles do
   can read and rewrite them.
 
   Everything shuttle can be told about a host lives in five JSON files under
-  `~/.config/felt/`. The board is reachable from a phone and from a second hub,
+  `~/.config/shuttle/`. The board is reachable from a phone and from a second hub,
   and the surface that steers the fleet has to be able to configure it, not
   only an editor on the machine that owns each file.
 
@@ -40,13 +40,13 @@ defmodule Shuttle.ConfigFiles do
   pointed at that file through its own path-override environment variable, and
   only a clean exit commits:
 
-    * `:remotes` → `felt shuttle remotes list --json` under `FELT_REMOTES_FILE`
+    * `:remotes` → `felt shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE`
       — the CLI that is already the fleet file's sole writer, and whose `list`
       verb is documented as its validator (duplicate names, port collisions,
       an unparseable `defaults.https_proxy`, a managed tunnel with no port).
-    * `:agents` → `felt shuttle agents --json` under `FELT_AGENTS_FILE` — which
+    * `:agents` → `felt shuttle agents --json` under `SHUTTLE_AGENTS_FILE` — which
       fails loud on an unsupported `version` or an unknown `builtins` mode.
-    * `:host` → `felt shuttle host --json` under `FELT_HOST_FILE` — an unknown
+    * `:host` → `felt shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` — an unknown
       class, or a `listen` that is not loopback tcp or a short absolute unix
       path.
     * `:stores` / `:projects` → checked here, against the shape
@@ -100,7 +100,7 @@ defmodule Shuttle.ConfigFiles do
 
   @doc """
   Where a file resolves on this host, exactly as its own reader resolves it —
-  each one's `*_FILE` environment override, else `~/.config/felt/<stem>.json`.
+  each one's `*_FILE` environment override, else `~/.config/shuttle/<stem>.json`.
 
   Four of the five delegate to the module that already answers this, so a
   settings page can never show a path the daemon is not in fact reading.
@@ -112,9 +112,9 @@ defmodule Shuttle.ConfigFiles do
   def path(:projects), do: Projects.config_path()
 
   def path(:agents) do
-    case System.get_env("FELT_AGENTS_FILE") do
+    case System.get_env("SHUTTLE_AGENTS_FILE") do
       value when is_binary(value) and value != "" -> Path.expand(value)
-      _ -> Path.expand("~/.config/felt/agents.json")
+      _ -> Path.expand("~/.config/shuttle/agents.json")
     end
   end
 
@@ -217,7 +217,7 @@ defmodule Shuttle.ConfigFiles do
 
   # The one way this page could lie. Both path-list files have a compact
   # comma-separated environment form that wins over the file ENTIRELY when it
-  # is set — so a host started with `FELT_STORES=...` polls that list while
+  # is set — so a host started with `SHUTTLE_STORES=...` polls that list while
   # `stores.json` sits on disk being read by nobody. An editor that showed the
   # file without saying so would let you carefully fix a setting that has no
   # effect, which is worse than having no editor.
@@ -225,7 +225,7 @@ defmodule Shuttle.ConfigFiles do
   # The fleet, agent and host files have no such form (deliberately, in both cases:
   # a structured entry has no comma grammar), so they never override.
   defp env_override(id) when id in [:stores, :projects] do
-    var = if id == :stores, do: "FELT_STORES", else: "FELT_PROJECTS"
+    var = if id == :stores, do: "SHUTTLE_STORES", else: "SHUTTLE_PROJECTS"
 
     case System.get_env(var) do
       value when is_binary(value) and value != "" -> %{var: var, value: value}
@@ -332,13 +332,13 @@ defmodule Shuttle.ConfigFiles do
   # environment variable a human would use, so what passes here is exactly what
   # the daemon and the CLI will read back off disk a moment later.
   defp validate_decoded(:remotes, text, _decoded),
-    do: validate_via_shuttle(text, "FELT_REMOTES_FILE", ["remotes", "list", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_REMOTES_FILE", ["remotes", "list", "--json"])
 
   defp validate_decoded(:agents, text, _decoded),
-    do: validate_via_shuttle(text, "FELT_AGENTS_FILE", ["agents", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_AGENTS_FILE", ["agents", "--json"])
 
   defp validate_decoded(:host, text, _decoded),
-    do: validate_via_shuttle(text, "FELT_HOST_FILE", ["host", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_HOST_CONFIG_FILE", ["host", "--json"])
 
   # No felt verb validates the path-list files, so the shape check lives here —
   # and it is the shape `PathListConfig` accepts, not a stricter one. In

@@ -2,7 +2,7 @@ defmodule ShuttleWeb.ProjectsControllerTest do
   @moduledoc """
   Wiring for `POST /api/v1/projects` — the write half of the pickers'
   "+ Add project…" affordance, and the first production caller of
-  `Shuttle.Projects.save/1`. Every test points `FELT_PROJECTS_FILE` at a
+  `Shuttle.Projects.save/1`. Every test points `SHUTTLE_PROJECTS_FILE` at a
   throwaway file so the user's real projects.json is never touched.
 
   Store initialization shells the real `felt init` on `PATH` (the default
@@ -19,8 +19,8 @@ defmodule ShuttleWeb.ProjectsControllerTest do
   setup do
     previous_runner = Application.get_env(:shuttle, :felt_runner)
     Application.put_env(:shuttle, :felt_runner, Shuttle.Runner.Default)
-    prev_env = System.get_env("FELT_PROJECTS")
-    prev_file = System.get_env("FELT_PROJECTS_FILE")
+    prev_env = System.get_env("SHUTTLE_PROJECTS")
+    prev_file = System.get_env("SHUTTLE_PROJECTS_FILE")
 
     file =
       Path.join(
@@ -28,8 +28,8 @@ defmodule ShuttleWeb.ProjectsControllerTest do
         "shuttle-projects-ctrl-#{System.unique_integer([:positive])}.json"
       )
 
-    System.delete_env("FELT_PROJECTS")
-    System.put_env("FELT_PROJECTS_FILE", file)
+    System.delete_env("SHUTTLE_PROJECTS")
+    System.put_env("SHUTTLE_PROJECTS_FILE", file)
 
     root =
       Path.join(System.tmp_dir!(), "shuttle_projects_ctrl_#{System.unique_integer([:positive])}")
@@ -40,8 +40,8 @@ defmodule ShuttleWeb.ProjectsControllerTest do
       restore_app_env(:felt_runner, previous_runner)
       File.rm(file)
       File.rm_rf(root)
-      restore_env("FELT_PROJECTS", prev_env)
-      restore_env("FELT_PROJECTS_FILE", prev_file)
+      restore_env("SHUTTLE_PROJECTS", prev_env)
+      restore_env("SHUTTLE_PROJECTS_FILE", prev_file)
     end)
 
     {:ok, root: root}

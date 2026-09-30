@@ -165,11 +165,11 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.ln_s!(nested, Path.join(project, ".felt"))
 
     args_file = install_fake_cli!()
-    old_felt_stores = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "#{loom},#{project}")
+    old_felt_stores = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", "#{loom},#{project}")
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_felt_stores)
+      restore_env("SHUTTLE_STORES", old_felt_stores)
       File.rm_rf(root)
     end)
 
@@ -534,7 +534,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   end
 
   # A throwaway single-store felt root holding one empty fiber at `slug`, wired
-  # to `FELT_STORES` for the duration of the test. Lifecycle verbs resolve the
+  # to `SHUTTLE_STORES` for the duration of the test. Lifecycle verbs resolve the
   # posted id against the configured stores, so a test that posts an id needs
   # that id to actually exist somewhere — otherwise the controller (correctly)
   # answers 400 `fiber not found` before it ever shells out to felt.
@@ -548,11 +548,11 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.mkdir_p!(fiber_dir)
     File.write!(Path.join(fiber_dir, "#{Path.basename(slug)}.md"), "---\nname: #{name}\n---\n\n")
 
-    old_felt_stores = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_felt_stores = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_felt_stores)
+      restore_env("SHUTTLE_STORES", old_felt_stores)
       File.rm_rf(root)
     end)
 

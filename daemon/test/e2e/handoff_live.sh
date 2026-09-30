@@ -24,7 +24,7 @@
 # observable; we cross-check it against the fiber's stamped frontmatter.
 #
 # The fake agent reaches the run through felt's USER agent registry: a temp
-# $FELT_AGENTS_FILE holding one `shuttle-e2e-stub` record whose `wrapper` is the
+# $SHUTTLE_AGENTS_FILE holding one `shuttle-e2e-stub` record whose `wrapper` is the
 # absolute path to the stand-in. felt merges it over the built-ins and emits it
 # under `shuttle.resolved.agent`; the daemon launches what it is handed. So this
 # gate patches nothing tracked in the repo, and it cannot inherit the operator's
@@ -38,8 +38,8 @@
 #   FELT=<path>          override the felt binary (default: `felt` on PATH)
 #   SHUTTLE_E2E_PORT=<n> override the daemon port (default: 4071)
 #
-# SAFETY: an isolated SHUTTLE_DATA_DIR, a temp FELT_STORES, a temp
-# FELT_AGENTS_FILE and a private port keep this fully separate from any
+# SAFETY: an isolated SHUTTLE_DATA_DIR, a temp SHUTTLE_STORES, a temp
+# SHUTTLE_AGENTS_FILE and a private port keep this fully separate from any
 # production daemon on :4000. All tmux sessions, the daemon, and temp dirs are
 # torn down on EXIT.
 set -uo pipefail
@@ -87,7 +87,7 @@ cleanup() {
     tmux kill-session -t "$s" 2>/dev/null || true
   done
   [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null || true
-  # Nothing tracked to restore: the fake agent rides a temp FELT_AGENTS_FILE and
+  # Nothing tracked to restore: the fake agent rides a temp SHUTTLE_AGENTS_FILE and
   # the private port rides SHUTTLE_PORT, so this run never edits the repo.
   rm -rf "$WORK"
 }
@@ -136,7 +136,7 @@ FAKE
 chmod +x "$FAKE_CLAUDE"
 
 # ── 3. Register the fake agent, build the daemon release ─────────────────────
-# One USER-layer record in a temp registry. Exporting FELT_AGENTS_FILE covers
+# One USER-layer record in a temp registry. Exporting SHUTTLE_AGENTS_FILE covers
 # every felt in this run — the ones this script calls and the ones the daemon
 # shells — and shadows the operator's own registry, so the gate is reproducible
 # on any machine.
@@ -158,7 +158,7 @@ cat > "$AGENTS_FILE" <<AGENTS
   ]
 }
 AGENTS
-export FELT_AGENTS_FILE="$AGENTS_FILE"
+export SHUTTLE_AGENTS_FILE="$AGENTS_FILE"
 "$FELT" shuttle agents resolve shuttle-e2e-stub --json >/dev/null || {
   echo "FATAL: felt does not resolve shuttle-e2e-stub from $AGENTS_FILE" >&2
   exit 2
@@ -203,7 +203,7 @@ make_fiber probe-dirty dirty
 
 # ── 5. Start the daemon (isolated port / store / data dir / host) ────────────
 info "starting daemon on :$PORT (store=$STORE host=$HOST)"
-SHUTTLE_PORT="$PORT" FELT_STORES="$STORE" FELT_AGENTS_FILE="$AGENTS_FILE" \
+SHUTTLE_PORT="$PORT" SHUTTLE_STORES="$STORE" SHUTTLE_AGENTS_FILE="$AGENTS_FILE" \
   SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
   nohup "$DAEMON" start --force >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!

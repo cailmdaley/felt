@@ -15,7 +15,7 @@ defmodule ShuttleWeb.ConfigController do
   unusual part and the point of the endpoint: a config file describes the host
   whose daemon reads it, and only that daemon can see it. Opening the settings
   page on a hub and choosing `some-remote` has to reach that remote's own
-  `~/.config/felt/`, exactly as `/projects` reaches its filesystem to create a
+  `~/.config/shuttle/`, exactly as `/projects` reaches its filesystem to create a
   store. A read carries its origin as a query parameter (`?origin=…`); a write
   carries it in the body, which is where every other write endpoint puts it.
 

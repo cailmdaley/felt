@@ -423,7 +423,7 @@ defmodule Shuttle.DispatcherTest do
     MockRunner.reset()
 
     # `default_felt_store/0` resolves through `FeltStores.configured_stores/0`,
-    # which reads the FELT_STORES env / persisted stores.json — NOT the injected
+    # which reads the SHUTTLE_STORES env / persisted stores.json — NOT the injected
     # test runner. On a machine with a configured loom it returns a store; in a
     # bare CI environment it returns [] → `default_felt_store/0` is nil, and a
     # dispatch has no store to read the fiber from.
@@ -431,8 +431,8 @@ defmodule Shuttle.DispatcherTest do
     # host's felt config; delete on exit so the setting never leaks to other
     # suites (the persistent_term cache in configured_stores/0 is keyed by the
     # base config, so a differing base on the next suite recomputes cleanly).
-    prev_stores = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", "/tmp")
+    prev_stores = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", "/tmp")
 
     sessions_file =
       Path.join(
@@ -448,8 +448,8 @@ defmodule Shuttle.DispatcherTest do
 
     on_exit(fn ->
       if prev_stores,
-        do: System.put_env("FELT_STORES", prev_stores),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_stores),
+        else: System.delete_env("SHUTTLE_STORES")
 
       Application.delete_env(:shuttle, :kitty_impl)
       Application.delete_env(:shuttle, :os_type)

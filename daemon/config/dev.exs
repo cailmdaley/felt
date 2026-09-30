@@ -9,7 +9,7 @@ import Config
 # same discipline as its prod sibling.
 #
 # The remote fleet is not configured here at all. It lives in
-# `~/.config/felt/remotes.json` and is read at runtime by `Shuttle.Remotes` —
+# `~/.config/shuttle/remotes.json` and is read at runtime by `Shuttle.Remotes` —
 # the same file `felt shuttle remotes` edits and `felt shuttle tunnels` installs
 # from.
 config :shuttle, ShuttleWeb.Endpoint,

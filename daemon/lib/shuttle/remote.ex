@@ -15,7 +15,7 @@ defmodule Shuttle.Remote do
   (`http://127.0.0.1:<port>`); give a `url` outright for a remote reached
   without a locally-managed tunnel.
 
-  Entries come from `Shuttle.Remotes` (the fleet file `~/.config/felt/remotes.json`)
+  Entries come from `Shuttle.Remotes` (the fleet file `~/.config/shuttle/remotes.json`)
   or from `config :shuttle, :remotes, [...]`. Each entry may be a map
   (string- or atom-keyed) or a keyword list.
 

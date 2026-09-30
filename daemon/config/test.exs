@@ -46,12 +46,12 @@ config :shuttle, ShuttleWeb.Endpoint,
   secret_key_base: "testsecretkeybasetestsecretkeybasetestsecretkeybasetestsecretkeybase",
   server: false
 
-# Keep the developer's ~/.config/felt/host.json and SHUTTLE_LISTEN out of the
+# Keep the developer's ~/.config/shuttle/host.json and SHUTTLE_LISTEN out of the
 # suite: an absent file is a single-user host, so the test endpoint resolves
-# to tcp://127.0.0.1:4002 on every machine. Host tests point FELT_HOST_FILE at
+# to tcp://127.0.0.1:4002 on every machine. Host tests point SHUTTLE_HOST_CONFIG_FILE at
 # their own files.
 System.put_env(
-  "FELT_HOST_FILE",
+  "SHUTTLE_HOST_CONFIG_FILE",
   Path.join(
     System.tmp_dir!(),
     "shuttle-test-host-json-#{System.unique_integer([:positive])}.json"

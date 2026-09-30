@@ -5,19 +5,21 @@ defmodule Shuttle.ProjectsTest do
   alias Shuttle.Projects
 
   setup do
-    prev_env = System.get_env("FELT_PROJECTS")
-    prev_file = System.get_env("FELT_PROJECTS_FILE")
+    prev_env = System.get_env("SHUTTLE_PROJECTS")
+    prev_file = System.get_env("SHUTTLE_PROJECTS_FILE")
 
     # Point the registry at a throwaway file so tests never read/clobber the
-    # user's real ~/.config/felt/projects.json.
-    path = Path.join(System.tmp_dir!(), "shuttle-projects-#{System.unique_integer([:positive])}.json")
-    System.delete_env("FELT_PROJECTS")
-    System.put_env("FELT_PROJECTS_FILE", path)
+    # user's real ~/.config/shuttle/projects.json.
+    path =
+      Path.join(System.tmp_dir!(), "shuttle-projects-#{System.unique_integer([:positive])}.json")
+
+    System.delete_env("SHUTTLE_PROJECTS")
+    System.put_env("SHUTTLE_PROJECTS_FILE", path)
 
     on_exit(fn ->
       File.rm(path)
-      restore_env("FELT_PROJECTS", prev_env)
-      restore_env("FELT_PROJECTS_FILE", prev_file)
+      restore_env("SHUTTLE_PROJECTS", prev_env)
+      restore_env("SHUTTLE_PROJECTS_FILE", prev_file)
     end)
 
     {:ok, path: path}
@@ -41,8 +43,8 @@ defmodule Shuttle.ProjectsTest do
     assert Projects.configured_projects() == ["/tmp/a", "/tmp/b"]
   end
 
-  test "FELT_PROJECTS env overrides the file" do
-    System.put_env("FELT_PROJECTS", "/tmp/x, /tmp/y")
+  test "SHUTTLE_PROJECTS env overrides the file" do
+    System.put_env("SHUTTLE_PROJECTS", "/tmp/x, /tmp/y")
     assert Projects.configured_projects() == ["/tmp/x", "/tmp/y"]
   end
 

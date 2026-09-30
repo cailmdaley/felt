@@ -7,30 +7,16 @@ defmodule Shuttle.DispatchIntegrationTest do
   alias Shuttle.Test.FiberUid
   import Shuttle.Test.PollerHelpers
 
-  # Every test here dispatches through the REAL `felt` binary (see
-  # IntegrationRunner.cmd/3 below, and the direct `System.cmd("felt", ...)`
-  # call further down) — on a clean machine without felt installed, the whole
-  # module fails rather than exercising anything. Skip it there (this is NOT
-  # tagged `:integration` — that tag is globally excluded by test_helper.exs,
-  # and this suite is meant to run by default wherever felt is available, the
-  # same as any dev machine today).
-  #
-  # System.find_executable/1 is the exact predicate that matters: it asks
-  # "can System.cmd("felt", ...) find an executable on the BEAM's PATH", the
-  # same PATH resolution System.cmd/3 itself uses. A login-shell `type -t`
-  # check diverges in both directions — a shell function/alias named `felt`
-  # would pass it and then every test raises :enoent, and a binary outside
-  # the login shell's PATH (e.g. Debian's /etc/profile rewriting PATH) would
-  # fail it and skip a module that would otherwise have run. It also needs no
-  # subprocess, so an absent `bash` can't crash the whole `mix test` run —
-  # exactly the failure mode this guard exists to prevent.
-  unless System.find_executable("felt") do
-    @moduletag skip: "felt binary not found on PATH — this module dispatches through the real CLI"
+  # These tests exercise the real `felt` and `shuttle` binaries through
+  # IntegrationRunner, plus a direct `felt edit`. Skip the module when either
+  # executable is absent rather than failing every test with :enoent.
+  unless System.find_executable("felt") && System.find_executable("shuttle") do
+    @moduletag skip: "felt and shuttle binaries are required for this CLI integration suite"
   end
 
   # ── Integration Runner ─────────────────────────────────────────────────────
-  # Passes `felt` commands to the real felt CLI (with -C felt_store).
-  # Intercepts `tmux` calls with an in-memory session set.
+  # Passes content and Shuttle commands to their owning real CLI, scoped to a
+  # temporary store. Intercepts `tmux` calls with an in-memory session set.
   # Named Agent so it can be injected as a module reference into Dispatcher.
 
   defmodule IntegrationRunner do
@@ -64,16 +50,21 @@ defmodule Shuttle.DispatchIntegrationTest do
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
     @impl true
-    def cmd("felt", args, opts) do
+    def cmd(command, args, opts) when command in ["felt", "shuttle"] do
       felt_store = Agent.get(__MODULE__, & &1.felt_store)
 
       Agent.update(__MODULE__, fn s ->
-        %{s | commands: s.commands ++ [{"felt", args}]}
+        %{s | commands: s.commands ++ [{command, args}]}
       end)
 
-      # Always use -C felt_store so the real felt finds our temp directory,
-      # regardless of working directory. Drop :cd — redundant when -C is set.
-      System.cmd("felt", ["-C", felt_store | args], Keyword.drop(opts, [:cd]))
+      # Scope unqualified commands to the test store; -C is already part of
+      # Shuttle lifecycle calls that need an explicit store root.
+      opts =
+        if match?(["-C", _store | _], args),
+          do: opts,
+          else: Keyword.put_new(opts, :cd, felt_store)
+
+      System.cmd(command, args, opts)
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do
@@ -218,9 +209,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   defp write_dispatch_marker(_host, id, session_id, at \\ DateTime.utc_now()) do
     {_output, 0} =
       IntegrationRunner.cmd(
-        "felt",
+        "shuttle",
         [
-          "shuttle",
           "mark-runtime",
           id,
           "--dispatched-at",
@@ -240,8 +230,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   defp write_handoff_marker(_host, id, at \\ DateTime.utc_now()) do
     {_output, 0} =
       IntegrationRunner.cmd(
-        "felt",
-        ["shuttle", "mark-runtime", id, "--handed-off-at", DateTime.to_iso8601(at)],
+        "shuttle",
+        ["mark-runtime", id, "--handed-off-at", DateTime.to_iso8601(at)],
         []
       )
 
@@ -570,7 +560,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     # session identity), or the continuation heuristic would compare a
     # subsequent clean-exit/died-mid-window against the PRIOR run's stamp.
     assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--dispatched-at" in args and "--session" in args and
                "kanban-session-uuid-5678" in args
            end),
@@ -950,7 +940,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     # `dispatch/1` returns regardless, carrying `--dispatched-at` with no
     # `--session` (there is nothing to backfill into yet).
     assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--dispatched-at" in args and "--session" not in args
            end),
            "expected dispatched_at to be stamped synchronously before dispatch returned"
@@ -962,7 +952,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     # lockstep round-trip cover that mark-runtime nests under shuttle.runtime.
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                  "--session" in args and "right-worker-session" in args and
                  "--dispatched-at" not in args
              end)
@@ -1015,7 +1005,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                  "--session" in args and "straddle-worker-session" in args
              end)
            end),
@@ -1379,10 +1369,10 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     write_handoff_marker(host, "tests/standing-armed")
 
-    # mark_awaiting resolves the fiber through FeltStores (FELT_STORES), not the
+    # mark_awaiting resolves the fiber through FeltStores (SHUTTLE_STORES), not the
     # injected runner — point it at the temp store for the duration.
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", host)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -1409,8 +1399,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       assert read_frontmatter(host, "tests/standing-armed")["status"] == "active"
     after
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end
   end
 
@@ -1463,8 +1453,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       if accept?, do: write_handoff_marker(host, "tests/#{slug}")
     end
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", host)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -1492,8 +1482,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(fm, "closed-at")
     after
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end
   end
 
@@ -1522,8 +1512,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing role awaiting review; the human clicks New session.
     """)
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", host)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1579,8 +1569,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(entry.fiber, "tempered")
     after
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end
   end
 
@@ -1625,8 +1615,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       DateTime.add(DateTime.utc_now(), -600, :second)
     )
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", host)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1678,8 +1668,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       assert read_frontmatter(host, "tests/standing-temper-rest")["status"] == "active"
     after
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end
   end
 
@@ -1732,7 +1722,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     # the two writes are serialized rather than racing.
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                  "--dispatched-at" in args
              end)
            end),

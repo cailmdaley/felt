@@ -349,10 +349,10 @@ defmodule Shuttle.TailnetDialTest do
     base: base
   } do
     remote_file = Path.join(base, "invalid-remotes.json")
-    previous_file = System.get_env("FELT_REMOTES_FILE")
+    previous_file = System.get_env("SHUTTLE_REMOTES_FILE")
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
     previous_proxy = Application.get_env(:shuttle, :https_proxy)
-    System.put_env("FELT_REMOTES_FILE", remote_file)
+    System.put_env("SHUTTLE_REMOTES_FILE", remote_file)
     Application.delete_env(:shuttle, :tailscale_socket)
     Application.put_env(:shuttle, :https_proxy, false)
 
@@ -362,7 +362,7 @@ defmodule Shuttle.TailnetDialTest do
     )
 
     on_exit(fn ->
-      restore_env("FELT_REMOTES_FILE", previous_file)
+      restore_env("SHUTTLE_REMOTES_FILE", previous_file)
       restore_app_env(:tailscale_socket, previous_socket)
       restore_app_env(:https_proxy, previous_proxy)
     end)
@@ -393,15 +393,15 @@ defmodule Shuttle.TailnetDialTest do
     File.write!(second_file, invalid_doc)
     File.touch!(second_file, File.stat!(first_file).mtime)
 
-    previous_file = System.get_env("FELT_REMOTES_FILE")
+    previous_file = System.get_env("SHUTTLE_REMOTES_FILE")
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
     previous_proxy = Application.get_env(:shuttle, :https_proxy)
-    System.put_env("FELT_REMOTES_FILE", first_file)
+    System.put_env("SHUTTLE_REMOTES_FILE", first_file)
     Application.delete_env(:shuttle, :tailscale_socket)
     Application.put_env(:shuttle, :https_proxy, false)
 
     on_exit(fn ->
-      restore_env("FELT_REMOTES_FILE", previous_file)
+      restore_env("SHUTTLE_REMOTES_FILE", previous_file)
       restore_app_env(:tailscale_socket, previous_socket)
       restore_app_env(:https_proxy, previous_proxy)
     end)
@@ -411,7 +411,7 @@ defmodule Shuttle.TailnetDialTest do
     assert {:error, {:tailnet_dial, :unavailable, {:no_bridge, @host, 443}}} =
              Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
 
-    System.put_env("FELT_REMOTES_FILE", second_file)
+    System.put_env("SHUTTLE_REMOTES_FILE", second_file)
     assert Shuttle.Remotes.config_token() == first_token
 
     assert {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}} =
@@ -730,16 +730,16 @@ defmodule Shuttle.TailnetDialTest do
   test "fleet token changes add, replace, and remove per-remote bridges", %{base: base} do
     remote_file = Path.join(base, "remotes.json")
     localapi = Path.join(base, "localapi.sock")
-    previous_file = System.get_env("FELT_REMOTES_FILE")
+    previous_file = System.get_env("SHUTTLE_REMOTES_FILE")
     previous_remotes = Application.get_env(:shuttle, :remotes)
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
-    System.put_env("FELT_REMOTES_FILE", remote_file)
+    System.put_env("SHUTTLE_REMOTES_FILE", remote_file)
     Application.delete_env(:shuttle, :remotes)
     Application.delete_env(:shuttle, :tailscale_socket)
     write_fleet(remote_file, localapi, [{"hub-a", "hub-a.example.ts.net"}])
 
     on_exit(fn ->
-      restore_env("FELT_REMOTES_FILE", previous_file)
+      restore_env("SHUTTLE_REMOTES_FILE", previous_file)
       restore_app_env(:remotes, previous_remotes)
       restore_app_env(:tailscale_socket, previous_socket)
     end)

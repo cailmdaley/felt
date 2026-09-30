@@ -44,13 +44,13 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   defp with_actions_host do
-    previous = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    previous = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       case previous do
-        nil -> System.delete_env("FELT_STORES")
-        value -> System.put_env("FELT_STORES", value)
+        nil -> System.delete_env("SHUTTLE_STORES")
+        value -> System.put_env("SHUTTLE_STORES", value)
       end
     end)
   end

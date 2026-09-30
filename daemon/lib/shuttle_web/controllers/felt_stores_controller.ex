@@ -4,7 +4,7 @@ defmodule ShuttleWeb.FeltStoresController do
 
   GET returns the human-curated base registry, not the symlink-expanded daemon
   polling list. POST persists the local registry. An empty POST list clears the
-  persisted file so the daemon has no configured stores unless `FELT_STORES` is
+  persisted file so the daemon has no configured stores unless `SHUTTLE_STORES` is
   set.
 
   Each remote's origin is read from `Shuttle.RemoteFiberRegistry`'s cached owner

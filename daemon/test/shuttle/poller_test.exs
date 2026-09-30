@@ -1702,16 +1702,16 @@ defmodule Shuttle.PollerTest do
     # it active-but-dead; reverting filter_eligible's guard re-arms the loop.
     #
     # The exit handler routes through felt (LifecycleStore → FeltStores.resolve_
-    # fiber), so the mock fiber must be felt-resolvable: point FELT_STORES at the
+    # fiber), so the mock fiber must be felt-resolvable: point SHUTTLE_STORES at the
     # mock store the factory wrote to (/tmp/.felt). Without this a
     # park regression would silently no-op — masking whether the gate even fired.
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end)
 
     fiber_id = "tests/pinned-exit-parks"
@@ -1764,13 +1764,13 @@ defmodule Shuttle.PollerTest do
     # handed_off_at and exits is asking for a fresh session (long autonomous arc).
     # handle_worker_exit's pinned branch leaves the document `active` (does NOT
     # park to open), and the next tick re-dispatches a fresh worker.
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end)
 
     fiber_id = "tests/pinned-clean-exit"
@@ -1820,13 +1820,13 @@ defmodule Shuttle.PollerTest do
     # The complement of the pinned carve-out: a STANDING (cron) worker's exit
     # still marks the role awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       if prev_loom,
-        do: System.put_env("FELT_STORES", prev_loom),
-        else: System.delete_env("FELT_STORES")
+        do: System.put_env("SHUTTLE_STORES", prev_loom),
+        else: System.delete_env("SHUTTLE_STORES")
     end)
 
     fiber_id = "tests/standing-exit-closes"
@@ -3273,11 +3273,11 @@ defmodule Shuttle.PollerTest do
   test "accept through the Poller re-arms the document and survives the next poll" do
     fiber_id = "tests/standing-accept-sticks"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
-      restore_env("FELT_STORES", previous_loom_homes)
+      restore_env("SHUTTLE_STORES", previous_loom_homes)
     end)
 
     # Awaiting is a document fact (status:closed + untempered). accept re-arms it
@@ -3370,11 +3370,11 @@ defmodule Shuttle.PollerTest do
     # the document is the single source of truth (slice 6), so the accept stands.
     fiber_id = "tests/standing-accept-during-poll"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
-      restore_env("FELT_STORES", previous_loom_homes)
+      restore_env("SHUTTLE_STORES", previous_loom_homes)
     end)
 
     # Awaiting is a document fact (status:closed + untempered).
@@ -4794,9 +4794,9 @@ defmodule Shuttle.PollerTest do
     # re-fired off the schedule mid-cycle.
     fiber_id = "tests/standing-dead-orphan"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
 
     # A far-future schedule so the role is NOT cron-due — the only thing that
     # could touch it is the dead-orphan marker, not a scheduled dispatch.
@@ -4842,9 +4842,9 @@ defmodule Shuttle.PollerTest do
     # (concluding the phantom run) and leave the role armed.
     fiber_id = "tests/standing-inverted-markers"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
     kind: standing
@@ -4876,7 +4876,7 @@ defmodule Shuttle.PollerTest do
     assert wait_until(
              fn ->
                Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-                 cmd == "shuttle" and match?(["mark-runtime" | _], args) and
+                 cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                    "--handed-off-at" in args
                end)
              end,
@@ -4905,9 +4905,9 @@ defmodule Shuttle.PollerTest do
     # with no handoff stamp and no fresh dispatch.
     fiber_id = "tests/pinned-inverted-markers"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
     kind: pinned
@@ -4937,7 +4937,7 @@ defmodule Shuttle.PollerTest do
 
     # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--handed-off-at" in args
            end)
 
@@ -4955,9 +4955,9 @@ defmodule Shuttle.PollerTest do
     # reconciler, so leaving a crashed ad-hoc run's role armed is safe.
     fiber_id = "tests/standing-dead-adhoc"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
 
     MockRunner.set_shuttle(fiber_id, """
     kind: standing
@@ -5002,9 +5002,9 @@ defmodule Shuttle.PollerTest do
     # skip the tick and let the next healthy scan decide.
     fiber_id = "tests/standing-tmux-wedged"
 
-    previous_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("FELT_STORES", previous_loom_homes) end)
+    previous_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
 
     # Same shape as the dead-orphan case — armed, dispatched, un-exited, not
     # cron-due — except tmux cannot answer.
@@ -5839,11 +5839,11 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-poller-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("FELT_STORES_FILE")
-    original_homes = System.get_env("FELT_STORES")
+    original_file = System.get_env("SHUTTLE_STORES_FILE")
+    original_homes = System.get_env("SHUTTLE_STORES")
 
-    System.put_env("FELT_STORES_FILE", config_path)
-    System.delete_env("FELT_STORES")
+    System.put_env("SHUTTLE_STORES_FILE", config_path)
+    System.delete_env("SHUTTLE_STORES")
     File.mkdir_p!(Path.dirname(config_path))
 
     File.write!(
@@ -5855,13 +5855,13 @@ defmodule Shuttle.PollerTest do
       File.rm(config_path)
 
       case original_file do
-        nil -> System.delete_env("FELT_STORES_FILE")
-        value -> System.put_env("FELT_STORES_FILE", value)
+        nil -> System.delete_env("SHUTTLE_STORES_FILE")
+        value -> System.put_env("SHUTTLE_STORES_FILE", value)
       end
 
       case original_homes do
-        nil -> System.delete_env("FELT_STORES")
-        value -> System.put_env("FELT_STORES", value)
+        nil -> System.delete_env("SHUTTLE_STORES")
+        value -> System.put_env("SHUTTLE_STORES", value)
       end
     end)
 
@@ -5882,11 +5882,11 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-refresh-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("FELT_STORES_FILE")
-    original_homes = System.get_env("FELT_STORES")
+    original_file = System.get_env("SHUTTLE_STORES_FILE")
+    original_homes = System.get_env("SHUTTLE_STORES")
 
-    System.put_env("FELT_STORES_FILE", config_path)
-    System.delete_env("FELT_STORES")
+    System.put_env("SHUTTLE_STORES_FILE", config_path)
+    System.delete_env("SHUTTLE_STORES")
     File.mkdir_p!(Path.dirname(config_path))
     File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-a"]}))
 
@@ -5894,13 +5894,13 @@ defmodule Shuttle.PollerTest do
       File.rm(config_path)
 
       case original_file do
-        nil -> System.delete_env("FELT_STORES_FILE")
-        value -> System.put_env("FELT_STORES_FILE", value)
+        nil -> System.delete_env("SHUTTLE_STORES_FILE")
+        value -> System.put_env("SHUTTLE_STORES_FILE", value)
       end
 
       case original_homes do
-        nil -> System.delete_env("FELT_STORES")
-        value -> System.put_env("FELT_STORES", value)
+        nil -> System.delete_env("SHUTTLE_STORES")
+        value -> System.put_env("SHUTTLE_STORES", value)
       end
     end)
 
@@ -5958,7 +5958,7 @@ defmodule Shuttle.PollerTest do
     # resume / continuation can recover it. The daemon's contract is the verb it
     # issues; felt's own suite covers that the verb nests correctly.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--session" in args and "uuid-claim-1" in args
            end)
 
@@ -5966,7 +5966,7 @@ defmodule Shuttle.PollerTest do
     # write: that stamp is how the recording's daemon, on any host, finds the
     # fiber its scribe filed.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                Enum.chunk_every(args, 2, 1, :discard) |> Enum.member?(["--meeting", "launch-xyz"])
            end)
 
@@ -6113,7 +6113,7 @@ defmodule Shuttle.PollerTest do
     # Nothing registered, renamed, or stamped: a retry after install claims cleanly.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              (cmd == "tmux" and hd(args) == "rename-session") or
-               (cmd == "shuttle" and match?(["mark-runtime" | _], args))
+               (cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args))
            end)
 
     assert Shuttle.SessionLedger.read_since(0) == []
@@ -6124,7 +6124,7 @@ defmodule Shuttle.PollerTest do
              Poller.claim_session(poller, id, "capture-uninstalled1", session_uuid: "uuid-early")
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "uuid-early" in args
            end)
   end

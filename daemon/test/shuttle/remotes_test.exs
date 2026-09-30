@@ -8,7 +8,7 @@ defmodule Shuttle.RemotesTest do
   @fixture_dir Path.expand("../fixtures/remotes", __DIR__)
 
   setup do
-    prev_file = System.get_env("FELT_REMOTES_FILE")
+    prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
     prev_env = Application.get_env(:shuttle, :remotes)
     prev_prefix = Application.get_env(:shuttle, :launchd_label_prefix)
     prev_proxy = Application.get_env(:shuttle, :https_proxy)
@@ -22,7 +22,7 @@ defmodule Shuttle.RemotesTest do
     Application.delete_env(:shuttle, :tailscale_socket)
 
     on_exit(fn ->
-      restore_env("FELT_REMOTES_FILE", prev_file)
+      restore_env("SHUTTLE_REMOTES_FILE", prev_file)
       restore_app_env(:remotes, prev_env)
       restore_app_env(:launchd_label_prefix, prev_prefix)
       restore_app_env(:https_proxy, prev_proxy)
@@ -47,7 +47,7 @@ defmodule Shuttle.RemotesTest do
       @want want
 
       test "#{fixture} reads identically in both languages" do
-        System.put_env("FELT_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
+        System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
 
         assert Remotes.launchd_label_prefix() == @want["launchd_label_prefix"]
 
@@ -100,7 +100,7 @@ defmodule Shuttle.RemotesTest do
       @remote remote
 
       test "#{fixture}: the daemon rejects #{field}" do
-        System.put_env("FELT_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
+        System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
         names = Enum.map(Remotes.registered(), & &1.name)
 
         if @remote == "" do
@@ -133,7 +133,7 @@ defmodule Shuttle.RemotesTest do
           })
           |> write_remotes()
 
-        System.put_env("FELT_REMOTES_FILE", file)
+        System.put_env("SHUTTLE_REMOTES_FILE", file)
         assert Remotes.tailscale_socket() == nil
         assert Remotes.registered() == []
       end
@@ -158,7 +158,7 @@ defmodule Shuttle.RemotesTest do
            "tunnel": {"manager": "systemd"}}
         ]}))
 
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
 
       for %Remote{name: name, tunnel: %{manager: manager}} <- Remotes.registered() do
         assert manager == :none, "#{name} has no port, so it has no tunnel to bounce"
@@ -171,7 +171,7 @@ defmodule Shuttle.RemotesTest do
           {"name": "tunnelled", "port": 4001, "tunnel": {"multiplex": true, "label": "custom"}}
         ]}))
 
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
 
       assert [%Remote{tunnel: tunnel}] = Remotes.registered()
       assert tunnel.multiplex
@@ -222,7 +222,7 @@ defmodule Shuttle.RemotesTest do
     test "reads exactly the grammar the Go reader reads" do
       for {written, want} <- @proxy_grammar do
         path = write_remotes(~s({"defaults": {"https_proxy": #{written}}, "remotes": []}))
-        System.put_env("FELT_REMOTES_FILE", path)
+        System.put_env("SHUTTLE_REMOTES_FILE", path)
 
         assert Remotes.https_proxy() == want,
                "#{written} should read as #{inspect(want)}"
@@ -231,19 +231,19 @@ defmodule Shuttle.RemotesTest do
 
     test "absent defaults, an absent file, and a malformed one all mean no proxy" do
       path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.https_proxy() == nil
 
-      System.put_env("FELT_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
+      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
       assert Remotes.https_proxy() == nil
 
-      System.put_env("FELT_REMOTES_FILE", write_remotes("{\"defaults\": {"))
+      System.put_env("SHUTTLE_REMOTES_FILE", write_remotes("{\"defaults\": {"))
       assert Remotes.https_proxy() == nil
     end
 
     test "application config wins, and false means explicitly none" do
       path = write_remotes(~s({"defaults": {"https_proxy": "localhost:1055"}, "remotes": []}))
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
 
       Application.put_env(:shuttle, :https_proxy, "proxy.example:8080")
       assert Remotes.https_proxy() == {"proxy.example", 8080}
@@ -255,7 +255,7 @@ defmodule Shuttle.RemotesTest do
 
   describe "file resolution" do
     test "an absent file is a valid local-only host, not an error" do
-      System.put_env("FELT_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
+      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
       assert Remotes.registered() == []
       assert Remotes.configured() == []
     end
@@ -265,7 +265,7 @@ defmodule Shuttle.RemotesTest do
       # daemon that refuses to serve its OWN board over a bad operator file is
       # worse than one that serves it without the fleet.
       path = write_remotes("{\"remotes\": [")
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.registered() == []
     end
 
@@ -273,7 +273,7 @@ defmodule Shuttle.RemotesTest do
       path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
       File.chmod!(path, 0o000)
       on_exit(fn -> File.chmod(path, 0o644) end)
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.registered() == []
     end
 
@@ -284,7 +284,7 @@ defmodule Shuttle.RemotesTest do
           {"name": "off", "port": 4002, "enabled": false}
         ]}))
 
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert [%Remote{name: "on"}] = Remotes.registered()
     end
   end
@@ -292,7 +292,7 @@ defmodule Shuttle.RemotesTest do
   describe "precedence" do
     test "application config wins over the file — including an explicit []" do
       path = write_remotes(~s({"remotes": [{"name": "from-file", "port": 4001}]}))
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
 
       Application.put_env(:shuttle, :remotes, [])
       assert Remotes.configured() == []
@@ -303,7 +303,7 @@ defmodule Shuttle.RemotesTest do
 
     test "unset application config falls through to the file" do
       path = write_remotes(~s({"remotes": [{"name": "from-file", "port": 4001}]}))
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       Application.delete_env(:shuttle, :remotes)
 
       assert [%Remote{name: "from-file", url: "http://127.0.0.1:4001"}] = Remotes.configured()
@@ -317,7 +317,7 @@ defmodule Shuttle.RemotesTest do
           ~s({"launchd_label_prefix": "com.file", "remotes": [{"name": "a", "port": 4001}]})
         )
 
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       Application.put_env(:shuttle, :launchd_label_prefix, "com.override")
 
       assert Remotes.label_for("a") == "com.override.shuttle-tunnel-a"
@@ -329,7 +329,7 @@ defmodule Shuttle.RemotesTest do
           ~s({"remotes": [{"name": "a", "port": 4001, "tunnel": {"label": "legacy.job"}}]})
         )
 
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert [remote] = Remotes.registered()
       assert Remotes.label_for(remote) == "legacy.job"
     end
@@ -338,7 +338,7 @@ defmodule Shuttle.RemotesTest do
   describe "config_token/0" do
     test "nil when absent, and changes when the file changes" do
       path = Path.join(tmp_dir(), "token.json")
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.config_token() == nil
 
       File.write!(path, ~s({"remotes": [{"name": "a", "port": 4001}]}))

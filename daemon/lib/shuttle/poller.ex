@@ -13,11 +13,11 @@ defmodule Shuttle.Poller do
   `Shuttle.FeltStores` resolves them and re-read every poll cycle:
 
       # env var (comma-separated, takes precedence over the persisted file):
-      FELT_STORES=~/some-store,~/other-project
+      SHUTTLE_STORES=~/some-store,~/other-project
       # or persisted registration written through the HTTP API:
-      ~/.config/felt/stores.json
+      ~/.config/shuttle/stores.json
 
-  The registry is the source of truth: with `FELT_STORES` unset, the list
+  The registry is the source of truth: with `SHUTTLE_STORES` unset, the list
   comes straight from the registry (empty if none registered). A
   `:felt_stores` start option pins the list instead (tests).
 

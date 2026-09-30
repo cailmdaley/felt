@@ -972,7 +972,7 @@ defmodule Shuttle.Dispatcher do
             "through a login bash, so the wrapper must be an executable on PATH or a shell " <>
             "function defined by your bash login profile — a definition that exists only in zsh " <>
             "or fish is invisible here. Install it, or point the agent at a CLI that is on PATH " <>
-            "in `~/.config/felt/agents.json` (`felt shuttle agents` prints the effective registry)."
+            "in `~/.config/shuttle/agents.json` (`felt shuttle agents` prints the effective registry)."
         )
     end
   end

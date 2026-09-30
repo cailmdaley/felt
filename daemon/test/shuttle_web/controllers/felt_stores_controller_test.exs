@@ -7,14 +7,14 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   setup do
-    original = System.get_env("FELT_STORES_FILE")
+    original = System.get_env("SHUTTLE_STORES_FILE")
     original_remotes = Application.get_env(:shuttle, :remotes)
 
-    # FELT_STORES env WINS over the registry file (FeltStores resolution
+    # SHUTTLE_STORES env WINS over the registry file (FeltStores resolution
     # order), so an operator shell exporting it leaks into every assertion
     # here. Clear it for the test; restore after.
-    original_env_stores = System.get_env("FELT_STORES")
-    System.delete_env("FELT_STORES")
+    original_env_stores = System.get_env("SHUTTLE_STORES")
+    System.delete_env("SHUTTLE_STORES")
 
     path =
       Path.join(
@@ -22,15 +22,15 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
         "shuttle-felt-stores-controller-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("FELT_STORES_FILE", path)
+    System.put_env("SHUTTLE_STORES_FILE", path)
     Application.put_env(:shuttle, :remotes, [])
 
     on_exit(fn ->
       File.rm(path)
 
       case original do
-        nil -> System.delete_env("FELT_STORES_FILE")
-        value -> System.put_env("FELT_STORES_FILE", value)
+        nil -> System.delete_env("SHUTTLE_STORES_FILE")
+        value -> System.put_env("SHUTTLE_STORES_FILE", value)
       end
 
       case original_remotes do
@@ -39,8 +39,8 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       end
 
       case original_env_stores do
-        nil -> System.delete_env("FELT_STORES")
-        value -> System.put_env("FELT_STORES", value)
+        nil -> System.delete_env("SHUTTLE_STORES")
+        value -> System.put_env("SHUTTLE_STORES", value)
       end
     end)
 
@@ -48,7 +48,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   end
 
   test "shows the configured base stores as the local origin" do
-    path = Path.expand(System.get_env("FELT_STORES_FILE"))
+    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
 
     File.write!(
@@ -72,7 +72,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   end
 
   test "surfaces the curated picker-project list on the local origin" do
-    prev_projects_file = System.get_env("FELT_PROJECTS_FILE")
+    prev_projects_file = System.get_env("SHUTTLE_PROJECTS_FILE")
 
     projects_path =
       Path.join(
@@ -80,7 +80,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
         "shuttle-projects-controller-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("FELT_PROJECTS_FILE", projects_path)
+    System.put_env("SHUTTLE_PROJECTS_FILE", projects_path)
     File.mkdir_p!(Path.dirname(projects_path))
 
     File.write!(
@@ -92,8 +92,8 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       File.rm(projects_path)
 
       case prev_projects_file do
-        nil -> System.delete_env("FELT_PROJECTS_FILE")
-        value -> System.put_env("FELT_PROJECTS_FILE", value)
+        nil -> System.delete_env("SHUTTLE_PROJECTS_FILE")
+        value -> System.put_env("SHUTTLE_PROJECTS_FILE", value)
       end
     end)
 
@@ -119,14 +119,14 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert body["ok"] == true
     assert body["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
 
-    {:ok, persisted} = File.read(Path.expand(System.get_env("FELT_STORES_FILE")))
+    {:ok, persisted} = File.read(Path.expand(System.get_env("SHUTTLE_STORES_FILE")))
     decoded = Jason.decode!(persisted)
     assert decoded["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
     assert decoded["version"] == 1
   end
 
   test "empty list clears the persisted file" do
-    path = Path.expand(System.get_env("FELT_STORES_FILE"))
+    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/stale"]}))
 
@@ -149,7 +149,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   # able to reach the one the reader is looking at: a store list describes the
   # daemon that polls it, and only that daemon can save it.
   test "a write for a remote origin forwards to the owning daemon" do
-    path = Path.expand(System.get_env("FELT_STORES_FILE"))
+    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
     saved = Jason.encode!(%{"ok" => true, "host" => "candide", "felt_stores" => ["/remote/loom"]})
 
     Shuttle.Test.ForwardStub.stub_forward(

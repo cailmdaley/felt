@@ -6,7 +6,7 @@ defmodule Shuttle.HostTest do
   alias Shuttle.Host
 
   @fixture_dir Path.expand("../fixtures/host", __DIR__)
-  @env_vars ~w(FELT_HOST_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR SHUTTLE_PEER_UID)
+  @env_vars ~w(SHUTTLE_HOST_CONFIG_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR SHUTTLE_PEER_UID)
 
   setup do
     previous = Map.new(@env_vars, &{&1, System.get_env(&1)})
@@ -32,7 +32,7 @@ defmodule Shuttle.HostTest do
         %{"file" => file, "env" => env, "expect" => want} = @kase
 
         System.put_env(
-          "FELT_HOST_FILE",
+          "SHUTTLE_HOST_CONFIG_FILE",
           if(file,
             do: Path.join(@fixture_dir, file),
             else: Path.join(@fixture_dir, "absent.json")
@@ -76,7 +76,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "on only for an explicit true", %{host_file: file} do
-      System.put_env("FELT_HOST_FILE", file)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       refute Host.quarantine_auto_release?()
 
       for {body, want} <- [
@@ -90,7 +90,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "any other value is off, with a warning", %{host_file: file} do
-      System.put_env("FELT_HOST_FILE", file)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       File.write!(file, ~s({"quarantine_auto_release":"yes"}))
 
       assert capture_log(fn -> refute Host.quarantine_auto_release?() end) =~
@@ -98,7 +98,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "a malformed host.json is off rather than a crash", %{host_file: file} do
-      System.put_env("FELT_HOST_FILE", file)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       File.write!(file, "{not json")
       refute Host.quarantine_auto_release?()
     end
@@ -107,13 +107,13 @@ defmodule Shuttle.HostTest do
   describe "resolve!/1" do
     test "raises with the file's path on a malformed host.json" do
       path = Path.join(@fixture_dir, "malformed.json")
-      System.put_env("FELT_HOST_FILE", path)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", path)
 
       assert_raise ArgumentError, ~r/#{Regex.escape(path)}/, fn -> Host.resolve!() end
     end
 
     test "the single-user default falls back to the endpoint config's port" do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "absent.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "absent.json"))
       System.delete_env("SHUTTLE_LISTEN")
       System.delete_env("SHUTTLE_PORT")
 
@@ -365,7 +365,7 @@ defmodule Shuttle.HostTest do
       # The real endpoint, restarted under the configuration boot produces:
       # the running test endpoint is stopped, reconfigured with server: true,
       # and restarted, so Phoenix → Bandit → thousand_island do the binding.
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
       sock = Path.join([base, "sock", "daemon.sock"])
       before = listening_sockets()
@@ -430,7 +430,7 @@ defmodule Shuttle.HostTest do
 
     test "a server: false endpoint resolves the socket without touching disk",
          %{base: base, endpoint: endpoint} do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
 
       Shuttle.Application.configure_endpoint()
@@ -444,7 +444,7 @@ defmodule Shuttle.HostTest do
       base: base,
       endpoint: endpoint
     } do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
       System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
       Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
@@ -460,7 +460,7 @@ defmodule Shuttle.HostTest do
       endpoint: endpoint
     } do
       {host_file, proc_root} = shared_tcp_fixtures(base)
-      System.put_env("FELT_HOST_FILE", host_file)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
       Application.put_env(:shuttle, :proc_net_root, proc_root)
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
@@ -480,7 +480,7 @@ defmodule Shuttle.HostTest do
       endpoint: endpoint
     } do
       {host_file, proc_root} = shared_tcp_fixtures(base)
-      System.put_env("FELT_HOST_FILE", host_file)
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
       System.put_env("SHUTTLE_PEER_UID", "424242")
       Application.put_env(:shuttle, :proc_net_root, proc_root)
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
@@ -497,7 +497,7 @@ defmodule Shuttle.HostTest do
       base: base,
       endpoint: endpoint
     } do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "shared.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
       System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
       Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
@@ -516,7 +516,7 @@ defmodule Shuttle.HostTest do
     test "an exposed host refuses TCP and directs the front proxy to its socket", %{
       endpoint: endpoint
     } do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "exposed.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "exposed.json"))
       System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
@@ -531,7 +531,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "a single-user host keeps loopback tcp on the configured port", %{endpoint: endpoint} do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "single_user.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "single_user.json"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)
 
       Shuttle.Application.configure_endpoint()
@@ -543,7 +543,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "a non-loopback listen refuses to boot", %{endpoint: endpoint} do
-      System.put_env("FELT_HOST_FILE", Path.join(@fixture_dir, "non_loopback.json"))
+      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "non_loopback.json"))
       Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)
 
       assert_raise ArgumentError, ~r/only 127\.0\.0\.1 is allowed/, fn ->

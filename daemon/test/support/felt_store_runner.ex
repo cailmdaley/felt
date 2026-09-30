@@ -50,7 +50,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   end
 
   # The store root (the directory containing `.felt/`) this run's MockRunner
-  # writes fiber files under — pass this to `felt_stores:` / `FELT_STORES`
+  # writes fiber files under — pass this to `felt_stores:` / `SHUTTLE_STORES`
   # instead of the old hardcoded `/tmp`.
   def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
 
@@ -565,8 +565,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
       # writer. Mirror the real CLI by folding the stamped flags into the
       # fiber's `shuttle:` map (the same surface put_shuttle_fields updates), so
       # a self-heal / conclude write is observable on the next poll.
-      command == "shuttle" and match?(["mark-runtime", _id | _], args) ->
-        [_mark, id | flags] = args
+      command == "shuttle" and match?(["mark-runtime", _id | _], drop_cli_store(args)) ->
+        [_mark, id | flags] = drop_cli_store(args)
 
         fields =
           flags

@@ -93,8 +93,15 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defmodule MarkerFailureRunner do
-    def cmd("shuttle", ["mark-runtime" | _], _opts), do: {"write failed", 1}
+    def cmd("shuttle", args, opts) do
+      if mark_runtime?(args), do: {"write failed", 1}, else: Runner.cmd("shuttle", args, opts)
+    end
+
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+
+    defp mark_runtime?(["-C", _store, "mark-runtime" | _]), do: true
+    defp mark_runtime?(["mark-runtime" | _]), do: true
+    defp mark_runtime?(_), do: false
   end
 
   defmodule MarkerFailsOnceRunner do
@@ -102,13 +109,17 @@ defmodule Shuttle.AppWorkersTest do
 
     def start_link(_), do: Agent.start_link(fn -> true end, name: __MODULE__)
 
-    def cmd("shuttle", ["mark-runtime" | _] = args, opts) do
-      if Agent.get_and_update(__MODULE__, fn fail? -> {fail?, false} end),
+    def cmd("shuttle", args, opts) do
+      if mark_runtime?(args) and Agent.get_and_update(__MODULE__, fn fail? -> {fail?, false} end),
         do: {"write failed", 1},
-        else: Runner.cmd("felt", args, opts)
+        else: Runner.cmd("shuttle", args, opts)
     end
 
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+
+    defp mark_runtime?(["-C", _store, "mark-runtime" | _]), do: true
+    defp mark_runtime?(["mark-runtime" | _]), do: true
+    defp mark_runtime?(_), do: false
   end
 
   defmodule MissingTmuxRunner do

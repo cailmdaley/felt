@@ -302,7 +302,10 @@ defmodule Shuttle.Continuation do
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
     args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 
-    case Shuttle.CLI.run_lifecycle("mark-runtime", fiber_id, args, runner: runner, cd: felt_store) do
+    case Shuttle.CLI.run_lifecycle("mark-runtime", fiber_id, args,
+           runner: runner,
+           felt_store: felt_store
+         ) do
       {:ok, _output} ->
         :ok
 

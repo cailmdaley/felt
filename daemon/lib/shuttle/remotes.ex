@@ -4,7 +4,7 @@ defmodule Shuttle.Remotes do
   how to reach each one — a locally-forwarded SSH tunnel port, or an outright
   URL on a mesh VPN.
 
-  Source: `~/.config/felt/remotes.json` (or `$FELT_REMOTES_FILE`) →
+  Source: `~/.config/shuttle/remotes.json` (or `$SHUTTLE_REMOTES_FILE`) →
 
       {
         "version": 1,
@@ -46,7 +46,7 @@ defmodule Shuttle.Remotes do
 
   The Go CLI (`cmd/shuttle_remotes.go`) reads the same file with the same
   defaults rather than shelling the daemon — the same one-way dependency
-  `FELT_STORES` keeps. `test/fixtures/remotes/*.json` is read by both suites so
+  `SHUTTLE_STORES` keeps. `test/fixtures/remotes/*.json` is read by both suites so
   the two readers cannot drift.
 
   ## Resolution
@@ -57,7 +57,7 @@ defmodule Shuttle.Remotes do
     2. the file
     3. `[]`
 
-  There is deliberately no compact `FELT_REMOTES` env form: a remote carries
+  There is deliberately no compact `SHUTTLE_REMOTES` env form: a remote carries
   structured fields (tunnel options, per-remote timeouts) no comma-separated
   grammar can express, so a second grammar in two languages would always be a
   lossy subset.
@@ -65,8 +65,8 @@ defmodule Shuttle.Remotes do
 
   alias Shuttle.Remote
 
-  @config_env "FELT_REMOTES_FILE"
-  @default_config_path "~/.config/felt/remotes.json"
+  @config_env "SHUTTLE_REMOTES_FILE"
+  @default_config_path "~/.config/shuttle/remotes.json"
 
   # Reverse-DNS prefix for the tunnel launchd labels. Matches the daemon's own
   # `io.shuttle.daemon` agent. The Go tunnel installer reads the same key, so
