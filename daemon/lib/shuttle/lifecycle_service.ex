@@ -36,11 +36,11 @@ defmodule Shuttle.LifecycleService do
   end
 
   @doc """
-  Shell `felt shuttle <verb> <fiber_id> --local`. `opts` go to
-  `Shuttle.Felt.Shuttle.run/4` (`:felt_store`, `:runner`).
+  Shell `shuttle <verb> <fiber_id> --local`. `opts` go to
+  `Shuttle.CLI.run_lifecycle/4` (`:felt_store`, `:runner`).
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
   def write(verb, fiber_id, opts) when verb in [:accept, :resume] do
-    Shuttle.Felt.Shuttle.run(Atom.to_string(verb), fiber_id, [], opts)
+    Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, [], opts)
   end
 end

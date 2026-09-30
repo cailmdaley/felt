@@ -11,7 +11,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # stale client still posts the key. The flag is silently dropped, not relayed.
   test "install drops a stale interactive key rather than forwarding it" do
     store = fixture_store!("shuttle-lifecycle-install", "tests/interactive", "Interactive")
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -28,20 +28,20 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
+             "-C\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
   end
 
   # pin CREATES a schedule-less kind:pinned block on a fiber that has none —
   # the board's drag-onto-the-Pinned-strip gesture for an unmanaged card (an
   # already-managed one reshapes instead). The controller forwards model /
-  # project / host to `felt shuttle pin`; no schedule (a pinned block has none).
+  # project / host to `shuttle pin`; no schedule (a pinned block has none).
   #
-  # `--host` here is the cross-host INSTALL TARGET, unrelated to `--felt-store`
+  # `--host` here is the cross-host INSTALL TARGET, unrelated to `-C`
   # (which names the store the id resolves against). Both ride the same argv;
   # this locks in that they stay distinct.
-  test "pin delegates to felt shuttle with model, project_dir and host" do
+  test "pin delegates to shuttle with model, project_dir and host" do
     store = fixture_store!("shuttle-lifecycle-pin", "tests/operator", "Operator")
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -59,7 +59,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\npin\ntests/operator\n--model\nclaude-fable\n" <>
+             "-C\n#{store}\npin\ntests/operator\n--model\nclaude-fable\n" <>
                "--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
   end
 
@@ -67,9 +67,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # an optional POSITIONAL right after the fiber, then the schedule flags. It
   # rides the same id-resolution clause as `install` and `pin`, so the store
   # flag still lands ahead of the verb.
-  test "reshape delegates to felt shuttle with kind as a positional" do
+  test "reshape delegates to shuttle with kind as a positional" do
     store = fixture_store!("shuttle-lifecycle-reshape", "tests/nightly", "Nightly")
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -87,7 +87,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nreshape\ntests/nightly\nstanding\n--schedule\n0 7 * * *\n" <>
+             "-C\n#{store}\nreshape\ntests/nightly\nstanding\n--schedule\n0 7 * * *\n" <>
                "--tz\nEurope/Paris\n--local\n"
   end
 
@@ -96,7 +96,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # controller choosing the shape the user didn't touch).
   test "reshape omits the kind positional for a schedule-only edit" do
     store = fixture_store!("shuttle-lifecycle-reshape-sched", "tests/cadence", "Cadence")
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -113,14 +113,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
+             "-C\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
   end
 
   # Only the three legal kinds reach the CLI — an arbitrary string is rejected
   # here rather than forwarded as a positional felt would have to argue with.
   test "reshape rejects a kind outside oneshot/standing/pinned" do
     fixture_store!("shuttle-lifecycle-reshape-badkind", "tests/badkind", "Bad kind")
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -164,7 +164,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.mkdir_p!(project)
     File.ln_s!(nested, Path.join(project, ".felt"))
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
     old_felt_stores = System.get_env("FELT_STORES")
     System.put_env("FELT_STORES", "#{loom},#{project}")
 
@@ -187,14 +187,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n--local\n"
+             "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n--local\n"
   end
 
   test "close and reopen delegate through the existing lifecycle endpoint" do
     close_store =
       fixture_store!("shuttle-lifecycle-close-route", "tests/close-route", "Close route")
 
-    close_args = install_fake_felt!()
+    close_args = install_fake_cli!()
 
     close_conn =
       post(
@@ -206,12 +206,12 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert close_conn.status == 200
 
     assert File.read!(close_args) ==
-             "--felt-store\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n--local\n"
+             "-C\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n--local\n"
 
     reopen_store =
       fixture_store!("shuttle-lifecycle-reopen-route", "tests/reopen-route", "Reopen route")
 
-    reopen_args = install_fake_felt!()
+    reopen_args = install_fake_cli!()
 
     reopen_conn =
       post(
@@ -228,11 +228,11 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert reopen_conn.status == 200
 
     assert File.read!(reopen_args) ==
-             "--felt-store\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n--local\n"
+             "-C\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n--local\n"
   end
 
   # set-interactive is retired: the controller no longer allows the action, so a
-  # stale client gets a clean rejection rather than a felt shuttle invocation.
+  # stale client gets a clean rejection rather than a shuttle invocation.
   test "set-interactive is rejected as an unknown lifecycle action" do
     conn =
       post(
@@ -249,10 +249,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.resp_body =~ "unknown lifecycle action"
   end
 
-  test "set-outcome delegates to felt shuttle, preserving a multi-line value as one arg" do
+  test "set-outcome delegates to shuttle, preserving a multi-line value as one arg" do
     store = fixture_store!("shuttle-lifecycle-outcome", "tests/outcome-edit", "Outcome edit")
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -270,19 +270,19 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     # The multi-line outcome rides as a single argv element (one `--outcome`
     # value), so the block scalar survives without stdin piping.
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n--local\n"
+             "-C\n#{store}\nset-outcome\ntests/outcome-edit\n--outcome\nBlocked: waiting on ADS token\nsecond line\n--local\n"
   end
 
   # T2: pause is the kanban's most-hit lifecycle write — the drag-a-card-off
-  # column gesture. Post-C2 this argv is built by `Shuttle.Felt.Shuttle.run/4`
+  # column gesture. This argv is built by `Shuttle.CLI.run_lifecycle/4`
   # (destructuring `run/2`'s `[verb, fiber_id | rest]`), not a per-callsite
   # hand-rolled list; this locks in that the store flag lands BEFORE the verb
   # and the verb/fiber_id/flags land in the right order after it — the exact
-  # shape a real `felt` binary requires.
-  test "pause delegates to felt shuttle with the store flag ahead of the verb" do
+  # shape a real `shuttle` binary requires.
+  test "pause delegates to shuttle with the store flag ahead of the verb" do
     store = fixture_store!("shuttle-lifecycle-pause", "tests/pause-edit", "Pause edit")
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -294,14 +294,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\npause\ntests/pause-edit\n--local\n"
+             "-C\n#{store}\npause\ntests/pause-edit\n--local\n"
   end
 
   test "pause --no-kill appends the flag after the verb and fiber id" do
     store =
       fixture_store!("shuttle-lifecycle-pause-nokill", "tests/pause-nokill", "Pause no-kill")
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -313,17 +313,17 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\npause\ntests/pause-nokill\n--no-kill\n--local\n"
+             "-C\n#{store}\npause\ntests/pause-nokill\n--no-kill\n--local\n"
   end
 
   # set-agent composes base agent × effort × chrome in one validated write.
   # The agent positional is optional and the axes ride as flags; chrome always
   # renders explicitly (`--chrome=true|false`) so a toggle-off is unambiguous,
   # and effort passes through verbatim.
-  test "set-agent forwards agent plus effort and chrome axes to felt shuttle" do
+  test "set-agent forwards agent plus effort and chrome axes to shuttle" do
     store = fixture_store!("shuttle-lifecycle-set-agent", "tests/axes-edit", "Axes edit")
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -341,14 +341,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n--local\n"
+             "-C\n#{store}\nset-agent\ntests/axes-edit\nclaude-opus\n--effort\nxhigh\n--chrome=true\n--local\n"
   end
 
   test "set-agent can update project_dir without changing agent axes" do
     store =
       fixture_store!("shuttle-lifecycle-set-project-dir", "tests/project-dir", "Project dir")
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -364,10 +364,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
+             "-C\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
   end
 
-  test "set-model shells felt shuttle in the resolved owning store" do
+  test "set-model shells shuttle in the resolved owning store" do
     store =
       fixture_store!(
         "shuttle-lifecycle-set-model-store",
@@ -381,7 +381,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
     )
 
-    args_file = install_fake_felt!()
+    args_file = install_fake_cli!()
 
     conn =
       post(
@@ -397,7 +397,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "--felt-store\n#{store}\nset-model\nscience/cmbx/explorations/spt-talk-push\ncodex\n--local\n"
+             "-C\n#{store}\nset-model\nscience/cmbx/explorations/spt-talk-push\ncodex\n--local\n"
   end
 
   test "command errors collapse duplicated cobra error lines" do
@@ -414,7 +414,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
     )
 
-    install_fake_felt!("""
+    install_fake_cli!("""
     printf 'Error: no fiber found matching "science/cmbx/explorations/spt-talk-push"\\nno fiber found matching "science/cmbx/explorations/spt-talk-push"\\n'
     exit 1
     """)
@@ -436,15 +436,15 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              ~s(shuttle exited 1: no fiber found matching "science/cmbx/explorations/spt-talk-push")
   end
 
-  # accept and resume are felt's to write: the controller runs
-  # `felt shuttle <verb> <fiber> --local` in the fiber's owning store (through
+  # accept and resume are Shuttle's to write: the controller runs
+  # `shuttle <verb> <fiber> --local` in the fiber's owning store (through
   # the Poller when one is running — none is in this suite) and relays felt's
   # answer. What the write does to the document is pinned by felt's own suite
   # (cmd/shuttle_lifecycle_test.go).
   for verb <- ~w(accept resume) do
-    test "#{verb} runs felt's writer with --local in the owning store" do
+    test "#{verb} runs Shuttle's writer with --local in the owning store" do
       store = fixture_store!("shuttle-lifecycle-#{unquote(verb)}", "tests/standing", "Standing")
-      args_file = install_fake_felt!()
+      args_file = install_fake_cli!()
 
       conn =
         post(
@@ -457,14 +457,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       assert conn.resp_body == "ok\n"
 
       assert File.read!(args_file) ==
-               "--felt-store\n#{store}\n#{unquote(verb)}\ntests/standing\n--local\n"
+               "-C\n#{store}\n#{unquote(verb)}\ntests/standing\n--local\n"
     end
   end
 
   test "accept relays felt's refusal as a 422 with the cobra prefix stripped" do
     fixture_store!("shuttle-lifecycle-accept-refused", "tests/standing-tempered", "Tempered")
 
-    install_fake_felt!("""
+    install_fake_cli!("""
     printf 'Error: fiber tests/standing-tempered is not acceptable (accept requires status active|closed + untempered)\\n' >&2
     exit 1
     """)
@@ -483,51 +483,50 @@ defmodule ShuttleWeb.LifecycleControllerTest do
                "(accept requires status active|closed + untempered)"
   end
 
-  # The lifecycle controller now shells `felt shuttle <verb>` for the write, but
-  # ALSO shells the real felt (`felt -C <store> show <id> -j`) to resolve the
-  # owning store first. So the stub is a fake `felt` that captures ONLY the
-  # `shuttle` subcommand (dropping it and logging the verb + flags the per-verb
-  # assertions check) and delegates every other felt call to the real binary —
-  # exactly the separation the old `shuttle-ctl`-named stub got for free.
-  defp install_fake_felt!(shuttle_body \\ nil) do
+  # The lifecycle controller shells felt for fiber-store resolution and
+  # shuttle for the lifecycle write. This fixture provides both binaries so
+  # tests exercise the executable boundary as well as the argv ordering.
+  defp install_fake_cli!(shuttle_body \\ nil) do
     dir =
       System.tmp_dir!()
       |> Path.join("shuttle-lifecycle-controller-#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(dir)
 
-    bin = Path.join(dir, "felt")
+    felt_bin = Path.join(dir, "felt")
+    shuttle_bin = Path.join(dir, "shuttle")
     args_file = Path.join(dir, "args")
     real_felt = System.find_executable("felt") || "felt"
 
     shuttle_body =
       shuttle_body ||
         """
-        shift  # drop the `shuttle` subcommand; log the verb + flags
-        printf '%s\\n' "$@" > "$FELT_SHUTTLE_ARGS_FILE"
+        printf '%s\\n' "$@" > "$SHUTTLE_ARGS_FILE"
         printf 'ok\\n'
         """
 
-    File.write!(bin, """
+    File.write!(felt_bin, """
     #!/bin/sh
-    if [ "$1" = shuttle ]; then
-      #{shuttle_body}
-    else
-      exec "#{real_felt}" "$@"   # store resolution etc. → the real felt
-    fi
+    exec "#{real_felt}" "$@"
     """)
 
-    File.chmod!(bin, 0o755)
+    File.write!(shuttle_bin, """
+    #!/bin/sh
+    #{shuttle_body}
+    """)
+
+    File.chmod!(felt_bin, 0o755)
+    File.chmod!(shuttle_bin, 0o755)
 
     old_path = System.get_env("PATH")
-    old_args_file = System.get_env("FELT_SHUTTLE_ARGS_FILE")
+    old_args_file = System.get_env("SHUTTLE_ARGS_FILE")
 
     System.put_env("PATH", dir <> ":" <> (old_path || ""))
-    System.put_env("FELT_SHUTTLE_ARGS_FILE", args_file)
+    System.put_env("SHUTTLE_ARGS_FILE", args_file)
 
     on_exit(fn ->
       restore_env("PATH", old_path)
-      restore_env("FELT_SHUTTLE_ARGS_FILE", old_args_file)
+      restore_env("SHUTTLE_ARGS_FILE", old_args_file)
       File.rm_rf(dir)
     end)
 

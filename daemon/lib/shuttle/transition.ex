@@ -157,15 +157,14 @@ defmodule Shuttle.Transition do
     end
   end
 
-  # Routed through the one audited write helper (`Shuttle.Felt.Shuttle`),
-  # which itself sits on `Shuttle.Felt.run` — bounded by `Shuttle.Runner`'s
-  # timeout+SIGKILL reap instead of a bare `System.cmd/3` that would hang this
-  # Phoenix request (and leak the process) forever against a wedged felt on a
-  # loaded node. `felt_store` may be `nil` (no store resolved) — the helper
-  # omits `--felt-store` in that case.
+  # Routed through the one audited write helper (`Shuttle.CLI`), bounded by
+  # `Shuttle.Runner`'s timeout+SIGKILL reap instead of a bare `System.cmd/3`
+  # that would hang this Phoenix request forever against a wedged shuttle on a
+  # loaded node. `felt_store` may be `nil` (no store resolved); the helper then
+  # omits `-C <store>`.
   defp run_felt(verb, fiber_id, args, felt_store) do
     verb
-    |> Shuttle.Felt.Shuttle.run(fiber_id, args, felt_store: felt_store)
+    |> Shuttle.CLI.run_lifecycle(fiber_id, args, felt_store: felt_store)
     |> invoke_result()
   end
 

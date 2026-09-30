@@ -218,7 +218,7 @@ defmodule ShuttleWeb.LifecycleController do
   defp add_bool_flag(args, flag, true), do: args ++ [flag]
   defp add_bool_flag(args, _flag, _), do: args
 
-  # Routed through the one audited write helper (`Shuttle.Felt.Shuttle`),
+  # Routed through the one audited write helper (`Shuttle.CLI`),
   # which itself sits on `Shuttle.Felt.run` (Runner-bounded — F3/C3) rather
   # than a private `System.cmd/3` copy. Every `args_for/2` clause returns
   # `[verb, fiber_id | rest]`, so destructuring here is enough to feed the
@@ -226,7 +226,7 @@ defmodule ShuttleWeb.LifecycleController do
   # `args_for` clause.
   defp run([verb, fiber_id | rest], felt_store) do
     verb
-    |> Shuttle.Felt.Shuttle.run(fiber_id, rest, felt_store: felt_store)
+    |> Shuttle.CLI.run_lifecycle(fiber_id, rest, felt_store: felt_store)
     |> clean_result()
   end
 

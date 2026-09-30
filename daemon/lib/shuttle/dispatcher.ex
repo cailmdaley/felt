@@ -786,11 +786,11 @@ defmodule Shuttle.Dispatcher do
     :ok
   end
 
-  # Shell `felt shuttle reopen` through the one audited write helper
-  # (`Shuttle.Felt.Shuttle`). felt resolves its own host from local state, so
-  # no `--host` override is passed — see `Shuttle.Felt.Shuttle`'s moduledoc.
+  # Shell `shuttle reopen` through the one audited write helper
+  # (`Shuttle.CLI`). The daemon's host is resolved locally, so no `--host`
+  # override is passed — see `Shuttle.CLI`'s moduledoc.
   defp run_reopen(fiber_id, runner, felt_store) do
-    Shuttle.Felt.Shuttle.run("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
+    Shuttle.CLI.run_lifecycle("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
   end
 
   defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"

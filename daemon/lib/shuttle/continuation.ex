@@ -295,14 +295,14 @@ defmodule Shuttle.Continuation do
   # ── internals ────────────────────────────────────────────────────────────────
 
   # Shell `felt shuttle mark-runtime <fiber_id> <flags...>` (cd: felt_store)
-  # through the one audited write helper (`Shuttle.Felt.Shuttle`). `flags` is
+  # through the one audited write helper (`Shuttle.CLI`). `flags` is
   # a list of `{flag, value}` pairs, already filtered to non-empty. felt
   # resolves its own host from local state, so no `--host` override is
-  # passed; see `Shuttle.Felt.Shuttle`'s moduledoc.
+  # passed; see `Shuttle.CLI`'s moduledoc.
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
     args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 
-    case Shuttle.Felt.Shuttle.run("mark-runtime", fiber_id, args, runner: runner, cd: felt_store) do
+    case Shuttle.CLI.run_lifecycle("mark-runtime", fiber_id, args, runner: runner, cd: felt_store) do
       {:ok, _output} ->
         :ok
 
