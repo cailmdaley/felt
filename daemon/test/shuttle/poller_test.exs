@@ -167,6 +167,27 @@ defmodule Shuttle.PollerTest do
 
   # ── Tests ──
 
+  test "felt reads omit resolved facets and Shuttle reads include them" do
+    id = "tests/resolved-surface"
+    MockRunner.set_shuttle(id, "agent: claude-opus")
+
+    assert {felt_listing, 0} = MockRunner.cmd("felt", ["ls", "--json"], [])
+    assert [%{"id" => ^id, "shuttle" => felt_list_block}] = Jason.decode!(felt_listing)
+    refute Map.has_key?(felt_list_block, "resolved")
+
+    assert {shuttle_listing, 0} = MockRunner.cmd("shuttle", ["ls", "--json"], [])
+    assert [%{"id" => ^id, "shuttle" => shuttle_list_block}] = Jason.decode!(shuttle_listing)
+    assert get_in(shuttle_list_block, ["resolved", "agent", "id"]) == "claude-opus"
+
+    assert {felt_show, 0} = MockRunner.cmd("felt", ["show", id, "--json"], [])
+    assert %{"shuttle" => felt_show_block} = Jason.decode!(felt_show)
+    refute Map.has_key?(felt_show_block, "resolved")
+
+    assert {shuttle_show, 0} = MockRunner.cmd("shuttle", ["show", id, "--json"], [])
+    assert %{"shuttle" => shuttle_show_block} = Jason.decode!(shuttle_show)
+    assert get_in(shuttle_show_block, ["resolved", "agent", "id"]) == "claude-opus"
+  end
+
   test "poller discovers and dispatches eligible fibers" do
     # Use a fiber ID unique to this test to avoid collisions with sessions left
     # alive by other tests' long-lived Pollers/Watchers.

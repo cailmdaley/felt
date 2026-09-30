@@ -445,7 +445,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
             end
           end)
 
-        json = Jason.encode!(Enum.map(fibers, &with_resolved_agent/1))
+        json = Jason.encode!(Enum.map(fibers, &for_cli(command, &1)))
         warning? = Agent.get(__MODULE__, & &1.ls_stderr_warning)
 
         if warning? and Keyword.get(opts, :stderr_to_stdout) do
@@ -468,7 +468,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         case Map.get(fibers, fiber_id) do
           nil -> {"fiber not found", 1}
-          fiber -> {Jason.encode!(with_resolved_agent(fiber)), 0}
+          fiber -> {Jason.encode!(for_cli(command, fiber)), 0}
         end
 
       command == "ps" ->
@@ -616,6 +616,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
     |> Enum.reject(&(&1 in ["show", "--json", "--field", "shuttle"]))
     |> List.first("")
   end
+
+  defp for_cli("shuttle", fiber), do: with_resolved_agent(fiber)
+  defp for_cli("felt", fiber), do: without_resolved_agent(fiber)
+
+  defp without_resolved_agent(%{"shuttle" => shuttle} = fiber) when is_map(shuttle) do
+    %{fiber | "shuttle" => Map.delete(shuttle, "resolved")}
+  end
+
+  defp without_resolved_agent(fiber), do: fiber
 
   defp with_resolved_agent(%{"shuttle" => shuttle} = fiber) when is_map(shuttle) do
     name = Map.get(shuttle, "agent") || "claude-sonnet"
