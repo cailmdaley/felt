@@ -20,8 +20,8 @@
 #
 # The loop calls `shuttle daemon start --force` with exponential backoff:
 # a daemon that exits in < 60s doubles the sleep (2s .. 300s cap); one that
-# lived >= 60s resets it to 2s. This is what prevents the crash-storm failure
-# mode (a wedged login node once drove the old fixed-2s loop to ~35k restarts).
+# lived >= 60s resets it to 2s, so repeated crashes back off without slowing
+# recovery after a healthy run.
 #
 # `--force` is load-bearing: bare `start` probes :4000 and halt(1)s if a
 # daemon answers, which would busy-respawn during the documented
@@ -80,8 +80,8 @@ if [ "${1:-}" = "--loop" ]; then
   # dispatch history survives tmux scrollback — a Linux host running this
   # respawn loop otherwise logs only to its pane, and a failed force-reopen
   # warning (or any crash reason) is lost the moment the pane rotates. Size-rotate at
-  # 64MB keeping one previous generation, so the log never becomes the 238MB
-  # monster that once outran diagnosis. Override the path with $SHUTTLE_LOG.
+  # 64MB keeping one previous generation, so the log remains bounded. Override
+  # the path with $SHUTTLE_LOG.
   # 64MB is Shuttle.LogRotator's @default_max_bytes: this rotation and the
   # daemon's in-process one bound the same file by different means (here
   # between daemon processes with mv, there hourly inside a running daemon by
@@ -146,11 +146,9 @@ case "$REPO$SELF" in
     ;;
 esac
 
-# Legacy socket sweep: an old respawn loop could have been started against
-# the alt tmux socket ($HOME/.shuttle/tmux.sock) before this script existed.
-# Kill it here too so a stale session on that socket never fights the
-# default-socket session this script owns for :4000. Sequential, not
-# ||-chained, so a miss on one socket doesn't short-circuit the other.
+# Clear this session from both tmux sockets before creating it on the default
+# socket. A competing shuttle-daemon session could otherwise bind :4000 first.
+# The commands are sequential so a miss on one socket doesn't short-circuit the other.
 #
 # Killing the session SIGHUPs the daemon, which dies without running its
 # shutdown (no init:stop), so mark the stop as asked-for first: the stop marker
