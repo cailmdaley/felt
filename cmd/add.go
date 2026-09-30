@@ -34,7 +34,7 @@ resolution and uses <slug> as spelled.`,
   felt add analysis/jackknife-bias "Jackknife bias" -o "negligible below 200 patches"`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := resolveProjectRoot()
+		root, err := felt.ProjectRoot(changeDir)
 		if err != nil {
 			return fmt.Errorf("not in a felt repository (run 'felt init' first)")
 		}

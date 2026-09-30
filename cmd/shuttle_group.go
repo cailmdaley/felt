@@ -5,18 +5,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The `felt shuttle <verb>` command group is felt's active/weaving mode: the
-// dispatch surface. Grouping it under `shuttle` keeps `felt --help` about notes and `felt shuttle --help` about
-// dispatch, and the group name is also the on-disk block name (`shuttle:`) and
-// the runtime namespace — one word, three roles. The verbs are reimplemented on
-// felt's own internals (resolve -> read -> mutate -> validate -> write), not on a
-// copied fiber-I/O layer; felt owns the data model.
+// The `felt shuttle <verb>` command group exposes the dispatch surface. The
+// verbs resolve fibers through Felt's shared storage library and own Shuttle's
+// lifecycle policy.
 
 // shuttleFeltStore is --felt-store, the store selector the daemon passes when
-// it shells `felt shuttle --felt-store <store> <verb>`
-// (daemon/lib/shuttle/felt/shuttle.ex). It is an alias for felt's -C: a
-// PersistentPreRun feeds it into the same `changeDir` the rest of the cmd
-// package resolves the store from, so no verb needs store logic of its own.
+// it shells `felt shuttle --felt-store <store> <verb>`. It is an alias for
+// felt's -C: a PersistentPreRun feeds it into the same `changeDir` the rest of
+// the cmd package resolves the store from, so no verb needs store logic of its own.
 var shuttleFeltStore string
 
 var shuttleCmd = &cobra.Command{
@@ -76,24 +72,24 @@ func shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, er
 	return f, st, err
 }
 
-func shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, fiberRef, error) {
-	root, err := resolveProjectRoot()
+func shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
+	root, err := felt.ProjectRoot(changeDir)
 	if err != nil {
-		return nil, nil, fiberRef{}, err
+		return nil, nil, felt.Ref{}, err
 	}
 	st := felt.NewStorage(root)
-	ref, err := resolveFiberRef(st, resolveCommandScope(root), query)
+	ref, err := felt.ResolveRef(st, felt.CommandScope(root, changeDir), query)
 	if err != nil {
-		return nil, nil, fiberRef{}, err
+		return nil, nil, felt.Ref{}, err
 	}
 	var f *felt.Felt
 	if full {
-		f, err = ref.storage.FindInScope("", ref.id)
+		f, err = ref.Storage.FindInScope("", ref.ID)
 	} else {
-		f, err = ref.storage.FindMetadataInScope("", ref.id)
+		f, err = ref.Storage.FindMetadataInScope("", ref.ID)
 	}
 	if err != nil {
-		return nil, nil, fiberRef{}, err
+		return nil, nil, felt.Ref{}, err
 	}
-	return f, ref.storage, ref, nil
+	return f, ref.Storage, ref, nil
 }

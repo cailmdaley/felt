@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,7 @@ tracking branch.`,
   felt sync --push   after committing`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}

@@ -4,13 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
-	"path/filepath"
 	"reflect"
 	"runtime/debug"
-	"strings"
 
-	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
 )
 
@@ -177,72 +173,6 @@ func init() {
 	rootCmd.SetHelpCommandGroupID(groupAgents)
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "Output in JSON format")
 	rootCmd.PersistentFlags().StringVarP(&changeDir, "directory", "C", "", "Run as if felt was started in `dir`")
-}
-
-// resolveProjectRoot returns the project root, honoring -C if set.
-func resolveProjectRoot() (string, error) {
-	if changeDir != "" {
-		abs, err := filepath.Abs(changeDir)
-		if err != nil {
-			return "", fmt.Errorf("resolving -C path: %w", err)
-		}
-		feltDir := filepath.Join(abs, felt.DirName)
-		if info, err := os.Stat(feltDir); err != nil || !info.IsDir() {
-			return "", fmt.Errorf("no .felt directory in %s", abs)
-		}
-		return abs, nil
-	}
-	return felt.FindProjectRoot()
-}
-
-// requireStore opens the storage for the enclosing felt project, returning the
-// project root alongside it for callers that also resolve a command scope.
-func requireStore() (*felt.Storage, string, error) {
-	root, err := resolveProjectRoot()
-	if err != nil {
-		return nil, "", fmt.Errorf("not in a felt repository")
-	}
-	return felt.NewStorage(root), root, nil
-}
-
-// resolveCommandScope derives the nearest containing fiber ID from the current
-// working directory when the command is run inside `.felt/`.
-func resolveCommandScope(root string) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	if changeDir != "" {
-		if abs, err := filepath.Abs(changeDir); err == nil {
-			cwd = abs
-		}
-	}
-
-	feltRoot := filepath.Join(root, felt.DirName)
-	if resolved, err := filepath.EvalSymlinks(feltRoot); err == nil {
-		feltRoot = resolved
-	}
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = resolved
-	}
-	rel, err := filepath.Rel(feltRoot, cwd)
-	if err != nil {
-		return ""
-	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || strings.HasPrefix(rel, "../") {
-		return ""
-	}
-
-	parts := strings.Split(rel, "/")
-	for i := len(parts); i > 0; i-- {
-		candidate := path.Join(parts[:i]...)
-		fiberPath := filepath.Join(feltRoot, filepath.FromSlash(candidate), path.Base(candidate)+felt.FileExt)
-		if info, err := os.Stat(fiberPath); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
 }
 
 // outputJSON marshals data to JSON and prints it. A nil slice is normalized

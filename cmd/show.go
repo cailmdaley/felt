@@ -35,7 +35,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
   felt show analysis/covariance --field status`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := requireStore()
+		storage, root, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
@@ -63,18 +63,18 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 			return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, or --field")
 		}
 
-		scopeID := resolveCommandScope(root)
+		scopeID := felt.CommandScope(root, changeDir)
 
 		// An id that names a fiber in the enclosing store is shown from
 		// there: everything below runs against the store that holds it, with
 		// the fiber addressed by its id in that store's coordinates.
-		target, err := resolveFiberRef(storage, scopeID, args[0])
+		target, err := felt.ResolveRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
 		query := args[0]
-		if target.elsewhere {
-			storage, scopeID, query = target.storage, "", target.id
+		if target.Elsewhere {
+			storage, scopeID, query = target.Storage, "", target.ID
 		}
 
 		if selectorCount == 0 && !jsonOutput && (detail == DepthName || detail == DepthCompact) {

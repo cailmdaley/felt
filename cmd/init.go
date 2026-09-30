@@ -16,8 +16,8 @@ does not look for an enclosing store. In an existing store it restores a
 missing .gitignore and changes nothing else.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Honor -C. resolveProjectRoot can't serve here: it requires an
-		// existing .felt/, which is precisely what init is there to create.
+		// Honor -C. The usual project-root lookup requires an existing .felt/,
+		// which is precisely what init is here to create.
 		target := "."
 		if changeDir != "" {
 			target = changeDir

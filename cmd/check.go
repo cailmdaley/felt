@@ -27,7 +27,7 @@ var checkCmd = &cobra.Command{
     (a warning)`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}

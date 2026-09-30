@@ -66,7 +66,7 @@ felt find searches the rest of it.`,
   felt ls --json --json-field id,status   machine-readable, two fields`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
@@ -683,7 +683,7 @@ the full tree.`,
 	Example: `  felt tree analysis -L 2`,
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
@@ -692,24 +692,24 @@ the full tree.`,
 		// fiber in the enclosing store draws THAT store's tree — the fiber is
 		// real, it just is not in this view — so the ref decides which store
 		// gets walked, and the walk happens exactly once either way.
-		target := fiberRef{storage: storage}
+		target := felt.Ref{Storage: storage}
 		if len(args) == 1 {
-			target, err = resolveFiberRef(storage, "", args[0])
+			target, err = felt.ResolveRef(storage, "", args[0])
 			if err != nil {
 				return err
 			}
 		}
 
-		felts, err := listForOutput(target.storage, nil)
+		felts, err := listForOutput(target.Storage, nil)
 		if err != nil {
 			return err
 		}
 
 		roots := buildContainmentTree(felts)
 		if len(args) == 1 {
-			node := findContainmentNode(roots, target.id)
+			node := findContainmentNode(roots, target.ID)
 			if node == nil {
-				return fmt.Errorf("fiber %s not found in tree", target.id)
+				return fmt.Errorf("fiber %s not found in tree", target.ID)
 			}
 			roots = []*ContainmentNode{node}
 		}

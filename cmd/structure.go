@@ -154,13 +154,13 @@ outside this view, the move happens in the enclosing store.`,
 	Example: `  felt nest covariance analysis`,
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := requireStore()
+		storage, root, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := resolveCommandScope(root)
+		scopeID := felt.CommandScope(root, changeDir)
 
-		childRef, err := resolveExactFiberRef(storage, scopeID, args[0])
+		childRef, err := felt.ResolveExactRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
@@ -185,21 +185,21 @@ outside this view, the move happens in the enclosing store.`,
 		if felt.ParentPath(childID) == parentID && childID == targetID {
 			return fmt.Errorf("%s is already nested under %s", childID, parentID)
 		}
-		if err := where.storage.CheckAvailableID(targetID); err != nil {
+		if err := where.Storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		result, err := where.storage.MoveSubtree(childID, targetID)
+		result, err := where.Storage.MoveSubtree(childID, targetID)
 		if err != nil {
 			// A write that fails after the rename leaves the subtree moved;
 			// name what was rewritten so the rest can be finished by hand.
 			if result != nil {
-				printRewrittenRefs(where.storage, result)
+				printRewrittenRefs(where.Storage, result)
 			}
 			return err
 		}
 
-		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.location())
-		printRewrittenRefs(where.storage, result)
+		fmt.Printf("Nested %s under %s as %s%s\n", childID, parentID, targetID, where.Location())
+		printRewrittenRefs(where.Storage, result)
 		return nil
 	},
 }
@@ -209,15 +209,15 @@ outside this view, the move happens in the enclosing store.`,
 // holds fibers without a fiber of its own — is the destination exactly as
 // spelled, so a slug rescue elsewhere in the tree cannot capture it. Only a
 // path that exists nowhere falls through to fiber resolution.
-func resolveNestParent(storage *felt.Storage, scopeID, arg string) (fiberRef, error) {
+func resolveNestParent(storage *felt.Storage, scopeID, arg string) (felt.Ref, error) {
 	dir := path.Clean(strings.Trim(strings.TrimSpace(arg), "/"))
 	if dir == felt.RolesNamespace {
-		return fiberRef{storage: storage, id: dir}, nil
+		return felt.Ref{Storage: storage, ID: dir}, nil
 	}
 	if info, err := os.Stat(filepath.Join(storage.Root(), filepath.FromSlash(dir))); err == nil && info.IsDir() && !strings.HasPrefix(dir, "..") {
-		return fiberRef{storage: storage, id: dir}, nil
+		return felt.Ref{Storage: storage, ID: dir}, nil
 	}
-	return resolveExactFiberRef(storage, scopeID, arg)
+	return felt.ResolveExactRef(storage, scopeID, arg)
 }
 
 var unnestCmd = &cobra.Command{
@@ -230,38 +230,38 @@ store's top level.`,
 	Example: `  felt unnest analysis/covariance`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := requireStore()
+		storage, root, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := resolveCommandScope(root)
+		scopeID := felt.CommandScope(root, changeDir)
 
-		child, err := resolveExactFiberRef(storage, scopeID, args[0])
+		child, err := felt.ResolveExactRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(child.id, "/") {
-			return fmt.Errorf("%s is already top-level", child.id)
+		if !strings.Contains(child.ID, "/") {
+			return fmt.Errorf("%s is already top-level", child.ID)
 		}
 
 		// Top level means top level of the store that holds it: promoting an
 		// external fiber lands it at the enclosing store's root, not in here.
-		targetID := path.Base(child.id)
-		if err := child.storage.CheckAvailableID(targetID); err != nil {
+		targetID := path.Base(child.ID)
+		if err := child.Storage.CheckAvailableID(targetID); err != nil {
 			return err
 		}
-		result, err := child.storage.MoveSubtree(child.id, targetID)
+		result, err := child.Storage.MoveSubtree(child.ID, targetID)
 		if err != nil {
 			// A write that fails after the rename leaves the subtree moved;
 			// name what was rewritten so the rest can be finished by hand.
 			if result != nil {
-				printRewrittenRefs(child.storage, result)
+				printRewrittenRefs(child.Storage, result)
 			}
 			return err
 		}
 
-		fmt.Printf("Promoted %s to %s%s\n", child.id, targetID, child.location())
-		printRewrittenRefs(child.storage, result)
+		fmt.Printf("Promoted %s to %s%s\n", child.ID, targetID, child.Location())
+		printRewrittenRefs(child.Storage, result)
 		return nil
 	},
 }
@@ -296,7 +296,7 @@ func init() {
 
 func resolveMigrationStorage(dir string) (*felt.Storage, error) {
 	if dir == "" {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return nil, err
 		}

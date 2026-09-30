@@ -173,7 +173,7 @@ func buildSessionContext() string {
 	sb.WriteString(sessionDirective)
 	sb.WriteString("\n\n")
 
-	root, err := resolveProjectRoot()
+	root, err := felt.ProjectRoot(changeDir)
 	if err != nil || root == "" {
 		sb.WriteString(sessionNoRepoNote)
 		sb.WriteString("\n")

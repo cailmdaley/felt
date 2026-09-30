@@ -62,7 +62,7 @@ other roles and collaborators; it does not change worker lifecycle settings.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("updated collaboration for %s%s\n", args[0], ref.location())
+		fmt.Printf("updated collaboration for %s%s\n", args[0], ref.Location())
 		return nil
 	},
 }

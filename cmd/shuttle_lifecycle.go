@@ -56,27 +56,27 @@ import (
 //
 // The returned ref carries where the fiber turned out to live: a shuttle verb
 // crosses the view boundary like rm and edit do, and every verb appends
-// ref.location() to its headline so a cross-store write is never silent.
-func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, fiberRef, func() error, error) {
+// ref.Location() to its headline so a cross-store write is never silent.
+func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, felt.Ref, func() error, error) {
 	f, st, ref, err := shuttleResolveFiberRef(query, true)
 	if err != nil {
-		return nil, nil, nil, fiberRef{}, nil, err
+		return nil, nil, nil, felt.Ref{}, nil, err
 	}
 	f, unlock, err := lockAndReloadFiber(st, f)
 	if err != nil {
-		return nil, nil, nil, fiberRef{}, nil, err
+		return nil, nil, nil, felt.Ref{}, nil, err
 	}
 	block, ok, err := f.ShuttleBlock()
 	if err != nil {
 		unlock()
-		return nil, nil, nil, fiberRef{}, nil, err
+		return nil, nil, nil, felt.Ref{}, nil, err
 	}
 	if !ok {
 		unlock()
 		if missingBlockHint == "" {
-			return nil, nil, nil, fiberRef{}, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
+			return nil, nil, nil, felt.Ref{}, nil, fmt.Errorf("fiber %s has no shuttle: block", query)
 		}
-		return nil, nil, nil, fiberRef{}, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, missingBlockHint)
+		return nil, nil, nil, felt.Ref{}, nil, fmt.Errorf("fiber %s has no shuttle: block (%s)", query, missingBlockHint)
 	}
 	return f, st, block, ref, unlock, nil
 }
@@ -141,7 +141,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("paused %s%s (status: open; schedule preserved)\n", args[0], ref.location())
+		fmt.Printf("paused %s%s (status: open; schedule preserved)\n", args[0], ref.Location())
 		if statusBefore != felt.StatusOpen {
 			fmt.Printf("  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
 		}
@@ -255,7 +255,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.location())
+			fmt.Printf("resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
 			return nil
 		}
 
@@ -267,7 +267,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("resumed %s%s (status: active)\n", args[0], ref.location())
+		fmt.Printf("resumed %s%s (status: active)\n", args[0], ref.Location())
 		if statusBefore != felt.StatusActive {
 			if statusBefore == "" {
 				fmt.Println("  status: active (set; was missing)")
@@ -466,7 +466,7 @@ awaiting review).`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("closed %s%s\n", args[0], ref.location())
+		fmt.Printf("closed %s%s\n", args[0], ref.Location())
 		switch {
 		case tempered == nil:
 			fmt.Println("  tempered: cleared (awaiting review)")
@@ -578,7 +578,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("reopened %s%s (status: %s)\n", args[0], ref.location(), status)
+		fmt.Printf("reopened %s%s (status: %s)\n", args[0], ref.Location(), status)
 		if statusBefore == "" {
 			fmt.Printf("  status: %s (set; was missing)\n", status)
 		} else if statusBefore != status {
@@ -628,7 +628,7 @@ Examples:
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set outcome for %s%s\n", args[0], ref.location())
+		fmt.Printf("set outcome for %s%s\n", args[0], ref.Location())
 		return nil
 	},
 }
@@ -723,7 +723,7 @@ bypassed: the accept may still apply there.`,
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.location())
+			fmt.Printf("accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.Location())
 			return nil
 		}
 
@@ -748,7 +748,7 @@ bypassed: the accept may still apply there.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 		fmt.Printf("accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
-			args[0], ref.location(), computedNext.Format(time.RFC3339))
+			args[0], ref.Location(), computedNext.Format(time.RFC3339))
 		return nil
 	},
 }
@@ -797,7 +797,7 @@ agent without starting or replacing a worker.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.location(), args[1])
+		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.Location(), args[1])
 		return nil
 	},
 }
@@ -901,7 +901,7 @@ or replace a worker.`,
 			return fmt.Errorf("writing fiber: %w", err)
 		}
 
-		fmt.Printf("set agent for %s%s → %s", args[0], ref.location(), shuttleNonEmpty(agentID, "(default)"))
+		fmt.Printf("set agent for %s%s → %s", args[0], ref.Location(), shuttleNonEmpty(agentID, "(default)"))
 		if effort != "" {
 			fmt.Printf(" effort=%s", effort)
 		}
@@ -1110,9 +1110,9 @@ pause / resume / close / reopen for that.`,
 		}
 
 		if block.Kind == kind {
-			fmt.Printf("reshaped %s%s (kind: %s, unchanged)\n", args[0], ref.location(), kind)
+			fmt.Printf("reshaped %s%s (kind: %s, unchanged)\n", args[0], ref.Location(), kind)
 		} else {
-			fmt.Printf("reshaped %s%s (kind: %s → %s)\n", args[0], ref.location(), shuttleNonEmpty(block.Kind, "(unset)"), kind)
+			fmt.Printf("reshaped %s%s (kind: %s → %s)\n", args[0], ref.Location(), shuttleNonEmpty(block.Kind, "(unset)"), kind)
 		}
 		if candidate.Schedule != nil {
 			fmt.Printf("  schedule: %s (%s)\n", candidate.Schedule.Expr, candidate.Schedule.TZ)
@@ -1190,7 +1190,7 @@ and a live worker is left running.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("removing shuttle block: %w", err)
 		}
-		fmt.Printf("uninstalled %s%s (shuttle: block removed)\n", args[0], ref.location())
+		fmt.Printf("uninstalled %s%s (shuttle: block removed)\n", args[0], ref.Location())
 		return nil
 	},
 }

@@ -40,18 +40,18 @@ own, structured ones included.`,
   felt edit analysis/covariance --set horizon=stashed`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := requireStore()
+		storage, root, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := resolveCommandScope(root)
+		scopeID := felt.CommandScope(root, changeDir)
 		// A fiber in the enclosing store is edited where it lives.
-		target, err := resolveFiberRef(storage, scopeID, args[0])
+		target, err := felt.ResolveRef(storage, scopeID, args[0])
 		if err != nil {
 			return err
 		}
-		storage = target.storage
-		f, err := storage.Read(target.id)
+		storage = target.Storage
+		f, err := storage.Read(target.ID)
 		if err != nil {
 			return err
 		}
@@ -155,11 +155,11 @@ own, structured ones included.`,
 
 		switch {
 		case bodyCleared:
-			fmt.Printf("Updated %s%s (body cleared; previous content removed)\n", f.ID, target.location())
+			fmt.Printf("Updated %s%s (body cleared; previous content removed)\n", f.ID, target.Location())
 		case bodyOverwritten:
-			fmt.Printf("Updated %s%s (body overwritten)\n", f.ID, target.location())
+			fmt.Printf("Updated %s%s (body overwritten)\n", f.ID, target.Location())
 		default:
-			fmt.Printf("Updated %s%s\n", f.ID, target.location())
+			fmt.Printf("Updated %s%s\n", f.ID, target.Location())
 		}
 		return nil
 	},

@@ -373,8 +373,8 @@ func TestShuttleStores_Precedence(t *testing.T) {
 
 // TestShuttleAddressFiber_FromAnywhere locks in the cwd-insensitive resolution
 // the address verbs need: with no -C, they resolve against the configured stores
-// (here FELT_STORES), by leaf and by full id, regardless of cwd — the parity
-// behavior shuttle-ctl had and a naive resolveProjectRoot port lost.
+// (here FELT_STORES), by leaf and by full id, regardless of cwd — matching
+// the configured-store lookup rather than an implicit project-root lookup.
 func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/deep/task", "01ADDRUID000000000000000001", felt.StatusActive, oneshot())

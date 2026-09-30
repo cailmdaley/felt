@@ -73,7 +73,7 @@ touches tmux.`,
 		if err := st.Write(f); err != nil {
 			return fmt.Errorf("writing fiber: %w", err)
 		}
-		fmt.Printf("marked runtime for %s%s\n", args[0], ref.location())
+		fmt.Printf("marked runtime for %s%s\n", args[0], ref.Location())
 		return nil
 	},
 }

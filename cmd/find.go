@@ -45,7 +45,7 @@ included; --limit caps it only when given.`,
   felt find -t rule: -r "data|vector"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := requireStore()
+		storage, _, err := felt.RequireStore(changeDir)
 		if err != nil {
 			return err
 		}
