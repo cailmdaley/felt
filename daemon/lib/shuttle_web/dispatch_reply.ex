@@ -66,16 +66,20 @@ defmodule ShuttleWeb.DispatchReply do
      )}
   end
 
-  def render(fiber_id, {:error, :reopen_failed}) do
+  # A closed fiber `shuttle reopen` refused, so no worker spawned. `message` is
+  # the CLI's own reason, verbatim; `host` is this daemon, where any command
+  # the reason names has to run; `needs` names the block field a human must
+  # supply to retry (`"project_dir"`, sent back as the dispatch's `project_dir`).
+  def render(fiber_id, {:error, {:reopen_failed, %{message: message} = failure}}) do
     {422,
      %{
        dispatched: false,
        reason: "reopen_failed",
        fiber_id: fiber_id,
-       message:
-         "Could not reopen the closed fiber — no worker was spawned. " <>
-           "Reopen it (`shuttle reopen #{fiber_id}`) and try again."
-     }}
+       host: Shuttle.Poller.own_host_id(),
+       message: message
+     }
+     |> put_present(:needs, Map.get(failure, :needs))}
   end
 
   # A dispatch preflight refused before anything spawned
@@ -113,6 +117,9 @@ defmodule ShuttleWeb.DispatchReply do
         base
     end
   end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 
   defp maybe_unix_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
   defp maybe_unix_ms(_), do: nil

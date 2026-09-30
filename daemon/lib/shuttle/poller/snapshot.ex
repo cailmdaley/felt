@@ -325,6 +325,9 @@ defmodule Shuttle.Poller.Snapshot do
   defp format_block_reason({tag, message}) when Shuttle.Dispatcher.refusal?(tag, message),
     do: message
 
+  defp format_block_reason({:reopen_failed, %{message: message}}),
+    do: "reopen refused: #{message}"
+
   defp format_block_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp format_block_reason(reason) when is_binary(reason), do: reason
   defp format_block_reason(reason), do: inspect(reason)

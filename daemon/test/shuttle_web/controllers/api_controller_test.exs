@@ -269,6 +269,115 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["fiber_id"] == fiber_id
   end
 
+  # A closed oneshot whose block names neither project_dir nor agent — the
+  # shape a worker writes by hand.
+  defp closed_bare_oneshot(fiber_id) do
+    fiber =
+      make_fiber(fiber_id, %{
+        "status" => "closed",
+        "closed-at" => "2026-09-29T10:00:00Z",
+        "tempered" => false
+      })
+
+    MockRunner.set_fiber(fiber_id, fiber)
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\n", "closed")
+  end
+
+  test "a refused reopen answers with the CLI's reason, the owning host, and what it needs" do
+    fiber_id = "tests/api-reopen-refused"
+    closed_bare_oneshot(fiber_id)
+
+    reason =
+      "cannot arm #{fiber_id}: its shuttle: block has no project_dir " <>
+        "(set it as you arm it: shuttle reopen #{fiber_id} --project-dir <dir>)"
+
+    MockRunner.set_reopen_result(reason <> "\n", 1)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{
+          "fiber_id" => fiber_id,
+          "force" => true,
+          "ad_hoc" => true,
+          "resume_mode" => "fresh"
+        })
+      )
+
+    assert conn.status == 422
+
+    assert Jason.decode!(conn.resp_body) == %{
+             "dispatched" => false,
+             "reason" => "reopen_failed",
+             "fiber_id" => fiber_id,
+             "host" => Poller.own_host_id(),
+             "message" => reason,
+             "needs" => "project_dir"
+           }
+
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
+  @tag :tmp_dir
+  test "dispatch hands a confirmed project_dir to the reopen and starts the worker there",
+       %{tmp_dir: tmp_dir} do
+    fiber_id = "tests/api-reopen-project-dir"
+    closed_bare_oneshot(fiber_id)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{
+          "fiber_id" => fiber_id,
+          "force" => true,
+          "ad_hoc" => true,
+          "resume_mode" => "fresh",
+          "project_dir" => tmp_dir
+        })
+      )
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body)["dispatched"] == true
+    commands = MockRunner.commands()
+
+    assert Enum.any?(commands, fn
+             {"shuttle", args} ->
+               Enum.drop_while(args, &(&1 != "reopen")) ==
+                 ["reopen", fiber_id, "--project-dir", tmp_dir, "--local"]
+
+             _ ->
+               false
+           end),
+           "expected reopen --project-dir; got #{inspect(commands)}"
+
+    assert {"tmux", new_session} =
+             Enum.find(commands, &match?({"tmux", ["new-session" | _]}, &1))
+
+    assert Enum.drop_while(new_session, &(&1 != "-c")) |> Enum.at(1) == tmp_dir
+  end
+
+  test "a blank project_dir confirms nothing" do
+    fiber_id = "tests/api-reopen-blank-dir"
+    closed_bare_oneshot(fiber_id)
+    MockRunner.set_reopen_result("cannot arm #{fiber_id}: no project_dir\n", 1)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{"fiber_id" => fiber_id, "ad_hoc" => true, "project_dir" => "   "})
+      )
+
+    assert conn.status == 422
+
+    refute Enum.any?(MockRunner.commands(), fn
+             {"shuttle", args} -> "--project-dir" in args
+             _ -> false
+           end)
+  end
+
   # ── POST /api/v1/transition ──
 
   # The unified write-plane: one call resolves the kanban target to an action

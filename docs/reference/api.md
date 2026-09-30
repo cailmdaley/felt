@@ -288,6 +288,18 @@ through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
 the delivery's status with `recording: true` and `error`, and the recording
 continues. Start errors are the same as meeting capture's.
 
+`POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
+user_message?, project_dir?}` (plus `origin` to forward). A forced start
+(`force` or `ad_hoc`) reopens a closed fiber with `shuttle reopen` on the
+owning host before any worker spawns. A refused reopen answers **422**
+`{dispatched: false, reason: "reopen_failed", fiber_id, host, message, needs?}`:
+`message` is the CLI's own reason, `host` is the owning daemon (where any
+command the reason names has to run), and `needs: "project_dir"` says the block
+has no `project_dir`. Resend with `project_dir`, a directory on the owning host
+that a human confirmed: the reopen validates it and writes it to the block
+(`--project-dir`), and the worker starts there. A start that does not reopen
+the fiber leaves its block and working directory as they are.
+
 `POST /deliver` accepts `{fiber_id, text, from?}` (plus `origin` to forward). A
 fiber with a live worker receives `text` through session messaging at
 `shuttle://<host>/<harness>/<session_uuid>`, woken, and the answer is

@@ -323,6 +323,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   def commands, do: Agent.get(__MODULE__, & &1.commands)
 
+  # What `shuttle reopen` answers: `{output, exit_status}`. Unset, a reopen
+  # succeeds silently without touching the fiber.
+  def set_reopen_result(output, exit_status),
+    do: Agent.update(__MODULE__, &Map.put(&1, :reopen_result, {output, exit_status}))
+
   # Shuttle inlines a resolved `shuttle.resolved.agent` on fiber reads and serves
   # the registry through `shuttle agents [resolve]`. The daemon consumes those
   # records without resolving names itself, so the mock synthesizes them — keyed
@@ -400,6 +405,9 @@ defmodule Shuttle.Test.FeltStoreRunner do
         [verb, id, "--local"] = drop_cli_store(args)
         apply_lifecycle_write(verb, id)
         {"#{verb} #{id}\n", 0}
+
+      command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
+        Agent.get(__MODULE__, &Map.get(&1, :reopen_result, {"", 0}))
 
       command == "shuttle" and args == ["host", "--json"] ->
         Agent.get(__MODULE__, fn state ->

@@ -21,12 +21,19 @@ defmodule Shuttle.Dispatcher do
   @session_capture_timeout_ms 120_000
   @session_capture_poll_ms 250
 
+  @typedoc """
+  Why a closed fiber could not be reopened: `message` is `shuttle reopen`'s
+  own words, and `needs` names the block field a human must supply before the
+  start can proceed (`"project_dir"` when the block has none), else `nil`.
+  """
+  @type reopen_failure :: %{message: String.t(), needs: String.t() | nil}
+
   @type dispatch_result ::
           {:ok, String.t()}
           | {:error, :not_found}
           | {:error, :closed}
           | {:error, :already_running}
-          | {:error, :reopen_failed}
+          | {:error, {:reopen_failed, reopen_failure()}}
           | {:error, :missing_session_id}
           | {:error, {:uid_missing, String.t()}}
           | {:error, {:wrapper_unresolved, String.t()}}
@@ -79,6 +86,11 @@ defmodule Shuttle.Dispatcher do
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
+    * `:project_dir` — a directory a human confirmed for a forced start that
+      reopens the fiber. The reopen writes it to the block
+      (`shuttle reopen --project-dir`, which validates it on this host) and the
+      worker starts there. A fiber the start does not reopen keeps its own
+      block and work directory.
   """
   @spec dispatch(String.t(), keyword()) :: dispatch_result()
   def dispatch(fiber_id, opts \\ []) do
@@ -87,11 +99,16 @@ defmodule Shuttle.Dispatcher do
     prompt_context = Keyword.get(opts, :prompt_context, :constitution)
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
     force = Keyword.get(opts, :force, false)
+    project_dir = normalize_project_dir(Keyword.get(opts, :project_dir))
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- check_not_closed(fiber, force),
-         :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
+         {:ok, work_dir} <-
+           maybe_reopen_on_force(fiber_id, fiber, force, project_dir, work_dir,
+             runner: runner,
+             felt_store: felt_store
+           ),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
          {:ok, agent} <- resolve_agent(fiber),
@@ -729,67 +746,123 @@ defmodule Shuttle.Dispatcher do
   # worker spawns. A worker dispatched against a still-`closed` fiber has no
   # live mandate — it boots and dies within seconds (the "terminal opens and
   # immediately closes" symptom) while the card stays in its closed column. So
-  # a non-zero `shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the
-  # dispatch and propagates through the `with` chain to the caller.
+  # a non-zero `shuttle reopen` (`{:error, {:reopen_failed, failure}}`) ABORTS
+  # the dispatch and propagates through the `with` chain to the caller, carrying
+  # the CLI's own reason.
   #
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
   # reopen stays best-effort: the worker has a live mandate regardless, so a
   # failed reopen only risks a sticky kanban column, which we log loudly.
-  defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
+  #
+  # Returns `{:ok, work_dir}`: a confirmed `project_dir` rides the reopen as
+  # `--project-dir` and, once the reopen has written it, becomes the worker's
+  # directory; otherwise the caller's `work_dir` stands.
+  defp maybe_reopen_on_force(_fiber_id, _fiber, false, _project_dir, work_dir, _cli),
+    do: {:ok, work_dir}
 
-  defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
-    if already_clean?(fiber) do
-      :ok
-    else
-      reopen(fiber_id, runner, felt_store, closed?(fiber))
+  defp maybe_reopen_on_force(fiber_id, fiber, true, project_dir, work_dir, cli) do
+    cond do
+      already_clean?(fiber) ->
+        {:ok, work_dir}
+
+      closed?(fiber) ->
+        with :ok <- reopen(fiber_id, fiber, project_dir, cli, true),
+             do: {:ok, project_dir || work_dir}
+
+      true ->
+        # Best-effort: a failure logs, and the worker keeps its declared
+        # directory because the block does not carry the confirmed one.
+        case reopen(fiber_id, fiber, project_dir, cli, false) do
+          :ok -> {:ok, project_dir || work_dir}
+          :failed -> {:ok, work_dir}
+        end
     end
   end
 
   # One reopen, two severities. `fatal?` is the closed-fiber case above: a
-  # failure aborts the dispatch (`:reopen_failed`).
-  # Otherwise the worker has a live mandate regardless, so a failure only risks
-  # a sticky kanban column and we log loudly and continue.
-  defp reopen(fiber_id, runner, felt_store, fatal?) do
-    case run_reopen(fiber_id, runner, felt_store) do
+  # failure aborts the dispatch (`{:error, {:reopen_failed, _}}`). Otherwise
+  # the worker has a live mandate regardless, so a failure only risks a sticky
+  # kanban column: it logs loudly and answers `:failed`.
+  defp reopen(fiber_id, fiber, project_dir, cli, fatal?) do
+    case run_reopen(fiber_id, project_dir, cli) do
       {:ok, output} ->
         Logger.info("Force-dispatch reopened #{fiber_id}: #{String.trim(output)}")
         :ok
 
       {:command_error, code, output} ->
-        reopen_failure(
-          fiber_id,
-          fatal?,
-          "`shuttle reopen` failed (exit #{code}: #{String.trim(to_string(output))})"
-        )
+        reopen_failure(fiber_id, fiber, fatal?, cli_reason(output), "exit #{code}")
 
       {:error, reason} ->
-        reopen_failure(fiber_id, fatal?, "`shuttle reopen` raised #{inspect(reason)}")
+        reopen_failure(
+          fiber_id,
+          fiber,
+          fatal?,
+          "`shuttle reopen` could not run: #{reason_text(reason)}",
+          "raised"
+        )
     end
   end
 
-  defp reopen_failure(fiber_id, true, detail) do
+  defp reopen_failure(fiber_id, fiber, true, message, how) do
     Logger.error(
-      "Force-dispatch aborted for #{fiber_id}: #{detail} — refusing to spawn a worker " <>
-        "against a still-closed fiber"
+      "Force-dispatch aborted for #{fiber_id}: `shuttle reopen` failed (#{how}: #{message}) " <>
+        "— refusing to spawn a worker against a still-closed fiber"
     )
 
-    {:error, :reopen_failed}
+    {:error, {:reopen_failed, %{message: message, needs: reopen_needs(fiber)}}}
   end
 
-  defp reopen_failure(fiber_id, false, detail) do
+  defp reopen_failure(fiber_id, _fiber, false, message, how) do
     Logger.warning(
       "Force-dispatch reopen failed for #{fiber_id} " <>
-        "(worker will still spawn but kanban card may stick in its prior column): #{detail}"
+        "(worker will still spawn but kanban card may stick in its prior column): " <>
+        "`shuttle reopen` failed (#{how}: #{message})"
     )
 
-    :ok
+    :failed
   end
+
+  # What a human must supply before a failed reopen can succeed. Arming refuses
+  # a block without a `project_dir` (`shuttle reopen`'s arming gate), so a block
+  # that has none needs one — including after a confirmed directory the CLI
+  # rejected, which the block still lacks.
+  defp reopen_needs(fiber) do
+    case get_in(fiber, ["shuttle", "project_dir"]) do
+      dir when is_binary(dir) -> if String.trim(dir) == "", do: "project_dir"
+      _ -> "project_dir"
+    end
+  end
+
+  # The CLI's stderr, trimmed; its exit status alone when it printed nothing.
+  defp cli_reason(output) do
+    case String.trim(to_string(output)) do
+      "" -> "`shuttle reopen` failed without a message"
+      text -> text
+    end
+  end
+
+  defp reason_text(reason) when is_binary(reason), do: reason
+  defp reason_text(reason), do: inspect(reason)
+
+  defp normalize_project_dir(dir) when is_binary(dir) do
+    case String.trim(dir) do
+      "" -> nil
+      trimmed -> Path.expand(trimmed)
+    end
+  end
+
+  defp normalize_project_dir(_), do: nil
 
   # Shell `shuttle reopen` through the one audited write helper
   # (`Shuttle.CLI`). The daemon's host is resolved locally, so no `--host`
   # override is passed — see `Shuttle.CLI`'s moduledoc.
-  defp run_reopen(fiber_id, runner, felt_store) do
-    Shuttle.CLI.run_lifecycle("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
+  defp run_reopen(fiber_id, project_dir, cli) do
+    args = if project_dir, do: ["--project-dir", project_dir], else: []
+
+    Shuttle.CLI.run_lifecycle("reopen", fiber_id, args,
+      runner: Keyword.fetch!(cli, :runner),
+      felt_store: Keyword.fetch!(cli, :felt_store)
+    )
   end
 
   defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"

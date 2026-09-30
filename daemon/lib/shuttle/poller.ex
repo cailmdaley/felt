@@ -2584,7 +2584,9 @@ defmodule Shuttle.Poller do
            # call (no persisted review-comment). The dispatcher inlines the
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
-           resume_mode: Keyword.get(opts, :resume_mode)
+           resume_mode: Keyword.get(opts, :resume_mode),
+           # A human-confirmed directory for a start that reopens the fiber.
+           project_dir: Keyword.get(opts, :project_dir)
          ) do
       {:ok, session} ->
         running_meta =
@@ -3365,7 +3367,6 @@ defmodule Shuttle.Poller do
   defp remove_running(%State{} = state, runtime_key) do
     %{state | running: Map.delete(state.running, runtime_key)}
   end
-
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the

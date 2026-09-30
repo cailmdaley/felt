@@ -16,6 +16,12 @@ defmodule ShuttleWeb.DispatchController do
   the body. Both ride the dispatch call into the prompt at launch; the remote
   forward passes `conn.body_params` verbatim, so they survive owner-routing
   intact.
+
+  `project_dir` is a directory the human confirmed for a start that reopens a
+  closed fiber. The owning daemon passes it to `shuttle reopen --project-dir`,
+  which validates it there and writes it to the block, and the worker starts
+  in it. Nothing supplies a directory on the human's behalf: a reopen refused
+  for want of one answers 422 `reopen_failed` with `needs: "project_dir"`.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -52,8 +58,9 @@ defmodule ShuttleWeb.DispatchController do
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
           ad_hoc: ad_hoc,
-          user_message: normalize_message(Map.get(params, "user_message")),
-          resume_mode: normalize_resume_mode(Map.get(params, "resume_mode"))
+          user_message: normalize_text(Map.get(params, "user_message")),
+          resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
+          project_dir: normalize_text(Map.get(params, "project_dir"))
         )
 
       {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
@@ -67,16 +74,17 @@ defmodule ShuttleWeb.DispatchController do
   defp truthy?(value) when value in [true, "true", "1", 1], do: true
   defp truthy?(_), do: false
 
-  # A blank message is no message — the From User block renders only for real
-  # content. Non-strings collapse to nil.
-  defp normalize_message(value) when is_binary(value) do
+  # A blank string is no value — the From User block renders only for real
+  # content, and a blank project_dir confirms nothing. Non-strings collapse to
+  # nil.
+  defp normalize_text(value) when is_binary(value) do
     case String.trim(value) do
       "" -> nil
       _ -> value
     end
   end
 
-  defp normalize_message(_), do: nil
+  defp normalize_text(_), do: nil
 
   # resume_mode ∈ {"previous", "fresh"} or absent (→ marker-decided). Anything
   # else is ignored (treated as absent) so a malformed param degrades to the
