@@ -1,0 +1,553 @@
+package shuttlecli
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"runtime"
+	"sort"
+	"strings"
+
+	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/spf13/cobra"
+)
+
+// The local-read verbs — status and ps. They list in-process:
+// felt.NewStorage(store).ListMetadataHavingFrontmatterFields over each store the
+// daemon would poll (shuttleStores), keeping only fibers that carry a
+// well-formed shuttle: facet. Liveness comes from tmux.
+//
+// The cross-host arm (--all / --remote, which queries the daemon's
+// /api/v1/state/composite) lives in shuttle_status_cross_host.go; this is the
+// local view only.
+
+var (
+	statusIncludeOrphans bool
+	statusAll            bool
+	statusRemote         string
+	statusClosed         bool
+)
+
+// FiberStatus is one row of the status output. Origin is reserved for the
+// cross-host rows the 3.3 daemon-HTTP arm adds; it is empty for every local row.
+type FiberStatus struct {
+	FiberID   string `json:"fiber_id"`
+	Origin    string `json:"origin,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	State     string `json:"state"`
+	Running   bool   `json:"running"`
+	Session   string `json:"session,omitempty"`
+	NextDueAt string `json:"next_due_at,omitempty"`
+	LastRunAt string `json:"last_run_at,omitempty"`
+	Stale     bool   `json:"stale,omitempty"`
+}
+
+// shuttleEntry is one shuttle-bearing fiber discovered by the in-process walk.
+type shuttleEntry struct {
+	FiberID string
+	UID     string
+	Status  string
+	Path    string
+	Block   *shuttle.Block
+}
+
+var statusCmd = &cobra.Command{
+	Use:   "status [fiber]",
+	Short: "Status overview, or a detailed report for one fiber",
+	Long: `With no argument, prints a table of every fiber with a shuttle: block in the
+stores this machine dispatches (-C when set, else FELT_STORES, else the
+~/.config/felt/stores.json registry). State is running (read from tmux), idle,
+scheduled (a standing role), paused (a draft), or closed. next_due_at comes
+from the daemon, so only the cross-host table (--all, --remote) fills it.
+
+With a fiber, prints the block's key fields, any running worker, and whether
+it is eligible for dispatch, naming the verb that would make it so when it is
+not. Eligibility is status active and a host: the owning host's daemon
+dispatches it — this one only when the host is this machine's (shuttle
+host). A block without a project_dir is eligible, but its worker starts in the
+felt store and no verb arms it again until it has one; the verdict says so.
+The daemon's boot quarantine can still hold an eligible fiber until
+'bin/shuttle release'; that is the daemon's to report.
+
+  shuttle status                 # the table
+  shuttle status <fiber>         # one fiber`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// The single-fiber report is a local read of one fiber, so the flags that
+		// shape the multi-fiber walk have nothing to act on.
+		if len(args) == 1 {
+			for _, flag := range []string{"all", "remote", "include-orphans"} {
+				if cmd.Flags().Changed(flag) {
+					return fmt.Errorf("--%s applies to the status table, not to a single fiber; drop it or drop the fiber argument", flag)
+				}
+			}
+			return runStatusOneFiber(args[0])
+		}
+
+		// Cross-host paths route through the local daemon; --remote and --all are
+		// mutually exclusive (--remote NAME implies "filter to one").
+		if statusAll || statusRemote != "" {
+			return runStatusCrossHost()
+		}
+
+		stores, err := shuttleStores()
+		if err != nil {
+			return err
+		}
+		entries, err := listShuttleFibersAcrossStores(stores)
+		if err != nil {
+			return fmt.Errorf("listing fibers: %w", err)
+		}
+
+		live := liveTmuxSessions()
+		owners := sessionOwnerMap(entries)
+
+		rows := make([]FiberStatus, 0, len(entries))
+		seenSessions := map[string]bool{}
+		for _, entry := range entries {
+			session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
+			running := session != "" && live[session] && owners[session] == entry.FiberID
+			if running {
+				seenSessions[session] = true
+			}
+			rows = append(rows, FiberStatus{
+				FiberID: entry.FiberID,
+				Kind:    entry.Block.Kind,
+				Agent:   entry.Block.Agent,
+				State:   computeState(entry.Block, entry.Status, running),
+				Running: running,
+				Session: session,
+			})
+		}
+
+		// Optionally surface live sessions not matched to any shuttle: facet.
+		if statusIncludeOrphans {
+			for session := range live {
+				if !seenSessions[session] {
+					rows = append(rows, FiberStatus{
+						FiberID: session,
+						State:   "running",
+						Running: true,
+						Session: session,
+					})
+				}
+			}
+		}
+
+		sort.Slice(rows, func(i, j int) bool { return rows[i].FiberID < rows[j].FiberID })
+
+		if jsonOutput {
+			return outputJSON(rows)
+		}
+		// A daemon-forked tmux server poisons every worker on it with macOS
+		// permission prompts charged to the daemon's binary — a state whose only
+		// visible symptom names nothing the human owns, so the overview says it
+		// out loud. Deliberately NOT in `shuttle ps`, which is parsed.
+		printTmuxOriginWarning()
+		printStatusTable(rows)
+		return nil
+	},
+}
+
+var psCmd = &cobra.Command{
+	Use:   "ps",
+	Short: "Live tmux worker sessions",
+	Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		live := liveTmuxSessions()
+		if len(live) == 0 {
+			if jsonOutput {
+				return outputJSON([]map[string]string{})
+			}
+			fmt.Println("no live shuttle workers")
+			return nil
+		}
+
+		// Best-effort owner attribution: a listing failure leaves sessions
+		// unattributed rather than failing ps (the live set is the point).
+		owners := map[string]string{}
+		if stores, err := shuttleStores(); err == nil {
+			if entries, err := listShuttleFibersAcrossStores(stores); err == nil {
+				owners = sessionOwnerMap(entries)
+			}
+		}
+
+		type row struct{ session, fiberID string }
+		rows := make([]row, 0, len(live))
+		for session := range live {
+			rows = append(rows, row{session: session, fiberID: owners[session]})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].session < rows[j].session })
+
+		if jsonOutput {
+			out := make([]map[string]string, len(rows))
+			for i, r := range rows {
+				item := map[string]string{"session": r.session}
+				if r.fiberID != "" {
+					item["fiber_id"] = r.fiberID
+				}
+				out[i] = item
+			}
+			return outputJSON(out)
+		}
+
+		for _, r := range rows {
+			if r.fiberID != "" {
+				fmt.Printf("%-40s  %s\n", r.session, r.fiberID)
+			} else {
+				fmt.Println(r.session)
+			}
+		}
+		return nil
+	},
+}
+
+// ---- single-fiber report ---------------------------------------------------
+
+// runStatusOneFiber prints the detailed report for one fiber: the whole block,
+// then the question the report exists to answer — will the daemon dispatch this,
+// and if not, what moves it. Read-only, and it never locks: a fiber can be
+// inspected while a worker holds it.
+func runStatusOneFiber(query string) error {
+	f, _, err := shuttleResolveFiber(query, false)
+	if err != nil {
+		return err
+	}
+	block, ok, err := shuttle.BlockOf(f)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' / 'pin' to create one)", query)
+	}
+
+	statusNow := f.Status
+	armed := statusNow == felt.StatusActive
+	session, running := liveWorkerSession(f)
+
+	if jsonOutput {
+		out := map[string]any{
+			"fiber_id": f.ID,
+			"kind":     block.Kind,
+			"host":     block.Host,
+			"status":   statusNow,
+			"armed":    armed,
+			"running":  running,
+			"dispatch": dispatchAssessment(f.ID, f.UID, statusNow, block),
+		}
+		if block.Agent != "" {
+			out["agent"] = block.Agent
+		}
+		if block.ProjectDir != "" {
+			out["project_dir"] = block.ProjectDir
+		}
+		if block.Schedule != nil {
+			out["schedule"] = map[string]string{"expr": block.Schedule.Expr, "tz": block.Schedule.TZ}
+		}
+		if running {
+			out["session"] = session
+		}
+		return outputJSON(out)
+	}
+
+	fmt.Printf("shuttle: fiber %s\n\n", f.ID)
+	writeBlockSummary(os.Stdout, block, statusNow, armed)
+	if running {
+		fmt.Printf("  worker:      running (tmux %s)\n", session)
+	}
+	fmt.Println("")
+	fmt.Println(dispatchAssessment(f.ID, f.UID, statusNow, block))
+	return nil
+}
+
+// dispatchAssessment renders the one line a single-fiber report is really for:
+// whether the fiber is eligible for dispatch, on which host, and the verb that
+// changes the answer when it is not. It promises eligibility, not a launch:
+// the owning daemon's boot quarantine can hold an eligible fiber. A block
+// without a project_dir still dispatches — its worker starts in the felt
+// store — but no verb arms it again until it has one, so every call named
+// here carries the --project-dir it would need.
+func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) string {
+	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
+	arm := func(verb string) string {
+		if noProjectDir {
+			return fmt.Sprintf("shuttle %s %s --project-dir <dir>", verb, fiberID)
+		}
+		return fmt.Sprintf("shuttle %s %s", verb, fiberID)
+	}
+	switch statusNow {
+	case felt.StatusActive:
+		own, _ := resolveOwnHost("")
+		var verdict string
+		switch {
+		case !isSessionULID(uid):
+			return "→ Armed, but the fiber has no intrinsic id, or its id is not an uppercase ULID — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter."
+		case block.Host == "":
+			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `shuttle uninstall` then install / repeat / pin, which stamp this host."
+		case block.Host != own:
+			verdict = fmt.Sprintf("→ Armed; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", block.Host, own)
+		default:
+			verdict = fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`bin/shuttle release`).", own)
+		}
+		if noProjectDir {
+			verdict += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `%s` sets one.", arm("resume"))
+		}
+		return verdict
+	case felt.StatusClosed:
+		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `%s` to clear verdict fields and requeue it.", arm("reopen"))
+	case felt.StatusOpen:
+		return fmt.Sprintf("→ Draft (status: open). Use `%s` to arm it.", arm("resume"))
+	case "":
+		return fmt.Sprintf("→ Status missing — daemon will NOT dispatch. Use `%s` or set status: active in the markdown.", arm("resume"))
+	default:
+		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `%s` to set status: active.", statusNow, arm("resume"))
+	}
+}
+
+// liveWorkerSession reports the tmux session holding this fiber's worker, if
+// one is live. A fiber without a uid has no session name and so no worker.
+func liveWorkerSession(f *felt.Felt) (string, bool) {
+	session := shuttleTmuxSessionName(f.ID, f.UID)
+	if session != "" && tmuxSessionExists(session) {
+		return session, true
+	}
+	return "", false
+}
+
+// writeBlockSummary writes the human-readable "Current block:" report. Dispatch
+// eligibility is the felt-native status alone (status:active = armed).
+func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool) {
+	fmt.Fprintln(out, "Current block:")
+	fmt.Fprintf(out, "  kind:        %s\n", shuttleNonEmpty(b.Kind, "(unset)"))
+	fmt.Fprintf(out, "  host:        %s\n", shuttleNonEmpty(b.Host, "(unset — NOT eligible on any daemon)"))
+	if b.Agent != "" {
+		fmt.Fprintf(out, "  agent:       %s\n", b.Agent)
+	}
+	if b.ProjectDir != "" {
+		fmt.Fprintf(out, "  project_dir: %s\n", b.ProjectDir)
+	}
+	if b.Schedule != nil {
+		fmt.Fprintf(out, "  schedule:    %q tz=%s\n", b.Schedule.Expr, b.Schedule.TZ)
+	}
+
+	switch {
+	case statusNow == "":
+		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
+	case statusNow == felt.StatusClosed:
+		fmt.Fprintln(out, "  status:      closed (NOT armed — daemon ignores closed fibers)")
+	case statusNow == felt.StatusOpen:
+		fmt.Fprintln(out, "  status:      open (draft — NOT armed; resume to dispatch)")
+	case armed:
+		fmt.Fprintf(out, "  status:      %s (armed)\n", statusNow)
+	default:
+		fmt.Fprintf(out, "  status:      %s\n", statusNow)
+	}
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+// listShuttleFibersAcrossStores walks each store in-process and merges the
+// shuttle-bearing fibers, deduplicating by intrinsic identity (UID, falling back
+// to the symlink-resolved path) — the same fiber is reachable from both the
+// aggregate store and its project-canonical store, so a cross-store walk would
+// otherwise double-count it. A per-store failure is non-fatal: log to stderr and
+// continue, matching the daemon's best-effort per-store scan; only an all-stores
+// failure surfaces an error.
+func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
+	if len(stores) == 0 {
+		return nil, fmt.Errorf("no felt stores configured")
+	}
+	merged := make([]shuttleEntry, 0)
+	seen := map[string]bool{}
+	var firstErr error
+	for _, store := range stores {
+		entries, err := listShuttleFibers(store)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shuttle: store %q: %v\n", store, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, e := range entries {
+			key := e.UID
+			if key == "" {
+				key = e.Path
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, e)
+		}
+	}
+	if len(merged) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return merged, nil
+}
+
+// listShuttleFibers reads one store's metadata, prefiltered to fibers whose
+// frontmatter carries a top-level shuttle: key, and keeps those with a
+// well-formed (typed-decodable) shuttle facet. A malformed block is skipped (it
+// is not a dispatchable role), matching the daemon's is_map + decode gate.
+func listShuttleFibers(store string) ([]shuttleEntry, error) {
+	storage := felt.NewStorage(store)
+	felts, err := storage.ListMetadataHavingFrontmatterFields([]string{shuttle.FacetKey})
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]shuttleEntry, 0, len(felts))
+	for _, f := range felts {
+		block, ok, err := shuttle.BlockOf(f)
+		if err != nil || !ok || block == nil {
+			continue
+		}
+		// Report the dispatch-canonical (nearest-.felt) id, not felt's
+		// outer-aggregate id, so a status fiber_id matches the daemon's identity
+		// and round-trips into a daemon-routed write verb. Falls back to felt's
+		// native id if the path is not under a resolvable .felt store.
+		id := f.ID
+		if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {
+			id = canonical
+		}
+		entries = append(entries, shuttleEntry{
+			FiberID: id,
+			UID:     f.UID,
+			Status:  f.Status,
+			Path:    f.Path,
+			Block:   block,
+		})
+	}
+	return entries, nil
+}
+
+// sessionOwnerMap maps each open fiber's worker session name back to its fiber
+// id. Closed fibers (no live worker to attribute) and fibers without a uid (no
+// session name) are excluded. Two fibers carrying the same uid — a copied file —
+// drop out of the map rather than mis-attributing a live worker.
+func sessionOwnerMap(entries []shuttleEntry) map[string]string {
+	owners := map[string]string{}
+	collisions := map[string]bool{}
+	for _, entry := range entries {
+		session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
+		if entry.Status == felt.StatusClosed || session == "" || collisions[session] {
+			continue
+		}
+		if existing, ok := owners[session]; ok && existing != entry.FiberID {
+			delete(owners, session)
+			collisions[session] = true
+			continue
+		}
+		owners[session] = entry.FiberID
+	}
+	return owners
+}
+
+// computeState derives the display state from tmux liveness and the felt-native
+// status (the sole lifecycle axis). A closed fiber collapses to "closed" — the
+// finer awaiting/tempered/discarded verdict is the tempered field the bulk
+// listing does not carry; the kanban makes that call.
+func computeState(b *shuttle.Block, status string, running bool) string {
+	if running {
+		return "running"
+	}
+	switch status {
+	case felt.StatusOpen:
+		return "paused"
+	case felt.StatusClosed:
+		return "closed"
+	case felt.StatusActive:
+		if b.Kind == "standing" {
+			return "scheduled"
+		}
+		return "idle"
+	default:
+		return shuttleNonEmpty(status, "unknown")
+	}
+}
+
+// printTmuxOriginWarning prints the one-line remedy when this host's tmux
+// server was forked by the Shuttle daemon; silence in every other case
+// (including every non-darwin host, where the attribution does not exist).
+func printTmuxOriginWarning() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if report := detectTmuxOrigin(); report.Origin == tmuxOriginDaemonBorn {
+		fmt.Printf("tmux server: daemon-born — %s\n", tmuxOriginRepair)
+	}
+}
+
+// hideClosedRows drops closed rows from a table render unless --closed asked
+// for them, returning the survivors and the count hidden. The JSON arm never
+// calls this: a parsed listing stays complete.
+func hideClosedRows(rows []FiberStatus) ([]FiberStatus, int) {
+	if statusClosed {
+		return rows, 0
+	}
+	kept := rows[:0:0]
+	hidden := 0
+	for _, r := range rows {
+		if r.State == "closed" {
+			hidden++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, hidden
+}
+
+func printHiddenClosedTrailer(hidden int) {
+	if hidden > 0 {
+		fmt.Printf("(%d closed hidden; --closed to show)\n", hidden)
+	}
+}
+
+func printStatusTable(rows []FiberStatus) {
+	rows, hidden := hideClosedRows(rows)
+	if len(rows) == 0 {
+		fmt.Println("no shuttle fibers")
+		printHiddenClosedTrailer(hidden)
+		return
+	}
+	fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
+	fmt.Println(strings.Repeat("─", 110))
+	for _, r := range rows {
+		agent := shuttleNonEmpty(r.Agent, "(default)")
+		next := shuttleNonEmpty(r.NextDueAt, "-")
+		fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n",
+			shuttleTruncateID(r.FiberID, 50), r.Kind, r.State, next, agent)
+	}
+	printHiddenClosedTrailer(hidden)
+}
+
+// shuttleTruncateID truncates a fiber id to n runes, keeping the SUFFIX (the leaf
+// distinguishes sibling fibers) with a leading ellipsis when clipped.
+func shuttleTruncateID(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-(n-1):]
+}
+
+func registerShuttleStatusFlags() {
+	statusCmd.Flags().BoolVar(&statusClosed, "closed", false,
+		"Also list closed fibers (hidden from the table by default; --json always includes them)")
+	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
+		"Also list live shuttle tmux sessions with no matching shuttle: facet")
+	statusCmd.Flags().BoolVar(&statusAll, "all", false,
+		"Show local plus all configured remotes (queries daemon /api/v1/state/composite)")
+	statusCmd.Flags().StringVar(&statusRemote, "remote", "",
+		"Show only the named remote (queries daemon /api/v1/state/composite)")
+	statusCmd.MarkFlagsMutuallyExclusive("all", "remote")
+}
+
+func init() {
+	registerShuttleStatusFlags()
+	addShuttleCommand(statusCmd)
+	addShuttleCommand(psCmd)
+}

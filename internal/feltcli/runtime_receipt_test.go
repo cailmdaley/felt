@@ -1,0 +1,408 @@
+package feltcli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCombineReceiptStatusRejectsFalseHealthy(t *testing.T) {
+	tests := []struct {
+		name       string
+		felt       receiptStatus
+		bundle     []ReceiptBundle
+		hooks      receiptStatus
+		generation receiptStatus
+		want       receiptStatus
+	}{
+		{"healthy", receiptHealthy, []ReceiptBundle{{Status: receiptHealthy}}, receiptHealthy, receiptHealthy, receiptHealthy},
+		{"missing", receiptMissing, nil, receiptMissing, receiptHealthy, receiptMissing},
+		{"partial", receiptHealthy, []ReceiptBundle{{Status: receiptHealthy}}, receiptHealthy, receiptMissing, receiptPartial},
+		{"stale", receiptHealthy, []ReceiptBundle{{Status: receiptStale}}, receiptHealthy, receiptHealthy, receiptStale},
+		{"mismatch", receiptHealthy, []ReceiptBundle{{Status: receiptHealthy}}, receiptMismatch, receiptHealthy, receiptMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := combineReceiptStatus(tt.felt, tt.bundle, tt.hooks, tt.generation)
+			if got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+			if tt.want != receiptHealthy && got == receiptHealthy {
+				t.Fatal("incomplete runtime was reported healthy")
+			}
+		})
+	}
+}
+
+func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
+	oldVersion := Version
+	Version = "1.2.3"
+	t.Cleanup(func() { Version = oldVersion })
+
+	root := t.TempDir()
+	manifest := filepath.Join(root, ".codex-plugin", "plugin.json")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range []string{"felt", "shuttle"} {
+		if err := os.MkdirAll(filepath.Join(root, "skills", skill), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "skills", skill, "SKILL.md"), []byte("skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(contents string) ReceiptBundle {
+		t.Helper()
+		if err := os.WriteFile(manifest, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return bundleFromManifest("codex", manifest, "/source")
+	}
+	if got := write(`{"name":"felt","version":"1.2.3"}`); got.Status != receiptHealthy {
+		t.Fatalf("matching bundle = %#v, want healthy", got)
+	}
+	if got := write(`{"name":"felt","version":"1.2.2"}`); got.Status != receiptStale {
+		t.Fatalf("stale bundle = %#v, want stale", got)
+	}
+	if got := write(`{"name":"other","version":"1.2.3"}`); got.Status != receiptMismatch {
+		t.Fatalf("wrong plugin = %#v, want mismatch", got)
+	}
+	if got := write(`not-json`); got.Status != receiptMismatch {
+		t.Fatalf("malformed manifest = %#v, want mismatch", got)
+	}
+}
+
+func TestCollectFeltReceiptUsesResolvedExecutable(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "felt")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '9.8.7 (abc, built now)\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FELT_BIN", bin)
+	t.Setenv("PATH", dir)
+	got := collectFeltReceipt()
+	if got.Status != receiptHealthy || got.Path != bin || got.Version != "9.8.7" || got.Build != "9.8.7 (abc, built now)" {
+		t.Fatalf("resolved executable receipt = %#v", got)
+	}
+}
+
+func TestCollectFeltReceiptFlagsShadowedStaleCopy(t *testing.T) {
+	fresh, stale, twin := t.TempDir(), t.TempDir(), t.TempDir()
+	write := func(dir, build string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "felt"), []byte("#!/bin/sh\nprintf 'felt version "+build+"\\n'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(stale, "dev (0123456789ab)")
+	write(fresh, "dev (3e5bcef70529)")
+	write(twin, "dev (3e5bcef70529)")
+	t.Setenv("FELT_BIN", "")
+
+	t.Setenv("PATH", strings.Join([]string{stale, fresh, twin}, string(os.PathListSeparator)))
+	got := collectFeltReceipt()
+	if got.Status != receiptMismatch || got.Path != filepath.Join(stale, "felt") {
+		t.Fatalf("shadowing receipt = %#v, want mismatch resolved to the first copy", got)
+	}
+	if len(got.Shadowed) != 2 || !strings.Contains(got.Repair, "remove the stale copy") {
+		t.Fatalf("shadowing receipt = %#v, want both differing copies named", got)
+	}
+
+	// Identical builds on PATH are redundant, not skewed.
+	t.Setenv("PATH", strings.Join([]string{fresh, twin}, string(os.PathListSeparator)))
+	if got := collectFeltReceipt(); got.Status != receiptHealthy || len(got.Shadowed) != 0 {
+		t.Fatalf("identical copies receipt = %#v, want healthy", got)
+	}
+}
+
+func TestFeltBuildMatchesVersionSeparatesLocalRevisions(t *testing.T) {
+	for _, tt := range []struct {
+		marker, build string
+		want          bool
+	}{
+		{"dev (3e5bcef70529)", "dev (3e5bcef70529)", true},
+		{"dev (3e5bcef70529)", "dev (0123456789ab)", false},
+		{"dev", "dev (3e5bcef70529)", true},
+		{"1.2.3 (abc, built now)", "1.2.3", true},
+		{"1.2.3", "1.2.4", false},
+	} {
+		if got := feltBuildMatchesVersion(tt.marker, tt.build); got != tt.want {
+			t.Errorf("feltBuildMatchesVersion(%q, %q) = %v, want %v", tt.marker, tt.build, got, tt.want)
+		}
+	}
+}
+
+func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
+	oldVersion := Version
+	Version = "dev"
+	t.Cleanup(func() { Version = oldVersion })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	source := filepath.Join(home, "source", "claude-plugin")
+	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range []string{"felt", "shuttle"} {
+		if err := os.MkdirAll(filepath.Join(source, "skills", skill), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, "skills", skill, "SKILL.md"), []byte("skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(source, ".codex-plugin", "plugin.json"), []byte(`{"name":"felt","version":"1.1.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(home, ".codex", "plugins", "cache", marketplaceName, "felt", "1.0.0", ".codex-plugin")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "plugin.json"), []byte(`{"name":"felt","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	list := filepath.Join(home, "plugin-list.json")
+	listJSON := `{"installed":[{"pluginId":"felt@cailmdaley-felt","name":"felt","marketplaceName":"cailmdaley-felt","version":"1.1.0","installed":true,"enabled":true,"source":{"source":"local","path":"` + source + `"},"marketplaceSource":{"sourceType":"local","source":"` + filepath.Dir(filepath.Dir(source)) + `"}}]}`
+	if err := os.WriteFile(list, []byte(listJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	codex := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\ncat \"$RECEIPT_PLUGIN_LIST\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RECEIPT_PLUGIN_LIST", list)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	bundles := collectCodexBundle()
+	if len(bundles) != 1 {
+		t.Fatalf("bundles = %#v, want one active bundle", bundles)
+	}
+	if bundles[0].Path != source || bundles[0].Version != "1.1.0" {
+		t.Fatalf("active bundle = %#v, cache path was incorrectly selected", bundles[0])
+	}
+}
+
+func TestCollectCodexBundleOmitsIntentionalSingleHarnessInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	codex := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\nprintf '%s\\n' '{\"installed\":[]}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if bundles := collectCodexBundle(); len(bundles) != 0 {
+		t.Fatalf("unconfigured Codex without Felt = %#v, want omitted", bundles)
+	}
+}
+
+func TestCollectCodexBundleReportsConfiguredButAbsentInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `[plugins."felt@cailmdaley-felt"]
+enabled = true
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	codex := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\nprintf '%s\\n' '{\"installed\":[]}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	bundles := collectCodexBundle()
+	if len(bundles) != 1 || bundles[0].Status != receiptMissing {
+		t.Fatalf("configured but absent Codex Felt = %#v, want one missing bundle", bundles)
+	}
+}
+
+func TestHookFilesCompatibleRequiresBothBoundaryHooks(t *testing.T) {
+	root := t.TempDir()
+	hooks := filepath.Join(root, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"session.sh", "remind.sh", "felt-bin.sh"} {
+		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := `{"hooks":{"SessionStart":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/session.sh"}]}],"PreToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/remind.sh"}]}]}}`
+	if err := os.WriteFile(filepath.Join(hooks, "hooks.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !hookFilesCompatible(root) {
+		t.Fatal("complete hook bundle was rejected")
+	}
+	if err := os.Remove(filepath.Join(hooks, "remind.sh")); err != nil {
+		t.Fatal(err)
+	}
+	if hookFilesCompatible(root) {
+		t.Fatal("missing reminder hook was reported compatible")
+	}
+}
+
+func TestCodexHooksTrustedRequiresBothActiveBoundaryEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `[hooks.state."felt@cailmdaley-felt:hooks/hooks.json:session_start:0:0"]
+trusted_hash = "sha256:one"
+
+[hooks.state."felt@cailmdaley-felt:hooks/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:two"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !codexHooksTrusted() {
+		t.Fatal("trusted active hook entries were not recognized")
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config[:len(config)-len("\n[hooks.state.\"felt@cailmdaley-felt:hooks/hooks.json:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:two\"\n")]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if codexHooksTrusted() {
+		t.Fatal("one missing trust entry was reported fully trusted")
+	}
+}
+
+func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, pluginJournalName), []byte(`{"phase":"swapped"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectGenerationReceipt(nil, ReceiptComponent{})
+	if got.Status != receiptPartial {
+		t.Fatalf("pending promotion receipt = %#v, want partial", got)
+	}
+	if !strings.Contains(got.Repair, "pending plugin promotion") {
+		t.Fatalf("pending promotion repair = %q, want actionable journal repair", got.Repair)
+	}
+	status, _ := combineReceiptStatus(receiptHealthy, []ReceiptBundle{{Status: receiptHealthy}}, receiptHealthy, receiptHealthy, got.Status)
+	if status == receiptHealthy {
+		t.Fatal("pending promotion was allowed to produce a healthy overall receipt")
+	}
+}
+
+func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
+	loadedRoot := filepath.Join(home, "loaded", "felt")
+	for _, root := range []string{activeRoot, loadedRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "plugin.json"), []byte(`{"name":"felt","version":"1.2.3"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "payload.txt"), []byte("same payload\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := pluginGenerationIdentity{
+		Schema: 1, SourceKind: "github", Source: marketplaceRepo,
+		RequestedRef: "main", ResolvedCommit: strings.Repeat("a", 40),
+		PluginVersion: "1.2.3", FeltBuild: "1.2.3 (build-a)",
+	}
+	digest, err := pluginPayloadDigest(activeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active.PayloadSHA256 = digest
+	if err := os.WriteFile(filepath.Join(loadedRoot, "payload.txt"), []byte("different payload\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded := active
+	loaded.PayloadSHA256, err = pluginPayloadDigest(loadedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeMarker := func(root string, identity pluginGenerationIdentity) {
+		t.Helper()
+		data, err := json.Marshal(identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, pluginGenerationMarkerName), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMarker(activeRoot, active)
+	writeMarker(loadedRoot, loaded)
+
+	got := collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}}, ReceiptComponent{})
+	if got.Status != receiptMismatch {
+		t.Fatalf("generation disagreement receipt = %#v, want mismatch", got)
+	}
+	if !strings.Contains(got.Repair, "payload digest") || !strings.Contains(got.Repair, "setup") {
+		t.Fatalf("generation disagreement repair = %q, want digest and setup guidance", got.Repair)
+	}
+}
+
+func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
+	if err := os.MkdirAll(filepath.Join(activeRoot, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeRoot, ".claude-plugin", "plugin.json"), []byte(`{"name":"felt","version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := pluginGenerationIdentity{
+		Schema: 1, SourceKind: "local", Source: "/src",
+		PluginVersion: "1.2.3", FeltBuild: "1.2.3",
+	}
+	digest, err := pluginPayloadDigest(activeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.PayloadSHA256 = digest
+	data, err := json.Marshal(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeRoot, pluginGenerationMarkerName), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same marker read by an executable of another build must not read as
+	// healthy: felt_build is bound to the executable the receipt resolved.
+	got := collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "9.9.9"})
+	if got.Status != receiptMismatch {
+		t.Fatalf("felt_build skew receipt = %#v, want mismatch", got)
+	}
+	if !strings.Contains(got.Repair, "sealed by felt") || !strings.Contains(got.Repair, "9.9.9") {
+		t.Fatalf("felt_build skew repair = %q, want executable binding guidance", got.Repair)
+	}
+
+	// A matching executable is not a mismatch.
+	got = collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "1.2.3"})
+	if got.Status == receiptMismatch {
+		t.Fatalf("matching felt_build reported mismatch: %#v", got)
+	}
+}

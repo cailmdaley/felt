@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-// The user registry's one structured writer: `felt shuttle agents effort`.
+// The user registry's one structured writer: `shuttle agents effort`.
 //
 // Everything else in agents.json is edited as text. An override is a single
 // field keyed by id, so it can be written without re-encoding the records

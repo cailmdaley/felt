@@ -39,7 +39,7 @@ type AgentRecord struct {
 	// Source is provenance, set by the loader and never read from JSON (a user
 	// file that carries one has it stripped): "builtin" for a record from the
 	// embedded set, "user" for one from the user registry. Emitted by
-	// `felt shuttle agents [--json]` so "did my file load?" is one command.
+	// `shuttle agents [--json]` so "did my file load?" is one command.
 	// Deliberately absent from ResolvedAgent — dispatch does not care where a
 	// record came from.
 	Source string `json:"source,omitempty"`
@@ -66,7 +66,7 @@ func (a AgentRecord) IsAlias() bool { return a.AliasOf != "" }
 
 // AgentRegistry is the loaded registry of agents: the embedded built-in layer
 // with the user layer (if any) folded on top. userPath/builtinsMode/
-// builtinCount describe how it was assembled — `felt shuttle agents` reports
+// builtinCount describe how it was assembled — `shuttle agents` reports
 // them so a misplaced config file is a one-command diagnosis.
 type AgentRegistry struct {
 	agents       []AgentRecord
@@ -104,7 +104,7 @@ func LoadBuiltinAgentRegistry() (*AgentRegistry, error) {
 
 // Warnings returns the non-fatal problems found while loading (duplicate
 // defaults, dangling aliases, unknown fields). They are for a person reading a
-// terminal: `felt shuttle agents` prints them in table mode only, because the
+// terminal: `shuttle agents` prints them in table mode only, because the
 // daemon shells the --json form with stderr folded into stdout.
 func (r *AgentRegistry) Warnings() []string { return r.warnings }
 

@@ -1,0 +1,199 @@
+package feltcli
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/cailmdaley/felt/internal/felt"
+)
+
+func TestEditMetadataFlags(t *testing.T) {
+	dir, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out, err := runCommand(t, dir, "edit", "fiber-a",
+		"--name", "Renamed",
+		"--status", "active",
+		"--tag", "alpha,beta",
+		"--outcome", "Landed.",
+	)
+	if err != nil {
+		t.Fatalf("edit metadata: %v\n%s", err, out)
+	}
+
+	f, err := storage.Read("fiber-a")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if f.Name != "Renamed" {
+		t.Fatalf("Name = %q, want %q", f.Name, "Renamed")
+	}
+	if f.Status != felt.StatusActive {
+		t.Fatalf("Status = %q, want %q", f.Status, felt.StatusActive)
+	}
+	if !f.HasTag("alpha") || !f.HasTag("beta") {
+		t.Fatalf("Tags = %v, want alpha+beta", f.Tags)
+	}
+	if f.Outcome != "Landed." {
+		t.Fatalf("Outcome = %q, want %q", f.Outcome, "Landed.")
+	}
+}
+
+func TestEditStampsUpdatedAt(t *testing.T) {
+	dir, storage := newStore(t)
+	created := mustParseTime(t, "2026-04-10T09:00:00Z")
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out, err := runCommand(t, dir, "edit", "fiber-a", "--outcome", "Landed.")
+	if err != nil {
+		t.Fatalf("edit: %v\n%s", err, out)
+	}
+
+	f, err := storage.Read("fiber-a")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	// A felt edit is a content write felt records, so it advances the durable
+	// recency anchor past creation — that's what a fresh clone reads to know
+	// the fiber was worked recently.
+	if f.UpdatedAt == nil {
+		t.Fatalf("edit did not stamp updated-at")
+	}
+	if !f.UpdatedAt.After(created) {
+		t.Fatalf("updated-at = %v, want strictly after created-at %v", f.UpdatedAt, created)
+	}
+}
+
+func TestEditBodyOverwriteDetection(t *testing.T) {
+	dir, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+		Body:      "original body",
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out, err := runCommand(t, dir, "edit", "fiber-a", "--body", "replacement body")
+	if err != nil {
+		t.Fatalf("edit body: %v\n%s", err, out)
+	}
+	if out != "Updated fiber-a (body overwritten)\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+// TestEditSetUnsetExtraScalars covers the generic opaque-scalar writer that the
+// cross-host kanban horizon path shells: --set is YAML-typed (so cold=true is a
+// real boolean in the JSON the board UI reads), --unset removes, and a full
+// horizon round-trip set→unset leaves the frontmatter clean.
+func TestEditSetUnsetExtraScalars(t *testing.T) {
+	dir, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if out, err := runCommand(t, dir, "edit", "fiber-a",
+		"--set", "horizon=stashed",
+		"--set", "cold=true",
+	); err != nil {
+		t.Fatalf("edit --set: %v\n%s", err, out)
+	}
+
+	f, err := storage.Read("fiber-a")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	// Type fidelity is the contract: the board UI reads `typeof cold === 'boolean'`.
+	encoded, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"cold":true`) {
+		t.Fatalf("cold did not round-trip as a JSON boolean: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"horizon":"stashed"`) {
+		t.Fatalf("horizon did not round-trip as a JSON string: %s", encoded)
+	}
+	if node := f.ExtraFields["cold"]; node == nil || node.Tag != "!!bool" {
+		t.Fatalf("cold node tag = %v, want !!bool", node)
+	}
+
+	// Unsetting both keys returns the frontmatter to clean.
+	if out, err := runCommand(t, dir, "edit", "fiber-a",
+		"--unset", "horizon",
+		"--unset", "cold",
+	); err != nil {
+		t.Fatalf("edit --unset: %v\n%s", err, out)
+	}
+	f, err = storage.Read("fiber-a")
+	if err != nil {
+		t.Fatalf("Read after unset: %v", err)
+	}
+	if _, ok := f.ExtraFields["horizon"]; ok {
+		t.Fatalf("horizon survived --unset: %v", f.ExtraFields)
+	}
+	if _, ok := f.ExtraFields["cold"]; ok {
+		t.Fatalf("cold survived --unset: %v", f.ExtraFields)
+	}
+}
+
+// TestEditSetUnsetGuards covers the fail-loud rails: native keys are refused on
+// both verbs, malformed --set is rejected, and --set will not scalar-clobber a
+// structured value (the shuttle: block).
+func TestEditSetUnsetGuards(t *testing.T) {
+	dir, storage := newStore(t)
+	f := &felt.Felt{
+		ID:        "fiber-a",
+		Name:      "Fiber A",
+		CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"),
+	}
+	// Seed a structured extra field (a mapping) to exercise the clobber guard.
+	if err := f.SetExtraField("shuttle", map[string]any{"kind": "oneshot", "agent": "claude-opus"}); err != nil {
+		t.Fatalf("SetExtraField shuttle: %v", err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"set native key", []string{"--set", "status=active"}, "native field"},
+		{"unset native key", []string{"--unset", "outcome"}, "native field"},
+		{"set without equals", []string{"--set", "horizon"}, "expected key=value"},
+		{"set empty value", []string{"--set", "horizon="}, "empty value"},
+		{"set clobbers structured", []string{"--set", "shuttle=oops"}, "structured value"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runCommand(t, dir, append([]string{"edit", "fiber-a"}, tc.args...)...)
+			if err == nil {
+				t.Fatalf("expected error, got success: %s", out)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not mention %q", err.Error(), tc.want)
+			}
+		})
+	}
+}

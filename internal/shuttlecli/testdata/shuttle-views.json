@@ -1,0 +1,25 @@
+[
+  {
+    "id": "work/task",
+    "shuttle": {
+      "agent": "claude-opus",
+      "effort": "high",
+      "host": "test-host",
+      "kind": "oneshot",
+      "project_dir": "/work/project",
+      "resolved": {
+        "agent": {
+          "id": "claude-opus",
+          "cli": "claude",
+          "wrapper": "claude",
+          "model": "opus",
+          "extra_flags": "--permission-mode auto",
+          "effort": "high"
+        }
+      },
+      "runtime": {
+        "session_id": "session-123"
+      }
+    }
+  }
+]

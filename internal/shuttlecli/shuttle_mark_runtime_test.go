@@ -1,0 +1,159 @@
+package shuttlecli
+
+import (
+	"testing"
+
+	"github.com/cailmdaley/felt/internal/felt"
+)
+
+// T1 — real-binary lock-in for the exact argv the Elixir daemon shells against
+// `shuttle mark-runtime`. Daemon-side Elixir tests assert flags are SENT
+// via a mock Runner; they stay green even if the real CLI rejects a flag (the
+// exact skew that shipped 80ce7b3: a post-fix daemon shelling a pre-fix CLI
+// that didn't know --host). These tests run the actual cobra command path
+// (runCommand → rootCmd.Execute), not a mock, so a flag the daemon relies on
+// but the CLI doesn't accept fails HERE.
+
+// shuttleRuntimeMap decodes the fiber's shuttle.runtime sub-mapping into a
+// plain map for assertions, mirroring the nested-write contract
+// shuttle.SetRuntimeField establishes that runtime fields live under
+// shuttle.runtime, never as flat shuttle siblings.
+func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
+	t.Helper()
+	node, ok := f.ExtraFields["shuttle"]
+	if !ok || node == nil {
+		t.Fatalf("fiber %s carries no shuttle: block", f.ID)
+	}
+	var shuttle map[string]any
+	if err := node.Decode(&shuttle); err != nil {
+		t.Fatalf("decoding shuttle: block: %v", err)
+	}
+	rt, ok := shuttle["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("shuttle.runtime missing or not a mapping: %#v", shuttle["runtime"])
+	}
+	return rt
+}
+
+// TestShuttleMarkRuntime_DaemonDispatchArgv locks in the exact argv
+// Shuttle.Continuation.write_dispatch/4 shells (daemon/lib/shuttle/continuation.ex,
+// the `mark_runtime/4` private helper), post-C1:
+//
+//	shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --run-id <run_id>
+//
+// No `--host` override: post-S1, `resolveOwnHost` is pure local state (no
+// daemon round-trip), so the daemon no longer hands felt its own_host_id —
+// ambient resolution (env → host file → hostname) drives the ownership guard
+// the same way for every write verb now. The daemon is DOWN here (unroutable
+// SHUTTLE_DAEMON_URL) and identity is seeded only via the host file, proving
+// mark-runtime never depends on a live daemon for either the flags
+// themselves or the ownership check.
+func TestShuttleMarkRuntime_DaemonDispatchArgv(t *testing.T) {
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1") // closed port: any round-trip fails loudly
+	withOwnHost(t, "candide")
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "candide",
+	}, nil)
+
+	out, err := runCommand(t, dir, "mark-runtime", "f",
+		"--dispatched-at", "2026-07-05T12:00:00Z",
+		"--session", "sess-abc-123",
+		"--run-id", "20260705T120000Z",
+	)
+	if err != nil {
+		t.Fatalf("mark-runtime with the daemon's exact dispatch argv must succeed: %v\n%s", err, out)
+	}
+
+	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
+	for k, want := range map[string]string{
+		"dispatched_at": "2026-07-05T12:00:00Z",
+		"session_uuid":  "sess-abc-123",
+		"run_id":        "20260705T120000Z",
+	} {
+		if got, _ := rt[k].(string); got != want {
+			t.Fatalf("shuttle.runtime.%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// TestShuttleMarkRuntime_DaemonHandoffArgv locks in the exact argv
+// Shuttle.Continuation.mark_handed_off/3 shells (daemon/lib/shuttle/continuation.ex)
+// — the daemon-side conclude write after an accept/resume/rearm, post-C1:
+//
+//	shuttle mark-runtime <fiber_id> --handed-off-at <ts>
+//
+// Same daemon-down + host-file-only identity setup as the dispatch test; no
+// `--host` override (see that test's comment for why).
+func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	withOwnHost(t, "candide")
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "standing", "agent": "claude-opus", "host": "candide",
+	}, nil)
+
+	out, err := runCommand(t, dir, "mark-runtime", "f",
+		"--handed-off-at", "2026-07-05T12:05:00Z",
+	)
+	if err != nil {
+		t.Fatalf("mark-runtime with the daemon's exact handoff argv must succeed: %v\n%s", err, out)
+	}
+
+	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
+	if got, _ := rt["handed_off_at"].(string); got != "2026-07-05T12:05:00Z" {
+		t.Fatalf("shuttle.runtime.handed_off_at = %q, want %q", got, "2026-07-05T12:05:00Z")
+	}
+}
+
+// TestShuttleMarkRuntime_ClaimMeetingArgv locks in the claim-time write of a
+// meeting capture, which stamps the recording's launch id beside the session:
+//
+//	shuttle mark-runtime <fiber_id> --dispatched-at <ts> --session <uuid> --meeting <launch>
+func TestShuttleMarkRuntime_ClaimMeetingArgv(t *testing.T) {
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	withOwnHost(t, "candide")
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "candide",
+	}, nil)
+
+	out, err := runCommand(t, dir, "mark-runtime", "f",
+		"--dispatched-at", "2026-09-27T20:14:55Z",
+		"--session", "sess-abc-123",
+		"--meeting", "launch-xyz",
+	)
+	if err != nil {
+		t.Fatalf("mark-runtime with a meeting claim's argv must succeed: %v\n%s", err, out)
+	}
+
+	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
+	if got, _ := rt["meeting"].(string); got != "launch-xyz" {
+		t.Fatalf("shuttle.runtime.meeting = %q, want %q", got, "launch-xyz")
+	}
+}
+
+// TestShuttleMarkRuntime_AliasGuardWithoutOverride proves the negative: without
+// --host, ambient own-host resolution alone (via the host file, daemon still
+// down) drives the ownership guard, so a fiber owned by a DIFFERENT host is
+// refused rather than silently landing on the wrong daemon's mirror.
+func TestShuttleMarkRuntime_AliasGuardWithoutOverride(t *testing.T) {
+	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	withOwnHost(t, "candide")
+
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
+	}, nil)
+
+	_, err := runCommand(t, dir, "mark-runtime", "remote", "--dispatched-at", "2026-07-05T12:00:00Z")
+	if err == nil {
+		t.Fatal("mark-runtime with ambient own-host candide on a cineca-owned fiber must be refused")
+	}
+	if _, ok := err.(ownerMismatchError); !ok {
+		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
+	}
+}

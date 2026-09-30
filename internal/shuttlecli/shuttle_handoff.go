@@ -1,0 +1,197 @@
+package shuttlecli
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/spf13/cobra"
+)
+
+var shuttleHandoffCmd = &cobra.Command{
+	Use:   "handoff <fiber>",
+	Short: "Stamp the clean-exit handoff signal for a worker",
+	Long: `Stamps shuttle.runtime.handed_off_at = now into the fiber's frontmatter — the
+signal that tells the daemon this worker exited CLEANLY, so the next dispatch
+starts fresh (and reads the rewritten '## Status' block) instead of resuming a
+dead transcript.
+
+A worker calls this as its FINAL action, after rewriting the constitution's
+'## Status' block: it stamps the field and then ends its own tmux session — so
+the exit is one command, no separate 'kill $PPID'. For its own fiber the file
+stamped is SHUTTLE_FIBER_PATH, which the daemon exports at dispatch (the path it
+already resolved); outside a daemon-launched worker the <fiber> argument is
+resolved instead, and the current tmux session (if any) still ends. An exact id
+or UID naming a different fiber stamps that fiber and leaves the caller's
+session running.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path, self, err := resolveHandoffPath(args[0])
+		if err != nil {
+			return err
+		}
+		at, err := stampHandedOff(path)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("handed off: %s (handed_off_at=%s)\n", path, at)
+		// Final act — but ONLY when handing off our own fiber: end our own tmux
+		// session (no-op outside tmux). The field is already durably on disk, so
+		// the kill loses nothing. A worker stamping a DIFFERENT fiber (e.g. a
+		// dead sibling worker's) stays alive.
+		if self {
+			endOwnTmuxSession()
+		}
+		return nil
+	},
+}
+
+func init() {
+	addShuttleCommand(shuttleHandoffCmd)
+}
+
+// resolveHandoffPath returns the fiber `.md` the worker should stamp, plus
+// whether that fiber is the worker's OWN (which gates the tmux self-kill). The
+// daemon exports SHUTTLE_FIBER_PATH at dispatch — the path it already resolved —
+// so a worker handing off its own fiber writes the same file the daemon reads on
+// the next poll, with no store resolution and no ambiguity.
+//
+// The explicit <fiber> argument beats the ambient env: when the argument names a
+// DIFFERENT fiber than SHUTTLE_FIBER_PATH (a worker stamping a sibling — e.g.
+// cleaning up after a dead worker on another card), the argument wins and the
+// caller is NOT treated as exiting. The env path is used when the argument
+// resolves to the same fiber (the normal self-handoff, where the env path is the
+// authoritative one) or when argument resolution fails outright (cwd/store
+// ambiguity). Paths are compared through
+// EvalSymlinks because loom stores reach fibers through symlinked .felt trees.
+//
+// Belt against fuzzy resolution: felt's resolver slug/suffix-matches, so an
+// argument can land on a fiber the caller didn't mean (the dispatch prompt's
+// global-id fallback is the realistic trigger). A DIFFERENT-fiber result is
+// honored only when the argument names it exactly (id or UID); a fuzzy match
+// that disagrees with the env is treated as ambiguity and the env wins, which
+// at worst stamps the caller's own fiber.
+func resolveHandoffPath(fiber string) (string, bool, error) {
+	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
+	f, _, err := shuttleResolveFiber(fiber, false)
+	if err != nil {
+		if envPath != "" {
+			return envPath, true, nil
+		}
+		return "", false, fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
+	}
+	if envPath == "" {
+		return f.Path, true, nil
+	}
+	if samePath(envPath, f.Path) {
+		return envPath, true, nil
+	}
+	if fiber == f.ID || fiber == f.UID {
+		return f.Path, false, nil
+	}
+	return envPath, true, nil
+}
+
+// samePath reports whether two paths name the same file, absolutizing and
+// resolving symlinks so a store path and its loom-symlinked alias compare
+// equal. Falls back to string equality when resolution fails (e.g. a
+// not-yet-existing path) — a bias toward "different", which errs on the safe
+// side: stamping the named file without the self-kill, never a false
+// clean-exit.
+func samePath(a, b string) bool {
+	ra, errA := canonicalPath(a)
+	rb, errB := canonicalPath(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return ra == rb
+}
+
+func canonicalPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the
+// fiber's frontmatter, surgically (shuttle.SetRuntimeField touches only that one
+// nested key, so the daemon-written session_uuid / dispatched_at ride through),
+// and writes atomically. This is the clean-exit
+// signal: the daemon compares handed_off_at against dispatched_at to decide
+// fresh-vs-resume at the next dispatch. RFC3339Nano with a trailing Z (UTC) — the
+// Elixir reader parses it via DateTime.from_iso8601, and the comparison is on the
+// wire value, so sub-second precision is exact.
+//
+// Operates on the file at `path` directly (read -> Parse -> stamp -> Marshal ->
+// atomic rename) rather than through Storage, because SHUTTLE_FIBER_PATH may name
+// a fiber in a store other than the worker's cwd; the path is unambiguous.
+//
+// It acquires path's cross-process advisory lock (internal/felt/lock.go)
+// BEFORE the read, and holds it through the write. A worker's handoff and a
+// daemon-shelled `mark-runtime` (the dispatch stamp, or a conclude re-arm) can
+// race the same fiber file; without the lock, whichever writes last silently
+// drops the other's field. The lock forces them to serialize instead.
+func stampHandedOff(path string) (string, error) {
+	unlock, err := felt.LockFiberFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	f, err := felt.Parse(idFromPath(path), content)
+	if err != nil {
+		return "", err
+	}
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
+		return "", err
+	}
+	data, err := f.Marshal()
+	if err != nil {
+		return "", err
+	}
+	if err := felt.WriteFiberFile(path, data); err != nil {
+		return "", err
+	}
+	return at, nil
+}
+
+// endOwnTmuxSession tears down the tmux session this process is running in — the
+// worker's `shuttle-<id>` session. Folded into handoff so the worker's exit is ONE
+// command (stamp the clean-exit field, then end the session) instead of a write
+// followed by a separate `kill $PPID`. Best-effort and a no-op outside tmux (e.g.
+// a manual/test invocation), so it never kills a stray shell: it asks tmux for the
+// *current* session name and kills exactly that.
+func endOwnTmuxSession() {
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	name, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	if err != nil {
+		return
+	}
+	session := strings.TrimSpace(string(name))
+	if session == "" {
+		return
+	}
+	// This kills our own pane mid-call; the field is already durably on disk (the
+	// rename completed before we got here), so nothing is lost.
+	_ = exec.Command("tmux", "kill-session", "-t", session).Run()
+}
+
+// idFromPath derives a cosmetic fiber id from a .md path (the leaf stem). The id
+// is not persisted (Felt.ID is yaml:"-"); Parse needs only a label.
+func idFromPath(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), felt.FileExt)
+}

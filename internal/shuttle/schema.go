@@ -75,13 +75,13 @@ func (s *Schedule) UnmarshalYAML(value *yaml.Node) error {
 //   - pinned   — schedule-less interactive role that rests PARKED on the board's
 //     pinned strip (status:open). A human starts it (Resume / strip → In-flight,
 //     which force-dispatches and flips it active). It then joins the unified
-//     lifecycle: a worker that hands off cleanly (`felt shuttle handoff`) is
+//     lifecycle: a worker that hands off cleanly (`shuttle handoff`) is
 //     redispatched fresh next tick — a long autonomous arc across clean sessions
 //     — while a dirty death or idle exit parks it back to the strip
 //     (active → open). When the arc is done it closes to Awaiting review, and a
 //     human accept re-parks it to the strip. See Poller.filter_eligible /
 //     tick_kind_eligible?, handle_worker_exit's pinned branch,
-//     LifecycleStore.park, and `felt shuttle accept`.
+//     LifecycleStore.park, and `shuttle accept`.
 var ValidKinds = []string{"oneshot", "standing", "pinned"}
 
 // ---- Validation ------------------------------------------------------------

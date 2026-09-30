@@ -22,7 +22,7 @@ type ResolvedAgent struct {
 }
 
 // Resolved is the resolved view of a shuttle: block — what felt emits additively
-// under shuttle.resolved in `felt show -j` / `felt ls --json`. The daemon reads
+// under shuttle.resolved in `shuttle show -j` / `shuttle ls --json`. The daemon reads
 // this instead of re-resolving the agent name and re-parsing cron itself; the
 // flat config/runtime fields beside it stay the source of truth.
 type Resolved struct {
@@ -45,8 +45,8 @@ func (r *Resolved) IsEmpty() bool {
 
 // NewResolvedAgent folds a base agent record and the effective axes into the
 // daemon-facing ResolvedAgent. It is the single place this projection is made,
-// so `felt show -j`'s shuttle.resolved.agent (via ResolveBlock) and
-// `felt shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a
+// so `shuttle show -j`'s shuttle.resolved.agent (via ResolveBlock) and
+// `shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a
 // byte-identical shape.
 func NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAgent {
 	return &ResolvedAgent{

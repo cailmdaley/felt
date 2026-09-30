@@ -24,7 +24,7 @@ import (
 // This mirrors the stores registry (cmd/shuttle_stores.go) one step short: there
 // is no inline-value env var, because a comma list of paths inlines into an
 // environment and a JSON registry does not. Every consumer — install-time
-// validation, the daemon (which shells `felt shuttle agents`) — reads the
+// validation, the daemon (which shells `shuttle agents`) — reads the
 // folded result through LoadAgentRegistry.
 
 // Provenance values for AgentRecord.Source.
@@ -72,7 +72,7 @@ type agentOverride struct {
 }
 
 // UserAgentsPath is where the user registry is read from (and written to by
-// `felt shuttle agents init`): $FELT_AGENTS_FILE, else ~/.config/felt/agents.json.
+// `shuttle agents init`): $FELT_AGENTS_FILE, else ~/.config/felt/agents.json.
 func UserAgentsPath() (string, error) {
 	if env := os.Getenv("FELT_AGENTS_FILE"); env != "" {
 		return expandHome(env)

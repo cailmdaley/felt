@@ -6,7 +6,7 @@ import (
 )
 
 // TestNewResolvedAgent_MatchesResolveBlock locks the contract the
-// `felt shuttle agents resolve` verb relies on: resolving a name+axes directly
+// `shuttle agents resolve` verb relies on: resolving a name+axes directly
 // (reg.Resolve → NewResolvedAgent — the verb's path, used by the daemon's
 // capture flow) yields the byte-identical record ResolveBlock emits under
 // shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
