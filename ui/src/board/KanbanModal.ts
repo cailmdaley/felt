@@ -46,7 +46,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchFailureMessage, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { dispatchFailureMessage, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -1022,8 +1022,9 @@ export class KanbanModal {
         await this.postFeltEdit(surfaceBody, 'Park-on-desk failed')
       }
 
+      let moved = true
       if (target === 'inFlight') {
-        await this.launchFromDrag(card)
+        moved = await this.launchFromDrag(card)
       } else {
         // Dragging a running card off in-flight stops its worker first — the
         // board's "alive only while in-flight" invariant. inFlight is the one
@@ -1032,7 +1033,11 @@ export class KanbanModal {
         await this.killWorkerIfRunning(card)
         await this.postTransition(card, target, 'Transition failed')
       }
-      this.announce(`Moved “${card.name}” to ${COLUMN_TITLES[target]}.`)
+      this.announce(
+        moved
+          ? `Moved “${card.name}” to ${COLUMN_TITLES[target]}.`
+          : `“${card.name}” needs a project directory before it can start.`,
+      )
     } catch (err: unknown) {
       const msg = errText(err)
       this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
@@ -1056,18 +1061,25 @@ export class KanbanModal {
    * something first live behind the detail panel, where they are chosen on
    * purpose. `fresh` is stamped explicitly rather than left to the daemon's
    * auto-decide, which would resume a transcript that died dirty.
+   *
+   * A start refused for want of a project directory is not a failed move but
+   * a question: the card's panel opens with the directory prompt, and the
+   * answer is `false`. Any other refusal throws the daemon's reason.
    */
-  private async launchFromDrag(card: KanbanCard): Promise<void> {
+  private async launchFromDrag(card: KanbanCard): Promise<boolean> {
     let res: Response
     try {
       res = await postForceDispatch(this.shuttleBase, card, { resume_mode: 'fresh' })
     } catch (err: unknown) {
       throw new Error(`Couldn't reach the Shuttle daemon: ${errText(err)}`)
     }
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
-      throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
+    if (res.ok) return true
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
+    if (needsProjectDir(body)) {
+      this.detailModal.openStartPrompt(card, body)
+      return false
     }
+    throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
   }
 
   /**

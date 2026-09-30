@@ -55,12 +55,14 @@ export async function postDaemonJson(
  * lifecycle itself and launches on the owning host regardless of poll
  * eligibility. `resume_mode` is explicit on every launch — `fresh` starts a
  * new session, `previous` resumes the fiber's `shuttle.session_uuid` — and
- * `user_message` rides inline into the worker's prompt.
+ * `user_message` rides inline into the worker's prompt. `project_dir` is a
+ * directory a human confirmed after a start was refused for want of one
+ * ({@link needsProjectDir}); the owning host's reopen validates and writes it.
  */
 export function postForceDispatch(
   shuttleBase: string,
   card: Pick<KanbanCard, 'id' | 'originId'>,
-  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string },
+  fields: { resume_mode: 'fresh' | 'previous'; user_message?: string; project_dir?: string },
 ): Promise<Response> {
   return fetch(`${shuttleBase}/api/v1/dispatch`, {
     method: 'POST',
@@ -77,10 +79,21 @@ export function postForceDispatch(
 
 /** What a refused dispatch says: the structured ineligibility copy when the
  *  daemon sent any (it names the actual host / project_dir), else its
- *  `error`, else `fallback`. */
+ *  `error`, else `fallback`. A refused reopen is `shuttle reopen`'s own reason,
+ *  placed on the host that gave it — any command it names runs there. */
 export function dispatchFailureMessage(body: DispatchFailureBody, fallback: string): string {
+  if (body.reason === 'reopen_failed' && body.message?.trim()) {
+    const reason = body.message.trim()
+    return body.host ? `On ${body.host}: ${reason}` : reason
+  }
   if (body.reason || body.detail || body.message) return dispatchIneligibleReason(body)
   return body.error || fallback
+}
+
+/** True when a refused start can go ahead once a human names the fiber's
+ *  project directory: its reopen was refused and the block has none. */
+export function needsProjectDir(body: DispatchFailureBody): boolean {
+  return body.reason === 'reopen_failed' && body.needs === 'project_dir'
 }
 
 export function isAgentCard(card: KanbanCard): boolean {
@@ -88,8 +101,14 @@ export function isAgentCard(card: KanbanCard): boolean {
     card.shuttleAgent !== undefined
 }
 
-/** A refused dispatch's JSON body: the ineligibility fields, or a bare `error`. */
-export type DispatchFailureBody = DispatchIneligibleBody & { error?: string }
+/** A refused dispatch's JSON body: the ineligibility fields, or a bare `error`.
+ *  A refused reopen (`reason: 'reopen_failed'`) adds the owning `host` and,
+ *  when a human must supply a block field first, `needs`. */
+export type DispatchFailureBody = DispatchIneligibleBody & {
+  error?: string
+  host?: string
+  needs?: string
+}
 
 /** The structured shape a 422 not_eligible dispatch response can carry. */
 export interface DispatchIneligibleBody {

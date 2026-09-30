@@ -6,6 +6,13 @@ export type HorizonKind = 'now' | 'stashed'
  *  reshape` accepts and the daemon's lifecycle controller allows. */
 export type ShuttleKind = 'oneshot' | 'standing' | 'pinned'
 
+/** A `shuttle.project_dir` read off an ancestor fiber: the directory and the
+ *  ancestor it came from. */
+export interface InheritedProjectDir {
+  path: string
+  from: string
+}
+
 export interface KanbanCard {
   id: string
   /** Intrinsic frontmatter ULID when present. */
@@ -189,6 +196,12 @@ export interface KanbanCard {
    * project path when absent.
    */
   shuttleProjectDir?: string
+  /**
+   * The nearest ancestor's `shuttle.project_dir` on this card's owning host,
+   * for a card whose block names none. A suggestion only: the board offers it
+   * when a start is refused for want of a directory, and a human confirms it.
+   */
+  inheritedProjectDir?: InheritedProjectDir
   /**
    * ISO timestamp of the next cron occurrence, server-computed from
    * `shuttleSchedule` + `shuttleTz`. Present only for armed standing roles

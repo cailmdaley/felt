@@ -25,7 +25,8 @@ import { agentGroups } from '../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../forms/executionSurface.js'
-import { dispatchFailureMessage, isAgentCard, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { buildProjectDirPrompt } from './projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
@@ -628,6 +629,9 @@ export class FiberDetailModal {
   /** The card the panel is currently showing — every viewer action
    *  (open/close/scroll/zoom) keys its persistence off `card.uid`. */
   private card: KanbanCard | null = null
+  /** A start refused before the panel opened (a drag onto In flight) that
+   *  waits on a project directory: the composer opens with its prompt. */
+  private pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null = null
   /** The full sent-files trail (newest-first), kept current while the panel is
    *  open. The launcher renders from this. */
   private sentFiles: SentFile[] = []
@@ -2454,6 +2458,11 @@ export class FiberDetailModal {
     foot.append(sends)
 
     const directive = (): string => message.value.trim()
+    const pending = this.pendingStartPrompt
+    if (pending?.cardId === card.id) {
+      this.pendingStartPrompt = null
+      this.showStartPrompt(err, card, pending.body, directive, 'fresh', fresh)
+    }
     fresh.addEventListener('click', (e) => {
       e.stopPropagation()
       void this.runRequeue(card, directive(), 'fresh', fresh, err)
@@ -3465,10 +3474,20 @@ export class FiberDetailModal {
   }
 
   /**
+   * Open the panel on a card whose start was refused for want of a project
+   * directory, with the composer's inline prompt already showing.
+   */
+  openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
+    this.pendingStartPrompt = { cardId: card.id, body }
+    this.open(card)
+  }
+
+  /**
    * Manual requeue: one force dispatch ({@link postForceDispatch}) carrying the
    * message and the resume intent inline. The daemon resolves the session to
    * resume from the fiber's `shuttle.session_uuid`, falling back to fresh when
-   * there is nothing to resume.
+   * there is nothing to resume. `projectDir` is a directory the human confirmed
+   * in the prompt a refused start raised ({@link showStartPrompt}).
    */
   private async runRequeue(
     card: KanbanCard,
@@ -3476,6 +3495,7 @@ export class FiberDetailModal {
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
+    projectDir?: string,
   ): Promise<void> {
     // A "New session" over a LIVE worker is a CUT: the daemon stamps the
     // clean-exit marker, kills the running session, and starts fresh — which
@@ -3499,7 +3519,11 @@ export class FiberDetailModal {
 
     let res: Response
     try {
-      res = await postForceDispatch(this.shuttleBase, card, { user_message: directive, resume_mode: mode })
+      res = await postForceDispatch(this.shuttleBase, card, {
+        user_message: directive,
+        resume_mode: mode,
+        ...(projectDir ? { project_dir: projectDir } : {}),
+      })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
       this.showDispatchError(errorEl, btn, original, `Couldn't reach Shuttle: ${detail}`)
@@ -3522,12 +3546,42 @@ export class FiberDetailModal {
     }
 
     if (!res.ok) {
+      btn.disabled = false
+      btn.textContent = original
+      if (needsProjectDir(body)) {
+        this.showStartPrompt(errorEl, card, body, () => directive, mode, btn)
+        return
+      }
       const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`)
       this.showDispatchError(errorEl, btn, original, msg)
       return
     }
 
     this.finishRequeue(card, body.tmux_session)
+  }
+
+  /**
+   * Answer a start refused for want of a project directory in place: the
+   * owning host's reason and a directory field, prefilled from the nearest
+   * ancestor's `project_dir` when the card has one. Start retries the same
+   * launch (`mode`, the composer's message) with the confirmed directory.
+   */
+  private showStartPrompt(
+    errorEl: HTMLElement,
+    card: KanbanCard,
+    body: DispatchFailureBody,
+    directive: () => string,
+    mode: 'fresh' | 'previous',
+    btn: HTMLButtonElement,
+  ): void {
+    const prompt = buildProjectDirPrompt({
+      reason: dispatchFailureMessage(body, 'The start was refused.'),
+      host: body.host ?? card.shuttleHost,
+      suggestion: card.inheritedProjectDir,
+      onStart: (dir) => void this.runRequeue(card, directive(), mode, btn, errorEl, dir),
+    })
+    errorEl.replaceChildren(prompt)
+    errorEl.style.display = ''
   }
 
   /**

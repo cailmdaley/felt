@@ -31,6 +31,7 @@ import {
   type KanbanColumn,
 } from './KanbanRules.js';
 import type {
+  InheritedProjectDir,
   KanbanCard,
   KanbanOriginStaleness,
   KanbanResponse,
@@ -624,6 +625,7 @@ function toCard(
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
     shuttleProjectDir: f.shuttleProjectDir,
+    inheritedProjectDir: inheritedProjectDir(f, byId),
     nextLaunchAt: nextStandingLaunch(f, nowMs),
     storedHorizon: horizon.storedHorizon,
     effectiveHorizon: horizon.effectiveHorizon,
@@ -635,6 +637,29 @@ function toCard(
     // the start for a cycle that only names its end.
     cycleStart: isCycle ? dueCivilDay(f.start) ?? null : null,
   };
+}
+
+/**
+ * The nearest ancestor's `shuttle.project_dir` for a fiber whose block names
+ * none — the directory the board suggests when a start is refused for want of
+ * one. Ancestors are the fiber's id prefixes (`a/b/c` → `a/b` → `a`), read from
+ * the whole feed, and only an ancestor owned by the same host counts: a
+ * directory is a path on one machine. `undefined` when the fiber declares its
+ * own directory, names no host, or no ancestor qualifies.
+ */
+export function inheritedProjectDir(
+  fiber: Fiber,
+  byId: Map<string, Fiber>,
+): InheritedProjectDir | undefined {
+  if (fiber.shuttleProjectDir || !fiber.shuttleHost) return undefined;
+  for (let id = fiber.id; id.includes('/'); ) {
+    id = id.slice(0, id.lastIndexOf('/'));
+    const ancestor = byId.get(id);
+    if (ancestor?.shuttleProjectDir && ancestor.shuttleHost === fiber.shuttleHost) {
+      return { path: ancestor.shuttleProjectDir, from: id };
+    }
+  }
+  return undefined;
 }
 
 /**

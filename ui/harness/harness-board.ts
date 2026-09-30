@@ -172,6 +172,7 @@ const ULID = {
   shearSprint: '01KVBRCT7PR65YT85512Z689Y9',
   rentreePush: '01KVBRDV8QS76ZV96623Z790Z0',
   summerSchool: '01KVBREW9RT870W07734Z801Z1',
+  bareFollowUp: '01KVBRFX0SV981X18845Z912Z2',
 } as const
 
 /** The tmux session a Shuttle worker on this fiber runs in — the real
@@ -484,6 +485,10 @@ const APP_CONVERSATION = fiber({
   shuttle: shuttleBlock(),
 })
 
+/** The follow-up whose start the mock daemon refuses for want of a
+ *  project_dir (see the `/api/v1/dispatch` stub). */
+const BARE_FOLLOW_UP = 'work/spt3g_papers/bmodes-2d/run/new-mask'
+
 const MOCK_FEED = {
   host: 'local',
   generated_at: iso(0),
@@ -539,6 +544,22 @@ const MOCK_FEED = {
       }
     }),
     ...AWAITING.map(fiber),
+    // A closed follow-up a worker filed by hand under the null-test run, owned
+    // by the same remote host: its block names no project_dir, so starting it
+    // is refused until a human confirms one — the board suggests the run's.
+    {
+      ...fiber({
+        id: BARE_FOLLOW_UP,
+        uid: ULID.bareFollowUp,
+        name: 'Re-run the null tests on the new mask',
+        status: 'closed',
+        outcome: 'Filed by the null-test worker; never started.',
+        tags: ['spt3g'],
+        closed_at: iso(-2 * 3_600_000),
+        shuttle: { kind: 'oneshot', host: FOREIGN_HOST } as MockFiber['shuttle'],
+      }),
+      origin: FOREIGN_HOST,
+    },
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
     ...PINNED.map(fiber),
@@ -1398,6 +1419,20 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow
   // it with a benign OK so the offline harness doesn't error on a click.
+  // A start of the hand-filed follow-up: refused the way its owner's
+  // `shuttle reopen` refuses it, until the board sends a confirmed directory.
+  if (url.endsWith('/api/v1/dispatch') && body().fiber_id === BARE_FOLLOW_UP && !body().project_dir) {
+    return json({
+      dispatched: false,
+      reason: 'reopen_failed',
+      fiber_id: BARE_FOLLOW_UP,
+      host: FOREIGN_HOST,
+      needs: 'project_dir',
+      message:
+        `cannot arm ${BARE_FOLLOW_UP}: its shuttle: block has no project_dir ` +
+        `(set it as you arm it: shuttle reopen ${BARE_FOLLOW_UP} --project-dir <dir>)`,
+    }, 422)
+  }
   if (url.includes('/api/v1/')) return json({ ok: true })
 
   return realFetch(input as RequestInfo, init)

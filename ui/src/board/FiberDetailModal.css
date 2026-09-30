@@ -541,6 +541,33 @@
 }
 .kbn-ctl-compose .kbn-detail-error { margin-top: 6px; }
 
+/* A start refused for want of a project directory, answered in place: the
+   owning host's reason in the error ink, then the question in the page's. */
+.kbn-start-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kbn-start-prompt-reason { margin: 0; overflow-wrap: anywhere; }
+.kbn-start-prompt-label {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6F6556;
+}
+.kbn-start-prompt-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.kbn-start-prompt-input { flex: 1 1 auto; }
+.kbn-start-prompt-hint {
+  margin: 0;
+  font-style: italic;
+  color: #6F6556;
+}
+
 /* Resume — the same worker, carried on: sap green, kept apart from the
    verdigris of a verdict. */
 .kbn-ctl-resume {
