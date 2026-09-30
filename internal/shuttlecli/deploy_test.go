@@ -174,7 +174,7 @@ func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T
 	}
 }
 
-func TestDeployMigrationRerendersOnlySupervisorsThatPredateTmuxTmpdir(t *testing.T) {
+func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T) {
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
 	if err != nil {
@@ -192,12 +192,24 @@ func TestDeployMigrationRerendersOnlySupervisorsThatPredateTmuxTmpdir(t *testing
 	if !strings.Contains(current, "TMUX_TMPDIR") {
 		t.Fatalf("a current unit with an empty TMUX_TMPDIR must still name it, or deploy re-renders it forever:\n%s", current)
 	}
-	var older []string
-	for _, line := range strings.Split(current, "\n") {
-		if !strings.Contains(line, "TMUX_TMPDIR") {
-			older = append(older, line)
-		}
+	if !strings.Contains(current, "\nKillMode=process\n") {
+		t.Fatalf("a current unit must set KillMode=process, or deploy re-renders it forever:\n%s", current)
 	}
+	without := func(marker string) string {
+		var lines []string
+		for _, line := range strings.Split(current, "\n") {
+			if !strings.Contains(line, marker) {
+				lines = append(lines, line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
+		"shuttle-daemon.service": []byte(without("KillMode=process")),
+	}); len(calls) != 1 {
+		t.Fatalf("install calls = %v; want one for the unit without KillMode=process", calls)
+	}
+	older := strings.Split(without("TMUX_TMPDIR"), "\n")
 	tunnel := "[Service]\nExecStart=/usr/bin/ssh -N shuttle-remote\nEnvironment=SSH_AUTH_SOCK=/tmp/agent.sock\n"
 
 	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{

@@ -76,6 +76,11 @@ Environment="SHUTTLE_LOG=__LOG__"
 # The launchd analogs: KeepAlive + ThrottleInterval 10.
 Restart=always
 RestartSec=10
+# Stopping or restarting the unit signals only the daemon. A tmux server the
+# daemon starts lives in this unit's cgroup, and systemd's default
+# (control-group) would kill it — and every worker on it — with the daemon.
+# Workers belong to tmux and outlive any restart.
+KillMode=process
 
 # systemd does not create the parent directory for append:; daemon install
 # creates it. append: needs systemd >= 240.

@@ -127,16 +127,22 @@ SH
 
     for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
       [ -f "$candidate" ] || continue
-      # Re-render two kinds of daemon supervisor, keeping every option they
-      # carry: one from the pre-split shim, which bakes FELT_STORES (current
-      # templates never write it), and one from a template that predates
-      # TMUX_TMPDIR. Current templates mention TMUX_TMPDIR in their comments
-      # even when the value is empty and the entry is dropped, so a daemon
-      # supervisor without the word was never offered one; install captures it
-      # from the login shell. Tunnel supervisors carry no SHUTTLE_RELEASE.
+      # Re-render a daemon supervisor rendered by an older template, keeping
+      # every option it carries: the pre-split shim bakes FELT_STORES (current
+      # templates never write it); current templates mention TMUX_TMPDIR in
+      # their comments even when the value is empty and the entry is dropped,
+      # so a supervisor without the word was never offered one (install
+      # captures it from the login shell); and a current systemd unit sets
+      # KillMode=process. Tunnel supervisors carry no SHUTTLE_RELEASE.
       grep -q 'shuttle' "$candidate" || continue
       if ! grep -q 'FELT_STORES' "$candidate"; then
-        grep -q 'SHUTTLE_RELEASE' "$candidate" && ! grep -q 'TMUX_TMPDIR' "$candidate" || continue
+        grep -q 'SHUTTLE_RELEASE' "$candidate" || continue
+        stale=0
+        grep -q 'TMUX_TMPDIR' "$candidate" || stale=1
+        case "$candidate" in
+          *.service) grep -q '^KillMode=process' "$candidate" || stale=1 ;;
+        esac
+        [ "$stale" = 1 ] || continue
       fi
 
       case "$candidate" in

@@ -543,7 +543,10 @@ enable` and `restart`. `Restart=always` with `RestartSec=10` is the KeepAlive an
 the same reasons — a systemd user manager inherits almost nothing either. An
 empty `SSH_AUTH_SOCK` or `TMUX_TMPDIR` is dropped from the rendered unit rather
 than baked in as a dead value, since Linux has no canonical agent socket and an
-empty `TMUX_TMPDIR` means tmux's default.
+empty `TMUX_TMPDIR` means tmux's default. `KillMode=process` makes a stop or
+restart signal only the daemon: a tmux server the daemon started lives in the
+unit's cgroup, and systemd's default would kill it, and every worker on it,
+along with the daemon.
 
 It is a **user** unit: the daemon runs as you and wants no root.
 
