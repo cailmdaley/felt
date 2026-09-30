@@ -18,24 +18,41 @@ import (
 // with the other and git shows the file modified forever, blocking rebase and
 // sync.
 //
-// It reads names from two places: the filesystem, where a case-sensitive host
-// shows both twins, and the git index when the store is tracked, which is the
-// only place a macOS checkout still sees both. Companion files count like
-// fibers. Symlinked directories are not followed; each store they reach is
-// checked on its own.
+// Two sources are read, each on its own: the git index when the store is
+// tracked, which is the only place a macOS checkout still sees both twins, and
+// the filesystem, where a case-sensitive host shows both. A collision is two
+// spellings within one source; a tracked file merely spelled differently on
+// disk is one file, not two. Companion files count like fibers. Symlinked
+// directories are not followed; each store they reach is checked on its own.
 func CheckCaseCollisions(s *Storage) ([]CheckIssue, error) {
 	root, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("resolving .felt path: %w", err)
 	}
-	paths, err := storeEntryPaths(root)
+	onDisk, err := storeEntryPaths(root)
 	if err != nil {
 		return nil, err
 	}
-	paths = append(paths, gitIndexPaths(root)...)
 
-	// Every prefix of every path is an entry in some directory. Group them by
-	// lowercased full path; a group with two spellings is a collision.
+	seen := map[string]bool{}
+	var issues []CheckIssue
+	for _, source := range [][]string{gitIndexPaths(root), onDisk} {
+		for _, issue := range caseCollisions(source) {
+			if key := issue.FiberID + "\x00" + issue.Message; !seen[key] {
+				seen[key] = true
+				issues = append(issues, issue)
+			}
+		}
+	}
+	sortIssues(issues)
+	return issues, nil
+}
+
+// caseCollisions finds the entries of one listing of store-relative slash
+// paths that differ only by case. Every prefix of every path is an entry in
+// some directory; grouped by lowercased full path, a group with two spellings
+// is a collision.
+func caseCollisions(paths []string) []CheckIssue {
 	spellings := map[string]map[string]struct{}{}
 	for _, p := range paths {
 		parts := strings.Split(p, "/")
@@ -73,8 +90,7 @@ func CheckCaseCollisions(s *Storage) ([]CheckIssue, error) {
 			Message: fmt.Sprintf("case collision: %s differ only by case; a case-insensitive filesystem (macOS) keeps one, so every checkout there shows the other modified — remove or rename one", strings.Join(quoteAll(names), " and ")),
 		})
 	}
-	sortIssues(issues)
-	return issues, nil
+	return issues
 }
 
 // storeEntryPaths lists every file and directory under root as a slash path
@@ -104,22 +120,47 @@ func storeEntryPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-// gitIndexPaths lists the tracked files under root, relative to it. A store
-// outside any repository, or a missing git, yields nothing.
+// gitIndexPaths lists the tracked files under root, relative to it. It lists
+// the whole index from the repository's top level and keeps the paths under
+// root's prefix compared without case: on a case-insensitive filesystem the
+// root may be reached through a spelling (a symlink's text, say) that differs
+// from the one the index records, and git's own pathspec scoping would then
+// find nothing. A store outside any repository, or a missing git, yields
+// nothing.
 func gitIndexPaths(root string) []string {
-	cmd := exec.Command("git", "-c", "core.quotePath=false", "ls-files", "-z")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	topOut, err := gitOutput(root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil
+	}
+	top, err := filepath.EvalSymlinks(strings.TrimSpace(string(topOut)))
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(top, root)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return nil
+	}
+	prefix := ""
+	if rel != "." {
+		prefix = filepath.ToSlash(rel) + "/"
+	}
+	out, err := gitOutput(top, "-c", "core.quotePath=false", "ls-files", "-z")
 	if err != nil {
 		return nil
 	}
 	var paths []string
 	for _, p := range bytes.Split(out, []byte{0}) {
-		if len(p) > 0 {
-			paths = append(paths, string(p))
+		if len(p) > len(prefix) && strings.EqualFold(string(p[:len(prefix)]), prefix) {
+			paths = append(paths, string(p[len(prefix):]))
 		}
 	}
 	return paths
+}
+
+func gitOutput(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	return cmd.Output()
 }
 
 func quoteAll(names []string) []string {

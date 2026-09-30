@@ -70,3 +70,74 @@ func TestCheckCaseCollisionsInGitIndex(t *testing.T) {
 		t.Errorf("file collision message = %q", msg)
 	}
 }
+
+// A tracked file or directory spelled differently on disk than in the index is
+// one entry, not a collision: git status is clean on a case-insensitive
+// filesystem, and a case-sensitive one holds a single entry either way.
+func TestCheckCaseCollisionsIgnoresDiskRespelling(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	s := NewStorage(dir)
+	s.Init()
+	fiberDir := filepath.Join(s.root, "project", "review")
+	notesDir := filepath.Join(s.root, "Notes")
+	os.MkdirAll(fiberDir, 0o755)
+	os.MkdirAll(notesDir, 0o755)
+	os.WriteFile(filepath.Join(fiberDir, "review.md"), []byte("---\nname: review\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(fiberDir, "REPORT.txt"), []byte("report\n"), 0o644)
+	os.WriteFile(filepath.Join(notesDir, "notes.md"), []byte("---\nname: notes\n---\n"), 0o644)
+	gitIn(t, dir, "init", "-q")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "init")
+
+	if err := os.Rename(filepath.Join(fiberDir, "REPORT.txt"), filepath.Join(fiberDir, "report.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(notesDir, filepath.Join(s.root, "notes")); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := CheckCaseCollisions(s)
+	if err != nil {
+		t.Fatalf("CheckCaseCollisions: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("a respelled tracked entry was reported: %+v", issues)
+	}
+}
+
+// A view whose .felt symlinks into the repository through a spelling the index
+// does not record (project, on disk and in the link, for the index's Project)
+// still sees the index twins.
+func TestCheckCaseCollisionsThroughRespelledSymlink(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := t.TempDir()
+	fiberDir := filepath.Join(repo, ".felt", "Project", "review")
+	os.MkdirAll(fiberDir, 0o755)
+	os.WriteFile(filepath.Join(fiberDir, "review.md"), []byte("---\nname: review\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(fiberDir, "REPORT.md"), []byte("report\n"), 0o644)
+	gitIn(t, repo, "init", "-q")
+	gitIn(t, repo, "add", ".")
+	blob := gitIn(t, repo, "hash-object", "-w", filepath.Join(fiberDir, "REPORT.md"))
+	gitIn(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",.felt/Project/review/report.md")
+	if err := os.Rename(filepath.Join(repo, ".felt", "Project"), filepath.Join(repo, ".felt", "project")); err != nil {
+		t.Fatal(err)
+	}
+
+	view := t.TempDir()
+	if err := os.Symlink(filepath.Join(repo, ".felt", "project"), filepath.Join(view, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := CheckCaseCollisions(NewStorage(view))
+	if err != nil {
+		t.Fatalf("CheckCaseCollisions: %v", err)
+	}
+	if len(issues) != 1 || issues[0].FiberID != "review" || !strings.Contains(issues[0].Message, `"REPORT.md" and "report.md"`) {
+		t.Fatalf("issues = %+v, want the REPORT.md/report.md pair under review", issues)
+	}
+}
