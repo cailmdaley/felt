@@ -11,6 +11,57 @@ import (
 	"testing"
 )
 
+func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	currentPath := filepath.Join(home, ".local", "bin", "shuttle")
+	currentTarget := filepath.Join(root, "current", "shuttle")
+	writeShuttleVersion(t, currentTarget, "build-current")
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(currentTarget, currentPath); err != nil {
+		t.Fatal(err)
+	}
+	pathDir := filepath.Join(root, "path")
+	pathShuttle := filepath.Join(pathDir, "shuttle")
+	writeShuttleVersion(t, pathShuttle, "build-stale")
+	goBinShuttle := filepath.Join(home, "go", "bin", "shuttle")
+	writeShuttleVersion(t, goBinShuttle, "build-old")
+
+	receipt := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
+	if receipt.ResolvedPath != resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
+		t.Fatalf("running binary receipt = %+v", receipt)
+	}
+	if receipt.HookResolution != resolveBinaryPath(pathShuttle) || receipt.HooksWouldPickIt {
+		t.Fatalf("PATH should shadow the running binary in hook resolution: %+v", receipt)
+	}
+	if len(receipt.Executables) != 2 {
+		t.Fatalf("other executables = %+v, want PATH and ~/go/bin candidates", receipt.Executables)
+	}
+	for _, executable := range receipt.Executables {
+		if !executable.Shadowing || executable.Build == "" || executable.Error != "" {
+			t.Fatalf("different build was not flagged as shadowing: %+v", executable)
+		}
+	}
+
+	fallback := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, "", "")
+	if fallback.HookResolution != resolveBinaryPath(currentPath) || !fallback.HooksWouldPickIt {
+		t.Fatalf("hook fallback should select the running binary: %+v", fallback)
+	}
+}
+
+func writeShuttleVersion(t *testing.T, path, build string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = \"--version\" ] || exit 2\nprintf 'shuttle version %%s\\n' %q\n", build)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCombineDoctorReceiptStatusPriorities(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

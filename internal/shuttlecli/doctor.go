@@ -23,12 +23,13 @@ const (
 )
 
 type DoctorReceipt struct {
-	Schema     int                `json:"schema"`
-	Status     receiptStatus      `json:"status"`
-	Repair     string             `json:"repair,omitempty"`
-	Daemon     ReceiptDaemon      `json:"daemon"`
-	Host       ReceiptHost        `json:"host"`
-	TmuxServer *ReceiptTmuxServer `json:"tmux_server,omitempty"`
+	Schema        int                  `json:"schema"`
+	Status        receiptStatus        `json:"status"`
+	Repair        string               `json:"repair,omitempty"`
+	Daemon        ReceiptDaemon        `json:"daemon"`
+	Host          ReceiptHost          `json:"host"`
+	ShuttleBinary ReceiptShuttleBinary `json:"shuttle_binary"`
+	TmuxServer    *ReceiptTmuxServer   `json:"tmux_server,omitempty"`
 }
 
 type ReceiptDaemon struct {
@@ -73,8 +74,8 @@ type ReceiptTmuxServer struct {
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check Shuttle's daemon, host, and runtime health",
-	Long:  "Reports the running daemon contract and host configuration, including listener and socket evidence. Use felt setup receipt for plugin and hook installation health.",
+	Short: "Check Shuttle's binary, daemon, host, and runtime health",
+	Long:  "Reports the running shuttle binary and hook resolution alongside the daemon contract and host configuration, including listener and socket evidence. Use felt setup receipt for plugin installation health.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		receipt := collectDoctorReceipt()
@@ -84,6 +85,7 @@ var doctorCmd = &cobra.Command{
 			}
 		} else {
 			fmt.Printf("shuttle %s\ndaemon: %s\n", receipt.Status, receipt.Daemon.Status)
+			printShuttleBinaryReceipt(receipt.ShuttleBinary)
 			printHostReceipt(receipt.Host)
 			printTailnetDialReceipt(receipt.Daemon.TailnetDial)
 			if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
@@ -102,8 +104,29 @@ var doctorCmd = &cobra.Command{
 
 func init() { addShuttleCommand(doctorCmd) }
 
+func printShuttleBinaryReceipt(binary ReceiptShuttleBinary) {
+	fmt.Printf("shuttle binary: %s (build %s)\n", binary.ResolvedPath, binary.Build)
+	for _, executable := range binary.Executables {
+		label := "other"
+		if executable.Shadowing {
+			label = "shadowing"
+		}
+		if executable.Error != "" {
+			fmt.Printf("  %s shuttle: %s (%s)\n", label, executable.Path, executable.Error)
+			continue
+		}
+		fmt.Printf("  %s shuttle: %s (build %s)\n", label, executable.Path, executable.Build)
+	}
+	if binary.HookResolution == "" {
+		fmt.Println("hooks/shuttle-bin.sh: no shuttle executable found")
+		return
+	}
+	fmt.Printf("hooks/shuttle-bin.sh: selects %s (this binary: %t)\n", binary.HookResolution, binary.HooksWouldPickIt)
+}
+
 func collectDoctorReceipt() DoctorReceipt {
 	receipt := DoctorReceipt{Schema: 1}
+	receipt.ShuttleBinary = collectShuttleBinaryReceipt()
 	receipt.Daemon = collectDaemonReceipt()
 	receipt.Host = collectHostReceiptWhenReady(receipt.Daemon)
 	receipt.TmuxServer = collectTmuxServerReceipt()
