@@ -471,6 +471,7 @@ awaiting review).`,
 
 var (
 	reopenAsDraft     bool
+	reopenConcludeRun bool
 	reopenProjectDir  string
 	reopenMessage     string
 	reopenMessageFile string
@@ -559,7 +560,15 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			}
 		}
 		statusBefore := f.Status
-		if err := unclose(f, status); err != nil {
+		// --conclude-run is the daemon's forced start: a standing role it
+		// re-arms concludes the run it stood on in the same write, as the
+		// daemon's own re-arm does, so a start refused after this write leaves
+		// the role armed rather than looking like a dirty exit.
+		arm := unclose
+		if reopenConcludeRun && block.Kind == "standing" && status == felt.StatusActive {
+			arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
+		}
+		if err := arm(f, status); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {
@@ -1190,6 +1199,8 @@ func init() {
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
 	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
+	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing role's run (shuttle.runtime.handed_off_at = now) in the same write")
+	_ = reopenCmd.Flags().MarkHidden("conclude-run")
 	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
 	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
 	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")

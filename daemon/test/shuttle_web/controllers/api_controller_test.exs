@@ -368,16 +368,77 @@ defmodule ShuttleWeb.APIControllerTest do
 
     assert {200, %{"dispatched" => true}} = post_start(fiber_id, %{"project_dir" => raw})
 
-    # The CLI resolves the raw input; the one arming write carries the path it
-    # resolved, and the worker's cwd is read back from the block.
+    # The CLI checks the raw input, then the one arming write carries the same
+    # raw input for the CLI to expand the same way; the worker's cwd is read
+    # back from the block.
     assert [{"shuttle", ["resolve-dir", ^raw]}] = shuttle_calls("resolve-dir")
     assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
 
     assert Enum.drop_while(reopen_args, &(&1 != "reopen")) ==
-             ["reopen", fiber_id, "--project-dir", checkout, "--local"]
+             ["reopen", fiber_id, "--project-dir", raw, "--conclude-run", "--local"]
 
     assert shuttle_calls("set-agent") == []
     assert spawn_dir() == checkout
+  end
+
+  @tag :tmp_dir
+  test "the directory checked is the directory launched, even with a $ inside a variable's value",
+       %{tmp_dir: tmp_dir} do
+    fiber_id = "tests/api-start-dollar-value"
+    closed_bare_oneshot(fiber_id)
+    literal = Path.join(tmp_dir, "checkout$SHUTTLE_TEST_SUFFIX")
+    File.mkdir_p!(literal)
+    File.mkdir_p!(Path.join(tmp_dir, "checkoutother"))
+    System.put_env("SHUTTLE_TEST_SUFFIX", "other")
+    System.put_env("SHUTTLE_TEST_ROOT", literal)
+
+    on_exit(fn ->
+      System.delete_env("SHUTTLE_TEST_SUFFIX")
+      System.delete_env("SHUTTLE_TEST_ROOT")
+    end)
+
+    assert {200, %{"dispatched" => true}} =
+             post_start(fiber_id, %{"project_dir" => "$SHUTTLE_TEST_ROOT"})
+
+    assert MockRunner.fiber(fiber_id)["shuttle"]["project_dir"] == literal
+    assert spawn_dir() == literal
+  end
+
+  @tag :tmp_dir
+  test "a standing role armed with a confirmed directory stays armed when its spawn is refused",
+       %{tmp_dir: tmp_dir} do
+    fiber_id = "tests/api-standing-dirty-run"
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z"})
+    )
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      kind: standing
+      project_dir: ""
+      schedule:
+        expr: "0 9 * * 1-5"
+        tz: Europe/Paris
+      """,
+      "closed"
+    )
+
+    # A dirty scheduled run: dispatched, never handed off.
+    MockRunner.put_shuttle_fields(fiber_id, %{"dispatched_at" => "2026-09-29T09:00:00Z"})
+    MockRunner.set_wrapper_missing(true)
+
+    assert {422, %{"reason" => "wrapper_unresolved"}} =
+             post_start(fiber_id, %{"project_dir" => tmp_dir})
+
+    fiber = MockRunner.fiber(fiber_id)
+    assert fiber["status"] == "active"
+    handed_off = get_in(fiber, ["shuttle", "runtime", "handed_off_at"])
+    assert is_binary(handed_off)
+    assert handed_off > "2026-09-29T09:00:00Z"
+    refute spawned?()
   end
 
   test "a confirmed project_dir the host cannot use is asked for again, before any write" do

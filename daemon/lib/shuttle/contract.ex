@@ -22,7 +22,7 @@ defmodule Shuttle.Contract do
   # Bumped in lockstep with internal/shuttlecli/contract.go's ShuttleContractLevel.
   # Level 4: the daemon shells `shuttle accept|resume <fiber> --local`.
   # Level 6: the daemon shells `shuttle resolve-dir <path>` and
-  # `shuttle reopen <fiber> --project-dir <dir> --local`.
+  # `shuttle reopen <fiber> --project-dir <dir> --conclude-run --local`.
   @expected_level 6
 
   @doc "The daemon's expected `shuttle contract` level."

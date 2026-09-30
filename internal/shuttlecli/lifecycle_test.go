@@ -308,6 +308,62 @@ func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
 	}
 }
 
+// TestShuttleReopen_ConcludeRunStampsAStandingRole: the daemon's forced start
+// reopens with --conclude-run, which arms the role, saves the directory and
+// stamps handed_off_at in one write.
+func TestShuttleReopen_ConcludeRunStampsAStandingRole(t *testing.T) {
+	dir, storage := newStore(t)
+	tempered := false
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, &tempered)
+	work := t.TempDir()
+
+	before := time.Now().UTC()
+	if out, err := runCommand(t, dir, "reopen", "f", "--project-dir", work, "--conclude-run", "--local"); err != nil {
+		t.Fatalf("reopen --conclude-run: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "f")
+	b, _, err := shuttle.BlockOf(f)
+	if err != nil || f.Status != felt.StatusActive || b.ProjectDir != work {
+		t.Fatalf("after reopen: status=%q block=%#v err=%v", f.Status, b, err)
+	}
+	raw, _ := shuttleRuntimeMap(t, f)["handed_off_at"].(string)
+	handedOff, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || handedOff.Before(before) {
+		t.Fatalf("--conclude-run must stamp handed_off_at, got %q (%v)", raw, err)
+	}
+}
+
+// TestShuttleResolveDir_MatchesWhatReopenSaves: resolve-dir and
+// reopen --project-dir expand the same raw input to the same path, even when
+// a variable's value itself holds a "$".
+func TestShuttleResolveDir_MatchesWhatReopenSaves(t *testing.T) {
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "old", felt.StatusClosed, map[string]any{
+		"kind": "oneshot", "agent": "claude-sonnet",
+	}, nil)
+	literal := filepath.Join(t.TempDir(), "checkout$SUFFIX")
+	if err := os.MkdirAll(literal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SUFFIX", "other")
+	t.Setenv("SHUTTLE_ROOT", literal)
+
+	out, err := runCommand(t, dir, "resolve-dir", "$SHUTTLE_ROOT")
+	if err != nil || strings.TrimSpace(out) != literal {
+		t.Fatalf("resolve-dir: out=%q err=%v, want %q", out, err, literal)
+	}
+	if out, err := runCommand(t, dir, "reopen", "old", "--project-dir", "$SHUTTLE_ROOT", "--local"); err != nil {
+		t.Fatalf("reopen --project-dir: %v\n%s", err, out)
+	}
+	b, _, err := shuttle.BlockOf(mustRead(t, storage, "old"))
+	if err != nil || b.ProjectDir != literal {
+		t.Fatalf("reopen saved %q (err %v), resolve-dir said %q", b.ProjectDir, err, literal)
+	}
+}
+
 // TestShuttleResolveDir expands like --project-dir and writes nothing.
 func TestShuttleResolveDir(t *testing.T) {
 	dir, _ := newStore(t)

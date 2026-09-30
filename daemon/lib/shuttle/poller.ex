@@ -2525,11 +2525,12 @@ defmodule Shuttle.Poller do
   #          `--project-dir` does and writes nothing;
   #        * otherwise the block's `project_dir` must be declared and be a
   #          directory on this host;
-  #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir`,
-  #      which saves it and arms the fiber in one write. The worker dispatches
-  #      at once and stamps `dispatched_at`, which advances a standing role's
-  #      schedule baseline, so the run it stood on needs no separate
-  #      conclusion. Without one, a closed or parked
+  #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir
+  #      --conclude-run` — the same raw input `resolve-dir` checked, so the CLI
+  #      expands it to the same path — which saves it and arms the fiber in one
+  #      write, concluding a standing role's run as the re-arm below does, so a
+  #      start refused after the write leaves the role armed. Without one, a
+  #      closed or parked
   #      perennial role is re-armed (`LifecycleStore.rearm`) and a closed
   #      oneshot reopened (`shuttle reopen`).
   #
@@ -2585,8 +2586,8 @@ defmodule Shuttle.Poller do
     case Keyword.get(opts, :project_dir) do
       raw when is_binary(raw) ->
         case Shuttle.CLI.run(["resolve-dir", raw], runner: state.runner) do
-          {:ok, output} ->
-            {:ok, {:confirmed, String.trim(output)}}
+          {:ok, _resolved} ->
+            {:ok, {:confirmed, raw}}
 
           {:command_error, code, output} ->
             arm_refused(
@@ -2622,8 +2623,10 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp arm_start(state, fiber, {:confirmed, dir}),
-    do: cli_reopen(state, Map.get(fiber, "id", ""), ["--project-dir", dir])
+  # The raw input, not `resolve-dir`'s answer: the CLI expands it the same way
+  # both times, so the directory checked is the directory saved.
+  defp arm_start(state, fiber, {:confirmed, raw}),
+    do: cli_reopen(state, Map.get(fiber, "id", ""), ["--project-dir", raw, "--conclude-run"])
 
   defp arm_start(state, fiber, :declared) do
     fiber_id = Map.get(fiber, "id", "")

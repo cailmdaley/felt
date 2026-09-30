@@ -426,23 +426,31 @@ defmodule Shuttle.Test.FeltStoreRunner do
           do: {resolved <> "\n", 0},
           else: {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
 
-      # `shuttle reopen <id> [--project-dir <dir>] --local`: answers the result a
-      # test set, else succeeds, saving a given directory to the block.
+      # `shuttle reopen <id> [--project-dir <raw>] [--conclude-run] --local`:
+      # answers the result a test set; else, like the CLI, expands a given
+      # directory once, refuses one that is not a directory, and saves it as it
+      # arms the fiber — concluding a standing role's run only under
+      # --conclude-run.
       command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
         case Agent.get(__MODULE__, &Map.get(&1, :reopen_result)) do
           nil ->
             ["reopen", id | flags] = drop_cli_store(args)
 
             case Enum.drop_while(flags, &(&1 != "--project-dir")) do
-              ["--project-dir", dir | _] ->
-                put_shuttle_fields(id, %{"project_dir" => dir})
-                apply_lifecycle_write("reopen", id)
+              ["--project-dir", raw | _] ->
+                dir = raw |> expand_env() |> Path.expand()
+
+                if File.dir?(dir) do
+                  put_shuttle_fields(id, %{"project_dir" => dir})
+                  apply_lifecycle_write("reopen", id, "--conclude-run" in flags)
+                  {"", 0}
+                else
+                  {"project dir \"#{dir}\": stat #{dir}: no such file or directory\n", 1}
+                end
 
               _ ->
-                :ok
+                {"", 0}
             end
-
-            {"", 0}
 
           result ->
             result
@@ -637,12 +645,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
   defp drop_cli_store(["-C", _store | rest]), do: rest
   defp drop_cli_store(args), do: args
 
-  defp apply_lifecycle_write(verb, id) do
+  defp apply_lifecycle_write(verb, id, conclude? \\ true) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
     kind = get_in(fiber, ["shuttle", "kind"])
     status = if verb == "accept" and kind == "pinned", do: "open", else: "active"
 
-    if kind == "standing",
+    if conclude? and kind == "standing",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
     Agent.update(__MODULE__, fn state ->
