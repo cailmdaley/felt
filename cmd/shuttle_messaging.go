@@ -388,6 +388,12 @@ var harnessSessionEnv = []struct{ key, harness string }{
 // session's message to its parent. Pi sets AI_AGENT=pi on its own process, and
 // Claude Code overwrites AI_AGENT for its children, so AI_AGENT=pi alongside
 // PI_SESSION_ID means the innermost harness is Pi.
+//
+// The trade-off: Codex (checked at 0.159.1) sets no AI_AGENT, so a Codex
+// session started from Pi's bash tool carries the same environment as Pi
+// started from Codex, and is attributed to its Pi parent. Pi under a Codex
+// session (a confer worker) is the common nesting, so Pi wins; --from
+// overrides either.
 func harnessSessionFromEnv() (harness, id string) {
 	if strings.TrimSpace(os.Getenv("AI_AGENT")) == "pi" {
 		if value := strings.TrimSpace(os.Getenv("PI_SESSION_ID")); value != "" {

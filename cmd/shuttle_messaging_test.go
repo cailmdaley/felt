@@ -462,6 +462,7 @@ func TestResolveMessageSenderFromPiSession(t *testing.T) {
 		{"pi without marker", "", "", "", pi, "shuttle://sender/pi/" + pi},
 		{"pi nested in claude", "pi", "", "claude-parent", pi, "shuttle://sender/pi/" + pi},
 		{"pi nested in codex", "pi", "codex-parent", "", pi, "shuttle://sender/pi/" + pi},
+		{"codex nested in pi (pinned trade-off: indistinguishable from pi nested in codex)", "pi", "codex-child", "", pi, "shuttle://sender/pi/" + pi},
 		{"claude nested in pi", "claude-code_2-1-285_agent", "", "claude-child", pi, "shuttle://sender/claude/claude-child"},
 		{"pi marker without id", "pi", "", "claude-parent", "", "shuttle://sender/claude/claude-parent"},
 		{"outside a harness", "pi", "", "", "", "external"},
