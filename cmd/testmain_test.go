@@ -29,6 +29,7 @@ var fencedEnv = []string{
 	"FELT_STORES", "FELT_TRANSCRIPT_CACHE_DIR",
 	"TMUX", "CODEX_THREAD_ID", "CODEX_HOME", "CODEX_APP_TOOLS_PIPE_PATH",
 	"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_MESSAGING_SOCKET",
+	"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "PI_SESSION_ID", "AI_AGENT",
 }
 
 // TestMain fences the whole cmd unit-test binary away from the machine it runs

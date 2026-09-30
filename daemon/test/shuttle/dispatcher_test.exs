@@ -1787,6 +1787,26 @@ defmodule Shuttle.DispatcherTest do
     assert out == "/usr/bin:#{root}.prev/bin:/bin|unset"
   end
 
+  test "erts_scrub_block drops inherited harness session identity" do
+    probe =
+      Dispatcher.erts_scrub_block(nil) <>
+        ~s(printf '%s|%s|%s|%s|%s' "${AI_AGENT-unset}" "${PI_SESSION_ID-unset}" ) <>
+        ~s("${CLAUDE_CODE_SESSION_ID-unset}" "${CLAUDE_SESSION_ID-unset}" "${CODEX_THREAD_ID-unset}")
+
+    {out, 0} =
+      System.cmd("/bin/bash", ["-c", probe],
+        env: [
+          {"AI_AGENT", "pi"},
+          {"PI_SESSION_ID", "stale-pi"},
+          {"CLAUDE_CODE_SESSION_ID", "stale-claude"},
+          {"CLAUDE_SESSION_ID", "stale-claude"},
+          {"CODEX_THREAD_ID", "stale-codex"}
+        ]
+      )
+
+    assert out == "unset|unset|unset|unset|unset"
+  end
+
   test "erts_scrub_block leaves PATH alone with no release root" do
     refute Dispatcher.erts_scrub_block(nil) =~ "PATH="
     assert Dispatcher.erts_scrub_block(nil) =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"

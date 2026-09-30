@@ -1961,6 +1961,12 @@ defmodule Shuttle.Dispatcher do
   # `release_root` is nil when the daemon runs under Mix rather than as a
   # release: `:code.root_dir/0` is then the host's own OTP install, the very
   # toolchain workers should keep, so PATH is left alone.
+  #
+  # Harness identity goes too. A tmux server started from inside a Claude, Codex
+  # or Pi session keeps that session's AI_AGENT and *_SESSION_ID / THREAD_ID in
+  # its global environment, and every pane inherits it; `felt shuttle message`
+  # and `send-file` read those to attribute the sender, so a worker would speak
+  # as the stale session. Each harness sets its own on launch.
   @doc false
   # Shared with `Shuttle.SessionResume`: any shell the daemon starts in tmux
   # must drop the release's Erlang first.
@@ -1984,6 +1990,7 @@ defmodule Shuttle.Dispatcher do
     #{path_filter}unset RELEASE_ROOT RELEASE_SYS_CONFIG RELEASE_TMP RELEASE_VSN RELEASE_NAME \\
           RELEASE_NODE RELEASE_COOKIE RELEASE_MODE RELEASE_BOOT_SCRIPT \\
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
+    unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID
     """
   end
 

@@ -339,13 +339,17 @@ the existing owner-served file surface.
 ### `felt shuttle send-file <path> [path...]`
 
 Publish readable regular files to the Shuttle Board and the session/fiber sent-files
-trail. Both Claude and Codex use this command. Paths are resolved to absolute
+trail. Claude, Codex and Pi sessions use this command. Paths are resolved to absolute
 paths on the owning host; files must remain there for subsequent viewing.
 The command validates the whole batch before recording one `file_sent` event.
 It fails visibly if attribution or recording is unavailable.
 
-Session identity comes from `--session`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`,
-or the current tmux session's local ledger. A worker's tmux name identifies its
+Session identity comes from `--session`; else `PI_SESSION_ID` when
+`AI_AGENT=pi` (Pi's own marker, so Pi nested under another harness is
+attributed to Pi); else the first set of `CODEX_THREAD_ID`,
+`CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `PI_SESSION_ID`; else the
+current tmux session's local ledger. `felt shuttle message` derives its
+automatic `--from` the same way. A worker's tmux name identifies its
 fiber. Outside a harness, pass `--session <native-session-id>`.
 The event stream uses the same configuration as `felt hook event`; recording
 works offline and confirms registration, not a completed client download.

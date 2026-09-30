@@ -107,15 +107,19 @@ func TestSendFilesLedgerAndExplicitSession(t *testing.T) {
 }
 
 func TestSendFilesIdentityPrecedence(t *testing.T) {
-	for _, tc := range []struct{ name, explicit, codex, claude, want string }{
-		{"explicit", "chosen", "codex", "claude", "chosen"},
-		{"codex", "", "codex", "claude", "codex"},
-		{"claude", "", "", "claude", "claude"},
+	for _, tc := range []struct{ name, explicit, codex, claude, pi, aiAgent, want string }{
+		{"explicit", "chosen", "codex", "claude", "pi", "pi", "chosen"},
+		{"codex", "", "codex", "claude", "", "", "codex"},
+		{"claude", "", "", "claude", "", "", "claude"},
+		{"pi", "", "", "", "pi", "pi", "pi"},
+		{"pi nested in claude", "", "", "claude", "pi", "pi", "pi"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sink, artifact := sendFileTestEnv(t)
 			t.Setenv("CODEX_THREAD_ID", tc.codex)
 			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
+			t.Setenv("PI_SESSION_ID", tc.pi)
+			t.Setenv("AI_AGENT", tc.aiAgent)
 			cwd, _ := os.Getwd()
 			relative, err := filepath.Rel(cwd, artifact)
 			if err != nil {
