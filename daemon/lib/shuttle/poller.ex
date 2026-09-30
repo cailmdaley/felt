@@ -1774,9 +1774,11 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Re-read one fiber from disk and replace its document-cache entry (or evict it
-  # if the fiber no longer resolves). Backs `refresh_document/2`, the shared
-  # post-mutation seam. Keyed identically to the poll's cache rebuild
+  # Re-read one fiber through Shuttle and replace its document-cache entry (or
+  # evict it if the fiber no longer resolves). The resolved facet must survive
+  # post-mutation refreshes; separate board-body reads continue through felt.
+  # Backs `refresh_document/2`, the shared post-mutation seam. Keyed identically
+  # to the poll's cache rebuild
   # (`Shuttle.Poller.DocumentCache.refresh/3`) — uid when present, else id — and
   # any prior entries for this fiber id under a different key are dropped first
   # so a re-key can't leave a duplicate card. The mtime is carried so the next
@@ -1793,7 +1795,7 @@ defmodule Shuttle.Poller do
         state.document_cache
       )
 
-    case Shuttle.FiberDocuments.get(fiber_id, felt_stores: state.felt_stores) do
+    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: state.felt_stores) do
       {:ok, %{fibers: [entry | _]}} ->
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)

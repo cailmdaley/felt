@@ -2,10 +2,11 @@ defmodule Shuttle.FiberDocuments do
   @moduledoc """
   Daemon-local document reads for clients that need the owning host's fibers.
 
-  Shuttle owns runtime state, but felt remains the document reader. This module
-  shells out to `felt ls` for each configured store and returns the raw felt JSON
-  entry plus enough path metadata for remote clients to render and mutate cards
-  from a single JSON read, with no fiber-tree WebSocket needed.
+  felt remains the document and content reader; Shuttle adds resolved runtime
+  facets to its own `show` and `ls` surfaces. This module uses felt for direct
+  content reads and Shuttle for poller refreshes that must retain resolved
+  metadata, returning enough path information for remote clients to render and
+  mutate cards from a single JSON read.
   """
 
   alias Shuttle.FeltStores
@@ -171,75 +172,78 @@ defmodule Shuttle.FiberDocuments do
   store. This is the per-fiber dual of `list/1`: the board UI resolves a
   remote fiber's content/owner (kanban card → vellum view) through this
   instead of fetching every fiber and linear-scanning, collapsing a ~3.5MB
-  cross-tunnel transfer to one fiber.
+  cross-tunnel transfer to one fiber. `get/2` reads through felt; the poller
+  uses `get_shuttle/2` when a refresh must preserve Shuttle's resolved facets.
 
   Two-tier lookup:
 
-    * **Fast path** — `felt show <id> -j` per store. For a fiber physically
-      rooted in the store the canonical id equals felt's traversal id, so the
-      direct show resolves in milliseconds.
+    * **Fast path** — `show <id> -j` per store, through the selected CLI. For a
+      fiber physically rooted in the store the canonical id equals felt's
+      traversal id, so the direct show resolves in milliseconds.
     * **Scan fallback** — for a symlink-traversed fiber (loom's `.felt/shapepipe`
       → a separate project store) the canonical id drops the store prefix, so
-      `felt show <canonical-id>` misses. We then reuse the `list/1` machinery to
-      enumerate the store and match on the canonical id. This costs a full
-      `felt ls` daemon-side but still returns a single fiber over the wire, and
-      only fires for the handful of symlinked-out projects.
+      `show <canonical-id>` misses. We enumerate the store with the same CLI and
+      match on the canonical id. This costs a full list daemon-side but still
+      returns a single fiber over the wire, and only fires for the handful of
+      symlinked-out projects.
 
   Returns the same `{:ok, %{host, felt_stores, fibers: […]}}` envelope as
   `list/1` with zero or one fiber, so the client reuses the same response parser.
-  A missing fiber is `{:ok, …, fibers: []}` (not an error); a felt failure
+  A missing fiber is `{:ok, …, fibers: []}` (not an error); a CLI failure
   during the scan fallback surfaces as `{:error, errors}`.
   """
   @spec get(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def get(id, opts \\ []) do
-    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
-    with_body? = Keyword.get(opts, :with_body, false)
+  def get(id, opts \\ []), do: get_with_cli(id, "felt", opts)
 
-    case fast_lookup(stores, id, with_body?) do
+  @doc "Resolve one fiber through Shuttle so runtime-resolved fields survive a document refresh."
+  @spec get_shuttle(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def get_shuttle(id, opts \\ []),
+    do: get_with_cli(id, "shuttle", Keyword.delete(opts, :with_body))
+
+  defp get_with_cli(id, cli, opts) do
+    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
+    with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
+
+    case fast_lookup(stores, id, with_body?, cli) do
       {:ok, entry} -> {:ok, envelope(stores, [entry])}
-      :miss -> scan_lookup(stores, id, with_body?)
+      :miss -> scan_lookup(stores, id, with_body?, cli)
     end
   end
 
-  # Direct `felt show` per store; first store that resolves the id wins.
-  defp fast_lookup(stores, id, with_body?) do
+  # Direct `show` per store; first store that resolves the id wins.
+  defp fast_lookup(stores, id, with_body?, cli) do
     Enum.find_value(stores, :miss, fn store ->
-      case show_store(store, id, with_body?) do
+      case show_store(store, id, with_body?, cli) do
         {:ok, [entry | _]} -> {:ok, entry}
         _ -> nil
       end
     end)
   end
 
-  defp show_store(store, id, with_body?) do
-    # `felt show -j` emits the full fiber JSON — always `id` and `path`, plus
-    # `body` whenever the fiber has one. Do NOT append `--body`: that selector
+  defp show_store(store, id, with_body?, cli) do
+    # `show -j` emits the full fiber JSON — always `id` and `path`, plus `body`
+    # whenever the fiber has one. Do NOT append `--body` for felt: that selector
     # switches felt to a minimal `{body, body_start_line}` shape with NO `id`, so
-    # `entry_for/2` (which keys on `id`) drops it, `fast_lookup/3` misses on every
-    # store, and `get/2` falls all the way through to the whole-store
-    # `scan_lookup` — a `felt ls --body` over every configured store, which under
-    # poller churn cost the body-read endpoint 6-10s while felt itself answered in
-    # ~10ms. The body is already in hand here: keep it for the content reader,
-    # drop it (a no-op when the fiber has none) for the metadata path so the
-    # response still matches the list endpoint's body=… contract.
+    # `entry_for/2` drops it and `fast_lookup/4` misses. The body is already in
+    # hand here: keep it for felt content reads, drop it for metadata reads so
+    # the response matches the list endpoint's body=… contract.
     #
-    # Same stderr discipline as list_store: never fold stderr into stdout — felt
-    # prints "no fiber found matching …" (and parse warnings) to stderr while
-    # emitting JSON on stdout. A missing fiber exits non-zero with empty stdout,
-    # which we treat as "not in this store" and fall through to the next.
+    # Same stderr discipline as list_store: never fold stderr into stdout. A
+    # missing fiber exits non-zero with empty stdout, which we treat as "not in
+    # this store" and fall through to the next.
     #
-    # A runner `:timeout` also lands in `:miss` — deliberately: `get/2` then
-    # falls through to `scan_lookup/3`, whose per-store error reports the wedged
+    # A runner `:timeout` also lands in `:miss` — deliberately: get then falls
+    # through to the whole-store scan, whose per-store error reports the wedged
     # store as `{:error, errors}` (5xx-shaped) unless another store positively
     # resolves the fiber first. A timeout is never reported as "fiber absent".
-    case runner().cmd("felt", ["show", id, "-j"], cd: store) do
+    case runner().cmd(cli, ["show", id, "-j"], cd: store) do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, %{} = fiber} ->
             fiber = if with_body?, do: fiber, else: Map.delete(fiber, "body")
-            # `felt show` does not yet carry the native `report_path` field, so
-            # the single-fiber path stats for report existence. The high-volume
-            # list path (:field) never stats.
+            # The single-fiber path may not carry the native `report_path`
+            # field, so it stats for report existence. The high-volume list path
+            # (:field) never stats.
             {:ok, entry_for(store, fiber, :stat)}
 
           _ ->
@@ -254,8 +258,8 @@ defmodule Shuttle.FiberDocuments do
   # Enumerate each store and match the requested canonical id. Reuses list_store
   # so the entry shape (canonical id, store-relative path, report_path) is
   # byte-identical to the list endpoint.
-  defp scan_lookup(stores, id, with_body?) do
-    results = Enum.map(stores, &list_store(&1, with_body?, :all))
+  defp scan_lookup(stores, id, with_body?, cli) do
+    results = Enum.map(stores, &list_store(&1, with_body?, :all, cli))
     errors = Enum.flat_map(results, &store_errors/1)
 
     match =
@@ -273,23 +277,22 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp list_store(store, with_body?, mode) do
-    args = list_args(with_body?)
+  defp list_store(store, with_body?, mode, cli \\ "felt") do
+    args = if cli == "shuttle", do: ["ls", "-s", "all", "-j"], else: list_args(with_body?)
 
-    # Do NOT fold stderr into stdout: felt prints `warning: failed to parse …`
-    # for stray non-fiber `.md` files (SPEC.md, README.md) to stderr while still
-    # emitting valid JSON on stdout and exiting 0. Capturing stderr would prepend
-    # those warnings to the JSON and break Jason.decode for the whole store —
-    # 500ing the entire /fibers endpoint. Felt's warnings land in the daemon log
-    # instead; only stdout is parsed.
+    # Do NOT fold stderr into stdout: the CLIs can report warnings for stray
+    # non-fiber `.md` files while still emitting valid JSON on stdout. Capturing
+    # stderr would prepend those warnings to the JSON and break Jason.decode for
+    # the whole store — 500ing the entire /fibers endpoint. Warnings land in the
+    # daemon log instead; only stdout is parsed.
     #
-    # Runs through the bounded runner (not bare System.cmd) so a felt wedged on
+    # Runs through the bounded runner (not bare System.cmd) so a CLI wedged on
     # an overloaded node times out into the ordinary per-store error path —
     # `status: :timeout` in the error map names it — instead of hanging the
     # request.
-    case runner().cmd("felt", args, cd: store) do
+    case runner().cmd(cli, args, cd: store) do
       {output, 0} ->
-        decode_store(store, output, mode)
+        decode_store(store, output, mode, cli)
 
       {output, status} ->
         {:error, %{felt_store: store, status: status, error: String.trim(output)}}
@@ -340,17 +343,16 @@ defmodule Shuttle.FiberDocuments do
 
   defp list_args(false), do: ["ls", "-s", "all", "-j"]
 
-  defp decode_store(store, output, mode) do
+  defp decode_store(store, output, mode, cli) do
     with {:ok, decoded} when is_list(decoded) <- Jason.decode(output) do
       rows = filter_rows(decoded, mode)
-      # The direct `felt ls` reader (content/search/graph + `body=true`) is not
-      # the Lustre-scale owner-feed hot path, so it keeps the `:stat` report
-      # fallback for felt binaries that do not yet carry the native field. The
-      # owner feed builds entries through `entries_for_fiber/2` (:field), which
-      # never stats.
+      # The direct list reader (content/search/graph + `body=true`) is not the
+      # Lustre-scale owner-feed hot path, so it keeps the `:stat` report fallback
+      # for CLI surfaces that do not carry the native field. The owner feed
+      # builds entries through `entries_for_fiber/2` (:field), which never stats.
       {:ok, rows |> Enum.flat_map(&entry_for(store, &1, :stat))}
     else
-      {:ok, _} -> {:error, %{felt_store: store, error: "felt ls returned non-list JSON"}}
+      {:ok, _} -> {:error, %{felt_store: store, error: "#{cli} ls returned non-list JSON"}}
       {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}
     end
   end

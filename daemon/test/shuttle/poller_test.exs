@@ -497,6 +497,36 @@ defmodule Shuttle.PollerTest do
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
   end
 
+  test "post-mutation document refresh keeps Shuttle's resolved agent" do
+    id = "tests/refreshed-agent"
+    uid = "01JZ00000000000000000000CC"
+    MockRunner.set_fiber(id, make_fiber(id, %{"uid" => uid}))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-opus")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_refresh_resolved_agent,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    assert wait_until(fn ->
+             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
+           end)
+
+    assert {:ok, before} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: %{"id" => ^uid} = fiber}] = before.fibers
+    assert get_in(fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-opus"
+
+    assert :ok = Poller.refresh_document(poller, id)
+
+    assert {:ok, refreshed} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: %{"id" => ^uid} = refreshed_fiber}] = refreshed.fibers
+    assert get_in(refreshed_fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-opus"
+  end
+
   # The incident this guards: on an overloaded login node one failed `shuttle ls`
   # used to blank every fiber on the host for the tick — mass document-cache
   # eviction, cards flapping in and out. A failed listing is "world unknown", not
