@@ -2,12 +2,14 @@
  * Felt extension for pi — the pi adapter over the same binary hooks the
  * Claude Code/Codex plugin drives (claude-plugin/hooks/).
  *
- * The `felt` binary owns routing, mailboxes, and records. This extension connects
- * Pi lifecycle events and native messaging to that shared surface. It also
- * enforces skill activation where Pi's reads of SKILL.md are visible.
+ * `felt` owns session context and fiber stamps; `shuttle` owns activity,
+ * commit, and mailbox hooks. This extension connects Pi lifecycle events and
+ * native messaging to those binaries and enforces skill activation where Pi's
+ * reads of SKILL.md are visible.
  *
- * Graceful degradation: a missing or old felt binary loses the context
- * injection and the ledger entries, never the session. Activity hooks are
+ * A missing binary only disables its own integration: missing `felt` loses
+ * context and fiber stamps, while missing `shuttle` loses activity, commit,
+ * and mailbox hooks. Neither fails the session. Activity hooks are
  * fire-and-forget; context hooks are awaited with a bounded timeout. Native
  * messaging reports acceptance or refusal without failing the receiving session.
  */
@@ -21,43 +23,56 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 // ---------------------------------------------------------------------------
-// felt binary resolution — mirrors claude-plugin/hooks/felt-bin.sh
+// Binary resolution mirrors the felt package's GUI-safe lookup order.
 // ---------------------------------------------------------------------------
 
-const feltCandidates = (): string[] => [
-	process.env.FELT_BIN,
-	path.join(os.homedir(), ".local", "bin", "felt"),
-	"/opt/homebrew/bin/felt",
-	"/usr/local/bin/felt",
-].filter((c): c is string => !!c);
+type HookOwner = "felt" | "shuttle";
 
 let feltBin: string | null | undefined;
+let shuttleBin: string | null | undefined;
 
-function resolveFelt(): string | null {
-	if (feltBin !== undefined) return feltBin;
-	feltBin = feltCandidates().find((c) => {
+function resolveBinary(owner: HookOwner): string | null {
+	const cached = owner === "felt" ? feltBin : shuttleBin;
+	if (cached !== undefined) return cached;
+
+	const binary = owner;
+	const override = process.env[owner === "felt" ? "FELT_BIN" : "SHUTTLE_BIN"];
+	const candidates = [
+		override,
+		path.join(os.homedir(), ".local", "bin", binary),
+		`/opt/homebrew/bin/${binary}`,
+		`/usr/local/bin/${binary}`,
+	].filter((candidate): candidate is string => !!candidate);
+	let resolved = candidates.find((candidate) => {
 		try {
-			fs.accessSync(c, fs.constants.X_OK);
+			fs.accessSync(candidate, fs.constants.X_OK);
 			return true;
 		} catch {
 			return false;
 		}
 	}) ?? null;
-	if (!feltBin) {
+
+	if (!resolved) {
 		// PATH probe last: command -v semantics without spawning a shell.
 		for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-			const candidate = path.join(dir, "felt");
+			const candidate = path.join(dir, binary);
 			try {
 				fs.accessSync(candidate, fs.constants.X_OK);
-				feltBin = candidate;
+				resolved = candidate;
 				break;
 			} catch {
 				/* keep looking */
 			}
 		}
 	}
-	return feltBin;
+
+	if (owner === "felt") feltBin = resolved;
+	else shuttleBin = resolved;
+	return resolved;
 }
+
+const resolveFelt = (): string | null => resolveBinary("felt");
+const resolveShuttle = (): string | null => resolveBinary("shuttle");
 
 /** Fire-and-forget hook spawn. The binary's contract is print-nothing/
  * exit-0-on-every-path; ours is never-fail-the-tool-call. Generous timeout:
@@ -65,8 +80,8 @@ function resolveFelt(): string | null {
  * work can sit in I/O wait well past a desktop's notion of slow — nibi's
  * measured ~6s warm, worse cold — and a killed hook is a lost activity
  * line, not a recovered failure. */
-function runHook(args: string[], payload: unknown): void {
-	const bin = resolveFelt();
+function runHook(owner: HookOwner, args: string[], payload: unknown): void {
+	const bin = resolveBinary(owner);
 	if (!bin) return;
 	try {
 		const child = execFile(bin, ["hook", ...args], { timeout: 30_000 }, () => {});
@@ -77,8 +92,8 @@ function runHook(args: string[], payload: unknown): void {
 	}
 }
 
-function runHookOutput(args: string[], payload: unknown): Promise<string> {
-	const bin = resolveFelt();
+function runHookOutput(owner: HookOwner, args: string[], payload: unknown): Promise<string> {
+	const bin = resolveBinary(owner);
 	if (!bin) return Promise.resolve("");
 	return new Promise((resolve) => {
 		let settled = false;
@@ -172,7 +187,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 	}
 
 	function emit(event: string, extra: Record<string, unknown>, ctx: any): void {
-		runHook(["event"], {
+		runHook("shuttle", ["event"], {
 			hook_event_name: event,
 			harness: "pi",
 			session_id: sessionId(ctx),
@@ -338,7 +353,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 		const sid = nativeSessionId;
 		const cwd = nativeCwd ?? ctx.cwd;
 		const transcript = nativeTranscript ?? safeSessionFile(ctx);
-		await runHookOutput(["event"], {
+		await runHookOutput("shuttle", ["event"], {
 			hook_event_name: "SessionEnd",
 			harness: "pi",
 			session_id: sid,
@@ -361,7 +376,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 	}
 
 	async function offerMailbox(ctx: any, prompt: string): Promise<string> {
-		const raw = await runHookOutput(["event"], {
+		const raw = await runHookOutput("shuttle", ["event"], {
 			hook_event_name: "UserPromptSubmit",
 			harness: "pi",
 			session_id: sessionId(ctx),
@@ -396,17 +411,14 @@ export default function feltExtension(pi: ExtensionAPI) {
 		// Fresh session identity resets both one-shot states; the flag file from
 		// a previous session id simply ages out of tmpdir.
 		injectedSessionId = null;
-		if (!resolveFelt()) {
-			if (!warnedBinaryMissing && ctx.hasUI) {
-				warnedBinaryMissing = true;
-				ctx.ui.notify(
-					"felt extension: `felt` binary not found — session context and activity stream disabled",
-					"warning",
-				);
-			}
-			return;
+		if (!resolveFelt() && !warnedBinaryMissing && ctx.hasUI) {
+			warnedBinaryMissing = true;
+			ctx.ui.notify(
+				"felt extension: `felt` binary not found — session context and fiber stamping disabled",
+				"warning",
+			);
 		}
-		await startNative(ctx);
+		if (resolveShuttle()) await startNative(ctx);
 		emit("SessionStart", {}, ctx);
 	});
 
@@ -414,7 +426,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 		const sid = sessionId(ctx);
 		// Some Pi startup paths report an anonymous session before the first
 		// prompt. Register lazily once the stable session identity is available.
-		if (!nativeServer && sid !== "anonymous" && resolveFelt()) {
+		if (!nativeServer && sid !== "anonymous" && resolveShuttle()) {
 			await startNative(ctx);
 			if (nativeServer) emit("SessionStart", {}, ctx);
 		}
@@ -496,6 +508,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 
 		if (event.toolName.toLowerCase() === "bash") {
 			runHook(
+				"shuttle",
 				["commit"],
 				{
 					hook_event_name: "PostToolUse",
@@ -511,6 +524,7 @@ export default function feltExtension(pi: ExtensionAPI) {
 
 		if (["edit", "write", "multiedit"].includes(event.toolName.toLowerCase())) {
 			runHook(
+				"felt",
 				["posttool"],
 				{
 					tool_name: event.toolName,

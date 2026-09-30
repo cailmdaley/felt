@@ -6,91 +6,124 @@ hooks="$repo_root/claude-plugin/hooks"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/felt-plugin-hooks.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-minimal_env=(env -i HOME="$tmp_dir/home" PATH="/usr/bin:/bin" FELT_BIN=)
+bare_path="$tmp_dir/bare-path"
+mkdir -p "$bare_path"
+ln -s "$(command -v dirname)" "$bare_path/dirname"
+ln -s "$(command -v cat)" "$bare_path/cat"
+base_env=(env -i PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
 
-# ── phase 1: felt absent ─────────────────────────────────────────────────
-#
-# The sandbox suppresses PATH and HOME, but felt-bin.sh also probes two
-# absolute paths no environment can hide. On a host with felt installed at
-# either one, the loop finds it and this phase would silently exercise the
-# real-felt branch while still matching a bare hookEventName grep. So name the
-# two cases and assert the one that is actually reachable.
-if [ -x /opt/homebrew/bin/felt ] || [ -x /usr/local/bin/felt ]; then
-  felt_absent=0
-  echo "note: felt is installed at an absolute probe path — phase 1 covers the felt-present branch here"
-else
-  felt_absent=1
-fi
-
-session_output="$("${minimal_env[@]}" "$hooks/session.sh" </dev/null)"
-grep -q '"hookEventName": "SessionStart"' <<<"$session_output"
-if [ "$felt_absent" = 1 ]; then
-  # The fallback envelope, identified by its own sentence rather than by the
-  # envelope shape both branches share.
-  grep -q 'missing or too old' <<<"$session_output"
-fi
-
-for hook in event.sh remind.sh touch.sh commit.sh; do
-  "${minimal_env[@]}" "$hooks/$hook" </dev/null
-done
-
-# ── phase 2: felt present ────────────────────────────────────────────────
-#
-# $HOME/.local/bin is first in the candidate list, so this fake wins over any
-# real felt the host happens to have — the felt-present branch is covered on
-# purpose, not by accident of the runner's install layout.
-mkdir -p "$tmp_dir/home/.local/bin"
-cat > "$tmp_dir/home/.local/bin/felt" <<'EOF'
+write_fake() {
+  local binary="$1"
+  local args_file="$2"
+  mkdir -p "$(dirname "$binary")"
+  cat > "$binary" <<EOF
 #!/bin/bash
-if [ "${1:-}" = "hook" ] && [ "${2:-}" = "--help" ]; then
+if [ "\${1:-}" = "hook" ] && [ "\${2:-}" = "--help" ]; then
   exit 0
 fi
-printf '%s\n' "$*" > "${FELT_TEST_ARGS:?}"
-cat
+printf '%s\\n' "\$*" >> "$args_file"
+/bin/cat >/dev/null
 EOF
-chmod +x "$tmp_dir/home/.local/bin/felt"
+  chmod +x "$binary"
+}
 
-felt_present_env=(env -i HOME="$tmp_dir/home" PATH="/usr/bin:/bin" FELT_BIN=)
+has_system_binary() {
+  local binary="$1"
+  [ -x "/opt/homebrew/bin/$binary" ] || [ -x "/usr/local/bin/$binary" ]
+}
 
-args_file="$tmp_dir/args"
-printf '%s\n' '{}' | "${felt_present_env[@]}" FELT_TEST_ARGS="$args_file" "$hooks/event.sh"
-grep -q '^hook event$' "$args_file"
+assert_arg() {
+  local file="$1"
+  local expected="$2"
+  grep -Fxq -- "$expected" "$file" || {
+    echo "expected '$expected' in $file" >&2
+    return 1
+  }
+}
 
-# session.sh takes one of two felt-present routes depending on whether jq is
-# reachable — `felt session | jq` or `felt hook session`. Either way it must
-# reach the binary and must NOT fall through to the missing-felt envelope.
-session_args="$tmp_dir/session-args"
-session_present="$("${felt_present_env[@]}" FELT_TEST_ARGS="$session_args" \
-  "$hooks/session.sh" </dev/null)"
-grep -qE '^(hook )?session$' "$session_args"
-! grep -q 'missing or too old' <<<"$session_present"
+# ── shuttle present, felt absent ─────────────────────────────────────────
+# This isolates each missing-binary behavior; a machine-wide Felt install at
+# one of the fixed absolute probes makes the felt-absent branch unreachable.
+shuttle_home="$tmp_dir/home-shuttle-only"
+shuttle_args="$tmp_dir/shuttle-only-args"
+write_fake "$shuttle_home/.local/bin/shuttle" "$shuttle_args"
+shuttle_only_env=(env -i HOME="$shuttle_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
+printf '%s\n' '{}' | "${shuttle_only_env[@]}" "$hooks/event.sh"
+printf '%s\n' '{}' | "${shuttle_only_env[@]}" "$hooks/commit.sh"
+assert_arg "$shuttle_args" 'hook event'
+assert_arg "$shuttle_args" 'hook commit'
 
-# ── phase 3: felt AND jq present ─────────────────────────────────────────
-#
-# The route above runs without jq on PATH, so it always took the `elif` — and
-# that branch ends in `exec`, which cannot fall through no matter what follows
-# it. The jq route is the one that has to return to the script, and for months
-# it did: every healthy session printed the real context and then the
-# "missing or too old" apology underneath it. So stub jq (the envelope's shape
-# is not what is under test here) and assert ONE envelope, not merely the
-# absence of the fallback.
-mkdir -p "$tmp_dir/bin"
-cat > "$tmp_dir/bin/jq" <<'EOF'
+if ! has_system_binary felt; then
+  session_output="$("${base_env[@]}" HOME="$shuttle_home" "$hooks/session.sh" </dev/null)"
+  grep -q 'missing or too old' <<<"$session_output"
+  for hook in remind.sh touch.sh; do
+    output="$("${base_env[@]}" HOME="$shuttle_home" "$hooks/$hook" </dev/null 2>&1)"
+    [ -z "$output" ]
+  done
+else
+  echo "note: felt absence is unreachable because a fixed system probe has felt; its independent absent case is skipped"
+fi
+
+# ── felt present, shuttle absent ─────────────────────────────────────────
+# A machine-wide Shuttle install likewise makes this absence unreachable.
+felt_home="$tmp_dir/home-felt-only"
+felt_args="$tmp_dir/felt-only-args"
+write_fake "$felt_home/.local/bin/felt" "$felt_args"
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/session.sh" >/dev/null
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/remind.sh"
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/touch.sh"
+assert_arg "$felt_args" 'hook session'
+assert_arg "$felt_args" 'hook pretool'
+assert_arg "$felt_args" 'hook posttool'
+
+if ! has_system_binary shuttle; then
+  for hook in event.sh commit.sh; do
+    output="$("${base_env[@]}" HOME="$felt_home" "$hooks/$hook" </dev/null 2>&1)"
+    [ -z "$output" ]
+  done
+else
+  echo "note: shuttle absence is unreachable because a fixed system probe has shuttle; its independent absent case is skipped"
+fi
+
+# ── both binaries present ─────────────────────────────────────────────────
+both_home="$tmp_dir/home-both"
+felt_args="$tmp_dir/both-felt-args"
+shuttle_args="$tmp_dir/both-shuttle-args"
+write_fake "$both_home/.local/bin/felt" "$felt_args"
+write_fake "$both_home/.local/bin/shuttle" "$shuttle_args"
+both_env=(env -i HOME="$both_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
+
+printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh"
+printf '%s\n' '{}' | "${both_env[@]}" "$hooks/commit.sh"
+printf '%s\n' '{}' | "${both_env[@]}" "$hooks/remind.sh"
+printf '%s\n' '{}' | "${both_env[@]}" "$hooks/touch.sh"
+
+# With no jq available, session.sh uses Felt's hook adapter.
+session_output="$("${both_env[@]}" "$hooks/session.sh" </dev/null)"
+! grep -q 'missing or too old' <<<"$session_output"
+assert_arg "$felt_args" 'hook session'
+assert_arg "$felt_args" 'hook pretool'
+assert_arg "$felt_args" 'hook posttool'
+assert_arg "$shuttle_args" 'hook event'
+assert_arg "$shuttle_args" 'hook commit'
+! grep -Eq '^hook (event|commit)$' "$felt_args"
+! grep -Eq '^hook (pretool|posttool|session)$' "$shuttle_args"
+
+# With jq available, SessionStart takes the felt session-context route and
+# emits exactly one harness envelope.
+jq_path="$tmp_dir/jq-path"
+mkdir -p "$jq_path"
+ln -s "$(command -v dirname)" "$jq_path/dirname"
+cat > "$jq_path/jq" <<'EOF'
 #!/bin/bash
-cat >/dev/null
+/bin/cat >/dev/null
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"stub"}}\n'
 EOF
-chmod +x "$tmp_dir/bin/jq"
+chmod +x "$jq_path/jq"
+jq_output="$(env -i HOME="$both_home" PATH="$jq_path:$bare_path" FELT_BIN= SHUTTLE_BIN= "$hooks/session.sh" </dev/null)"
+[ "$(grep -c hookEventName <<<"$jq_output")" = 1 ]
+assert_arg "$felt_args" 'session'
 
-jq_env=(env -i HOME="$tmp_dir/home" PATH="$tmp_dir/bin:/usr/bin:/bin" FELT_BIN=)
-session_jq="$("${jq_env[@]}" FELT_TEST_ARGS="$tmp_dir/session-args-jq" \
-  "$hooks/session.sh" </dev/null)"
-if [ "$(grep -c hookEventName <<<"$session_jq")" != 1 ]; then
-  echo "session.sh emitted more than one SessionStart envelope:" >&2
-  printf '%s\n' "$session_jq" >&2
-  exit 1
-fi
-! grep -q 'missing or too old' <<<"$session_jq"
-
+# Hook registrations stay in the combined plugin; only the binary owner changes.
 grep -q '\${CLAUDE_PLUGIN_ROOT:-\$PLUGIN_ROOT}' "$hooks/hooks.json"
 echo "plugin hook tests passed"
