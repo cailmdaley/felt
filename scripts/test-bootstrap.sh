@@ -20,7 +20,7 @@ cat > "$WORK/bin/uname" <<'STUB'
 #!/bin/bash
 printf 'Darwin\n'
 STUB
-for tool in mix tmux felt node npm; do
+for tool in mix tmux felt shuttle node npm; do
   cat > "$WORK/bin/$tool" <<'STUB'
 #!/bin/bash
 exit 0
@@ -35,7 +35,7 @@ if [[ " $* " == *' ui '* && "${BOOTSTRAP_TEST_FAIL_UI:-0}" == 1 ]]; then
 fi
 STUB
 chmod +x "$WORK/bin/uname" "$WORK/bin/mix" "$WORK/bin/tmux" \
-  "$WORK/bin/felt" "$WORK/bin/make" "$WORK/node-bin/"*
+  "$WORK/bin/felt" "$WORK/bin/shuttle" "$WORK/bin/make" "$WORK/node-bin/"*
 
 login_path() {
   printf 'export PATH=%q\n' "$1" > "$WORK/home/.bash_profile"
@@ -55,6 +55,15 @@ grep -F "node ($WORK/node-bin/node)" "$WORK/output" >/dev/null \
 [ ! -e "$WORK/calls" ] && [ ! -e "$WORK/home/.shuttle" ] \
   || fail 'dry run changed installation state'
 printf 'PASS: login shell finds Node absent from inherited PATH\n'
+
+login_path "$WORK/bin:$WORK/node-bin"
+mv "$WORK/bin/shuttle" "$WORK/shuttle-stub"
+if run_bootstrap --dry-run; then fail 'missing shuttle allowed dry-run'; fi
+grep -F 'shuttle — MISSING' "$WORK/output" >/dev/null || fail 'missing shuttle not diagnosed'
+[ ! -e "$WORK/calls" ] && [ ! -e "$WORK/home/.shuttle" ] \
+  || fail 'missing shuttle reached installation writes'
+mv "$WORK/shuttle-stub" "$WORK/bin/shuttle"
+printf 'PASS: --skip-cli requires both felt and shuttle\n'
 
 login_path "$WORK/bin"
 if run_bootstrap; then fail 'missing Node allowed installation'; fi
