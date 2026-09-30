@@ -27,7 +27,7 @@ defmodule Shuttle.CommitLedger do
 
   ## The writer is the hook
 
-  Unlike the session ledger, the daemon does not write this file — `felt hook
+  Unlike the session ledger, the daemon does not write this file — `shuttle hook
   commit` does (internal/shuttlecli/hook_commit.go, wired as the plugin's `commit.sh`), on
   `PostToolUse` for a Bash call that ran a `git commit`. The writer emits the
   fields below in this order, and this module is the contract they answer to:

@@ -469,7 +469,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		switch {
 		case !socket.Exists:
 			mismatch(fmt.Sprintf("configured Tailscale LocalAPI socket %s is unavailable: %s", socket.Path, socket.Error),
-				"start tailscaled with the configured LocalAPI socket path and rerun `felt setup receipt`")
+				"start tailscaled with the configured LocalAPI socket path and rerun `shuttle doctor`")
 		case socket.Symlink || !socket.Socket:
 			mismatch(fmt.Sprintf("configured Tailscale LocalAPI path %s is not a Unix socket", socket.Path),
 				"set defaults.tailscale_socket to the actual tailscaled Unix socket path")
@@ -480,7 +480,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 			}
 			repair := "run tailscaled with its LocalAPI socket under a directory owned by the daemon uid and inaccessible to other users"
 			if socket.PrivateDir != "" {
-				repair = fmt.Sprintf("protect the Tailscale LocalAPI socket path under %s from other users, then rerun `felt setup receipt`", socket.PrivateDir)
+				repair = fmt.Sprintf("protect the Tailscale LocalAPI socket path under %s from other users, then rerun `shuttle doctor`", socket.PrivateDir)
 			}
 			mismatch(problem, repair)
 		}
