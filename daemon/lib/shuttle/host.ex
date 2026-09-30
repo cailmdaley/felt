@@ -2,7 +2,7 @@ defmodule Shuttle.Host do
   @moduledoc """
   What kind of machine this daemon runs on, and where it therefore listens.
 
-  Source: `~/.config/felt/host.json` (or `$FELT_HOST_FILE`) →
+  Source: `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`) →
 
       {"class": "single-user", "listen": "tcp://127.0.0.1:4000"}
 
@@ -24,7 +24,7 @@ defmodule Shuttle.Host do
   operator tried to name it would pick the permissive answer for the one host
   that said it needed the strict one.
 
-  The Go CLI (`felt shuttle host`) reads the same file and applies the same
+  The Go CLI (`shuttle host`) reads the same file and applies the same
   listen rule; `test/fixtures/host/` is read by both suites so the two cannot
   drift.
 
@@ -73,8 +73,8 @@ defmodule Shuttle.Host do
           listen_source: :env | :file | :class_default
         }
 
-  @config_env "FELT_HOST_FILE"
-  @default_config_path "~/.config/felt/host.json"
+  @config_env "SHUTTLE_HOST_CONFIG_FILE"
+  @default_config_path "~/.config/shuttle/host.json"
   @max_unix_path_bytes 100
   @default_port 4000
 
@@ -84,7 +84,7 @@ defmodule Shuttle.Host do
     "exposed" => :exposed
   }
 
-  @doc "Path host.json is read from: `$FELT_HOST_FILE`, else `~/.config/felt/host.json`."
+  @doc "Path host.json is read from: `$SHUTTLE_HOST_CONFIG_FILE`, else `~/.config/shuttle/host.json`."
   @spec config_path() :: String.t()
   def config_path do
     case System.get_env(@config_env) do

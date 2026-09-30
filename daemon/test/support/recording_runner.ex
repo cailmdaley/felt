@@ -1,9 +1,8 @@
 defmodule Shuttle.Test.RecordingRunner do
   @moduledoc """
-  Records every felt invocation and returns success — lets the writer tests
-  assert the daemon shells the right `felt shuttle mark-runtime` command
-  (Stage 5: felt owns the runtime nesting; the daemon's contract is the verb it
-  issues) without running felt.
+  Records every CLI invocation and returns success — lets the writer tests
+  assert the daemon shells the right `shuttle mark-runtime` command without
+  executing either CLI.
 
   Globally named, and `start/0` resets an already-running Agent, so use it only
   from NON-async tests.

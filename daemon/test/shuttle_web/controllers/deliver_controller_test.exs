@@ -14,13 +14,13 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # Answers `felt shuttle message` with the scripted receipt (accepted unless
+  # Answers `shuttle message` with the scripted receipt (accepted unless
   # `:deliver_test_receipt` names a status, detail and exit code) and records
   # the frame; every other command is the store mock's.
   defmodule MessageRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("felt", ["shuttle", "message", "--local", "--json", "--request-json"], opts) do
+    def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
       request = opts[:input] |> String.trim() |> Jason.decode!()
       send(Application.fetch_env!(:shuttle, :deliver_test_pid), {:message, request})
 

@@ -24,16 +24,16 @@ config :shuttle,
   tailnet_dial_test_cacerts_enabled: true
 
 # Test daemon identity. Application start freezes SHUTTLE_HOST when it is set
-# and asks `felt shuttle host --json` otherwise, so pinning it keeps the suite
-# off the real felt and stable across machines. Nothing is pinned at
+# and asks `shuttle host --json` otherwise, so pinning it keeps the suite
+# independent of the operator's host config and stable across machines. Nothing is pinned at
 # the Application config layer, where a value would ride into any artifact
 # built with MIX_ENV=test. Tests that exercise host-pin matching pass explicit
 # `own_host_id:` opts to `Poller.start_link`.
 System.put_env("SHUTTLE_HOST", "test-host")
 
-# Fence the test run away from the developer's real ~/.shuttle/host. felt's
-# hostname tier SEEDS that file, and the identity tests clear SHUTTLE_HOST —
-# so without a pinned path a real felt reached from any concurrent test could
+# Fence the test run away from the developer's real ~/.shuttle/host. Shuttle's
+# hostname tier seeds that file, and the identity tests clear SHUTTLE_HOST —
+# so without a pinned path, a Shuttle process from any concurrent test could
 # rewrite this machine's canonical identity. This only has to be somewhere
 # harmless.
 System.put_env(
@@ -46,12 +46,12 @@ config :shuttle, ShuttleWeb.Endpoint,
   secret_key_base: "testsecretkeybasetestsecretkeybasetestsecretkeybasetestsecretkeybase",
   server: false
 
-# Keep the developer's ~/.config/felt/host.json and SHUTTLE_LISTEN out of the
+# Keep the developer's ~/.config/shuttle/host.json and SHUTTLE_LISTEN out of the
 # suite: an absent file is a single-user host, so the test endpoint resolves
-# to tcp://127.0.0.1:4002 on every machine. Host tests point FELT_HOST_FILE at
+# to tcp://127.0.0.1:4002 on every machine. Host tests point SHUTTLE_HOST_CONFIG_FILE at
 # their own files.
 System.put_env(
-  "FELT_HOST_FILE",
+  "SHUTTLE_HOST_CONFIG_FILE",
   Path.join(
     System.tmp_dir!(),
     "shuttle-test-host-json-#{System.unique_integer([:positive])}.json"

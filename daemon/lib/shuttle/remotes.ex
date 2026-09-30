@@ -4,7 +4,7 @@ defmodule Shuttle.Remotes do
   how to reach each one — a locally-forwarded SSH tunnel port, or an outright
   URL on a mesh VPN.
 
-  Source: `~/.config/felt/remotes.json` (or `$FELT_REMOTES_FILE`) →
+  Source: `~/.config/shuttle/remotes.json` (or `$SHUTTLE_REMOTES_FILE`) →
 
       {
         "version": 1,
@@ -34,7 +34,7 @@ defmodule Shuttle.Remotes do
   A bare JSON array of entries is also accepted. Absent, unreadable, or
   malformed file → `[]`: a hub with no fleet file is a correct local-only
   daemon, and a daemon that refuses to boot over a typo in an operator file is
-  worse than one that serves its own board. `felt shuttle remotes list` is the
+  worse than one that serves its own board. `shuttle remotes list` is the
   validator that reports the typo.
 
   Deliberately a **sibling** of `Shuttle.FeltStores` (`stores.json`) and
@@ -46,7 +46,7 @@ defmodule Shuttle.Remotes do
 
   The Go CLI (`cmd/shuttle_remotes.go`) reads the same file with the same
   defaults rather than shelling the daemon — the same one-way dependency
-  `FELT_STORES` keeps. `test/fixtures/remotes/*.json` is read by both suites so
+  `SHUTTLE_STORES` keeps. `test/fixtures/remotes/*.json` is read by both suites so
   the two readers cannot drift.
 
   ## Resolution
@@ -57,7 +57,7 @@ defmodule Shuttle.Remotes do
     2. the file
     3. `[]`
 
-  There is deliberately no compact `FELT_REMOTES` env form: a remote carries
+  There is deliberately no compact `SHUTTLE_REMOTES` env form: a remote carries
   structured fields (tunnel options, per-remote timeouts) no comma-separated
   grammar can express, so a second grammar in two languages would always be a
   lossy subset.
@@ -65,8 +65,8 @@ defmodule Shuttle.Remotes do
 
   alias Shuttle.Remote
 
-  @config_env "FELT_REMOTES_FILE"
-  @default_config_path "~/.config/felt/remotes.json"
+  @config_env "SHUTTLE_REMOTES_FILE"
+  @default_config_path "~/.config/shuttle/remotes.json"
 
   # Reverse-DNS prefix for the tunnel launchd labels. Matches the daemon's own
   # `io.shuttle.daemon` agent. The Go tunnel installer reads the same key, so
@@ -133,7 +133,7 @@ defmodule Shuttle.Remotes do
   Source: the document-level `defaults.https_proxy` (`"http://localhost:1055"`,
   or a bare `"localhost:1055"`). **`$HTTPS_PROXY` is deliberately not read.** A
   supervised daemon's environment is invisible to the operator who has to debug
-  it, while the fleet file is one place `felt shuttle remotes list` already
+  it, while the fleet file is one place `shuttle remotes list` already
   validates — so the proxy lives where the fleet does, and there is exactly one
   answer to "why can't this hub reach that node".
 
@@ -159,7 +159,7 @@ defmodule Shuttle.Remotes do
   configured socket value is invalid.
 
   `$TS_SOCKET` is deliberately not read: the fleet file is the operator-visible
-  source of truth shared by the daemon and `felt shuttle remotes list`.
+  source of truth shared by the daemon and `shuttle remotes list`.
   """
   @spec tailscale_socket_configured?() :: boolean()
   def tailscale_socket_configured? do
@@ -187,7 +187,7 @@ defmodule Shuttle.Remotes do
 
   @doc """
   A cheap change token for the fleet file — `{mtime, size}`, or `nil` when the
-  file is absent. The registries stat this each tick so `felt shuttle remotes
+  file is absent. The registries stat this each tick so `shuttle remotes
   add` takes effect without a daemon bounce. Size is folded in because POSIX
   mtime has 1-second granularity and an edit-and-save inside the same second is
   ordinary.
@@ -304,7 +304,7 @@ defmodule Shuttle.Remotes do
   #
   # Anything unusable is nil rather than a raise: a daemon that refuses to boot
   # over a typo in an operator file is worse than one that serves its own
-  # board, and `felt shuttle remotes list` is the validator that fails loud
+  # board, and `shuttle remotes list` is the validator that fails loud
   # with the reason.
   #
   # `daemon/test/shuttle/remotes_test.exs` and `cmd/shuttle_remotes_test.go`

@@ -33,7 +33,7 @@ defmodule Shuttle.EventStream do
 
   ## Rotation continues every projection
 
-  `felt hook event` rotates by renaming the live file to `events.jsonl.1` and
+  `shuttle hook event` rotates by renaming the live file to `events.jsonl.1` and
   starting a fresh one. The stream recognizes that by the live path's inode
   moving, not by a shrink. When the rotated file carries the inode it was
   following, it ingests that file's bytes past the old offset (the lines

@@ -63,7 +63,7 @@ defmodule Shuttle.SessionResumeTest do
         {"tmux", ["has-session" | _]} ->
           if Agent.get(__MODULE__, & &1.running), do: {"", 0}, else: {"can't find session", 1}
 
-        {"felt", ["shuttle", "agents", "resolve", id, "--json"]} ->
+        {"shuttle", ["agents", "resolve", id, "--json"]} ->
           case @agents[id] do
             nil -> {"unknown agent #{id}", 1}
             agent -> {Jason.encode!(agent), 0}

@@ -53,11 +53,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -95,11 +95,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -141,11 +141,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -160,7 +160,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     refute File.exists?(args_file)
   end
 
-  test "routes a collaboration replacement through felt shuttle assign without changing status" do
+  test "routes a collaboration replacement through shuttle assign without changing status" do
     root =
       System.tmp_dir!()
       |> Path.join("shuttle-felt-edit-collaboration-#{System.unique_integer([:positive])}")
@@ -175,11 +175,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -200,7 +200,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
 
     assert conn.status == 200
     assert args = File.read!(args_file)
-    assert args =~ "-C\n#{store}\nshuttle\nassign\ntests/remote-tags\n--json-assignment\n"
+    assert args =~ "-C\n#{store}\nassign\ntests/remote-tags\n--json-assignment\n"
     assert args =~ "\"collaborator\""
     refute args =~ "--status"
   end
@@ -222,11 +222,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -241,7 +241,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
 
     assert conn.status == 200
 
-    assert ["-C", ^store, "shuttle", "assign", "tests/remote-tags", "--json-assignment", encoded] =
+    assert ["-C", ^store, "assign", "tests/remote-tags", "--json-assignment", encoded] =
              File.read!(args_file) |> String.split("\n", trim: true)
 
     assert Jason.decode!(encoded) == collaboration
@@ -278,11 +278,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -410,7 +410,8 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     File.mkdir_p!(bin_dir)
 
     bin = Path.join(bin_dir, "felt")
-    args_file = Path.join(root, "felt-args")
+    shuttle_bin = Path.join(bin_dir, "shuttle")
+    args_file = Path.join(root, "cli-args")
 
     # `FeltStores.resolve_fiber` asks felt for the fiber's carried path
     # (`felt show -j`), so the fake answers that with felt-shaped JSON (id +
@@ -436,6 +437,14 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     """)
 
     File.chmod!(bin, 0o755)
+
+    File.write!(shuttle_bin, """
+    #!/bin/sh
+    printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
+    printf 'ok\\n'
+    """)
+
+    File.chmod!(shuttle_bin, 0o755)
 
     old_path = System.get_env("PATH")
     old_args_file = System.get_env("FELT_ARGS_FILE")
@@ -469,11 +478,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -526,11 +535,11 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", store)
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 

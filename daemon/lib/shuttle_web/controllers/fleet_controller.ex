@@ -10,7 +10,7 @@ defmodule ShuttleWeb.FleetController do
   Three facts about a remote come from three different places, and keeping them
   apart is the point of this endpoint:
 
-    * **Configured** — `felt shuttle remotes list --json`, which reports the
+    * **Configured** — `shuttle remotes list --json`, which reports the
       file *normalized*: defaults applied, `url` derived from `port`, the
       tunnel manager resolved against this host's supervisor. That is what the
       daemon and the CLI actually act on, and it differs from the file's own
@@ -31,7 +31,7 @@ defmodule ShuttleWeb.FleetController do
   ## Writing
 
   **Nothing ever re-encodes the fleet file from a model.** `POST /fleet/remotes`
-  shells `felt shuttle remotes add|rm` rather than composing JSON here, so the
+  shells `shuttle remotes add|rm` rather than composing JSON here, so the
   grammar the two readers have to agree on is never implemented a third time.
   (The other way the file can change is `POST /api/v1/config/remotes`, which
   writes the exact bytes a human typed and validates them by running that same
@@ -43,7 +43,7 @@ defmodule ShuttleWeb.FleetController do
   of those drops it. The structured form is for the common shape; the file is
   for everything else, and `Shuttle.ConfigFiles` serves it.
 
-  `POST /tunnels` shells `felt shuttle tunnels install` for the same reason,
+  `POST /tunnels` shells `shuttle tunnels install` for the same reason,
   and its `preview` action is the CLI's own `--dry-run`: it reports what would
   be written and which orphaned jobs would be pruned, touching nothing.
 
@@ -57,7 +57,7 @@ defmodule ShuttleWeb.FleetController do
   import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, relay_json: 2]
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
-  alias Shuttle.{ConfigFiles, Felt, OriginRouter, Poller, Remotes}
+  alias Shuttle.{CLI, ConfigFiles, OriginRouter, Poller, Remotes}
 
   @registry_timeout_ms 1_500
   @cli_timeout_ms 60_000
@@ -115,15 +115,15 @@ defmodule ShuttleWeb.FleetController do
     end
   end
 
-  # `felt shuttle remotes list --json` is the validator as well as the reader,
+  # `shuttle remotes list --json` is the validator as well as the reader,
   # so a non-zero exit here IS the diagnostic — relayed verbatim rather than
   # summarized, exactly as a refused config write is.
   defp normalized_fleet do
-    case Felt.run(["shuttle", "remotes", "list", "--json"], timeout_ms: 15_000) do
+    case CLI.run(["remotes", "list", "--json"], timeout_ms: 15_000) do
       {:ok, ""} -> {:ok, %{"remotes" => []}}
       {:ok, output} -> decode_fleet(output)
       {:command_error, _status, output} -> {:error, String.trim(output)}
-      {:error, reason} -> {:error, "could not run felt: #{reason}"}
+      {:error, reason} -> {:error, "could not run shuttle: #{reason}"}
     end
   end
 
@@ -133,7 +133,7 @@ defmodule ShuttleWeb.FleetController do
       # A host with no fleet file prints nothing but an empty document; a bare
       # array is the file's other accepted shape and reaches us the same way.
       {:ok, list} when is_list(list) -> {:ok, %{"remotes" => list}}
-      _ -> {:error, "felt shuttle remotes list returned something that is not a fleet document"}
+      _ -> {:error, "shuttle remotes list returned something that is not a fleet document"}
     end
   end
 
@@ -151,7 +151,7 @@ defmodule ShuttleWeb.FleetController do
   # Only a MANAGED tunnel has a job, so only a managed tunnel gets a label. A
   # `manager: "none"` entry is reached directly — naming a launchd label for it
   # would invite the reader to look for a job that correctly does not exist.
-  # `felt shuttle remotes list` normalizes the manager but leaves a generated
+  # `shuttle remotes list` normalizes the manager but leaves a generated
   # label implicit, so it is derived here the way the installer derives it.
   defp tunnel_label(entry) do
     tunnel = Map.get(entry, "tunnel") || %{}
@@ -231,9 +231,9 @@ defmodule ShuttleWeb.FleetController do
 
       :local ->
         if truthy(Map.get(params, "remove")) do
-          run_cli(conn, ["shuttle", "remotes", "rm", name])
+          run_cli(conn, ["remotes", "rm", name])
         else
-          run_cli(conn, ["shuttle", "remotes", "add", name] ++ add_flags(params))
+          run_cli(conn, ["remotes", "add", name] ++ add_flags(params))
         end
 
       {:error, {:unknown_origin, origin}} ->
@@ -311,10 +311,10 @@ defmodule ShuttleWeb.FleetController do
 
         case Map.get(params, "action", "preview") do
           "preview" ->
-            run_cli(conn, ["shuttle", "tunnels", "install"] ++ named ++ ["--dry-run"])
+            run_cli(conn, ["tunnels", "install"] ++ named ++ ["--dry-run"])
 
           "install" ->
-            run_cli(conn, ["shuttle", "tunnels", "install"] ++ named)
+            run_cli(conn, ["tunnels", "install"] ++ named)
 
           other ->
             bad_request(conn, "unknown action #{inspect(other)} (known: preview, install)")
@@ -324,33 +324,33 @@ defmodule ShuttleWeb.FleetController do
 
   # ── Shared ───────────────────────────────────────────────────────────────
 
-  # felt's own stdout is the answer. These verbs report what they did in lines
+  # shuttle's own stdout is the answer. These verbs report what they did in lines
   # a human reads ("would install hub-a -> …"), and there is nothing this
   # controller could add by restating them as a structure.
   defp run_cli(conn, args) do
-    case Felt.run(args, timeout_ms: @cli_timeout_ms) do
+    case CLI.run(args, timeout_ms: @cli_timeout_ms) do
       {:ok, output} ->
         json(conn, %{ok: true, host: Poller.own_host_id(), output: String.trim(output)})
 
-      # Same distinction the config plane makes: felt refusing the request is a
+      # Same distinction the config plane makes: shuttle refusing the request is a
       # 400, felt not being runnable is a 503. A wedged CLI reported as "your
       # request was bad" sends someone to fix a correct one; and a timeout is
       # never evidence of absence — `remotes add` may well have landed.
       {:command_error, :timeout, _output} ->
         unavailable(
           conn,
-          "felt did not answer within #{div(@cli_timeout_ms, 1000)}s on this host. " <>
+          "shuttle did not answer within #{div(@cli_timeout_ms, 1000)}s on this host. " <>
             "It may or may not have finished — re-read the fleet before retrying."
         )
 
       {:command_error, 127, _output} ->
-        unavailable(conn, "felt is not on this daemon's PATH, so it cannot run that verb.")
+        unavailable(conn, "shuttle is not on this daemon's PATH, so it cannot run that verb.")
 
       {:command_error, _status, output} ->
         bad_request(conn, String.trim(output))
 
       {:error, reason} ->
-        unavailable(conn, "could not run felt: #{reason}")
+        unavailable(conn, "could not run shuttle: #{reason}")
     end
   end
 

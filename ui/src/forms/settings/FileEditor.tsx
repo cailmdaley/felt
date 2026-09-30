@@ -7,7 +7,7 @@
  * configuration we built a widget for". Three things it is the only way to do:
  *
  *   - reach a key no CLI flag can set (`remotes.json` carries `auth`,
- *     `ssh_flags`, `tunnel.label` and per-entry timeouts; `felt shuttle remotes
+ *     `ssh_flags`, `tunnel.label` and per-entry timeouts; `shuttle remotes
  *     add` has a flag for none of them),
  *   - see what is actually on disk, rather than a model's opinion of it,
  *   - edit a file this page has no form for at all, from a phone.

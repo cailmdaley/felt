@@ -5,15 +5,15 @@
 #   clean exit  → next dispatch starts FRESH   (new session, reads ## Status)
 #   dirty death → next dispatch RESUMES         (re-enters the in-flight transcript)
 #
-# Where handoff_roundtrip.sh covers the BYTE level (the Go writer in isolation,
-# hand-set SHUTTLE_FIBER_PATH, no daemon), this covers the LIVE level: a REAL
-# daemon on a temp port, REAL tmux workers, the daemon's SHUTTLE_FIBER_PATH
-# export exercised end-to-end, and the full loop —
+# Where handoff_roundtrip.sh covers the writer in isolation (hand-set
+# SHUTTLE_FIBER_PATH, no daemon), this covers the LIVE level: a daemon on a temp
+# port, real tmux workers, the daemon's SHUTTLE_FIBER_PATH export exercised
+# end-to-end, and the full loop —
 #
-#   daemon stamps session_uuid + dispatched_at  (async Task, real felt write)
+#   daemon stamps session_uuid + dispatched_at
 #     → worker runs in real tmux, sources the daemon-exported SHUTTLE_FIBER_PATH
-#     → real `felt shuttle handoff` stamps handed_off_at (clean) / nothing (dirty)
-#     → daemon reads the fiber back off `felt show -j`
+#     → `shuttle handoff` stamps handed_off_at (clean) / nothing (dirty)
+#     → daemon reads the fiber back off `shuttle show -j`
 #     → decide_continuation builds `--session-id <new>` (fresh) or `--resume <old>`
 #
 # The worker is a FAKE claude (a controllable stand-in wired in as a test agent
@@ -23,10 +23,10 @@
 # hands off cleanly or sleeps to be killed mid-thought. The argv line is the gold
 # observable; we cross-check it against the fiber's stamped frontmatter.
 #
-# The fake agent reaches the run through felt's USER agent registry: a temp
-# $FELT_AGENTS_FILE holding one `shuttle-e2e-stub` record whose `wrapper` is the
-# absolute path to the stand-in. felt merges it over the built-ins and emits it
-# under `shuttle.resolved.agent`; the daemon launches what it is handed. So this
+# The fake agent reaches the run through Shuttle's user agent registry: a temp
+# $SHUTTLE_AGENTS_FILE holding one `shuttle-e2e-stub` record whose `wrapper` is
+# the absolute path to the stand-in. Shuttle merges it over the built-ins and
+# emits it under `shuttle.resolved.agent`; the daemon launches what it is handed. So this
 # gate patches nothing tracked in the repo, and it cannot inherit the operator's
 # own registry.
 #
@@ -36,16 +36,18 @@
 #
 # Usage:  daemon/test/e2e/handoff_live.sh
 #   FELT=<path>          override the felt binary (default: `felt` on PATH)
+#   SHUTTLE_BIN=<path>   override the Shuttle binary (default: `shuttle` on PATH)
 #   SHUTTLE_E2E_PORT=<n> override the daemon port (default: 4071)
 #
-# SAFETY: an isolated SHUTTLE_DATA_DIR, a temp FELT_STORES, a temp
-# FELT_AGENTS_FILE and a private port keep this fully separate from any
+# SAFETY: an isolated SHUTTLE_DATA_DIR, a temp SHUTTLE_STORES, a temp
+# SHUTTLE_AGENTS_FILE and a private port keep this fully separate from any
 # production daemon on :4000. All tmux sessions, the daemon, and temp dirs are
 # torn down on EXIT.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 FELT=${FELT:-felt}
+SHUTTLE_BIN=${SHUTTLE_BIN:-$(command -v shuttle || true)}
 PORT=${SHUTTLE_E2E_PORT:-4071}
 HOST=e2e-host
 WORK=$(mktemp -d /tmp/shuttle-handoff-live.XXXXXX)
@@ -56,24 +58,8 @@ DAEMON_LOG="$WORK/daemon.log"
 AGENTS_FILE="$WORK/agents.json"     # temp user agent registry (holds the fake agent)
 FAKE_CLAUDE="$BIN/fake-claude"
 FELT_BIN=$(command -v "$FELT" || true)
-# The worker's handoff verb is `felt shuttle handoff` (the standalone shuttle-ctl
-# shim is retired). CTL is the verb prefix the fake worker appends `handoff` to.
-#
-# ABSOLUTE path, deliberately. The fake worker runs inside a tmux session the
-# DAEMON spawned, and a tmux session inherits the tmux SERVER's environment —
-# not this script's. Where that server predates the current login (the normal
-# case on a workstation with tmux already running), its PATH can lack
-# ~/.local/bin, a bare `felt` resolves to nothing, and the handoff dies 127.
-#
-# NOT interpolated into the fake worker as an array. This heredoc is unquoted,
-# so bash expands parameters but performs no word splitting inside it:
-# `"${CTL[@]}"` renders as ONE double-quoted token, `"<path> shuttle"`, and the
-# worker then tries to exec a binary literally named `felt shuttle` (ENOENT).
-# That silently broke this gate — the worker exited, its tmux session ended,
-# and "no handed_off_at" looked exactly like the regression under test. The
-# worker interpolates "${FELT_BIN}" and writes `shuttle handoff` as literal
-# script text instead.
-CTL=("${FELT_BIN:-$FELT}" shuttle)
+# Use absolute executable paths: tmux sessions inherit the tmux server's
+# environment, which may not include the current login's PATH.
 
 FAIL=0
 DAEMON_PID=""
@@ -86,14 +72,20 @@ cleanup() {
   tmux ls 2>/dev/null | grep -Eo '^shuttle-e2e/[^:]+' | while read -r s; do
     tmux kill-session -t "$s" 2>/dev/null || true
   done
-  [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null || true
-  # Nothing tracked to restore: the fake agent rides a temp FELT_AGENTS_FILE and
+  if [ -n "$DAEMON_PID" ]; then
+    SHUTTLE_PORT="$PORT" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
+      "$SHUTTLE_BIN" daemon stop >/dev/null 2>&1 || true
+    kill -TERM "$DAEMON_PID" 2>/dev/null || true
+    wait "$DAEMON_PID" 2>/dev/null || true
+  fi
+  # Nothing tracked to restore: the fake agent rides a temp SHUTTLE_AGENTS_FILE and
   # the private port rides SHUTTLE_PORT, so this run never edits the repo.
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 [ -n "$FELT_BIN" ] || { echo "felt not found (set FELT=<path>)"; exit 2; }
+[ -n "$SHUTTLE_BIN" ] || { echo "shuttle not found (set SHUTTLE_BIN=<path>)"; exit 2; }
 
 mkdir -p "$BIN" "$DATA"
 
@@ -104,9 +96,8 @@ if command -v lsof >/dev/null && port_busy "$PORT"; then
   for p in 4072 4073 4074 4081 4082 4091; do port_busy "$p" || { PORT=$p; break; }; done
 fi
 
-# ── 1. The real worker handoff verb is `felt shuttle handoff` ────────────────
-# Nothing to build — the shim is retired; the fake worker shells the felt binary
-# resolved above directly.
+# ── 1. The real worker handoff verb is `shuttle handoff` ─────────────────────
+# The fake worker shells the standalone Shuttle binary resolved above.
 
 # ── 2. Write the fake claude worker ──────────────────────────────────────────
 # Derives its per-fiber argv log + mode file from SHUTTLE_FIBER_PATH (the daemon
@@ -126,7 +117,7 @@ if [ "\$MODE" = clean ]; then
   # Loud on failure. A silently-failing handoff is indistinguishable from a
   # worker that exited without stamping — the tmux session ends either way —
   # so it would masquerade as the very regression this gate exists to catch.
-  if ! "${FELT_BIN}" shuttle handoff probe >>"\$DIR/handoff.log" 2>&1; then
+  if ! "${SHUTTLE_BIN}" -C "${STORE}" handoff probe >>"\$DIR/handoff.log" 2>&1; then
     echo "HANDOFF FAILED (exit \$?)" >> "\$DIR/handoff.log"
   fi
 else
@@ -136,7 +127,7 @@ FAKE
 chmod +x "$FAKE_CLAUDE"
 
 # ── 3. Register the fake agent, build the daemon release ─────────────────────
-# One USER-layer record in a temp registry. Exporting FELT_AGENTS_FILE covers
+# One USER-layer record in a temp registry. Exporting SHUTTLE_AGENTS_FILE covers
 # every felt in this run — the ones this script calls and the ones the daemon
 # shells — and shadows the operator's own registry, so the gate is reproducible
 # on any machine.
@@ -158,9 +149,9 @@ cat > "$AGENTS_FILE" <<AGENTS
   ]
 }
 AGENTS
-export FELT_AGENTS_FILE="$AGENTS_FILE"
-"$FELT" shuttle agents resolve shuttle-e2e-stub --json >/dev/null || {
-  echo "FATAL: felt does not resolve shuttle-e2e-stub from $AGENTS_FILE" >&2
+export SHUTTLE_AGENTS_FILE="$AGENTS_FILE"
+"$SHUTTLE_BIN" agents resolve shuttle-e2e-stub --json >/dev/null || {
+  echo "FATAL: shuttle does not resolve shuttle-e2e-stub from $AGENTS_FILE" >&2
   exit 2
 }
 
@@ -168,11 +159,11 @@ info "building daemon release (port comes from SHUTTLE_PORT at run time)"
 # No config patching. Shuttle.Application.configure_endpoint/0 reads
 # SHUTTLE_PORT at boot, so the private port is passed to the daemon in step 5
 # like any other runtime value. The release is built in place (bin/rel) and
-# run through the tracked bin/shuttle shim — nothing test-specific is baked
-# into the artifact, so nothing needs cleaning up afterwards.
+# run through the Shuttle daemon CLI — nothing test-specific is baked into the
+# artifact, so nothing needs cleaning up afterwards.
 ( cd "$REPO/daemon" && MIX_ENV=prod mix release shuttled --overwrite --path ../bin/rel >/dev/null 2>&1 ) \
   || { echo "release build failed"; exit 2; }
-DAEMON="$REPO/bin/shuttle"
+DAEMON="$SHUTTLE_BIN"
 
 # ── 4. Create the temp store + two probe fibers ──────────────────────────────
 make_fiber() {  # make_fiber <slug> <mode>
@@ -203,9 +194,9 @@ make_fiber probe-dirty dirty
 
 # ── 5. Start the daemon (isolated port / store / data dir / host) ────────────
 info "starting daemon on :$PORT (store=$STORE host=$HOST)"
-SHUTTLE_PORT="$PORT" FELT_STORES="$STORE" FELT_AGENTS_FILE="$AGENTS_FILE" \
-  SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
-  nohup "$DAEMON" start --force >"$DAEMON_LOG" 2>&1 &
+SHUTTLE_RELEASE="$REPO/bin/rel" SHUTTLE_PORT="$PORT" SHUTTLE_STORES="$STORE" \
+  SHUTTLE_AGENTS_FILE="$AGENTS_FILE" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
+  nohup "$DAEMON" daemon start --force >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
 # Wait for the HTTP surface to bind.
@@ -267,12 +258,13 @@ wait_until 20 "worker stamps handed_off_at (#1)" has_handoff e2e/probe-clean || 
 wait_until 20 "worker ends its own tmux session (#1)" no_session "$S1" || true
 H1=$(sh_field e2e/probe-clean handed_off_at)
 if [ -n "$H1" ]; then
-  pass "worker stamped handed_off_at=$H1 (real felt shuttle handoff, daemon-exported path)"
+  pass "worker stamped handed_off_at=$H1 (real shuttle handoff, daemon-exported path)"
 else
   fail "handed_off_at never stamped"
   # The worker logs the handoff's own stderr here. If it is a 127, the tmux
-  # server handed the worker a PATH without felt on it; if it is a felt error,
-  # read it directly. Empty means the worker never reached the handoff at all.
+  # server handed the worker a PATH without shuttle on it; an error from the
+  # handoff command is logged directly. Empty means the worker never reached
+  # the handoff at all.
   info "worker handoff log: $(cat "$STORE/.felt/e2e/probe-clean/handoff.log" 2>/dev/null || echo '(no log written)')"
 fi
 no_session "$S1" && pass "endOwnTmuxSession killed $S1" || fail "tmux session survived handoff"

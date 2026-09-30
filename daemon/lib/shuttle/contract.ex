@@ -11,7 +11,7 @@ defmodule Shuttle.Contract do
   skew that shipped 80ce7b3: a post-fix daemon shelling a pre-fix CLI that
   silently failed every dispatch write because it didn't know `--host`.
 
-  At `Shuttle.Poller.init/1` the daemon shells `felt shuttle contract` and
+  At `Shuttle.Poller.init/1` the daemon shells `shuttle contract` and
   compares its bare-integer stdout against `expected_level/0` — catching a
   stale CLI installed alongside a newer daemon (or vice versa) once at boot
   instead of failing one shelled write at a time with "unknown flag".
@@ -20,15 +20,15 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Bumped in lockstep with cmd/shuttle_contract.go's ShuttleContractLevel.
-  # Level 4: the daemon shells `felt shuttle accept|resume <fiber> --local`.
+  # Level 4: the daemon shells `shuttle accept|resume <fiber> --local`.
   @expected_level 5
 
-  @doc "The daemon's expected `felt shuttle contract` level."
+  @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()
   def expected_level, do: @expected_level
 
   @doc """
-  Shell `felt shuttle contract` through `runner` (Runner-bounded — tolerant of
+  Shell `shuttle contract` through `runner` (Runner-bounded — tolerant of
   a slow node, never hangs boot) and compare its output to `expected_level/0`.
 
   Always returns a map, never raises:
@@ -39,9 +39,9 @@ defmodule Shuttle.Contract do
 
   `ok: false` covers EVERY shape other than an exact match on stdout exactly
   `"<expected_level>\\n"` at exit 0 — a mismatched level, unparseable/
-  multi-line stdout, or a nonzero exit (including an old CLI where `contract`
-  is an unknown subcommand: the daemon cannot determine its level, so it must
-  be treated as incompatible, same as an explicit mismatch).
+  multi-line stdout, or a nonzero exit (including a CLI that does not expose
+  `contract`: the daemon cannot determine its level, so it treats it as
+  incompatible, the same as an explicit mismatch).
   """
   @spec check(module()) :: %{
           expected: pos_integer(),
@@ -50,18 +50,26 @@ defmodule Shuttle.Contract do
           reason: String.t() | nil
         }
   def check(runner) do
-    case runner.cmd("felt", ["shuttle", "contract"], stderr_to_stdout: true) do
-      {output, 0} ->
+    case Shuttle.CLI.run(["contract"], runner: runner) do
+      {:ok, output} ->
         parse_level(output)
 
-      {output, status} ->
+      {:command_error, status, output} ->
         trimmed = output |> to_string() |> String.trim()
 
         %{
           expected: @expected_level,
           observed: trimmed,
           ok: false,
-          reason: "felt shuttle contract exited #{inspect(status)}: #{trimmed}"
+          reason: "shuttle contract exited #{inspect(status)}: #{trimmed}"
+        }
+
+      {:error, reason} ->
+        %{
+          expected: @expected_level,
+          observed: "error",
+          ok: false,
+          reason: "shuttle contract could not run: #{reason}"
         }
     end
   rescue
@@ -70,7 +78,7 @@ defmodule Shuttle.Contract do
         expected: @expected_level,
         observed: "error",
         ok: false,
-        reason: "felt shuttle contract raised: #{inspect(e)}"
+        reason: "shuttle contract raised: #{inspect(e)}"
       }
   end
 
@@ -111,7 +119,7 @@ defmodule Shuttle.Contract do
 
     if result.ok do
       Logger.debug(
-        "felt shuttle contract level #{result.observed} matches expected #{result.expected}"
+        "shuttle contract level #{result.observed} matches expected #{result.expected}"
       )
     else
       Logger.error(

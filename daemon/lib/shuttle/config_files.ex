@@ -4,7 +4,7 @@ defmodule Shuttle.ConfigFiles do
   can read and rewrite them.
 
   Everything shuttle can be told about a host lives in five JSON files under
-  `~/.config/felt/`. The board is reachable from a phone and from a second hub,
+  `~/.config/shuttle/`. The board is reachable from a phone and from a second hub,
   and the surface that steers the fleet has to be able to configure it, not
   only an editor on the machine that owns each file.
 
@@ -40,22 +40,22 @@ defmodule Shuttle.ConfigFiles do
   pointed at that file through its own path-override environment variable, and
   only a clean exit commits:
 
-    * `:remotes` → `felt shuttle remotes list --json` under `FELT_REMOTES_FILE`
+    * `:remotes` → `shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE`
       — the CLI that is already the fleet file's sole writer, and whose `list`
       verb is documented as its validator (duplicate names, port collisions,
       an unparseable `defaults.https_proxy`, a managed tunnel with no port).
-    * `:agents` → `felt shuttle agents --json` under `FELT_AGENTS_FILE` — which
+    * `:agents` → `shuttle agents --json` under `SHUTTLE_AGENTS_FILE` — which
       fails loud on an unsupported `version` or an unknown `builtins` mode.
-    * `:host` → `felt shuttle host --json` under `FELT_HOST_FILE` — an unknown
+    * `:host` → `shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` — an unknown
       class, or a `listen` that is not loopback tcp or a short absolute unix
       path.
     * `:stores` / `:projects` → checked here, against the shape
-      `Shuttle.PathListConfig` actually accepts: felt has no verb that
-      validates them. (The CLI reads `stores.json` inside other verbs —
-      `cmd/shuttle_stores.go` — and does not read `projects.json`.)
+      `Shuttle.PathListConfig` accepts. The CLI has no verb that validates
+      these path lists. It reads `stores.json` as needed and does not read
+      `projects.json`.
 
   So the daemon never grows a second opinion about what a valid fleet file is.
-  It grows one opinion about *when* to ask, and asks felt.
+  It grows one opinion about *when* to ask, and asks Shuttle.
 
   ## What this module will not touch
 
@@ -72,7 +72,7 @@ defmodule Shuttle.ConfigFiles do
   reports the values the daemon is actually running under.
   """
 
-  alias Shuttle.{Felt, FeltStores, Host, Projects, Remotes}
+  alias Shuttle.{FeltStores, Host, Projects, Remotes}
 
   require Logger
 
@@ -100,7 +100,7 @@ defmodule Shuttle.ConfigFiles do
 
   @doc """
   Where a file resolves on this host, exactly as its own reader resolves it —
-  each one's `*_FILE` environment override, else `~/.config/felt/<stem>.json`.
+  each one's `*_FILE` environment override, else `~/.config/shuttle/<stem>.json`.
 
   Four of the five delegate to the module that already answers this, so a
   settings page can never show a path the daemon is not in fact reading.
@@ -112,9 +112,9 @@ defmodule Shuttle.ConfigFiles do
   def path(:projects), do: Projects.config_path()
 
   def path(:agents) do
-    case System.get_env("FELT_AGENTS_FILE") do
+    case System.get_env("SHUTTLE_AGENTS_FILE") do
       value when is_binary(value) and value != "" -> Path.expand(value)
-      _ -> Path.expand("~/.config/felt/agents.json")
+      _ -> Path.expand("~/.config/shuttle/agents.json")
     end
   end
 
@@ -197,7 +197,7 @@ defmodule Shuttle.ConfigFiles do
 
   The board is reachable from two hubs and a phone at the same time, so "this
   file has not changed since I read it" is a real question here rather than a
-  theoretical one — an editor left open on a phone while `felt shuttle remotes
+  theoretical one — an editor left open on a phone while `shuttle remotes
   add` runs on the laptop would otherwise save the old text back over the new
   entry, silently.
 
@@ -217,7 +217,7 @@ defmodule Shuttle.ConfigFiles do
 
   # The one way this page could lie. Both path-list files have a compact
   # comma-separated environment form that wins over the file ENTIRELY when it
-  # is set — so a host started with `FELT_STORES=...` polls that list while
+  # is set — so a host started with `SHUTTLE_STORES=...` polls that list while
   # `stores.json` sits on disk being read by nobody. An editor that showed the
   # file without saying so would let you carefully fix a setting that has no
   # effect, which is worse than having no editor.
@@ -225,7 +225,7 @@ defmodule Shuttle.ConfigFiles do
   # The fleet, agent and host files have no such form (deliberately, in both cases:
   # a structured entry has no comma grammar), so they never override.
   defp env_override(id) when id in [:stores, :projects] do
-    var = if id == :stores, do: "FELT_STORES", else: "FELT_PROJECTS"
+    var = if id == :stores, do: "SHUTTLE_STORES", else: "SHUTTLE_PROJECTS"
 
     case System.get_env(var) do
       value when is_binary(value) and value != "" -> %{var: var, value: value}
@@ -311,7 +311,7 @@ defmodule Shuttle.ConfigFiles do
   Check candidate bytes without writing them — the same gate `write/2` runs.
 
   `:ok` or `{:error, message}`, where the message is the owning reader's own
-  words. felt names the file and the offending entry; repeating that verbatim
+  words. Shuttle names the file and the offending entry; repeating that verbatim
   is more use than any sentence this module could compose about it.
   """
   @spec validate(id(), String.t()) :: :ok | {:error, String.t()} | {:unavailable, String.t()}
@@ -332,13 +332,13 @@ defmodule Shuttle.ConfigFiles do
   # environment variable a human would use, so what passes here is exactly what
   # the daemon and the CLI will read back off disk a moment later.
   defp validate_decoded(:remotes, text, _decoded),
-    do: validate_via_felt(text, "FELT_REMOTES_FILE", ["shuttle", "remotes", "list", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_REMOTES_FILE", ["remotes", "list", "--json"])
 
   defp validate_decoded(:agents, text, _decoded),
-    do: validate_via_felt(text, "FELT_AGENTS_FILE", ["shuttle", "agents", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_AGENTS_FILE", ["agents", "--json"])
 
   defp validate_decoded(:host, text, _decoded),
-    do: validate_via_felt(text, "FELT_HOST_FILE", ["shuttle", "host", "--json"])
+    do: validate_via_shuttle(text, "SHUTTLE_HOST_CONFIG_FILE", ["host", "--json"])
 
   # No felt verb validates the path-list files, so the shape check lives here —
   # and it is the shape `PathListConfig` accepts, not a stricter one. In
@@ -367,10 +367,10 @@ defmodule Shuttle.ConfigFiles do
   # Run felt against a throwaway copy of the candidate. The env entry is an
   # override on the inherited environment (Port semantics), so felt keeps its
   # PATH and everything else and reads only this one file from somewhere else.
-  defp validate_via_felt(text, env_var, args) do
+  defp validate_via_shuttle(text, env_var, args) do
     with {:ok, tmp} <- write_temp(text) do
       try do
-        case Felt.run(args, env: [{env_var, tmp}], timeout_ms: 15_000) do
+        case Shuttle.CLI.run(args, env: [{env_var, tmp}], timeout_ms: 15_000) do
           {:ok, _output} ->
             :ok
 
@@ -387,14 +387,14 @@ defmodule Shuttle.ConfigFiles do
 
           {:command_error, 127, _output} ->
             {:unavailable,
-             "felt is not on this daemon's PATH, so there is nothing here that can validate " <>
+             "shuttle is not on this daemon's PATH, so there is nothing here that can validate " <>
                "this file. The edit was not saved."}
 
           {:command_error, _status, output} ->
             {:error, output |> scrub_path(tmp) |> String.trim()}
 
           {:error, reason} when is_binary(reason) ->
-            {:unavailable, "could not run felt to validate: #{reason}"}
+            {:unavailable, "could not run shuttle to validate: #{reason}"}
         end
       after
         File.rm(tmp)
@@ -422,7 +422,7 @@ defmodule Shuttle.ConfigFiles do
     end
   end
 
-  # felt names the file it was reading, and the file it was reading is our
+  # Shuttle names the file it was reading, and the file it was reading is our
   # temporary copy — a path the human has never seen and cannot act on.
   #
   # The replacement is positional, not textual, and that distinction is load

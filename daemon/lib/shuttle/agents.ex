@@ -2,16 +2,16 @@ defmodule Shuttle.Agents do
   @moduledoc """
   Agent command rendering.
 
-  Felt owns the agent registry and resolution: it parses a fiber's
+  Shuttle owns the agent registry and resolution: it parses a fiber's
   `shuttle.agent` name plus the block-declared axes (effort, chrome, headless),
   overlays the registry, and inlines the *effective* record under
-  `shuttle.resolved.agent` in its JSON (`felt show -j` / `ls --json`). The two
-  registry-read verbs `felt shuttle agents [resolve]` cover the cases with no
-  fiber to read from.
+  `shuttle.resolved.agent` in its JSON (`shuttle show -j` / `ls --json`). The
+  registry-read verbs `shuttle agents [resolve]` cover cases with no fiber to
+  read from.
 
-  This module keeps only what felt does NOT do: turning a resolved record into
-  the harness's shell invocation. `from_resolved/1` adapts felt's string-keyed
-  JSON into the atom-keyed record the command builders consume.
+  This module keeps only what Shuttle does NOT do: turning a resolved record
+  into the harness's shell invocation. `from_resolved/1` adapts Shuttle's
+  string-keyed JSON into the atom-keyed record the command builders consume.
   """
 
   @type agent_record :: %{
@@ -28,11 +28,11 @@ defmodule Shuttle.Agents do
         }
 
   @doc """
-  Builds the command-rendering agent record from felt's resolved.agent JSON
-  (felt show -j / ls --json). felt owns resolution (name + axes → effective
-  record); the daemon owns only rendering. omitempty keys (absent chrome /
-  headless / effort / requires_model) map to nil/false, which render_flags
-  already treats as "axis off".
+  Builds the command-rendering agent record from Shuttle's resolved.agent JSON
+  (`shuttle show -j` / `shuttle ls --json`). Shuttle owns resolution (name +
+  axes → effective record); the daemon owns only rendering. omitempty keys
+  (absent chrome / headless / effort / requires_model) map to nil/false, which
+  render_flags already treats as "axis off".
   """
   @spec from_resolved(map()) :: agent_record()
   def from_resolved(resolved) when is_map(resolved) do
@@ -193,7 +193,7 @@ defmodule Shuttle.Agents do
   #            swaps the interactive permission mode for `bypassPermissions`
   #   pi     → `:level` suffix on the model string (preserves today's behaviour)
   #   codex  → `-c model_reasoning_effort="<level>"`
-  # Effort/chrome/headless come from felt's resolved record via from_resolved/1
+  # Effort/chrome/headless come from Shuttle's resolved record via from_resolved/1
   # (the `:effort`/`:chrome`/`:headless` keys); absent (nil/false) means no axis
   # rendering.
   defp render_flags(agent) do

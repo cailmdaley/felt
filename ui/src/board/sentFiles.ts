@@ -10,7 +10,7 @@
 /**
  * One sent deliverable on a card's trail. `fullPath` is the absolute path the
  * `/api/v1/file` route reads; `sessionId` is the worker session that pushed it
- * (display-only). `timestamp` is epoch milliseconds — `felt hook event` writes
+ * (display-only). `timestamp` is epoch milliseconds — `shuttle hook event` writes
  * `UnixMilli`.
  */
 export interface SentFile {

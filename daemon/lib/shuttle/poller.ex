@@ -13,11 +13,11 @@ defmodule Shuttle.Poller do
   `Shuttle.FeltStores` resolves them and re-read every poll cycle:
 
       # env var (comma-separated, takes precedence over the persisted file):
-      FELT_STORES=~/some-store,~/other-project
+      SHUTTLE_STORES=~/some-store,~/other-project
       # or persisted registration written through the HTTP API:
-      ~/.config/felt/stores.json
+      ~/.config/shuttle/stores.json
 
-  The registry is the source of truth: with `FELT_STORES` unset, the list
+  The registry is the source of truth: with `SHUTTLE_STORES` unset, the list
   comes straight from the registry (empty if none registered). A
   `:felt_stores` start option pins the list instead (tests).
 
@@ -53,7 +53,7 @@ defmodule Shuttle.Poller do
   @default_heartbeat_interval_ms 5_000
   # THE boot-quarantine default: a freshly (re)started daemon parks every
   # autonomous dispatch until a human releases it (POST
-  # /api/v1/quarantine/release / `bin/shuttle release`) — no timeout, no
+  # /api/v1/quarantine/release / `shuttle daemon release`) — no timeout, no
   # self-clearing. Single source of truth; config (`:boot_quarantine`) and the
   # start_link opt override it (config/test.exs sets false so dispatch tests
   # exercise the tick directly; quarantine tests opt back in per-poller).
@@ -161,9 +161,9 @@ defmodule Shuttle.Poller do
       # keyed by uid, and a cold miss falls through to felt.
       uid_slug_index: %{},
       # %{uid_or_fiber_id => %{modified_at: String.t() | nil, entry: map()}} —
-      # daemon-local document cache for the kanban feed. The poll task
-      # diffs the cheap shuttle projection's modified_at against this cache and
-      # runs full `felt show --json` only for cold or changed fibers.
+      # daemon-local document cache for the kanban feed. Each poll builds
+      # entries from the widened Shuttle listing projection and reuses unchanged
+      # entries by modified_at.
       document_cache: %{},
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
       document_cache_ready: false,
@@ -274,10 +274,10 @@ defmodule Shuttle.Poller do
       # adoption, or a boot whose tmux scan came back unknown, fails closed.
       adopted?: false,
       # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1`: the
-      # daemon shells `felt shuttle contract` and compares it to
+      # daemon shells `shuttle contract` and compares it to
       # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
-      # unparseable stdout, or a nonzero exit — an old CLI where `contract` is
-      # unknown included) means every shelled write this daemon makes is
+      # unparseable stdout, or a nonzero exit, including an unknown subcommand)
+      # means every shelled write this daemon makes is
       # suspect, so the skew is caught once at boot instead of failing one
       # shelled write at a time. Gates the autonomous
       # dispatch tick the same way `boot_quarantine` does (park fresh, let
@@ -305,9 +305,9 @@ defmodule Shuttle.Poller do
       # set by `was_running` — members re-dispatch, only non-members land here
       # (runtime-observation, never stale on-disk markers).
       parked_launches: %{},
-      # %{store => rows} — the last SUCCESSFUL `felt ls` shuttle listing per
+      # %{store => rows} — the last SUCCESSFUL `shuttle ls` listing per
       # store, retained VERBATIM (no reshape: `created_at`, `tempered`, `slug`,
-      # … survive exactly as felt emitted them). Refreshed on every successful
+      # … survive exactly as Shuttle emitted them). Refreshed on every successful
       # listing; served by `discover_candidates/1` when a store's listing fails
       # (timeout, transient exec error), so an outage degrades to yesterday's
       # truth instead of blanking the store or serving a lossy six-key shadow.
@@ -533,7 +533,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run felt's `accept` / `resume` writer (`Shuttle.LifecycleService.write/3`)
+  Run Shuttle's `accept` / `resume` writer (`Shuttle.LifecycleService.write/3`)
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
@@ -631,7 +631,7 @@ defmodule Shuttle.Poller do
       # Boot-time version handshake: probe ONCE here, before the first
       # tick, so a skewed CLI is caught (and fresh dispatch held) before any
       # autonomous work is even considered. Runner-bounded, so a slow/wedged
-      # `felt` degrades to a logged skew rather than hanging boot.
+      # `shuttle` degrades to a logged skew rather than hanging boot.
       contract_check: Shuttle.Contract.check_and_log(runner),
       # Where this daemon records its OWN liveness, and how often — the evidence
       # the next boot reads to tell a fast bounce (a kernel rlimit kill nobody
@@ -738,7 +738,7 @@ defmodule Shuttle.Poller do
         %{state | boot_quarantine: false, parked_launches: %{}}
 
       {:hold, reason} ->
-        Logger.info("boot quarantine held (#{reason}); awaiting `bin/shuttle release`")
+        Logger.info("boot quarantine held (#{reason}); awaiting `shuttle daemon release`")
         state
     end
   end
@@ -1381,7 +1381,7 @@ defmodule Shuttle.Poller do
 
     # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
     # cache itself stays on `State`. Entries are built directly from the candidate
-    # rows the poll already discovered — one `felt ls` per store, no per-miss
+    # rows the poll already discovered — one `shuttle ls` per store, no per-miss
     # `felt show` and no filesystem stat.
     {refresh_us, {document_cache, document_cache_stats}} =
       :timer.tc(fn -> Shuttle.Poller.DocumentCache.refresh(state, candidates, store_map) end)
@@ -1552,7 +1552,7 @@ defmodule Shuttle.Poller do
     Map.filter(map, fn {key, _entry} -> MapSet.member?(active_keys, key) end)
   end
 
-  # Discovers candidate fibers by asking felt for a narrow shuttle projection
+  # Discovers candidate fibers by asking Shuttle for a narrow fiber projection
   # per configured store and keeping the ones physically rooted in that store.
   # No tag predicate — the shuttle: block is the source of truth, matching the
   # same contract every other surface reads.
@@ -1824,13 +1824,13 @@ defmodule Shuttle.Poller do
     )
   end
 
-  # Read one store's shuttle fibers via felt's JSON, keeping only those
+  # Read one store's shuttle fibers via Shuttle's JSON, keeping only those
   # PHYSICALLY ROOTED in this store. Ownership is read from felt's carried
   # `path` (absolute, symlink-resolved) — a fiber belongs to `store` iff its
   # path lives under `realpath(store)/.felt/`. felt enumerates symlink-traversed
   # fibers too (loom listing a project whose `.felt` is symlinked in), so the
   # path-prefix check is what keeps each fiber owned by exactly the store that
-  # physically roots it, read from felt rather than reverse-derived. A store
+  # physically roots it, read from the CLI response, never reverse-derived. A store
   # whose own `.felt/` is a symlink owns nothing here: the target store
   # enumerates it canonically.
   defp list_shuttle_fibers(store, state) do
@@ -1841,9 +1841,9 @@ defmodule Shuttle.Poller do
         {:ok, []}
 
       {:ok, %File.Stat{type: :directory}} ->
-        # An empty store has nothing to enumerate; skip the felt shell-out so a
+        # An empty store has nothing to enumerate; skip the Shuttle shell-out so a
         # store with no fibers costs nothing (and so a daemon polling an empty
-        # configured store doesn't shell felt every tick).
+        # configured store doesn't shell Shuttle every tick).
         if empty_dir?(felt_dir) do
           {:ok, []}
         else
@@ -1863,12 +1863,12 @@ defmodule Shuttle.Poller do
   end
 
   defp run_shuttle_listing(store, state) do
-    case run_felt_ls_for_shuttle(store, state) do
+    case run_shuttle_ls_for_shuttle(store, state) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
           owned_prefix = Shuttle.FeltStores.store_felt_realpath(store) <> "/"
 
-          # Per-row isolation: felt itself skips-and-warns unparseable fibers
+          # Per-row isolation: Shuttle skips and warns on unparseable fibers
           # (warning on stderr, valid JSON of the rest on stdout, exit 0), so a
           # single malformed fiber never poisons the blob. The `is_map/1` guard
           # is the same posture on our side of the wire — one non-map row is
@@ -1889,10 +1889,9 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A fiber is owned by this store iff felt's carried physical `path` lives
-  # under `realpath(store)/.felt/`. No `path` (older felt) means we cannot
-  # confirm ownership, so the fiber is conservatively dropped — the owning
-  # store, where felt does carry a matching path, enumerates it.
+  # A fiber is owned by this store iff the carried physical `path` lives under
+  # `realpath(store)/.felt/`. Without a path, ownership cannot be confirmed, so
+  # the fiber is conservatively dropped.
   defp owned_by_store?(%{"path" => path}, owned_prefix) when is_binary(path) and path != "" do
     String.starts_with?(path, owned_prefix)
   end
@@ -1930,16 +1929,15 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp run_felt_ls_for_shuttle(store, state) do
-    # Widened projection: felt filters by raw top-level frontmatter first, then
-    # emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
+  defp run_shuttle_ls_for_shuttle(store, state) do
+    # Widened projection: shuttle filters by raw top-level frontmatter first,
+    # then emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
     # superset of the fields the poller needs for eligibility, ownership, and
     # identity). Widening it lets the document cache build each entry DIRECTLY
-    # from its candidate row (no per-miss `felt show`, no stat), so a poll tick
-    # costs one `felt ls` per store. A failure of any kind degrades
-    # `discover_candidates/1` to the store's last-known rows; a felt too old for
-    # these flags is caught by the boot contract probe (`Shuttle.Contract`).
-    run_felt(store, state.runner, [
+    # from its candidate row (no per-miss `show`, no stat), so a poll tick costs
+    # one `shuttle ls` per store. A failure degrades `discover_candidates/1` to
+    # the store's last-known rows; the boot contract probe checks CLI parity.
+    run_shuttle(store, state.runner, [
       "ls",
       "--json",
       "--has-field",
@@ -1957,7 +1955,7 @@ defmodule Shuttle.Poller do
   # starts it (drag-to-in-flight / New session / Resume — all force-dispatch),
   # the worker stays attached as the interface, and the session ends when the
   # human ends it. But a pinned worker deep in a long autonomous arc can
-  # deliberately ask for a fresh session by running `felt shuttle handoff` (which
+  # deliberately ask for a fresh session by running `shuttle handoff` (which
   # stamps `handed_off_at` newer than its `dispatched_at`) — that is the worker
   # saying "keep going in a clean session," and the tick honors it by
   # re-dispatching next poll. Any other exit — a dirty death, an idle exit with
@@ -1969,7 +1967,7 @@ defmodule Shuttle.Poller do
   #
   # oneshot/standing are unconditionally eligible here (their own gates live in
   # `eligible?`). Force-dispatch bypasses this filter entirely, and a plain
-  # `felt shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
+  # `shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
   # a human can always start or continue a pinned role by hand: a pinned role
   # is an interface a human drives, not a loop.
   defp filter_eligible(candidates, state) do
@@ -2108,7 +2106,7 @@ defmodule Shuttle.Poller do
         false
 
       # Pinned roles need no bespoke branch HERE: this predicate also serves
-      # the explicit-dispatch path (`felt shuttle dispatch`, plain POST
+      # the explicit-dispatch path (`shuttle dispatch`, plain POST
       # /dispatch), where a pinned role IS eligible — it's a human asking for
       # it. The autonomous tick applies its own kind gate in
       # `tick_kind_eligible?/1` (`filter_eligible/2`, the tick's only caller):
@@ -2121,7 +2119,7 @@ defmodule Shuttle.Poller do
       # Standing roles have additional preconditions; a oneshot that reaches
       # here has passed every gate. `depends_on` has no dispatch meaning — it
       # is a board-only ordering annotation ("filed after that"), read solely
-      # by the UI fold and by `felt check`'s shape validation.
+      # by the UI fold and by `shuttle check`'s shape validation.
       role_kind(shuttle) == "standing" ->
         StandingRoles.standing_role_due?(fiber)
 
@@ -2329,7 +2327,7 @@ defmodule Shuttle.Poller do
   state/snapshot endpoints — goes through here, so a daemon's advertised
   identity is single-valued by construction. Do not derive a hostname
   anywhere else in the daemon: the identity comes from `SHUTTLE_HOST` or from
-  `felt shuttle host --json`, the same resolver the CLI stamps with.
+  `shuttle host --json`, the same resolver the CLI stamps with.
 
   A pure `:persistent_term` read, never a shell. `server`'s own slot (the
   value its `init/1` froze) wins; otherwise this reads the daemon identity
@@ -2359,15 +2357,15 @@ defmodule Shuttle.Poller do
   Resolves this daemon's identity and freezes it for the daemon's life.
 
   `Shuttle.Application.start/2` calls this once, before any child starts, so
-  no request, poll read or per-row feed filter ever shells felt for it; the
+  no request, poll read or per-row feed filter ever shells Shuttle for it; the
   production Poller receives the frozen value as its `:own_host_id`. Raises
-  when felt cannot answer: a daemon with no identity would match no
+  when Shuttle cannot answer: a daemon with no identity would match no
   `shuttle.host` and dispatch nothing, silently, so it does not boot.
-  `felt_opts` go to `Shuttle.Felt.run/2`.
+  `cli_opts` go to `Shuttle.CLI.run/2`.
   """
   @spec freeze_daemon_host_id!(keyword()) :: String.t()
-  def freeze_daemon_host_id!(felt_opts \\ []) do
-    id = resolve_own_host_id(felt_opts)
+  def freeze_daemon_host_id!(cli_opts \\ []) do
+    id = resolve_own_host_id(cli_opts)
     :persistent_term.put(@daemon_host_key, id)
     id
   end
@@ -2375,7 +2373,7 @@ defmodule Shuttle.Poller do
   @doc """
   The daemon identity frozen at application start. Code running with no
   application (a bare script, a unit test that stopped it) resolves and
-  freezes it on first use, so even there felt is asked at most once.
+  freezes it on first use, so even there Shuttle is asked at most once.
   """
   @spec daemon_host_id() :: String.t()
   def daemon_host_id do
@@ -2386,31 +2384,31 @@ defmodule Shuttle.Poller do
   end
 
   # `SHUTTLE_HOST` (trimmed) when set — the explicit override and the test
-  # seam, the same first tier felt itself honours — else felt's answer. felt is
-  # the one resolver of the host file and the OS-hostname fallback (see
-  # cmd/shuttle_host.go), so the CLI's `host:` stamp and this daemon's dispatch
-  # predicate cannot disagree about which machine this is. Runs once per
-  # daemon (`freeze_daemon_host_id!/1`) and once per Poller started without an
-  # `:own_host_id` opt (test pollers; `init/1` passes its `:runner`).
+  # seam — else the answer from `shuttle host --json`. Shuttle resolves the host
+  # identity and OS-hostname fallback, so the CLI's `host:` stamp and this
+  # daemon's dispatch predicate cannot disagree about which machine this is.
+  # Runs once per daemon (`freeze_daemon_host_id!/1`) and once per Poller
+  # started without an `:own_host_id` opt (test pollers; `init/1` passes its
+  # `:runner`).
   #
-  # Raises when felt cannot answer: a daemon with no identity would match no
+  # Raises when Shuttle cannot answer: a daemon with no identity would match no
   # `shuttle.host` and dispatch nothing, silently.
   @spec resolve_own_host_id(keyword()) :: String.t()
-  defp resolve_own_host_id(felt_opts) do
+  defp resolve_own_host_id(cli_opts) do
     case String.trim(System.get_env("SHUTTLE_HOST", "")) do
-      "" -> felt_host_id(felt_opts)
+      "" -> shuttle_host_id(cli_opts)
       env -> env
     end
   end
 
-  defp felt_host_id(felt_opts) do
-    with {:ok, output} <- Shuttle.Felt.run(["shuttle", "host", "--json"], felt_opts),
+  defp shuttle_host_id(cli_opts) do
+    with {:ok, output} <- Shuttle.CLI.run(["host", "--json"], cli_opts),
          {:ok, %{"id" => id}} when is_binary(id) and id != "" <- Jason.decode(output) do
       id
     else
       other ->
-        raise "Shuttle.Poller could not resolve own_host_id from `felt shuttle host --json`: " <>
-                "#{inspect(other)}. Set SHUTTLE_HOST=<name> or run `felt shuttle host seed`."
+        raise "Shuttle.Poller could not resolve own_host_id from `shuttle host --json`: " <>
+                "#{inspect(other)}. Set SHUTTLE_HOST=<name> or run `shuttle host seed`."
     end
   end
 
@@ -2437,7 +2435,7 @@ defmodule Shuttle.Poller do
   end
 
   # The fiber's owning felt store, falling back to the first configured store
-  # when resolution fails (callers need *some* store to shell felt against).
+  # when resolution fails (callers need some store to shell Shuttle against).
   defp owning_store(fiber_id, state) do
     case store_for_fiber(fiber_id, state) do
       {:ok, h} -> h
@@ -2445,11 +2443,11 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # The agent id for snapshot metadata, read off felt's already-resolved record
-  # (felt owns resolution). Prefers the
-  # effective `shuttle.resolved.agent.id`, falls back to the raw `shuttle.agent`
-  # name, then `"unknown"` — this is a display/metadata label, never a dispatch
-  # decision, so a best-effort label is correct when felt emitted no resolution.
+  # The agent id for snapshot metadata, read off Shuttle's resolved record.
+  # Prefers the effective `shuttle.resolved.agent.id`, falls back to the raw
+  # `shuttle.agent` name, then `"unknown"` — this is a display/metadata label,
+  # never a dispatch decision, so a best-effort label is correct when Shuttle
+  # emitted no resolution.
   @doc false
   def agent_id_from_fiber(fiber) when is_map(fiber) do
     get_in(fiber, ["shuttle", "resolved", "agent", "id"]) ||
@@ -2746,7 +2744,7 @@ defmodule Shuttle.Poller do
                 {state, {:error, :closed}}
 
               # The claim stamps `shuttle.runtime` (dispatched_at, session_uuid)
-              # through `felt shuttle mark-runtime`, which needs an installed
+              # through `shuttle mark-runtime`, which needs an installed
               # block to nest under. Claiming an uninstalled fiber would
               # register a worker whose runtime never lands — no Resume
               # previous, no meeting-to-card link — so install comes first.
@@ -2768,7 +2766,7 @@ defmodule Shuttle.Poller do
   defp register_claimed_session(%State{} = state, fiber_id, fiber, tmux_session, opts) do
     # The session is already live; we only need a label for the running-state
     # entry. Prefer the claim's explicit `:agent` (the worker names itself),
-    # else felt's resolved id, else the raw name / "unknown" — a best-effort
+    # else Shuttle's resolved id, else the raw name / "unknown" — a best-effort
     # display label, never a dispatch decision.
     agent_id = Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
 
@@ -2849,8 +2847,7 @@ defmodule Shuttle.Poller do
   # The claim-time analog of the dispatcher's dispatch write: a self-claimed /
   # chat-captured session stamps (refreshes) the fiber's `shuttle.runtime`
   # dispatch fields so the continuation heuristic and "Resume previous" can
-  # recover its session UUID. Routes through `felt shuttle mark-runtime` (felt
-  # owns the nesting). The store/scoped-id pair mirrors the dispatch
+  # recover its session UUID. Routes through `shuttle mark-runtime`. The store/scoped-id pair mirrors the dispatch
   # path: `store_for_fiber` (the same owning-store the poll enumerated this fiber
   # from), falling back to the primary configured store. A claim with no captured
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
@@ -2961,7 +2958,7 @@ defmodule Shuttle.Poller do
   # deliberate by construction. Every reap path that catches a closed fiber
   # with a live worker (the per-poll reaper above, and orphan/boot adoption in
   # `Shuttle.Poller.SessionReconciliation`) calls this to stamp
-  # `shuttle.runtime.handed_off_at` exactly as `felt shuttle handoff` would, so
+  # `shuttle.runtime.handed_off_at` exactly as `shuttle handoff` would, so
   # `Continuation.clean_handoff_since_dispatch?/1` reads the exit as clean
   # (fresh redispatch) rather than a dirty death (resume). Skipped when
   # `handed_off_at` is already present and not older than `dispatched_at` — a
@@ -3082,7 +3079,7 @@ defmodule Shuttle.Poller do
         case fetch_fiber_full(fiber_id, state) do
           {:ok, fiber} ->
             # The daemon does NOT write the handoff marker — the WORKER does,
-            # via `felt shuttle handoff`, as its second-to-last act. A worker
+            # via `shuttle handoff`, as its second-to-last act. A worker
             # that dies without handing off leaves no handoff marker, so the
             # next dispatch resumes its transcript while warm and starts fresh
             # once cold (`Dispatcher.check_resume_intent/2`). The clean/dirty
@@ -3113,7 +3110,7 @@ defmodule Shuttle.Poller do
                 # staying `active` in a state the tick gate can never pick
                 # up):
                 #
-                #  • DELIBERATE handoff since dispatch (the worker ran `felt shuttle
+                #  • DELIBERATE handoff since dispatch (the worker ran `shuttle
                 #    handoff`, stamping a fresh marker) → a deliberate ask for a
                 #    fresh session in a long autonomous arc. Leave the document
                 #    `active` and write nothing; `filter_eligible`'s
@@ -3545,26 +3542,22 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Fetch a fiber's full JSON representation via the felt CLI. Routes to the
-  # fiber's owning store via store_for_fiber/2 (cache → felt resolution).
+  # Fetch a fiber's full JSON representation via shuttle so runtime decisions
+  # see resolved Shuttle fields. Routes to the owning store via owning_store/2.
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
 
-    case run_felt(host, state.runner, ["show", fiber_id, "--json"]) do
+    case run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
       {:ok, output} ->
         case Jason.decode(output) do
           {:ok, fiber} -> {:ok, fiber}
           {:error, _} -> {:error, :invalid_json}
         end
 
-      # run_felt already wraps a non-zero exit in a descriptive string naming
-      # the command, the store directory and felt's output. A common case here
-      # is a felt-store path that doesn't exist on THIS host — e.g. a foreign
-      # absolute path (`/path/to/store` on another machine) that lives only in
-      # that host's own `FELT_STORES`/registry config. Naming the path makes
-      # that an actionable error rather than a blank 500. See
-      # `gotcha-remote-daemon-foreign-felt-store-path`.
+      # run_shuttle reports the executable, command, store directory, and CLI
+      # output. A common error is a store path that exists only on another host;
+      # naming it makes that actionable instead of returning a blank 500.
       {:error, reason} ->
         {:error, reason}
     end
@@ -3610,44 +3603,45 @@ defmodule Shuttle.Poller do
 
   defp running_prompt_metadata(_), do: %{}
 
-  # Run a felt CLI command against an explicit host directory.
-  # Every felt-touching helper calls this directly with the resolved host.
-  #
-  # On a non-zero exit, the error is a self-describing string carrying the
-  # command, the host directory it ran in, the exit status, and trimmed
-  # output. felt's own output for a nonexistent store can be empty (it just
-  # finds no index), so the host path is what names the actual fault —
-  # typically a felt-store path that doesn't exist on this machine (a foreign
-  # absolute path registered only in another host's own
-  # `FELT_STORES`/registry config).
-  #
-  # No configured store to route through (empty registry) fails soft rather
-  # than crashing the `is_binary(host)` clause with a FunctionClauseError.
-  defp run_felt(nil, _runner, _args), do: {:error, :no_felt_store}
+  # Run either CLI against an explicit store. Felt reads run from the store
+  # directory; Shuttle receives its root `-C` flag. JSON consumers keep stderr
+  # separate because a successful listing can warn about an unreadable fiber.
+  defp run_felt(store, runner, args), do: run_cli(:felt, store, runner, args)
+  defp run_shuttle(store, runner, args), do: run_cli(:shuttle, store, runner, args)
 
-  defp run_felt(host, runner, args) when is_binary(host) do
-    # These poller calls consume felt's stdout as JSON. Keep stderr separate:
-    # felt can exit 0 while warning about unrelated unreadable fibers, and
-    # folding those warnings into stdout makes the JSON undecodable.
-    opts = [cd: host, stderr_to_stdout: false]
+  defp run_cli(_tool, nil, _runner, _args), do: {:error, :no_felt_store}
 
-    case runner.cmd("felt", args, opts) do
-      {output, 0} ->
+  defp run_cli(tool, store, runner, args) when is_binary(store) do
+    {result, scope} =
+      case tool do
+        :felt ->
+          {Shuttle.CLI.run_felt(args,
+             runner: runner,
+             cd: store,
+             stderr_to_stdout: false
+           ), "cd #{store}"}
+
+        :shuttle ->
+          {Shuttle.CLI.run_in_store(store, args, runner: runner, stderr_to_stdout: false),
+           "-C #{store}"}
+      end
+
+    case result do
+      {:ok, output} ->
         {:ok, output}
 
-      {_output, :timeout} ->
-        # The runner's wall-clock bound fired (felt wedged on an overloaded
-        # node). Surfaced as its own atom — not folded into the exit-status
-        # string — because a timeout says NOTHING about the store's fibers:
-        # callers must treat it as "world unknown", never as "fiber gone"
-        # (see discover_candidates/1), and the poll cycle degrades for one
-        # tick instead of stalling forever.
+      {:command_error, :timeout, _output} ->
+        # A timeout says nothing about the store's fibers: callers treat the
+        # result as "world unknown", never as "fiber gone".
         {:error, :timeout}
 
-      {output, status} ->
+      {:command_error, status, output} ->
         trimmed = String.trim(to_string(output))
         detail = if trimmed == "", do: "(no output)", else: trimmed
-        {:error, "felt #{Enum.join(args, " ")} (cd #{host}) exited #{status}: #{detail}"}
+        {:error, "#{tool} #{Enum.join(args, " ")} (#{scope}) exited #{status}: #{detail}"}
+
+      {:error, reason} ->
+        {:error, "could not run #{tool} #{Enum.join(args, " ")} (#{scope}): #{reason}"}
     end
   end
 

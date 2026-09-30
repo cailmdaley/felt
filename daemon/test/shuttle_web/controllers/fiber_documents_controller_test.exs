@@ -35,14 +35,14 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     store = Path.join(root, "loom")
     File.mkdir_p!(store)
 
-    old_loom_homes = System.get_env("FELT_STORES")
+    old_loom_homes = System.get_env("SHUTTLE_STORES")
     old_shuttle_host = System.get_env("SHUTTLE_HOST")
 
-    System.put_env("FELT_STORES", store)
+    System.put_env("SHUTTLE_STORES", store)
     System.put_env("SHUTTLE_HOST", "test-host")
 
     on_exit(fn ->
-      restore_env("FELT_STORES", old_loom_homes)
+      restore_env("SHUTTLE_STORES", old_loom_homes)
       restore_env("SHUTTLE_HOST", old_shuttle_host)
       File.rm_rf(root)
     end)
@@ -1093,7 +1093,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     File.mkdir_p!(Path.join(store, ".felt"))
     File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "felt-project"]))
-    System.put_env("FELT_STORES", Enum.join([store, project], ","))
+    System.put_env("SHUTTLE_STORES", Enum.join([store, project], ","))
 
     warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
@@ -1385,7 +1385,6 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end
   end
 
-
   # Start a Poller under its default name (so the controller's calls reach it),
   # or reuse a running one — returning the original state to restore on exit.
   defp start_or_reuse_poller(store) do
@@ -1414,7 +1413,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
   # on-disk shuttle fibers to appear must warm the cache first. Returns the pid.
   defp warm_poller!(store) do
     stores =
-      case System.get_env("FELT_STORES") do
+      case System.get_env("SHUTTLE_STORES") do
         nil -> [store]
         "" -> [store]
         value -> String.split(value, ",", trim: true)
@@ -1495,5 +1494,4 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     {realdir, 0} = System.cmd("realpath", [dir])
     String.trim(realdir)
   end
-
 end

@@ -135,7 +135,7 @@ defmodule Shuttle.Activity do
   count never depends on which window asks for it, which is what the
   whole-minutes rule below promises.
 
-  `felt hook event` rotates the stream at 64 MB: the live file is renamed to
+  `shuttle hook event` rotates the stream at 64 MB: the live file is renamed to
   `events.jsonl.1` and a fresh one starts (`cmd/shuttle_events.go`). The fold
   reads the rotated sibling first and the live file second, always — a window
   that reaches back past the last rotation is served from both, and a window

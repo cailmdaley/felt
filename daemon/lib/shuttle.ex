@@ -376,7 +376,7 @@ defmodule Shuttle.Application do
   # anything signed appears.
   #
   # If signed state ever must outlive a restart, the upgrade is local to this
-  # function: persist to ~/.config/felt/secret_key_base with 0600 on first boot.
+  # function: persist to ~/.config/shuttle/secret_key_base with 0600 on first boot.
   defp secret_key_base(existing) do
     Keyword.get(existing, :secret_key_base) ||
       System.get_env("SHUTTLE_SECRET_KEY_BASE") ||

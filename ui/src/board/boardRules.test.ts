@@ -1478,7 +1478,7 @@ describe('Resting holds standing roles asleep between runs', () => {
   it('leaves a CLOSED standing role in Awaiting review — it wants a verdict, not a nap', () => {
     // What the daemon actually does (shuttle standing-roles reference): a
     // standing role's run ends `status:closed` + untempered, which IS the
-    // awaiting-review state, and `felt shuttle accept` re-arms it to `active`.
+    // awaiting-review state, and `shuttle accept` re-arms it to `active`.
     // So a closed role is not parked — it is holding a work product for you —
     // and drawing it asleep in Resting would hide the one thing it needs.
     const resp = boardOf([role({ status: 'closed', outcome: 'Paid 3 bills' })])
@@ -1487,7 +1487,7 @@ describe('Resting holds standing roles asleep between runs', () => {
   })
 
   it('leaves a PAUSED standing role in Drafts, where pause put it', () => {
-    // `felt shuttle pause` writes status:open and preserves the schedule. An
+    // `shuttle pause` writes status:open and preserves the schedule. An
     // open role is not armed, so it has no next launch to sleep until.
     const resp = boardOf([role({ status: 'open' })])
     expect(resp.now.drafts.map((c) => c.id)).toEqual(['ops/monthly-report'])

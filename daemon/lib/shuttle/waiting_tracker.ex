@@ -8,7 +8,7 @@ defmodule Shuttle.WaitingTracker do
 
   ## Why tail the local stream
 
-  `felt hook event` — registered by the bundled plugin on both Claude Code and
+  `shuttle hook event` — registered by the bundled plugin on both Claude Code and
   Codex — appends every hook event to a host-local `events.jsonl` on every
   machine a worker runs on. The owning
   daemon stamps runtime liveness for *its own* fibers (local daemon for local

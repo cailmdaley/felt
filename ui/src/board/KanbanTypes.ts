@@ -2,7 +2,7 @@
 export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted' | 'pinned'
 export type HorizonKind = 'now' | 'stashed'
 
-/** The three shapes a shuttle block can take — the values `felt shuttle
+/** The three shapes a shuttle block can take — the values `shuttle
  *  reshape` accepts and the daemon's lifecycle controller allows. */
 export type ShuttleKind = 'oneshot' | 'standing' | 'pinned'
 
@@ -96,7 +96,7 @@ export interface KanbanCard {
   /**
    * True when the owning daemon is holding this fiber under boot quarantine — a
    * genuinely-fresh launch parked in `pending_launch`, awaiting
-   * `bin/shuttle release`. Distinct from `workerState` (a live worker) and from
+   * `shuttle daemon release`. Distinct from `workerState` (a live worker) and from
    * an idle-active card: it reads as "held, awaiting release", not "running" or
    * "idle between workers". Served per-fiber by the owning host.
    */

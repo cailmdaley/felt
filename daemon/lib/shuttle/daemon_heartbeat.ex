@@ -7,7 +7,7 @@ defmodule Shuttle.DaemonHeartbeat do
   ## What it is for
 
   `Shuttle.Poller`'s boot quarantine parks every genuinely-fresh autonomous
-  dispatch on each (re)start until a human runs `bin/shuttle release`. That is
+  dispatch on each (re)start until a human runs `shuttle daemon release`. That is
   right for the restarts it was built for — a crash loop on an overloaded login
   node, a deploy, a machine coming back after hours down — because the danger
   is mass re-dispatch of stale work, and a deploy puts a new build in front of
@@ -25,7 +25,7 @@ defmodule Shuttle.DaemonHeartbeat do
 
   ## Asked-for versus hard: the signal decides
 
-  Every asked-for stop — `make stop`, `bin/shuttle`'s `stop_daemon` (run before
+  Every asked-for stop — `make stop`, `shuttle daemon`'s `stop_daemon` (run before
   installing a supervisor), `bin/shuttle-deploy`'s listener kill, `systemctl
   --user restart`, `launchctl kickstart -k` — sends SIGTERM first. Re-running
   `bin/shuttle-launch` (and `install-agent`'s retirement of that loop) kills
@@ -273,7 +273,7 @@ defmodule Shuttle.DaemonHeartbeat do
   @doc """
   The stop marker beside `heartbeat_path`: `heartbeat.stopped` in the same
   directory, so `$SHUTTLE_DATA_DIR/heartbeat.stopped` by default — the path
-  `make stop`, `bin/shuttle` and `bin/shuttle-deploy` touch before they signal.
+  `make stop`, `shuttle daemon` and `bin/shuttle-deploy` touch before they signal.
   """
   @spec stop_marker_path(String.t()) :: String.t()
   def stop_marker_path(heartbeat_path),

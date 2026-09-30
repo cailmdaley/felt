@@ -6,7 +6,7 @@ defmodule Shuttle.LogRotator do
   Nothing else ever truncates these files. The daemon's stdout+stderr are
   redirected to one file by whichever supervisor started it (launchd's
   `StandardOutPath`, systemd's `StandardOutput=append:`, or the tmux respawn
-  loop's `>>`), and `felt shuttle tunnels` points each autossh job's log at
+  loop's `>>`), and `shuttle tunnels` points each autossh job's log at
   `~/.local/state/shuttle/tunnel-<remote>.log`. A long-lived daemon writes to
   both forever: the hub's `shuttle.log` reached 343MB before this module
   existed, one tunnel log 22MB.
@@ -49,7 +49,7 @@ defmodule Shuttle.LogRotator do
   the supervisor's business, baked into the rendered plist/unit as `__LOG__`.
   So `install-agent` now also exports it as `SHUTTLE_LOG` in the rendered job's
   environment, and this module reads that. When it is unset we fall back to the
-  same per-platform default `bin/shuttle` uses, which covers the tmux respawn
+  same per-platform default `shuttle daemon` uses, which covers the tmux respawn
   loop: `bin/shuttle-launch` starts the daemon with no baked environment at all
   (it reads `$SHUTTLE_LOG` itself, with the same fallback, but does not export
   it).
@@ -157,7 +157,7 @@ defmodule Shuttle.LogRotator do
 
   defp tunnel_logs(dir) do
     # Globbed every pass rather than resolved once at boot, so a remote added
-    # with `felt shuttle remotes add` (and its new tunnel log) is picked up
+    # with `shuttle remotes add` (and its new tunnel log) is picked up
     # without a daemon bounce. Path.wildcard on a missing directory returns [],
     # which is the silent no-op non-hub hosts need.
     dir |> Path.join(@tunnel_log_glob) |> Path.wildcard()
@@ -238,7 +238,7 @@ defmodule Shuttle.LogRotator do
 
   # SHUTTLE_LOG is exported by the rendered launchd plist / systemd unit
   # (share/*.template), from the same value their stdout redirection uses. The
-  # fallbacks mirror `bin/shuttle`'s AGENT_LOG_DEFAULT verbatim, which is what
+  # fallbacks mirror `shuttle daemon`'s AGENT_LOG_DEFAULT verbatim, which is what
   # the tmux respawn loop lands on when it starts the daemon with no baked
   # environment.
   defp daemon_log_path do
@@ -254,9 +254,9 @@ defmodule Shuttle.LogRotator do
     end
   end
 
-  # The directory and `tunnel-<remote>.log` naming are the felt CLI's
-  # convention (cmd/shuttle_tunnels.go). Mirrored here as a convention, not
-  # imported: the daemon never reaches into felt internals.
+  # The directory and `tunnel-<remote>.log` naming follow the Shuttle CLI's
+  # convention. Mirrored here as a convention, not imported: the daemon never
+  # reaches into CLI internals.
   defp default_tunnel_log_dir do
     Path.join([System.user_home!(), ".local", "state", "shuttle"])
   end

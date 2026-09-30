@@ -91,7 +91,7 @@ export interface CompositeEntry {
   runtime?: CompositeRuntime;
   /** Owner-served boot-quarantine hold — true iff the owning daemon is
    * withholding this fiber as a genuinely-fresh launch in `pending_launch`
-   * (awaiting `bin/shuttle release`). Distinct from `runtime` (a live worker)
+   * (awaiting `shuttle daemon release`). Distinct from `runtime` (a live worker)
    * and from an idle-active card. Served through the per-fiber feed by the
    * owning host, so it works cross-host with no board-side global-state lookup. */
   held?: boolean;

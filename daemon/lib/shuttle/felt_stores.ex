@@ -4,8 +4,8 @@ defmodule Shuttle.FeltStores do
 
   Resolution order:
 
-    1. `FELT_STORES` env (comma-separated)
-    2. persisted registry `~/.config/felt/stores.json`
+    1. `SHUTTLE_STORES` env (comma-separated)
+    2. persisted registry `~/.config/shuttle/stores.json`
 
   The registry is the source of truth — there is no implicit default store. An
   empty env *and* an empty/absent registry resolve to `[]`; register a store
@@ -15,9 +15,9 @@ defmodule Shuttle.FeltStores do
   alias Shuttle.PathListConfig
 
   @spec_ %{
-    env: "FELT_STORES",
-    config_env: "FELT_STORES_FILE",
-    default_path: "~/.config/felt/stores.json",
+    env: "SHUTTLE_STORES",
+    config_env: "SHUTTLE_STORES_FILE",
+    default_path: "~/.config/shuttle/stores.json",
     json_key: "felt_stores"
   }
 
@@ -35,7 +35,7 @@ defmodule Shuttle.FeltStores do
   A cache read — the walk runs in the poll cycle's Task
   (`refresh_expanded_stores/0`), never on a request process. The exception is a
   cold start: the first call for a given base list, which includes a
-  just-changed `FELT_STORES`/registry, so a config change takes effect at once.
+  just-changed `SHUTTLE_STORES`/registry, so a config change takes effect at once.
   """
   @spec configured_stores() :: store_list()
   def configured_stores, do: cached_expansion(:infinity)
@@ -72,8 +72,8 @@ defmodule Shuttle.FeltStores do
   @doc """
   The configured store list before symlink-substore expansion.
 
-  This is the human-curated registry: `FELT_STORES` when explicitly set,
-  otherwise the persisted `~/.config/felt/stores.json` list. Use this for picker
+  This is the human-curated registry: `SHUTTLE_STORES` when explicitly set,
+  otherwise the persisted `~/.config/shuttle/stores.json` list. Use this for picker
   surfaces that should reflect the canonical city list. Use `configured_stores/0`
   for daemon polling/resolution, where symlinked substores must be expanded.
   """
@@ -430,15 +430,15 @@ defmodule Shuttle.FeltStores do
   def save(stores) when is_list(stores), do: PathListConfig.save(@spec_, stores)
 
   @doc """
-  Where the registry file resolves: `FELT_STORES_FILE`, else
-  `~/.config/felt/stores.json`. `FELT_STORES` overrides the file's *contents*,
+  Where the registry file resolves: `SHUTTLE_STORES_FILE`, else
+  `~/.config/shuttle/stores.json`. `SHUTTLE_STORES` overrides the file's *contents*,
   not its location, so this path can be live and unread at the same time.
   """
   @spec config_path() :: String.t()
   def config_path, do: PathListConfig.config_path(@spec_)
 
   @doc """
-  The list PERSISTED in the file, ignoring `FELT_STORES`.
+  The list PERSISTED in the file, ignoring `SHUTTLE_STORES`.
 
   Distinct from `configured_base_stores/0`, which answers "what is this daemon
   actually polling" — the env form when it is set. An editor of the file wants

@@ -1,7 +1,7 @@
 defmodule Shuttle.Dispatcher do
   @moduledoc """
   Dispatches a single worker for a felt constitution fiber:
-  - Locates the fiber via felt CLI
+  - Locates the fiber via the Shuttle CLI
   - Refuses a fiber without an intrinsic id (its worker would have no name)
   - Checks status (refuses closed)
   - Checks for an existing worker
@@ -534,46 +534,45 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Resolves an agent name + axes with no fiber on disk (a capture, or
-  # `Shuttle.SessionResume`'s ledger-named agent), so it shells felt — the
+  # `Shuttle.SessionResume`'s ledger-named agent), so it shells shuttle — the
   # registry owner — rather than re-resolving locally:
-  #   felt shuttle agents resolve <name> [--effort <E>] [--chrome] --json
-  # emits the same shape felt inlines as `shuttle.resolved.agent`. The daemon
-  # turns it into a command record via from_resolved/1. felt exits non-zero with
-  # a descriptive stderr message on an unknown agent / dangling alias /
-  # unsupported axis; that becomes `{:error, {:invalid_axes, msg}}` so the HTTP
-  # layer can answer 422 (client error) without string-sniffing — other capture
-  # failures (tmux spawn, missing model config) stay 500-shaped. Routed through
-  # the injected `runner` so tests need no live `felt shuttle agents` verb.
+  #   shuttle agents resolve <name> [--effort <E>] [--chrome] --json
+  # emits the same shape inlines as `shuttle.resolved.agent`. The daemon turns
+  # it into a command record via from_resolved/1. shuttle exits non-zero with a
+  # descriptive diagnostic on an unknown agent / dangling alias / unsupported
+  # axis; that becomes `{:error, {:invalid_axes, msg}}` so the HTTP layer can
+  # answer 422 without string-sniffing. Other capture failures stay 500-shaped.
+  # Routed through the injected `runner` so tests need no live shuttle process.
   @doc false
   def resolve_agent_axes(agent_name, effort, chrome, runner) do
     args =
-      ["shuttle", "agents", "resolve", agent_name] ++
+      ["agents", "resolve", agent_name] ++
         if(is_binary(effort) and effort != "", do: ["--effort", effort], else: []) ++
         if(chrome, do: ["--chrome"], else: []) ++
         ["--json"]
 
-    # `stderr_to_stdout: true`: on success felt writes only the resolved JSON to
-    # stdout (nothing to stderr), so `output` is clean JSON; on a non-zero exit
-    # stdout is empty and stderr carries felt's descriptive diagnostic, so
-    # `output` is the constraint message. Folding gives the right bytes either way.
-    case runner.cmd("felt", args, stderr_to_stdout: true) do
-      {output, 0} ->
+    # `stderr_to_stdout: true` keeps successful resolved JSON and a refused
+    # request's diagnostic in the same result string.
+    case Shuttle.CLI.run(args, runner: runner) do
+      {:ok, output} ->
         {:ok, Agents.from_resolved(Jason.decode!(output))}
 
       # A runner timeout is a wedged node, not a bad request — it must stay
       # 500-shaped (see moduledoc: only axes-validation failures answer 422).
-      {output, :timeout} ->
-        {:error, "felt shuttle agents resolve timed out: #{String.trim(output)}"}
+      {:command_error, :timeout, output} ->
+        {:error, "shuttle agents resolve timed out: #{String.trim(output)}"}
 
-      {output, _status} ->
+      {:command_error, _status, output} ->
         {:error, {:invalid_axes, String.trim(output)}}
+
+      {:error, reason} ->
+        {:error, "shuttle agents resolve failed: #{reason}"}
     end
   rescue
-    # ErlangError: the spawn itself failed — most pointedly `felt` not on PATH
-    # (`:enoent`). Jason.DecodeError: felt exited 0 but emitted non-JSON (a
-    # contract violation). Either surfaces loudly as a 500 rather than crashing.
-    e in [ErlangError, Jason.DecodeError] ->
-      {:error, "felt shuttle agents resolve failed: #{Exception.message(e)}"}
+    # A malformed successful response is a CLI contract violation and surfaces
+    # loudly as a 500 rather than crashing the capture path.
+    e in Jason.DecodeError ->
+      {:error, "shuttle agents resolve failed: #{Exception.message(e)}"}
   end
 
   @doc false
@@ -678,16 +677,16 @@ defmodule Shuttle.Dispatcher do
 
   # Read the fiber from the store this dispatch was given — the Poller passes
   # the fiber's owning store; the default is `default_felt_store/0`. With no
-  # store there is nothing to read. felt's stderr stays out of the JSON: felt
-  # can exit 0 while warning about an unrelated unreadable fiber.
+  # store there is nothing to read. Shuttle's show includes the resolved agent
+  # record the dispatch preflight consumes; stderr stays out of the JSON.
   defp fetch_fiber(_fiber_id, _runner, nil), do: {:error, :not_found}
 
   defp fetch_fiber(fiber_id, runner, felt_store) do
-    case runner.cmd("felt", ["show", fiber_id, "--json"],
-           cd: felt_store,
+    case Shuttle.CLI.run_in_store(felt_store, ["show", fiber_id, "--json"],
+           runner: runner,
            stderr_to_stdout: false
          ) do
-      {output, 0} -> decode_fiber(output)
+      {:ok, output} -> decode_fiber(output)
       _ -> {:error, :not_found}
     end
   end
@@ -730,7 +729,7 @@ defmodule Shuttle.Dispatcher do
   # worker spawns. A worker dispatched against a still-`closed` fiber has no
   # live mandate — it boots and dies within seconds (the "terminal opens and
   # immediately closes" symptom) while the card stays in its closed column. So
-  # a non-zero `felt shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the
+  # a non-zero `shuttle reopen` (`{:error, :reopen_failed}`) ABORTS the
   # dispatch and propagates through the `with` chain to the caller.
   #
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
@@ -760,11 +759,11 @@ defmodule Shuttle.Dispatcher do
         reopen_failure(
           fiber_id,
           fatal?,
-          "`felt shuttle reopen` failed (exit #{code}: #{String.trim(to_string(output))})"
+          "`shuttle reopen` failed (exit #{code}: #{String.trim(to_string(output))})"
         )
 
       {:error, reason} ->
-        reopen_failure(fiber_id, fatal?, "`felt shuttle reopen` raised #{inspect(reason)}")
+        reopen_failure(fiber_id, fatal?, "`shuttle reopen` raised #{inspect(reason)}")
     end
   end
 
@@ -786,11 +785,11 @@ defmodule Shuttle.Dispatcher do
     :ok
   end
 
-  # Shell `felt shuttle reopen` through the one audited write helper
-  # (`Shuttle.Felt.Shuttle`). felt resolves its own host from local state, so
-  # no `--host` override is passed — see `Shuttle.Felt.Shuttle`'s moduledoc.
+  # Shell `shuttle reopen` through the one audited write helper
+  # (`Shuttle.CLI`). The daemon's host is resolved locally, so no `--host`
+  # override is passed — see `Shuttle.CLI`'s moduledoc.
   defp run_reopen(fiber_id, runner, felt_store) do
-    Shuttle.Felt.Shuttle.run("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
+    Shuttle.CLI.run_lifecycle("reopen", fiber_id, [], runner: runner, felt_store: felt_store)
   end
 
   defp closed?(fiber), do: Map.get(fiber, "status", "") == "closed"
@@ -845,18 +844,19 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp resolve_agent(fiber) do
-    # felt resolves name + axes → the effective record and inlines it under
-    # shuttle.resolved.agent (felt show -j). The daemon consumes that finished
-    # record and renders it (Agents.build_command); it keeps no registry. Absent
-    # resolved.agent ⇒ felt could not resolve (unknown agent) or felt is not on
-    # PATH — fail the dispatch loudly rather than launch a broken worker.
+    # Shuttle resolves name + axes → the effective record and inlines it under
+    # shuttle.resolved.agent (`shuttle show -j`). The daemon consumes that
+    # finished record and renders it (Agents.build_command); it keeps no
+    # registry. Absent resolved.agent ⇒ Shuttle could not resolve the agent or
+    # `shuttle` is not on PATH — fail the dispatch rather than launch a broken
+    # worker.
     case get_in(fiber, ["shuttle", "resolved", "agent"]) do
       resolved when is_map(resolved) ->
         {:ok, Agents.from_resolved(resolved)}
 
       _ ->
         {:error,
-         "no resolved agent in felt JSON for #{inspect(get_in(fiber, ["shuttle", "agent"]))} (felt must emit shuttle.resolved.agent)"}
+         "no resolved agent in Shuttle JSON for #{inspect(get_in(fiber, ["shuttle", "agent"]))} (shuttle must emit shuttle.resolved.agent)"}
     end
   end
 
@@ -922,14 +922,14 @@ defmodule Shuttle.Dispatcher do
 
   defp preflight_wrapper(agent, work_dir, runner) do
     case Agents.wrapper_probe(agent) do
-      # felt fills a record's `wrapper` from its `cli` when the record omits it
+      # Shuttle fills a record's `wrapper` from its `cli` when the record omits it
       # (internal/shuttle/registry_config.go), so nothing to probe means the
       # registry record itself names nothing to invoke.
       :none ->
         dispatch_refused(
           :wrapper_unresolved,
           "agent #{agent.id} names no wrapper or cli to invoke — its registry record is " <>
-            "incomplete (`felt shuttle agents` prints the effective registry)."
+            "incomplete (`shuttle agents` prints the effective registry)."
         )
 
       {command, args} ->
@@ -972,7 +972,7 @@ defmodule Shuttle.Dispatcher do
             "through a login bash, so the wrapper must be an executable on PATH or a shell " <>
             "function defined by your bash login profile — a definition that exists only in zsh " <>
             "or fish is invisible here. Install it, or point the agent at a CLI that is on PATH " <>
-            "in `~/.config/felt/agents.json` (`felt shuttle agents` prints the effective registry)."
+            "in `~/.config/shuttle/agents.json` (`shuttle agents` prints the effective registry)."
         )
     end
   end
@@ -1545,7 +1545,7 @@ defmodule Shuttle.Dispatcher do
   # tmux session starts doing work, not some seconds later. So for EVERY
   # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
   # `store_session_id` returns (a bounded blocking call: the Runner bounds
-  # every felt shell-out). Only the piece that
+  # every CLI shell-out). Only the piece that
   # genuinely can't be known yet — codex/pi's session UUID, scraped from a
   # JSONL file the harness hasn't necessarily written when tmux launches — is
   # deferred to an async task, and that task only BACKFILLS `session_uuid`
@@ -1595,13 +1595,13 @@ defmodule Shuttle.Dispatcher do
     do: record_dispatch_session(fiber_id, nil, runner, opts)
 
   # Stamp `{session_uuid, dispatched_at, run_id}` into the fiber's
-  # `shuttle.runtime` block by shelling `felt shuttle mark-runtime` (felt owns
-  # the nesting). At the next dispatch the worker's
-  # `handed_off_at` is compared against this `dispatched_at` to decide
-  # fresh-vs-resume. `felt_store` + `fiber_id` are the store/scoped-id pair the
-  # dispatch read the fiber with, so felt resolves it. A missing `:felt_store`
-  # skips the write — the fiber then reads as a fresh dispatch, the safe
-  # default. `uuid` may be `nil` (codex/pi at launch, or `:none` agents) — the
+  # `shuttle.runtime` block by shelling `shuttle mark-runtime`. At the next
+  # dispatch the worker's `handed_off_at` is compared against this
+  # `dispatched_at` to decide fresh-vs-resume. `felt_store` + `fiber_id` are the
+  # store/scoped-id pair the dispatch read the fiber with, so Shuttle resolves
+  # it. A missing `:felt_store` skips the write — the fiber then reads as a
+  # fresh dispatch, the safe default. `uuid` may be `nil` (codex/pi at launch,
+  # or `:none` agents) — the
   # marker still gets a `dispatched_at` boundary, just no `session_uuid` yet.
   defp record_dispatch_session(fiber_id, uuid, runner, opts) do
     write_runtime_marker(fiber_id, uuid, opts, "dispatch marker", fn store ->
@@ -1670,7 +1670,7 @@ defmodule Shuttle.Dispatcher do
 
   # Backfill `session_uuid` into an ALREADY-STAMPED marker — the codex/pi
   # async capture path. Deliberately does not touch `dispatched_at`: it shells
-  # `felt shuttle mark-runtime --session <uuid>` with no `--dispatched-at`
+  # `shuttle mark-runtime --session <uuid>` with no `--dispatched-at`
   # flag, and mark-runtime only writes fields whose flag is present, so the
   # boundary `record_dispatch_session/4` stamped synchronously at launch is
   # left exactly as it was.
@@ -1852,7 +1852,7 @@ defmodule Shuttle.Dispatcher do
     headless = Keyword.get(opts, :headless, false)
     display_fiber_id = Keyword.get(opts, :display_fiber_id, fiber_id)
 
-    # The fiber's `.md` path for the worker's `felt shuttle handoff`: it stamps
+    # The fiber's `.md` path for the worker's `shuttle handoff`: it stamps
     # `shuttle.handed_off_at` directly into this file (no felt-store resolution,
     # no ambiguity), so the daemon hands it the path it already resolved at
     # dispatch. The worker writes the same `shuttle:` block this daemon reads on
@@ -1964,7 +1964,7 @@ defmodule Shuttle.Dispatcher do
   #
   # Harness identity goes too. A tmux server started from inside a Claude, Codex
   # or Pi session keeps that session's AI_AGENT and *_SESSION_ID / THREAD_ID in
-  # its global environment, and every pane inherits it; `felt shuttle message`
+  # its global environment, and every pane inherits it; `shuttle message`
   # and `send-file` read those to attribute the sender, so a worker would speak
   # as the stale session. Each harness sets its own on launch.
   @doc false

@@ -3,14 +3,14 @@ defmodule Shuttle.ConfigFilesTest do
   `Shuttle.ConfigFiles` — the five operator files as addressable bytes.
 
   Every test points ALL FIVE `*_FILE` env vars at throwaway paths and clears the
-  two compact `FELT_STORES` / `FELT_PROJECTS` forms, so nothing here can read or
-  write the developer's real `~/.config/felt/` — nor the suite-wide fixtures
-  `test_helper.exs` pins `FELT_AGENTS_FILE` / `FELT_REMOTES_FILE` at, which this
+  two compact `SHUTTLE_STORES` / `SHUTTLE_PROJECTS` forms, so nothing here can read or
+  write the developer's real `~/.config/shuttle/` — nor the suite-wide fixtures
+  `test_helper.exs` pins `SHUTTLE_AGENTS_FILE` / `SHUTTLE_REMOTES_FILE` at, which this
   module would otherwise happily overwrite.
 
-  The felt shell-out `validate/2` runs for `:remotes` / `:agents` / `:host` is stubbed at
-  the `:felt_runner` seam, so a real felt on the developer's PATH never decides
-  whether these tests pass.
+  Shuttle's `validate/2` shell-outs for `:remotes` / `:agents` / `:host` are
+  stubbed at the shared `:felt_runner` seam, so a real CLI on the developer's
+  PATH never decides whether these tests pass.
   """
   use ExUnit.Case, async: false
   import Shuttle.Test.EnvHelpers
@@ -19,19 +19,19 @@ defmodule Shuttle.ConfigFilesTest do
 
   # Each file's path override, in `ConfigFiles.ids/0` order.
   @file_vars [
-    stores: "FELT_STORES_FILE",
-    projects: "FELT_PROJECTS_FILE",
-    agents: "FELT_AGENTS_FILE",
-    remotes: "FELT_REMOTES_FILE",
-    host: "FELT_HOST_FILE"
+    stores: "SHUTTLE_STORES_FILE",
+    projects: "SHUTTLE_PROJECTS_FILE",
+    agents: "SHUTTLE_AGENTS_FILE",
+    remotes: "SHUTTLE_REMOTES_FILE",
+    host: "SHUTTLE_HOST_CONFIG_FILE"
   ]
 
   # The two compact comma-separated forms — the only ones that exist.
-  @compact_vars [stores: "FELT_STORES", projects: "FELT_PROJECTS"]
+  @compact_vars [stores: "SHUTTLE_STORES", projects: "SHUTTLE_PROJECTS"]
 
   @stores_doc ~s({"version":1,"felt_stores":["/tmp/one","/tmp/two"]})
 
-  # A felt that records what it was asked — argv, the env override, and the
+  # A runner that records each CLI call — argv, the env override, and the
   # bytes staged at the path that override names AT CALL TIME — and answers
   # from a script. The staged read has to happen inside `cmd/3`: the candidate
   # is deleted the moment `validate/2` returns, which is the point of test
@@ -135,7 +135,7 @@ defmodule Shuttle.ConfigFilesTest do
       end
     end
 
-    test "falls back to ~/.config/felt/<stem>.json when nothing overrides it" do
+    test "falls back to ~/.config/shuttle/<stem>.json when nothing overrides it" do
       # Cleared and restored in one breath: while a `*_FILE` var is absent every
       # other reader in the VM resolves at the developer's real config, and this
       # suite's whole job is to never go near it.
@@ -145,11 +145,11 @@ defmodule Shuttle.ConfigFilesTest do
       Enum.each(previous, fn {var, value} -> restore_env(var, value) end)
 
       assert resolved == %{
-               stores: Path.expand("~/.config/felt/stores.json"),
-               projects: Path.expand("~/.config/felt/projects.json"),
-               agents: Path.expand("~/.config/felt/agents.json"),
-               remotes: Path.expand("~/.config/felt/remotes.json"),
-               host: Path.expand("~/.config/felt/host.json")
+               stores: Path.expand("~/.config/shuttle/stores.json"),
+               projects: Path.expand("~/.config/shuttle/projects.json"),
+               agents: Path.expand("~/.config/shuttle/agents.json"),
+               remotes: Path.expand("~/.config/shuttle/remotes.json"),
+               host: Path.expand("~/.config/shuttle/host.json")
              }
     end
   end
@@ -179,28 +179,28 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "names the compact env form overriding a path-list file" do
-      System.put_env("FELT_STORES", "/tmp/a,/tmp/b")
-      System.put_env("FELT_PROJECTS", "/tmp/c")
+      System.put_env("SHUTTLE_STORES", "/tmp/a,/tmp/b")
+      System.put_env("SHUTTLE_PROJECTS", "/tmp/c")
       on_exit(fn -> Enum.each(@compact_vars, fn {_id, var} -> System.delete_env(var) end) end)
 
       assert ConfigFiles.summary(:stores).env_override == %{
-               var: "FELT_STORES",
+               var: "SHUTTLE_STORES",
                value: "/tmp/a,/tmp/b"
              }
 
       assert ConfigFiles.summary(:projects).env_override == %{
-               var: "FELT_PROJECTS",
+               var: "SHUTTLE_PROJECTS",
                value: "/tmp/c"
              }
     end
 
     test "the fleet and agent files never report one — they have no compact form" do
       # Even with same-named variables exported, which a confused operator will
-      # do sooner or later: `FELT_REMOTES` is not a thing felt reads, and saying
-      # it overrode the file would be a lie in the other direction.
-      System.put_env("FELT_REMOTES", "/tmp/a,/tmp/b")
-      System.put_env("FELT_AGENTS", "/tmp/c")
-      on_exit(fn -> Enum.each(["FELT_REMOTES", "FELT_AGENTS"], &System.delete_env/1) end)
+      # do sooner or later: `SHUTTLE_REMOTES` is not a thing shuttle reads, and
+      # saying it overrode the file would be a lie in the other direction.
+      System.put_env("SHUTTLE_REMOTES", "/tmp/a,/tmp/b")
+      System.put_env("SHUTTLE_AGENTS", "/tmp/c")
+      on_exit(fn -> Enum.each(["SHUTTLE_REMOTES", "SHUTTLE_AGENTS"], &System.delete_env/1) end)
 
       assert ConfigFiles.summary(:remotes).env_override == nil
       assert ConfigFiles.summary(:agents).env_override == nil
@@ -392,28 +392,28 @@ defmodule Shuttle.ConfigFilesTest do
                {:error, ~s(expected an object with a "projects" array, or a bare array of paths)}
     end
 
-    test "never shells felt — no CLI verb reads these files" do
+    test "never shells a CLI — no CLI verb validates these path lists" do
       assert ConfigFiles.validate(:stores, @stores_doc) == :ok
       assert ConfigFiles.validate(:projects, ~s([])) == :ok
       assert MockFelt.calls() == []
     end
   end
 
-  describe "validate/2 for the felt-owned files" do
+  describe "validate/2 for Shuttle-validated files" do
     @remotes_doc ~s({"remotes":[{"name":"candide","port":4001}]})
     @agents_doc ~s({"version":1,"agents":[]})
 
-    test "stages the candidate and points felt's own *_FILE var at it" do
+    test "stages the candidate and points Shuttle's own *_FILE var at it" do
       assert ConfigFiles.validate(:remotes, @remotes_doc) == :ok
 
       call = MockFelt.last()
-      assert call.command == "felt"
-      assert call.args == ["shuttle", "remotes", "list", "--json"]
-      assert [{"FELT_REMOTES_FILE", tmp}] = call.env
+      assert call.command == "shuttle"
+      assert call.args == ["remotes", "list", "--json"]
+      assert [{"SHUTTLE_REMOTES_FILE", tmp}] = call.env
       assert call.opts[:timeout_ms] == 15_000
       assert call.opts[:stderr_to_stdout] == true
 
-      # A throwaway copy, never the real file: what felt reads back is exactly
+      # A throwaway copy, never the real file: what Shuttle reads back is exactly
       # the bytes the caller sent, and a refused edit cannot have touched disk.
       assert tmp == call.tmp
       assert String.starts_with?(tmp, Path.join(System.tmp_dir!(), "shuttle-config-check"))
@@ -421,28 +421,28 @@ defmodule Shuttle.ConfigFilesTest do
       assert call.staged == {:ok, @remotes_doc}
     end
 
-    test "asks the agents verb about the agents file, under FELT_AGENTS_FILE" do
+    test "asks the agents verb about the agents file, under SHUTTLE_AGENTS_FILE" do
       assert ConfigFiles.validate(:agents, @agents_doc) == :ok
 
       call = MockFelt.last()
-      assert call.args == ["shuttle", "agents", "--json"]
-      assert [{"FELT_AGENTS_FILE", tmp}] = call.env
+      assert call.args == ["agents", "--json"]
+      assert [{"SHUTTLE_AGENTS_FILE", tmp}] = call.env
       refute tmp == ConfigFiles.path(:agents)
       assert call.staged == {:ok, @agents_doc}
     end
 
-    test "asks the host verb about the host file, under FELT_HOST_FILE" do
+    test "asks the host verb about the host file, under SHUTTLE_HOST_CONFIG_FILE" do
       doc = ~s({"class":"shared-multi-user"})
       assert ConfigFiles.validate(:host, doc) == :ok
 
       call = MockFelt.last()
-      assert call.args == ["shuttle", "host", "--json"]
-      assert [{"FELT_HOST_FILE", tmp}] = call.env
+      assert call.args == ["host", "--json"]
+      assert [{"SHUTTLE_HOST_CONFIG_FILE", tmp}] = call.env
       refute tmp == ConfigFiles.path(:host)
       assert call.staged == {:ok, doc}
     end
 
-    test "a non-zero exit becomes felt's own stdout, verbatim" do
+    test "a non-zero exit becomes Shuttle's stdout, verbatim" do
       MockFelt.reply_with(fn _call ->
         {~s(remote "hub-a": port 4001 already used by "hub-b"\n), 1}
       end)
@@ -452,7 +452,7 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "scrubs the candidate's path out of the message" do
-      # felt names the file it was reading, and that file is our temporary copy
+      # Shuttle names the file it was reading, and that file is our temporary copy
       # — a path the human has never seen and cannot act on.
       MockFelt.reply_with(fn call ->
         {"#{call.tmp}: duplicate remote \"hub-a\"\n", 1}
@@ -474,7 +474,7 @@ defmodule Shuttle.ConfigFilesTest do
       # path sits inside a clause: `parsing <tmp>: unsupported version 99`
       # became `parsing unsupported version 99`, eating the colon that held the
       # sentence together — so the one guarantee five docs make about these
-      # refusals ("felt's own sentence, verbatim") was false for that file.
+      # refusals ("the CLI's own sentence, verbatim") was false for that file.
       MockFelt.reply_with(fn call ->
         {"loading agent registry: parsing #{call.tmp}: unsupported version 99\n", 1}
       end)
@@ -483,7 +483,7 @@ defmodule Shuttle.ConfigFilesTest do
                {:error, "loading agent registry: parsing the file: unsupported version 99"}
     end
 
-    test "cleans up the candidate whether felt accepts or refuses" do
+    test "cleans up the candidate whether Shuttle accepts or refuses" do
       assert ConfigFiles.validate(:remotes, @remotes_doc) == :ok
       accepted = MockFelt.last()
       assert accepted.staged == {:ok, @remotes_doc}

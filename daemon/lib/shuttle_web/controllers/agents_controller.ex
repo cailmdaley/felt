@@ -5,29 +5,29 @@ defmodule ShuttleWeb.AgentsController do
       GET  /api/v1/agents          the effective registry, as a JSON array
       POST /api/v1/agents/effort   set or clear one agent's default-effort override
 
-  The read shells `felt shuttle agents --json` — felt owns the registry; the
+  The read shells `shuttle agents --json` — shuttle owns the registry; the
   daemon embeds none of it. External consumers (the board's agent picker, the
   settings page) fetch this instead of reading any registry file off disk.
 
-  felt unavailable / unparseable degrades to an empty array with a 200 rather
-  than a 500: the picker tolerates an empty list (it falls back to a free-text
-  agent name) and the rest of the board must keep loading.
+  An unavailable or unparseable Shuttle response degrades to an empty array
+  with a 200 rather than a 500: the picker tolerates an empty list (it falls
+  back to a free-text agent name) and the rest of the board must keep loading.
 
   **Owner-routed via `Shuttle.OriginRouter`** on `?origin=`. The registry is a
-  per-host fact — the built-in layer travels with that host's felt binary and
+  per-host fact — the built-in layer travels with that host's shuttle binary and
   the user layer is a file in its home — so "which agents can this host run"
   can only be answered by that host. Without an origin it is this daemon's own
   registry, which is every existing caller's question.
 
   ## Writing
 
-  `POST /agents/effort` takes `{id, effort, origin?}` and shells `felt shuttle
-  agents effort <id> <effort>`, or `--reset` when `effort` is null. felt is the
+  `POST /agents/effort` takes `{id, effort, origin?}` and shells `shuttle
+  agents effort <id> <effort>`, or `--reset` when `effort` is null. shuttle is the
   only writer of the `overrides` grammar in `agents.json`; nothing here composes
   JSON. The write is owner-routed like the read, and answers the way the fleet
-  verbs do: 200 `%{ok, host, output}` with felt's own line, 400 carrying felt's
-  refusal verbatim (unknown agent, a level outside `effort_levels`), 503 when
-  felt could not be run at all.
+  verbs do: 200 `%{ok, host, output}` with shuttle's own line, 400 carrying
+  shuttle's refusal verbatim (unknown agent, a level outside `effort_levels`),
+  503 when shuttle could not be run at all.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -64,10 +64,10 @@ defmodule ShuttleWeb.AgentsController do
       :local ->
         case Map.fetch(params, "effort") do
           {:ok, nil} ->
-            run_cli(conn, ["shuttle", "agents", "effort", id, "--reset"])
+            run_cli(conn, ["agents", "effort", id, "--reset"])
 
           {:ok, level} when is_binary(level) and level != "" ->
-            run_cli(conn, ["shuttle", "agents", "effort", id, level])
+            run_cli(conn, ["agents", "effort", id, level])
 
           _ ->
             bad_request(conn, "effort is required — a level, or null to reset")
@@ -80,27 +80,27 @@ defmodule ShuttleWeb.AgentsController do
 
   def effort(conn, _params), do: bad_request(conn, "id is required")
 
-  # felt refusing the request is a 400 in its own words; felt not being
+  # Shuttle refusing the request is a 400 in its own words; Shuttle not being
   # runnable is a 503, because nothing the caller sent is wrong.
   defp run_cli(conn, args) do
-    case Shuttle.Felt.run(args, timeout_ms: @cli_timeout_ms) do
+    case Shuttle.CLI.run(args, timeout_ms: @cli_timeout_ms) do
       {:ok, output} ->
         json(conn, %{ok: true, host: Poller.own_host_id(), output: String.trim(output)})
 
       {:command_error, :timeout, _output} ->
         unavailable(
           conn,
-          "felt did not answer within #{div(@cli_timeout_ms, 1000)}s on this host."
+          "shuttle did not answer within #{div(@cli_timeout_ms, 1000)}s on this host."
         )
 
       {:command_error, 127, _output} ->
-        unavailable(conn, "felt is not on this daemon's PATH, so it cannot run that verb.")
+        unavailable(conn, "shuttle is not on this daemon's PATH, so it cannot run that verb.")
 
       {:command_error, _status, output} ->
         bad_request(conn, String.trim(output))
 
       {:error, reason} ->
-        unavailable(conn, "could not run felt: #{reason}")
+        unavailable(conn, "could not run shuttle: #{reason}")
     end
   end
 
@@ -113,12 +113,12 @@ defmodule ShuttleWeb.AgentsController do
   end
 
   defp list_agents do
-    with {:ok, output} <- Shuttle.Felt.run(["shuttle", "agents", "--json"]),
+    with {:ok, output} <- Shuttle.CLI.run(["agents", "--json"]),
          {:ok, records} when is_list(records) <- Jason.decode(output) do
       records
     else
       error ->
-        Logger.warning("GET /api/v1/agents: felt shuttle agents failed: #{inspect(error)}")
+        Logger.warning("GET /api/v1/agents: shuttle agents failed: #{inspect(error)}")
         []
     end
   end

@@ -66,7 +66,7 @@ defmodule ShuttleWeb.Router do
     # `felt ls --body --has-field shuttle -s all` for. Local stores only.
     get("/search", SearchController, :show)
     get("/agents", AgentsController, :show)
-    # One agent's default-effort override, owner-routed; shells `felt shuttle
+    # One agent's default-effort override, owner-routed; shells `shuttle
     # agents effort`, which stays the only writer of that grammar.
     post("/agents/effort", AgentsController, :effort)
     get("/version", VersionController, :show)
@@ -79,7 +79,7 @@ defmodule ShuttleWeb.Router do
     # The operator files as text, owner-routed: the settings page reads and
     # rewrites `stores/projects/agents/remotes.json` on whichever host owns
     # them. Reads are owner-routed too — a config file describes the daemon
-    # that reads it, and only that daemon can see its own `~/.config/felt/`.
+    # that reads it, and only that daemon can see its own `~/.config/shuttle/`.
     get("/config", ConfigController, :index)
     get("/config/:id", ConfigController, :show)
     post("/config/:id", ConfigController, :create)

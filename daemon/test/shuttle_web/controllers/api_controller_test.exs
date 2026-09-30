@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.APIControllerTest do
   @moduledoc """
-  Tests for the Stage 5 Agent-API REST endpoints.
+  Tests for the daemon's API endpoints.
   """
 
   use ExUnit.Case
@@ -44,26 +44,25 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   defp with_actions_host do
-    previous = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", MockRunner.felt_root())
+    previous = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     on_exit(fn ->
       case previous do
-        nil -> System.delete_env("FELT_STORES")
-        value -> System.put_env("FELT_STORES", value)
+        nil -> System.delete_env("SHUTTLE_STORES")
+        value -> System.put_env("SHUTTLE_STORES", value)
       end
     end)
   end
 
-  test "GET /api/v1/agents degrades to []/200 when felt's agents verb is unavailable" do
-    # The registry is felt-owned now: the controller shells `felt shuttle agents
-    # --json` through Shuttle.Felt.run. Route that shell-out at MockRunner (the
-    # `:felt_runner` seam), whose fall-through returns `{"", 0}` — felt emitted
-    # nothing parseable as a JSON array, the "verb absent / old felt" shape. The
-    # controller must degrade to an empty list with 200 (the board's picker falls
-    # back to free-text), never crash the request. Without the seam this asserted
-    # `== []` only on a box where felt happened to be absent — a real felt on PATH
-    # returned the live registry and the test flapped.
+  test "GET /api/v1/agents degrades to []/200 when Shuttle output is unavailable" do
+    # Shuttle owns the registry; the controller shells `shuttle agents --json`
+    # through `Shuttle.CLI.run`. Route that shell-out at MockRunner (the
+    # configured CLI-runner seam), whose fall-through returns `{"", 0}`. The
+    # response is not a JSON array, so the controller must return an empty list
+    # with 200 (the board's picker falls back to free text), never crash the
+    # request. The mock keeps this result deterministic when a Shuttle binary is
+    # available on PATH.
     previous_felt_runner = Application.get_env(:shuttle, :felt_runner)
     Application.put_env(:shuttle, :felt_runner, MockRunner)
     on_exit(fn -> restore_app_env(:felt_runner, previous_felt_runner) end)
@@ -75,10 +74,10 @@ defmodule ShuttleWeb.APIControllerTest do
 
   test "GET /api/v1/agents?origin= asks the host that owns the registry" do
     # The registry is a PER-HOST fact — the built-in layer travels with that
-    # host's felt binary and the user layer is a file in its home — so "which
-    # agents can this host run" can only be answered by that host. A local felt
-    # answering for a remote would be a confident wrong answer, so this leg must
-    # forward; the stub blows up the test if it instead shelled locally.
+    # host's Shuttle binary and the user layer is a file in its home — so "which
+    # agents can this host run" can only be answered by that host. A local
+    # Shuttle CLI answering for a remote would be a confident wrong answer, so
+    # this leg must forward; the stub fails the test if it instead shells locally.
     previous_felt_runner = Application.get_env(:shuttle, :felt_runner)
     Application.put_env(:shuttle, :felt_runner, MockRunner)
     on_exit(fn -> restore_app_env(:felt_runner, previous_felt_runner) end)
@@ -226,12 +225,11 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["error"] == "fiber_id is required"
   end
 
-  test "HTTP ad-hoc dispatch of an awaiting standing role re-arms and runs (no longer 422)" do
-    # Awaiting is felt-native (slice 5): status:closed + untempered. The HTTP
-    # /dispatch path folds ad_hoc into force (`force: force or ad_hoc`), so an
-    # explicit dispatch IS the human verdict: it bypasses the awaiting gate,
-    # re-arms the doc, and spawns — instead of the old 422 that told the user to
-    # `felt shuttle accept/resume` first.
+  test "HTTP ad-hoc dispatch re-arms and runs an awaiting standing role" do
+    # Awaiting is represented by status:closed + untempered. The HTTP /dispatch
+    # path folds ad_hoc into force (`force: force or ad_hoc`), so an explicit
+    # dispatch is the human go-ahead: it bypasses the awaiting gate, re-arms the
+    # document, and spawns without a separate `shuttle accept/resume`.
     fiber_id = "tests/api-awaiting-refuses-adhoc"
 
     fiber =
@@ -276,7 +274,7 @@ defmodule ShuttleWeb.APIControllerTest do
   # The unified write-plane: one call resolves the kanban target to an action
   # AND invokes it (no separate resolve leg). A closed oneshot dragged to the
   # tempered column resolves to close-tempered and shells the offline writer —
-  # threading --felt-store through the extracted Transition pipeline.
+  # threading `-C <store>` through the extracted Transition pipeline.
   @tag :capture_log
   test "transition resolves the target and invokes in one call (local)" do
     with_actions_host()
@@ -297,21 +295,22 @@ defmodule ShuttleWeb.APIControllerTest do
     argv_log = Path.join(stub_dir, "argv.log")
     real_felt = System.find_executable("felt") || "felt"
 
-    # The transition pipeline shells the real felt to resolve the store/target,
-    # THEN shells `felt shuttle <verb>` for the write. Capture only the `shuttle`
-    # subcommand (logging its verb + flags, the `shuttle` prefix dropped) and
-    # delegate everything else to the real felt — so resolution still works and
-    # the log holds just the write's argv.
+    # The transition pipeline shells felt to resolve the store/target and
+    # shuttle for the write. Keep those process boundaries separate and capture
+    # the complete Shuttle argv.
     File.write!(Path.join(stub_dir, "felt"), """
     #!/usr/bin/env bash
-    if [ "$1" = shuttle ]; then
-      printf '%s\\n' "${@:2}" >> "#{argv_log}"
-      exit 0
-    fi
     exec "#{real_felt}" "$@"
     """)
 
+    File.write!(Path.join(stub_dir, "shuttle"), """
+    #!/usr/bin/env bash
+    printf '%s\\n' "$@" >> "#{argv_log}"
+    exit 0
+    """)
+
     File.chmod!(Path.join(stub_dir, "felt"), 0o755)
+    File.chmod!(Path.join(stub_dir, "shuttle"), 0o755)
 
     previous_path = System.get_env("PATH")
     System.put_env("PATH", "#{stub_dir}:#{previous_path}")
@@ -335,7 +334,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["target"] == "tempered"
 
     captured = argv_log |> File.read!() |> String.split("\n", trim: true)
-    assert Enum.take(captured, 2) == ["--felt-store", MockRunner.felt_root()]
+    assert Enum.take(captured, 2) == ["-C", MockRunner.felt_root()]
     assert "close" in captured
     assert "--tempered=true" in captured
   end
@@ -844,14 +843,9 @@ defmodule ShuttleWeb.APIControllerTest do
 
   # ── GET /api/v1/agents ──
 
-  # NOTE (Stage 4a): the former "agents returns the registry as a JSON array"
-  # test was deleted. `GET /api/v1/agents` now shells `felt shuttle agents
-  # --json` (felt owns the registry); its CONTENTS — non-empty list, a flagged
-  # default — are felt's responsibility, verified felt-side, and the verb is not
-  # guaranteed live in `mix test`. The controller's only daemon-side contract is
-  # "200 + bare array, degrading to [] when felt is unavailable" — and a test
-  # asserting that would still depend on the live verb to distinguish the two,
-  # so the route's content is left to felt's own suite.
+  # `GET /api/v1/agents` shells `shuttle agents --json` and returns its array
+  # to the board. Shuttle owns registry contents; the controller tests cover
+  # response shape and graceful degradation without requiring a live CLI.
 
   # ── GET /api/v1/version ──
 

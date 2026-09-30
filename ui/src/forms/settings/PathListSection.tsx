@@ -240,7 +240,7 @@ export function PathListSection({
    *
    * Suppressed under an environment override, and that is not fussiness. The
    * rows are the FILE's list; `expandedFeltStores` is the expansion of what the
-   * daemon actually polls, which under `FELT_STORES` is a different list
+   * daemon actually polls, which under `SHUTTLE_STORES` is a different list
    * entirely. Subtracting one from the other then labels whatever the env
    * expansion has and the file lacks "a symlinked substore of those roots" —
    * about roots it is not reached through. Two lists that are not about the

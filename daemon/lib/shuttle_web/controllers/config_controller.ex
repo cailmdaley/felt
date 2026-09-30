@@ -15,7 +15,7 @@ defmodule ShuttleWeb.ConfigController do
   unusual part and the point of the endpoint: a config file describes the host
   whose daemon reads it, and only that daemon can see it. Opening the settings
   page on a hub and choosing `some-remote` has to reach that remote's own
-  `~/.config/felt/`, exactly as `/projects` reaches its filesystem to create a
+  `~/.config/shuttle/`, exactly as `/projects` reaches its filesystem to create a
   store. A read carries its origin as a query parameter (`?origin=…`); a write
   carries it in the body, which is where every other write endpoint puts it.
 
@@ -43,7 +43,7 @@ defmodule ShuttleWeb.ConfigController do
   the same file would otherwise save its stale text back over the new one.
   Omitting the key is last-write-wins, which is what a script wants.
 
-  A refused edit is a 400 carrying felt's own diagnostic verbatim — "remote
+  A refused edit is a 400 carrying the CLI's own diagnostic verbatim — "remote
   \"hub-a\": port 4001 already used by \"hub-b\"" reaches the human's screen as
   the sentence the CLI would have printed, because no paraphrase of it is more
   useful than the original.

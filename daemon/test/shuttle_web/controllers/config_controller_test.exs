@@ -3,8 +3,8 @@ defmodule ShuttleWeb.ConfigControllerTest do
   `/api/v1/config` — the operator files over HTTP, reads included.
 
   Every test points ALL FIVE `*_FILE` env vars at throwaway paths and clears the
-  compact `FELT_STORES` / `FELT_PROJECTS` forms, so no request here can reach
-  the developer's real `~/.config/felt/` — nor the fixtures `test_helper.exs`
+  compact `SHUTTLE_STORES` / `SHUTTLE_PROJECTS` forms, so no request here can reach
+  the developer's real `~/.config/shuttle/` — nor the fixtures `test_helper.exs`
   pins the agents and remotes files at.
 
   The write cases use `stores`, whose grammar `Shuttle.ConfigFiles` owns
@@ -23,14 +23,14 @@ defmodule ShuttleWeb.ConfigControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   @file_vars [
-    stores: "FELT_STORES_FILE",
-    projects: "FELT_PROJECTS_FILE",
-    agents: "FELT_AGENTS_FILE",
-    remotes: "FELT_REMOTES_FILE",
-    host: "FELT_HOST_FILE"
+    stores: "SHUTTLE_STORES_FILE",
+    projects: "SHUTTLE_PROJECTS_FILE",
+    agents: "SHUTTLE_AGENTS_FILE",
+    remotes: "SHUTTLE_REMOTES_FILE",
+    host: "SHUTTLE_HOST_CONFIG_FILE"
   ]
 
-  @compact_vars ["FELT_STORES", "FELT_PROJECTS"]
+  @compact_vars ["SHUTTLE_STORES", "SHUTTLE_PROJECTS"]
 
   @stores_doc ~s({"version":1,"felt_stores":["/tmp/one","/tmp/two"]})
 

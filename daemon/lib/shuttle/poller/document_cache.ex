@@ -8,13 +8,13 @@ defmodule Shuttle.Poller.DocumentCache do
 
   ## One walk, not N shell-outs
 
-  The candidate rows the poller already discovered (`felt ls` with the widened
-  kanban projection — see `Shuttle.FiberDocuments.kanban_fields/0`) carry every
-  field a cache entry needs, so an entry is built DIRECTLY from its candidate row
-  via `Shuttle.FiberDocuments.entries_for_fiber/2` — no per-miss `felt show`.
-  The mtime predicate stays as a cheap "reuse the already-built entry map"
-  optimization; on a slow filesystem (a Lustre login node with 726 shuttle
-  fibers) the tick costs exactly one `felt ls` per store and zero stats.
+  The candidate rows the poller already discovered (`shuttle ls` with the
+  widened kanban projection — see `Shuttle.FiberDocuments.kanban_fields/0`)
+  carry every field a cache entry needs, so an entry is built directly from its
+  candidate row via `Shuttle.FiberDocuments.entries_for_fiber/2` — no per-miss
+  `felt show`. The mtime predicate stays as a cheap "reuse the already-built
+  entry map" optimization; on a slow Lustre login node with 726 Shuttle
+  fibers, the tick costs one `shuttle ls` per store and zero stats.
 
   The cache itself — `document_cache`, `document_cache_stats`,
   `document_cache_ready` — lives on `Shuttle.Poller.State`; the GenServer owns
@@ -115,7 +115,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
   def reusable_entry?(_, _), do: false
 
-  # Build one candidate's document entry directly from its felt-list row. No
+  # Build one candidate's document entry directly from its Shuttle-list row. No
   # shell-out and no stat: the row already carries the full kanban projection
   # (including the native `report_path` existence signal), so
   # `FiberDocuments.entries_for_fiber/2` shapes the wire entry in-process.

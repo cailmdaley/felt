@@ -46,7 +46,7 @@ export interface ConfigFileSummary {
   updated_at: number | null
   /**
    * Set when an environment variable is overriding this file's CONTENTS
-   * outright (`FELT_STORES`, `FELT_PROJECTS`). While it is set, the file on
+   * outright (`SHUTTLE_STORES`, `SHUTTLE_PROJECTS`). While it is set, the file on
    * disk is read by nobody — so a section that shows it has to say so, or it
    * invites you to fix a setting that has no effect.
    */
@@ -513,7 +513,7 @@ export const loadAgents = (base: string, host: SettingsHost): Promise<AgentRecor
 
 /**
  * Set one agent's default-effort override in the host's `agents.json`, or
- * clear it with `effort: null`. The daemon shells `felt shuttle agents effort`,
+ * clear it with `effort: null`. The daemon shells `shuttle agents effort`,
  * which validates the level against the agent's `effort_levels`.
  */
 export const setAgentEffort = (

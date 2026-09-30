@@ -220,13 +220,13 @@ defmodule Shuttle.LifecycleStoreTest do
 
     File.write!(path, original)
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", loom)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("science/cmbx", path, original)
     after
-      restore_env("FELT_STORES", prev_loom)
+      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
@@ -294,7 +294,7 @@ defmodule Shuttle.LifecycleStoreTest do
   end
 
   # Builds a real on-disk felt fiber (resolvable by the felt CLI) in the
-  # new-model awaiting shape, points FELT_STORES at the fixture, and runs
+  # new-model awaiting shape, points SHUTTLE_STORES at the fixture, and runs
   # `fun.(fiber_id, path)`. There is no runtime store anymore (slice 6): the
   # felt document carries the entire lifecycle.
   defp with_doc_awaiting_role(fun, opts \\ []) do
@@ -329,13 +329,13 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", loom)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("life/french/practice", path)
     after
-      restore_env("FELT_STORES", prev_loom)
+      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
@@ -372,13 +372,13 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("FELT_STORES")
-    System.put_env("FELT_STORES", loom)
+    prev_loom = System.get_env("SHUTTLE_STORES")
+    System.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("ai-futures/tokenmaxxing/operator", path)
     after
-      restore_env("FELT_STORES", prev_loom)
+      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end

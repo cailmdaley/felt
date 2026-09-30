@@ -412,7 +412,7 @@ defmodule Shuttle.Kitty do
           nil ->
             {:error,
              "#{host} is not in this host's fleet file, so there is no way to reach it " <>
-               "(felt shuttle remotes add #{host} ...)"}
+               "(shuttle remotes add #{host} ...)"}
 
           remote ->
             case Shuttle.Remote.ssh_host(remote) do

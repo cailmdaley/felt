@@ -6,7 +6,7 @@ defmodule Shuttle.PollerBootTest do
   defmodule BlockingInitRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("felt", ["shuttle", "contract"], _opts),
+    def cmd("shuttle", ["contract"], _opts),
       do: {Integer.to_string(Shuttle.Contract.expected_level()) <> "\n", 0}
 
     def cmd("tmux", ["ls", "-F", _format], _opts) do

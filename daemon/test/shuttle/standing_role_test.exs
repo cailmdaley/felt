@@ -5,13 +5,13 @@ defmodule Shuttle.StandingRoleTest do
 
   @now ~U[2026-06-02 10:00:30Z]
 
-  # felt is the cron authority (Stage 4b): it inlines resolved.{prev_due,next_due}
-  # on every read and the daemon reads those, never parsing cron. This helper
-  # builds a role the way felt's `show -j` presents it — a schedule (carried for
-  # the snapshot's display only, never parsed) plus the two resolved occurrences
-  # that drive every timing decision. `prev_s`/`next_s` place those occurrences
-  # relative to @now; `overrides` merge over the base block (a stray review key,
-  # kind: oneshot, an empty resolved standing in for an unparseable schedule).
+  # Shuttle resolves cron schedules and inlines `resolved.prev_due` and
+  # `resolved.next_due` on each read; the daemon consumes those without parsing
+  # cron. This helper builds a role as `shuttle show -j` presents it: a schedule
+  # (carried for display only) plus the two resolved occurrences that drive
+  # timing decisions. `prev_s`/`next_s` place those occurrences relative to
+  # @now; `overrides` merge over the base block (a stray review key, kind:
+  # oneshot, or an empty resolved map for an unparseable schedule).
   defp iso(offset_s), do: DateTime.to_iso8601(DateTime.add(@now, offset_s, :second))
 
   defp role(prev_s \\ -30, next_s \\ 30, overrides \\ %{}) do
@@ -82,23 +82,23 @@ defmodule Shuttle.StandingRoleTest do
       refute StandingRole.due_by_cron?(role(-30, 30, %{"kind" => "oneshot"}), @now, @window_ms)
     end
 
-    test "a role felt resolved no occurrence for (unparseable schedule) is not due" do
-      # felt emits no resolved.next_due/prev_due when the cron won't parse →
+    test "an unparseable schedule produces no resolved occurrence and is not due" do
+      # Shuttle emits no resolved.next_due/prev_due when the cron won't parse →
       # next_due_at/prev_due nil → not dispatchable → not due.
       refute StandingRole.due_by_cron?(role(-30, 30, %{"resolved" => %{}}), @now, @window_ms)
     end
   end
 
-  describe "next_due_from_cron — display next_due is felt's resolved next_due" do
-    test "returns felt's resolved next occurrence" do
+  describe "next_due_from_cron — display next_due is Shuttle's resolved next_due" do
+    test "returns Shuttle's resolved next occurrence" do
       # next_due placed 30s after now; next_due_from_cron reads it straight off
-      # the block (the `now` arg is unused — felt computed the occurrence).
+      # the block (the `now` arg is unused — Shuttle computed the occurrence).
       role = role(-30, 30)
       assert %DateTime{} = next = StandingRole.next_due_from_cron(role)
       assert DateTime.compare(next, DateTime.add(@now, 30, :second)) == :eq
     end
 
-    test "returns nil when felt resolved no schedule" do
+    test "returns nil when Shuttle resolved no schedule" do
       role = role(-30, 30, %{"resolved" => %{}})
       assert StandingRole.next_due_from_cron(role) == nil
     end
@@ -107,9 +107,9 @@ defmodule Shuttle.StandingRoleTest do
   describe "dispatch_run_id — a fresh display label every dispatch" do
     @resume_now ~U[2026-06-05 16:04:19Z]
 
-    test "mints the label from felt's next_due — not load-bearing for resume continuity" do
+    test "mints the label from Shuttle's next_due — not load-bearing for resume continuity" do
       # Continuation is decided from the per-host dispatch/handoff markers, not
-      # parsed from this id. The id is felt's next_due formatted for display.
+      # parsed from this id. The id is Shuttle's next_due formatted for display.
       # role()'s next_due is @now + 30s = 2026-06-02 10:01:00Z.
       assert StandingRole.dispatch_run_id(role(), @resume_now) == "20260602T100100+0000"
     end
@@ -118,7 +118,8 @@ defmodule Shuttle.StandingRoleTest do
       with_stray_review =
         role(-30, 30, %{"review" => %{"state" => "scheduled", "run_id" => "20260605T070000+0000"}})
 
-      assert StandingRole.dispatch_run_id(with_stray_review, @resume_now) == "20260602T100100+0000"
+      assert StandingRole.dispatch_run_id(with_stray_review, @resume_now) ==
+               "20260602T100100+0000"
     end
   end
 end

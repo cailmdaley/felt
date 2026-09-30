@@ -1013,15 +1013,15 @@ defmodule Shuttle.RemoteRegistryTest do
       File.mkdir_p!(dir)
       path = Path.join(dir, "remotes.json")
 
-      prev_file = System.get_env("FELT_REMOTES_FILE")
+      prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
       prev_remotes = Application.get_env(:shuttle, :remotes)
-      System.put_env("FELT_REMOTES_FILE", path)
+      System.put_env("SHUTTLE_REMOTES_FILE", path)
       Application.delete_env(:shuttle, :remotes)
 
       on_exit(fn ->
         File.rm_rf(dir)
-        if prev_file, do: System.put_env("FELT_REMOTES_FILE", prev_file)
-        if prev_file == nil, do: System.delete_env("FELT_REMOTES_FILE")
+        if prev_file, do: System.put_env("SHUTTLE_REMOTES_FILE", prev_file)
+        if prev_file == nil, do: System.delete_env("SHUTTLE_REMOTES_FILE")
 
         if prev_remotes == nil,
           do: Application.delete_env(:shuttle, :remotes),

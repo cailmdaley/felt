@@ -12,9 +12,9 @@ defmodule Shuttle.Continuation do
       (claude: the `--session-id` it generated; codex/pi: scraped from the
       JSONL), so nothing is plumbed to the worker.
     * `shuttle.runtime.handed_off_at` — **written by the WORKER at clean exit**
-      via `felt shuttle handoff` (Go, nested surgical write), and by a human
-      re-arm: felt's `accept` / `resume` in the same write as the status, a
-      force-dispatch `Shuttle.LifecycleStore.rearm` as a second write after it.
+      via `shuttle handoff`, and by a human re-arm: Shuttle's `accept` / `resume`
+      in the same write as the status, a force-dispatch
+      `Shuttle.LifecycleStore.rearm` as a second write after it.
       A clean exit is the only thing that stamps it newer than the dispatch.
 
   The fields are **per-host by nature** but safe in git: only the owning host
@@ -23,14 +23,12 @@ defmodule Shuttle.Continuation do
   non-owned fibers). Reassigning `host` leaves the session's transcript on the
   old host, so the new owner finds none and starts fresh.
 
-  ## felt owns the nested write
+  ## Shuttle owns the nested write
 
-  The runtime nesting lives in ONE engine — felt's `yaml.Node` code. The daemon
-  never edits the two-level `shuttle.runtime` structure with its own text
-  surgery; it shells `felt shuttle mark-runtime`, felt's daemon-facing
-  runtime-write channel. So the writers here take a `runner` + the fiber's felt
-  store + its store-scoped id and shell that verb, instead of editing the `.md`
-  directly.
+  Shuttle updates `shuttle.runtime` through its YAML-aware writer. The daemon
+  never edits the nested structure with text surgery; it shells `shuttle
+  mark-runtime`. Writers here take a `runner`, the fiber's felt store, and its
+  store-scoped id, instead of editing the `.md` directly.
 
   ## Reading: nested only
 
@@ -43,8 +41,7 @@ defmodule Shuttle.Continuation do
   ## Continuation decision
 
   When a fiber's tmux session is gone, the daemon reads these fields off the
-  freshly-polled fiber (`felt show -j` already carries the whole `shuttle:`
-  block):
+  freshly-polled fiber (`shuttle show -j` carries the whole `shuttle:` block):
 
     * `handed_off_at` present AND `handed_off_at >= dispatched_at` → **fresh**.
     * absent `dispatched_at` → treat as **fresh** (safe default).
@@ -224,14 +221,14 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  # ── writers (shell `felt shuttle mark-runtime` — felt owns the nesting) ───────
+  # ── writers (shell `shuttle mark-runtime`) ──────────────────────────────
 
   @doc """
   Stamp the dispatch runtime fields into a fiber's `shuttle.runtime` block:
-  `{session_uuid, dispatched_at, run_id, meeting}`, by shelling `felt shuttle
-  mark-runtime` (felt's daemon-facing runtime-write channel) with
-  `cd: felt_store`. `fiber_id` is the id scoped to `felt_store` — the same pair
-  the dispatch read the fiber with — so felt resolves it from that store.
+  `{session_uuid, dispatched_at, run_id, meeting}`, by shelling
+  `shuttle -C <felt_store> mark-runtime`. `fiber_id` is the id scoped to
+  `felt_store` — the same pair the dispatch read the fiber with — so Shuttle
+  resolves it from that store.
 
   `dispatched_at` is set to now (RFC3339 UTC) unless the caller supplied one.
   `session_uuid` is passed only when non-empty (a codex/pi claim with no scraped
@@ -239,8 +236,8 @@ defmodule Shuttle.Continuation do
   only when present (a plain oneshot omits it), as is `meeting`, the launch id
   of the meeting a claimed capture scribes.
 
-  Best-effort: a non-zero `felt` exit is logged, not raised, so it can never
-  block dispatch. A missing `felt_store`/`fiber_id` is a no-op (the fiber then
+  Best-effort: a non-zero `shuttle` exit is logged, not raised, so it can
+  never block dispatch. A missing `felt_store`/`fiber_id` is a no-op (the fiber then
   reads as a fresh dispatch — the safe default).
   """
   @spec write_dispatch(module(), String.t(), String.t(), map()) :: :ok | {:error, term()}
@@ -263,7 +260,7 @@ defmodule Shuttle.Continuation do
   without touching `dispatched_at` (or `run_id`) — the codex/pi path, where
   `write_dispatch/4` already stamped the dispatch boundary synchronously at
   launch and the session UUID is only scraped from the harness's JSONL
-  afterward. Shells `felt shuttle mark-runtime --session <uuid>` with no
+  afterward. Shells `shuttle mark-runtime --session <uuid>` with no
   `--dispatched-at` flag; `mark-runtime` only writes fields whose flag is
   present, so the boundary written at launch is left untouched.
   """
@@ -279,10 +276,10 @@ defmodule Shuttle.Continuation do
 
   @doc """
   Stamp `shuttle.runtime.handed_off_at = now` — the clean-exit / human-re-arm
-  signal — by shelling `felt shuttle mark-runtime --handed-off-at`
-  (`cd: felt_store`). The worker's own exit uses the Go `felt shuttle handoff`;
-  this is the daemon-side entry point (the `LifecycleStore` conclude after a
-  force-dispatch rearm or a self-healed standing role, and tests).
+  signal — by shelling `shuttle mark-runtime --handed-off-at`
+  (`-C felt_store`). The worker's own exit uses `shuttle handoff`; this is the
+  daemon-side entry point (the `LifecycleStore` conclude after a force-dispatch
+  rearm or a self-healed standing role, and tests).
   """
   @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
   def mark_handed_off(runner, felt_store, fiber_id)
@@ -294,26 +291,29 @@ defmodule Shuttle.Continuation do
 
   # ── internals ────────────────────────────────────────────────────────────────
 
-  # Shell `felt shuttle mark-runtime <fiber_id> <flags...>` (cd: felt_store)
-  # through the one audited write helper (`Shuttle.Felt.Shuttle`). `flags` is
-  # a list of `{flag, value}` pairs, already filtered to non-empty. felt
-  # resolves its own host from local state, so no `--host` override is
-  # passed; see `Shuttle.Felt.Shuttle`'s moduledoc.
+  # Shell `shuttle -C <felt_store> mark-runtime <fiber_id> <flags...>` through
+  # the one audited write helper (`Shuttle.CLI`). `flags` is a list of
+  # `{flag, value}` pairs, already filtered to non-empty. Shuttle resolves its
+  # own host from local state, so no `--host` override is passed; see
+  # `Shuttle.CLI`'s moduledoc.
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
     args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 
-    case Shuttle.Felt.Shuttle.run("mark-runtime", fiber_id, args, runner: runner, cd: felt_store) do
+    case Shuttle.CLI.run_lifecycle("mark-runtime", fiber_id, args,
+           runner: runner,
+           felt_store: felt_store
+         ) do
       {:ok, _output} ->
         :ok
 
       {:command_error, status, output} ->
-        reason = "felt shuttle mark-runtime exited #{status}: #{String.trim(to_string(output))}"
+        reason = "shuttle mark-runtime exited #{status}: #{String.trim(to_string(output))}"
         Logger.warning("Continuation: #{reason} (fiber=#{fiber_id}, store=#{felt_store})")
         {:error, reason}
 
       {:error, reason} ->
         Logger.warning(
-          "Continuation: felt shuttle mark-runtime raised #{inspect(reason)} " <>
+          "Continuation: shuttle mark-runtime raised #{inspect(reason)} " <>
             "(fiber=#{fiber_id}, store=#{felt_store})"
         )
 
