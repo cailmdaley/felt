@@ -69,9 +69,9 @@ fi
 felt_home="$tmp_dir/home-felt-only"
 felt_args="$tmp_dir/felt-only-args"
 write_fake "$felt_home/.local/bin/felt" "$felt_args"
-printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" FELT_TEST_ARGS="$felt_args" "$hooks/session.sh" >/dev/null
-printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" FELT_TEST_ARGS="$felt_args" "$hooks/remind.sh"
-printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" FELT_TEST_ARGS="$felt_args" "$hooks/touch.sh"
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/session.sh" >/dev/null
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/remind.sh"
+printf '%s\n' '{}' | "${base_env[@]}" HOME="$felt_home" "$hooks/touch.sh"
 assert_arg "$felt_args" 'hook session'
 assert_arg "$felt_args" 'hook pretool'
 assert_arg "$felt_args" 'hook posttool'
@@ -91,7 +91,7 @@ felt_args="$tmp_dir/both-felt-args"
 shuttle_args="$tmp_dir/both-shuttle-args"
 write_fake "$both_home/.local/bin/felt" "$felt_args"
 write_fake "$both_home/.local/bin/shuttle" "$shuttle_args"
-both_env=(env -i HOME="$both_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN= FELT_TEST_ARGS="$felt_args" SHUTTLE_TEST_ARGS="$shuttle_args")
+both_env=(env -i HOME="$both_home" PATH="$bare_path" FELT_BIN= SHUTTLE_BIN=)
 
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/event.sh"
 printf '%s\n' '{}' | "${both_env[@]}" "$hooks/commit.sh"
@@ -120,7 +120,7 @@ cat > "$jq_path/jq" <<'EOF'
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"stub"}}\n'
 EOF
 chmod +x "$jq_path/jq"
-jq_output="$(env -i HOME="$both_home" PATH="$jq_path:$bare_path" FELT_BIN= SHUTTLE_BIN= FELT_TEST_ARGS="$felt_args" SHUTTLE_TEST_ARGS="$shuttle_args" "$hooks/session.sh" </dev/null)"
+jq_output="$(env -i HOME="$both_home" PATH="$jq_path:$bare_path" FELT_BIN= SHUTTLE_BIN= "$hooks/session.sh" </dev/null)"
 [ "$(grep -c hookEventName <<<"$jq_output")" = 1 ]
 assert_arg "$felt_args" 'session'
 
