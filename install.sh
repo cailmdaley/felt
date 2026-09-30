@@ -4,8 +4,8 @@
 #   FELT_REPO         source repo (default cailmdaley/felt)
 #   FELT_INSTALL_DIR  where both Go binaries land
 #   FELT_VERSION      install this exact tag instead of the latest release
-#   SHUTTLE=1         also install the shuttle daemon release
-#   SHUTTLE_HOME      where the daemon lands (default ~/.local/share/shuttle)
+#   SHUTTLE_DAEMON=1  also install the shuttle daemon release
+#   SHUTTLE_HOME      where the release lands (default ~/.local/share/shuttle)
 set -eu
 
 REPO="${FELT_REPO:-cailmdaley/felt}"
@@ -79,7 +79,12 @@ verify_cli() {
   _binary="$1"
   _name="$2"
   _expected="${TAG#v}"
-  _line="$("$_binary" --version 2>/dev/null | head -1 || true)"
+  if ! _output="$("$_binary" --version 2>/dev/null)"; then
+    echo "Downloaded ${_name} could not run --version." >&2
+    echo "Refusing to replace ${INSTALL_DIR}/${_name}." >&2
+    exit 1
+  fi
+  _line="$(printf '%s\n' "$_output" | head -1)"
   _actual="$(printf '%s\n' "$_line" | awk '{print $3}')"
   if [ "$_actual" != "$_expected" ]; then
     echo "Downloaded ${_name} reports version '${_actual:-unknown}', expected ${_expected}." >&2
@@ -88,16 +93,9 @@ verify_cli() {
   fi
 }
 
-# The daemon is an ERTS-bundled Mix release, so "is this the right version"
-# and "can this machine run it at all" are one question — and the launcher's
-# `version` verb answers only the first. That verb is a pure shell readout of
-# releases/start_erl.data: it prints a version and exits 0 on a tree whose
-# bundled beam.smp cannot start, which is exactly the state a release built
-# against a newer glibc lands in on an older cluster. Ask the VM instead.
-# `eval` boots the bare BEAM (no application start, no SHUTTLE_STORES needed) and
-# the version it prints is the loaded application's own, so one invocation
-# proves the runtime works and establishes identity.
-verify_shuttle() {
+# The daemon is an ERTS-bundled Mix release. Prove its VM starts on this host
+# and verify the loaded application's version before replacing an installation.
+verify_daemon_release() {
   _binary="$1"
   _expected="${TAG#v}"
   _err="$TMPDIR/shuttle-verify.err"
@@ -109,7 +107,7 @@ verify_shuttle() {
       sed 's/^/  /' "$_err" >&2
     fi
     echo "A \`GLIBC_... not found\` error means this host's C library is older than the" >&2
-    echo "one the release was built against; the felt CLI above is unaffected." >&2
+    echo "one the release was built against; the Go CLI pair is unaffected." >&2
     exit 1
   fi
   _actual="$(printf '%s\n' "$_line" | tail -1 | tr -d '[:space:]')"
@@ -131,23 +129,21 @@ tar xzf "$TMPDIR/felt.tar.gz" -C "$TMPDIR"
 verify_cli "$TMPDIR/felt" felt
 verify_cli "$TMPDIR/shuttle" shuttle
 
-# ── shuttle daemon (opt-in) ────────────────────────────────────────────────
-# SHUTTLE=1 also installs the shuttle daemon: an ERTS-bundled Mix release
-# fetched from the same GitHub release — no Erlang, Elixir, or Node needed.
-# It lands in $SHUTTLE_HOME (default ~/.local/share/shuttle). Runtime
-# prerequisites: tmux, felt, and shuttle.
-if [ "${SHUTTLE:-0}" = "1" ]; then
+# ── shuttle daemon release (opt-in) ────────────────────────────────────────
+# SHUTTLE_DAEMON=1 also installs the ERTS-bundled Mix release. It lands in
+# SHUTTLE_HOME (default ~/.local/share/shuttle); no Erlang, Elixir, or Node is
+# needed on the target host. Runtime prerequisites: tmux and both Go CLIs.
+if [ "${SHUTTLE_DAEMON:-0}" = "1" ]; then
   SHUTTLE_HOME="${SHUTTLE_HOME:-${HOME}/.local/share/shuttle}"
 
   echo "Installing shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
   download_asset "shuttled_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttled.tar.gz"
   tar xzf "$TMPDIR/shuttled.tar.gz" -C "$TMPDIR"
-  verify_shuttle "$TMPDIR/shuttled/bin/shuttled"
+  verify_daemon_release "$TMPDIR/shuttled/bin/shuttled"
 fi
 
-# Both CLI binaries and any requested daemon release are checked before the
-# installation is changed. A missing or mismatched asset leaves the existing
-# installation intact.
+# All requested assets are downloaded and checked before replacing any binary.
+# An absent or mismatched daemon therefore leaves the existing CLI pair intact.
 mkdir -p "$INSTALL_DIR"
 mv "$TMPDIR/felt" "$INSTALL_DIR/felt"
 mv "$TMPDIR/shuttle" "$INSTALL_DIR/shuttle"
@@ -161,7 +157,7 @@ case ":${PATH}:" in
   *) echo "Add ${INSTALL_DIR} to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 
-if [ "${SHUTTLE:-0}" = "1" ]; then
+if [ "${SHUTTLE_DAEMON:-0}" = "1" ]; then
   rm -rf "$SHUTTLE_HOME"
   mkdir -p "$(dirname "$SHUTTLE_HOME")"
   mv "$TMPDIR/shuttled" "$SHUTTLE_HOME"
@@ -179,12 +175,11 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
 
   # ~/.shuttle holds the daemon's own state, and two things need it to exist:
   #
-  #   repo  — shuttle-launch resolves what to launch from $SHUTTLE_DIR, else
-  #           this file, else its own parent directory. Revived over SSH it has
-  #           no environment, and its parent here is ~/.local — which does not
-  #           contain the release — so without this file a fetched host cannot be
-  #           revived by its hub at all. scripts/bootstrap.sh writes it for checkouts;
-  #           this is the fetched equivalent.
+  #   repo  — shuttle-launch resolves the daemon release from $SHUTTLE_DIR,
+  #           else this file, else its own parent directory. Revived over SSH
+  #           it has no environment, and its parent here is ~/.local — which
+  #           does not contain the release — so this points at SHUTTLE_HOME.
+  #           scripts/bootstrap.sh writes the checkout path for source installs.
   #   dir    — the plugin's activity-event hook writes events only when the
   #           directory already exists, so the board's activity views stay
   #           empty until something creates it.
@@ -209,11 +204,11 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   fi
 
   echo "shuttle daemon ${TAG} installed."
-  echo "  Start it:   SHUTTLE_STORES=<your-store> SHUTTLE_RELEASE=\"${SHUTTLE_HOME}\" \"${INSTALL_DIR}/shuttle\" daemon start"
-  # The release carries its own supervisor templates (share/), and the Go CLI
-  # renders + loads them, so a fetched install needs no checkout or Makefile.
-  echo "  Keep-alive: SHUTTLE_RELEASE=\"${SHUTTLE_HOME}\" \"${INSTALL_DIR}/shuttle\" daemon install  # configure stores in Settings"
-  echo "              (launchd on macOS, systemd --user on Linux; see"
+  echo "  Start it:   SHUTTLE_RELEASE='${SHUTTLE_HOME}' shuttle daemon start"
+  # The release carries supervisor templates; the Go CLI renders and installs
+  # them without a checkout or Makefile.
+  echo "  Keep-alive: SHUTTLE_RELEASE='${SHUTTLE_HOME}' shuttle daemon install"
+  echo "              (configure stores in ~/.config/shuttle/stores.json; see"
   echo "               https://cailmdaley.github.io/felt/shuttle/installation/)"
 fi
 

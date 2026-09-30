@@ -90,13 +90,9 @@ defmodule Shuttle.MixProject do
     [
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
-      # tz (compile-time IANA DB) over tzdata. Forced by the escript era:
-      # tzdata's runtime data dir resolved to a path *under* the bin/shuttle
-      # escript file (:enotdir), crashing the daemon on boot — see
-      # finding-self-defeating-loop. A release has a real priv dir, so that
-      # particular crash is history; tz stays right anyway, because the DB is
-      # baked into modules and there is no runtime data dir to ship, write, or
-      # refresh.
+      # `tz` supplies the IANA rules used by scheduled work. The daemon
+      # registers Tz.TimeZoneDatabase on every boot path, so timezone shifts
+      # do not fall back to the UTC-only database.
       {:tz, "~> 0.28"},
       {:phoenix, "~> 1.7"},
       {:bandit, "~> 1.0"},
