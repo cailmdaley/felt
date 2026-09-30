@@ -46,9 +46,10 @@ var lsCmd = &cobra.Command{
 	Use:   "ls [query]",
 	Short: "List and search fibers in this view",
 	Long: `Bare ls lists the open and active fibers in this view, oldest first. A query
-matches name, outcome, extra frontmatter text, and id as a case-insensitive
-substring; exact matches on name, id, or basename sort first. --body also
-searches bodies.
+matches when every word in it occurs, as a case-insensitive substring, somewhere
+in the name, outcome, extra frontmatter text, or id; exact matches on name, id,
+or basename sort first. --body also searches bodies. -r matches the whole query
+as one regular expression, which is how to ask for a literal phrase.
 
 A filter (query, -t, --has-field) widens to every status and counts closed
 matches in a trailing hint instead of printing them, unless -s names the
@@ -228,6 +229,7 @@ func init() {
 type lsSearch struct {
 	query           string
 	queryLower      string
+	terms           []string
 	re              *regexp.Regexp
 	effectiveStatus string
 	hasFields       []string
@@ -258,6 +260,7 @@ func compileSearch(query string, status string, widen bool, tags, hasFields []st
 	return lsSearch{
 		query:           query,
 		queryLower:      strings.ToLower(query),
+		terms:           strings.Fields(strings.ToLower(query)),
 		re:              re,
 		effectiveStatus: effectiveStatus,
 		hasFields:       hasFields,
@@ -287,7 +290,7 @@ func (search lsSearch) run(storage *felt.Storage, felts []*felt.Felt, suppressCl
 func (search lsSearch) match(storage *felt.Storage, felts []*felt.Felt) (exact, rest []*felt.Felt, err error) {
 	exact, rest, bodyCandidates := search.apply(felts)
 	if search.query != "" && !search.exact && search.body && len(bodyCandidates) > 0 {
-		rest, err = scanBodyMatches(storage, rest, bodyCandidates, search.re, search.queryLower, search.regex)
+		rest, err = scanBodyMatches(storage, rest, bodyCandidates, search.re, search.terms, search.regex)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -314,7 +317,7 @@ func finish(matches, exact []*felt.Felt, suppressClosed, collapse bool) (shown, 
 // apply splits felts into exact matches (printed first), ordinary matches,
 // and — with --body — the fibers whose body still has to be read.
 func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCandidates []*felt.Felt) {
-	query, queryLower, re, effectiveStatus, hasFields := search.query, search.queryLower, search.re, search.effectiveStatus, search.hasFields
+	query, queryLower, terms, re, effectiveStatus, hasFields := search.query, search.queryLower, search.terms, search.re, search.effectiveStatus, search.hasFields
 	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
 	for _, f := range felts {
 		if effectiveStatus != "all" && effectiveStatus != "" {
@@ -373,7 +376,7 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 				continue
 			}
 
-			if matchesQuery(f, queryLower, re, regex) {
+			if matchesQuery(f, terms, re, regex) {
 				filtered = append(filtered, f)
 				continue
 			}
@@ -588,24 +591,38 @@ func feltJSONField(f *felt.Felt, field string) (interface{}, bool, error) {
 	return value, true, nil
 }
 
-// matchesQuery reports whether f matches the query by substring or regex.
-// It checks the fiber's display name, SearchText, and full id (slug).
-// queryLower must be strings.ToLower(query); re is the compiled regexp (non-nil iff useRegex).
-func matchesQuery(f *felt.Felt, queryLower string, re *regexp.Regexp, useRegex bool) bool {
+// matchesQuery reports whether f matches the query. A regex matches any of the
+// fiber's display name, id (slug), or SearchText; plain terms (the lowercased
+// words of the query) must each occur somewhere across those three.
+func matchesQuery(f *felt.Felt, terms []string, re *regexp.Regexp, useRegex bool) bool {
 	if useRegex {
 		return re.MatchString(f.DisplayName()) ||
 			re.MatchString(f.ID) ||
 			re.MatchString(f.SearchText())
 	}
-	return strings.Contains(strings.ToLower(f.DisplayName()), queryLower) ||
-		strings.Contains(strings.ToLower(f.ID), queryLower) ||
-		strings.Contains(strings.ToLower(f.SearchText()), queryLower)
+	return containsAllTerms(metadataText(f), terms)
+}
+
+// metadataText is the lowercased text a plain query searches without --body.
+func metadataText(f *felt.Felt) string {
+	return strings.ToLower(f.DisplayName() + "\n" + f.ID + "\n" + f.SearchText())
+}
+
+// containsAllTerms reports whether every term is a substring of haystack.
+func containsAllTerms(haystack string, terms []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(haystack, term) {
+			return false
+		}
+	}
+	return true
 }
 
 // scanBodyMatches folds candidates whose body matches the query into filtered by
-// hydrating and scanning the markdown source of truth. Regex queries match by
-// pattern; plain queries match by lowercased substring (so partial words match).
-func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, re *regexp.Regexp, queryLower string, useRegex bool) ([]*felt.Felt, error) {
+// hydrating and scanning the markdown source of truth. Regex queries match the
+// body by pattern; plain terms must each occur somewhere in the body or the
+// metadata, so the words of one query may be split between them.
+func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, re *regexp.Regexp, terms []string, useRegex bool) ([]*felt.Felt, error) {
 	fullCandidates, err := hydrateBodies(storage, candidates)
 	if err != nil {
 		return nil, err
@@ -616,7 +633,7 @@ func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, r
 		if useRegex {
 			matches = re.MatchString(f.Body)
 		} else {
-			matches = strings.Contains(strings.ToLower(f.Body), queryLower)
+			matches = containsAllTerms(metadataText(f)+"\n"+strings.ToLower(f.Body), terms)
 		}
 		if matches {
 			filtered = append(filtered, f)

@@ -93,6 +93,46 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 	}
 }
 
+// A multi-word query matches a fiber when every word occurs somewhere in it,
+// in any order and across fields; -r keeps the whole query as one pattern.
+func TestLsQueryMatchesEveryWord(t *testing.T) {
+	dir, storage := newStore(t)
+	for _, fiber := range []*felt.Felt{
+		{ID: "email/reply-drafts", Name: "Draft replies", Outcome: "Every EMAIL gets a reply", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+		{ID: "email/archive", Name: "Archive rules", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "reply drafts never archived"},
+		{ID: "notes/draft", Name: "Draft notes", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		args       []string
+		want, deny []string
+	}{
+		{[]string{"ls", "-v", "email reply draft"}, []string{"email/reply-drafts"}, []string{"email/archive", "notes/draft"}},
+		{[]string{"ls", "-v", "--body", "email reply draft"}, []string{"email/reply-drafts", "email/archive"}, []string{"notes/draft"}},
+		{[]string{"find", "-v", "DRAFT   Email"}, []string{"email/reply-drafts"}, []string{"notes/draft"}},
+		{[]string{"ls", "-v", "-r", "email reply"}, nil, []string{"email/reply-drafts", "email/archive"}},
+	} {
+		out, err := runCommand(t, dir, tc.args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", tc.args, err, out)
+		}
+		for _, id := range tc.want {
+			if !strings.Contains(out, id) {
+				t.Errorf("%v missing %s:\n%s", tc.args, id, out)
+			}
+		}
+		for _, id := range tc.deny {
+			if strings.Contains(out, id) {
+				t.Errorf("%v included %s:\n%s", tc.args, id, out)
+			}
+		}
+	}
+}
+
 // A fiber directory with a report.html sibling surfaces report_path (absolute,
 // pointing at that sibling); a fiber without one omits/empties the field. Both
 // the plain walk and the --json-field projection must agree.
