@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -77,7 +78,15 @@ the plugin and its marketplace.`,
 		if err != nil {
 			return err
 		}
-		return installPluginViaCLI(marketplaceSource)
+		if err := installPluginViaCLI(marketplaceSource); err != nil {
+			return err
+		}
+		// The plugin now serves felt's skills; a link to the same skills in
+		// ~/.claude/skills would load them a second time.
+		for _, name := range pruneMarketplaceSkillLinks() {
+			fmt.Printf("Unlinked skill (served by the plugin): %s\n", name)
+		}
+		return nil
 	},
 }
 
@@ -469,10 +478,10 @@ func uninstallPlugin() error {
 		return fmt.Errorf("uninstalling %s: %w", pluginRef, err)
 	}
 
-	// Skills linked by `felt setup skills` point into the marketplace clone
-	// that `marketplace remove` deletes. Unlink them first, or uninstall
-	// leaves dangling symlinks in ~/.claude/skills — worse residue than the
-	// registration we came to clean up.
+	// Skills linked by `felt setup skills` point into the plugin sources this
+	// uninstall retires. Unlink them first, or uninstall leaves dangling
+	// symlinks in ~/.claude/skills — worse residue than the registration we
+	// came to clean up.
 	for _, name := range pruneMarketplaceSkillLinks() {
 		fmt.Printf("Unlinked skill: %s\n", name)
 	}
@@ -487,19 +496,24 @@ func uninstallPlugin() error {
 }
 
 // pruneMarketplaceSkillLinks removes symlinks in ~/.claude/skills that point
-// into the felt marketplace clone — the inverse of `felt setup skills` for its
-// default target. Returns the skill names it unlinked.
+// into a directory felt manages as a plugin source: Claude Code's marketplace
+// clone, or the promoted generations under ~/.felt/plugin-runtime that the
+// directory marketplace serves. Such a link duplicates skills the plugin
+// already loads while it is installed, and dangles once it is removed.
+// Returns the skill names it unlinked.
 //
-// Deliberately narrow: only symlinks, and only ones resolving inside the clone
-// directory about to be deleted. A skill linked from a local checkout via
-// --source keeps working after uninstall (its target still exists), so it is
-// left alone; so is anything that is a real directory. A non-default --target
-// is not tracked anywhere, so we cannot reach it — best-effort by design, and
+// Deliberately narrow: only symlinks, and only ones resolving inside those
+// directories. A skill linked from a local checkout via --source is left
+// alone; so is anything that is a real directory. A non-default --target is
+// not tracked anywhere, so we cannot reach it — best-effort by design, and
 // silent when there is nothing to do.
 func pruneMarketplaceSkillLinks() []string {
-	clone := claudeMarketplaceClonePath()
-	if clone == "" {
-		return nil
+	var managed []string
+	if clone := claudeMarketplaceClonePath(); clone != "" {
+		managed = append(managed, clone)
+	}
+	if runtimeDir, err := pluginRuntimeDir(); err == nil {
+		managed = append(managed, runtimeDir)
 	}
 	skillsDir, err := homePath(".claude", "skills")
 	if err != nil {
@@ -517,7 +531,9 @@ func pruneMarketplaceSkillLinks() []string {
 		if err != nil {
 			continue // not a symlink; not ours to touch
 		}
-		if !strings.HasPrefix(target, clone+string(filepath.Separator)) {
+		if !slices.ContainsFunc(managed, func(dir string) bool {
+			return strings.HasPrefix(target, dir+string(filepath.Separator))
+		}) {
 			continue
 		}
 		if err := os.Remove(path); err == nil {

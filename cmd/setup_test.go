@@ -526,22 +526,23 @@ func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 	t.Setenv("HOME", home)
 	calls := fakeClaudeOnPath(t, `[{"id":"felt@`+marketplaceName+`"}]`)
 
-	// A skill linked from the marketplace clone (goes), one linked from a
-	// local checkout (stays — its target survives uninstall), and a real
-	// directory (never ours to touch).
+	// Skills linked from the marketplace clone and from the plugin runtime
+	// the directory marketplace serves (both go), one linked from a local
+	// checkout (stays — its target survives uninstall), and a real directory
+	// (never ours to touch).
 	cloneSkills := filepath.Join(home, ".claude", "plugins", "marketplaces", marketplaceName, "claude-plugin", "skills", "felt")
+	runtimeSkill := filepath.Join(home, ".felt", pluginRuntimeDirName, pluginCurrentName, "claude-plugin", "skills", "shuttle")
 	checkoutSkill := filepath.Join(home, "src", "felt", "claude-plugin", "skills", "shuttle")
 	skillsDir := filepath.Join(home, ".claude", "skills")
-	for _, d := range []string{cloneSkills, checkoutSkill, skillsDir, filepath.Join(skillsDir, "unrelated")} {
+	for _, d := range []string{cloneSkills, runtimeSkill, checkoutSkill, skillsDir, filepath.Join(skillsDir, "unrelated")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink(cloneSkills, filepath.Join(skillsDir, "felt")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(checkoutSkill, filepath.Join(skillsDir, "shuttle")); err != nil {
-		t.Fatal(err)
+	for link, target := range map[string]string{"felt": cloneSkills, "shuttle": runtimeSkill, "shuttle-dev": checkoutSkill} {
+		if err := os.Symlink(target, filepath.Join(skillsDir, link)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := uninstallPlugin(); err != nil {
@@ -564,7 +565,10 @@ func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(skillsDir, "felt")); !os.IsNotExist(err) {
 		t.Errorf("skill linked from the marketplace clone survived uninstall: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(skillsDir, "shuttle")); err != nil {
+	if _, err := os.Lstat(filepath.Join(skillsDir, "shuttle")); !os.IsNotExist(err) {
+		t.Errorf("skill linked from the plugin runtime survived uninstall: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "shuttle-dev")); err != nil {
 		t.Errorf("skill linked from a local checkout was removed: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(skillsDir, "unrelated")); err != nil {
