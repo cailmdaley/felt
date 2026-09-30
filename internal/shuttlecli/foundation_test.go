@@ -176,9 +176,9 @@ func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 // TestResolveOwnHost_SeedNeverCreatesDirectory: the seed writes into a parent
 // that already exists and never creates one. The existence of ~/.shuttle is
 // the gate that decides whether this machine keeps an event stream and a commit
-// ledger (shuttleSink), and resolveOwnHost runs inside `felt hook event`
-// upstream of that gate — so an mkdir here would turn a felt-only machine into
-// a shuttle host on its first hook.
+// ledger (shuttleSink), and resolveOwnHost runs inside `shuttle hook event`
+// upstream of that gate — so a mkdir here would enable the event stream on a
+// machine with no Shuttle state directory.
 func TestResolveOwnHost_SeedNeverCreatesDirectory(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "")
 	dir := filepath.Join(t.TempDir(), "dot-shuttle")

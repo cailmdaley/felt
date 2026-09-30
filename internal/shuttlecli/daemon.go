@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// The daemon HTTP client — the felt CLI's window onto the running shuttle
+// The daemon HTTP client — the shuttle CLI's window onto the running daemon
 // daemon. Most `shuttle` verbs are pure local-frontmatter writes; the
 // daemon-coupled ones are the read verbs (snapshot, sessions, status --all) and
 // the soft lifecycle hop for standing-role resume/accept, which the daemon

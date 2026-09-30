@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// tmux session naming + management for the felt CLI's worker-facing verbs (pause
+// tmux session naming + management for shuttle's worker-facing verbs (pause
 // kills a live worker; attach/session-name address one). A worker's session is
 // always <leaf>-<uid>-shuttle, the same scheme as the daemon's
 // Shuttle.Dispatcher.session_name/2 and Shuttle.ULID.from_tmux/1, so the CLI

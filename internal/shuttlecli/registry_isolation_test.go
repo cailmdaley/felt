@@ -5,11 +5,8 @@ import (
 	"path/filepath"
 )
 
-// See internal/shuttle/registry_isolation_test.go. Set here in an init rather
-// than a TestMain because the integration suite (build tag `integration`,
-// package cmd_test) already owns TestMain and two of them in one test binary
-// will not link. The exported environment also reaches the felt binary those
-// integration tests exec.
+// The integration build excludes shuttlecli's TestMain, so set a disposable
+// registry path before any test can load the user agent registry.
 func init() {
-	os.Setenv("FELT_AGENTS_FILE", filepath.Join(os.TempDir(), "felt-tests-no-such-agents.json"))
+	os.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(os.TempDir(), "shuttle-tests-no-such-agents.json"))
 }

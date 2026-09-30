@@ -52,7 +52,7 @@ func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (
 			return owner, nil
 		}
 	}
-	path, _ := feltRemotesPath()
+	path, _ := shuttleRemotesPath()
 	return "", ownerRouteRefusal(cmd, args, owner,
 		fmt.Sprintf("host %q is not an enabled remote in %s", owner, path))
 }
@@ -81,7 +81,7 @@ func directOwnerCommand(cmd *cobra.Command, args []string) string {
 	}
 	var flags []string
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
-		if flag.Name == "help" || flag.Name == "json" || flag.Name == "directory" || flag.Name == "felt-store" {
+		if flag.Name == "help" || flag.Name == "json" || flag.Name == "store" {
 			return
 		}
 		if flag.Name == "message" {

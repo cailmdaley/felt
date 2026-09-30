@@ -18,9 +18,9 @@ var (
 // markRuntimeCmd is the daemon-facing runtime-stamp verb: it sets whichever
 // shuttle.runtime continuation fields are named by flags, nested under
 // shuttle.runtime, preserving every config sibling and every unspecified runtime
-// key. It is felt's single channel for the daemon's runtime writes (the dispatch
-// marker, the re-arm conclude) — the daemon shells this instead of editing the
-// fiber .md itself, so runtime nesting stays in Shuttle's YAML-node facet API.
+// key. It is Shuttle's single channel for the daemon's runtime writes (the
+// dispatch marker, the re-arm conclude) — the daemon shells this instead of
+// editing the fiber .md itself, so runtime nesting stays in Shuttle's YAML-node facet API.
 //
 // Unlike `handoff` (the worker's exit ritual, which also ends the tmux session),
 // mark-runtime only writes the fields — no session management. An empty flag
@@ -35,7 +35,7 @@ var markRuntimeCmd = &cobra.Command{
 shuttle.runtime, preserving config and any unspecified runtime key. An empty
 flag value removes that key. This is the daemon's channel for writing
 continuation state: the daemon shells it rather than editing the fiber file, so
-the runtime nesting lives in one engine (felt). Unlike 'handoff', it never
+the runtime nesting lives in one engine (Shuttle). Unlike 'handoff', it never
 touches tmux.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

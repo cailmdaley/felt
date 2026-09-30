@@ -704,7 +704,7 @@ and availability.`,
 }
 
 func transcriptCacheDir() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("FELT_TRANSCRIPT_CACHE_DIR")); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv("SHUTTLE_TRANSCRIPT_CACHE_DIR")); dir != "" {
 		return dir, nil
 	}
 	base := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME"))

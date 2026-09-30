@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -98,12 +99,27 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Execute() {
+func Execute() { os.Exit(executeCommand()) }
+
+func executeCommand() int {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		var exitErr *cliExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.code
+		}
+		return 1
 	}
+	return 0
 }
+
+type cliExitError struct {
+	code int
+	err  error
+}
+
+func (e *cliExitError) Error() string { return e.err.Error() }
+func (e *cliExitError) Unwrap() error { return e.err }
 
 func init() {
 	cobra.EnableTraverseRunHooks = true

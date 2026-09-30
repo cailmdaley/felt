@@ -12,7 +12,21 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/spf13/cobra"
 )
+
+func TestDirectOwnerCommandUsesShuttleAndOmitsLocalStore(t *testing.T) {
+	root := &cobra.Command{Use: "shuttle"}
+	command := &cobra.Command{Use: "reopen"}
+	root.AddCommand(command)
+	command.Flags().String("store", "", "Felt store root")
+	if err := command.Flags().Set("store", "/local/store"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := directOwnerCommand(command, []string{"task"}), "shuttle reopen task"; got != want {
+		t.Fatalf("direct owner command = %q, want %q", got, want)
+	}
+}
 
 func configureRemoteLifecycleTest(t *testing.T) {
 	t.Helper()
@@ -323,7 +337,7 @@ func TestRemoteLifecycleUnknownOwnerAndLocalDaemonDownRefuseWithCommand(t *testi
 	t.Run("unknown remote", func(t *testing.T) {
 		withOwnHost(t, "hub")
 		missing := filepath.Join(t.TempDir(), "remotes.json")
-		t.Setenv("FELT_REMOTES_FILE", missing)
+		t.Setenv("SHUTTLE_REMOTES_FILE", missing)
 		dir, storage := newStore(t)
 		seedShuttleRole(t, storage, "task", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
 		_, err := runCommand(t, dir, "reopen", "task")
@@ -418,7 +432,7 @@ func TestRemoteResumeReportsFreshRemoteBootQuarantine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote resume: %v", err)
 	}
-	if !strings.Contains(out, "may stay pending") || !strings.Contains(out, "bin/shuttle release") || mustRead(t, storage, "draft").Status != felt.StatusOpen {
+	if !strings.Contains(out, "may stay pending") || !strings.Contains(out, "shuttle daemon release") || mustRead(t, storage, "draft").Status != felt.StatusOpen {
 		t.Fatalf("resume output = %q; hub mirror status = %q", out, mustRead(t, storage, "draft").Status)
 	}
 }

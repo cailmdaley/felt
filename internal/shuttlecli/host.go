@@ -18,9 +18,9 @@ import (
 //
 // This is the one host-identity resolver. The daemon does not re-derive it: its
 // Poller asks `shuttle host --json` once at boot (unless SHUTTLE_HOST is
-// set) and freezes the answer, and `bin/shuttle install-agent` runs `felt
-// shuttle host seed`. So the CLI's stamp and the daemon's dispatch predicate
-// cannot disagree about which machine this is.
+// set) and freezes the answer, and `shuttle daemon install` runs `shuttle host
+// seed`. So the CLI's stamp and the daemon's dispatch predicate cannot disagree
+// about which machine this is.
 //
 // Precedence: explicit --host (cross-host install, an explicit per-invocation
 // override — checked first because it's a deliberate ask, not an ambient
@@ -130,9 +130,9 @@ func normalizeHostname(raw string) string {
 // creates one. That is the same gate the event stream and commit ledger use
 // (shuttleSink, cmd/shuttle_events.go): the existence of ~/.shuttle is what
 // distinguishes a shuttle host from a machine that installed felt for fibers
-// alone. Since resolveOwnHost runs inside `felt hook event` — before the
-// stream's own gate is consulted — an mkdir here would create ~/.shuttle on a
-// felt-only machine and thereby switch that machine's event stream on. Seeding
+// alone. Since resolveOwnHost runs inside `shuttle hook event` — before the
+// stream's own gate is consulted — a mkdir here would create ~/.shuttle on a
+// Felt-only machine and thereby switch that machine's event stream on. Seeding
 // is explicitly best-effort, so declining is free; breaking the gate is not.
 func seedHostConfigFile(name string) {
 	path := hostConfigFilePath()
@@ -144,7 +144,7 @@ func seedHostConfigFile(name string) {
 }
 
 // seedOwnHost makes this machine's identity durable, for `shuttle host
-// seed` (which `bin/shuttle install-agent` runs before it starts the daemon it
+// seed` (which `shuttle daemon install` runs before it starts the daemon it
 // supervises). An identity already in the host file always wins: it may be a
 // name someone chose, and re-deciding it would rename the machine out from
 // under every fiber homed to it. Otherwise the resolved identity — $SHUTTLE_HOST,

@@ -96,7 +96,7 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 		},
 	})
 	cache := t.TempDir()
-	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", cache)
+	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
 	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("transcript: %v\n%s", err, out)
@@ -124,7 +124,7 @@ func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T)
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
 		},
 	})
-	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("empty transcript: %v\n%s", err, out)
@@ -152,7 +152,7 @@ func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) 
 			_, _ = w.Write(current)
 		},
 	})
-	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("growing transcript: %v\n%s", err, out)
@@ -183,7 +183,7 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(bad) },
 	})
 	cache := t.TempDir()
-	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", cache)
+	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
 	_, destination, err := transcriptCachePath(provenanceSession)
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
 	body := []byte("{\"type\":\"response_item\"}\n")
 	server := provenanceDaemon(t, body)
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	t.Setenv("FELT_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	dir := t.TempDir()
 	out, err := runCommand(t, t.TempDir(), "sessions", "new/name", "--materialize", "--dir", dir, "--json")
 	if err != nil {

@@ -1,6 +1,8 @@
 # Binaries (root only, not internal/felt/)
 /felt
 /felt-linux
+/shuttle
+/shuttle-linux
 *.exe
 
 # goreleaser
@@ -35,7 +37,6 @@ erl_crash.dump
 *.ez
 shuttle-*.tar
 # Built daemon release + its generated version module
-# (bin/shuttle itself is the TRACKED shell shim that fronts the release)
 /bin/rel/
 /bin/rel.next/
 /bin/rel.prev/

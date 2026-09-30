@@ -1,6 +1,6 @@
 # Shuttle tunnel systemd **user** unit — the Linux analog of
 # cmd/shuttle-tunnel.plist.tmpl, and the sibling of the daemon's own
-# share/io.shuttle.daemon.service.template. `felt shuttle tunnels install`
+# share/io.shuttle.daemon.service.template. `shuttle tunnels install`
 # renders one per remote into ~/.config/systemd/user/shuttle-tunnel-<name>.service;
 # the template itself is not a loadable unit until it has been through that.
 #
@@ -11,7 +11,7 @@
 # your last logout, which would take the fleet's tunnels down with the ssh
 # session that installed them. `loginctl enable-linger <user>` keeps the
 # manager (and so the tunnels) alive across logout and starts them at boot.
-# `felt shuttle tunnels install` prints the command; it is the one manual step,
+# `shuttle tunnels install` prints the command; it is the one manual step,
 # for the same reason the daemon's install leaves it manual.
 #
 # PATH is baked in at install time, like the daemon's unit and for a sharper
@@ -74,8 +74,8 @@ Environment="SSH_AUTH_SOCK={{ .SSHAuthSock }}"
 Restart=on-failure
 RestartSec=10
 
-# systemd does not create the parent directory for append:; `felt shuttle
-# tunnels install` mkdir -p's it. append: needs systemd >= 240. Like the plist's
+# systemd does not create the parent directory for append:; `shuttle tunnels
+# install` mkdir -p's it. append: needs systemd >= 240. Like the plist's
 # StandardOutPath, this file is never rotated — one tunnel's log grows slowly,
 # and truncating it out from under a running autossh would cost more than it saves.
 StandardOutput=append:{{ .LogPath }}

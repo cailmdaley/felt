@@ -112,7 +112,7 @@ var sessionNameCmd = &cobra.Command{
 	Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
 worker: <leaf>-<uid>-shuttle, keyed by the fiber's intrinsic id. A fiber
 without an id has no session name and the command fails. It searches the
--C / --felt-store store when set, otherwise every configured store, so it
+-C / --store when set, otherwise every configured store, so it
 works from any directory.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

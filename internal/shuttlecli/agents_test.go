@@ -19,14 +19,14 @@ func runAgents(t *testing.T, args ...string) (stdout, stderr string, err error) 
 	return executeCLI(t, "", args...)
 }
 
-// userRegistry writes a user registry and points $FELT_AGENTS_FILE at it.
+// userRegistry writes a user registry and points $SHUTTLE_AGENTS_FILE at it.
 func userRegistry(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agents.json")
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
-	t.Setenv("FELT_AGENTS_FILE", path)
+	t.Setenv("SHUTTLE_AGENTS_FILE", path)
 	return path
 }
 
@@ -35,7 +35,7 @@ func userRegistry(t *testing.T, body string) string {
 func TestShuttleAgents_FooterNamesTheUserFile(t *testing.T) {
 	// No user file: the footer says so, and says where it looked.
 	missing := filepath.Join(t.TempDir(), "absent.json")
-	t.Setenv("FELT_AGENTS_FILE", missing)
+	t.Setenv("SHUTTLE_AGENTS_FILE", missing)
 	_, stderr, err := runAgents(t, "agents")
 	if err != nil {
 		t.Fatalf("agents: %v", err)
@@ -184,7 +184,7 @@ func TestShuttleAgentsResolve_SeesUserAgents(t *testing.T) {
 
 func TestShuttleAgentsInit_WritesRefusesAndForces(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "agents.json")
-	t.Setenv("FELT_AGENTS_FILE", path)
+	t.Setenv("SHUTTLE_AGENTS_FILE", path)
 
 	stdout, _, err := runAgents(t, "agents", "init")
 	if err != nil {
@@ -247,7 +247,7 @@ func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 	pdir := t.TempDir()
 
 	// Without the user registry the id is unknown, and the error lists what is.
-	t.Setenv("FELT_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
+	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
 	out, err := runCommand(t, dir, "install", "task",
 		"--host", "testhost", "--project-dir", pdir, "--model", "my-agent")
 	if err == nil {
@@ -274,7 +274,7 @@ func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 
 func TestShuttleAgentsEffort_SetListReset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents.json")
-	t.Setenv("FELT_AGENTS_FILE", path)
+	t.Setenv("SHUTTLE_AGENTS_FILE", path)
 
 	stdout, _, err := runAgents(t, "agents", "effort", "claude-opus", "high")
 	if err != nil || !strings.Contains(stdout, "claude-opus: default_effort high in "+path) {
@@ -307,7 +307,7 @@ func TestShuttleAgentsEffort_SetListReset(t *testing.T) {
 }
 
 func TestShuttleAgentsEffort_ArgumentShape(t *testing.T) {
-	t.Setenv("FELT_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
+	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
 	for _, args := range [][]string{
 		{"claude-opus"},
 		{"claude-opus", "high", "--reset"},

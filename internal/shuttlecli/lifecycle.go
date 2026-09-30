@@ -15,17 +15,15 @@ import (
 )
 
 // The lifecycle write verbs — pause/resume/reopen/close/set-outcome/accept/
-// set-model/set-agent/reshape/uninstall. A fiber's lifecycle is felt-native:
-// status (the sole dispatch gate) is f.Status, the human verdict is the
-// top-level `tempered` ExtraField, closed-at is f.ClosedAt; only the config
-// verbs (set-model/set-agent/reshape) touch the shuttle: block, and they do it
-// surgically (shuttle.SetField / shuttle.SetNodeField) so the daemon-owned runtime
-// keys ride through untouched. Every write passes the ownership guard. felt is
-// the one writer of every lifecycle transition: resume and accept hop through
-// the owning daemon, which runs the same verb with --local inside its Poller
-// (serialized with its state changes, its document cache refreshed after), and
-// write here
-// with --local or when no connection to the daemon can be made.
+// set-model/set-agent/reshape/uninstall. A fiber's lifecycle state remains
+// felt-native: status (the sole dispatch gate) is f.Status, the human verdict is
+// the top-level `tempered` ExtraField, and closed-at is f.ClosedAt. Config verbs
+// update only the configuration fields in the shuttle: block, preserving its
+// runtime keys. Every write passes the ownership guard. The Shuttle CLI owns human
+// lifecycle transitions: resume and accept hop through the owning daemon,
+// which runs the same verb with --local inside its Poller (serialized with state
+// changes and followed by a cache refresh); --local or a daemon connection
+// failure writes directly here.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
 // write verb: a full read (body preserved for the re-serialize), a required
@@ -243,7 +241,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			}
 			printDaemonBody([]byte(output))
 			if ownerBootQuarantine(owner) {
-				fmt.Printf("  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `bin/shuttle release` runs on %q.\n", owner)
+				fmt.Printf("  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
 			}
 			return nil
 		}
@@ -387,7 +385,7 @@ func setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shut
 }
 
 // A hub cannot stat a path on a remote owner. Keep the supplied value intact in
-// the local request; the owning daemon's felt CLI expands and validates it on
+// the local request; the owning daemon's shuttle CLI expands and validates it on
 // the machine where workers will use it.
 func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shuttle.Block) error {
 	if !cmd.Flags().Changed("project-dir") {

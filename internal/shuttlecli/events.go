@@ -13,8 +13,8 @@ import (
 // stream and the commit ledger live, when they may be written, and how the
 // stream is bounded. It sits beside shuttle_stores.go as a "mirror the Elixir
 // resolver in Go" module — the daemon reads these files
-// (daemon/lib/shuttle/event_stream.ex, daemon/lib/shuttle/commit_ledger.ex), `felt hook event` and `felt hook commit`
-// write them, and the two sides must never disagree about the paths.
+// (daemon/lib/shuttle/event_stream.ex, daemon/lib/shuttle/commit_ledger.ex), `shuttle hook event` and
+// `shuttle hook commit` write them, and the two sides must never disagree about the paths.
 
 const (
 	// eventsDefaultMaxBytes bounds the live stream. On rollover the file is

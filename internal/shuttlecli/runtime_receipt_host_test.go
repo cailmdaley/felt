@@ -502,7 +502,7 @@ func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
 	if err := os.WriteFile(fleet, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FELT_REMOTES_FILE", fleet)
+	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
 
 	got := gatherHostEvidence()
 	if got.tailscaleSocket != path || got.tailscaleConfigError != "" ||
@@ -518,7 +518,7 @@ func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
 	if err := os.WriteFile(fleet, []byte(`{"defaults":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FELT_REMOTES_FILE", fleet)
+	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
 
 	ev := gatherHostEvidence()
 	if ev.remotesConfigError == "" || ev.tailscaleSocket != "" {

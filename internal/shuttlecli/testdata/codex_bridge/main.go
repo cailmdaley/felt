@@ -19,17 +19,17 @@ import (
 )
 
 func main() {
-	if os.Getenv("FELT_BRIDGE_DESCENDANT") == "1" {
+	if os.Getenv("SHUTTLE_BRIDGE_DESCENDANT") == "1" {
 		signal.Ignore(syscall.SIGTERM)
 		data, _ := json.Marshal(map[string]int{"pid": os.Getpid(), "pgid": syscall.Getpgrp()})
-		_ = os.WriteFile(os.Getenv("FELT_BRIDGE_DESCENDANT_FILE"), data, 0600)
+		_ = os.WriteFile(os.Getenv("SHUTTLE_BRIDGE_DESCENDANT_FILE"), data, 0600)
 		for {
 			time.Sleep(time.Second)
 		}
 	}
-	if os.Getenv("FELT_BRIDGE_DESCENDANT_FILE") != "" {
+	if os.Getenv("SHUTTLE_BRIDGE_DESCENDANT_FILE") != "" {
 		child := exec.Command(os.Args[0])
-		child.Env = append(os.Environ(), "FELT_BRIDGE_DESCENDANT=1")
+		child.Env = append(os.Environ(), "SHUTTLE_BRIDGE_DESCENDANT=1")
 		child.Stderr = os.Stderr
 		if err := child.Start(); err != nil {
 			panic(err)
@@ -42,38 +42,38 @@ func main() {
 			listen = os.Args[i+1]
 		}
 	}
-	if path := os.Getenv("FELT_BRIDGE_ARGS_FILE"); path != "" {
+	if path := os.Getenv("SHUTTLE_BRIDGE_ARGS_FILE"); path != "" {
 		data, _ := json.Marshal(os.Args[1:])
 		_ = os.WriteFile(path, data, 0600)
 	}
-	if path := os.Getenv("FELT_BRIDGE_ENV_FILE"); path != "" {
+	if path := os.Getenv("SHUTTLE_BRIDGE_ENV_FILE"); path != "" {
 		data, _ := json.Marshal(map[string]string{
-			"CODEX_CLI_PATH":            os.Getenv("CODEX_CLI_PATH"),
-			"CODEX_APP_TOOLS_PIPE_PATH": os.Getenv("CODEX_APP_TOOLS_PIPE_PATH"),
-			"FELT_BRIDGE_ENV_MARKER":    os.Getenv("FELT_BRIDGE_ENV_MARKER"),
-			"FELT_BRIDGE_HELPER_PID":    strconv.Itoa(os.Getpid()),
-			"FELT_BRIDGE_NATIVE_PPID":   strconv.Itoa(os.Getppid()),
-			"FELT_BRIDGE_LISTEN":        listen,
+			"CODEX_CLI_PATH":             os.Getenv("CODEX_CLI_PATH"),
+			"CODEX_APP_TOOLS_PIPE_PATH":  os.Getenv("CODEX_APP_TOOLS_PIPE_PATH"),
+			"SHUTTLE_BRIDGE_ENV_MARKER":  os.Getenv("SHUTTLE_BRIDGE_ENV_MARKER"),
+			"SHUTTLE_BRIDGE_HELPER_PID":  strconv.Itoa(os.Getpid()),
+			"SHUTTLE_BRIDGE_NATIVE_PPID": strconv.Itoa(os.Getppid()),
+			"SHUTTLE_BRIDGE_LISTEN":      listen,
 		})
 		_ = os.WriteFile(path, data, 0600)
 	}
-	if os.Getenv("FELT_BRIDGE_PASSTHROUGH") == "1" {
+	if os.Getenv("SHUTTLE_BRIDGE_PASSTHROUGH") == "1" {
 		os.Exit(23)
 	}
-	if os.Getenv("FELT_BRIDGE_NO_SOCKET") == "1" {
+	if os.Getenv("SHUTTLE_BRIDGE_NO_SOCKET") == "1" {
 		for {
 			time.Sleep(time.Second)
 		}
 	}
 
-	path := os.Getenv("FELT_BRIDGE_SOCKET")
+	path := os.Getenv("SHUTTLE_BRIDGE_SOCKET")
 	if path == "" {
 		os.Exit(2)
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0700)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		if errorPath := os.Getenv("FELT_BRIDGE_ERROR_FILE"); errorPath != "" {
+		if errorPath := os.Getenv("SHUTTLE_BRIDGE_ERROR_FILE"); errorPath != "" {
 			_ = os.WriteFile(errorPath, []byte(err.Error()), 0600)
 		}
 		os.Exit(3)
@@ -94,7 +94,7 @@ func main() {
 				return
 			}
 			if kind == websocket.TextMessage || kind == websocket.BinaryMessage {
-				if os.Getenv("FELT_BRIDGE_LARGE_REPLY") == "1" {
+				if os.Getenv("SHUTTLE_BRIDGE_LARGE_REPLY") == "1" {
 					data = []byte(`{"blob":"` + strings.Repeat("x", 1<<20) + `"}`)
 				}
 				_ = ws.WriteMessage(websocket.TextMessage, data)

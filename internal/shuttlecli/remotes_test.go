@@ -51,10 +51,25 @@ type remoteFixtureDoc struct {
 
 const remotesFixtureDir = "../../daemon/test/fixtures/remotes"
 
+func TestShuttleRemotesPathUsesShuttleConfigLocation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHUTTLE_REMOTES_FILE", "")
+	t.Setenv("FELT_REMOTES_FILE", filepath.Join(t.TempDir(), "felt-remotes.json"))
+
+	got, err := shuttleRemotesPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".config", "shuttle", "remotes.json"); got != want {
+		t.Fatalf("default remotes path = %q, want %q", got, want)
+	}
+}
+
 // TestRemotesFixtureParity is the anti-drift device: the Go reader and the
 // Elixir reader (daemon/test/shuttle/remotes_test.exs) read the SAME fixture files and
 // assert the SAME expected.json. A default that changes in one language fails in
-// both. FELT_STORES parity is guarded only by comments; this one is executable.
+// both. SHUTTLE_STORES parity is guarded only by comments; this one is executable.
 func TestRemotesFixtureParity(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(remotesFixtureDir, "expected.json"))
 	if err != nil {
@@ -77,7 +92,7 @@ func TestRemotesFixtureParity(t *testing.T) {
 			if err := json.Unmarshal(blob, &want); err != nil {
 				t.Fatalf("parse expectation: %v", err)
 			}
-			t.Setenv("FELT_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
+			t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
 
 			doc, err := loadRemotesFile()
 			if err != nil {
@@ -158,7 +173,7 @@ func TestRemotesFixtureRejected(t *testing.T) {
 		if err := json.Unmarshal(blob, &want); err != nil {
 			t.Fatalf("%s: %v", fixture, err)
 		}
-		t.Setenv("FELT_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
+		t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
 		_, err := loadRemotesFile()
 		if err == nil {
 			t.Errorf("%s loaded; want a refusal of %s.%s", fixture, want.Remote, want.Field)
@@ -192,13 +207,13 @@ func sameRemoteFixture(a, b remoteFixture) bool {
 }
 
 // TestConfiguredRemotes_Resolution locks the precedence and the absent-file
-// contract. There is deliberately no compact FELT_REMOTES env form, so
-// FELT_REMOTES_FILE is the only override.
+// contract. There is deliberately no comma-separated environment form, so
+// SHUTTLE_REMOTES_FILE is the only override.
 func TestConfiguredRemotes_Resolution(t *testing.T) {
 	dir := t.TempDir()
 
 	// Missing file → empty, no error. A host with no fleet is a valid host.
-	t.Setenv("FELT_REMOTES_FILE", filepath.Join(dir, "absent.json"))
+	t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(dir, "absent.json"))
 	got, err := configuredRemotes()
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
@@ -212,19 +227,19 @@ func TestConfiguredRemotes_Resolution(t *testing.T) {
 	if err := os.WriteFile(bad, []byte(`{"remotes": [`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FELT_REMOTES_FILE", bad)
+	t.Setenv("SHUTTLE_REMOTES_FILE", bad)
 	if _, err := configuredRemotes(); err == nil {
 		t.Fatal("malformed file should error")
 	} else if !strings.Contains(err.Error(), bad) {
 		t.Fatalf("error should name the path, got %q", err)
 	}
 
-	// FELT_REMOTES_FILE points the reader elsewhere.
+	// SHUTTLE_REMOTES_FILE points the reader elsewhere.
 	good := filepath.Join(dir, "good.json")
 	if err := os.WriteFile(good, []byte(`{"version":1,"remotes":[{"name":"x","port":4009}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FELT_REMOTES_FILE", good)
+	t.Setenv("SHUTTLE_REMOTES_FILE", good)
 	got, err = configuredRemotes()
 	if err != nil {
 		t.Fatalf("configuredRemotes: %v", err)
@@ -304,7 +319,7 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 // (matching the stores/projects writers).
 func TestSaveRemotes_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "remotes.json")
-	t.Setenv("FELT_REMOTES_FILE", path)
+	t.Setenv("SHUTTLE_REMOTES_FILE", path)
 
 	doc := remotesFile{Remotes: []remoteSpec{{Name: "a", Port: 4001}}}
 	if err := saveRemotes(doc); err != nil {
@@ -378,14 +393,14 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	}
 }
 
-// writeRemotes points FELT_REMOTES_FILE at a temp file holding body.
+// writeRemotes points SHUTTLE_REMOTES_FILE at a temp file holding body.
 func writeRemotes(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "remotes.json")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FELT_REMOTES_FILE", path)
+	t.Setenv("SHUTTLE_REMOTES_FILE", path)
 	return path
 }
 

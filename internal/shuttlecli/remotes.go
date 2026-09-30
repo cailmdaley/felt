@@ -29,11 +29,11 @@ import (
 // are mutated at runtime by the kanban; the fleet is operator setup that a UI
 // round-trip must never clobber.
 //
-// Resolution: $FELT_REMOTES_FILE, else ~/.config/felt/remotes.json. Absent file
+// Resolution: $SHUTTLE_REMOTES_FILE, else ~/.config/shuttle/remotes.json. Absent file
 // → no remotes (a local-only host pays nothing). There is deliberately no
-// compact `FELT_REMOTES` env form: a remote carries structured fields (tunnel
-// options, per-remote timeouts) that no comma-separated grammar can express, so
-// a second grammar in two languages would always be a lossy subset.
+// comma-separated environment form: a remote carries structured fields (tunnel
+// options, per-remote timeouts) that no compact grammar can express, so a second
+// grammar in two languages would always be a lossy subset.
 
 const (
 	// defaultRemoteDaemonPort is the port a shuttle daemon binds on its OWN
@@ -307,17 +307,17 @@ func managedTunnel(manager string) bool {
 	return manager == "launchd" || manager == "systemd"
 }
 
-// feltRemotesPath is the canonical fleet file location for reads AND writes:
-// $FELT_REMOTES_FILE, else ~/.config/felt/remotes.json.
-func feltRemotesPath() (string, error) {
-	return feltConfigPath("FELT_REMOTES_FILE", "remotes.json")
+// shuttleRemotesPath is the canonical fleet file location for reads AND writes:
+// $SHUTTLE_REMOTES_FILE, else ~/.config/shuttle/remotes.json.
+func shuttleRemotesPath() (string, error) {
+	return shuttleConfigPath("SHUTTLE_REMOTES_FILE", "remotes.json")
 }
 
 // loadRemotesFileRaw parses the fleet file WITHOUT filling defaults. Edit verbs
 // use it so a round-trip through `add`/`rm` never materializes every default
 // into the file and pins values the reader should keep deciding.
 func loadRemotesFileRaw() (remotesFile, error) {
-	path, err := feltRemotesPath()
+	path, err := shuttleRemotesPath()
 	if err != nil {
 		return remotesFile{}, err
 	}
@@ -353,7 +353,7 @@ func loadRemotesFile() (remotesFile, error) {
 		return remotesFile{}, err
 	}
 	if err := normalizeRemotes(&doc); err != nil {
-		path, _ := feltRemotesPath()
+		path, _ := shuttleRemotesPath()
 		return remotesFile{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return doc, nil
@@ -622,7 +622,7 @@ func firstNonZero(values ...int) int {
 // saveRemotes writes the fleet atomically (tmp + rename). An empty fleet deletes
 // the file, matching the stores/projects writers.
 func saveRemotes(doc remotesFile) error {
-	path, err := feltRemotesPath()
+	path, err := shuttleRemotesPath()
 	if err != nil {
 		return err
 	}
@@ -697,7 +697,7 @@ var remotesListCmd = &cobra.Command{
 			return outputJSON(doc)
 		}
 		if len(doc.Remotes) == 0 {
-			path, _ := feltRemotesPath()
+			path, _ := shuttleRemotesPath()
 			fmt.Printf("no remotes configured (%s)\n", path)
 			return nil
 		}
@@ -787,7 +787,7 @@ var remotesAddCmd = &cobra.Command{
 		if err := saveRemotes(doc); err != nil {
 			return err
 		}
-		path, _ := feltRemotesPath()
+		path, _ := shuttleRemotesPath()
 		fmt.Printf("saved %s (%s)\n", args[0], path)
 		return nil
 	},
@@ -828,7 +828,7 @@ var remotesPathCmd = &cobra.Command{
 	Short: "Print the fleet file path",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := feltRemotesPath()
+		path, err := shuttleRemotesPath()
 		if err != nil {
 			return err
 		}

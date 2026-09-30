@@ -767,7 +767,7 @@ func daemonListenerAddress(address string) bool {
 }
 
 // checkResolvedDaemonPortOwner checks the socket-class TCP exception used by
-// bin/shuttle. A refused connection means there is no listener to inspect yet.
+// the shuttle CLI. A refused connection means there is no listener to inspect yet.
 func checkResolvedDaemonPortOwner(settings hostSettings) error {
 	if runtime.GOOS != "linux" || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
 		return nil

@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,75 +112,10 @@ func TestShuttleHostJSON_PrintsAmpersandPathsVerbatim(t *testing.T) {
 	}
 }
 
-// scriptFunction extracts `name() { ... }` from the shell script at path.
-func scriptFunction(t *testing.T, path, name string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return shellFunction(t, string(data), name)
-}
-
-// TestStopMarkerShells: bin/shuttle and bin/shuttle-deploy put the stop
-// marker where felt reports the data directory, and fall back to the plain
-// expansion only when felt cannot say.
-func TestStopMarkerShells(t *testing.T) {
-	reported := filepath.Join(t.TempDir(), "reported")
-	stub := t.TempDir()
-	felt := "#!/bin/sh\n[ \"$*\" = 'shuttle host --json' ] || exit 2\n" +
-		"printf '{\\n  \"listen\": \"tcp://127.0.0.1:4000\",\\n  \"data_dir\": \"%s\"\\n}\\n' \"$REPORTED\"\n"
-	if err := os.WriteFile(filepath.Join(stub, "felt"), []byte(felt), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("REPORTED", reported)
-	t.Setenv("SHUTTLE_DATA_DIR", "/plain/expansion")
-	withFelt := stub + string(os.PathListSeparator) + os.Getenv("PATH")
-	// No felt anywhere on this PATH: only the shell's own utilities.
-	withoutFelt := t.TempDir()
-	for _, tool := range []string{"sh", "sed", "head", "printf"} {
-		if path, err := exec.LookPath(tool); err == nil {
-			_ = os.Symlink(path, filepath.Join(withoutFelt, tool))
-		}
-	}
-
-	marker := scriptFunction(t, "../../bin/shuttle", "stop_marker")
-	prelude := scriptFunction(t, "../../bin/shuttle-deploy", "listen_prelude")
-	deploy, err := exec.Command("bash", "-c", prelude+"\nlisten_prelude").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name, script string
-	}{
-		{"bin/shuttle stop_marker", marker + "\nstop_marker"},
-		{"bin/shuttle-deploy daemon_kill prelude", string(deploy) + `printf '%s/heartbeat.stopped\n' "${dd:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}"`},
-	} {
-		for _, path := range []struct {
-			name, value, want string
-		}{
-			{"felt reports", withFelt, reported + "/heartbeat.stopped"},
-			{"no felt", withoutFelt, "/plain/expansion/heartbeat.stopped"},
-		} {
-			t.Run(tc.name+"/"+path.name, func(t *testing.T) {
-				cmd := exec.Command("/bin/sh", "-c", tc.script)
-				cmd.Env = append(os.Environ(), "PATH="+path.value)
-				out, err := cmd.Output()
-				if err != nil {
-					t.Fatalf("%v", err)
-				}
-				if got := strings.TrimSpace(string(out)); got != path.want {
-					t.Fatalf("marker = %q, want %q", got, path.want)
-				}
-			})
-		}
-	}
-}
-
-// TestStopMarkerWriters: every shell that touches the stop marker resolves
-// its directory through felt; none expands SHUTTLE_DATA_DIR on its own.
+// TestStopMarkerWriters: shell launchers that touch the marker resolve its
+// directory through shuttle; none expands SHUTTLE_DATA_DIR on its own.
 func TestStopMarkerWriters(t *testing.T) {
-	for _, file := range []string{"../../bin/shuttle", "../../bin/shuttle-launch", "../../bin/shuttle-deploy", "../../Makefile"} {
+	for _, file := range []string{"../../bin/shuttle-launch", "../../bin/shuttle-deploy"} {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
@@ -193,7 +127,7 @@ func TestStopMarkerWriters(t *testing.T) {
 			}
 		}
 		if strings.Contains(text, "heartbeat.stopped") && !strings.Contains(text, `"data_dir"`) && !strings.Contains(text, "stop_marker") {
-			t.Errorf("%s writes the stop marker without felt's data_dir", file)
+			t.Errorf("%s writes the stop marker without shuttle's data_dir", file)
 		}
 	}
 }

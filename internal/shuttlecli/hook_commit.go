@@ -15,7 +15,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// `felt hook commit` — the host-local commit ledger
+// `shuttle hook commit` — the host-local commit ledger
 // ----------------------------------------------------------------------------
 //
 // Appends one JSONL line per commit to ~/.shuttle/commits.jsonl, pairing the

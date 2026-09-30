@@ -1,55 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Shuttle daemon LaunchAgent, rendered from a template at install time by
-  `shuttle install-agent` (in a checkout, `make install-agent` is a wrapper
-  over the same command and the same template). The placeholders
-  __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__
-  are filled in then; the unrendered template is not a valid plist, so don't
-  load it directly.
+  Shuttle's launchd LaunchAgent is rendered by `shuttle daemon install`.
+  Placeholders: __LABEL__, __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__,
+  __SHUTTLE_STORES__, __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, and
+  __SSH_AUTH_SOCK__. The unrendered template is not a valid plist.
 
-  __SHUTTLE_DIR__ is whatever directory holds bin/shuttle — the unpacked
-  release for a downloaded tarball, the repository root for a checkout.
-  `exec` replaces the shell with the daemon so launchd's KeepAlive supervises
-  it directly, and `start --force` skips the already-running guard so a
-  restart never refuses.
+  __SHUTTLE_BIN__ is the absolute path to the Go CLI. __SHUTTLE_RELEASE__ is
+  the Mix release directory. Launchd starts the Go CLI in its forced start
+  mode, which skips the already-running guard during a restart.
 
-  PATH. launchd starts with a near-empty environment, and the daemon shells out
-  to `felt` for every store walk — a PATH missing `felt` yields `:enoent` → 500
-  on /api/v1/fibers/composite: the board loads, the kanban does not. Boot
-  itself no longer needs anything, since the daemon is an ERTS-bundled Mix
-  release with no `#!/usr/bin/env escript` shebang hunting for escript/erl
-  (which, under launchd's bare env, used to exit 127). That narrows the
-  requirement to `felt`; it does not remove it. Running a login shell at
-  runtime does NOT fix what's left: starting from launchd's bare env, the user
-  profile doesn't reconstruct the login PATH (its setup isn't self-sufficient
-  from `env -i`). So install-agent CAPTURES the login PATH once, at install
-  time, from a login shell run in a scrubbed environment — scrubbed so the
-  installing session's own PATH can't leak in — and bakes it into __PATH__
-  below. Deterministic at runtime, and the user's real PATH rather than a
-  hand-maintained list. `--path` overrides it.
+  Launchd starts with a near-empty environment. The daemon needs both `felt`
+  for fiber data and `shuttle` for orchestration, so install captures the
+  user's login PATH in a scrubbed login shell and renders it as __PATH__.
+  The path option overrides the captured value.
 
-  Keep BOTH the shuttle directory and the felt stores outside ~/Documents,
-  ~/Desktop and ~/Downloads. macOS TCC charges every file access to a process's
-  *responsible process* — for a launchd-spawned chain, that's the executable
-  launchd itself invoked (beam.smp here), not the process that actually opened
-  the file. A grant made to some other binary in the tree (bash, felt) never
-  covers what beam.smp reads, and beam.smp cannot hold a Full Disk Access grant
-  of its own under launchd (the grant doesn't attach to a process launchd
-  supervises), so a daemon rooted in a protected folder crash-loops and stores
-  in one are silently walked as empty. Staying outside those folders sidesteps
-  TCC entirely: zero grants, survives erlang upgrades. install-agent warns
-  about either path. (Earlier this template used `-c` + no-exec + an FDA grant
-  on /bin/bash to keep bash as the responsible process; responsibility for a
-  launchd-spawned tree is charged to the tree's own executable regardless, not
-  reassignable by the invoking shell — relocating out of the protected folders
-  is the fix.)
+  Keep the Mix release and felt stores outside ~/Documents, ~/Desktop, and
+  ~/Downloads. macOS TCC attributes file access to the responsible process in
+  the launchd-spawned process tree. A Full Disk Access grant to an unrelated
+  binary does not cover the daemon's file access, so protected paths can make
+  the daemon crash or appear empty. install warns about both paths.
 
-  The same responsible-process rule is why the daemon must never be the one to
-  start a tmux server (see docs/dev/dispatch.md, "tmux server ownership"): a
-  tmux server forked from this launchd chain makes beam.smp the responsible
-  process for every worker under it, and every file the worker's shells and
-  tools touch raises a TCC prompt this template's own grant cannot cover.
+  The same TCC boundary is why the daemon must not start a tmux server (see
+  docs/dev/dispatch.md, "tmux server ownership"): workers started beneath the
+  daemon inherit its responsible-process boundary. Keep the tmux server owned
+  by the user's session instead.
 -->
 <plist version="1.0">
 <dict>
@@ -58,13 +33,16 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>exec '__SHUTTLE_DIR__/bin/shuttle' start --force</string>
+        <string>__SHUTTLE_BIN__</string>
+        <string>daemon</string>
+        <string>start</string>
+        <string>--force</string>
     </array>
 
     <key>EnvironmentVariables</key>
     <dict>
+        <key>SHUTTLE_RELEASE</key>
+        <string>__SHUTTLE_RELEASE__</string>
         <!-- The user's real login PATH, captured at install time (see header). -->
         <key>PATH</key>
         <string>__PATH__</string>
@@ -78,14 +56,14 @@
         <key>SHUTTLE_PORT</key>
         <string>__PORT__</string>
         <!--
-          Empty FELT_STORES selects the editable registry and clears any stale
-          override inherited from launchd. --felt-stores explicitly pins the
-          list instead; Settings then reports the override as read-only.
+          Empty SHUTTLE_STORES selects the editable registry and clears any
+          stale override inherited from launchd. An explicit store list pins
+          the values instead; Settings then reports the override as read-only.
         -->
-        <key>FELT_STORES</key>
-        <string>__FELT_STORES__</string>
-        <key>FELT_STORES_FILE</key>
-        <string>__FELT_STORES_FILE__</string>
+        <key>SHUTTLE_STORES</key>
+        <string>__SHUTTLE_STORES__</string>
+        <key>SHUTTLE_STORES_FILE</key>
+        <string>__SHUTTLE_STORES_FILE__</string>
         <!--
           SSH_AUTH_SOCK points at the user's PERSISTENT login ssh-agent (default
           ~/.ssh/agent.sock), NOT launchd's per-session Keychain agent. This is
@@ -96,7 +74,7 @@
           this, every fresh ssh the daemon makes to such a host fails auth: its own
           remote feed/tunnel can't connect, and a kanban Attach tab (which
           inherits this very SSH_AUTH_SOCK) opens and instantly dies. Override
-          with `--ssh-auth-sock` if your socket lives elsewhere.
+          with the socket option if your agent uses another path.
         -->
         <key>SSH_AUTH_SOCK</key>
         <string>__SSH_AUTH_SOCK__</string>
@@ -107,14 +85,14 @@
           launchd never tells the process it supervises, and Shuttle.LogRotator
           has to be able to cap that file (unrotated, the hub's reached 343MB).
           Without it the rotator falls back to the platform default, which is
-          right for a default install and wrong for any `--log` override.
+          right for a default install and wrong for a custom log path.
         -->
         <key>SHUTTLE_LOG</key>
         <string>__LOG__</string>
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>__SHUTTLE_DIR__</string>
+    <string>__SHUTTLE_RELEASE__</string>
 
     <key>RunAtLoad</key>
     <true/>

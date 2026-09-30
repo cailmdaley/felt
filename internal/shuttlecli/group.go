@@ -9,7 +9,7 @@ func addShuttleCommand(command *cobra.Command) {
 	switch command.Name() {
 	case "agents":
 		command.GroupID = groupAgents
-	case "host", "remotes", "tunnels":
+	case "daemon", "host", "remotes", "tunnels", "version":
 		command.GroupID = groupHosts
 	default:
 		command.GroupID = groupOperations

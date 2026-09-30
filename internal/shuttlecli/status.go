@@ -57,8 +57,8 @@ var statusCmd = &cobra.Command{
 	Use:   "status [fiber]",
 	Short: "Status overview, or a detailed report for one fiber",
 	Long: `With no argument, prints a table of every fiber with a shuttle: block in the
-stores this machine dispatches (-C when set, else FELT_STORES, else the
-~/.config/felt/stores.json registry). State is running (read from tmux), idle,
+stores this machine dispatches (-C when set, else SHUTTLE_STORES, else the
+~/.config/shuttle/stores.json registry). State is running (read from tmux), idle,
 scheduled (a standing role), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
@@ -69,7 +69,7 @@ dispatches it — this one only when the host is this machine's (shuttle
 host). A block without a project_dir is eligible, but its worker starts in the
 felt store and no verb arms it again until it has one; the verdict says so.
 The daemon's boot quarantine can still hold an eligible fiber until
-'bin/shuttle release'; that is the daemon's to report.
+'shuttle daemon release'; that is the daemon's to report.
 
   shuttle status                 # the table
   shuttle status <fiber>         # one fiber`,
@@ -290,7 +290,7 @@ func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) st
 		case block.Host != own:
 			verdict = fmt.Sprintf("→ Armed; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", block.Host, own)
 		default:
-			verdict = fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`bin/shuttle release`).", own)
+			verdict = fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`shuttle daemon release`).", own)
 		}
 		if noProjectDir {
 			verdict += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `%s` sets one.", arm("resume"))

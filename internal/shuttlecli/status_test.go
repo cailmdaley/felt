@@ -333,7 +333,7 @@ func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
 // ---- store resolution ------------------------------------------------------
 
 func TestShuttleStores_Precedence(t *testing.T) {
-	// changeDir wins: an explicit -C / --felt-store scopes to that single store.
+	// changeDir wins: an explicit -C / --store scopes to that single store.
 	dir, _ := newStore(t)
 	prevCD := changeDir
 	t.Cleanup(func() { changeDir = prevCD })
@@ -343,25 +343,25 @@ func TestShuttleStores_Precedence(t *testing.T) {
 		t.Fatalf("with -C, shuttleStores = %v (%v), want [%s]", got, err, dir)
 	}
 
-	// No -C: FELT_STORES wins over the registry file.
+	// No -C: SHUTTLE_STORES wins over the registry file.
 	changeDir = ""
-	t.Setenv("FELT_STORES", "/store/a,/store/b,/store/a")
-	t.Setenv("FELT_STORES_FILE", "/nonexistent/should/be/ignored.json")
+	t.Setenv("SHUTTLE_STORES", "/store/a,/store/b,/store/a")
+	t.Setenv("SHUTTLE_STORES_FILE", "/nonexistent/should/be/ignored.json")
 	got, err = shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
 	}
 	if len(got) != 2 || got[0] != "/store/a" || got[1] != "/store/b" {
-		t.Fatalf("FELT_STORES should win, deduped+ordered: got %v", got)
+		t.Fatalf("SHUTTLE_STORES should win, deduped+ordered: got %v", got)
 	}
 
-	// No FELT_STORES: the registry file is consulted.
-	t.Setenv("FELT_STORES", "")
+	// No SHUTTLE_STORES: the registry file is consulted.
+	t.Setenv("SHUTTLE_STORES", "")
 	regPath := dir + "/felt_stores.json"
 	if err := os.WriteFile(regPath, []byte(`{"version":1,"felt_stores":["/reg/x","/reg/y"]}`), 0o644); err != nil {
 		t.Fatalf("write registry: %v", err)
 	}
-	t.Setenv("FELT_STORES_FILE", regPath)
+	t.Setenv("SHUTTLE_STORES_FILE", regPath)
 	got, err = shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
@@ -373,7 +373,7 @@ func TestShuttleStores_Precedence(t *testing.T) {
 
 // TestShuttleAddressFiber_FromAnywhere locks in the cwd-insensitive resolution
 // the address verbs need: with no -C, they resolve against the configured stores
-// (here FELT_STORES), by leaf and by full id, regardless of cwd — matching
+// (here SHUTTLE_STORES), by leaf and by full id, regardless of cwd — matching
 // the configured-store lookup rather than an implicit project-root lookup.
 func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	dir, storage := newStore(t)
@@ -382,7 +382,7 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	prevCD := changeDir
 	t.Cleanup(func() { changeDir = prevCD })
 	changeDir = "" // no -C: must fall through to the configured stores
-	t.Setenv("FELT_STORES", dir)
+	t.Setenv("SHUTTLE_STORES", dir)
 
 	for _, q := range []string{"task", "proj/deep/task"} {
 		f, err := shuttleAddressFiber(q)

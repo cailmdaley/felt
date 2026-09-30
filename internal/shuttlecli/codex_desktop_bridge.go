@@ -134,7 +134,7 @@ func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
 	relay := exec.Command(self, relayArgs...)
 	relay.Stdin, relay.Stdout, relay.Stderr = o.stdin, o.stdout, o.stderr
 	relay.ExtraFiles = []*os.File{readyW}
-	relay.Env = append(os.Environ(), "FELT_BRIDGE_READY_FD=3", fmt.Sprintf("FELT_BRIDGE_PARENT_PID=%d", os.Getpid()))
+	relay.Env = append(os.Environ(), "SHUTTLE_BRIDGE_READY_FD=3", fmt.Sprintf("SHUTTLE_BRIDGE_PARENT_PID=%d", os.Getpid()))
 	if err := relay.Start(); err != nil {
 		readyR.Close()
 		readyW.Close()
@@ -216,13 +216,13 @@ func runCodexDesktopRelay(ctx context.Context, o bridgeOptions) error {
 	if err := validateBridgeCodex(o.codex); err != nil {
 		return err
 	}
-	readyFD, err := strconv.Atoi(os.Getenv("FELT_BRIDGE_READY_FD"))
+	readyFD, err := strconv.Atoi(os.Getenv("SHUTTLE_BRIDGE_READY_FD"))
 	if err != nil || readyFD != 3 {
 		return errors.New("relay readiness fd must be 3")
 	}
-	parentPID, err := strconv.Atoi(os.Getenv("FELT_BRIDGE_PARENT_PID"))
+	parentPID, err := strconv.Atoi(os.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
 	if err != nil || parentPID <= 1 || os.Getppid() != parentPID || syscall.Getpgrp() != parentPID {
-		return fmt.Errorf("relay parent pid: %q", os.Getenv("FELT_BRIDGE_PARENT_PID"))
+		return fmt.Errorf("relay parent pid: %q", os.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
 	}
 	socket, err := bridgeSocketPath(o.socket)
 	if err != nil {

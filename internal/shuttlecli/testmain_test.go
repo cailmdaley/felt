@@ -22,23 +22,27 @@ var testFenceDir string
 // state: the daemon listener, identity, ledgers, worker context and harness
 // homes. A test that needs one sets it with t.Setenv.
 var fencedEnv = []string{
-	"SHUTTLE_HOST", "SHUTTLE_LISTEN", "SHUTTLE_PORT", "SHUTTLE_DATA_DIR",
-	"SHUTTLE_EVENTS", "SHUTTLE_EVENTS_MAX_BYTES", "SHUTTLE_MESSAGES",
-	"SHUTTLE_SESSIONS_FILE", "SHUTTLE_FIBER_PATH", "SHUTTLE_TMUX_SESSION",
+	"SHUTTLE_HOST", "SHUTTLE_HOST_FILE", "SHUTTLE_HOST_CONFIG_FILE", "SHUTTLE_LISTEN",
+	"SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_RELEASE", "SHUTTLE_DAEMON_URL",
+	"SHUTTLE_EVENTS", "SHUTTLE_EVENTS_FILE", "SHUTTLE_EVENTS_MAX_BYTES", "SHUTTLE_COMMITS_FILE",
+	"SHUTTLE_MESSAGES", "SHUTTLE_SESSIONS_FILE", "SHUTTLE_FIBER_PATH", "SHUTTLE_TMUX_SESSION",
 	"SHUTTLE_CODEX_SOCKET", "SHUTTLE_CONFER_STATE_DIR", "SHUTTLE_LIFECYCLE_OFFLINE",
-	"FELT_STORES", "FELT_TRANSCRIPT_CACHE_DIR",
+	"SHUTTLE_AGENTS_FILE", "SHUTTLE_REMOTES_FILE", "SHUTTLE_STORES", "SHUTTLE_STORES_FILE",
+	"SHUTTLE_PROJECTS", "SHUTTLE_PROJECTS_FILE", "SHUTTLE_TRANSCRIPT_CACHE_DIR",
+	"SHUTTLE_BRIDGE_READY_FD", "SHUTTLE_BRIDGE_PARENT_PID", "SHUTTLE_BRIDGE_SOCKET",
+	"SHUTTLE_BRIDGE_ENV_FILE", "SHUTTLE_BRIDGE_ARGS_FILE", "SHUTTLE_BRIDGE_ERROR_FILE",
 	"TMUX", "CODEX_THREAD_ID", "CODEX_HOME", "CODEX_APP_TOOLS_PIPE_PATH",
 	"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_MESSAGING_SOCKET",
 	"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "PI_SESSION_ID", "AI_AGENT",
 }
 
-// TestMain fences the whole cmd unit-test binary away from the machine it runs
+// TestMain fences the Shuttle CLI unit-test binary away from the machine it runs
 // on. Without it a test inherits the developer's live daemon (127.0.0.1:4000
 // or its socket) and fleet file, so a lifecycle verb on a remote-owned test
 // fiber is forwarded to a real host; and resolveOwnHost's last tier seeds the
 // host file, which would rename the developer's machine.
 //
-// HOME and XDG_CACHE_HOME move to a temp dir, the felt config files and the
+// HOME and XDG paths move to a temp dir, the shuttle config files and the
 // host identity file point inside it, and SHUTTLE_DAEMON_URL names a loopback
 // port nothing listens on. A test that exercises a daemon starts an httptest
 // server and sets SHUTTLE_DAEMON_URL itself.
@@ -47,7 +51,13 @@ func TestMain(m *testing.M) {
 }
 
 func runFenced(m *testing.M) int {
-	dir, err := os.MkdirTemp("", "felt-cmd-test-*")
+	// Re-executed event-hook helpers must append to the parent test's stream,
+	// not to a fresh fence directory of their own.
+	helperEventFile := ""
+	if os.Getenv("SHUTTLE_EVENT_HELPER") == "1" {
+		helperEventFile = os.Getenv("SHUTTLE_EVENTS_FILE")
+	}
+	dir, err := os.MkdirTemp("", "shuttle-cli-test-*")
 	if err != nil {
 		panic(err)
 	}
@@ -68,16 +78,24 @@ func runFenced(m *testing.M) int {
 		}
 	}
 	for key, value := range map[string]string{
-		"HOME":               home,
-		"XDG_CACHE_HOME":     filepath.Join(dir, "cache"),
-		"SHUTTLE_HOST_FILE":  filepath.Join(dir, "host"),
-		"FELT_HOST_FILE":     filepath.Join(dir, "host.json"),
-		"FELT_REMOTES_FILE":  filepath.Join(dir, "remotes.json"),
-		"FELT_STORES_FILE":   filepath.Join(dir, "stores.json"),
-		"FELT_AGENTS_FILE":   filepath.Join(dir, "agents.json"),
-		"SHUTTLE_DAEMON_URL": "http://" + closedLoopbackAddr(),
+		"HOME":                         home,
+		"XDG_CACHE_HOME":               filepath.Join(dir, "cache"),
+		"XDG_CONFIG_HOME":              filepath.Join(dir, "config"),
+		"SHUTTLE_HOST_FILE":            filepath.Join(dir, "host"),
+		"SHUTTLE_HOST_CONFIG_FILE":     filepath.Join(dir, "host.json"),
+		"SHUTTLE_REMOTES_FILE":         filepath.Join(dir, "remotes.json"),
+		"SHUTTLE_STORES_FILE":          filepath.Join(dir, "stores.json"),
+		"SHUTTLE_AGENTS_FILE":          filepath.Join(dir, "agents.json"),
+		"SHUTTLE_PROJECTS_FILE":        filepath.Join(dir, "projects.json"),
+		"SHUTTLE_TRANSCRIPT_CACHE_DIR": filepath.Join(dir, "transcripts"),
+		"SHUTTLE_DAEMON_URL":           "http://" + closedLoopbackAddr(),
 	} {
 		if err := os.Setenv(key, value); err != nil {
+			panic(err)
+		}
+	}
+	if helperEventFile != "" {
+		if err := os.Setenv("SHUTTLE_EVENTS_FILE", helperEventFile); err != nil {
 			panic(err)
 		}
 	}
@@ -129,9 +147,13 @@ func TestTestMainFencesLiveMachineState(t *testing.T) {
 		t.Fatalf("fenced daemon endpoint accepted a connection: %v", err)
 	}
 	for name, resolve := range map[string]func() (string, error){
-		"remotes": feltRemotesPath,
-		"home":    os.UserHomeDir,
-		"host":    hostClassFilePath,
+		"remotes":       shuttleRemotesPath,
+		"stores":        feltStoresRegistryPath,
+		"agents":        func() (string, error) { return shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
+		"projects":      func() (string, error) { return shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
+		"home":          os.UserHomeDir,
+		"host config":   hostClassFilePath,
+		"host identity": func() (string, error) { return hostConfigFilePath(), nil },
 	} {
 		path, err := resolve()
 		if err != nil {

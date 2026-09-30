@@ -54,9 +54,9 @@ func isolateMessageFiberStore(t *testing.T, store string) {
 	previousDir := changeDir
 	changeDir = ""
 	t.Cleanup(func() { changeDir = previousDir })
-	t.Setenv("FELT_STORES", store)
-	t.Setenv("FELT_STORES_FILE", filepath.Join(t.TempDir(), "stores.json"))
-	t.Setenv("FELT_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
+	t.Setenv("SHUTTLE_STORES", store)
+	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(t.TempDir(), "stores.json"))
+	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
 	t.Setenv("HOME", t.TempDir())
 }
 

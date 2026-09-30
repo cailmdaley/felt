@@ -34,7 +34,7 @@ import (
 //
 // Resolution:
 //
-//	file   $FELT_HOST_FILE, else ~/.config/felt/host.json
+//	file   $SHUTTLE_HOST_CONFIG_FILE, else ~/.config/shuttle/host.json
 //	class  host.json "class", else single-user (missing file or key)
 //	listen $SHUTTLE_LISTEN → host.json "listen" → the class default:
 //	       single-user            tcp://127.0.0.1:<$SHUTTLE_PORT or 4000>
@@ -208,9 +208,9 @@ type hostSettings struct {
 	listen listenAddr
 }
 
-// hostClassFilePath is $FELT_HOST_FILE, else ~/.config/felt/host.json.
+// hostClassFilePath is $SHUTTLE_HOST_CONFIG_FILE, else ~/.config/shuttle/host.json.
 func hostClassFilePath() (string, error) {
-	return feltConfigPath("FELT_HOST_FILE", "host.json")
+	return shuttleConfigPath("SHUTTLE_HOST_CONFIG_FILE", "host.json")
 }
 
 // readHostFile returns the file's object with every key preserved (the class
@@ -506,7 +506,7 @@ else ~/.shuttle/host), creating its directory.
 
 An id already in the file is kept. Otherwise $SHUTTLE_HOST, else the
 normalized OS hostname, is written, so the daemon and every later CLI call
-resolve the same name. bin/shuttle install-agent runs this before it starts
+resolve the same name. shuttle daemon install runs this before it starts
 the daemon it supervises.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

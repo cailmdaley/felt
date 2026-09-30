@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// shuttle agents — the registry surface. felt owns the agent registry (the
+// shuttle agents — the registry surface. Shuttle owns the agent registry (the
 // single source of truth); these verbs expose it so the networked daemon keeps
 // zero registry knowledge of its own:
 //
@@ -27,12 +27,12 @@ import (
 //   - `shuttle agents init` → seed the user registry file, so extending the
 //     built-in set is a file to edit rather than a format to look up.
 //   - `shuttle agents effort <agent> <level>|--reset` → set or clear one
-//     agent's default_effort override in that file. felt is the only structured
+//     agent's default_effort override in that file. shuttle is the only structured
 //     writer of the grammar; the daemon's POST /api/v1/agents/effort shells it.
 //
 // The registry is the embedded built-ins with the user registry layered on top
-// ($FELT_AGENTS_FILE, else ~/.config/felt/agents.json). Reads touch no felt
-// store, so no -C / --felt-store context is required.
+// ($SHUTTLE_AGENTS_FILE, else ~/.config/shuttle/agents.json). Reads touch no felt
+// store, so no -C / --store context is required.
 
 var (
 	agentsResolveEffort string
@@ -45,12 +45,12 @@ var (
 
 var shuttleAgentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List the agent registry felt owns (the single source of truth)",
+	Short: "List the agent registry Shuttle owns (the single source of truth)",
 	Long: `Print the effective agent registry — every base agent and alias with its
 axis-constraint metadata (effort_levels, default_effort, chrome_capable).
 
 The registry is the built-in set with the user registry layered on top
-($FELT_AGENTS_FILE, else ~/.config/felt/agents.json). The table marks each
+($SHUTTLE_AGENTS_FILE, else ~/.config/shuttle/agents.json). The table marks each
 record — * default, u user-provided, blank built-in — and closes with a footer
 on stderr naming what loaded from where. --source filters to one layer.
 
@@ -89,7 +89,7 @@ stream.`,
 
 		// --json is a machine surface and stays silent apart from the array. Not
 		// merely "stdout stays clean": the daemon shells this verb through
-		// Shuttle.Felt.run, which always sets stderr_to_stdout (daemon/lib/shuttle/felt.ex),
+		// Shuttle.CLI.run, which always sets stderr_to_stdout (daemon/lib/shuttle/cli.ex),
 		// so a footer on stderr would land inside the bytes it hands to
 		// Jason.decode and empty the browser's agent picker. Provenance and
 		// warnings are for a person reading a terminal — they ride the table.
@@ -162,7 +162,7 @@ var shuttleAgentsInitCmd = &cobra.Command{
 	Short: "Write a user agent registry seeded from the built-ins",
 	Long: `Seed the user agent registry with the built-in records, then edit it.
 
-Writes $FELT_AGENTS_FILE (else ~/.config/felt/agents.json), or --path. Refuses
+Writes $SHUTTLE_AGENTS_FILE (else ~/.config/shuttle/agents.json), or --path. Refuses
 to overwrite an existing file without --force. The seeded file works every
 field across several harnesses — edit it in place.`,
 	Args: cobra.NoArgs,
@@ -266,7 +266,7 @@ func registryFooter(reg *shuttle.AgentRegistry) string {
 	if reg.UserPath() == "" {
 		path, err := shuttle.UserAgentsPath()
 		if err != nil {
-			path = "~/.config/felt/agents.json"
+			path = "~/.config/shuttle/agents.json"
 		}
 		return fmt.Sprintf("registry: %d builtin, no user file at %s → %d agents",
 			reg.BuiltinCount(), path, total)

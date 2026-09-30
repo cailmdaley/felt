@@ -242,7 +242,7 @@ func TestEventWriteGate(t *testing.T) {
 // that can reach around it: renderEventLine resolves this machine's identity
 // (for origin_name) BEFORE eventsSink consults the gate, and that resolution's
 // last tier seeds ~/.shuttle/host. If the seed created its parent, one hook
-// event on a felt-only machine would produce ~/.shuttle — and with it, from the
+// event on a machine without Shuttle state would create ~/.shuttle — and with it, from the
 // next event on, a live stream nobody opted into.
 func TestEventHookSeedsNothingWithoutStateDir(t *testing.T) {
 	home := isolateEvents(t)
@@ -598,7 +598,7 @@ func TestEventConcurrentAppends(t *testing.T) {
 			payload := fmt.Sprintf(`{"hook_event_name":"PreToolUse","session_id":"s%d","tool_name":"Bash","tool_input":{"command":"%s"}}`,
 				i, strings.Repeat("c", 200))
 			cmd := exec.Command(os.Args[0], "-test.run=^TestEventHookHelperProcess$")
-			cmd.Env = append(os.Environ(), "FELT_EVENT_HELPER=1")
+			cmd.Env = append(os.Environ(), "SHUTTLE_EVENT_HELPER=1")
 			cmd.Stdin = strings.NewReader(payload)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				errs <- fmt.Errorf("child %d: %v\n%s", i, err, out)
@@ -625,16 +625,10 @@ func TestEventConcurrentAppends(t *testing.T) {
 }
 
 // TestEventHookHelperProcess is the child half of TestEventConcurrentAppends:
-// a real `felt hook event` invocation, reached by re-execing the test binary
-// so no build step is needed. It is inert unless FELT_EVENT_HELPER is set.
-//
-// "No build step" is a property of this binary's TestMain, not of re-exec, and
-// the integration build tag once broke it: that TestMain compiles the CLI, so
-// each of the 50 children compiled it again. cmd/integration_test.go now
-// returns early when it sees FELT_EVENT_HELPER — if this variable is ever
-// renamed, rename it there too.
+// it re-execs the test binary and calls the hook implementation directly. It
+// is inert unless SHUTTLE_EVENT_HELPER is set.
 func TestEventHookHelperProcess(t *testing.T) {
-	if os.Getenv("FELT_EVENT_HELPER") != "1" {
+	if os.Getenv("SHUTTLE_EVENT_HELPER") != "1" {
 		return
 	}
 	_ = runEventHook(os.Stdin)

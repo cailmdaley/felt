@@ -16,11 +16,11 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// `felt hook event` — the host-local activity stream
+// `shuttle hook event` — the host-local activity stream
 // ----------------------------------------------------------------------------
 //
 // Appends one JSONL line per harness hook event to the stream the shuttle
-// daemon tails (see cmd/shuttle_events.go for the path and the write gate).
+// daemon tails (see shuttle_events.go for the path and the write gate).
 // Two readers consume it, and only these fields:
 //
 //   - daemon/lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`,

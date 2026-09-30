@@ -15,13 +15,13 @@
 # Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
 # file scripts/bootstrap.sh writes at install time, so remote revival over SSH needs
 # no env to find the bootstrapped checkout); else the script's own directory
-# if it looks like <repo>/bin. If none of those resolve to a checkout with
-# bin/shuttle, this exits loudly rather than guessing a path.
+# if it looks like <repo>/bin. Source checkouts contain bin/rel/bin/shuttled;
+# fetched releases contain bin/shuttled. If none resolves, this exits loudly.
 #
-# The loop respawns `./bin/shuttle start --force` with exponential backoff:
+# The loop calls `shuttle daemon start --force` with exponential backoff:
 # a daemon that exits in < 60s doubles the sleep (2s .. 300s cap); one that
-# lived >= 60s resets it to 2s. This is what prevents the crash-storm failure
-# mode (a wedged login node once drove the old fixed-2s loop to ~35k restarts).
+# lived >= 60s resets it to 2s, so repeated crashes back off without slowing
+# recovery after a healthy run.
 #
 # `--force` is load-bearing: bare `start` probes :4000 and halt(1)s if a
 # daemon answers, which would busy-respawn during the documented
@@ -30,17 +30,24 @@
 set -u
 
 # Guarantee the canonical CLI dir is on PATH for the daemon we launch. The
-# daemon shells out to `felt` (contract check at boot, dispatch); on a fresh
-# Debian-family host ~/.local/bin joins PATH only if it existed when the login
-# profile ran, so a first bootstrap's respawn loop — or a bare SSH revival —
-# can otherwise start a daemon that cannot find its own CLI (contract skew,
-# dispatches held).
+# daemon shells out to both `felt` and `shuttle`; on a fresh Debian-family host
+# ~/.local/bin joins PATH only if it existed when the login profile ran, so a
+# first bootstrap's respawn loop — or a bare SSH revival — can otherwise start
+# a daemon that cannot find its CLIs (contract skew, dispatches held).
 case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
   *) PATH="$HOME/.local/bin:$PATH"; export PATH ;;
 esac
 
 SESSION=shuttle-daemon
+
+release_dir() {
+  if [ -x "$1/bin/rel/bin/shuttled" ]; then
+    printf '%s\n' "$1/bin/rel"
+  elif [ -x "$1/bin/shuttled" ]; then
+    printf '%s\n' "$1"
+  fi
+}
 
 resolve_repo() {
   if [ -n "${SHUTTLE_DIR:-}" ]; then
@@ -49,21 +56,21 @@ resolve_repo() {
   fi
   if [ -r "$HOME/.shuttle/repo" ]; then
     state_repo=$(head -n 1 "$HOME/.shuttle/repo")
-    if [ -n "$state_repo" ] && [ -x "$state_repo/bin/shuttle" ]; then
+    if [ -n "$state_repo" ] && [ -n "$(release_dir "$state_repo")" ]; then
       printf '%s\n' "$state_repo"
       return
     fi
   fi
   script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
   candidate=$(dirname -- "$script_dir")
-  if [ -x "$candidate/bin/shuttle" ]; then
+  if [ -n "$(release_dir "$candidate")" ]; then
     printf '%s\n' "$candidate"
   fi
 }
 
 REPO=$(resolve_repo)
-[ -n "$REPO" ] && [ -x "$REPO/bin/shuttle" ] || {
-  echo "shuttle-launch: could not find the felt checkout. Set \$SHUTTLE_DIR to its path (or run this script from <repo>/bin, or write the path to \$HOME/.shuttle/repo)." >&2
+[ -n "$REPO" ] && SHUTTLE_RELEASE=$(release_dir "$REPO") || {
+  echo "shuttle-launch: could not find a daemon release. Set \$SHUTTLE_DIR to its checkout or release path (or write that path to \$HOME/.shuttle/repo)." >&2
   exit 1
 }
 
@@ -73,8 +80,8 @@ if [ "${1:-}" = "--loop" ]; then
   # dispatch history survives tmux scrollback — a Linux host running this
   # respawn loop otherwise logs only to its pane, and a failed force-reopen
   # warning (or any crash reason) is lost the moment the pane rotates. Size-rotate at
-  # 64MB keeping one previous generation, so the log never becomes the 238MB
-  # monster that once outran diagnosis. Override the path with $SHUTTLE_LOG.
+  # 64MB keeping one previous generation, so the log remains bounded. Override
+  # the path with $SHUTTLE_LOG.
   # 64MB is Shuttle.LogRotator's @default_max_bytes: this rotation and the
   # daemon's in-process one bound the same file by different means (here
   # between daemon processes with mv, there hourly inside a running daemon by
@@ -94,16 +101,14 @@ if [ "${1:-}" = "--loop" ]; then
       mv -f "$LOG" "$LOG.1" 2>/dev/null || true
     fi
     # A foreign daemon can already be answering at this host's listen address —
-    # a manual `bin/shuttle start`, or a tmux session that outlived this loop's
-    # own. `bin/shuttle status` probes the same address the daemon binds (a
-    # unix socket on a shared host, loopback TCP otherwise) and treats a
-    # bound-but-booting version response as alive. `--force` skips
-    # the health probe bare `start` does (bin/shuttle:605-618), so without this
-    # check the loop would crash-dump into :eaddrinuse every iteration. A
-    # booting listener is re-probed after five seconds (so its death is noticed
-    # promptly); a ready daemon gets the slower healthy cadence. An absent or
-    # unanswering listener falls through to the normal forced start.
-    if status=$(./bin/shuttle status 2>/dev/null); then
+    # a manually started release, or a tmux session that outlived this loop's
+    # own. `shuttle daemon status` probes the daemon's listen address (a unix
+    # socket on a shared host, loopback TCP otherwise) and treats a
+    # bound-but-booting version response as alive. `--force` skips the start
+    # health check, so without this probe the loop would crash into :eaddrinuse
+    # every iteration. A booting listener is re-probed after five seconds; a
+    # ready daemon gets the slower healthy cadence. An absent listener starts.
+    if status=$(SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon status 2>/dev/null); then
       if printf '%s\n' "$status" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*false([,}])'; then
         echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon is bound but still booting; checking again in 5s" | tee -a "$LOG" >&2
         sleep 5
@@ -115,7 +120,7 @@ if [ "${1:-}" = "--loop" ]; then
     fi
     started=$(date +%s)
     echo "=== shuttle start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
-    ./bin/shuttle start --force >> "$LOG" 2>&1
+    SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon start --force >> "$LOG" 2>&1
     status=$?
     lived=$(( $(date +%s) - started ))
     [ "$lived" -ge 60 ] && backoff=2
@@ -141,22 +146,20 @@ case "$REPO$SELF" in
     ;;
 esac
 
-# Legacy socket sweep: an old respawn loop could have been started against
-# the alt tmux socket ($HOME/.shuttle/tmux.sock) before this script existed.
-# Kill it here too so a stale session on that socket never fights the
-# default-socket session this script owns for :4000. Sequential, not
-# ||-chained, so a miss on one socket doesn't short-circuit the other.
+# Clear this session from both tmux sockets before creating it on the default
+# socket. A competing shuttle-daemon session could otherwise bind :4000 first.
+# The commands are sequential so a miss on one socket doesn't short-circuit the other.
 #
 # Killing the session SIGHUPs the daemon, which dies without running its
 # shutdown (no init:stop), so mark the stop as asked-for first: the stop marker
 # tells the next boot to hold its quarantine (Shuttle.DaemonHeartbeat). It
-# lives in the data directory `felt shuttle host --json` reports as data_dir
+# lives in the data directory `shuttle host --json` reports as data_dir
 # ($SHUTTLE_DATA_DIR trimmed, a leading ~ expanded, as the daemon resolves it);
-# without a felt that reports it, the plain expansion. A missing data dir means
-# no daemon has run here, and the touch just fails.
+# without a shuttle CLI that reports it, the plain expansion. A missing data
+# dir means no daemon has run here, and the touch just fails.
 data_dir=""
-if command -v felt >/dev/null 2>&1; then
-  data_dir=$(felt shuttle host --json 2>/dev/null | sed -n 's/.*"data_dir": *"\([^"]*\)".*/\1/p' | head -n 1)
+if command -v shuttle >/dev/null 2>&1; then
+  data_dir=$(SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle host --json 2>/dev/null | sed -n 's/.*"data_dir": *"\([^"]*\)".*/\1/p' | head -n 1)
 fi
 touch "${data_dir:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null
 tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t "$SESSION" 2>/dev/null

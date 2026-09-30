@@ -15,20 +15,20 @@ import (
 // operate on one store resolved from -C/cwd; the shuttle read surface needs more:
 // it must see every fiber the daemon would dispatch, from anywhere (e.g. `make
 // status` runs from the felt checkout, not a felt repo). So it mirrors
-// Shuttle.FeltStores' precedence — FELT_STORES env → ~/.config/felt/stores.json
+// Shuttle.FeltStores' precedence — SHUTTLE_STORES env → ~/.config/shuttle/stores.json
 // registry — ported here as the same surface the Elixir poller reads. This is
 // operational config (which stores exist on this machine), not the felt data
 // model; it stays isolated in the shuttle cmd layer.
 //
-// The registry is the source of truth: when FELT_STORES is unset, configuredFeltStores
+// The registry is the source of truth: when SHUTTLE_STORES is unset, configuredFeltStores
 // resolves to whatever the registry lists (empty when none registered). A registered
 // aggregate store whose .felt/ symlinks fan out into project substores is covered by
 // one in-process walk.
 
 // shuttleStores returns the felt stores the aggregate read verbs walk. With -C /
-// --felt-store set (changeDir, mapped by the group's PersistentPreRun), it is that
+// --store set (changeDir, mapped by the group's PersistentPreRun), it is that
 // single store — the explicit scope wins, exactly as the daemon's
-// `--felt-store <store>` invocations expect. Otherwise it is the configured store
+// `-C <store>` invocations expect. Otherwise it is the configured store
 // surface (configuredFeltStores).
 func shuttleStores() ([]string, error) {
 	if changeDir != "" {
@@ -42,11 +42,11 @@ func shuttleStores() ([]string, error) {
 }
 
 // configuredFeltStores returns every felt store the dispatcher considers, mirroring
-// Shuttle.FeltStores in the Elixir daemon so the felt CLI sees the same surface the
+// Shuttle.FeltStores in the Elixir daemon so the shuttle CLI sees the same surface the
 // poller does:
 //
-//  1. FELT_STORES env var (comma-separated; non-empty wins)
-//  2. the persisted registry ~/.config/felt/stores.json (or $FELT_STORES_FILE)
+//  1. SHUTTLE_STORES env var (comma-separated; non-empty wins)
+//  2. the persisted registry ~/.config/shuttle/stores.json (or $SHUTTLE_STORES_FILE)
 //
 // The registry is the source of truth; an empty env and an empty/absent registry
 // resolve to no stores (callers handle the empty case).
@@ -57,18 +57,18 @@ func configuredFeltStores() ([]string, error) {
 	return registeredFeltStores()
 }
 
-// feltStoresEnv parses FELT_STORES into a normalized store list, matching the
+// feltStoresEnv parses SHUTTLE_STORES into a normalized store list, matching the
 // Elixir reader's split-and-trim.
 func feltStoresEnv() []string {
-	raw := os.Getenv("FELT_STORES")
+	raw := os.Getenv("SHUTTLE_STORES")
 	if raw == "" {
 		return nil
 	}
 	return normalizeFeltStores(strings.Split(raw, ","))
 }
 
-// registeredFeltStores reads the persisted registry (~/.config/felt/stores.json,
-// or $FELT_STORES_FILE) and returns its normalized store list. A missing file or
+// registeredFeltStores reads the persisted registry (~/.config/shuttle/stores.json,
+// or $SHUTTLE_STORES_FILE) and returns its normalized store list. A missing file or
 // empty list returns an empty slice with no error.
 func registeredFeltStores() ([]string, error) {
 	path, err := feltStoresRegistryPath()
@@ -100,14 +100,14 @@ func registeredFeltStores() ([]string, error) {
 }
 
 // feltStoresRegistryPath is the canonical registry location for WRITES:
-// $FELT_STORES_FILE, else ~/.config/felt/stores.json.
+// $SHUTTLE_STORES_FILE, else ~/.config/shuttle/stores.json.
 func feltStoresRegistryPath() (string, error) {
-	return feltConfigPath("FELT_STORES_FILE", "stores.json")
+	return shuttleConfigPath("SHUTTLE_STORES_FILE", "stores.json")
 }
 
-// feltConfigPath resolves a ~/.config/felt/<leaf> file, letting envVar override
+// shuttleConfigPath resolves a ~/.config/shuttle/<leaf> file, letting envVar override
 // it outright.
-func feltConfigPath(envVar, leaf string) (string, error) {
+func shuttleConfigPath(envVar, leaf string) (string, error) {
 	if env := os.Getenv(envVar); env != "" {
 		return expandUserPath(env)
 	}
@@ -115,7 +115,7 @@ func feltConfigPath(envVar, leaf string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "felt", leaf), nil
+	return filepath.Join(home, ".config", "shuttle", leaf), nil
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while

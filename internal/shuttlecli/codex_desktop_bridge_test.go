@@ -67,10 +67,10 @@ func newBridgeHarness(t *testing.T, extraEnv ...string) *bridgeHarness {
 	h.input, h.output = inW, outR
 	h.cmd = exec.Command(cli, "codex-desktop-bridge", "--codex", native, "--socket", h.socket, "--", "-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "-c", "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true")
 	h.cmd.Stdin, h.cmd.Stdout, h.cmd.Stderr = inR, outW, &h.stderr
-	h.cmd.Env = append(os.Environ(), "FELT_BRIDGE_SOCKET="+h.socket, "FELT_BRIDGE_ENV_FILE="+h.envFile, "CODEX_CLI_PATH=/wrapper/not/native", "CODEX_APP_TOOLS_PIPE_PATH=/private/app-tools.pipe")
+	h.cmd.Env = append(os.Environ(), "SHUTTLE_BRIDGE_SOCKET="+h.socket, "SHUTTLE_BRIDGE_ENV_FILE="+h.envFile, "CODEX_CLI_PATH=/wrapper/not/native", "CODEX_APP_TOOLS_PIPE_PATH=/private/app-tools.pipe")
 	h.cmd.Env = append(h.cmd.Env, extraEnv...)
 	for _, setting := range extraEnv {
-		if setting == "FELT_BRIDGE_TEST_ALREADY_ISOLATED=1" {
+		if setting == "SHUTTLE_BRIDGE_TEST_ALREADY_ISOLATED=1" {
 			h.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		}
 	}
@@ -153,14 +153,14 @@ func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := h.native(t)
-	if env["FELT_BRIDGE_HELPER_PID"] != strconv.Itoa(h.cmd.Process.Pid) || env["FELT_BRIDGE_NATIVE_PPID"] != strconv.Itoa(os.Getpid()) {
+	if env["SHUTTLE_BRIDGE_HELPER_PID"] != strconv.Itoa(h.cmd.Process.Pid) || env["SHUTTLE_BRIDGE_NATIVE_PPID"] != strconv.Itoa(os.Getpid()) {
 		t.Fatalf("native ancestry=%v", env)
 	}
 	if env["CODEX_CLI_PATH"] == "/wrapper/not/native" || env["CODEX_APP_TOOLS_PIPE_PATH"] != "/private/app-tools.pipe" {
 		t.Fatalf("environment=%v", env)
 	}
-	if env["FELT_BRIDGE_LISTEN"] != "unix://"+h.socket {
-		t.Fatalf("listen=%q", env["FELT_BRIDGE_LISTEN"])
+	if env["SHUTTLE_BRIDGE_LISTEN"] != "unix://"+h.socket {
+		t.Fatalf("listen=%q", env["SHUTTLE_BRIDGE_LISTEN"])
 	}
 	h.input.Close()
 	h.wait(t)
@@ -179,7 +179,7 @@ func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
-	h := newBridgeHarness(t, "FELT_BRIDGE_TEST_ALREADY_ISOLATED=1")
+	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_TEST_ALREADY_ISOLATED=1")
 	h.native(t)
 	h.input.Close()
 	h.wait(t)
@@ -212,7 +212,7 @@ func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
 
 func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
 	marker := filepath.Join(bridgeTempDir(t), "descendant.json")
-	h := newBridgeHarness(t, "FELT_BRIDGE_DESCENDANT_FILE="+marker)
+	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_DESCENDANT_FILE="+marker)
 	h.native(t)
 	var child map[string]int
 	bridgeEventually(t, "descendant ready", func() bool { data, e := os.ReadFile(marker); return e == nil && json.Unmarshal(data, &child) == nil })
@@ -247,7 +247,7 @@ func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
-	h := newBridgeHarness(t, "FELT_BRIDGE_NO_SOCKET=1")
+	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_NO_SOCKET=1")
 	h.native(t)
 	if err := h.wait(t); err == nil {
 		t.Fatal("expected startup timeout")
@@ -261,7 +261,7 @@ func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
 func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
 	for _, mode := range []string{"stdin-eof", "parent-exit"} {
 		t.Run(mode, func(t *testing.T) {
-			h := newBridgeHarness(t, "FELT_BRIDGE_LARGE_REPLY=1")
+			h := newBridgeHarness(t, "SHUTTLE_BRIDGE_LARGE_REPLY=1")
 			h.native(t)
 			if _, err := h.input.Write([]byte("{\"id\":1}\n")); err != nil {
 				t.Fatal(err)
@@ -342,7 +342,7 @@ func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
 	native := buildBridgeBinary(t, true)
 	marker := filepath.Join(t.TempDir(), "native.json")
 	command := exec.Command(buildBridgeBinary(t, false), "codex-desktop-bridge", "--codex", native, "--", "--version")
-	command.Env = append(os.Environ(), "FELT_BRIDGE_PASSTHROUGH=1", "FELT_BRIDGE_ENV_FILE="+marker)
+	command.Env = append(os.Environ(), "SHUTTLE_BRIDGE_PASSTHROUGH=1", "SHUTTLE_BRIDGE_ENV_FILE="+marker)
 	err := command.Run()
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 23 {
@@ -356,7 +356,7 @@ func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
 	if e := json.Unmarshal(data, &env); e != nil {
 		t.Fatal(e)
 	}
-	if env["FELT_BRIDGE_HELPER_PID"] != strconv.Itoa(command.Process.Pid) || env["CODEX_CLI_PATH"] != native {
+	if env["SHUTTLE_BRIDGE_HELPER_PID"] != strconv.Itoa(command.Process.Pid) || env["CODEX_CLI_PATH"] != native {
 		t.Fatalf("native identity=%v", env)
 	}
 }
