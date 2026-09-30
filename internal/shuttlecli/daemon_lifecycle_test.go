@@ -259,6 +259,23 @@ func TestDaemonStartForceExecutesReleaseLauncher(t *testing.T) {
 	}
 }
 
+func TestDaemonStartGuardRefusesWhenTCPOwnerCheckFails(t *testing.T) {
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	t.Setenv("SHUTTLE_RELEASE", release.Dir)
+	t.Setenv("SHUTTLE_LISTEN", "tcp://127.0.0.1:4000")
+	previousOwnerCheck, previousExec := daemonLifecycleOwnerCheck, execDaemonRelease
+	t.Cleanup(func() {
+		daemonLifecycleOwnerCheck, execDaemonRelease = previousOwnerCheck, previousExec
+	})
+	daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
+	launched := false
+	execDaemonRelease = func(string, ...string) error { launched = true; return nil }
+	_, stderr, err := executeCLI(t, t.TempDir(), "daemon", "start")
+	if err == nil || launched || !strings.Contains(err.Error(), "foreign listener") || strings.Contains(stderr, "Daemon already running") {
+		t.Fatalf("start result err=%v launched=%t stderr=%q", err, launched, stderr)
+	}
+}
+
 func TestDaemonStartGuardRefusesAnAnsweringListener(t *testing.T) {
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	t.Setenv("SHUTTLE_RELEASE", release.Dir)

@@ -39,6 +39,9 @@ var shuttleDaemonStartCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+			if err := daemonLifecycleOwnerCheck(settings); err != nil {
+				return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
+			}
 			if _, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
 				fmt.Fprintf(os.Stderr, "Daemon already running at %s.\n", settings.Listen)
 				fmt.Fprintln(os.Stderr, "If a keep-alive supervisor owns it, cycle it there:")
