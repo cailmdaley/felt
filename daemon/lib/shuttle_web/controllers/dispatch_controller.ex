@@ -18,11 +18,11 @@ defmodule ShuttleWeb.DispatchController do
   intact.
 
   A forced start never runs a worker in the felt store. `project_dir` is a
-  directory the human confirmed: the owning daemon writes it to the block with
-  `shuttle set-agent --project-dir`, which expands and validates it there, and
-  the worker starts in the directory the CLI saved. Nothing supplies a
-  directory on the human's behalf: a forced start of a block without one
-  answers 422 `arm_refused` with `needs: "project_dir"`.
+  directory the human confirmed: the owning daemon resolves it on its host
+  (`shuttle resolve-dir`), then saves it and arms the fiber in one write
+  (`shuttle reopen --project-dir`), and the worker starts in the directory the
+  CLI saved. Nothing supplies a directory on the human's behalf: a forced start
+  of a block without one answers 422 `arm_refused` with `needs: "project_dir"`.
   """
 
   use Phoenix.Controller, formats: [:json]

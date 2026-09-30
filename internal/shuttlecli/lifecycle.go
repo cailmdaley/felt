@@ -491,6 +491,10 @@ Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A block without one is refused; --project-dir sets it (an existing
 directory on the owning host for remote fibers) in the same step.
 
+A standing role reopened to active concludes the run it stood on
+(shuttle.runtime.handed_off_at = now) in the same write, as resume does, so it
+next runs at its schedule's next tick.
+
 With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 	Args: cobra.ExactArgs(1),
@@ -559,7 +563,14 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			}
 		}
 		statusBefore := f.Status
-		if err := unclose(f, status); err != nil {
+		// A standing role armed again concludes the run it stood on, in the
+		// same write, as resume does: without the handed_off_at stamp the
+		// poller would re-fire the occurrence that already ran.
+		arm := unclose
+		if block.Kind == "standing" && status == felt.StatusActive {
+			arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
+		}
+		if err := arm(f, status); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {

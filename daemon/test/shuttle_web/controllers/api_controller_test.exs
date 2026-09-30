@@ -356,30 +356,31 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   @tag :tmp_dir
-  test "a confirmed project_dir is saved as the CLI resolved it, and the worker starts there",
+  test "a confirmed project_dir is resolved, then saved with the arm in one write, and the worker starts there",
        %{tmp_dir: tmp_dir} do
     fiber_id = "tests/api-start-confirmed-dir"
     closed_bare_oneshot(fiber_id)
-    File.mkdir_p!(Path.join(tmp_dir, "checkout"))
+    checkout = Path.join(tmp_dir, "checkout")
+    File.mkdir_p!(checkout)
     System.put_env("SHUTTLE_TEST_PROJECT", "checkout")
     on_exit(fn -> System.delete_env("SHUTTLE_TEST_PROJECT") end)
     raw = Path.join(tmp_dir, "$SHUTTLE_TEST_PROJECT")
 
     assert {200, %{"dispatched" => true}} = post_start(fiber_id, %{"project_dir" => raw})
 
-    # The raw input goes to the CLI, which expands it; the reopen then arms a
-    # block that already carries the resolved directory.
-    assert [{"shuttle", set_args}] = shuttle_calls("set-agent")
-
-    assert Enum.drop_while(set_args, &(&1 != "set-agent")) ==
-             ["set-agent", fiber_id, "--project-dir", raw, "--local"]
-
+    # The CLI resolves the raw input; the one arming write carries the path it
+    # resolved, and the worker's cwd is read back from the block.
+    assert [{"shuttle", ["resolve-dir", ^raw]}] = shuttle_calls("resolve-dir")
     assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
-    refute "--project-dir" in reopen_args
-    assert spawn_dir() == Path.join(tmp_dir, "checkout")
+
+    assert Enum.drop_while(reopen_args, &(&1 != "reopen")) ==
+             ["reopen", fiber_id, "--project-dir", checkout, "--local"]
+
+    assert shuttle_calls("set-agent") == []
+    assert spawn_dir() == checkout
   end
 
-  test "a confirmed project_dir the CLI rejects is asked for again in its words" do
+  test "a confirmed project_dir the host cannot use is asked for again, before any write" do
     fiber_id = "tests/api-start-bad-dir"
     closed_bare_oneshot(fiber_id)
 
@@ -389,6 +390,73 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["message"] =~ "no such file or directory"
     assert shuttle_calls("reopen") == []
     refute spawned?()
+  end
+
+  @tag :tmp_dir
+  test "an arm the CLI refuses for another reason shows its words and asks for nothing",
+       %{tmp_dir: tmp_dir} do
+    fiber_id = "tests/api-start-retired-agent"
+    closed_bare_oneshot(fiber_id)
+    reason = "cannot arm: unknown agent claude-retired (shuttle set-agent to pick a current one)"
+    MockRunner.set_reopen_result(reason <> "\n", 1)
+
+    assert {422, body} = post_start(fiber_id, %{"project_dir" => tmp_dir})
+    assert body["reason"] == "arm_refused"
+    assert body["message"] == reason
+    refute Map.has_key?(body, "needs")
+    refute spawned?()
+  end
+
+  test "a refused fresh start leaves a live session running and unmarked" do
+    fiber_id = "tests/api-start-live-bad-dir"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+    assert {:ok, session} = Poller.dispatch_fiber(fiber_id, [])
+    before = length(MockRunner.commands())
+
+    assert {422, %{"reason" => "arm_refused", "needs" => "project_dir"}} =
+             post_start(fiber_id, %{"project_dir" => "/nonexistent/checkout"})
+
+    after_refusal = Enum.drop(MockRunner.commands(), before)
+
+    refute Enum.any?(after_refusal, fn
+             {"tmux", ["kill-session" | _]} -> true
+             {"shuttle", args} -> "mark-runtime" in args or "reopen" in args
+             _ -> false
+           end),
+           "a refused start must not cut, mark or arm; got #{inspect(after_refusal)}"
+
+    conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => fiber_id}))
+    assert conn.status == 409
+    assert Jason.decode!(conn.resp_body)["tmux_session"] == session
+  end
+
+  @tag :tmp_dir
+  test "a standing role with a confirmed project_dir is armed by the one reopen write",
+       %{tmp_dir: tmp_dir} do
+    fiber_id = "tests/api-standing-confirmed-dir"
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z"})
+    )
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      kind: standing
+      project_dir: ""
+      schedule:
+        expr: "0 9 * * 1-5"
+        tz: Europe/Paris
+      """,
+      "closed"
+    )
+
+    assert {200, %{"dispatched" => true}} = post_start(fiber_id, %{"project_dir" => tmp_dir})
+    assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
+    assert "--project-dir" in reopen_args
+    assert spawn_dir() == tmp_dir
   end
 
   test "a blank project_dir confirms nothing" do

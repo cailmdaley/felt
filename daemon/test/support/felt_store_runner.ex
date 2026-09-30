@@ -417,22 +417,35 @@ defmodule Shuttle.Test.FeltStoreRunner do
         apply_lifecycle_write(verb, id)
         {"#{verb} #{id}\n", 0}
 
+      # `shuttle resolve-dir <raw>`: like the CLI, expand `$VARS` and `~` and
+      # print the path when it is a directory here; refuse otherwise.
+      command == "shuttle" and match?(["resolve-dir", _], args) ->
+        resolved = args |> List.last() |> expand_env() |> Path.expand()
+
+        if File.dir?(resolved),
+          do: {resolved <> "\n", 0},
+          else: {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
+
+      # `shuttle reopen <id> [--project-dir <dir>] --local`: answers the result a
+      # test set, else succeeds, saving a given directory to the block.
       command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
-        Agent.get(__MODULE__, &Map.get(&1, :reopen_result, {"", 0}))
+        case Agent.get(__MODULE__, &Map.get(&1, :reopen_result)) do
+          nil ->
+            ["reopen", id | flags] = drop_cli_store(args)
 
-      # `shuttle set-agent <id> --project-dir <raw> --local`: like the CLI,
-      # expand `$VARS` and `~`, refuse a path that is not a directory here, and
-      # save the resolved path to the block.
-      command == "shuttle" and
-          match?(["set-agent", _id, "--project-dir", _raw | _], drop_cli_store(args)) ->
-        ["set-agent", id, "--project-dir", raw | _] = drop_cli_store(args)
-        resolved = raw |> expand_env() |> Path.expand()
+            case Enum.drop_while(flags, &(&1 != "--project-dir")) do
+              ["--project-dir", dir | _] ->
+                put_shuttle_fields(id, %{"project_dir" => dir})
+                apply_lifecycle_write("reopen", id)
 
-        if File.dir?(resolved) do
-          put_shuttle_fields(id, %{"project_dir" => resolved})
-          {"set agent for #{id} → (default)\n", 0}
-        else
-          {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
+              _ ->
+                :ok
+            end
+
+            {"", 0}
+
+          result ->
+            result
         end
 
       command == "shuttle" and args == ["host", "--json"] ->

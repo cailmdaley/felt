@@ -290,18 +290,20 @@ continues. Start errors are the same as meeting capture's.
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
 user_message?, project_dir?}` (plus `origin` to forward). A forced start
-(`force` or `ad_hoc`) never runs a worker in the felt store: before anything
-is written, the owning daemon needs a `project_dir` that exists on its host.
-It then re-arms a closed or parked role, or reopens a closed fiber with
-`shuttle reopen`, and spawns. A start that cannot arm its fiber answers
-**422** `{dispatched: false, reason: "arm_refused", fiber_id, host, message,
-needs?}`: `message` is the refusal (the Shuttle CLI's own words when the CLI
-refused), `host` is the owning daemon, where any command the message names has
-to run, and `needs: "project_dir"` says the block has no directory, or one
-that is not a directory there. Resend with `project_dir`, a directory a human
-confirmed: the daemon saves it with `shuttle set-agent --project-dir`, which
-expands and validates it on the owning host, and the worker starts in the
-directory the CLI saved.
+(`force` or `ad_hoc`) never runs a worker in the felt store. Every check runs
+before a session is cut or a document written: the owning daemon needs a
+`project_dir` that is a directory on its host. It then arms the fiber in one
+write — re-arming a closed or parked role, or reopening a closed fiber with
+`shuttle reopen` — cuts any open session for a fresh start, and spawns. A start
+that cannot arm its fiber answers **422** `{dispatched: false, reason:
+"arm_refused", fiber_id, host, message, needs?}`: `message` is the refusal (the
+Shuttle CLI's own words when the CLI refused), `host` is the owning daemon,
+where any command the message names has to run, and `needs: "project_dir"`
+says the directory is the problem: the block has none, or the one declared or
+confirmed is not a directory there. Resend with `project_dir`, a directory a
+human confirmed: the daemon resolves it with `shuttle resolve-dir`, then saves
+it and arms the fiber in the same write (`shuttle reopen --project-dir`), and
+the worker starts in the directory the CLI saved.
 
 `POST /deliver` accepts `{fiber_id, text, from?}` (plus `origin` to forward). A
 fiber with a live worker receives `text` through session messaging at

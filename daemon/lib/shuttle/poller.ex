@@ -1135,54 +1135,10 @@ defmodule Shuttle.Poller do
     state = reconcile_running_fiber(state, fiber_id)
     uid = resolved_uid(state, fiber_id, runtime_key)
 
-    # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
-    # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
-    # drag-launch) stamps the clean-exit marker, kills the live tmux, and drops
-    # the runtime entry, then FALLS THROUGH to the fresh dispatch below instead
-    # of bouncing off `:already_running`. See cut_open_session_for_fresh/5.
-    state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
-
-    current = running_worker(state, fiber_id)
-
-    cond do
-      current != nil and Shuttle.AppWorkers.app?(current.session) and
-          Keyword.get(opts, :resume_mode) == "previous" ->
-        with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
-             :ok <-
-               ensure_app_claim_marker(
-                 state,
-                 fiber_id,
-                 fiber,
-                 Shuttle.AppWorkers.id(current.session)
-               ),
-             {:ok, _} <-
-               start_app_turn(
-                 current.session,
-                 Keyword.get(opts, :user_message) || "Continue the work on fiber #{fiber_id}."
-               ) do
-          key = running_key(state, fiber_id)
-          meta = Map.merge(current, %{state: "running", launch_error: nil})
-          {:reply, {:ok, current.session}, %{state | running: Map.put(state.running, key, meta)}}
-        else
-          error -> {:reply, error, state}
-        end
-
-      open_session?(state, fiber_id, runtime_key, uid) ->
-        {:reply, {:error, :already_running}, state}
-
-      true ->
-        case fetch_fiber_full(fiber_id, state) do
-          {:ok, fiber} ->
-            if dispatch_eligible?(fiber, state, opts) do
-              {new_state, result} = do_dispatch_fiber(state, fiber, opts)
-              {:reply, result, new_state}
-            else
-              {:reply, {:error, dispatch_ineligible_reason(fiber, state, opts)}, state}
-            end
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+    # Every check, and the fiber's arm, before any session is cut.
+    case prepare_forced_start(state, fiber_id, runtime_key, uid, opts) do
+      {:ok, state} -> dispatch_prepared(state, fiber_id, runtime_key, uid, opts)
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -2271,11 +2227,12 @@ defmodule Shuttle.Poller do
 
   defp declared_project_dir(_), do: nil
 
-  # ── The one project_dir touch ──
+  # ── The project_dir touch ──
   #
-  # THE only place the poller touches `shuttle.project_dir` on disk, and it
-  # runs for a fiber that has passed every pure gate and is about to have a
-  # worker spawned into that directory. Everything upstream — eligibility,
+  # The place the poller touches `shuttle.project_dir` on disk (with its twin
+  # for a human's start, `check_start_directory/3`), and it runs for a fiber
+  # that has passed every pure gate and is about to have a worker spawned into
+  # that directory. Everything upstream — eligibility,
   # parking, the snapshot — reads frontmatter and runtime maps alone, so a
   # fiber the poller merely LOOKS at each tick is never stat'd, however long it
   # sits there.
@@ -2289,7 +2246,7 @@ defmodule Shuttle.Poller do
   # Returns `{:ok, work_dir}` — the declared `project_dir` when it exists here,
   # else `nil`, meaning an autonomous worker starts in the fiber's owning felt
   # store (a forced start has already refused a block without one, see
-  # `arm_forced_directory/3`). A declared `project_dir` must exist on THIS host:
+  # `prepare_forced_start/5`). A declared `project_dir` must exist on THIS host:
   # present-but-missing means the checkout lives on another machine, and the
   # dispatch refuses with `:project_dir_missing` rather than downgrading the
   # worker's cwd to a felt store.
@@ -2500,156 +2457,241 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Re-arm a perennial role (standing or pinned) on the forced path. Returns the
-  # fiber map with `status` reflected as "active" so the running-state snapshot
-  # built later in this dispatch is coherent without an extra felt re-read. This
-  # is what makes the board's strip → In-flight "start" gesture both spawn now
-  # AND leave a pinned role looping (open → active). A failed re-arm (oneshot,
-  # unreadable) is logged and the fiber passes through unchanged — force-dispatch
-  # of a oneshot still spawns it for a single run.
-  defp maybe_force_rearm(fiber, opts, %State{} = state) do
-    if Keyword.get(opts, :force, false) and Map.get(fiber, "status") != "active" do
-      fiber_id = Map.get(fiber, "id", "")
+  # The dispatch once a forced start is prepared: a fresh start cuts any open
+  # session, then the worker launches (or a live app turn resumes).
+  defp dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
+    # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
+    # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
+    # drag-launch) stamps the clean-exit marker, kills the live tmux, and drops
+    # the runtime entry, then FALLS THROUGH to the fresh dispatch below instead
+    # of bouncing off `:already_running`. See cut_open_session_for_fresh/5.
+    state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
 
-      case LifecycleStore.rearm(fiber_id, runner: state.runner, felt_stores: state.felt_stores) do
-        {:ok, msg} ->
-          Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
+    current = running_worker(state, fiber_id)
 
-          fiber
-          |> Map.put("status", "active")
-          |> Map.delete("tempered")
-          |> Map.delete("closed-at")
+    cond do
+      current != nil and Shuttle.AppWorkers.app?(current.session) and
+          Keyword.get(opts, :resume_mode) == "previous" ->
+        with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+             :ok <-
+               ensure_app_claim_marker(
+                 state,
+                 fiber_id,
+                 fiber,
+                 Shuttle.AppWorkers.id(current.session)
+               ),
+             {:ok, _} <-
+               start_app_turn(
+                 current.session,
+                 Keyword.get(opts, :user_message) || "Continue the work on fiber #{fiber_id}."
+               ) do
+          key = running_key(state, fiber_id)
+          meta = Map.merge(current, %{state: "running", launch_error: nil})
+          {:reply, {:ok, current.session}, %{state | running: Map.put(state.running, key, meta)}}
+        else
+          error -> {:reply, error, state}
+        end
 
-        {:error, _reason} ->
-          # Oneshots aren't re-armable; that's expected — force-dispatch still
-          # spawns them for a single run.
-          fiber
-      end
-    else
-      fiber
+      open_session?(state, fiber_id, runtime_key, uid) ->
+        {:reply, {:error, :already_running}, state}
+
+      true ->
+        case fetch_fiber_full(fiber_id, state) do
+          {:ok, fiber} ->
+            if dispatch_eligible?(fiber, state, opts) do
+              {new_state, result} = do_dispatch_fiber(state, fiber, opts)
+              {:reply, result, new_state}
+            else
+              {:reply, {:error, dispatch_ineligible_reason(fiber, state, opts)}, state}
+            end
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
     end
   end
 
-  defp do_dispatch_fiber(%State{} = state, fiber, opts \\ []) do
-    if Keyword.get(opts, :force, false) do
-      case arm_forced_directory(state, fiber, opts) do
+  # ── A forced start: checked, then armed, before anything else happens ──
+  #
+  # A human's start that will launch a worker (a fresh one, or any start with
+  # no live session to resume) runs every check before any session is cut or
+  # any document is written, then arms the fiber in a single write:
+  #
+  #   1. eligibility (host ownership);
+  #   2. the directory, which a worker never goes without — a forced start never
+  #      runs in the felt store:
+  #        * a directory the human confirmed is resolved by
+  #          `shuttle resolve-dir`, which expands `$VARS` and `~` as
+  #          `--project-dir` does and writes nothing;
+  #        * otherwise the block's `project_dir` must be declared and be a
+  #          directory on this host;
+  #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir`,
+  #      which saves it and arms the fiber in one write (a standing role's
+  #      reopen also concludes its run). Without one, a closed or parked
+  #      perennial role is re-armed (`LifecycleStore.rearm`) and a closed
+  #      oneshot reopened (`shuttle reopen`).
+  #
+  # A refusal is `{:arm_refused, %{message, needs}}`. `needs: "project_dir"` is
+  # set only from the directory checks in step 2, which the daemon made itself;
+  # a refused arm write carries the CLI's own words and asks for nothing.
+  #
+  # The fiber the dispatch then reads is fetched afresh, so the worker's cwd is
+  # the `project_dir` the CLI saved.
+  defp prepare_forced_start(%State{} = state, fiber_id, runtime_key, uid, opts) do
+    launches? =
+      Keyword.get(opts, :force, false) and
+        (Keyword.get(opts, :resume_mode) == "fresh" or
+           not open_session?(state, fiber_id, runtime_key, uid))
+
+    if launches? do
+      case fetch_fiber_full(fiber_id, state) do
         {:ok, fiber} ->
-          dispatch_armed_fiber(state, fiber, opts)
+          result =
+            with :ok <- forced_eligibility(fiber, state, opts),
+                 {:ok, directory} <- check_start_directory(state, fiber, opts) do
+              arm_start(state, fiber, directory)
+            end
+
+          case result do
+            :ok ->
+              {:ok, state}
+
+            {:error, {:arm_refused, _} = reason} ->
+              {:error, reason, record_dispatch_failure(state, fiber, reason)}
+
+            {:error, reason} ->
+              {:error, reason, state}
+          end
 
         {:error, reason} ->
-          {record_dispatch_failure(state, fiber, reason), {:error, reason}}
+          {:error, reason, state}
       end
     else
-      dispatch_armed_fiber(state, fiber, opts)
+      {:ok, state}
     end
   end
 
-  # ── A forced start's directory ──
-  #
-  # A human's start never puts a worker in the felt store. Before anything is
-  # written (the perennial re-arm, the dispatcher's reopen), the start needs a
-  # `project_dir` that exists on this host:
-  #
-  #   * a directory the human confirmed (`:project_dir`) is written to the block
-  #     by `shuttle set-agent --project-dir`, which expands and validates it on
-  #     this host; the block is then re-read, so the worker starts in the
-  #     directory the CLI saved, not a second reading of the raw input. A CLI
-  #     refusal is `{:arm_refused, _}` in its own words.
-  #   * a block with no `project_dir` is refused as `{:arm_refused, _}` with
-  #     `needs: "project_dir"`, which the board answers with a prompt.
-  #   * a declared `project_dir` missing on this host is refused as
-  #     `:project_dir_missing` (by `project_dir_for_dispatch/1`).
-  #
-  # Returns the fiber to dispatch, re-read when the block changed.
-  defp arm_forced_directory(state, fiber, opts) do
+  defp forced_eligibility(fiber, state, opts) do
+    if dispatch_eligible?(fiber, state, opts),
+      do: :ok,
+      else: {:error, dispatch_ineligible_reason(fiber, state, opts)}
+  end
+
+  defp check_start_directory(state, fiber, opts) do
     fiber_id = Map.get(fiber, "id", "")
 
     case Keyword.get(opts, :project_dir) do
-      dir when is_binary(dir) ->
-        result =
-          Shuttle.CLI.run_lifecycle("set-agent", fiber_id, ["--project-dir", dir],
-            runner: state.runner,
-            felt_store: owning_store(fiber_id, state)
-          )
+      raw when is_binary(raw) ->
+        case Shuttle.CLI.run(["resolve-dir", raw], runner: state.runner) do
+          {:ok, output} ->
+            {:ok, {:confirmed, String.trim(output)}}
 
-        with :ok <- arm_write(fiber_id, result),
-             {:ok, fiber} <- fetch_fiber_full(fiber_id, state) do
-          require_declared_directory(fiber)
+          {:command_error, code, output} ->
+            arm_refused(
+              fiber_id,
+              cli_text(output, "`shuttle resolve-dir` exited #{code}"),
+              "project_dir"
+            )
+
+          {:error, reason} ->
+            arm_refused(fiber_id, "`shuttle resolve-dir` could not run: #{inspect(reason)}", nil)
         end
 
       nil ->
-        require_declared_directory(fiber)
+        case declared_project_dir(Map.get(fiber, "shuttle")) do
+          nil ->
+            arm_refused(
+              fiber_id,
+              "#{fiber_id} has no project_dir in its shuttle: block, and a worker never " <>
+                "starts in the felt store. Choose the directory it works in.",
+              "project_dir"
+            )
+
+          dir ->
+            if File.dir?(dir),
+              do: {:ok, :declared},
+              else:
+                arm_refused(
+                  fiber_id,
+                  "#{fiber_id}'s project_dir #{dir} is not a directory on this host.",
+                  "project_dir"
+                )
+        end
     end
   end
 
-  defp arm_write(_fiber_id, {:ok, _output}), do: :ok
+  defp arm_start(state, fiber, {:confirmed, dir}),
+    do: cli_reopen(state, Map.get(fiber, "id", ""), ["--project-dir", dir])
 
-  defp arm_write(fiber_id, {:command_error, code, output}) do
-    message =
-      case String.trim(to_string(output)) do
-        "" -> "`shuttle set-agent --project-dir` exited #{code} without a message"
-        text -> text
-      end
-
-    arm_refused(fiber_id, message)
-  end
-
-  defp arm_write(fiber_id, {:error, reason}),
-    do: arm_refused(fiber_id, "`shuttle set-agent` could not run: #{inspect(reason)}")
-
-  defp arm_refused(fiber_id, message) do
-    Logger.error("Force-dispatch of #{fiber_id} could not set its project_dir: #{message}")
-    {:error, {:arm_refused, %{message: message, needs: "project_dir"}}}
-  end
-
-  defp require_declared_directory(fiber) do
-    if declared_project_dir(Map.get(fiber, "shuttle")) do
-      {:ok, fiber}
-    else
-      {:error,
-       {:arm_refused,
-        %{
-          message:
-            "#{Map.get(fiber, "id", "")} has no project_dir in its shuttle: block, and a " <>
-              "worker never starts in the felt store. Choose the directory it works in.",
-          needs: "project_dir"
-        }}}
-    end
-  end
-
-  defp dispatch_armed_fiber(%State{} = state, fiber, opts) do
+  defp arm_start(state, fiber, :declared) do
     fiber_id = Map.get(fiber, "id", "")
-    force? = Keyword.get(opts, :force, false)
+    status = Map.get(fiber, "status")
 
-    # The directory is vouched for before anything is written, so a refused
-    # start leaves the document as it was.
+    cond do
+      status == "active" ->
+        :ok
+
+      Map.get(Map.get(fiber, "shuttle") || %{}, "kind") in ["standing", "pinned"] ->
+        rearm_perennial(state, fiber_id)
+
+      status == "closed" ->
+        cli_reopen(state, fiber_id, [])
+
+      # A oneshot draft: the dispatcher's best-effort reopen moves its card.
+      true ->
+        :ok
+    end
+  end
+
+  # Re-arm a closed or parked perennial role (standing or pinned) so the
+  # board's start both spawns it now AND leaves a pinned role looping
+  # (open → active). A failed re-arm is logged and the start proceeds.
+  defp rearm_perennial(state, fiber_id) do
+    case LifecycleStore.rearm(fiber_id, runner: state.runner, felt_stores: state.felt_stores) do
+      {:ok, msg} -> Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
+      {:error, reason} -> Logger.warning("force-dispatch re-arm #{fiber_id} failed: #{reason}")
+    end
+
+    :ok
+  end
+
+  defp cli_reopen(state, fiber_id, args) do
+    case Shuttle.CLI.run_lifecycle("reopen", fiber_id, args,
+           runner: state.runner,
+           felt_store: owning_store(fiber_id, state)
+         ) do
+      {:ok, output} ->
+        Logger.info("Force-dispatch armed #{fiber_id}: #{String.trim(output)}")
+        :ok
+
+      {:command_error, code, output} ->
+        arm_refused(fiber_id, cli_text(output, "`shuttle reopen` exited #{code}"), nil)
+
+      {:error, reason} ->
+        arm_refused(fiber_id, "`shuttle reopen` could not run: #{inspect(reason)}", nil)
+    end
+  end
+
+  defp cli_text(output, fallback) do
+    case String.trim(to_string(output)) do
+      "" -> fallback
+      text -> text
+    end
+  end
+
+  defp arm_refused(fiber_id, message, needs) do
+    Logger.error("Force-dispatch of #{fiber_id} refused before anything changed: #{message}")
+    {:error, {:arm_refused, %{message: message, needs: needs}}}
+  end
+
+  defp do_dispatch_fiber(%State{} = state, fiber, opts \\ []) do
+    fiber_id = Map.get(fiber, "id", "")
+
     case project_dir_for_dispatch(fiber) do
-      {:error, {:project_dir_missing, dir} = reason} ->
-        # A human's start is asked for another directory; the autonomous loop
-        # records the ineligibility and moves on.
-        error =
-          if force?,
-            do:
-              {:arm_refused,
-               %{
-                 message: "#{fiber_id}'s project_dir #{dir} is not a directory on this host.",
-                 needs: "project_dir"
-               }},
-            else: {:not_eligible, reason}
-
-        {record_dispatch_failure(state, fiber, reason), {:error, error}}
+      {:error, reason} ->
+        {record_dispatch_failure(state, fiber, reason), {:error, {:not_eligible, reason}}}
 
       {:ok, project_dir} ->
-        # A forced dispatch (the human's "go" from the board) re-arms a
-        # closed/awaiting standing role to `status: active` BEFORE spawning, so
-        # the doc is coherent with the running worker. The kanban's snappy
-        # reflection of that re-arm rides the shared post-mutation cache refresh
-        # (`refresh_document/1`) the dispatch endpoint and the transition
-        # pipeline both call — NOT an inline patch here, so the autonomous poll
-        # path (which rebuilds the whole cache anyway) pays nothing. No-op for
-        # active roles, oneshots, and non-forced dispatch.
-        fiber = maybe_force_rearm(fiber, opts, state)
-
         # The runtime key (uid when the fiber carries one, else slug) keys every
         # runtime map — running, dispatch_failures. felt I/O below stays
         # addressed by the slug `fiber_id`.
@@ -2658,10 +2700,14 @@ defmodule Shuttle.Poller do
         # A human force-dispatch ("New session" / "Resume" / drag-to-inFlight)
         # is an explicit "go" — clear any open resume-loop breaker so the worker
         # spawns now rather than sitting out the cooldown.
-        state = if force?, do: clear_resume_loop(state, runtime_key), else: state
+        state =
+          if Keyword.get(opts, :force, false),
+            do: clear_resume_loop(state, runtime_key),
+            else: state
 
         # The project_dir is the worker's cwd, so it loads that project's
-        # CLAUDE.md; an autonomous worker without one starts in its felt store.
+        # CLAUDE.md; an autonomous worker without one starts in its felt store
+        # (a forced start refused that case in `prepare_forced_start/5`).
         felt_store = owning_store(fiber_id, state)
         work_dir = project_dir || felt_store
         spawn_worker(state, fiber, fiber_id, runtime_key, felt_store, work_dir, opts)

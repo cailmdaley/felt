@@ -278,6 +278,48 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 	}
 }
 
+// TestShuttleReopen_StandingConcludesItsRunWithTheDirectory: reopening a
+// closed standing role with --project-dir sets the directory, arms the role
+// and stamps handed_off_at, all in one write.
+func TestShuttleReopen_StandingConcludesItsRunWithTheDirectory(t *testing.T) {
+	dir, storage := newStore(t)
+	tempered := false
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
+		"kind": "standing", "agent": "claude-sonnet",
+		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+	}, &tempered)
+	work := t.TempDir()
+
+	before := time.Now().UTC()
+	if out, err := runCommand(t, dir, "reopen", "f", "--project-dir", work, "--local"); err != nil {
+		t.Fatalf("reopen --project-dir --local: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "f")
+	b, _, err := shuttle.BlockOf(f)
+	if err != nil || f.Status != felt.StatusActive || f.ClosedAt != nil || b.ProjectDir != work {
+		t.Fatalf("after reopen: status=%q closedAt=%v block=%#v err=%v", f.Status, f.ClosedAt, b, err)
+	}
+	raw, _ := shuttleRuntimeMap(t, f)["handed_off_at"].(string)
+	handedOff, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || handedOff.Before(before) {
+		t.Fatalf("reopen of a standing role must stamp handed_off_at, got %q (%v)", raw, err)
+	}
+}
+
+// TestShuttleResolveDir expands like --project-dir and writes nothing.
+func TestShuttleResolveDir(t *testing.T) {
+	dir, _ := newStore(t)
+	work := t.TempDir()
+	t.Setenv("SHUTTLE_RESOLVE_TEST", work)
+	out, err := runCommand(t, dir, "resolve-dir", "$SHUTTLE_RESOLVE_TEST")
+	if err != nil || strings.TrimSpace(out) != work {
+		t.Fatalf("resolve-dir: out=%q err=%v, want %q", out, err, work)
+	}
+	if _, err := runCommand(t, dir, "resolve-dir", work+"/missing"); err == nil {
+		t.Fatal("resolve-dir must refuse a path that is not a directory")
+	}
+}
+
 // TestShuttleResume_StandingAwaitingRearmsAndConcludes: resume on a standing
 // role awaiting review re-arms it and concludes the reviewed run in the same
 // write — the handed_off_at stamp that keeps the poller from re-firing the
