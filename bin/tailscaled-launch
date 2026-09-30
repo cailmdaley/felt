@@ -61,16 +61,16 @@
 # login node routinely has a dozen other people on it.
 #
 # Only a hub needs this, and only a hub whose loopback is its own. The daemon
-# refuses `defaults.https_proxy` unless ~/.config/felt/host.json declares the
-# host `single-user` (docs/shuttle/installation.md, "Host classes and trust
+# refuses `defaults.https_proxy` unless ~/.config/shuttle/host.json declares
+# the host `single-user` (docs/shuttle/installation.md, "Host classes and trust
 # boundaries"), so on a shared login node the proxy buys nothing and
-# `felt setup receipt` flags it. A shared host dials out over ssh instead —
+# `shuttle doctor` flags it. A shared host dials out over ssh instead —
 # into the tailnet from userspace mode via
 # `ssh -o ProxyCommand="tailscale nc %h %p"`, which rides this tailscaled's
 # private LocalAPI socket and opens no listener. Set $TAILSCALED_HTTP_PROXY
 # to the listen address (e.g. `localhost:1055`) on a single-user hub only;
 # `defaults.https_proxy` in remotes.json must name the same address — two
-# settings in two files, and the receipt reports when the class forbids it.
+# settings in two files, and `shuttle doctor` reports when the class forbids it.
 #
 # $TAILSCALED_SOCKS5 is the same switch for `--socks5-server`, and nothing in
 # felt or shuttle uses it; it exists only because a human occasionally wants a

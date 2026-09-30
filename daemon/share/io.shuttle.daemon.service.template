@@ -1,35 +1,29 @@
 # Shuttle daemon systemd **user** unit — the Linux analog of
-# share/io.shuttle.daemon.plist.template. Rendered from a template at install
-# time by `shuttle install-agent` (in a checkout, `make install-agent` is a
-# wrapper over the same command and the same template), which fills in
-# __SHUTTLE_DIR__ / __LOG__ / __FELT_STORES__ / __PATH__ / __SSH_AUTH_SOCK__
-# and writes the result to ~/.config/systemd/user/shuttle-daemon.service. The
-# unrendered template is not a valid unit — don't enable it directly.
+# share/io.shuttle.daemon.plist.template. `shuttle daemon install` renders it
+# to ~/.config/systemd/user/shuttle-daemon.service. Placeholders:
+# __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__, __SHUTTLE_STORES__,
+# __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, and
+# __SSH_AUTH_SOCK__. The unrendered template is not a valid unit.
 #
-# __SHUTTLE_DIR__ is whatever directory holds bin/shuttle — the unpacked
-# release for a downloaded tarball, the repository root for a checkout. There
-# is no TCC on Linux, so unlike the macOS LaunchAgent it may live anywhere,
-# including under ~/Documents.
+# __SHUTTLE_BIN__ is the absolute Go CLI path; __SHUTTLE_RELEASE__ is the Mix
+# release directory. There is no TCC on Linux, so the release may live
+# anywhere, including under ~/Documents.
 #
 # A *user* unit, not a system one: the daemon runs as you, reads your felt
-# stores, writes your ~/.shuttle, and shells out to your `felt`. Nothing here
-# wants root.
+# stores, writes your ~/.shuttle, and uses `felt` for fiber data and `shuttle`
+# for orchestration. Nothing here wants root.
 #
 # LINGERING. A systemd user manager normally starts at your first login and
 # stops at your last logout, which would take the daemon down with your ssh
 # session. `loginctl enable-linger <user>` keeps the manager (and so the
-# daemon) alive across logout and starts it at boot. install-agent prints the
-# command; it is the one manual step, because enabling linger for another
-# user's account needs privileges this install does not assume.
+# daemon) alive across logout and starts it at boot. `shuttle daemon install`
+# prints the command; enabling linger for another user's account needs
+# privileges this install does not assume.
 #
-# PATH is captured at install time, for the same reason the macOS plist does
-# it: the unit's environment is not your login environment, and systemd --user
-# inherits almost nothing. Boot survives that — the daemon is an ERTS-bundled
-# Mix release and needs no OTP toolchain on PATH — but at runtime it shells out
-# to `felt` for every store walk, and a PATH without `felt` yields `:enoent` ->
-# 500 on /api/v1/fibers/composite (board loads, kanban does not). The capture
-# runs a login shell in a scrubbed environment, so the installing session's own
-# PATH can't leak in; `--path` overrides it.
+# PATH is captured at install time because the systemd user manager inherits
+# almost nothing. The daemon needs both CLIs on PATH at runtime. The capture
+# runs a login shell in a scrubbed environment, so the installing session's
+# own PATH can't leak in; `--path` overrides it.
 
 [Unit]
 Description=Shuttle daemon (felt fiber dispatcher)
@@ -37,47 +31,47 @@ Documentation=https://cailmdaley.github.io/felt/shuttle/installation/
 
 [Service]
 Type=simple
-WorkingDirectory=__SHUTTLE_DIR__
+WorkingDirectory="__SHUTTLE_RELEASE__"
 # StandardOutput=append: (below) never rotates on its own, unlike the tmux
 # respawn loop's own log (bin/shuttle-launch), which size-rotates at 64MB on
 # every iteration. Mirror that here so a systemd-supervised daemon gets the
 # same fidelity: on each restart, if the log has grown past 64MB, move it to
 # .1 (clobbering any previous .1) before the new instance starts appending.
-# $$ (not $) below: systemd itself expands bare $VAR/$() in ExecStart lines
-# before handing the string to the shell, so dollars meant for /bin/sh must be
-# doubled to survive systemd's own pass.
+# $$ (not $) below: systemd expands bare $VAR/$() in ExecStartPre before
+# handing the command to /bin/sh, so shell dollars must survive that pass.
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 67108864 ]; then mv -f "__LOG__" "__LOG__.1"; fi'
-# `start --force` skips the already-running guard, so a restart never refuses.
-ExecStart=__SHUTTLE_DIR__/bin/shuttle start --force
+# `--force` skips the already-running guard, so a restart never refuses.
+ExecStart="__SHUTTLE_BIN__" daemon start --force
 
-# The user's real login PATH, captured at install time (see header).
-Environment=PATH=__PATH__
+# The release and user's real login PATH, set at install time.
+Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
+Environment="PATH=__PATH__"
 # Absent by default (the daemon binds 4000); set only to supervise a second
 # instance beside the real one. The renderer drops this line when empty.
-Environment=SHUTTLE_PORT=__PORT__
+Environment="SHUTTLE_PORT=__PORT__"
 # Empty clears any manager-level override and selects the editable registry.
-# --felt-stores explicitly pins a list instead (read-only in Settings).
-Environment="FELT_STORES=__FELT_STORES__"
-Environment="FELT_STORES_FILE=__FELT_STORES_FILE__"
+# --stores explicitly pins a list instead (read-only in Settings).
+Environment="SHUTTLE_STORES=__SHUTTLE_STORES__"
+Environment="SHUTTLE_STORES_FILE=__SHUTTLE_STORES_FILE__"
 # SSH_AUTH_SOCK points at the ssh-agent that holds your remote credentials, so
 # the daemon's own remote feed and the Attach path can authenticate. Dropped
 # from the rendered unit when the value is empty — on Linux the agent socket
 # has no canonical path, and an empty setting is worse than none.
-Environment=SSH_AUTH_SOCK=__SSH_AUTH_SOCK__
+Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
 # SHUTTLE_LOG names the same file StandardOutput/StandardError append to below
 # — all three render from the same placeholder. It exists so the daemon can
 # know where its own stdout lands, which systemd never tells it: Shuttle.LogRotator caps that
 # file on an hourly timer, where the ExecStartPre above only fires at restart.
 # Without it the rotator falls back to the platform default, right for a
 # default install and wrong for any `--log` override.
-Environment=SHUTTLE_LOG=__LOG__
+Environment="SHUTTLE_LOG=__LOG__"
 
 # The launchd analogs: KeepAlive + ThrottleInterval 10.
 Restart=always
 RestartSec=10
 
-# systemd does not create the parent directory for append:; install-agent
-# mkdir -p's it. append: needs systemd >= 240.
+# systemd does not create the parent directory for append:; daemon install
+# creates it. append: needs systemd >= 240.
 StandardOutput=append:__LOG__
 StandardError=append:__LOG__
 

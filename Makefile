@@ -159,7 +159,7 @@ ifeq ($(SKIP_CLI),1)
 else ifneq ($(shell command -v go 2>/dev/null),)
 	$(MAKE) cli-install
 else
-	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install felt first."; exit 1; }
+	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install both CLIs first."; exit 1; }
 	@command -v shuttle >/dev/null 2>&1 || { echo "shuttle not found on PATH and no Go toolchain to build it — install shuttle first."; exit 1; }
 endif
 	cd daemon && $(MIX) deps.get
@@ -225,7 +225,7 @@ plugin-hooks-test:
 	node --experimental-strip-types extensions/pi/test.mjs
 
 # Fail if a maintainer's own host or account name has crept back into tracked
-# source. Fleet members belong in ~/.config/felt/remotes.json, not in the repo.
+# source. Fleet members belong in ~/.config/shuttle/remotes.json, not in the repo.
 # Runs as part of `make go-test` too; this target is for a quick standalone check.
 lint-personal:
 	go test ./cmd/ -run TestNoPersonalIdentifiersInSource
