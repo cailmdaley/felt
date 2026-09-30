@@ -78,7 +78,9 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 				for _, want := range []string{
 					`ExecStart="/tmp/go bin/shuttle \"quoted\" \\literal %%bin" daemon start --force`,
 					`Environment="SHUTTLE_STORES=/tmp/store with spaces & <notes> \"quoted\" \\literal %%store"`,
-					`StandardOutput=append:/tmp/log\x20dir/\"quoted\"\\literal\x20%%log`,
+					`StandardOutput=append:/tmp/log dir/"quoted"\literal %%log`,
+					`StandardError=append:/tmp/log dir/"quoted"\literal %%log`,
+					`Environment="SHUTTLE_LOG=/tmp/log dir/\"quoted\"\\literal %%log"`,
 					`Environment="SHUTTLE_RELEASE=` + systemdQuotedValue(release.Dir) + `"`,
 				} {
 					if !strings.Contains(rendered, want) {

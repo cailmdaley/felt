@@ -292,8 +292,8 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 		source = removeEnvironmentLine(source, "SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__")
 	}
 	source = strings.ReplaceAll(source, "WorkingDirectory=__WORKING_DIRECTORY__", "WorkingDirectory="+systemdLiteralPath(values["__WORKING_DIRECTORY__"]))
-	source = strings.ReplaceAll(source, "StandardOutput=append:__LOG__", "StandardOutput=append:"+systemdUnitValue(options.Log))
-	source = strings.ReplaceAll(source, "StandardError=append:__LOG__", "StandardError=append:"+systemdUnitValue(options.Log))
+	source = strings.ReplaceAll(source, "StandardOutput=append:__LOG__", "StandardOutput=append:"+systemdLiteralPath(options.Log))
+	source = strings.ReplaceAll(source, "StandardError=append:__LOG__", "StandardError=append:"+systemdLiteralPath(options.Log))
 	source = replaceSystemdPlaceholder(source, "__LOG__", options.Log)
 	source = replaceSystemdPlaceholder(source, "__SHUTTLE_BIN__", values["__SHUTTLE_BIN__"])
 	source = replaceSystemdPlaceholder(source, "__SHUTTLE_RELEASE__", release.Dir)
@@ -386,31 +386,6 @@ func systemdQuotedValue(value string) string {
 
 func systemdLiteralPath(value string) string {
 	return strings.ReplaceAll(value, "%", "%%")
-}
-
-func systemdUnitValue(value string) string {
-	var result strings.Builder
-	for _, r := range value {
-		switch r {
-		case '\\':
-			result.WriteString(`\\`)
-		case ' ':
-			result.WriteString(`\x20`)
-		case '"':
-			result.WriteString(`\"`)
-		case '%':
-			result.WriteString("%%")
-		case '\n':
-			result.WriteString(`\n`)
-		case '\r':
-			result.WriteString(`\r`)
-		case '\t':
-			result.WriteString(`\t`)
-		default:
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
 }
 
 func replaceSystemdExecStartPre(source string) string {
