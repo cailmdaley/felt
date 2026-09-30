@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FiberDetailModal } from './FiberDetailModal.js'
 import type { Fiber } from './KanbanFiber.js'
 import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } from './KanbanModalShared.js'
-import { inheritedProjectDir } from './KanbanReadModel.js'
+import { parseCompositeFeed, type CompositeEntry } from './KanbanComposite.js'
+import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
 import { buildProjectDirPrompt } from './projectDirPrompt.js'
 import { card } from './testFixtures.js'
 
@@ -18,6 +19,18 @@ class FakeEl {
   spellcheck = true
   value = ''
   disabled = false
+  hidden = false
+  title = ''
+  readonly classList = {
+    toggle: (name: string, on?: boolean): boolean => {
+      const names = new Set(this.className.split(' ').filter(Boolean))
+      const next = on ?? !names.has(name)
+      if (next) names.add(name)
+      else names.delete(name)
+      this.className = [...names].join(' ')
+      return next
+    },
+  }
   readonly style: Record<string, string> = {}
   readonly attrs: Record<string, string> = {}
   private readonly listeners: Record<string, ((e: unknown) => void)[]> = {}
@@ -77,19 +90,19 @@ const REASON =
   'cannot arm work/task: its shuttle: block has no project_dir ' +
   '(set it as you arm it: shuttle reopen work/task --project-dir <dir>)'
 const refused: DispatchFailureBody = {
-  reason: 'reopen_failed',
+  reason: 'arm_refused',
   host: 'owner-host',
   message: REASON,
   needs: 'project_dir',
 }
 
-describe('a refused reopen reads in the CLI’s own words', () => {
+describe('a refused start reads in the owning host’s words', () => {
   it('places the reason on the host where any command it names must run', () => {
     expect(dispatchFailureMessage(refused, 'fallback')).toBe(`On owner-host: ${REASON}`)
   })
 
   it('carries the reason alone when the daemon names no host', () => {
-    expect(dispatchFailureMessage({ reason: 'reopen_failed', message: REASON }, 'fallback')).toBe(REASON)
+    expect(dispatchFailureMessage({ reason: 'arm_refused', message: REASON }, 'fallback')).toBe(REASON)
   })
 
   it('asks for a directory only when the refusal needs one', () => {
@@ -100,35 +113,71 @@ describe('a refused reopen reads in the CLI’s own words', () => {
 })
 
 describe('inheritedProjectDir', () => {
-  const fiber = (id: string, over: Partial<Fiber> = {}): Fiber =>
-    ({ id, name: id, status: 'active', createdAt: '2026-01-01T00:00:00Z', ...over }) as Fiber
-  const index = (...fibers: Fiber[]): Map<string, Fiber> => new Map(fibers.map((f) => [f.id, f]))
+  // Feed rows as the daemon serves them: `origin` is the serving host, and the
+  // block's `host` owns the fiber.
+  const row = (id: string, origin: string, shuttle: Record<string, unknown>, status = 'active') => ({
+    origin,
+    felt_store: `/stores/${origin}`,
+    path: `.felt/${id}.md`,
+    fiber: { id, name: id, status, created_at: '2026-01-01T00:00:00Z', shuttle: { kind: 'oneshot', ...shuttle } },
+  })
+  const feed = (...rows: ReturnType<typeof row>[]) =>
+    parseCompositeFeed({
+      host: 'here',
+      fibers: rows,
+      origins: { here: { kind: 'local', stale: false, fiber_count: rows.length } },
+    })
+  const inherited = (entries: CompositeEntry[], id: string) => {
+    const f = entries.find((e) => e.fiber.id === id)?.fiber
+    expect(f).toBeDefined()
+    return inheritedProjectDir(f as Fiber, projectDirIndex(entries))
+  }
 
   it('takes the nearest ancestor on the same host', () => {
-    const child = fiber('a/b/c', { shuttleHost: 'owner-host' })
-    const byId = index(
-      fiber('a', { shuttleHost: 'owner-host', shuttleProjectDir: '/srv/a' }),
-      fiber('a/b', { shuttleHost: 'owner-host', shuttleProjectDir: '/srv/b' }),
-      child,
+    const { entries } = feed(
+      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
+      row('a/b/c', 'here', { host: 'here' }),
     )
-    expect(inheritedProjectDir(child, byId)).toEqual({ path: '/srv/b', from: 'a/b' })
+    expect(inherited(entries, 'a/b/c')).toEqual({ path: '/srv/b', from: 'a/b' })
   })
 
-  it('walks past an ancestor on another host and one missing from the feed', () => {
-    const child = fiber('a/b/c/d', { shuttleHost: 'owner-host' })
-    const byId = index(
-      fiber('a', { shuttleHost: 'owner-host', shuttleProjectDir: '/srv/a' }),
-      fiber('a/b/c', { shuttleHost: 'laptop', shuttleProjectDir: '/Users/me/a' }),
-      child,
+  it('never lets another host’s row of the same slug answer for this host', () => {
+    // The same `a/b` served by two hosts, the remote copy last: a slug-keyed
+    // map keeps only the remote row, whose directory is a path on the other
+    // machine.
+    const { entries } = feed(
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
+      row('a/b/c', 'here', { host: 'here' }, 'closed'),
+      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
     )
-    expect(inheritedProjectDir(child, byId)).toEqual({ path: '/srv/a', from: 'a' })
+    expect(inherited(entries, 'a/b/c')).toEqual({ path: '/srv/b', from: 'a/b' })
+
+    const card = buildKanbanResponseFromComposite(feed(
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
+      row('a/b/c', 'here', { host: 'here' }, 'closed'),
+      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
+    )).now.awaitingReview.find((c) => c.id === 'a/b/c')
+    expect(card?.inheritedProjectDir).toEqual({ path: '/srv/b', from: 'a/b' })
+  })
+
+  it('walks past an ancestor owned elsewhere and one missing from the feed', () => {
+    const { entries } = feed(
+      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
+      row('a/b/c', 'far', { host: 'far', project_dir: '/far/c' }),
+      row('a/b/c/d', 'here', { host: 'here' }),
+    )
+    expect(inherited(entries, 'a/b/c/d')).toEqual({ path: '/srv/a', from: 'a' })
   })
 
   it('suggests nothing for a fiber with its own directory or no owner', () => {
-    const byId = index(fiber('a', { shuttleHost: 'owner-host', shuttleProjectDir: '/srv/a' }))
-    expect(inheritedProjectDir(fiber('a/b', { shuttleHost: 'owner-host', shuttleProjectDir: '/x' }), byId))
-      .toBeUndefined()
-    expect(inheritedProjectDir(fiber('a/b'), byId)).toBeUndefined()
+    const { entries } = feed(
+      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
+      row('a/b', 'here', { host: 'here', project_dir: '/x' }),
+      row('a/c', 'here', {}),
+    )
+    expect(inherited(entries, 'a/b')).toBeUndefined()
+    expect(inherited(entries, 'a/c')).toBeUndefined()
   })
 })
 
@@ -225,10 +274,10 @@ describe('the detail panel answers a refused start with the prompt', () => {
     expect(refreshed).toHaveBeenCalledOnce()
   })
 
-  it('shows any other refused reopen as its reason, with no prompt', async () => {
+  it('shows any other refused start as its reason, with no prompt', async () => {
     vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
     const other: DispatchFailureBody = {
-      reason: 'reopen_failed',
+      reason: 'arm_refused',
       host: 'owner-host',
       message: 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)',
     }
@@ -243,5 +292,33 @@ describe('the detail panel answers a refused start with the prompt', () => {
       new FakeEl('button') as unknown as HTMLButtonElement, errorEl as unknown as HTMLElement)
     expect(errorEl.find('kbn-start-prompt')).toBeUndefined()
     expect(errorEl.textContent).toBe(`On owner-host: ${other.message}`)
+  })
+})
+
+describe('a start prompt presented on open unfolds the controls drawer', () => {
+  type Controls = {
+    pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null
+    buildControls: (c: ReturnType<typeof card>, shuttleManaged: boolean) => HTMLElement
+    buildControlsBody: (...args: unknown[]) => void
+  }
+  const drawer = (pending: boolean) => {
+    const panel = new FiberDetailModal('http://daemon', vi.fn()) as unknown as Controls
+    const task = card({ id: 'work/task', shuttleKind: 'oneshot', shuttleHost: 'owner-host' })
+    if (pending) panel.pendingStartPrompt = { cardId: task.id, body: refused }
+    // The composer consumes the pending prompt while the body builds.
+    panel.buildControlsBody = () => { panel.pendingStartPrompt = null }
+    const wrap = el(panel.buildControls(task, true))
+    return { body: el(wrap.find('kbn-detail-controls-body')), wrap }
+  }
+
+  it('opens when the prompt is waiting for this card', () => {
+    const { body, wrap } = drawer(true)
+    expect(body.hidden).toBe(false)
+    expect(wrap.className).toContain('kbn-detail-controls-open')
+    expect(el(wrap.find('kbn-detail-controls-toggle')).attrs['aria-expanded']).toBe('true')
+  })
+
+  it('stays folded otherwise', () => {
+    expect(drawer(false).body.hidden).toBe(true)
   })
 })

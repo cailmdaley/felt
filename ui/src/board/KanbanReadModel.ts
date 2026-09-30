@@ -106,7 +106,7 @@ export function buildKanbanResponseFromComposite(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
   );
-  const surfaces = assembleSurfaces(eligible, byId, nowMs);
+  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(feed.entries), nowMs);
 
   return {
     feltHost: feed.host,
@@ -257,6 +257,7 @@ const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
 function assembleSurfaces(
   entries: CompositeEntry[],
   byId: Map<string, Fiber>,
+  dirs: ProjectDirIndex,
   nowMs: number,
 ): AssembledSurfaces {
   const drafts: KanbanCard[] = [];
@@ -283,7 +284,7 @@ function assembleSurfaces(
   // the feed, or settled into the past lane. Nothing is ever hidden behind a
   // card that is not there.
   const classified = entries.map((entry) => {
-    const card = toCard(entry, byId, nowMs);
+    const card = toCard(entry, byId, dirs, nowMs);
     return {
       card,
       column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
@@ -545,7 +546,7 @@ export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()
   // edges against, so every dep would read as dangling — a warning that every
   // single-fiber fetch would raise is noise, not information.
   return {
-    ...toCard(entry, new Map(), nowMs),
+    ...toCard(entry, new Map(), new Map(), nowMs),
     dependsOnUnresolved: undefined,
   };
 }
@@ -560,6 +561,7 @@ export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()
 function toCard(
   entry: CompositeEntry,
   byId: Map<string, Fiber>,
+  dirs: ProjectDirIndex,
   nowMs: number,
 ): KanbanCard {
   const f = entry.fiber;
@@ -625,7 +627,7 @@ function toCard(
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
     shuttleProjectDir: f.shuttleProjectDir,
-    inheritedProjectDir: inheritedProjectDir(f, byId),
+    inheritedProjectDir: inheritedProjectDir(f, dirs),
     nextLaunchAt: nextStandingLaunch(f, nowMs),
     storedHorizon: horizon.storedHorizon,
     effectiveHorizon: horizon.effectiveHorizon,
@@ -640,24 +642,43 @@ function toCard(
 }
 
 /**
+ * Every declared `shuttle.project_dir` in the feed, keyed by owning host and
+ * fiber id. A directory is a path on one machine, and the same slug can arrive
+ * from several hosts (a git-synced store is served by every daemon that has
+ * it), so the host is part of the key: one host's row never answers for
+ * another's.
+ */
+export type ProjectDirIndex = Map<string, string>;
+
+const dirKey = (host: string, id: string): string => `${host}\u0000${id}`;
+
+export function projectDirIndex(entries: CompositeEntry[]): ProjectDirIndex {
+  const dirs: ProjectDirIndex = new Map();
+  for (const { fiber } of entries) {
+    if (fiber.shuttleHost && fiber.shuttleProjectDir) {
+      dirs.set(dirKey(fiber.shuttleHost, fiber.id), fiber.shuttleProjectDir);
+    }
+  }
+  return dirs;
+}
+
+/**
  * The nearest ancestor's `shuttle.project_dir` for a fiber whose block names
  * none — the directory the board suggests when a start is refused for want of
- * one. Ancestors are the fiber's id prefixes (`a/b/c` → `a/b` → `a`), read from
- * the whole feed, and only an ancestor owned by the same host counts: a
- * directory is a path on one machine. `undefined` when the fiber declares its
- * own directory, names no host, or no ancestor qualifies.
+ * one. Ancestors are the fiber's id prefixes (`a/b/c` → `a/b` → `a`), and only
+ * an ancestor owned by the fiber's own host counts. `undefined` when the fiber
+ * declares its own directory, names no host, or no ancestor qualifies.
  */
 export function inheritedProjectDir(
   fiber: Fiber,
-  byId: Map<string, Fiber>,
+  dirs: ProjectDirIndex,
 ): InheritedProjectDir | undefined {
-  if (fiber.shuttleProjectDir || !fiber.shuttleHost) return undefined;
+  const host = fiber.shuttleHost;
+  if (fiber.shuttleProjectDir || !host) return undefined;
   for (let id = fiber.id; id.includes('/'); ) {
     id = id.slice(0, id.lastIndexOf('/'));
-    const ancestor = byId.get(id);
-    if (ancestor?.shuttleProjectDir && ancestor.shuttleHost === fiber.shuttleHost) {
-      return { path: ancestor.shuttleProjectDir, from: id };
-    }
+    const path = dirs.get(dirKey(host, id));
+    if (path) return { path, from: id };
   }
   return undefined;
 }

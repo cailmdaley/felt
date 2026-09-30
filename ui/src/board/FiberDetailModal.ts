@@ -2319,12 +2319,15 @@ export class FiberDetailModal {
     body.className = 'kbn-detail-controls-body'
     body.hidden = true
 
-    toggle.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const opening = body.hidden
+    const setOpen = (opening: boolean): void => {
       body.hidden = !opening
       toggle.setAttribute('aria-expanded', String(opening))
       wrap.classList.toggle('kbn-detail-controls-open', opening)
+    }
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const opening = body.hidden
+      setOpen(opening)
       // On a phone sheet the unfolded drawer leaves the bottom edge for the
       // flow at the page's end; bring its strip up under the title bar, so the
       // drawer opens where the thumb is and the page stays one scroll above.
@@ -2336,8 +2339,12 @@ export class FiberDetailModal {
       }
     })
 
+    // A start prompt waiting for this card lives in the composer, inside the
+    // drawer: the drawer opens with it, or the question would be hidden.
+    const presentsStartPrompt = this.pendingStartPrompt?.cardId === card.id
     wrap.append(toggle, body)
     this.buildControlsBody(body, card, shuttleManaged, reflect, (watch) => watchers.push(watch))
+    if (presentsStartPrompt) setOpen(true)
     return wrap
   }
 

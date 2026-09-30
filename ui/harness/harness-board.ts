@@ -1424,7 +1424,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.endsWith('/api/v1/dispatch') && body().fiber_id === BARE_FOLLOW_UP && !body().project_dir) {
     return json({
       dispatched: false,
-      reason: 'reopen_failed',
+      reason: 'arm_refused',
       fiber_id: BARE_FOLLOW_UP,
       host: FOREIGN_HOST,
       needs: 'project_dir',
