@@ -9,7 +9,9 @@
 #
 # Modes:
 #   shuttle-launch          (re)create tmux session "shuttle-daemon" running
-#                           `shuttle-launch --loop`
+#                           `shuttle-launch --loop`; on a host with an installed
+#                           systemd/launchd supervisor, restart through it
+#                           instead
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
 # Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
@@ -133,6 +135,26 @@ if [ "${1:-}" = "--loop" ]; then
       [ "$backoff" -gt 300 ] && backoff=300
     fi
   done
+fi
+
+# A host whose daemon is owned by an installed supervisor (`shuttle daemon
+# install`: a systemd user unit or a launchd agent) is revived through that
+# supervisor. A respawn loop beside it would be a second supervisor started
+# with a different environment than the unit's.
+if command -v systemctl >/dev/null 2>&1 \
+  && { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null \
+    || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
+  systemctl --user restart shuttle-daemon.service \
+    || { echo "shuttle-launch: systemctl --user restart shuttle-daemon failed" >&2; exit 1; }
+  echo "shuttle-launch: restarted the daemon through its systemd user unit"
+  exit 0
+fi
+if command -v launchctl >/dev/null 2>&1 \
+  && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
+  launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" \
+    || { echo "shuttle-launch: launchctl kickstart io.shuttle.daemon failed" >&2; exit 1; }
+  echo "shuttle-launch: restarted the daemon through its launchd agent"
+  exit 0
 fi
 
 # (Re)create the tmux session running this script's own loop mode.

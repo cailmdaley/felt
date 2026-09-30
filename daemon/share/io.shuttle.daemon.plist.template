@@ -3,17 +3,18 @@
 <!--
   Shuttle's launchd LaunchAgent is rendered by `shuttle daemon install`.
   Placeholders: __LABEL__, __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__,
-  __SHUTTLE_STORES__, __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, and
-  __SSH_AUTH_SOCK__. The unrendered template is not a valid plist.
+  __SHUTTLE_STORES__, __SHUTTLE_STORES_FILE__, __PATH__, __PORT__,
+  __SSH_AUTH_SOCK__, and __TMUX_TMPDIR__. The unrendered template is not a valid plist.
 
   __SHUTTLE_BIN__ is the absolute path to the Go CLI. __SHUTTLE_RELEASE__ is
   the Mix release directory. Launchd starts the Go CLI in its forced start
   mode, which skips the already-running guard during a restart.
 
   Launchd starts with a near-empty environment. The daemon needs both `felt`
-  for fiber data and `shuttle` for orchestration, so install captures the
-  user's login PATH in a scrubbed login shell and renders it as __PATH__.
-  The path option overrides the captured value.
+  for fiber data and `shuttle` for orchestration, and it must reach the tmux
+  server the user's shells use. Install runs one scrubbed login shell and
+  renders its PATH and TMUX_TMPDIR into the entries below. The path and
+  tmux-tmpdir options override the captured values.
 
   Keep the Mix release and felt stores outside ~/Documents, ~/Desktop, and
   ~/Downloads. macOS TCC attributes file access to the responsible process in
@@ -78,6 +79,14 @@
         -->
         <key>SSH_AUTH_SOCK</key>
         <string>__SSH_AUTH_SOCK__</string>
+        <!--
+          TMUX_TMPDIR names the directory holding the user's tmux server
+          socket, captured from the login shell (see header), so the daemon
+          finds the server its workers run on. The renderer drops this pair
+          when it is empty; tmux's default directory then applies.
+        -->
+        <key>TMUX_TMPDIR</key>
+        <string>__TMUX_TMPDIR__</string>
         <!--
           SHUTTLE_LOG names the very file StandardOutPath/StandardErrorPath
           below redirect to — all three render from the same placeholder. It

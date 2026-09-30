@@ -2,8 +2,8 @@
 # share/io.shuttle.daemon.plist.template. `shuttle daemon install` renders it
 # to ~/.config/systemd/user/shuttle-daemon.service. Placeholders:
 # __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__, __SHUTTLE_STORES__,
-# __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, and
-# __SSH_AUTH_SOCK__. The unrendered template is not a valid unit.
+# __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, __SSH_AUTH_SOCK__, and
+# __TMUX_TMPDIR__. The unrendered template is not a valid unit.
 #
 # __SHUTTLE_BIN__ is the absolute Go CLI path; __SHUTTLE_RELEASE__ is the Mix
 # release directory. There is no TCC on Linux, so the release may live
@@ -20,10 +20,12 @@
 # prints the command; enabling linger for another user's account needs
 # privileges this install does not assume.
 #
-# PATH is captured at install time because the systemd user manager inherits
-# almost nothing. The daemon needs both CLIs on PATH at runtime. The capture
-# runs a login shell in a scrubbed environment, so the installing session's
-# own PATH can't leak in; `--path` overrides it.
+# PATH and TMUX_TMPDIR are captured at install time because the systemd user
+# manager inherits almost nothing. The daemon needs both CLIs on PATH at
+# runtime, and it must reach the same tmux server your login shells use. One
+# login shell, run in a scrubbed environment, reports both, so the installing
+# session's own values can't leak in; `--path` and `--tmux-tmpdir` override
+# them.
 
 [Unit]
 Description=Shuttle daemon (felt fiber dispatcher)
@@ -58,6 +60,11 @@ Environment="SHUTTLE_STORES_FILE=__SHUTTLE_STORES_FILE__"
 # from the rendered unit when the value is empty — on Linux the agent socket
 # has no canonical path, and an empty setting is worse than none.
 Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
+# TMUX_TMPDIR names the directory holding the tmux server socket. Workers the
+# daemon starts land on that server, and `tmux attach` from a login shell
+# finds them only if both agree — a cluster rc file that moves it off /tmp
+# must reach the daemon too. Dropped when empty: tmux's default applies.
+Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
 # SHUTTLE_LOG names the same file StandardOutput/StandardError append to below
 # — all three render from the same placeholder. It exists so the daemon can
 # know where its own stdout lands, which systemd never tells it: Shuttle.LogRotator caps that

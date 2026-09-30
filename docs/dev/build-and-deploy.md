@@ -119,12 +119,17 @@ Release users install packaged releases through the [installer](../shuttle/insta
 Push the verified revision, then deploy it on each host:
 
 1. Pull the checkout and run `make build` in the host's login shell.
-2. Cycle the daemon through its supervisor or respawn loop.
-3. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
+2. Re-render an installed daemon supervisor that an older template wrote — a
+   pre-split one (it bakes `FELT_STORES`) or one that predates `TMUX_TMPDIR`
+   (the word appears nowhere in it) — through `shuttle daemon install`, keeping
+   its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
+   `TMUX_TMPDIR` from the login shell.
+3. Cycle the daemon through its supervisor or respawn loop.
+4. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
    and `ready` is `true` (up to 15 minutes by default; set
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
-4. Check the changed behavior through the live API or board.
-5. Run `shuttle daemon release` to release the boot quarantine.
+5. Check the changed behavior through the live API or board.
+6. Run `shuttle daemon release` to release the boot quarantine.
 
 The helper builds both CLIs, the daemon, and — on every host that is not marked
 `"build_ui": false` — the UI, on that host.

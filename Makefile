@@ -76,6 +76,9 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 # AGENT_SSH_AUTH_SOCK — the persistent ssh-agent socket to bake in. Passed
 #   through ONLY when you define it (even to empty), so the per-OS default
 #   stands otherwise: ~/.ssh/agent.sock on macOS, empty on Linux.
+# AGENT_TMUX_TMPDIR — the tmux socket directory to bake in. Passed through ONLY
+#   when you define it (even to empty); otherwise shuttle captures it from the
+#   login shell, so the daemon and your shells share one tmux server.
 AGENT_STORES ?=
 AGENT_PATH ?=
 
@@ -308,7 +311,8 @@ install-agent: daemon
 	 $(if $(strip $(AGENT_STORES)),--stores '$(AGENT_STORES)',) \
 	 $(if $(strip $(AGENT_PATH)),--path '$(AGENT_PATH)',) \
 	 --log '$(LOG)' \
-	 $(if $(filter undefined,$(origin AGENT_SSH_AUTH_SOCK)),,--ssh-auth-sock '$(AGENT_SSH_AUTH_SOCK)')
+	 $(if $(filter undefined,$(origin AGENT_SSH_AUTH_SOCK)),,--ssh-auth-sock '$(AGENT_SSH_AUTH_SOCK)') \
+	 $(if $(filter undefined,$(origin AGENT_TMUX_TMPDIR)),,--tmux-tmpdir '$(AGENT_TMUX_TMPDIR)')
 
 uninstall-agent:
 	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' shuttle daemon uninstall

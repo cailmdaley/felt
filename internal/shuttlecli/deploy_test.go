@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,7 +47,12 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 }
 
-func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
+// runDeploySupervisorMigration writes each unit into a fake home's systemd
+// user directory, runs deploy's supervisor migration against a fake shuttle,
+// and returns each `shuttle daemon install` call as SHUTTLE_STORES_FILE plus
+// its argv.
+func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map[string][]byte) [][]string {
+	t.Helper()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -56,41 +62,27 @@ func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T
 	home := t.TempDir()
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	localBin := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(unitDir, 0o755); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{unitDir, localBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.MkdirAll(localBin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(unitDir, "second.service"), legacy, 0o600); err != nil {
-		t.Fatal(err)
+	for name, unit := range units {
+		if err := os.WriteFile(filepath.Join(unitDir, name), unit, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	capture := filepath.Join(t.TempDir(), "install-args")
 	fakeShuttle := `#!/bin/sh
 [ "$1 $2" = "daemon install" ] || exit 2
 {
+  printf 'CALL\n'
   printf 'STORES_FILE=%s\n' "$SHUTTLE_STORES_FILE"
   shift 2
   for arg do printf 'ARG=%s\n' "$arg"; done
-} > "$SHUTTLE_CAPTURE_FILE"
+} >> "$SHUTTLE_CAPTURE_FILE"
 `
 	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte(fakeShuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	share := filepath.Join(release.Dir, "share")
-	if err := os.MkdirAll(share, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(share, "io.shuttle.daemon.service.template"), serviceTemplate, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
@@ -105,29 +97,55 @@ config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
 		"SHUTTLE_CAPTURE_FILE="+capture,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("legacy supervisor migration: %v\n%s", err, out)
+		t.Fatalf("supervisor migration: %v\n%s", err, out)
 	}
 	captured, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatalf("shuttle daemon install was not called: %v", err)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(captured)), "\n")
-	storesFile := strings.TrimPrefix(lines[0], "STORES_FILE=")
-	args := make([]string, 0, len(lines)-1)
-	for _, line := range lines[1:] {
-		args = append(args, strings.TrimPrefix(line, "ARG="))
-	}
-	flag := func(name string) string {
-		for i := 0; i+1 < len(args); i++ {
-			if args[i] == name {
-				return args[i+1]
-			}
+	var calls [][]string
+	for _, line := range strings.Split(strings.TrimSpace(string(captured)), "\n") {
+		if line == "CALL" {
+			calls = append(calls, nil)
+			continue
 		}
-		t.Fatalf("install argv %v lacks %s", args, name)
-		return ""
+		calls[len(calls)-1] = append(calls[len(calls)-1], line)
 	}
+	return calls
+}
+
+// installFlag reads one flag's value from a captured install call.
+func installFlag(t *testing.T, call []string, name string) string {
+	t.Helper()
+	for i := 1; i+1 < len(call); i++ {
+		if call[i] == "ARG="+name {
+			return strings.TrimPrefix(call[i+1], "ARG=")
+		}
+	}
+	t.Fatalf("install call %v lacks %s", call, name)
+	return ""
+}
+
+func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
+	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"second.service": legacy})
+	if len(calls) != 1 {
+		t.Fatalf("install calls = %v; want one", calls)
+	}
+	call := calls[0]
+	flag := func(name string) string { return installFlag(t, call, name) }
 	options := supervisorOptions{
-		OS: "Linux", Label: flag("--label"), Stores: flag("--stores"), StoresFile: storesFile,
+		OS: "Linux", Label: flag("--label"), Stores: flag("--stores"), StoresFile: strings.TrimPrefix(call[0], "STORES_FILE="),
 		Port: flag("--port"), Log: flag("--log"), Path: flag("--path"), SSHSocket: flag("--ssh-auth-sock"),
 		ShuttleBin: "/opt/shuttle",
 	}
@@ -152,6 +170,65 @@ config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("new supervisor render missing migrated value %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestDeployMigrationRerendersOnlySupervisorsThatPredateTmuxTmpdir(t *testing.T) {
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := supervisorOptions{
+		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
+		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
+		SSHSocket: "/tmp/agent.sock",
+	}
+	current, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(current, "TMUX_TMPDIR") {
+		t.Fatalf("a current unit with an empty TMUX_TMPDIR must still name it, or deploy re-renders it forever:\n%s", current)
+	}
+	var older []string
+	for _, line := range strings.Split(current, "\n") {
+		if !strings.Contains(line, "TMUX_TMPDIR") {
+			older = append(older, line)
+		}
+	}
+	tunnel := "[Service]\nExecStart=/usr/bin/ssh -N shuttle-remote\nEnvironment=SSH_AUTH_SOCK=/tmp/agent.sock\n"
+
+	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
+		"shuttle-daemon.service": []byte(current),
+		"shuttle-tunnel.service": []byte(tunnel),
+	}); len(calls) != 0 {
+		t.Fatalf("current and tunnel supervisors were re-rendered: %v", calls)
+	}
+
+	calls := runDeploySupervisorMigration(t, release, map[string][]byte{
+		"shuttle-daemon.service": []byte(strings.Join(older, "\n")),
+		"shuttle-tunnel.service": []byte(tunnel),
+	})
+	if len(calls) != 1 {
+		t.Fatalf("install calls = %v; want one for the pre-TMUX_TMPDIR daemon unit", calls)
+	}
+	call := calls[0]
+	for flag, want := range map[string]string{
+		"--label": defaultDaemonLabel, "--stores": "/srv/store", "--path": "/opt/bin:/usr/bin",
+		"--log": "/tmp/logs/shuttle.log", "--ssh-auth-sock": "/tmp/agent.sock", "--port": "",
+	} {
+		if got := installFlag(t, call, flag); got != want {
+			t.Errorf("%s = %q; want %q", flag, got, want)
+		}
+	}
+	if call[0] != "STORES_FILE=/tmp/cfg/stores.json" {
+		t.Errorf("stores file = %q", call[0])
+	}
+	for _, arg := range call {
+		if strings.HasPrefix(arg, "ARG=--tmux-tmpdir") {
+			t.Errorf("migration pinned %s; install must capture TMUX_TMPDIR from the login shell", arg)
 		}
 	}
 }
@@ -200,7 +277,11 @@ func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
 	}
 }
 
-func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
+// runLauncherRestart runs deploy's respawn-launcher restart against fake tmux,
+// systemctl and launchctl, so no test can reach a real supervisor. supervisor
+// names the one the fakes report installed: "", "systemd" or "launchd".
+func runLauncherRestart(t *testing.T, supervisor string) (home string, freshLauncher []byte, tmuxCalls string, supervisorCalls string) {
+	t.Helper()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +290,7 @@ func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.
 	root := t.TempDir()
 	checkout := filepath.Join(root, "checkout")
 	dataDir := filepath.Join(root, "data")
-	home := filepath.Join(root, "home")
+	home = filepath.Join(root, "home")
 	fakeBin := filepath.Join(root, "fakebin")
 	for _, dir := range []string{filepath.Join(checkout, "bin", "rel", "bin"), filepath.Join(checkout, "bin"), dataDir, filepath.Join(home, ".local", "bin"), fakeBin} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -219,7 +300,7 @@ func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.
 	if err := os.WriteFile(filepath.Join(checkout, "bin", "rel", "bin", "shuttled"), []byte("release"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	freshLauncher, err := os.ReadFile("../../bin/shuttle-launch")
+	freshLauncher, err = os.ReadFile("../../bin/shuttle-launch")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +316,16 @@ func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.
 	if err := os.WriteFile(filepath.Join(fakeBin, "tmux"), []byte(tmux), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	supervisorLog := filepath.Join(root, "supervisor-calls")
+	fakes := map[string]string{
+		"systemctl": "#!/bin/sh\ncase \"$*\" in *is-enabled*|*is-active*) [ \"$SHUTTLE_TEST_SUPERVISOR\" = systemd ]; exit $? ;; esac\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
+		"launchctl": "#!/bin/sh\ncase \"$1\" in print) [ \"$SHUTTLE_TEST_SUPERVISOR\" = launchd ]; exit $? ;; esac\nprintf 'launchctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
+	}
+	for name, source := range fakes {
+		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 ` + helper + `
 respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
@@ -247,6 +338,8 @@ respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
 		"SHUTTLE_TEST_DATA_DIR="+dataDir,
 		"SHUTTLE_TEST_MARKER="+marker,
 		"SHUTTLE_TEST_CALLS="+calls,
+		"SHUTTLE_TEST_SUPERVISOR="+supervisor,
+		"SHUTTLE_TEST_SUPERVISOR_CALLS="+supervisorLog,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -260,12 +353,38 @@ respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
 	if err != nil || strings.TrimSpace(string(repo)) != checkout {
 		t.Fatalf("deployed checkout state = %q, %v; want %q", repo, err, checkout)
 	}
-	got, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatalf("tmux was not called: %v\n%s", err, out)
+	tmuxLog, _ := os.ReadFile(calls)
+	supervisorOut, _ := os.ReadFile(supervisorLog)
+	return home, freshLauncher, string(tmuxLog), string(supervisorOut)
+}
+
+func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
+	home, _, got, supervisorCalls := runLauncherRestart(t, "")
+	if got == "" {
+		t.Fatal("tmux was not called")
 	}
-	if !strings.Contains(string(got), "marker-before-kill") || !strings.Contains(string(got), filepath.Join(home, ".local", "bin", "shuttle-launch")+"' --loop") {
+	if !strings.Contains(got, "marker-before-kill") || !strings.Contains(got, filepath.Join(home, ".local", "bin", "shuttle-launch")+"' --loop") {
 		t.Fatalf("loop restart did not mark before killing and relaunch through the installed script: %s", got)
+	}
+	if supervisorCalls != "" {
+		t.Fatalf("an unsupervised host touched a supervisor: %s", supervisorCalls)
+	}
+}
+
+func TestLauncherRestartsThroughAnInstalledSupervisor(t *testing.T) {
+	for supervisor, want := range map[string]string{
+		"systemd": "systemctl --user restart shuttle-daemon.service",
+		"launchd": "launchctl kickstart -k gui/",
+	} {
+		t.Run(supervisor, func(t *testing.T) {
+			_, _, tmuxCalls, supervisorCalls := runLauncherRestart(t, supervisor)
+			if tmuxCalls != "" {
+				t.Fatalf("a supervised host started a respawn loop: %s", tmuxCalls)
+			}
+			if !strings.Contains(supervisorCalls, want) {
+				t.Fatalf("supervisor calls = %q; want %q", supervisorCalls, want)
+			}
+		})
 	}
 }
 

@@ -32,6 +32,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 		Log:        `/tmp/log dir/"quoted"\literal %log`,
 		Port:       "4401",
 		SSHSocket:  `/tmp/ssh socket/"quoted"\literal %sock`,
+		TmuxTmpdir: `/scratch/tmux dir/"quoted"\literal %tmux & <x>`,
 	}
 
 	for _, tc := range []struct {
@@ -58,7 +59,8 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 				t.Fatalf("unrendered placeholders: %v\n%s", remaining, rendered)
 			}
 			if tc.osName == "Darwin" {
-				if !strings.Contains(rendered, "&amp; &lt;unit&gt;") || !strings.Contains(rendered, "&lt;notes&gt;") {
+				if !strings.Contains(rendered, "&amp; &lt;unit&gt;") || !strings.Contains(rendered, "&lt;notes&gt;") ||
+					!strings.Contains(rendered, "<key>TMUX_TMPDIR</key>\n<string>/scratch/tmux dir/&#34;quoted&#34;\\literal %tmux &amp; &lt;x&gt;</string>") {
 					t.Fatalf("plist values were not XML escaped:\n%s", rendered)
 				}
 				decoder := xml.NewDecoder(strings.NewReader(rendered))
@@ -82,6 +84,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 					`StandardError=append:/tmp/log dir/"quoted"\literal %%log`,
 					`Environment="SHUTTLE_LOG=/tmp/log dir/\"quoted\"\\literal %%log"`,
 					`Environment="SHUTTLE_RELEASE=` + systemdQuotedValue(release.Dir) + `"`,
+					`Environment="TMUX_TMPDIR=/scratch/tmux dir/\"quoted\"\\literal %%tmux & <x>"`,
 				} {
 					if !strings.Contains(rendered, want) {
 						t.Errorf("systemd unit missing escaped value %q:\n%s", want, rendered)
@@ -113,14 +116,15 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 	options := supervisorOptions{
 		Label: "io.shuttle.test", ShuttleBin: "/opt/shuttle", StoresFile: "/tmp/stores.json",
 		Path: "/usr/bin:/home/test/.local/bin", Log: "/tmp/shuttle.log", Port: "4401",
-		SSHSocket: "/tmp/ssh-agent.sock",
+		SSHSocket: "/tmp/ssh-agent.sock", TmuxTmpdir: "/scratch/tmux",
 	}
 	for _, tc := range []struct {
 		osName string
 		want   string
+		tmux   string
 	}{
-		{"Darwin", `<string>daemon</string>`},
-		{"Linux", `ExecStart="/opt/shuttle" daemon start --force`},
+		{"Darwin", `<string>daemon</string>`, "<key>TMUX_TMPDIR</key>\n        <string>/scratch/tmux</string>"},
+		{"Linux", `ExecStart="/opt/shuttle" daemon start --force`, `Environment="TMUX_TMPDIR=/scratch/tmux"`},
 	} {
 		t.Run(tc.osName, func(t *testing.T) {
 			path, err := findSupervisorTemplate(release, tc.osName)
@@ -137,6 +141,18 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 			}
 			if !strings.Contains(rendered, tc.want) || templatePlaceholderPattern.MatchString(rendered) {
 				t.Fatalf("rendered template does not start shuttle or has placeholders:\n%s", rendered)
+			}
+			if !strings.Contains(rendered, tc.tmux) {
+				t.Fatalf("rendered template lacks TMUX_TMPDIR %q:\n%s", tc.tmux, rendered)
+			}
+			bare := options
+			bare.TmuxTmpdir = ""
+			without, err := renderSupervisorTemplate(tc.osName, string(source), bare, release)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(without, "<key>TMUX_TMPDIR</key>") || strings.Contains(without, `Environment="TMUX_TMPDIR=`) {
+				t.Fatalf("empty TMUX_TMPDIR was rendered:\n%s", without)
 			}
 			if tc.osName == "Darwin" {
 				decoder := xml.NewDecoder(strings.NewReader(rendered))
@@ -177,6 +193,7 @@ func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
 			_ = os.Unsetenv("AGENT_SSH_AUTH_SOCK")
 		}
 	})
+	stubLoginEnv(t, loginEnv{Path: "/captured", TmuxTmpdir: ""})
 	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print", "--os", "Linux", "--path", "/bin", "--log", filepath.Join(home, "shuttle.log"))
 	if err != nil {
 		t.Fatalf("daemon install --print --os Linux: %v\n%s", err, stderr)
@@ -214,6 +231,7 @@ func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
 	t.Setenv("SHUTTLE_RELEASE", release.Dir)
 	t.Setenv("SHUTTLE_STORES_FILE", storesFile)
 	t.Setenv("AGENT_STORES", "")
+	stubLoginEnv(t, loginEnv{Path: "/captured"})
 	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--dry-run", "--os", "Linux", "--stores", "", "--ssh-auth-sock=", "--path", "/usr/bin", "--log", "/tmp/shuttle.log", "--label", defaultDaemonLabel)
 	if err != nil {
 		t.Fatalf("daemon install --dry-run: %v\n%s", err, stderr)
@@ -245,10 +263,10 @@ func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
 			t.Fatal(err)
 		}
 		if tc.osName == "Darwin" {
-			if strings.Contains(rendered, "<key>SHUTTLE_PORT</key>") || strings.Contains(rendered, "<key>SSH_AUTH_SOCK</key>") {
+			if strings.Contains(rendered, "<key>SHUTTLE_PORT</key>") || strings.Contains(rendered, "<key>SSH_AUTH_SOCK</key>") || strings.Contains(rendered, "<key>TMUX_TMPDIR</key>") {
 				t.Fatalf("empty optional plist entries remain:\n%s", rendered)
 			}
-		} else if strings.Contains(rendered, `Environment="SHUTTLE_PORT=`) || strings.Contains(rendered, `Environment="SSH_AUTH_SOCK=`) {
+		} else if strings.Contains(rendered, `Environment="SHUTTLE_PORT=`) || strings.Contains(rendered, `Environment="SSH_AUTH_SOCK=`) || strings.Contains(rendered, `Environment="TMUX_TMPDIR=`) {
 			t.Fatalf("empty optional systemd entries remain:\n%s", rendered)
 		}
 	}
@@ -346,18 +364,166 @@ func TestSupervisorTemplateRequiresExactPlaceholderSet(t *testing.T) {
 	}
 }
 
-func TestCaptureLoginPathReadsFencedShellOutput(t *testing.T) {
+func TestCaptureLoginEnvReadsFencedShellOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("login-shell PATH capture requires a POSIX shell")
+		t.Skip("login-shell capture requires a POSIX shell")
 	}
-	shell := filepath.Join(t.TempDir(), "login-shell")
-	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf 'banner\\n__SHUTTLE_PATH__/one:/bin:/one\\n'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got := captureLoginPathWith(shell, "-lc"); got != "/one:/bin:/one" {
-		t.Fatalf("captured PATH = %q", got)
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   loginEnv
+		ok     bool
+	}{
+		{"both", `banner\n__SHUTTLE_TMUX_TMPDIR__/rc/noise\n__SHUTTLE_PATH__/one:/bin:/one\n__SHUTTLE_TMUX_TMPDIR__/scratch/tmp\n`, loginEnv{Path: "/one:/bin:/one", TmuxTmpdir: "/scratch/tmp"}, true},
+		{"no tmux dir", `__SHUTTLE_PATH__/usr/bin\n__SHUTTLE_TMUX_TMPDIR__\n`, loginEnv{Path: "/usr/bin"}, true},
+		{"no path", `__SHUTTLE_PATH__\n__SHUTTLE_TMUX_TMPDIR__/scratch/tmp\n`, loginEnv{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shell := filepath.Join(t.TempDir(), "login-shell")
+			if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '"+tc.output+"'\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := captureLoginEnvWith(shell, "-lc")
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("captured %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
+			}
+		})
 	}
 }
+
+func TestCaptureLoginEnvRunsOneLoginShellForEveryValue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("login-shell capture requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	rc := filepath.Join(dir, "rc")
+	// The rc file exports TMUX_TMPDIR the way a cluster ~/.bashrc does; the
+	// capture must evaluate the real script, not echo canned markers.
+	if err := os.WriteFile(rc, []byte("PATH=/rc/bin:/usr/bin\nTMUX_TMPDIR=/scratch/me/tmp\nexport PATH TMUX_TMPDIR\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(dir, "sh")
+	script := "#!/bin/sh\necho \"$1\" >> '" + calls + "'\n. '" + rc + "'\nexec /bin/sh -c \"$2\"\n"
+	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	t.Setenv("TMUX_TMPDIR", "/leaked/from/installer")
+	got := captureLoginEnv()
+	if got != (loginEnv{Path: "/rc/bin:/usr/bin", TmuxTmpdir: "/scratch/me/tmp"}) {
+		t.Fatalf("captured %+v", got)
+	}
+	invocations, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(invocations)) != "-lic" {
+		t.Fatalf("login shell invocations = %q; want one -lic run", invocations)
+	}
+}
+
+func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	share := filepath.Join(release.Dir, "share")
+	if err := os.MkdirAll(share, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range supervisorTemplateFixtures() {
+		if err := os.WriteFile(filepath.Join(share, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHUTTLE_RELEASE", release.Dir)
+	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
+	unsetEnv(t, "AGENT_TMUX_TMPDIR")
+	for _, tc := range []struct {
+		name  string
+		env   *string
+		args  []string
+		path  string
+		want  string
+		calls int
+	}{
+		{name: "captured", want: "/scratch/captured", calls: 1},
+		{name: "captured with explicit path", args: []string{"--path", "/explicit"}, path: "/explicit", want: "/scratch/captured", calls: 1},
+		{name: "flag", args: []string{"--tmux-tmpdir", "/flag/dir"}, want: "/flag/dir", calls: 1},
+		{name: "flag and path skip capture", args: []string{"--tmux-tmpdir", "/flag/dir", "--path", "/explicit"}, path: "/explicit", want: "/flag/dir"},
+		{name: "env", env: stringPtr("/env/dir"), want: "/env/dir", calls: 1},
+		{name: "flag beats env", env: stringPtr("/env/dir"), args: []string{"--tmux-tmpdir=/flag/dir"}, want: "/flag/dir", calls: 1},
+		{name: "explicit empty omits", args: []string{"--tmux-tmpdir="}, want: "", calls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != nil {
+				t.Setenv("AGENT_TMUX_TMPDIR", *tc.env)
+			} else {
+				unsetEnv(t, "AGENT_TMUX_TMPDIR")
+			}
+			calls := 0
+			previous := loginEnvCapture
+			loginEnvCapture = func() loginEnv {
+				calls++
+				return loginEnv{Path: "/captured", TmuxTmpdir: "/scratch/captured"}
+			}
+			t.Cleanup(func() { loginEnvCapture = previous })
+			for _, osName := range []string{"Linux", "Darwin"} {
+				calls = 0
+				args := append([]string{"daemon", "install", "--print", "--os", osName, "--ssh-auth-sock=", "--log", filepath.Join(home, "shuttle.log")}, tc.args...)
+				out, stderr, err := executeCLI(t, t.TempDir(), args...)
+				if err != nil {
+					t.Fatalf("%s: daemon install --print: %v\n%s", osName, err, stderr)
+				}
+				if calls != tc.calls {
+					t.Errorf("%s: login shell captured %d times; want %d", osName, calls, tc.calls)
+				}
+				wantPath := tc.path
+				if wantPath == "" {
+					wantPath = "/captured"
+				}
+				tmuxLine, pathLine := `Environment="TMUX_TMPDIR=`+tc.want+`"`, `Environment="PATH=`+wantPath
+				if osName == "Darwin" {
+					tmuxLine, pathLine = "<key>TMUX_TMPDIR</key>\n<string>"+tc.want+"</string>", "<key>Path</key><string>"+wantPath
+				}
+				if !strings.Contains(out, pathLine) {
+					t.Errorf("%s: PATH is not %q:\n%s", osName, wantPath, out)
+				}
+				if tc.want == "" {
+					if strings.Contains(out, "TMUX_TMPDIR") {
+						t.Errorf("%s: an empty TMUX_TMPDIR was rendered:\n%s", osName, out)
+					}
+				} else if !strings.Contains(out, tmuxLine) {
+					t.Errorf("%s: TMUX_TMPDIR is not %q:\n%s", osName, tc.want, out)
+				}
+			}
+		})
+	}
+}
+
+func stubLoginEnv(t *testing.T, env loginEnv) {
+	t.Helper()
+	previous := loginEnvCapture
+	loginEnvCapture = func() loginEnv { return env }
+	t.Cleanup(func() { loginEnvCapture = previous })
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	previous, wasSet := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(key, previous)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
+
+func stringPtr(value string) *string { return &value }
 
 func TestSupervisorPathContainsShuttleAndFeltDirectories(t *testing.T) {
 	binDir := t.TempDir()
@@ -405,6 +571,8 @@ func supervisorTemplateFixtures() map[string]string {
 <string>__PORT__</string>
 <key>SSH_AUTH_SOCK</key>
 <string>__SSH_AUTH_SOCK__</string>
+<key>TMUX_TMPDIR</key>
+<string>__TMUX_TMPDIR__</string>
 </dict></plist>
 `,
 		"io.shuttle.daemon.service.template": `[Service]
@@ -417,6 +585,7 @@ Environment="SHUTTLE_PORT=__PORT__"
 Environment="SHUTTLE_STORES=__SHUTTLE_STORES__"
 Environment="SHUTTLE_STORES_FILE=__SHUTTLE_STORES_FILE__"
 Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
+Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
 Environment="SHUTTLE_LOG=__LOG__"
 StandardOutput=append:__LOG__
 StandardError=append:__LOG__

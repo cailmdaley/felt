@@ -425,6 +425,7 @@ The install fixes these values into the job:
 | `--stores <list>` | `AGENT_STORES` | empty — use the editable store registry |
 | — | `SHUTTLE_STORES_FILE` | `~/.config/shuttle/stores.json` |
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
+| `--tmux-tmpdir <dir>` | `AGENT_TMUX_TMPDIR` | the login shell's `TMUX_TMPDIR`, captured at install time; omitted when empty |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
 | `--label <name>` | `AGENT_LABEL` | `io.shuttle.daemon` |
@@ -485,10 +486,12 @@ does this through `make install-agent`). The agent sets `RunAtLoad` and
 had started by hand is stopped first — the job starts its own, and two would
 fight over `:4000`.
 
-Five environment variables go into the plist. Each one exists because the
+Six environment variables go into the plist. Each one exists because the
 obvious approach failed:
 
-- **`PATH`** — captured from `bash -lc 'echo $PATH'` *at install time*.
+- **`PATH`** — captured *at install time* from one login shell run in a
+  scrubbed environment (your `$SHELL` as `-lic`, then `-lc`, then
+  `/bin/bash -lc`), so the installing session's own values cannot leak in.
   launchd's own environment is nearly empty, and the daemon cannot find `felt`
   or `shuttle` in it. (The daemon itself needs nothing off `PATH` to boot — it
   carries its own Erlang runtime — but shells `felt` for fiber content and
@@ -509,6 +512,14 @@ obvious approach failed:
   hands the daemon a bare per-session Keychain agent that holds only the default
   key, which breaks every SSH the daemon makes to a remote host. Point
   `--ssh-auth-sock` elsewhere if your socket lives elsewhere.
+- **`TMUX_TMPDIR`** — captured from the same login shell as `PATH`. tmux
+  places its server socket under this directory, so the daemon's workers and
+  your own `tmux attach` meet on one server only if both see the same value.
+  An rc file that moves it off `/tmp` (common on cluster hosts with a small or
+  shared `/tmp`) must reach the daemon too; otherwise the board's Attach finds
+  no workers and the daemon cannot reach sessions started from your shell.
+  Dropped when empty, so tmux's default applies. `--tmux-tmpdir` overrides the
+  capture, and `--tmux-tmpdir=` omits it.
 - **`SHUTTLE_LOG`** — the same file `StandardOutPath` redirects to, rendered
   from the same `--log`. launchd never tells a process where its stdout went,
   and the daemon needs to know in order to rotate it (see
@@ -528,10 +539,11 @@ see [Sharp edges](#sharp-edges).
 `~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
 enable` and `restart`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
 `WantedBy=default.target` starts the daemon at login. It bakes in the same
-`PATH`, store configuration, and `SSH_AUTH_SOCK` as the plist, for the same reasons —
-a systemd user manager inherits almost nothing either. An empty
-`SSH_AUTH_SOCK` is dropped from the rendered unit rather than baked in as a
-dead path, since Linux has no canonical agent socket.
+`PATH`, `TMUX_TMPDIR`, store configuration, and `SSH_AUTH_SOCK` as the plist, for
+the same reasons — a systemd user manager inherits almost nothing either. An
+empty `SSH_AUTH_SOCK` or `TMUX_TMPDIR` is dropped from the rendered unit rather
+than baked in as a dead value, since Linux has no canonical agent socket and an
+empty `TMUX_TMPDIR` means tmux's default.
 
 It is a **user** unit: the daemon runs as you and wants no root.
 

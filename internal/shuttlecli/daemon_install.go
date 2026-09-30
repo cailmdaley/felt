@@ -55,12 +55,18 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 			} else {
 				options.SSHSocket, options.SSHSocketSet = defaultDaemonSSHSocket(options.OS, home), false
 			}
+			if cmd.Flags().Changed("tmux-tmpdir") {
+				options.TmuxTmpdirSet = true
+			} else if dir, ok := os.LookupEnv("AGENT_TMUX_TMPDIR"); ok {
+				options.TmuxTmpdir, options.TmuxTmpdirSet = dir, true
+			}
 			return installDaemonSupervisor(options)
 		},
 	}
 	command.Flags().StringVar(&options.Stores, "stores", options.Stores, "Fixed comma-separated store list; empty uses the editable registry")
 	command.Flags().StringVar(&options.SSHSocket, "ssh-auth-sock", options.SSHSocket, "SSH agent socket to use (empty omits the setting)")
 	command.Flags().StringVar(&options.Path, "path", options.Path, "PATH for the supervisor (default: captured from a login shell)")
+	command.Flags().StringVar(&options.TmuxTmpdir, "tmux-tmpdir", "", "TMUX_TMPDIR for the supervisor, so the daemon shares your tmux server (default: captured from a login shell; empty omits the setting)")
 	command.Flags().StringVar(&options.Log, "log", options.Log, "Daemon log path")
 	command.Flags().StringVar(&options.Label, "label", options.Label, "Supervisor label")
 	command.Flags().StringVar(&options.Port, "port", options.Port, "Daemon port for an additional instance")
@@ -99,7 +105,12 @@ type supervisorOptions struct {
 	Port         string
 	SSHSocket    string
 	SSHSocketSet bool
-	Print        bool
+	// TmuxTmpdir selects the tmux server directory the daemon shares with
+	// the user's login shells; TmuxTmpdirSet means it was given explicitly
+	// rather than captured.
+	TmuxTmpdir    string
+	TmuxTmpdirSet bool
+	Print         bool
 }
 
 func supervisorOS(goos string) string {
@@ -147,8 +158,14 @@ func installDaemonSupervisor(options supervisorOptions) error {
 	if options.Log == "" {
 		options.Log = defaultDaemonLog(options.OS)
 	}
-	if options.Path == "" {
-		options.Path = captureLoginPath()
+	if options.Path == "" || !options.TmuxTmpdirSet {
+		login := loginEnvCapture()
+		if options.Path == "" {
+			options.Path = login.Path
+		}
+		if !options.TmuxTmpdirSet {
+			options.TmuxTmpdir = login.TmuxTmpdir
+		}
 	}
 	options.Path = pathForDaemonSupervisor(options.Path)
 	if options.SSHSocket == "" && options.OS == "Darwin" && !options.SSHSocketSet {
@@ -189,7 +206,7 @@ func validateSupervisorOptions(options supervisorOptions) error {
 	for name, value := range map[string]string{
 		"--label": options.Label, "--stores": options.Stores, "--stores-file": options.StoresFile,
 		"--path": options.Path, "--log": options.Log, "--port": options.Port,
-		"--ssh-auth-sock": options.SSHSocket,
+		"--ssh-auth-sock": options.SSHSocket, "--tmux-tmpdir": options.TmuxTmpdir,
 	} {
 		if strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("%s may not contain NUL or newline characters", name)
@@ -269,55 +286,46 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 		"__PATH__":                options.Path,
 		"__PORT__":                options.Port,
 		"__SSH_AUTH_SOCK__":       options.SSHSocket,
+		"__TMUX_TMPDIR__":         options.TmuxTmpdir,
 	}
 	if osName == "Darwin" {
 		values["__LABEL__"] = options.Label
-		for _, key := range []string{"__PORT__", "__SSH_AUTH_SOCK__"} {
-			if values[key] == "" {
-				plistKey := "SSH_AUTH_SOCK"
-				if key == "__PORT__" {
-					plistKey = "SHUTTLE_PORT"
-				}
-				source = removePlistEntry(source, plistKey, key)
+		for _, optional := range optionalSupervisorEnv {
+			if values[optional.placeholder] == "" {
+				source = removePlistEntry(source, optional.key, optional.placeholder)
 			}
 		}
-		escaped := map[string]string{
-			"__LABEL__": xmlEscape(options.Label), "__SHUTTLE_BIN__": xmlEscape(values["__SHUTTLE_BIN__"]),
-			"__SHUTTLE_RELEASE__": xmlEscape(release.Dir), "__WORKING_DIRECTORY__": xmlEscape(values["__WORKING_DIRECTORY__"]),
-			"__LOG__":            xmlEscape(options.Log),
-			"__SHUTTLE_STORES__": xmlEscape(options.Stores), "__SHUTTLE_STORES_FILE__": xmlEscape(options.StoresFile),
-			"__PATH__": xmlEscape(options.Path), "__PORT__": xmlEscape(options.Port),
-			"__SSH_AUTH_SOCK__": xmlEscape(options.SSHSocket),
-		}
-		for placeholder, value := range escaped {
-			source = strings.ReplaceAll(source, placeholder, value)
+		for placeholder, value := range values {
+			source = strings.ReplaceAll(source, placeholder, xmlEscape(value))
 		}
 		return rejectUnrenderedPlaceholders(source)
 	}
 
-	if options.Port == "" {
-		source = removeEnvironmentLine(source, "SHUTTLE_PORT", "__PORT__")
-	}
-	if options.SSHSocket == "" {
-		source = removeEnvironmentLine(source, "SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__")
+	for _, optional := range optionalSupervisorEnv {
+		if values[optional.placeholder] == "" {
+			source = removeEnvironmentLine(source, optional.key, optional.placeholder)
+		}
 	}
 	source = strings.ReplaceAll(source, "WorkingDirectory=__WORKING_DIRECTORY__", "WorkingDirectory="+systemdLiteralPath(values["__WORKING_DIRECTORY__"]))
 	source = strings.ReplaceAll(source, "StandardOutput=append:__LOG__", "StandardOutput=append:"+systemdLiteralPath(options.Log))
 	source = strings.ReplaceAll(source, "StandardError=append:__LOG__", "StandardError=append:"+systemdLiteralPath(options.Log))
-	source = replaceSystemdPlaceholder(source, "__LOG__", options.Log)
-	source = replaceSystemdPlaceholder(source, "__SHUTTLE_BIN__", values["__SHUTTLE_BIN__"])
-	source = replaceSystemdPlaceholder(source, "__SHUTTLE_RELEASE__", release.Dir)
-	source = replaceSystemdPlaceholder(source, "__SHUTTLE_STORES__", options.Stores)
-	source = replaceSystemdPlaceholder(source, "__SHUTTLE_STORES_FILE__", options.StoresFile)
-	source = replaceSystemdPlaceholder(source, "__PATH__", options.Path)
-	source = replaceSystemdPlaceholder(source, "__PORT__", options.Port)
-	source = replaceSystemdPlaceholder(source, "__SSH_AUTH_SOCK__", options.SSHSocket)
+	for placeholder, value := range values {
+		source = replaceSystemdPlaceholder(source, placeholder, value)
+	}
 	source = replaceSystemdExecStartPre(source)
 	return rejectUnrenderedPlaceholders(source)
 }
 
+// optionalSupervisorEnv lists the environment entries a rendered supervisor
+// drops when their value is empty: an empty setting is worse than none.
+var optionalSupervisorEnv = []struct{ key, placeholder string }{
+	{"SHUTTLE_PORT", "__PORT__"},
+	{"SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__"},
+	{"TMUX_TMPDIR", "__TMUX_TMPDIR__"},
+}
+
 func validateTemplatePlaceholderSet(osName, source string) error {
-	want := []string{"__SHUTTLE_BIN__", "__SHUTTLE_RELEASE__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__"}
+	want := []string{"__SHUTTLE_BIN__", "__SHUTTLE_RELEASE__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__", "__TMUX_TMPDIR__"}
 	if osName == "Darwin" {
 		want = append(want, "__LABEL__")
 	}
@@ -472,7 +480,23 @@ func cleanPathEntries(value string) []string {
 	return entries
 }
 
-func captureLoginPath() string {
+// loginEnv is what a supervisor carries from the user's login shell: the
+// PATH that finds both CLIs, and the TMUX_TMPDIR that places the daemon's
+// workers on the same tmux server the user attaches to.
+type loginEnv struct {
+	Path       string
+	TmuxTmpdir string
+}
+
+// loginEnvCapture is the capture installDaemonSupervisor uses.
+var loginEnvCapture = captureLoginEnv
+
+// captureLoginEnv runs one login shell in a scrubbed environment and reads
+// every loginEnv variable from its output. It tries the user's shell as an
+// interactive login shell, then as a plain login shell, then /bin/bash; the
+// first attempt that reports a PATH supplies every value. If none does, the
+// installing process's own environment stands in.
+func captureLoginEnv() loginEnv {
 	shell := os.Getenv("SHELL")
 	base := filepath.Base(shell)
 	switch base {
@@ -484,14 +508,25 @@ func captureLoginPath() string {
 		shell = "/bin/bash"
 	}
 	for _, attempt := range []struct{ shell, flags string }{{shell, "-lic"}, {shell, "-lc"}, {"/bin/bash", "-lc"}} {
-		if path := captureLoginPathWith(attempt.shell, attempt.flags); path != "" {
-			return strings.Join(cleanPathEntries(path), string(os.PathListSeparator))
+		if env, ok := captureLoginEnvWith(attempt.shell, attempt.flags); ok {
+			env.Path = strings.Join(cleanPathEntries(env.Path), string(os.PathListSeparator))
+			return env
 		}
 	}
-	return strings.Join(cleanPathEntries(os.Getenv("PATH")), string(os.PathListSeparator))
+	return loginEnv{
+		Path:       strings.Join(cleanPathEntries(os.Getenv("PATH")), string(os.PathListSeparator)),
+		TmuxTmpdir: os.Getenv("TMUX_TMPDIR"),
+	}
 }
 
-func captureLoginPathWith(shell, flags string) string {
+const (
+	loginPathMarker       = "__SHUTTLE_PATH__"
+	loginTmuxTmpdirMarker = "__SHUTTLE_TMUX_TMPDIR__"
+)
+
+// captureLoginEnvWith runs one shell invocation and parses its fenced output.
+// It reports false unless the shell printed a PATH.
+func captureLoginEnvWith(shell, flags string) (loginEnv, bool) {
 	home, _ := os.UserHomeDir()
 	user := os.Getenv("USER")
 	if user == "" {
@@ -502,15 +537,16 @@ func captureLoginPathWith(shell, flags string) string {
 			user = current.Username
 		}
 	}
-	file, err := os.CreateTemp("", "shuttle-path-*.txt")
+	file, err := os.CreateTemp("", "shuttle-env-*.txt")
 	if err != nil {
-		return ""
+		return loginEnv{}, false
 	}
 	path := file.Name()
 	defer os.Remove(path)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, shell, flags, `printf '\n__SHUTTLE_PATH__%s\n' "$PATH"`)
+	script := `printf '\n` + loginPathMarker + `%s\n` + loginTmuxTmpdirMarker + `%s\n' "${PATH-}" "${TMUX_TMPDIR-}"`
+	cmd := exec.CommandContext(ctx, shell, flags, script)
 	cmd.Env = []string{
 		"HOME=" + home, "USER=" + user, "SHELL=" + shell, "TERM=xterm-256color", "TMUX=shuttle-capture",
 		"DISABLE_AUTO_UPDATE=true", "HOMEBREW_NO_AUTO_UPDATE=1",
@@ -520,27 +556,36 @@ func captureLoginPathWith(shell, flags string) string {
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
 		_ = file.Close()
-		return ""
+		return loginEnv{}, false
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		_ = file.Close()
-		return ""
+		return loginEnv{}, false
 	}
 	data, err := io.ReadAll(file)
 	_ = file.Close()
 	if err != nil {
-		return ""
+		return loginEnv{}, false
 	}
-	var captured string
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "__SHUTTLE_PATH__") {
-			captured = strings.TrimPrefix(line, "__SHUTTLE_PATH__")
+	return parseLoginEnv(string(data))
+}
+
+// parseLoginEnv reads the last fenced value of each variable, so rc-file
+// output printed before the fence cannot masquerade as a value.
+func parseLoginEnv(output string) (loginEnv, bool) {
+	var env loginEnv
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.HasPrefix(line, loginPathMarker):
+			env.Path = strings.TrimPrefix(line, loginPathMarker)
+		case strings.HasPrefix(line, loginTmuxTmpdirMarker):
+			env.TmuxTmpdir = strings.TrimPrefix(line, loginTmuxTmpdirMarker)
 		}
 	}
-	if !strings.Contains(captured, "/") {
-		return ""
+	if !strings.Contains(env.Path, "/") {
+		return loginEnv{}, false
 	}
-	return captured
+	return env, true
 }
 
 func supervisorStoresFilePath() (string, error) {
