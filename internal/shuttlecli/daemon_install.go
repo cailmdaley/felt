@@ -289,6 +289,7 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 	if options.SSHSocket == "" {
 		source = removeEnvironmentLine(source, "SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__")
 	}
+	source = strings.ReplaceAll(source, "WorkingDirectory=__SHUTTLE_RELEASE__", "WorkingDirectory="+systemdLiteralPath(release.Dir))
 	source = strings.ReplaceAll(source, "StandardOutput=append:__LOG__", "StandardOutput=append:"+systemdUnitValue(options.Log))
 	source = strings.ReplaceAll(source, "StandardError=append:__LOG__", "StandardError=append:"+systemdUnitValue(options.Log))
 	source = replaceSystemdPlaceholder(source, "__LOG__", options.Log)
@@ -372,6 +373,10 @@ func systemdQuotedValue(value string) string {
 		}
 	}
 	return result.String()
+}
+
+func systemdLiteralPath(value string) string {
+	return strings.ReplaceAll(value, "%", "%%")
 }
 
 func systemdUnitValue(value string) string {

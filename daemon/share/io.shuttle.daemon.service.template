@@ -31,7 +31,7 @@ Documentation=https://cailmdaley.github.io/felt/shuttle/installation/
 
 [Service]
 Type=simple
-WorkingDirectory="__SHUTTLE_RELEASE__"
+WorkingDirectory=__SHUTTLE_RELEASE__
 # StandardOutput=append: (below) never rotates on its own, unlike the tmux
 # respawn loop's own log (bin/shuttle-launch), which size-rotates at 64MB on
 # every iteration. Mirror that here so a systemd-supervised daemon gets the

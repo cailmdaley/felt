@@ -72,6 +72,9 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 					}
 				}
 			} else {
+				if !strings.Contains(rendered, "WorkingDirectory="+release.Dir+"\n") || strings.Contains(rendered, `WorkingDirectory="`) {
+					t.Fatalf("systemd WorkingDirectory must be unquoted:\n%s", rendered)
+				}
 				for _, want := range []string{
 					`ExecStart="/tmp/go bin/shuttle \"quoted\" \\literal %%bin" daemon start --force`,
 					`Environment="SHUTTLE_STORES=/tmp/store with spaces & <notes> \"quoted\" \\literal %%store"`,
@@ -310,7 +313,7 @@ func supervisorTemplateFixtures() map[string]string {
 </dict></plist>
 `,
 		"io.shuttle.daemon.service.template": `[Service]
-WorkingDirectory="__SHUTTLE_RELEASE__"
+WorkingDirectory=__SHUTTLE_RELEASE__
 ExecStart="__SHUTTLE_BIN__" daemon start --force
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'
 Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
