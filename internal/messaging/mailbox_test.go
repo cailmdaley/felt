@@ -40,7 +40,7 @@ func TestMailboxReservationIgnoresPostLinkCleanupFailures(t *testing.T) {
 
 func TestMailboxQueueOfferAndReplay(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("claude", "session", "host", "/project", true); err != nil {
+	if err := RegisterMailbox("claude", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/claude/session", Text: "peer context\n$(never execute)", From: "other-session", MessageID: "id-1"}
@@ -72,7 +72,7 @@ func TestMailboxQueueOfferAndReplay(t *testing.T) {
 
 func TestMailboxOutputFailurePreservesPending(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	_ = RegisterMailbox("claude", "s", "host", "/", true)
+	_ = RegisterMailbox("claude", "s", "host", "/", os.Getpid(), true)
 	r := Request{Address: "shuttle://host/claude/s", Text: "hello", MessageID: "m"}
 	if _, err := Send(context.Background(), "host", r); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestMailboxOutputFailurePreservesPending(t *testing.T) {
 
 func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	_ = RegisterMailbox("claude", "s", "host", "/", true)
+	_ = RegisterMailbox("claude", "s", "host", "/", os.Getpid(), true)
 	for i := 0; i < 10; i++ {
 		_, err := Send(context.Background(), "host", Request{Address: "shuttle://host/claude/s", Text: "hello", MessageID: fmt.Sprint(i)})
 		if err != nil {
@@ -128,12 +128,12 @@ func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
 
 func TestMailboxWithdrawAndNoWake(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	_ = RegisterMailbox("claude", "s", "host", "/", true)
+	_ = RegisterMailbox("claude", "s", "host", "/", os.Getpid(), true)
 	_, err := Send(context.Background(), "host", Request{Address: "shuttle://host/claude/s", Text: "hello", Wake: true, MessageID: "w"})
 	if err == nil {
 		t.Fatal("wake was accepted")
 	}
-	if err := RegisterMailbox("claude", "s", "host", "/", false); err != nil {
+	if err := RegisterMailbox("claude", "s", "host", "/", os.Getpid(), false); err != nil {
 		t.Fatal(err)
 	}
 	if MailboxAvailable("claude", "s", "host") {
@@ -147,7 +147,7 @@ func TestMailboxWithdrawAndNoWake(t *testing.T) {
 
 func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("codex", "thread/1", "owner", "/project", true); err != nil {
+	if err := RegisterMailbox("codex", "thread/1", "owner", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	if MailboxAvailable("codex", "thread/1", "other") {
@@ -176,7 +176,7 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 func TestMailboxWakeRejectedForEveryHookHarness(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	for _, harness := range []string{"claude", "codex"} {
-		if err := RegisterMailbox(harness, "s", "host", "/", true); err != nil {
+		if err := RegisterMailbox(harness, "s", "host", "/", os.Getpid(), true); err != nil {
 			t.Fatal(err)
 		}
 		req := Request{Address: "shuttle://host/" + harness + "/s", Text: "wake", Wake: true, MessageID: harness}
@@ -210,7 +210,7 @@ func TestMergeSessionsCollapsesRepeatedNativeAndHookAddresses(t *testing.T) {
 func TestClaudeDiscoveryKeepsHookRegistrationWhenNativeCLIUnavailable(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
-	if err := RegisterMailbox("claude", "session", "host", "/project", true); err != nil {
+	if err := RegisterMailbox("claude", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := (claudeAdapter{}).discover(context.Background(), "host")

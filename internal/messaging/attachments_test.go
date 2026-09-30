@@ -125,7 +125,7 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
 	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", true); err != nil {
+	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	attachments := []Attachment{
@@ -188,7 +188,7 @@ func TestAttachmentPayloadChangeConflictsOnMessageID(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
 	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", true); err != nil {
+	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/codex/session", MessageID: "same-id", Attachments: []Attachment{testAttachment("x", []byte("one"))}}
@@ -205,7 +205,7 @@ func TestPreexistingSymlinkPreventsDelivery(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
 	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", true); err != nil {
+	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	messageID := "symlink"

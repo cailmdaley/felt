@@ -82,7 +82,7 @@ func TestParseAddressRejectsNoncanonical(t *testing.T) {
 
 func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("claude", "session", "host", "/work", true); err != nil {
+	if err := RegisterMailbox("claude", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	request := Request{

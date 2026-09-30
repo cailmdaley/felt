@@ -33,6 +33,35 @@ func processAlive(pid int, start string) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+func processStartToken(pid int) string {
+	start, _ := linuxProcessStartTime(pid)
+	return start
+}
+
+// processParent reads the parent pid (field 4) and command name (field 2) of
+// pid from /proc/<pid>/stat.
+func processParent(pid int) (int, string, bool) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, "", false
+	}
+	s := string(b)
+	openParen := strings.IndexByte(s, '(')
+	closeParen := strings.LastIndexByte(s, ')')
+	if openParen < 0 || closeParen < openParen {
+		return 0, "", false
+	}
+	fields := strings.Fields(s[closeParen+1:])
+	if len(fields) < 2 {
+		return 0, "", false
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return ppid, s[openParen+1 : closeParen], true
+}
+
 // linuxProcessStartTime reads field 22 from /proc/<pid>/stat. The command name
 // is parenthesized and may itself contain spaces or parentheses, so split only
 // after its final closing parenthesis.

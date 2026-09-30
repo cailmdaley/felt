@@ -98,7 +98,7 @@ func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 	t.Setenv("SHUTTLE_CONFER_STATE_DIR", t.TempDir())
 	socket, closeFixture := piNativeFixture(t, map[string]any{"ok": true})
 	defer closeFixture()
-	if err := RegisterMailbox("pi", "session", "host", "/project", true); err != nil {
+	if err := RegisterMailbox("pi", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := RegisterPiNative("session", "host", "/project", socket, "", os.Getpid(), true); err != nil {
@@ -221,7 +221,7 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 
 func TestPiMailboxSupportsPassiveContext(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("pi", "session", "host", "/project", true); err != nil {
+	if err := RegisterMailbox("pi", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/pi/session", Text: "context", MessageID: "passive"}

@@ -20,11 +20,49 @@ import (
 // Supported harness hook interfaces accept additional context without starting
 // a turn. These host-local mailboxes preserve messages until a receiving hook can
 // offer them. An offer is not evidence that the model read or acted on it.
+//
+// A registration names the receiver's harness process. The mailbox is
+// available only while that process lives: a harness that exits without
+// running its SessionEnd hook, as one killed with its tmux pane does, leaves
+// its registration behind, and a message queued there would never be offered.
 type mailboxRegistration struct {
 	ID       string `json:"id"`
 	Host     string `json:"host"`
 	CWD      string `json:"cwd"`
 	LastSeen int64  `json:"last_seen"`
+	PID      int    `json:"pid,omitempty"`
+	Start    string `json:"start,omitempty"`
+}
+
+// live reports whether the registration's receiver process still runs. A
+// registration without a process identity cannot be verified and is not live.
+func (r mailboxRegistration) live() bool {
+	return r.PID > 0 && processAlive(r.PID, r.Start)
+}
+
+// hookShells are the launchers a harness may interpose between itself and a
+// hook command. They exit with the hook, so they never identify the receiver.
+var hookShells = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true, "mksh": true,
+	"fish": true, "csh": true, "tcsh": true, "env": true,
+}
+
+// HookReceiverPID names the harness process running the calling hook: the
+// nearest ancestor that is not a shell. It returns 0 when the chain cannot be
+// read.
+func HookReceiverPID() int {
+	pid := os.Getppid()
+	for hops := 0; hops < 8 && pid > 0; hops++ {
+		ppid, name, ok := processParent(pid)
+		if !ok {
+			return 0
+		}
+		if !hookShells[name] {
+			return pid
+		}
+		pid = ppid
+	}
+	return 0
 }
 
 type mailboxEntry struct {
@@ -41,9 +79,10 @@ func mailboxDir(harness, id string) string {
 	return filepath.Join(dataDir(), "mailboxes", harness, mailboxKey(id))
 }
 
-// RegisterMailbox is called by the receiver's hooks, never by a sender. A
-// SessionEnd withdraws availability without deleting already queued messages.
-func RegisterMailbox(harness, id, host, cwd string, active bool) error {
+// RegisterMailbox is called by the receiver's hooks, never by a sender, with
+// the receiver's harness process (see HookReceiverPID). A SessionEnd withdraws
+// availability without deleting already queued messages.
+func RegisterMailbox(harness, id, host, cwd string, pid int, active bool) error {
 	if harness != "claude" && harness != "codex" && harness != "pi" {
 		return errCode("invalid_request", "unsupported mailbox harness")
 	}
@@ -64,10 +103,14 @@ func RegisterMailbox(harness, id, host, cwd string, active bool) error {
 		}
 		return syncDir(dir)
 	}
+	reg := mailboxRegistration{ID: id, Host: host, CWD: cwd, LastSeen: time.Now().UnixMilli(), PID: pid, Start: processStartToken(pid)}
+	if !reg.live() {
+		return errCode("unavailable", "mailbox receiver process %d is not running", pid)
+	}
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(mailboxRegistration{ID: id, Host: host, CWD: cwd, LastSeen: time.Now().UnixMilli()})
+	b, err := json.Marshal(reg)
 	if err != nil {
 		return err
 	}
@@ -75,8 +118,20 @@ func RegisterMailbox(harness, id, host, cwd string, active bool) error {
 }
 
 func MailboxAvailable(harness, id, host string) bool {
+	return mailboxUnavailable(harness, id, host) == ""
+}
+
+// mailboxUnavailable says why a session cannot take a queued message, or
+// returns "" when a live receiver on host registered it.
+func mailboxUnavailable(harness, id, host string) string {
 	r, err := mailboxRegistrationFor(harness, id)
-	return err == nil && r.ID == id && r.Host == host
+	if err != nil || r.ID != id || r.Host != host {
+		return "session has not registered a Shuttle message hook on this host"
+	}
+	if !r.live() {
+		return "session's registered receiver process is no longer running; no hook would offer this message"
+	}
+	return ""
 }
 
 func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
@@ -93,8 +148,11 @@ func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
 
 func queueMailbox(a Address, r Request) (Receipt, error) {
 	transport := a.Harness + "-hook"
-	if (a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi") || !MailboxAvailable(a.Harness, a.ID, a.Host) {
-		return rejected(r, transport, "session has not registered a Shuttle message hook on this host"), errCode("unavailable", "session has not registered a Shuttle message hook on this host")
+	if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
+		return rejected(r, transport, "harness has no Shuttle message hook"), errCode("unavailable", "harness has no Shuttle message hook")
+	}
+	if reason := mailboxUnavailable(a.Harness, a.ID, a.Host); reason != "" {
+		return rejected(r, transport, reason), errCode("unavailable", "%s", reason)
 	}
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
@@ -218,8 +276,9 @@ func OfferMailbox(harness, id, host string, emit func([]Request) error) error {
 	return nil
 }
 
-// mailboxSessions returns hook-registered receivers for one harness and host.
-// A registration means the hook was observed, not that a model turn is live.
+// mailboxSessions returns hook-registered receivers for one harness and host
+// whose harness process still runs. A registration means the hook was
+// observed, not that a model turn is live.
 func mailboxSessions(harness, host string) []Session {
 	root := filepath.Join(dataDir(), "mailboxes", harness)
 	entries, err := os.ReadDir(root)
@@ -236,7 +295,7 @@ func mailboxSessions(harness, host string) []Session {
 			continue
 		}
 		var r mailboxRegistration
-		if json.Unmarshal(b, &r) != nil || r.ID == "" || r.Host != host {
+		if json.Unmarshal(b, &r) != nil || r.ID == "" || r.Host != host || !r.live() {
 			continue
 		}
 		address, err := FormatAddress(host, harness, r.ID)

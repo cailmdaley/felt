@@ -64,7 +64,7 @@ func nativeClaudeFixture(t *testing.T, respond func(map[string]any, *os.File)) (
 			}()
 		}
 	}()
-	if err := RegisterMailbox("claude", "session", "host", dir, true); err != nil {
+	if err := RegisterMailbox("claude", "session", "host", dir, os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := RegisterClaudeNative("session", "host", dir, socket, transcript, true); err != nil {

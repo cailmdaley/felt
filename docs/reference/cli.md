@@ -227,7 +227,9 @@ explicit endpoint configuration, durable launch setup, and acceptance checks.
 No-argument `sessions` may report a Claude, Codex, or Pi receiver with `state: "hook"`. This
 means a supported hook registered the session for queued context; it does not
 claim that a model turn is live. `last_seen` records the latest registration in
-Unix milliseconds. An abnormal exit can leave a registration behind. Peer JSON
+Unix milliseconds. A registration names the receiver's harness process and is
+listed only while that process runs; a context-only message to a receiver
+whose process has exited is rejected rather than queued. Peer JSON
 rows include the fiber path when the session ledger records its pairing, and
 provenance rows include a canonical `address` when the host and harness are known.
 Messages wake idle receivers or steer ongoing work by default:

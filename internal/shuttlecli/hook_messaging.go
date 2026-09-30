@@ -38,7 +38,13 @@ func runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if err != nil {
 		return nil
 	}
-	if messaging.RegisterMailbox(harness, input.SessionID, host, input.CWD, input.HookEventName != "SessionEnd") != nil {
+	// Pi's extension runs in the harness process and names it; Claude Code and
+	// Codex run this hook as a child, possibly through a shell.
+	receiver := input.NativePID
+	if harness != "pi" || receiver <= 0 {
+		receiver = messaging.HookReceiverPID()
+	}
+	if messaging.RegisterMailbox(harness, input.SessionID, host, input.CWD, receiver, input.HookEventName != "SessionEnd") != nil {
 		return nil
 	}
 	if harness == "pi" && input.NativeSocket != "" {
