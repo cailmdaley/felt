@@ -47,6 +47,32 @@ for arg in "$@"; do
   esac
 done
 
+supervisor_probe_cmd() {
+  cat <<'SH'
+for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
+  [ -f "$candidate" ] || continue
+  if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then
+    echo 1
+    exit 0
+  fi
+done
+echo 0
+SH
+}
+
+respawn_launcher_restart_cmd() {
+  local checkout="$1"
+  cat <<SH
+set -eu
+mkdir -p "\$HOME/.shuttle" "\$HOME/.local/bin"
+printf '%s\\n' $(shell_quote "$checkout") > "\$HOME/.shuttle/repo"
+install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") "\$HOME/.local/bin/shuttle-launch"
+PATH="\$HOME/.local/bin:\$PATH"
+export PATH
+SHUTTLE_DIR=$(shell_quote "$checkout") "\$HOME/.local/bin/shuttle-launch"
+SH
+}
+
 config_migration_cmd() {
   local reinstall="${1:-1}" release="${2:-}"
   cat <<'SH'
@@ -62,16 +88,8 @@ done
 SH
   if [ "$reinstall" = 1 ]; then
     printf 'export SHUTTLE_RELEASE=%s\n' "$(shell_quote "$release")"
+    printf 'if [ "$(%s)" = 1 ]; then\n' "$(supervisor_probe_cmd)"
     cat <<'SH'
-installed=0
-for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
-  [ -f "$candidate" ] || continue
-  if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then
-    installed=1
-    break
-  fi
-done
-if [ "$installed" = 1 ]; then
   PATH="$HOME/.local/bin:$PATH"
   export PATH
   command -v shuttle >/dev/null 2>&1 || { echo "shuttle is not on PATH; cannot refresh the installed supervisor" >&2; exit 1; }
@@ -376,9 +394,16 @@ deploy_local() {
   # and the old BEAM keeps running the previous release. The booted_at check
   # in wait_for_sha verifies that the cycle actually happened.
   check_listen "" || return 1
-  run_on "" "$(daemon_kill)"; sleep 2
-  launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
-    || bash -lc "cd $(shell_quote "$REPO") && make restart" >/dev/null
+  local supervisor
+  supervisor="$(run_on "" "$(supervisor_probe_cmd)")" || { bad "could not inspect the local supervisor"; return 1; }
+  if [ "$supervisor" = 1 ]; then
+    run_on "" "$(daemon_kill)"; sleep 2
+    launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
+      || bash -lc "cd $(shell_quote "$REPO") && make restart" >/dev/null
+  else
+    run_on "" "$(respawn_launcher_restart_cmd "$REPO")" \
+      || { bad "could not install and restart the local respawn loop"; return 1; }
+  fi
   wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
   release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
@@ -408,9 +433,17 @@ deploy_remote() {
   fi
   run_on "$host" "$(config_migration_cmd 1 "$dir/bin/rel")" \
     || { bad "config migration or supervisor refresh failed on $host"; return 1; }
-  # Cycle the listener; the host's supervisor starts the rebuilt release.
+  # Cycle through the installed supervisor, or replace the tmux loop when no
+  # launchd/systemd unit owns this host.
   check_listen "$host" || return 1
-  run_on "$host" "$(daemon_kill)"
+  local supervisor
+  supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
+  if [ "$supervisor" = 1 ]; then
+    run_on "$host" "$(daemon_kill)"
+  else
+    run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
+      || { bad "could not install and restart the respawn loop on $host"; return 1; }
+  fi
   wait_for_sha "$host" \
     || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \

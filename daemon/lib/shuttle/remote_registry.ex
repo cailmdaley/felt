@@ -949,12 +949,11 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
-  # shuttle-launch itself kills and recreates the default-socket
-  # shuttle-daemon session (single source of truth for session teardown),
-  # including the legacy alt-socket sweep (~/.shuttle/tmux.sock — see
-  # "Legacy socket sweep" in bin/shuttle-launch), and resolves the repo
-  # from the state file bootstrap.sh wrote (~/.shuttle/repo), so revival
-  # needs no SHUTTLE_DIR here. This SSH script is just the invocation.
+  # Prefer the launcher in the deployed checkout named by ~/.shuttle/repo so
+  # SSH revival runs current loop logic, not a stale installed copy. Fetched
+  # releases without a checkout use the installed launcher. Either path owns
+  # default-socket session teardown and the second-socket sweep (see the
+  # socket cleanup in bin/shuttle-launch).
   #
   # Each revive here resets the respawn loop's own backoff (kill + recreate
   # starts a fresh `--loop` process, so its in-shell `backoff` var restarts
@@ -981,7 +980,11 @@ defmodule Shuttle.RemoteRegistry do
   # Guarded on a non-loopback URL: a tunnelled remote must not have a VPN agent
   # started on it as a side effect of a daemon restart.
   defp restart_script(%Remote{} = remote) do
-    daemon = ~s("$HOME/.local/bin/shuttle-launch")
+    daemon =
+      """
+      repo=$(head -n 1 "$HOME/.shuttle/repo" 2>/dev/null || true); if [ -n "$repo" ] && [ -x "$repo/bin/shuttle-launch" ]; then SHUTTLE_DIR="$repo" "$repo/bin/shuttle-launch"; else "$HOME/.local/bin/shuttle-launch"; fi
+      """
+      |> String.trim()
 
     if remote_addressed?(remote) do
       # The gate is the far side's own state file, not the script being

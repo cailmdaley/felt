@@ -503,14 +503,15 @@ defmodule Shuttle.RemoteRegistryTest do
                  Enum.any?(args, &String.contains?(&1, "curl -sf --max-time 3"))
              end)
 
-      # The restart script is now just the shuttle-launch invocation —
-      # shuttle-launch itself owns all session teardown (default-socket
-      # kill + the legacy alt-socket sweep), so restart_remote no longer
-      # ships any tmux kill-session of its own.
+      # The SSH revive prefers the source checkout's current launcher and
+      # falls back to the installed copy for a fetched release. The launcher
+      # owns session teardown, so restart_remote ships no tmux kill-session.
       assert Enum.any?(calls, fn {command, args} ->
                command == "ssh" and
                  Enum.any?(args, fn arg ->
-                   String.contains?(arg, "$HOME/.local/bin/shuttle-launch") and
+                   String.contains?(arg, "head -n 1 \"$HOME/.shuttle/repo\"") and
+                     String.contains?(arg, "\"$repo/bin/shuttle-launch\"") and
+                     String.contains?(arg, "\"$HOME/.local/bin/shuttle-launch\"") and
                      not String.contains?(arg, "tmux ") and
                      not String.contains?(arg, "kill-session")
                  end)

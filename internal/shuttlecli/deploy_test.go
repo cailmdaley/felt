@@ -46,6 +46,75 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 }
 
+func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := shellFunction(t, string(script), "respawn_launcher_restart_cmd")
+	root := t.TempDir()
+	checkout := filepath.Join(root, "checkout")
+	dataDir := filepath.Join(root, "data")
+	home := filepath.Join(root, "home")
+	fakeBin := filepath.Join(root, "fakebin")
+	for _, dir := range []string{filepath.Join(checkout, "bin", "rel", "bin"), filepath.Join(checkout, "bin"), dataDir, filepath.Join(home, ".local", "bin"), fakeBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "bin", "rel", "bin", "shuttled"), []byte("release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	freshLauncher, err := os.ReadFile("../../bin/shuttle-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "bin", "shuttle-launch"), freshLauncher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "shuttle"), []byte("#!/bin/sh\nprintf '{\\\"data_dir\\\":\\\"%s\\\"}\\n' \"$SHUTTLE_TEST_DATA_DIR\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(root, "tmux-calls")
+	marker := filepath.Join(dataDir, "heartbeat.stopped")
+	tmux := "#!/bin/sh\ncase \"$*\" in *kill-session*) [ -f \"$SHUTTLE_TEST_MARKER\" ] && echo marker-before-kill >> \"$SHUTTLE_TEST_CALLS\" ;; esac\nprintf '%s\\n' \"$*\" >> \"$SHUTTLE_TEST_CALLS\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "tmux"), []byte(tmux), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+` + helper + `
+respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
+`
+	cmd := exec.Command("/bin/bash", "-c", harness)
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH="+fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin",
+		"CHECKOUT="+checkout,
+		"SHUTTLE_TEST_DATA_DIR="+dataDir,
+		"SHUTTLE_TEST_MARKER="+marker,
+		"SHUTTLE_TEST_CALLS="+calls,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("respawn launcher restart failed: %v\n%s", err, out)
+	}
+	installed, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch"))
+	if err != nil || string(installed) != string(freshLauncher) {
+		t.Fatalf("installed launcher differs from checkout: err=%v", err)
+	}
+	repo, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
+	if err != nil || strings.TrimSpace(string(repo)) != checkout {
+		t.Fatalf("deployed checkout state = %q, %v; want %q", repo, err, checkout)
+	}
+	got, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("tmux was not called: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(got), "marker-before-kill") || !strings.Contains(string(got), filepath.Join(home, ".local", "bin", "shuttle-launch")+"' --loop") {
+		t.Fatalf("loop restart did not mark before killing and relaunch through the installed script: %s", got)
+	}
+}
+
 func TestShuttleDeployReportsBootingAtReadyTimeout(t *testing.T) {
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
