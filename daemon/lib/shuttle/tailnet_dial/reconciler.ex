@@ -23,7 +23,7 @@ defmodule Shuttle.TailnetDial.Reconciler do
       write_concurrency: true
     ])
 
-    data_dir = Keyword.get(opts, :data_dir, Shuttle.data_dir())
+    data_dir = Keyword.get(opts, :data_dir, Shuttle.TailnetDial.socket_root())
     {remotes, socket} = configured_inputs(opts)
     desired = bridge_specs(remotes, socket, data_dir)
     bridges = reconcile(desired, %{})

@@ -126,8 +126,21 @@ defmodule Shuttle.TailnetDial do
     ArgumentError -> :ok
   end
 
+  @doc """
+  Where dial bridge sockets live: `$XDG_RUNTIME_DIR/shuttle` when the session
+  has a runtime directory, else the data directory. Sockets are ephemeral, and
+  a data directory on a root-squashed network home (whose ancestors are owned
+  by `nobody`) fails `Shuttle.Host.prepare_unix_socket!/1`'s ancestor check.
+  """
+  def socket_root do
+    case System.get_env("XDG_RUNTIME_DIR", "") do
+      "/" <> _ = dir -> if File.dir?(dir), do: Path.join(dir, "shuttle"), else: Shuttle.data_dir()
+      _ -> Shuttle.data_dir()
+    end
+  end
+
   @doc false
-  def socket_path(remote_name, data_dir \\ Shuttle.data_dir()) do
+  def socket_path(remote_name, data_dir \\ socket_root()) do
     Path.join([data_dir, "sock", "dial-#{socket_component(remote_name)}.sock"])
   end
 
