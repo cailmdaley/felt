@@ -225,29 +225,40 @@ enabled = true
 	}
 }
 
-func TestHookFilesCompatibleRequiresBothBoundaryHooks(t *testing.T) {
+func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
 	root := t.TempDir()
 	hooks := filepath.Join(root, "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"session.sh", "remind.sh", "felt-bin.sh"} {
+	for _, name := range []string{"session.sh", "remind.sh", "touch.sh", "event.sh", "commit.sh", "felt-bin.sh", "shuttle-bin.sh"} {
 		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	manifest := `{"hooks":{"SessionStart":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/session.sh"}]}],"PreToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/remind.sh"}]}]}}`
-	if err := os.WriteFile(filepath.Join(hooks, "hooks.json"), []byte(manifest), 0o644); err != nil {
+	manifest := `{"hooks":{"SessionStart":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/session.sh"},{"command":"${PLUGIN_ROOT}/hooks/event.sh"}]}],"PreToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/remind.sh"},{"command":"${PLUGIN_ROOT}/hooks/event.sh"}]}],"PostToolUse":[{"hooks":[{"command":"${PLUGIN_ROOT}/hooks/touch.sh"},{"command":"${PLUGIN_ROOT}/hooks/commit.sh"},{"command":"${PLUGIN_ROOT}/hooks/event.sh"}]}]}}`
+	manifestPath := filepath.Join(hooks, "hooks.json")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !hookFilesCompatible(root) {
-		t.Fatal("complete hook bundle was rejected")
+		t.Fatal("complete Felt and Shuttle hook bundle was rejected")
 	}
-	if err := os.Remove(filepath.Join(hooks, "remind.sh")); err != nil {
+	if err := os.Remove(filepath.Join(hooks, "shuttle-bin.sh")); err != nil {
 		t.Fatal(err)
 	}
 	if hookFilesCompatible(root) {
-		t.Fatal("missing reminder hook was reported compatible")
+		t.Fatal("missing Shuttle resolver was reported compatible")
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "shuttle-bin.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withoutCommit := strings.Replace(manifest, `,{"command":"${PLUGIN_ROOT}/hooks/commit.sh"}`, "", 1)
+	if err := os.WriteFile(manifestPath, []byte(withoutCommit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if hookFilesCompatible(root) {
+		t.Fatal("PostToolUse manifest without the commit hook was reported compatible")
 	}
 }
 

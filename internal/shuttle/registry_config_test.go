@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-// writeUserRegistry points $FELT_AGENTS_FILE at a temp file holding body.
+// writeUserRegistry points $SHUTTLE_AGENTS_FILE at a temp file holding body.
 func writeUserRegistry(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agents.json")
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	t.Setenv("FELT_AGENTS_FILE", path)
+	t.Setenv("SHUTTLE_AGENTS_FILE", path)
 	return path
 }
 
@@ -29,7 +29,7 @@ func find(t *testing.T, reg *AgentRegistry, id string) AgentRecord {
 }
 
 func TestLoadAgentRegistry_NoUserFile(t *testing.T) {
-	t.Setenv("FELT_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
+	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
 
 	reg, err := LoadAgentRegistry()
 	if err != nil {
@@ -52,14 +52,14 @@ func TestLoadAgentRegistry_NoUserFile(t *testing.T) {
 	}
 }
 
-// The env var wins over ~/.config/felt/agents.json — asserted with a fake HOME
-// carrying a registry that must NOT be read.
+// The environment override wins over ~/.config/shuttle/agents.json — asserted
+// with a fake HOME carrying a registry that must not be read.
 func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".config", "felt"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".config", "shuttle"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	homeFile := filepath.Join(home, ".config", "felt", "agents.json")
+	homeFile := filepath.Join(home, ".config", "shuttle", "agents.json")
 	if err := os.WriteFile(homeFile, []byte(`{"version":1,"agents":[{"id":"from-home","cli":"x"}]}`), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	// With no env var, HOME is the source.
-	t.Setenv("FELT_AGENTS_FILE", "")
+	t.Setenv("SHUTTLE_AGENTS_FILE", "")
 	reg, err := LoadAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
@@ -88,7 +88,36 @@ func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 	}
 	find(t, reg, "from-env")
 	if _, ok := reg.Find("from-home"); ok {
-		t.Fatal("the home registry must not be read when $FELT_AGENTS_FILE is set")
+		t.Fatal("the home registry must not be read when SHUTTLE_AGENTS_FILE is set")
+	}
+}
+
+func TestLoadAgentRegistryDoesNotReadFeltNamedEnvironment(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "shuttle")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	homeFile := filepath.Join(configDir, "agents.json")
+	if err := os.WriteFile(homeFile, []byte(`{"version":1,"agents":[{"id":"from-home","cli":"x"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	feltNamedFile := filepath.Join(t.TempDir(), "agents.json")
+	if err := os.WriteFile(feltNamedFile, []byte(`{"version":1,"agents":[{"id":"from-felt-variable","cli":"x"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("SHUTTLE_AGENTS_FILE", "")
+	t.Setenv("FELT_AGENTS_FILE", feltNamedFile)
+
+	reg, err := LoadAgentRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	find(t, reg, "from-home")
+	if _, ok := reg.Find("from-felt-variable"); ok {
+		t.Fatal("registry loaded from FELT_AGENTS_FILE")
 	}
 }
 
@@ -301,7 +330,7 @@ func TestUserAgentsPath_ExpandsTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("FELT_AGENTS_FILE", "~/somewhere/agents.json")
+	t.Setenv("SHUTTLE_AGENTS_FILE", "~/somewhere/agents.json")
 
 	got, err := UserAgentsPath()
 	if err != nil {
@@ -509,7 +538,7 @@ func TestSetEffortOverride_Refusals(t *testing.T) {
 
 func TestSetEffortOverride_CreatesMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "agents.json")
-	t.Setenv("FELT_AGENTS_FILE", path)
+	t.Setenv("SHUTTLE_AGENTS_FILE", path)
 
 	if _, _, changed, err := SetEffortOverride("claude-opus", ""); err != nil || changed {
 		t.Fatalf("resetting with no file = %v, %v; want a no-op", changed, err)

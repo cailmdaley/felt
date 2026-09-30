@@ -308,7 +308,7 @@ func isRegularFile(path string) bool {
 // pluginHookBasenames is the plugin's complete hook set: the files that must
 // exist and be executable, and the only commands hooks.json may reference.
 // The two checks must agree, so they read the same list.
-var pluginHookBasenames = []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "touch.sh"}
+var pluginHookBasenames = []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "shuttle-bin.sh", "touch.sh"}
 
 func validateHookManifest(path, pluginDir string) error {
 	var document map[string]interface{}

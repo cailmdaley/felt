@@ -77,8 +77,8 @@ type AgentRegistry struct {
 }
 
 // LoadAgentRegistry returns the effective agent registry: the built-ins
-// embedded at compile time, with the user registry ($FELT_AGENTS_FILE, else
-// ~/.config/felt/agents.json) folded on top. A missing user file is normal — the
+// embedded at compile time, with the user registry ($SHUTTLE_AGENTS_FILE, else
+// ~/.config/shuttle/agents.json) folded on top. A missing user file is normal — the
 // built-ins stand alone. A present but unreadable or malformed one is fatal, and
 // the error names the path: a typo must not look like "my agents vanished".
 func LoadAgentRegistry() (*AgentRegistry, error) {

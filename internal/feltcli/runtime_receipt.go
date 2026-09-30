@@ -478,7 +478,7 @@ func collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 		}
 		root := b.Path
 		if !hookFilesCompatible(root) {
-			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore the SessionStart and PreToolUse hooks", b.Harness)}
+			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
 		}
 		if b.Harness == "codex" && strings.Contains(b.Evidence, "plugin list") && !codexHooksTrusted() {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: "open a Codex session and approve felt's hooks, then rerun the receipt"}
@@ -489,7 +489,7 @@ func collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 
 func hookFilesCompatible(pluginRoot string) bool {
 	hooks := filepath.Join(pluginRoot, "hooks")
-	for _, name := range []string{"hooks.json", "session.sh", "remind.sh", "felt-bin.sh"} {
+	for _, name := range []string{"hooks.json", "session.sh", "remind.sh", "touch.sh", "event.sh", "commit.sh", "felt-bin.sh", "shuttle-bin.sh"} {
 		path := filepath.Join(hooks, name)
 		if _, err := os.Stat(path); err != nil {
 			return false
@@ -508,7 +508,13 @@ func hookFilesCompatible(pluginRoot string) bool {
 	}
 	session, sessionOK := hookDoc["SessionStart"].([]any)
 	pretool, pretoolOK := hookDoc["PreToolUse"].([]any)
-	return sessionOK && pretoolOK && hookCommandPresent(session, "session.sh") && hookCommandPresent(pretool, "remind.sh")
+	posttool, posttoolOK := hookDoc["PostToolUse"].([]any)
+	return sessionOK && pretoolOK && posttoolOK &&
+		hookCommandPresent(session, "session.sh") &&
+		hookCommandPresent(pretool, "remind.sh") &&
+		hookCommandPresent(posttool, "touch.sh") &&
+		hookCommandPresent(posttool, "commit.sh") &&
+		hookValueContains(hookDoc, "event.sh")
 }
 
 func skillFilesCompatible(pluginRoot string) bool {

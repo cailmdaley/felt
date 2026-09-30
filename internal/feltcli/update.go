@@ -4,11 +4,14 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -26,8 +29,8 @@ func init() {
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update felt to the latest release",
-	Long: `Replaces this binary with the latest GitHub release (a dev build asks first),
+	Short: "Update felt and shuttle to the latest release",
+	Long: `Replaces both CLI binaries from the latest GitHub release (a dev build asks first),
 then moves the agent integrations to the matching tag so hooks and skills stay
 in step with the binary: the Claude Code plugin whenever the claude CLI is on
 PATH, and the Codex and pi integrations where felt is already installed.`,
@@ -72,32 +75,19 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 			return fmt.Errorf("download failed: %s (asset: %s)", resp.Status, assetName)
 		}
 
-		// Extract the "felt" binary from the tar.gz
-		binary, err := extractBinary(resp.Body)
+		binaries, err := extractBinaries(resp.Body)
 		if err != nil {
-			return fmt.Errorf("extracting binary: %w", err)
+			return fmt.Errorf("extracting CLI binaries: %w", err)
 		}
-
-		// Replace the running binary
-		exe, err := os.Executable()
+		feltPath, err := os.Executable()
 		if err != nil {
-			return fmt.Errorf("locating current binary: %w", err)
+			return fmt.Errorf("locating current felt binary: %w", err)
+		}
+		if err := replaceBinaryPair(feltPath, binaries); err != nil {
+			return fmt.Errorf("replacing felt and shuttle binaries: %w", err)
 		}
 
-		// Atomic-ish replace: rename old, write new, remove old
-		old := exe + ".old"
-		if err := os.Rename(exe, old); err != nil {
-			return fmt.Errorf("backing up current binary: %w (try running with sudo?)", err)
-		}
-
-		if err := os.WriteFile(exe, binary, 0755); err != nil {
-			// Try to restore
-			os.Rename(old, exe)
-			return fmt.Errorf("writing new binary: %w", err)
-		}
-
-		os.Remove(old)
-		fmt.Printf("Updated to %s\n", latestClean)
+		fmt.Printf("Updated felt and shuttle to %s\n", latestClean)
 		refreshPluginAfterUpdate(defaultMarketplaceRef())
 		return nil
 	},
@@ -163,13 +153,15 @@ func archiveArch() string {
 	}
 }
 
-func extractBinary(r io.Reader) ([]byte, error) {
+func extractBinaries(r io.Reader) (map[string][]byte, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
 	}
 	defer gz.Close()
 
+	const maxBinaryBytes = 256 << 20
+	binaries := make(map[string][]byte, 2)
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -179,9 +171,163 @@ func extractBinary(r io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Name == "felt" || strings.HasSuffix(hdr.Name, "/felt") {
-			return io.ReadAll(tr)
+		name := path.Base(hdr.Name)
+		if name != "felt" && name != "shuttle" {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+			return nil, fmt.Errorf("archive entry %q is not a regular file", hdr.Name)
+		}
+		if _, duplicate := binaries[name]; duplicate {
+			return nil, fmt.Errorf("archive contains more than one %s binary", name)
+		}
+		if hdr.Size < 0 || hdr.Size > maxBinaryBytes {
+			return nil, fmt.Errorf("archive entry %q exceeds the %d-byte limit", hdr.Name, maxBinaryBytes)
+		}
+		data, err := io.ReadAll(io.LimitReader(tr, maxBinaryBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxBinaryBytes {
+			return nil, fmt.Errorf("archive entry %q exceeds the %d-byte limit", hdr.Name, maxBinaryBytes)
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("archive entry %q is empty", hdr.Name)
+		}
+		binaries[name] = data
+	}
+	for _, name := range []string{"felt", "shuttle"} {
+		if _, ok := binaries[name]; !ok {
+			return nil, fmt.Errorf("binary %q not found in archive", name)
 		}
 	}
-	return nil, fmt.Errorf("binary 'felt' not found in archive")
+	return binaries, nil
+}
+
+func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
+	feltBinary, feltOK := binaries["felt"]
+	shuttleBinary, shuttleOK := binaries["shuttle"]
+	if !feltOK || !shuttleOK {
+		return errors.New("both felt and shuttle binaries are required")
+	}
+	directory := filepath.Dir(feltPath)
+	targets := []struct {
+		path string
+		data []byte
+	}{{feltPath, feltBinary}, {filepath.Join(directory, "shuttle"), shuttleBinary}}
+	for _, target := range targets {
+		if info, err := os.Lstat(target.path); err == nil {
+			if info.IsDir() || info.Mode()&os.ModeSymlink == 0 && !info.Mode().IsRegular() {
+				return fmt.Errorf("binary destination %q is not a regular file", target.path)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("checking binary destination %q: %w", target.path, err)
+		}
+	}
+
+	type stagedBinary struct {
+		target string
+		temp   string
+		backup string
+		moved  bool
+		placed bool
+	}
+	staged := make([]stagedBinary, 0, len(targets))
+	cleanupTemps := func() {
+		for _, item := range staged {
+			if item.temp != "" {
+				_ = os.Remove(item.temp)
+			}
+			if item.backup != "" && !item.moved {
+				_ = os.Remove(item.backup)
+			}
+		}
+	}
+	for _, target := range targets {
+		file, err := os.CreateTemp(directory, ".felt-update-*")
+		if err != nil {
+			cleanupTemps()
+			return fmt.Errorf("staging %q: %w", target.path, err)
+		}
+		item := stagedBinary{target: target.path, temp: file.Name()}
+		staged = append(staged, item)
+		if err := file.Chmod(0o755); err != nil {
+			_ = file.Close()
+			cleanupTemps()
+			return fmt.Errorf("setting mode on staged %q: %w", target.path, err)
+		}
+		if _, err := file.Write(target.data); err != nil {
+			_ = file.Close()
+			cleanupTemps()
+			return fmt.Errorf("writing staged %q: %w", target.path, err)
+		}
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			cleanupTemps()
+			return fmt.Errorf("syncing staged %q: %w", target.path, err)
+		}
+		if err := file.Close(); err != nil {
+			cleanupTemps()
+			return fmt.Errorf("closing staged %q: %w", target.path, err)
+		}
+	}
+
+	rollback := func() error {
+		var rollbackErr error
+		for i := len(staged) - 1; i >= 0; i-- {
+			item := &staged[i]
+			if item.placed {
+				if err := os.Remove(item.target); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("removing new %q: %w", item.target, err))
+				}
+			}
+			if item.moved {
+				if err := os.Rename(item.backup, item.target); err != nil {
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restoring %q: %w", item.target, err))
+				}
+			}
+		}
+		cleanupTemps()
+		return rollbackErr
+	}
+
+	for i := range staged {
+		item := &staged[i]
+		if _, err := os.Lstat(item.target); err == nil {
+			backup, err := os.CreateTemp(directory, ".felt-update-backup-*")
+			if err != nil {
+				return errors.Join(fmt.Errorf("preparing backup for %q: %w", item.target, err), rollback())
+			}
+			item.backup = backup.Name()
+			if err := backup.Close(); err != nil {
+				_ = os.Remove(item.backup)
+				return errors.Join(fmt.Errorf("closing backup placeholder for %q: %w", item.target, err), rollback())
+			}
+			if err := os.Remove(item.backup); err != nil {
+				return errors.Join(fmt.Errorf("removing backup placeholder for %q: %w", item.target, err), rollback())
+			}
+			if err := os.Rename(item.target, item.backup); err != nil {
+				return errors.Join(fmt.Errorf("backing up %q: %w", item.target, err), rollback())
+			}
+			item.moved = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Join(fmt.Errorf("checking backup source %q: %w", item.target, err), rollback())
+		}
+	}
+	for i := range staged {
+		item := &staged[i]
+		if err := os.Rename(item.temp, item.target); err != nil {
+			return errors.Join(fmt.Errorf("installing %q: %w", item.target, err), rollback())
+		}
+		item.temp = ""
+		item.placed = true
+	}
+	for _, item := range staged {
+		if item.moved {
+			if err := os.Remove(item.backup); err != nil {
+				return fmt.Errorf("both CLIs were updated, but removing backup %q failed: %w", item.backup, err)
+			}
+		}
+	}
+	return nil
 }

@@ -12,20 +12,20 @@ import (
 )
 
 // The user agent registry — how a machine adds to or restricts the agents the
-// binary ships.
+// shuttle binary ships.
 //
 // The embedded set (embed.go) is the maintained default fleet. A user file is
 // still useful for local wrappers, account-specific additions, and restricting
 // a host to an explicit subset:
 //
-//	1. $FELT_AGENTS_FILE      (single path, `~` expanded)
-//	2. ~/.config/felt/agents.json
+//	1. $SHUTTLE_AGENTS_FILE      (single path, `~` expanded)
+//	2. ~/.config/shuttle/agents.json
 //
-// This mirrors the stores registry (cmd/shuttle_stores.go) one step short: there
-// is no inline-value env var, because a comma list of paths inlines into an
-// environment and a JSON registry does not. Every consumer — install-time
-// validation, the daemon (which shells `shuttle agents`) — reads the
-// folded result through LoadAgentRegistry.
+// This mirrors the stores registry one step short: there is no inline-value env
+// var, because a comma list of paths inlines into an environment and a JSON
+// registry does not. Every consumer — install-time validation and the daemon
+// (which shells `shuttle agents`) — reads the folded result through
+// LoadAgentRegistry.
 
 // Provenance values for AgentRecord.Source.
 const (
@@ -39,7 +39,7 @@ const (
 	BuiltinsRestrict = "restrict"
 )
 
-// agentsFileVersion is the only envelope version this felt reads.
+// agentsFileVersion is the only envelope version this shuttle reads.
 const agentsFileVersion = 1
 
 // DefaultEffortOverride is AgentRecord.DefaultEffortSource for a record whose
@@ -72,16 +72,16 @@ type agentOverride struct {
 }
 
 // UserAgentsPath is where the user registry is read from (and written to by
-// `shuttle agents init`): $FELT_AGENTS_FILE, else ~/.config/felt/agents.json.
+// `shuttle agents init`): $SHUTTLE_AGENTS_FILE, else ~/.config/shuttle/agents.json.
 func UserAgentsPath() (string, error) {
-	if env := os.Getenv("FELT_AGENTS_FILE"); env != "" {
+	if env := os.Getenv("SHUTTLE_AGENTS_FILE"); env != "" {
 		return expandHome(env)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
-	return filepath.Join(home, ".config", "felt", "agents.json"), nil
+	return filepath.Join(home, ".config", "shuttle", "agents.json"), nil
 }
 
 // layerUserAgents folds the user registry (if present) onto the built-in layer.
@@ -210,7 +210,7 @@ func parseAgentsFile(data []byte, path string) (agentsFile, []string, error) {
 	}
 	if file.Version != 0 && file.Version != agentsFileVersion {
 		return agentsFile{}, nil, fmt.Errorf(
-			"parsing %s: unsupported version %d (this felt reads version %d)", path, file.Version, agentsFileVersion)
+			"parsing %s: unsupported version %d (this shuttle reads version %d)", path, file.Version, agentsFileVersion)
 	}
 	switch file.Builtins {
 	case "":
@@ -314,9 +314,9 @@ func mergeAgentLayers(builtins, user []AgentRecord, mode string) ([]AgentRecord,
 	return merged, warnings
 }
 
-// unknownFieldWarning re-decodes strictly, purely to name fields felt ignores —
+// unknownFieldWarning re-decodes strictly, purely to name fields shuttle ignores —
 // the commonest cause of "I set it and nothing happened". Never fatal: a file
-// written for a newer felt should still load on an older one.
+// written for a newer shuttle should still load on an older one.
 func unknownFieldWarning(data []byte, path string) string {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

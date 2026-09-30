@@ -1,6 +1,9 @@
 package feltcli
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +16,7 @@ import (
 // The maintainer's own machines and account names once appeared throughout
 // config/, lib/, and cmd/ — a hardcoded fleet, a hostname gate, a launchd label
 // prefix, and a long tail of comments that named specific clusters. All of it is
-// now operator data in ~/.config/felt/remotes.json, or generic prose.
+// now operator data in ~/.config/shuttle/remotes.json, or generic prose.
 //
 // This test is what keeps it that way. A comment is the easiest place for a
 // personal identifier to creep back in, and a comment is exactly where nobody
@@ -85,7 +88,7 @@ func TestNoPersonalIdentifiersInSource(t *testing.T) {
 	}
 
 	if len(offenders) > 0 {
-		t.Fatalf("personal identifiers in tracked source (put fleet data in ~/.config/felt/remotes.json, keep prose generic):\n  %s",
+		t.Fatalf("personal identifiers in tracked source (put fleet data in ~/.config/shuttle/remotes.json, keep prose generic):\n  %s",
 			strings.Join(offenders, "\n  "))
 	}
 }
@@ -116,7 +119,7 @@ func scannedPath(rel string) bool {
 	if rel == "Makefile" || rel == "scripts/bootstrap.sh" {
 		return true
 	}
-	for _, dir := range []string{"daemon/config/", "daemon/lib/", "cmd/", "daemon/share/", "ui/", "bin/"} {
+	for _, dir := range []string{"daemon/config/", "daemon/lib/", "cmd/", "internal/", "daemon/share/", "ui/", "bin/"} {
 		if strings.HasPrefix(rel, dir) {
 			return true
 		}
@@ -133,4 +136,76 @@ func allowedContext(line string) bool {
 		stripped = strings.ReplaceAll(stripped, allowed, "")
 	}
 	return !personalIdentifiers.MatchString(stripped)
+}
+
+func TestFeltPackagesDoNotReadShuttleEnvironmentOrProbeItsBinaries(t *testing.T) {
+	root := repoRoot(t)
+	var violations []string
+	for _, packageDir := range []string{"internal/felt", "internal/feltcli"} {
+		dir := filepath.Join(root, packageDir)
+		err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				receiver, ok := selector.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				argument := 0
+				if receiver.Name == "exec" && selector.Sel.Name == "CommandContext" {
+					argument = 1
+				}
+				if argument >= len(call.Args) {
+					return true
+				}
+				literal, ok := call.Args[argument].(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err != nil {
+					return true
+				}
+				rel, _ := filepath.Rel(root, path)
+				switch {
+				case receiver.Name == "os" && (selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv") && strings.HasPrefix(value, "SHUTTLE_"):
+					violations = append(violations, rel+": reads "+value)
+				case receiver.Name == "exec" && (selector.Sel.Name == "LookPath" || selector.Sel.Name == "Command" || selector.Sel.Name == "CommandContext") && (value == "shuttle" || value == "shuttled"):
+					violations = append(violations, rel+": probes or launches "+value)
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scanning %s: %v", packageDir, err)
+		}
+	}
+	if len(violations) > 0 {
+		t.Fatalf("Felt code crossed into Shuttle's runtime boundary:\n  %s", strings.Join(violations, "\n  "))
+	}
+}
+
+func TestHygieneScanIncludesInternalGoPackages(t *testing.T) {
+	for _, path := range []string{"internal/felt/fiber.go", "internal/shuttlecli/root.go"} {
+		if !scannedPath(path) {
+			t.Errorf("hygiene scan excludes %s", path)
+		}
+	}
 }
