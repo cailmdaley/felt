@@ -112,7 +112,7 @@ defmodule Shuttle.Poller.Snapshot do
       eligible: eligible,
       blocked: blocked,
       boot_quarantine: state.boot_quarantine,
-      # The boot-time `felt shuttle contract` handshake result — always
+      # The boot-time `shuttle contract` handshake result — always
       # present (not just on skew) so /api/v1/state and /api/v1/version can
       # both show "what we expect" and "what we saw" even when they match.
       contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),

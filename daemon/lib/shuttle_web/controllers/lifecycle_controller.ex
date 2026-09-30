@@ -6,8 +6,8 @@ defmodule ShuttleWeb.LifecycleController do
   Owner-routed via `Shuttle.OriginRouter`: a local-owned card's mutation runs
   here; a remote-owned card's request is forwarded to the owning daemon's
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
-  branch delegates to felt's `shuttle` CLI verbs, so the validated offline
-  frontmatter writer remains the single implementation of
+  branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
+  writer remains the single implementation of
   install/pause/resume/repeat/pin/accept/close/reopen/set-model/set-agent/set-outcome/uninstall.
 
   `install`/`repeat`/`pin` are CREATE verbs — they refuse a fiber that already
@@ -65,8 +65,8 @@ defmodule ShuttleWeb.LifecycleController do
   defp action(%{"action" => action}), do: {:error, "unknown lifecycle action #{inspect(action)}"}
   defp action(_), do: {:error, "missing lifecycle action"}
 
-  # accept and resume go through `Shuttle.LifecycleService`, which runs felt's
-  # writer inside the Poller, serialized with its state changes.
+  # accept and resume go through `Shuttle.LifecycleService`, which runs
+  # Shuttle's writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
 

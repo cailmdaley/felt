@@ -11,7 +11,7 @@
  *
  * There is one structured gesture: each row with an effort axis carries a
  * select for its default effort. Choosing a level writes an entry in the
- * file's `overrides` block (`felt shuttle agents effort`, via the daemon),
+ * file's `overrides` block (`shuttle agents effort`, via the daemon),
  * which patches that one field of the resolved record — built-in or user — and
  * the row marks it "· override". Resetting removes the entry.
  *
@@ -23,7 +23,7 @@
  * for real, which fails on an unsupported version, an unknown `builtins` mode
  * or a bad override, and warns about a dangling alias.
  *
- * `felt shuttle agents init` seeds that file from the built-ins — a worked
+ * `shuttle agents init` seeds that file from the built-ins — a worked
  * example of every field, ready to edit. The lede says so, because the empty
  * textarea below is otherwise a poor place to start from.
  */
@@ -102,7 +102,7 @@ export function AgentsSection({
         <span className="set-mono">agents.json</span> folded over the top by id. A user record
         replaces a built-in one <em>wholesale</em>; set{' '}
         <span className="set-mono">"builtins": "restrict"</span> in the file to drop the shipped
-        layer altogether. Run <span className="set-mono">felt shuttle agents init</span> on that
+        layer altogether. Run <span className="set-mono">shuttle agents init</span> on that
         host to seed the file with a worked example of every field.
       </p>
 

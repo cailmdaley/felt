@@ -9,9 +9,9 @@ import { useEffect, useRef } from 'react'
  * How often an open section re-reads its host.
  *
  * Slower than the board's own 15s, deliberately. The fleet read is not free on
- * the far side: it shells `felt shuttle remotes list` on the host being looked
- * at, and that host can be a shared cluster login node where the Runner's own
- * moduledoc records a felt call taking ~11s under IO pressure. Half a minute
+ * the far side: it shells `shuttle remotes list` on the host being looked
+ * at, and that host can be a shared cluster login node where the CLI call can
+ * take ~11s under IO pressure. Half a minute
  * is still far inside the window where a staleness clock reads honestly, and
  * it is a third of the subprocesses.
  */

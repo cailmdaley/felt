@@ -88,16 +88,13 @@ defmodule Shuttle.DispatcherTest do
 
     # Test fiber registry: id → %{status:, tags:, shuttle:}.
     #
-    # `felt show --json` emits id/name/status/created_at/body/modified_at *only*
-    # — it does NOT include `shuttle:` or `tags:` (verified against real felt).
+    # Felt show returns ordinary frontmatter without a resolved facet; the
+    # separate `shuttle show -j` response includes `shuttle.resolved.agent`.
     # `felt show --field shuttle` emits structured values as YAML; `--field
-    # tags` emits sequences of scalars one-per-line. The cmd handler below
-    # routes each `felt show` flavor through the right shape.
-    # felt owns resolution and inlines the effective record under
-    # `shuttle.resolved.agent` (felt show -j). The daemon reads that finished
-    # record — it no longer re-resolves. So each dispatchable fiber here carries
-    # a `resolved` agent the way real felt JSON does. The keys mirror felt's
-    # omitempty shape (a falsey chrome/headless/effort simply absent).
+    # tags` emits sequences of scalars one-per-line. The command handler below
+    # provides the corresponding shapes for both CLI names. Shuttle resolves
+    # each dispatchable fiber's agent; these fixtures carry that resolved record
+    # with the same omitted-false keys as Shuttle JSON.
     @claude_opus_resolved %{
       "id" => "claude-opus",
       "cli" => "claude",
@@ -132,7 +129,7 @@ defmodule Shuttle.DispatcherTest do
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
       "tests/reopen-fails" => %{
-        # Closed fiber whose `felt shuttle reopen` shell-out fails (see the
+        # Closed fiber whose `shuttle reopen` shell-out fails (see the
         # reopen branch in handle_felt/1) — exercises the authoritative-reopen
         # abort for the CLOSED case.
         status: "closed",
@@ -173,7 +170,7 @@ defmodule Shuttle.DispatcherTest do
         }
       },
       "tests/shuttle-agent-overrides-tag" => %{
-        # A legacy bare `pi` tag still rides the fiber, but felt's resolved
+        # A free-form `pi` tag still rides the fiber, but Shuttle's resolved
         # record (claude-opus) is the only thing the daemon reads — the block's
         # agent is the source of truth, tags are inert for dispatch.
         status: "active",
@@ -333,15 +330,14 @@ defmodule Shuttle.DispatcherTest do
         is_nil(fiber_id) ->
           {"fiber not found", 1}
 
-        # `felt shuttle reopen tests/reopen-fails` fails — the store rejects
+        # `shuttle reopen tests/reopen-fails` fails — the store rejects
         # the reopen. The dispatcher must treat this as fatal for a closed
         # fiber and abort before any tmux spawn.
         "reopen" in args and fiber_id == "tests/reopen-fails" ->
           {"reopen: could not reopen fiber in store", 1}
 
-        # `felt show <id> --json` (felt v1.0.4+) — tool-owned namespaces
-        # like `shuttle:` round-trip as flat top-level JSON keys alongside
-        # the parsed fields. The dispatcher reads `shuttle.agent` and
+        # `shuttle show <id> --json` includes the resolved agent alongside
+        # the parsed fiber fields. The dispatcher reads `shuttle.agent` and
         # `tags` directly off the JSON map.
         "--json" in args ->
           fiber = @test_fibers[fiber_id]
@@ -474,7 +470,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "Felt store: /tmp/store"
     assert prompt =~ "Kind: oneshot; surface: cli; headless: false"
     refute prompt =~ "Exit Contract"
-    refute prompt =~ "felt shuttle handoff"
+    refute prompt =~ "shuttle handoff"
     refute prompt =~ "──"
   end
 
@@ -821,7 +817,7 @@ defmodule Shuttle.DispatcherTest do
 
     commands = MockRunner.commands()
 
-    assert {"shuttle", ["show", "tests/haiku", "--json"]} in commands
+    assert {"shuttle", ["-C", "/tmp", "show", "tests/haiku", "--json"]} in commands
 
     assert Enum.any?(commands, fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -1017,13 +1013,13 @@ defmodule Shuttle.DispatcherTest do
     assert {:error, :closed} = result
   end
 
-  test "dispatch with force: true on a closed fiber shells out to felt shuttle reopen" do
+  test "dispatch with force: true on a closed fiber shells out to shuttle reopen" do
     # The kanban Resume button on an awaitingReview / closed card flows here
     # with force=true. Without the reopen step, the worker spawns but the
     # YAML stays closed and `classifyFiber` keeps the card pinned
     # in its prior column — see KanbanModal.runRequeue's comment about why
     # this side-effect is daemon-owned. The contract: force-dispatch on a
-    # not-already-clean fiber issues `felt shuttle reopen <fiber>` before
+    # not-already-clean fiber issues `shuttle reopen <fiber>` before
     # tmux new-session fires.
     result = Dispatcher.dispatch("tests/closed", runner: MockRunner, force: true)
     assert {:ok, _session} = result
@@ -1036,13 +1032,10 @@ defmodule Shuttle.DispatcherTest do
         _ -> false
       end)
 
-    assert reopen_call != nil, "expected felt shuttle reopen call; got #{inspect(commands)}"
+    assert reopen_call != nil, "expected shuttle reopen call; got #{inspect(commands)}"
 
-    # C1: no `--host` override — post-S1 `resolveOwnHost` is pure local state
-    # (env → host file → hostname), so the daemon-shelled reopen no longer
-    # needs to hand felt its own_host_id; felt resolves it locally, same as
-    # every other write verb. `--felt-store` (the STORE selector, not an
-    # identity override) is still there.
+    # Shuttle resolves host identity locally, so the daemon's reopen command
+    # needs no `--host` override. `-C <store>` selects the fiber's store.
     {"shuttle", reopen_args} = reopen_call
     refute "--host" in reopen_args, "reopen must not pass --host; got #{inspect(reopen_args)}"
     assert "-C" in reopen_args
@@ -1079,11 +1072,11 @@ defmodule Shuttle.DispatcherTest do
              {"shuttle", args} -> "reopen" in args
              _ -> false
            end),
-           "expected no felt shuttle reopen on already-clean fiber; got #{inspect(MockRunner.commands())}"
+           "expected no shuttle reopen on already-clean fiber; got #{inspect(MockRunner.commands())}"
   end
 
   test "dispatch with force: true aborts when reopen of a closed fiber fails" do
-    # Authoritative reopen: a closed fiber whose `felt shuttle reopen` exits
+    # Authoritative reopen: a closed fiber whose `shuttle reopen` exits
     # non-zero must ABORT the dispatch — never spawn a worker with no live
     # mandate (the doomed "terminal opens and immediately closes" worker).
     result = Dispatcher.dispatch("tests/reopen-fails", runner: MockRunner, force: true)
@@ -1149,7 +1142,7 @@ defmodule Shuttle.DispatcherTest do
            end)
   end
 
-  test "dispatch reads felt's resolved pi agent (pi-tagged fiber)" do
+  test "dispatch reads Shuttle's resolved pi agent (pi-tagged fiber)" do
     result = Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner)
     assert {:ok, session} = result
     assert session == FiberUid.session("tests/pi-tagged")
@@ -1163,14 +1156,14 @@ defmodule Shuttle.DispatcherTest do
     assert hd(args) == "new-session"
   end
 
-  test "dispatch uses felt's resolved agent (claude-opus) when present" do
+  test "dispatch uses Shuttle's resolved agent (claude-opus) when present" do
     assert {:ok, _session} = Dispatcher.dispatch("tests/shuttle-agent-block", runner: MockRunner)
     script = read_run_script_for(FiberUid.session("tests/shuttle-agent-block"))
     assert script =~ "agent=claude-opus"
     refute script =~ "agent=claude-sonnet"
   end
 
-  test "dispatch: felt's resolved.agent (claude-opus) wins over a legacy bare tag" do
+  test "dispatch: Shuttle's resolved.agent (claude-opus) wins over a free-form tag" do
     assert {:ok, _session} =
              Dispatcher.dispatch("tests/shuttle-agent-overrides-tag", runner: MockRunner)
 
@@ -1191,12 +1184,12 @@ defmodule Shuttle.DispatcherTest do
     File.read!(script_path)
   end
 
-  # felt owns resolution and inlines the effective record as `shuttle.resolved.agent`
+  # Shuttle owns resolution and inlines the effective record as `shuttle.resolved.agent`
   # JSON. These tests exercise the daemon's job — turning that record into the
   # harness shell command — so they build it via Agents.from_resolved/1, exactly
   # the production path. A resolved record carries the effective axes already
-  # overlaid (effort/chrome/headless), which is felt's responsibility, not the
-  # daemon's; the daemon only renders what it's handed.
+  # overlaid (effort/chrome/headless), which is Shuttle's responsibility, not
+  # the daemon's; the daemon only renders what it's handed.
   defp resolved(fields), do: Agents.from_resolved(fields)
 
   # The two four-key base records these tests reuse verbatim.
@@ -1270,7 +1263,7 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Axis rendering (effort × chrome × headless) per harness ──
   #
-  # felt resolves the axes; these assert the daemon renders an already-resolved
+  # Shuttle resolves the axes; these assert the daemon renders an already-resolved
   # record's effort/chrome/headless into each CLI's native flag form.
 
   test "claude effort renders --effort and chrome renders --chrome" do
@@ -1334,7 +1327,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "resolved chrome renders --chrome" do
-    # felt resolved the claude-opus base with chrome:true; the daemon renders it.
+    # Shuttle resolved the claude-opus base with chrome:true; the daemon renders it.
     agent =
       resolved(%{
         "id" => "claude-opus",
@@ -1499,7 +1492,7 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "Run: run-2026-05-06"
     assert prompt =~ "Run mode: scheduled"
     assert prompt =~ "Kind: standing"
-    refute prompt =~ "felt shuttle handoff"
+    refute prompt =~ "shuttle handoff"
   end
 
   test "standing launch distinguishes ad-hoc from scheduled runs" do
@@ -2069,7 +2062,7 @@ defmodule Shuttle.DispatcherTest do
         refute Map.has_key?(claim, "surface")
       end
 
-      refute prompt =~ "felt shuttle handoff"
+      refute prompt =~ "shuttle handoff"
       refute prompt =~ "──"
     end
   end
@@ -2346,8 +2339,8 @@ defmodule Shuttle.DispatcherTest do
   defp iso_now, do: DateTime.to_iso8601(DateTime.utc_now())
 
   # A oneshot fiber map carrying the daemon-at-dispatch shuttle fields (session
-  # uuid + dispatched_at from the test context), nested under shuttle.runtime
-  # (C5 — the reader no longer falls back to flat). `extra` merges over the
+  # uuid + dispatched_at from the test context), nested under shuttle.runtime.
+  # `extra` merges over the
   # whole shuttle map for config keys (e.g. `kind: standing`) EXCEPT the
   # runtime-key names, which route into the nested runtime block instead (e.g.
   # a clean-exit test's `handed_off_at`).

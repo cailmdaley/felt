@@ -3,10 +3,12 @@ defmodule Shuttle.CLI do
   Shell boundary for the `felt` and `shuttle` executables.
 
   `run/2` invokes `shuttle`; `run_felt/2` is the content CLI entry point used
-  by `Shuttle.Felt`. Both share the configured runner, timeout, stderr mapping,
-  and `{:ok, output} | {:command_error, status, output} | {:error, message}`
-  result contract. The default runner names the executable in its PATH-missing
-  error, so each caller reports the binary it actually needs.
+  by `Shuttle.Felt`. `run_in_store/3` scopes Shuttle commands with `-C`, and
+  `run_lifecycle/4` builds on it for fiber lifecycle writes. Both executables
+  share the configured runner, timeout, stderr mapping, and
+  `{:ok, output} | {:command_error, status, output} | {:error, message}` result
+  contract. The default runner names the executable in its PATH-missing error,
+  so each caller reports the binary it actually needs.
   """
 
   @type result ::
@@ -28,15 +30,18 @@ defmodule Shuttle.CLI do
     run_executable("felt", args, opts)
   end
 
+  @doc "Run a Shuttle command with an optional felt store root."
+  @spec run_in_store(String.t() | nil, [String.t()], keyword()) :: result()
+  def run_in_store(felt_store, args, opts \\ []) do
+    run(store_flag(felt_store) ++ args, opts)
+  end
+
   @doc "Run a fiber-scoped Shuttle verb, adding the store and local-owner flags."
   @spec run_lifecycle(String.t(), String.t(), [String.t()], keyword()) :: result()
   def run_lifecycle(verb, fiber_id, args \\ [], opts \\ []) do
     {felt_store, opts} = Keyword.pop(opts, :felt_store)
 
-    argv =
-      store_flag(felt_store) ++ [verb, fiber_id] ++ args ++ local_flag(verb)
-
-    run(argv, opts)
+    run_in_store(felt_store, [verb, fiber_id] ++ args ++ local_flag(verb), opts)
   end
 
   defp run_executable(executable, args, opts) do

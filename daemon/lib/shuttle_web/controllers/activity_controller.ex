@@ -41,7 +41,7 @@ defmodule ShuttleWeb.ActivityController do
     with {:ok, requested, {from_ms, to_ms}} <- window_params(params) do
       # The canonical window plus both event files' `{mtime, size}`. The
       # response is a function of exactly those (see `Shuttle.Activity`'s
-      # whole-minutes note): `felt hook event` appends to the live file and
+      # whole-minutes note): `shuttle hook event` appends to the live file and
       # rotates by rename, so either operation moves the tokens, and two
       # requests whose bounds differ inside a minute share one validator. A 304
       # skips re-sending an unchanged body.

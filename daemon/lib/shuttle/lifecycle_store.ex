@@ -5,7 +5,7 @@ defmodule Shuttle.LifecycleStore do
   role's exit closes it to Awaiting review), `park` (a pinned role's dirty exit
   returns it to the strip), and `rearm` (a force-dispatch opens a standing or
   pinned role to `status: active`). The human verdicts `accept` and `resume` are
-  felt's (`Shuttle.LifecycleService`).
+  Shuttle's (`Shuttle.LifecycleService`).
 
   The document is the single source of truth: `status`, `tempered`, `outcome`,
   the cron `schedule`, `agent`, `host`. There is no runtime store and no review
@@ -26,13 +26,13 @@ defmodule Shuttle.LifecycleStore do
   @doc """
   Standing-worker exit writer: mark a role awaiting review by writing
   `status: closed` (untempered) straight to the felt document — the awaiting
-  signal, recognized by felt's `accept`/`resume`, the poller's `eligible?` gate,
+  signal, recognized by Shuttle's `accept`/`resume`, the poller's `eligible?` gate,
   and the kanban classifier. It is also the don't-re-fire gate: a closed role
   is never dispatch-eligible, so the `active → closed → active` cycle encodes
   "already ran this occurrence."
 
   Awaiting is fully doc-representable: there is no review axis and no
-  runtime row, so this is a single felt write — the mirror of the accept re-arm,
+  runtime row, so this is a single document write — the mirror of the accept re-arm,
   setting `status: closed` where accept sets `status: active`. Atomic via
   `FiberDoc.write!` (tmp + rename). A no-op-shaped error (not standing /
   unreadable) returns `{:error, _}` so the caller can log without crashing the
@@ -61,7 +61,7 @@ defmodule Shuttle.LifecycleStore do
   its current verdict.
 
   This is the **force-dispatch** re-arm: an explicit human "go" from the board
-  (force-dispatch) is the verdict, so unlike felt's `accept`/`resume` it does
+  (force-dispatch) is the verdict, so unlike Shuttle's `accept`/`resume` it does
   not require the awaiting precondition — it reopens a closed role whether it was
   awaiting, tempered, or composted, and starts a parked pinned role by writing
   `open → active` so the board's strip → In-flight "start" gesture both spawns
@@ -178,14 +178,12 @@ defmodule Shuttle.LifecycleStore do
   # (`handed_off_at >= dispatched_at`) and the cron lookback baseline advances —
   # stopping the temper oscillation with no separate re-arm field.
   #
-  # felt owns the nesting, so the daemon cannot fold this into
-  # the atomic status write a single flat op could. It is a
-  # SECOND write — `felt shuttle mark-runtime --handed-off-at` — after the status
-  # re-arm. The sub-ms non-atomic window between the two is the one accepted
-  # tradeoff: a daemon crash there leaves the role `active` with no fresh handoff
-  # → the dead-orphan reconciler marks it awaiting → the human re-accepts. Rare
-  # (crash during a human action), recoverable, standing-only. Best-effort: a
-  # resolution miss or a non-zero `felt` exit is logged, never fails the re-arm.
+  # Shuttle owns the nested runtime writer, so the daemon stamps this after
+  # the atomic status write. The sub-ms non-atomic window between the two is the
+  # one accepted tradeoff: a daemon crash there leaves the role `active` with no
+  # fresh handoff → the dead-orphan reconciler marks it awaiting → the human
+  # re-accepts. Recoverable and standing-only. Best-effort: a resolution miss or
+  # a non-zero `shuttle` exit is logged, never fails the re-arm.
   #
   # Public because the poller's dead-standing-role reconciler reuses it to
   # SELF-HEAL a run with inverted/implausible markers (`handed_off_at` earlier
@@ -211,7 +209,7 @@ defmodule Shuttle.LifecycleStore do
   end
 
   # Resolve a fiber id to its owning felt store + store-scoped id — the pair
-  # `felt shuttle mark-runtime` needs (run with `cd: store`). Uses the daemon's
+  # `shuttle mark-runtime` needs (run with `-C store`). Uses the daemon's
   # configured `felt_stores` when threaded (the poller passes `state.felt_stores`),
   # else the global configured stores.
   defp resolve_runtime_target(fiber_id, felt_stores) do

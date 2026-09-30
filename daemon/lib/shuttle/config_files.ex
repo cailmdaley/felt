@@ -40,22 +40,22 @@ defmodule Shuttle.ConfigFiles do
   pointed at that file through its own path-override environment variable, and
   only a clean exit commits:
 
-    * `:remotes` → `felt shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE`
+    * `:remotes` → `shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE`
       — the CLI that is already the fleet file's sole writer, and whose `list`
       verb is documented as its validator (duplicate names, port collisions,
       an unparseable `defaults.https_proxy`, a managed tunnel with no port).
-    * `:agents` → `felt shuttle agents --json` under `SHUTTLE_AGENTS_FILE` — which
+    * `:agents` → `shuttle agents --json` under `SHUTTLE_AGENTS_FILE` — which
       fails loud on an unsupported `version` or an unknown `builtins` mode.
-    * `:host` → `felt shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` — an unknown
+    * `:host` → `shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` — an unknown
       class, or a `listen` that is not loopback tcp or a short absolute unix
       path.
     * `:stores` / `:projects` → checked here, against the shape
-      `Shuttle.PathListConfig` actually accepts: felt has no verb that
-      validates them. (The CLI reads `stores.json` inside other verbs —
-      `cmd/shuttle_stores.go` — and does not read `projects.json`.)
+      `Shuttle.PathListConfig` accepts. The CLI has no verb that validates
+      these path lists. It reads `stores.json` as needed and does not read
+      `projects.json`.
 
   So the daemon never grows a second opinion about what a valid fleet file is.
-  It grows one opinion about *when* to ask, and asks felt.
+  It grows one opinion about *when* to ask, and asks Shuttle.
 
   ## What this module will not touch
 
@@ -197,7 +197,7 @@ defmodule Shuttle.ConfigFiles do
 
   The board is reachable from two hubs and a phone at the same time, so "this
   file has not changed since I read it" is a real question here rather than a
-  theoretical one — an editor left open on a phone while `felt shuttle remotes
+  theoretical one — an editor left open on a phone while `shuttle remotes
   add` runs on the laptop would otherwise save the old text back over the new
   entry, silently.
 
@@ -311,7 +311,7 @@ defmodule Shuttle.ConfigFiles do
   Check candidate bytes without writing them — the same gate `write/2` runs.
 
   `:ok` or `{:error, message}`, where the message is the owning reader's own
-  words. felt names the file and the offending entry; repeating that verbatim
+  words. Shuttle names the file and the offending entry; repeating that verbatim
   is more use than any sentence this module could compose about it.
   """
   @spec validate(id(), String.t()) :: :ok | {:error, String.t()} | {:unavailable, String.t()}
@@ -422,7 +422,7 @@ defmodule Shuttle.ConfigFiles do
     end
   end
 
-  # felt names the file it was reading, and the file it was reading is our
+  # Shuttle names the file it was reading, and the file it was reading is our
   # temporary copy — a path the human has never seen and cannot act on.
   #
   # The replacement is positional, not textual, and that distinction is load

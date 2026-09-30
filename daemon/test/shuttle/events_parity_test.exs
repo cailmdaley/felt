@@ -2,7 +2,7 @@ defmodule Shuttle.EventsParityTest do
   @moduledoc """
   Cross-language guard on the event stream.
 
-  `felt hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
+  `shuttle hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
   `Shuttle.WaitingTracker` and `Shuttle.SentFiles` (Elixir) project it. Nothing in the type system connects the
   two, so the contract is a checked-in fixture: `cmd/testdata/events_golden.jsonl`
   is produced byte-for-byte by `TestEventGoldenParity` in cmd/hook_event_test.go

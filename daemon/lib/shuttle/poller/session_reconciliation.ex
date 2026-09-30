@@ -114,7 +114,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   defp adopt_live_session(state, fiber_id, fiber, uid, session) do
-    # Label only — felt owns resolution; read its resolved id off the
+    # Label only — Shuttle owns resolution; read its resolved id off the
     # already-fetched fiber JSON rather than re-resolving.
     agent_id = Poller.agent_id_from_fiber(fiber)
 

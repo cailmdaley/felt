@@ -264,7 +264,7 @@ export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Elemen
                   {busy ? 'Releasing…' : `Release ${host.isLocal ? '' : host.label}`.trim()}
                 </button>
                 <span className="set-row-note">
-                  the same grant as <span className="set-mono">bin/shuttle release</span> on that
+                  the same grant as <span className="set-mono">shuttle daemon release</span> on that
                   machine
                 </span>
               </div>

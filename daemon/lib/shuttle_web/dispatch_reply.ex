@@ -74,7 +74,7 @@ defmodule ShuttleWeb.DispatchReply do
        fiber_id: fiber_id,
        message:
          "Could not reopen the closed fiber — no worker was spawned. " <>
-           "Reopen it (`felt shuttle reopen #{fiber_id}`) and try again."
+           "Reopen it (`shuttle reopen #{fiber_id}`) and try again."
      }}
   end
 

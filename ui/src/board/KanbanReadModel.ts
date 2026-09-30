@@ -431,7 +431,7 @@ function assembleSurfaces(
  *   status:open standing   → paused/draft, classifies to `drafts` — on the desk.
  *   status:closed standing → an awaiting run needing a verdict; it classifies to
  *                            `awaitingReview` and belongs in that column, not
- *                            asleep in Resting. Accept re-arms it (`felt shuttle
+ *                            asleep in Resting. Accept re-arms it (`shuttle
  *                            accept` → `status:active`) and it lands back here.
  *   a running standing role → the liveness branch sends it to `inFlight`.
  */

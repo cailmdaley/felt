@@ -261,7 +261,7 @@ defmodule Shuttle.RemotesTest do
     end
 
     test "malformed JSON degrades to no remotes rather than failing to boot" do
-      # `felt shuttle remotes list` is the validator that names the typo; a
+      # `shuttle remotes list` is the validator that names the typo; a
       # daemon that refuses to serve its OWN board over a bad operator file is
       # worse than one that serves it without the fleet.
       path = write_remotes("{\"remotes\": [")

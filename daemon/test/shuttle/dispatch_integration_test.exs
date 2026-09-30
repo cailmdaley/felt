@@ -199,7 +199,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
   # Mirror the dispatcher's at-spawn stamp: `session_uuid` + `dispatched_at`
   # into the fiber's `shuttle.runtime` block (the real .md under `host`), by
-  # shelling the REAL `felt shuttle mark-runtime` — the actual production
+  # shelling the REAL `shuttle mark-runtime` — the actual production
   # write path (C5: it nests under shuttle.runtime, a two-level shape
   # hand-rolled text surgery can't produce here — shelling the CLI can). `at` lets a
   # test order a later handoff against it. The fiber must already exist
@@ -224,8 +224,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     :ok
   end
 
-  # Mirror the worker's `felt shuttle handoff`: stamp `shuttle.runtime.handed_off_at`
-  # in RFC3339 UTC (via the real `felt shuttle mark-runtime`) — the clean-exit
+  # Mirror the worker's `shuttle handoff`: stamp `shuttle.runtime.handed_off_at`
+  # in RFC3339 UTC (via the real `shuttle mark-runtime`) — the clean-exit
   # signal the daemon compares against dispatched_at.
   defp write_handoff_marker(_host, id, at \\ DateTime.utc_now()) do
     {_output, 0} =
@@ -945,11 +945,10 @@ defmodule Shuttle.DispatchIntegrationTest do
            end),
            "expected dispatched_at to be stamped synchronously before dispatch returned"
 
-    # The captured worker session id is BACKFILLED into that already-stamped
-    # marker via `felt shuttle mark-runtime --session` (felt owns the nesting —
-    # Stage 5) so resume can recover it; the wrong (human) session is ignored.
-    # The daemon's contract is the verb it shells — felt's own suite + the
-    # lockstep round-trip cover that mark-runtime nests under shuttle.runtime.
+    # The captured worker session id is backfilled into that already-stamped
+    # marker via `shuttle mark-runtime --session` so resume can recover it; the
+    # wrong (human) session is ignored. Shuttle owns the nested update, and the
+    # CLI tests cover `mark-runtime` writing under `shuttle.runtime`.
     assert eventually(fn ->
              Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
                cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
@@ -1714,10 +1713,10 @@ defmodule Shuttle.DispatchIntegrationTest do
            "expected the document cache to warm"
 
     # Warming the cache runs a poll that DISPATCHES this status:active fiber,
-    # which shells `felt shuttle mark-runtime` SYNCHRONOUSLY (before dispatch
-    # returns) to stamp the dispatch fields (felt owns the runtime nesting —
-    # Stage 5; the sync stamp is F2 — `dispatched_at` must exist the moment
-    # the tmux session launches). `eventually` here just waits out the poll
+    # which shells `shuttle mark-runtime` SYNCHRONOUSLY (before dispatch
+    # returns) to stamp the dispatch fields (`shuttle mark-runtime` owns the
+    # nested runtime update; `dispatched_at` must exist when the tmux session
+    # launches). `eventually` here just waits out the poll
     # cycle itself, not the mark-runtime write, before mutating out of band so
     # the two writes are serialized rather than racing.
     assert eventually(fn ->

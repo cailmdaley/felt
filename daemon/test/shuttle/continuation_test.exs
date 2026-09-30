@@ -180,14 +180,14 @@ defmodule Shuttle.ContinuationTest do
       assert "--dispatched-at" in args
     end
 
-    test "mark_handed_off passes --handed-off-at (no --host override — C1)" do
+    test "mark_handed_off passes --handed-off-at without a --host override" do
       :ok = Continuation.mark_handed_off(RecordingRunner, "/loom", "demo/task")
 
       assert [{"shuttle", args, _}] = RecordingRunner.calls()
       assert ["-C", "/loom", "mark-runtime", "demo/task" | rest] = args
       assert "--handed-off-at" in rest
-      # Post-S1/C1, felt's own resolveOwnHost is pure local state, so the
-      # daemon no longer hands it an explicit --host override.
+      # Shuttle resolves its own host from local state, so the daemon does not
+      # pass an explicit --host override.
       refute "--host" in rest
     end
 
@@ -199,7 +199,7 @@ defmodule Shuttle.ContinuationTest do
     end
   end
 
-  test "write_dispatch is best-effort: a non-zero felt exit returns {:error,_}, never raises" do
+  test "write_dispatch is best-effort: a non-zero Shuttle exit returns {:error,_}, never raises" do
     assert {:error, _} = Continuation.write_dispatch(FailingRunner, "/loom", "demo/task", %{})
   end
 end

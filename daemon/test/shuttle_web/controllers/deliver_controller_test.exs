@@ -14,7 +14,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # Answers `felt shuttle message` with the scripted receipt (accepted unless
+  # Answers `shuttle message` with the scripted receipt (accepted unless
   # `:deliver_test_receipt` names a status, detail and exit code) and records
   # the frame; every other command is the store mock's.
   defmodule MessageRunner do

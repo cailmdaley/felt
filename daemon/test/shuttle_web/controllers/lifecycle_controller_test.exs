@@ -438,8 +438,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
   # accept and resume are Shuttle's to write: the controller runs
   # `shuttle <verb> <fiber> --local` in the fiber's owning store (through
-  # the Poller when one is running — none is in this suite) and relays felt's
-  # answer. What the write does to the document is pinned by felt's own suite
+  # the Poller when one is running — none is in this suite) and relays Shuttle's
+  # answer. The document write is covered by the CLI's Go tests
   # (cmd/shuttle_lifecycle_test.go).
   for verb <- ~w(accept resume) do
     test "#{verb} runs Shuttle's writer with --local in the owning store" do
@@ -461,7 +461,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     end
   end
 
-  test "accept relays felt's refusal as a 422 with the cobra prefix stripped" do
+  test "accept relays Shuttle's refusal as a 422 with the cobra prefix stripped" do
     fixture_store!("shuttle-lifecycle-accept-refused", "tests/standing-tempered", "Tempered")
 
     install_fake_cli!("""

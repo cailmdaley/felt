@@ -39,9 +39,9 @@ defmodule Shuttle.Contract do
 
   `ok: false` covers EVERY shape other than an exact match on stdout exactly
   `"<expected_level>\\n"` at exit 0 — a mismatched level, unparseable/
-  multi-line stdout, or a nonzero exit (including an old CLI where `contract`
-  is an unknown subcommand: the daemon cannot determine its level, so it must
-  be treated as incompatible, same as an explicit mismatch).
+  multi-line stdout, or a nonzero exit (including a CLI that does not expose
+  `contract`: the daemon cannot determine its level, so it treats it as
+  incompatible, the same as an explicit mismatch).
   """
   @spec check(module()) :: %{
           expected: pos_integer(),

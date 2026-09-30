@@ -9,9 +9,9 @@ defmodule ShuttleWeb.AgentsController do
   daemon embeds none of it. External consumers (the board's agent picker, the
   settings page) fetch this instead of reading any registry file off disk.
 
-  felt unavailable / unparseable degrades to an empty array with a 200 rather
-  than a 500: the picker tolerates an empty list (it falls back to a free-text
-  agent name) and the rest of the board must keep loading.
+  An unavailable or unparseable Shuttle response degrades to an empty array
+  with a 200 rather than a 500: the picker tolerates an empty list (it falls
+  back to a free-text agent name) and the rest of the board must keep loading.
 
   **Owner-routed via `Shuttle.OriginRouter`** on `?origin=`. The registry is a
   per-host fact — the built-in layer travels with that host's shuttle binary and
@@ -80,7 +80,7 @@ defmodule ShuttleWeb.AgentsController do
 
   def effort(conn, _params), do: bad_request(conn, "id is required")
 
-  # felt refusing the request is a 400 in its own words; felt not being
+  # Shuttle refusing the request is a 400 in its own words; Shuttle not being
   # runnable is a 503, because nothing the caller sent is wrong.
   defp run_cli(conn, args) do
     case Shuttle.CLI.run(args, timeout_ms: @cli_timeout_ms) do

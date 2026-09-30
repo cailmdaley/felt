@@ -1,8 +1,8 @@
 defmodule Shuttle.Test.FeltStoreRunner do
   @moduledoc """
   A `Shuttle.Runner` that simulates a live felt store: fiber files are really
-  written under a throwaway root, and `felt ls` / `felt show` / `felt shuttle
-  *` / `tmux *` are answered from Agent state.
+  written under a throwaway root, and both CLIs plus `tmux *` are answered
+  from Agent state.
 
   This is the runner for tests that need the daemon to actually discover,
   dispatch, and reconcile — `PollerTest` and `APIControllerTest`. Tests that
@@ -40,8 +40,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
           tmux_sessions: MapSet.new(),
           fibers: %{},
           shuttle: %{},
-          felt_ls_stderr_warning: false,
-          felt_ls_delay_ms: 0,
+          ls_stderr_warning: false,
+          ls_delay_ms: 0,
           new_session_delay_ms: 0
         }
       end,
@@ -51,10 +51,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   # The store root (the directory containing `.felt/`) this run's MockRunner
   # writes fiber files under — pass this to `felt_stores:` / `SHUTTLE_STORES`
-  # instead of the old hardcoded `/tmp`.
+  # rather than relying on the operator's configured stores.
   def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
 
-  # `<felt_root>/.felt` — replaces the old hardcoded `/tmp/.felt`.
+  # `<felt_root>/.felt`.
   def felt_dir, do: Path.join(felt_root(), ".felt")
 
   def reset do
@@ -69,8 +69,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         tmux_sessions: MapSet.new(),
         fibers: %{},
         shuttle: %{},
-        felt_ls_stderr_warning: false,
-        felt_ls_delay_ms: 0,
+        ls_stderr_warning: false,
+        ls_delay_ms: 0,
         new_session_delay_ms: 0
       }
     end)
@@ -102,13 +102,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   # Write a real .md file carrying the given shuttle: block and felt status so
   # the poller can discover host ownership from the filesystem while reading
-  # shuttle metadata through the mocked `felt ls` / `felt show` JSON surfaces.
+  # Shuttle data through the mocked `shuttle ls` / `shuttle show` JSON surfaces.
   # The status defaults to "active" — pass an explicit value for tests that
   # verify eligibility gates (closed, untracked, etc.).
   def set_shuttle(id, yaml, status \\ "active") do
-    # Post-cutover, every installed block carries an explicit `host:` equal
-    # to the owning daemon's own_host_id (the strict eligibility predicate
-    # has no nil-wildcard). The factory mirrors that: a block whose YAML
+    # Every installed block carries an explicit `host:` equal to the owning
+    # daemon's own_host_id. The factory mirrors that: a block whose YAML
     # omits `host:` is stamped with the test daemon's identity
     # ("test-host", set via SHUTTLE_HOST in config/test.exs) so generic
     # dispatch tests stay eligible. Host-specific tests pass an explicit
@@ -140,9 +139,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
     File.write!(dir_path, "---\n#{id_line}status: #{status}\nshuttle:\n#{indented}\n---\nbody\n")
 
     # Mirror real felt: carry the absolute, symlink-resolved on-disk `path`.
-    # The poller reads this `path` to decide store ownership instead of
-    # walking the filesystem, so the mock's `felt ls`/`felt show` JSON must
-    # expose it the same way the real CLI now does.
+    # The poller reads this `path` to decide store ownership; the Shuttle
+    # response carries this metadata.
     carried_path = realpath(dir_path)
 
     shuttle_block =
@@ -174,14 +172,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # Merge scalar continuation fields into a fiber's parsed `shuttle:` block —
   # the in-memory analog of the daemon stamping `dispatched_at`/`session_uuid`
   # (or the worker stamping `handed_off_at`) into the fiber's frontmatter. The
-  # poller reads these straight off the `felt show -j` map, so updating the map
-  # is what the continuation/orphan readers see on the next poll.
+  # poller reads these from the Shuttle fiber response, so updating the map is
+  # what continuation and orphan readers see on the next poll.
   #
-  # C5: nests runtime-key fields under `shuttle.runtime`, mirroring real felt's
-  # on-disk shape (Stage 5 — `mark-runtime` only ever writes nested) now that
-  # `Shuttle.Continuation`'s readers no longer fall back to flat. Any
-  # non-runtime key in `fields` (there are none among current callers, but
-  # keeping this generic) still merges at the top level.
+  # Runtime-key fields nest under `shuttle.runtime`, matching Shuttle's
+  # `mark-runtime` writer. Any non-runtime key in `fields` still merges at the
+  # top level.
   @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
 
   def put_shuttle_fields(id, fields) do
@@ -219,8 +215,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
     end
   end
 
-  def set_felt_ls_stderr_warning(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_stderr_warning, enabled))
+  def set_ls_stderr_warning(enabled),
+    do: Agent.update(__MODULE__, &Map.put(&1, :ls_stderr_warning, enabled))
 
   # Simulate a host where the agent's wrapper resolves to nothing in a login
   # bash — the dispatcher's preflight probe (`bash -lc "type -t -- '<word>'"`)
@@ -234,15 +230,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_tmux_server_missing(enabled),
     do: Agent.update(__MODULE__, &Map.put(&1, :tmux_server_missing, enabled))
 
-  # Simulate a wedged felt on an overloaded node: every `felt ls` variant
-  # returns the bounded runner's timeout shape ({message, :timeout}) while
-  # `felt show` keeps answering — the exact incident profile the poller's
-  # last-known-candidate retention degrades through.
-  def set_felt_ls_timeout(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_timeout, enabled))
+  # Simulate a listing timeout while `shuttle show` remains responsive, so the
+  # poller's last-known-candidate retention path is exercised.
+  def set_listing_timeout(enabled),
+    do: Agent.update(__MODULE__, &Map.put(&1, :listing_timeout, enabled))
 
-  def set_felt_ls_delay(ms),
-    do: Agent.update(__MODULE__, &Map.put(&1, :felt_ls_delay_ms, ms))
+  def set_ls_delay(ms),
+    do: Agent.update(__MODULE__, &Map.put(&1, :ls_delay_ms, ms))
 
   # Simulate a wedged tmux: `tmux ls` returns the bounded runner's timeout
   # shape. The session list is then UNKNOWN — the poller must skip its
@@ -305,7 +299,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         &Map.put(&1, :kill_session_failure, enabled && {"tmux: hung up", 1})
       )
 
-  # S2: override what `felt shuttle contract` reports, for tests exercising
+  # S2: override what `shuttle contract` reports, for tests exercising
   # the boot-time contract handshake. Must be called BEFORE the poller
   # starts (init/1 probes once, synchronously). `level` is the raw stdout
   # string (a mismatched integer, or garbage to exercise "unparseable");
@@ -317,9 +311,9 @@ defmodule Shuttle.Test.FeltStoreRunner do
         &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
       )
 
-  # What `felt shuttle host --json` answers, for tests that clear SHUTTLE_HOST
-  # so the Poller asks felt for its identity. `output` is the raw stdout;
-  # a nonzero `exit_status` is felt refusing (a malformed host file).
+  # What `shuttle host --json` answers, for tests that clear SHUTTLE_HOST
+  # so the Poller asks Shuttle for its identity. `output` is the raw stdout;
+  # a nonzero `exit_status` is Shuttle refusing (for example, a malformed host file).
   def set_host_json(output, exit_status \\ 0) when is_binary(output),
     do:
       Agent.update(
@@ -329,13 +323,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   def commands, do: Agent.get(__MODULE__, & &1.commands)
 
-  # Real felt inlines a fully-resolved `shuttle.resolved.agent` on every fiber
-  # with a shuttle facet (felt show -j) and serves the registry via `felt
-  # shuttle agents [resolve]`. The daemon reads those records and no longer
-  # resolves names itself, so the mock synthesizes them — keyed off the block's
-  # `agent` name (default claude-sonnet). Only the command-rendering keys
-  # matter (id/cli/wrapper/model); axes are absent here. Defined before `cmd`
-  # so the attribute is in scope where the felt-resolve branch reads it.
+  # Shuttle inlines a resolved `shuttle.resolved.agent` on fiber reads and serves
+  # the registry through `shuttle agents [resolve]`. The daemon consumes those
+  # records without resolving names itself, so the mock synthesizes them — keyed
+  # off the block's `agent` name (default claude-sonnet). Only the
+  # command-rendering keys matter (id/cli/wrapper/model); axes are absent here.
+  # Defined before `cmd` so the attribute is in scope where the Shuttle resolve
+  # branch reads it.
   @resolved_agents %{
     "claude-sonnet" => %{
       "id" => "claude-sonnet",
@@ -399,7 +393,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
       # `shuttle [-C s] accept|resume <id> --local` — shuttle's
       # lifecycle writer. Mirror its document effect on both surfaces (the
-      # fiber map `felt ls`/`show` answer from, and the real file): a pinned
+      # fiber map `shuttle ls`/`show` answer from, and the real file): a pinned
       # accept re-parks to `status: open`, everything else re-arms to `active`;
       # the verdict and closed-at clear; a standing re-arm concludes the run.
       command == "shuttle" and lifecycle_write?(args) ->
@@ -413,23 +407,23 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end)
 
       # `shuttle agents resolve <name> ...` — the capture path's no-fiber
-      # resolution. The daemon shells shuttle (registry owner) rather than
-      # re-resolving; the mock returns felt's resolved.agent JSON shape.
+      # resolution. The daemon shells Shuttle (registry owner) rather than
+      # re-resolving; the mock returns Shuttle's resolved.agent JSON shape.
       #
       # The bare `shuttle agents --json` listing is deliberately NOT
-      # answered: it falls through to `{"", 0}`, shuttle's "verb absent / old
-      # shuttle" shape, which is the degradation AgentsController must survive.
+      # answered: it falls through to `{"", 0}`, the malformed-output shape
+      # that AgentsController must survive.
       command == "shuttle" and match?(["agents", "resolve" | _], args) ->
         name = Enum.at(args, 2)
         record = Map.get(@resolved_agents, name, @resolved_agents["claude-sonnet"])
         {Jason.encode!(record), 0}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") and
-          Agent.get(__MODULE__, &Map.get(&1, :felt_ls_timeout, false)) ->
-        {"felt #{full_args} timed out after 60000ms", :timeout}
+          Agent.get(__MODULE__, &Map.get(&1, :listing_timeout, false)) ->
+        {"#{command} #{full_args} timed out after 60000ms", :timeout}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") ->
-        delay_ms = Agent.get(__MODULE__, &Map.get(&1, :felt_ls_delay_ms, 0))
+        delay_ms = Agent.get(__MODULE__, &Map.get(&1, :ls_delay_ms, 0))
         if delay_ms > 0, do: Process.sleep(delay_ms)
 
         show_all =
@@ -452,7 +446,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
           end)
 
         json = Jason.encode!(Enum.map(fibers, &with_resolved_agent/1))
-        warning? = Agent.get(__MODULE__, & &1.felt_ls_stderr_warning)
+        warning? = Agent.get(__MODULE__, & &1.ls_stderr_warning)
 
         if warning? and Keyword.get(opts, :stderr_to_stdout) do
           {"warning: failed to parse unrelated fiber\n" <> json, 0}
@@ -467,10 +461,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {Map.get(shuttle, fiber_id, ""), 0}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "show") ->
-        # `felt show --json` rounds-trip-the-bytes (felt v1.0.4+): tool-owned
-        # frontmatter namespaces like `shuttle:` and `tags:` appear as flat
-        # top-level JSON keys, alongside the parsed fields. The mock keeps
-        # the fiber map intact to mirror this.
+        # `shuttle show --json` includes the resolved Shuttle facet alongside
+        # the parsed fiber fields. The mock returns the corresponding fiber map.
         fiber_id = extract_fiber_id(args)
         fibers = Agent.get(__MODULE__, & &1.fibers)
 
@@ -561,8 +553,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {output, 0}
 
       # `shuttle mark-runtime <id> [--handed-off-at ts] [--dispatched-at ts]
-      # [--session s] [--run-id r] [--host h]` — felt's daemon-facing runtime
-      # writer. Mirror the real CLI by folding the stamped flags into the
+      # [--session s] [--run-id r] [--host h]` — Shuttle's daemon-facing runtime
+      # writer. Fold the stamped flags into the
       # fiber's `shuttle:` map (the same surface put_shuttle_fields updates), so
       # a self-heal / conclude write is observable on the next poll.
       command == "shuttle" and match?(["mark-runtime", _id | _], drop_cli_store(args)) ->
@@ -617,9 +609,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
   end
 
   defp extract_fiber_id(args) do
-    # args like ["show", "tests/haiku", "--json"] or
+    # args like ["-C", store, "show", "tests/haiku", "--json"] or
     # ["show", "tests/haiku", "--field", "shuttle"]
     args
+    |> drop_cli_store()
     |> Enum.reject(&(&1 in ["show", "--json", "--field", "shuttle"]))
     |> List.first("")
   end

@@ -2,8 +2,8 @@ defmodule Shuttle.LifecycleService do
   @moduledoc """
   The daemon's side of the role lifecycle verbs `accept` and `resume`.
 
-  felt is their one writer: `felt shuttle <verb> <fiber> --local` re-arms (or,
-  for a pinned accept, re-parks) the role and concludes its run
+  Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local` re-arms
+  (or, for a pinned accept, re-parks) the role and concludes its run
   (`shuttle.runtime.handed_off_at = now`) in a single document write, so the
   poller never reads a re-armed role without the stamp that keeps its
   just-served occurrence from firing again.
@@ -36,7 +36,7 @@ defmodule Shuttle.LifecycleService do
   end
 
   @doc """
-  Shell `shuttle <verb> <fiber_id> --local`. `opts` go to
+  Shell `shuttle -C <store> <verb> <fiber_id> --local`. `opts` go to
   `Shuttle.CLI.run_lifecycle/4` (`:felt_store`, `:runner`).
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()

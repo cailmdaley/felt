@@ -160,7 +160,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     refute File.exists?(args_file)
   end
 
-  test "routes a collaboration replacement through felt shuttle assign without changing status" do
+  test "routes a collaboration replacement through shuttle assign without changing status" do
     root =
       System.tmp_dir!()
       |> Path.join("shuttle-felt-edit-collaboration-#{System.unique_integer([:positive])}")

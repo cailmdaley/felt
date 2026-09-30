@@ -43,7 +43,7 @@ defmodule ShuttleWeb.ConfigController do
   the same file would otherwise save its stale text back over the new one.
   Omitting the key is last-write-wins, which is what a script wants.
 
-  A refused edit is a 400 carrying felt's own diagnostic verbatim — "remote
+  A refused edit is a 400 carrying the CLI's own diagnostic verbatim — "remote
   \"hub-a\": port 4001 already used by \"hub-b\"" reaches the human's screen as
   the sentence the CLI would have printed, because no paraphrase of it is more
   useful than the original.

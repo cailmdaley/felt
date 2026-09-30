@@ -3,9 +3,9 @@ defmodule ShuttleWeb.FleetControllerTest do
   `/api/v1/fleet`, `/api/v1/fleet/remotes` and `/api/v1/tunnels` — the fleet as
   rows, and the two verbs that shell the Go CLI to change it.
 
-  Both halves are stubbed at the `:felt_runner` seam, so nothing here depends on
-  a real felt being on the developer's PATH or on what that felt would say about
-  the developer's own fleet. `SHUTTLE_REMOTES_FILE` points at a throwaway path for
+  Both halves are stubbed at the shared `:felt_runner` seam, so nothing here
+  depends on a real Shuttle CLI being on the developer's PATH or on what it would
+  say about the developer's own fleet. `SHUTTLE_REMOTES_FILE` points at a throwaway path for
   the same reason `test_helper.exs` pins it suite-wide: the file summary in the
   response resolves through it.
   """
@@ -18,7 +18,7 @@ defmodule ShuttleWeb.FleetControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  # The normalized document `felt shuttle remotes list --json` prints: defaults
+  # The normalized document `shuttle remotes list --json` prints: defaults
   # applied, `url` derived, the tunnel manager resolved. One managed entry and
   # one reached directly, which is the distinction `tunnel_label` renders.
   @fleet_doc %{
@@ -192,7 +192,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert Enum.all?(body["remotes"], &(&1["health"]["polled"] == false))
     end
 
-    test "an unparseable fleet file surfaces felt's diagnostic, not a 500" do
+    test "an unparseable fleet file surfaces Shuttle's diagnostic, not a 500" do
       MockFelt.reply_with(fn _args ->
         {~s(remotes.json: remote "hub-a": port 4001 already used by "hub-b"\n), 1}
       end)
@@ -277,7 +277,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert MockFelt.last_args() == ["remotes", "rm", "hub-a"]
     end
 
-    test "a missing name is a 400, and felt is never run" do
+    test "a missing name is a 400, and Shuttle is never run" do
       conn = post_json("/api/v1/fleet/remotes", %{"port" => 4001})
 
       assert conn.status == 400
@@ -285,7 +285,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert MockFelt.calls() == []
     end
 
-    test "felt's refusal is relayed as a 400, in its own words" do
+    test "Shuttle's refusal is relayed as a 400, in its own words" do
       MockFelt.reply_with(fn _args -> {~s(port 4001 already used by "hub-b"\n), 1} end)
 
       conn = post_json("/api/v1/fleet/remotes", %{"name" => "hub-a", "port" => 4001})
@@ -319,7 +319,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert MockFelt.last_args() == ["tunnels", "install", "candide"]
     end
 
-    test "an unknown action is a 400 naming the two, and felt is never run" do
+    test "an unknown action is a 400 naming the two, and Shuttle is never run" do
       conn = post_json("/api/v1/tunnels", %{"action" => "uninstall"})
 
       assert conn.status == 400

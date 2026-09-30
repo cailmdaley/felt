@@ -15,7 +15,7 @@ defmodule Shuttle.SessionResume do
   The resume invocation is `Shuttle.Agents.build_resume_command/3`, the one the
   dispatcher uses to resume a worker, with no injected prompt: the human is the
   next turn. The agent is the one this host's session ledger recorded for the
-  session, resolved through this host's registry (`felt shuttle agents
+  session, resolved through this host's registry (`shuttle agents
   resolve`), so model, effort and flags match a dispatch. A ledger line with no
   agent, or an agent that no longer resolves to the transcript's harness,
   resumes with the bare harness CLI.

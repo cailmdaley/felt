@@ -18,7 +18,7 @@
  *
  * ## Adding, and why the file is right below
  *
- * The add form shells `felt shuttle remotes add`, which is the fleet file's
+ * The add form shells `shuttle remotes add`, which is the fleet file's
  * only writer. That verb is **add-or-replace, wholesale**, and it has no flag
  * for `enabled`, `auth`, `ssh_flags`, `tunnel.label` or the per-entry
  * timeouts — so re-adding an entry that carries one of those drops it. The
@@ -28,7 +28,7 @@
  * ## Tunnels
  *
  * A remote reached by `url` needs no tunnel. A remote reached by `port` needs
- * a supervised `autossh` job on THIS host, and `felt shuttle tunnels install`
+ * a supervised `autossh` job on THIS host, and `shuttle tunnels install`
  * writes them: with no name it is convergent, installing every managed remote
  * and pruning any job the file no longer asks for. Preview is that verb's own
  * `--dry-run` — it reports both halves and touches nothing.

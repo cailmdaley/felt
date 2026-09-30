@@ -9,20 +9,13 @@ defmodule Shuttle.StandingRole do
   is none; the schedule-derived phase here only answers sleeping/due/running for
   an armed role.
 
-  **felt is the cron authority; this module is the timing decider.**
-  The daemon no longer parses cron. felt resolves the schedule on every read and
-  inlines two timestamps under `shuttle.resolved`: `next_due` (the next
-  occurrence strictly after now — display) and `prev_due` (the most recent
-  occurrence at or before now — the catch-up dispatch signal). This module reads
-  those off the block and answers every timing question by comparing instants.
-  The key reduction: "did a tick fire since the role was last serviced?" is
-  `prev_due > last_serviced`, equal to the old `NextOccurrence(last_serviced) <=
-  now` window check for every schedule with an occurrence inside felt's ~1-year
-  catch-up horizon — i.e. every real standing role. The two diverge only for a
-  sub-annual schedule on a role unserviced for >1 year (e.g. a leap-Feb-29 role
-  between leap years): felt's `prev_due` scans 1 year back from now and omits it,
-  so such a role sleeps until its next fire rather than firing an ancient
-  catch-up — an accepted, arguably-better behavior at that exotic boundary.
+  **Shuttle is the cron authority; this module is the timing decider.** The
+  daemon does not parse cron. Shuttle resolves each schedule on read and inlines
+  `next_due` (the next occurrence after now) and `prev_due` (the most recent
+  occurrence at or before now) under `shuttle.resolved`. This module reads those
+  timestamps and compares instants. A role is due when `prev_due` is later than
+  its last service time. Shuttle searches one year back for `prev_due`; a role
+  unserviced longer than that sleeps until its next occurrence.
   """
 
   defstruct [
@@ -33,12 +26,12 @@ defmodule Shuttle.StandingRole do
     :uid,
     :kind,
     # The raw schedule map, carried for the snapshot's display only — never
-    # parsed here (felt owns cron). nil for a block without one.
+    # parsed here (Shuttle owns cron). nil for a block without one.
     :schedule,
-    # felt-resolved occurrences (shuttle.resolved.{next_due,prev_due}), the sole
+    # Shuttle-resolved occurrences (shuttle.resolved.{next_due,prev_due}), the
     # source of timing. next_due_at: next tick > now (display + the
     # parseable-schedule signal). prev_due: most recent tick <= now (the
-    # dispatch/display due signal). Both nil unless felt resolved a standing
+    # dispatch/display due signal). Both nil unless Shuttle resolved a standing
     # schedule.
     :next_due_at,
     :prev_due,
@@ -64,8 +57,8 @@ defmodule Shuttle.StandingRole do
       uid: uid,
       kind: string(data["kind"]),
       schedule: map_or_nil(data["schedule"]),
-      # next_due/prev_due come from felt's resolution; fall back to the legacy
-      # flat next_due_at only if felt emitted nothing (pre-Stage-2 documents).
+      # next_due/prev_due come from Shuttle's resolution; use the flat
+      # next_due_at field when resolved next_due is absent.
       next_due_at: parse_datetime(resolved["next_due"] || data["next_due_at"]),
       prev_due: parse_datetime(resolved["prev_due"])
     }
@@ -78,7 +71,7 @@ defmodule Shuttle.StandingRole do
   def standing?(_), do: false
 
   @doc """
-  The schedule-derived display phase for an armed role, computed from felt's
+  The schedule-derived display phase for an armed role, computed from Shuttle's
   resolved occurrences + liveness — NOT from `review.state` or `enabled`
   (neither axis exists). "Awaiting review", "accepted", and "paused/draft" are
   document facts (`status:closed` + untempered / `tempered`, and `status:open`),
@@ -100,14 +93,14 @@ defmodule Shuttle.StandingRole do
 
   # Display window for the `state/3` "due" phase — the recent past in which a
   # fired tick still reads as "due" before the poll dispatches it and the
-  # document flips to closed. felt's prev_due is the most recent occurrence; a
+  # document flips to closed. Shuttle's prev_due is the most recent occurrence; a
   # fixed lookback window is how a just-fired tick is recognized for display
   # (mirrors the dispatch path's `due_by_cron?` window, sized for display rather
   # than the poll cadence).
   @display_due_window_ms 90_000
 
   # Display due-ness for `state/3`: a valid role whose most recent occurrence
-  # (felt's prev_due) fell inside `(now - window, now]`. Pure timestamp compare —
+  # (Shuttle's prev_due) fell inside `(now - window, now]`. Pure timestamp compare —
   # no cron parse, no stored next_due_at, no review gate.
   defp due_by_schedule?(%__MODULE__{prev_due: %DateTime{} = prev} = role, %DateTime{} = now) do
     valid?(role) and
@@ -118,12 +111,12 @@ defmodule Shuttle.StandingRole do
 
   @doc """
   Occurrence-derived due check for the **dispatch** path: true iff the schedule's
-  most recent tick (felt's `prev_due`) fell inside the lookback `(now -
+  most recent tick (Shuttle's `prev_due`) fell inside the lookback `(now -
   window_ms, now]` — equivalently, strictly after `window_start = now -
-  window_ms`. felt's prev_due is always `<= felt's now <= now`, so the upper
+  window_ms`. Shuttle's prev_due is always `<=` its resolution time, so the upper
   bound holds for free and only the lower bound is checked.
 
-  Due-ness is a pure timestamp comparison against felt's resolved occurrence, NOT
+  Due-ness is a pure timestamp comparison against Shuttle's resolved occurrence, NOT
   a cron parse and NOT a stored `next_due_at`. The *meaning* of the lookback is
   the caller's. The poller (`standing_role_due?`) anchors it at the role's last
   service (`now - last_serviced`), so this reduces to **`prev_due >
@@ -149,7 +142,7 @@ defmodule Shuttle.StandingRole do
 
   def due_by_cron?(_, _, _), do: false
 
-  # Dispatch-path validity: a standing role for which felt resolved a schedule
+  # Dispatch-path validity: a standing role for which Shuttle resolved a schedule
   # (next_due_at present ⟺ the cron parsed and a future tick exists). Both the
   # dispatch and display paths gate on this alone — there are no review/next_due
   # validations: the document, not a review overlay, is the truth.
@@ -157,9 +150,9 @@ defmodule Shuttle.StandingRole do
   defp dispatchable?(_), do: false
 
   @doc """
-  The next scheduled occurrence, for the kanban **display** next_due — felt's
+  The next scheduled occurrence, for the kanban **display** next_due — Shuttle's
   resolved `next_due` (the next tick strictly after now), read straight off the
-  block. Returns nil when felt resolved no schedule.
+  block. Returns nil when Shuttle resolved no schedule.
   """
   @spec next_due_from_cron(t()) :: DateTime.t() | nil
   def next_due_from_cron(%__MODULE__{next_due_at: %DateTime{} = next}), do: next
@@ -170,7 +163,7 @@ defmodule Shuttle.StandingRole do
 
   @doc """
   Run id for a *scheduled* (non-ad-hoc) standing dispatch — a display label for
-  the prompt's `Run:` line, minted from felt's next_due (or now).
+  the prompt's `Run:` line, minted from Shuttle's next_due (or now).
 
   It is not load-bearing for resume continuity: continuation is decided from the
   fiber's `shuttle.dispatched_at`/`handed_off_at` (`Shuttle.Continuation`), not
@@ -205,10 +198,10 @@ defmodule Shuttle.StandingRole do
     }
   end
 
-  # Validity is the document's intrinsic shape: a standing role for which felt
-  # resolved a schedule (next_due_at present). There are no review/next_due
-  # validations — the document (status + tempered) is the truth, and felt already
-  # rejected an unparseable schedule on write (emitting no resolved occurrence).
+  # Validity is the document's intrinsic shape: a standing role for which
+  # Shuttle resolved a schedule (next_due_at present). There are no
+  # review/next_due validations — the document (status + tempered) is the truth,
+  # and an unparseable schedule produces no resolved occurrence.
   defp validation_errors(%__MODULE__{} = role) do
     [
       validate_kind(role),
@@ -220,11 +213,11 @@ defmodule Shuttle.StandingRole do
   defp validate_kind(%__MODULE__{kind: "standing"}), do: nil
   defp validate_kind(%__MODULE__{kind: kind}), do: "kind must be standing, got #{inspect(kind)}"
 
-  # A standing role is well-formed iff felt resolved a next occurrence for it.
-  # felt emits next_due only when the cron parsed, so its presence IS the
+  # A standing role is well-formed iff Shuttle resolved a next occurrence for
+  # it. Shuttle emits next_due only when the cron parsed, so its presence IS the
   # parseable-schedule signal — the daemon never re-validates the expression.
   defp validate_schedule(%__MODULE__{next_due_at: %DateTime{}}), do: nil
-  defp validate_schedule(%__MODULE__{}), do: "felt resolved no schedule occurrence (next_due)"
+  defp validate_schedule(%__MODULE__{}), do: "Shuttle resolved no schedule occurrence (next_due)"
 
   defp parse_datetime(nil), do: nil
   defp parse_datetime(""), do: nil

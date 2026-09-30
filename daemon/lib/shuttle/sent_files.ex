@@ -4,7 +4,7 @@ defmodule Shuttle.SentFiles do
   stream (`~/.shuttle/events.jsonl`).
 
   The standalone Shuttle board shows artifacts registered with
-  `felt shuttle send-file`. The command writes `file_sent` events with top-level
+  `shuttle send-file`. The command writes `file_sent` events with top-level
   `files`, `sessionId`, `tmuxSession`, `cwd`, and `timestamp`. A harness's
   `SendUserFile` tool call, recorded by the hook, carries its paths in
   `toolInput.files`.
@@ -182,7 +182,7 @@ defmodule Shuttle.SentFiles do
     end
   end
 
-  # `felt shuttle send-file` events, then a harness's SendUserFile tool call.
+  # `shuttle send-file` events, then a harness's SendUserFile tool call.
   defp sent_paths(%{"type" => "file_sent", "files" => files}), do: files
   defp sent_paths(%{"tool" => "SendUserFile", "toolInput" => %{"files" => files}}), do: files
   defp sent_paths(_), do: nil

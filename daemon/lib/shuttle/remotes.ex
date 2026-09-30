@@ -34,7 +34,7 @@ defmodule Shuttle.Remotes do
   A bare JSON array of entries is also accepted. Absent, unreadable, or
   malformed file → `[]`: a hub with no fleet file is a correct local-only
   daemon, and a daemon that refuses to boot over a typo in an operator file is
-  worse than one that serves its own board. `felt shuttle remotes list` is the
+  worse than one that serves its own board. `shuttle remotes list` is the
   validator that reports the typo.
 
   Deliberately a **sibling** of `Shuttle.FeltStores` (`stores.json`) and
@@ -133,7 +133,7 @@ defmodule Shuttle.Remotes do
   Source: the document-level `defaults.https_proxy` (`"http://localhost:1055"`,
   or a bare `"localhost:1055"`). **`$HTTPS_PROXY` is deliberately not read.** A
   supervised daemon's environment is invisible to the operator who has to debug
-  it, while the fleet file is one place `felt shuttle remotes list` already
+  it, while the fleet file is one place `shuttle remotes list` already
   validates — so the proxy lives where the fleet does, and there is exactly one
   answer to "why can't this hub reach that node".
 
@@ -159,7 +159,7 @@ defmodule Shuttle.Remotes do
   configured socket value is invalid.
 
   `$TS_SOCKET` is deliberately not read: the fleet file is the operator-visible
-  source of truth shared by the daemon and `felt shuttle remotes list`.
+  source of truth shared by the daemon and `shuttle remotes list`.
   """
   @spec tailscale_socket_configured?() :: boolean()
   def tailscale_socket_configured? do
@@ -187,7 +187,7 @@ defmodule Shuttle.Remotes do
 
   @doc """
   A cheap change token for the fleet file — `{mtime, size}`, or `nil` when the
-  file is absent. The registries stat this each tick so `felt shuttle remotes
+  file is absent. The registries stat this each tick so `shuttle remotes
   add` takes effect without a daemon bounce. Size is folded in because POSIX
   mtime has 1-second granularity and an edit-and-save inside the same second is
   ordinary.
@@ -304,7 +304,7 @@ defmodule Shuttle.Remotes do
   #
   # Anything unusable is nil rather than a raise: a daemon that refuses to boot
   # over a typo in an operator file is worse than one that serves its own
-  # board, and `felt shuttle remotes list` is the validator that fails loud
+  # board, and `shuttle remotes list` is the validator that fails loud
   # with the reason.
   #
   # `daemon/test/shuttle/remotes_test.exs` and `cmd/shuttle_remotes_test.go`

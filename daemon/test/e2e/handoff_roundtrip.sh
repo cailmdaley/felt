@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Standalone mechanical gate for the shed-history continuation write path.
 #
-# Proves, against the REAL `felt shuttle handoff` and a REAL felt round-trip (no
+# Proves, against the REAL `shuttle handoff` and a REAL felt round-trip (no
 # daemon, no tmux), that the handoff verb surgically stamps
 # shuttle.handed_off_at while PRESERVING the daemon-written session_uuid /
 # dispatched_at, the rest of the shuttle: block, non-shuttle frontmatter, and the
@@ -13,8 +13,8 @@
 # real worker in tmux — is exercised separately.
 #
 # Usage:  daemon/test/e2e/handoff_roundtrip.sh
-#   FELT=<path>  overrides the felt binary (defaults to `felt` on PATH; any felt
-#                works — the shuttle: block is opaque frontmatter it round-trips).
+#   FELT=<path>        overrides the felt binary (default: `felt` on PATH)
+#   SHUTTLE_BIN=<path> overrides the Shuttle binary (default: `shuttle` on PATH).
 #
 # SAFETY: handoff's endOwnTmuxSession kills $TMUX session if set. Every handoff
 # call here runs under `env -u TMUX` so it can never kill the caller's session.
@@ -22,16 +22,14 @@ set -euo pipefail
 
 WORK=$(mktemp -d /tmp/shuttle-handoff-e2e.XXXXXX)
 FELT=${FELT:-felt}
+SHUTTLE_BIN=${SHUTTLE_BIN:-$(command -v shuttle || true)}
 FAIL=0
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; FAIL=1; }
 trap 'rm -rf "$WORK"' EXIT
 
 command -v "$FELT" >/dev/null || { echo "felt not found (set FELT=<path>)"; exit 2; }
-
-# The handoff verb is `felt shuttle handoff` (the old standalone shuttle-ctl
-# shim is retired). CTL is the verb prefix; callers append `handoff <id>`.
-CTL=("$FELT" shuttle)
+[ -n "$SHUTTLE_BIN" ] || { echo "shuttle not found (set SHUTTLE_BIN=<path>)"; exit 2; }
 
 STORE="$WORK/store"
 FIBER_DIR="$STORE/.felt/demo/worker-fiber"
@@ -72,9 +70,7 @@ EOF
 body_of() { awk 'f==2{print} /^---[[:space:]]*$/{f++}' "$1"; }
 # Dispatch stamps live in the shuttle.runtime sub-block (session_uuid,
 # dispatched_at, handed_off_at); fall back to the top level for the structural
-# keys (kind, host, agent). Same lookup as handoff_live.sh — when the stamps
-# moved into `runtime:` this gate kept reading the old shape and went quietly
-# red on a writer that was working correctly.
+# keys (kind, host, agent).
 sh_field() {
   printf '%s' "$1" | python3 -c "
 import sys, json
@@ -85,7 +81,7 @@ print(s.get('runtime', {}).get('$2', s.get('$2', '')))"
 body_before=$(body_of "$MD")
 
 echo "== CASE 1: clean handoff preserves daemon fields + siblings + body =="
-env -u TMUX SHUTTLE_FIBER_PATH="$MD" "${CTL[@]}" handoff demo/worker-fiber >/dev/null
+env -u TMUX SHUTTLE_FIBER_PATH="$MD" "$SHUTTLE_BIN" -C "$STORE" handoff demo/worker-fiber >/dev/null
 J=$("$FELT" -C "$STORE" show demo/worker-fiber -j)
 [ -n "$(sh_field "$J" handed_off_at)" ] && pass "handed_off_at stamped" || fail "handed_off_at missing"
 [ "$(sh_field "$J" session_uuid)" = "$SESSION_UUID" ] && pass "session_uuid preserved" || fail "session_uuid lost"
@@ -110,8 +106,8 @@ PY
 
 echo "== CASE 2: idempotent — repeated handoff does not accrete whitespace =="
 lines1=$(wc -l < "$MD")
-env -u TMUX SHUTTLE_FIBER_PATH="$MD" "${CTL[@]}" handoff demo/worker-fiber >/dev/null
-env -u TMUX SHUTTLE_FIBER_PATH="$MD" "${CTL[@]}" handoff demo/worker-fiber >/dev/null
+env -u TMUX SHUTTLE_FIBER_PATH="$MD" "$SHUTTLE_BIN" -C "$STORE" handoff demo/worker-fiber >/dev/null
+env -u TMUX SHUTTLE_FIBER_PATH="$MD" "$SHUTTLE_BIN" -C "$STORE" handoff demo/worker-fiber >/dev/null
 lines2=$(wc -l < "$MD")
 [ "$lines1" = "$lines2" ] && pass "line count stable across re-handoffs ($lines1)" || fail "file grew: $lines1 → $lines2"
 [ "$(body_of "$MD")" = "$body_before" ] && pass "body still byte-identical after re-handoffs" || fail "body drifted on re-handoff"
@@ -119,7 +115,7 @@ lines2=$(wc -l < "$MD")
 echo "== CASE 3: no shuttle: block → errors loudly, no silent corruption =="
 NS="$STORE/.felt/demo/no-shuttle/no-shuttle.md"; mkdir -p "$(dirname "$NS")"
 printf -- '---\nid: demo/no-shuttle\nname: NS\nstatus: open\n---\nBody untouched.\n' > "$NS"
-if env -u TMUX SHUTTLE_FIBER_PATH="$NS" "${CTL[@]}" handoff demo/no-shuttle >/dev/null 2>&1; then
+if env -u TMUX SHUTTLE_FIBER_PATH="$NS" "$SHUTTLE_BIN" -C "$STORE" handoff demo/no-shuttle >/dev/null 2>&1; then
   fail "handoff on a fiber with no shuttle: block should error"
 else
   pass "handoff errors on missing shuttle: block"

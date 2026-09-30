@@ -218,7 +218,7 @@ defmodule Shuttle.RemoteRegistry do
   immediately — one manual reset buys exactly one cascade.
 
   Operators reach this through `shuttle reset <remote>` (see
-  the `bin/shuttle` shim), which POSTs `/api/v1/remotes/:name/reset`
+  the `shuttle daemon` shim), which POSTs `/api/v1/remotes/:name/reset`
   (`ShuttleWeb.RemoteController`) on the running daemon — the release runs
   with RELEASE_DISTRIBUTION=none (rel/env.sh.eex), so there is no remote
   console to call this from directly.
@@ -355,7 +355,7 @@ defmodule Shuttle.RemoteRegistry do
 
   # Stat the fleet file each tick; on a change, re-read it and re-key the
   # snapshot map. A stat per second is free, and it removes the whole
-  # "I added a remote and nothing happened" class of confusion — `felt shuttle
+  # "I added a remote and nothing happened" class of confusion — `shuttle
   # remotes add` is live without a daemon bounce. Existing entries keep their
   # recovery state (see `RegistryCommon.reconcile/3`), so a reload never
   # restarts a cascade in flight.
@@ -1187,7 +1187,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   the failure impossible rather than rare.
 
   **The proxy is re-read, not read once at boot.** `Shuttle.Remotes` is live —
-  `felt shuttle remotes add` takes effect without a daemon bounce — so a
+  `shuttle remotes add` takes effect without a daemon bounce — so a
   request re-reads it whenever the fleet file's `{mtime, size}` token has
   moved, and otherwise pays one stat. See `Shuttle.Remotes.https_proxy/0` for
   why a hub needs one at all. A host whose class is not `single-user`

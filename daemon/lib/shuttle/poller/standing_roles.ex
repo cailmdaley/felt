@@ -206,8 +206,8 @@ defmodule Shuttle.Poller.StandingRoles do
   #   • handed_off_at >= dispatched  → clean exit observed                → not an orphan.
   #   • otherwise (dispatched, no newer handoff)                          → orphan (true).
   #
-  # A human accept / resume / force-rearm SUPERSEDES the dead-orphan inference by
-  # *concluding the run* — each stamps `handed_off_at = now` as it re-arms (felt's
+  # A human accept / resume / force-rearm supersedes the dead-orphan inference by
+  # concluding the run — each stamps `handed_off_at = now` as it re-arms (Shuttle's
   # accept/resume in the same write, `LifecycleStore.rearm` just after), the same
   # signal a clean worker exit leaves, since a human
   # accepting the run IS concluding it. This is what stops the standing-role
@@ -293,10 +293,10 @@ defmodule Shuttle.Poller.StandingRoles do
   end
 
   # A standing role parsed straight from a fiber map's `shuttle:` block — a poll
-  # candidate row or a `felt show` read alike, since both carry felt's resolved
-  # view of the block (`shuttle.resolved.{next_due,prev_due}` included). The
-  # document is the truth — status, tempered, and the cron schedule — and the
-  # StandingRole reads exactly that, with no further felt read.
+  # candidate row or a `shuttle show` read alike, since both carry Shuttle's
+  # resolved view of the block (`shuttle.resolved.{next_due,prev_due}` included).
+  # The document is the truth — status, tempered, and the cron schedule — and
+  # the StandingRole reads exactly that, with no further CLI read.
   def standing_role_from_fiber(fiber) do
     fiber_id = Map.get(fiber, "id", "")
 
@@ -395,7 +395,7 @@ defmodule Shuttle.Poller.StandingRoles do
       |> StandingRole.to_snapshot(now, running?)
       # Display next_due is the schedule's next tick after now: `active` means
       # armed-for-the-next-occurrence. Falls back to the snapshot's value when
-      # felt resolved no occurrence.
+      # Shuttle resolved no occurrence.
       |> put_computed_next_due(role)
       |> Map.put(:uid, role.uid)
     end)

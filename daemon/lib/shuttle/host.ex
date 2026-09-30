@@ -24,7 +24,7 @@ defmodule Shuttle.Host do
   operator tried to name it would pick the permissive answer for the one host
   that said it needed the strict one.
 
-  The Go CLI (`felt shuttle host`) reads the same file and applies the same
+  The Go CLI (`shuttle host`) reads the same file and applies the same
   listen rule; `test/fixtures/host/` is read by both suites so the two cannot
   drift.
 

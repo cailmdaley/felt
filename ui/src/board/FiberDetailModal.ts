@@ -3597,8 +3597,8 @@ export class FiberDetailModal {
     }
     let records: AgentRecord[]
     try {
-      // The daemon's registry is a bare array (`felt shuttle agents --json`,
-      // degrading to `[]` when felt is unavailable). A non-array body is
+      // The daemon's registry is a bare array (`shuttle agents --json`,
+      // degrading to `[]` when Shuttle is unavailable). A non-array body is
       // malformed — treat it as empty rather than trusting it.
       const res = await fetch(`${this.shuttleBase}/api/v1/agents`)
       if (!res.ok) throw new Error(`${res.status}`)

@@ -140,7 +140,7 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  # A session directory, as `felt shuttle sessions --local --json` and a peer's
+  # A session directory, as `shuttle sessions --local --json` and a peer's
   # `/api/v1/peers?local=true` both serve it; a missing `gaps` is none.
   defp decode_directory(body) do
     with {:ok, %{"sessions" => sessions} = directory} when is_list(sessions) <- Jason.decode(body),

@@ -115,7 +115,7 @@ defmodule ShuttleWeb.RelayHelpers do
     * `{:error, :timeout, reason}` → 503 with the reason.
 
   `tool` labels the 422 line (`"felt"` for the felt CLI, `"shuttle"` for the
-  `felt shuttle` verbs). A caller that needs a side effect on success (a document
+  `shuttle` verbs). A caller that needs a side effect on success (a document
   refresh) keeps its own 200 branch and routes only the `else` failures here.
   """
   def send_cli_result(conn, _tool, {:ok, output}) do

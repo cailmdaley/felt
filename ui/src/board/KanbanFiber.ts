@@ -68,7 +68,7 @@ export interface Fiber {
    * it launched the most recent worker. Machine-managed; read-only here. */
   shuttleDispatchedAt?: string;
   /** `shuttle.runtime.handed_off_at` — RFC3339 INSTANT the WORKER stamped on a
-   * clean exit (`felt shuttle handoff`). Compare against `shuttleDispatchedAt`
+   * clean exit (`shuttle handoff`). Compare against `shuttleDispatchedAt`
    * to tell this run's handoff from a leftover stamp of the previous one: only
    * `handed_off_at >= dispatched_at` concluded the run in hand. */
   shuttleHandedOffAt?: string;

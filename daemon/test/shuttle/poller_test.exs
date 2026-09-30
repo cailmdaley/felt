@@ -144,20 +144,18 @@ defmodule Shuttle.PollerTest do
     })
   end
 
-  # Mirror the worker's `felt shuttle handoff`: stamp `shuttle.handed_off_at` in
+  # Mirror the worker's `shuttle handoff`: stamp `shuttle.handed_off_at` in
   # RFC3339 UTC — the clean-exit signal the daemon compares against dispatched_at.
   defp write_handoff_marker(id, at \\ DateTime.utc_now()) do
     MockRunner.put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(at)})
   end
 
-  # Inject the resolved occurrences felt computes for a standing role — the same
-  # way the mock's `with_resolved_agent` injects resolved.agent. felt is the cron
-  # authority (Stage 4b): it inlines `prev_due` (the catch-up dispatch signal —
-  # most recent tick <= now) and `next_due` (display + the parseable-schedule /
-  # validity signal), and the daemon reads them off `felt show -j` and parses no
-  # cron. A `prev_due` after the role's last service makes it due; an old one
-  # leaves it valid-but-sleeping. Without this a standing fiber resolves no
-  # occurrence → it is treated as having an unparseable schedule (never due).
+  # Inject the resolved occurrences Shuttle computes for a standing role — the
+  # same way the mock's `with_resolved_agent` injects resolved.agent. Shuttle
+  # inlines `prev_due` (the catch-up dispatch signal — most recent tick <= now)
+  # and `next_due` (display and schedule-validity signals); the daemon reads them
+  # from `shuttle show -j` without parsing cron. A `prev_due` after the role's
+  # last service makes it due; an older one leaves it valid but sleeping.
   defp set_resolved_occurrences(id, prev_due, next_due) do
     MockRunner.put_shuttle_fields(id, %{
       "resolved" => %{
@@ -257,9 +255,8 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  # The Poller's default `own_host_id` is SHUTTLE_HOST when set, else felt's
-  # answer from `felt shuttle host --json` — felt owns the host file and the
-  # OS-hostname fallback. Explicit `own_host_id:` opts always win.
+  # The Poller's default `own_host_id` is SHUTTLE_HOST when set, else Shuttle's
+  # answer from `shuttle host --json`. Explicit `own_host_id:` opts always win.
   describe "own_host_id resolution" do
     setup do
       prev = System.get_env("SHUTTLE_HOST")
@@ -272,29 +269,29 @@ defmodule Shuttle.PollerTest do
       :ok
     end
 
-    test "SHUTTLE_HOST, trimmed, wins without asking felt" do
+    test "SHUTTLE_HOST, trimmed, wins without asking Shuttle" do
       System.put_env("SHUTTLE_HOST", "  candide \n")
-      MockRunner.set_host_json(~s({"id": "from-felt"}))
+      MockRunner.set_host_json(~s({"id": "from-shuttle"}))
 
       {:ok, poller} = start_identity_poller(:test_poller_env_host)
 
       assert Poller.snapshot(poller).host == "candide"
-      refute asked_felt_for_host?()
+      refute asked_shuttle_for_host?()
     end
 
-    test "with SHUTTLE_HOST unset the id is felt's, frozen for the Poller's life" do
+    test "with SHUTTLE_HOST unset the id is Shuttle's, frozen for the Poller's life" do
       System.delete_env("SHUTTLE_HOST")
       MockRunner.set_host_json(~s({"id": "candide", "class": "single-user"}))
 
-      {:ok, poller} = start_identity_poller(:test_poller_felt_host)
+      {:ok, poller} = start_identity_poller(:test_poller_shuttle_host)
 
       assert Poller.snapshot(poller).host == "candide"
-      assert Poller.own_host_id(:test_poller_felt_host) == "candide"
-      assert asked_felt_for_host?()
+      assert Poller.own_host_id(:test_poller_shuttle_host) == "candide"
+      assert asked_shuttle_for_host?()
 
-      # A later change in felt's answer does not reach a booted Poller.
+      # A later change in Shuttle's answer does not reach a booted Poller.
       MockRunner.set_host_json(~s({"id": "renamed"}))
-      assert Poller.own_host_id(:test_poller_felt_host) == "candide"
+      assert Poller.own_host_id(:test_poller_shuttle_host) == "candide"
     end
 
     test "the daemon identity is resolved once; every later read is shell-free" do
@@ -365,7 +362,7 @@ defmodule Shuttle.PollerTest do
     )
   end
 
-  defp asked_felt_for_host? do
+  defp asked_shuttle_for_host? do
     Enum.member?(MockRunner.commands(), {"shuttle", ["host", "--json"]})
   end
 
@@ -391,7 +388,16 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn ->
              Enum.any?(MockRunner.commands(), fn {cmd, args} ->
                cmd == "shuttle" and
-                 args == ["ls", "--json", "--has-field", "shuttle", "--json-field", projection]
+                 args == [
+                   "-C",
+                   MockRunner.felt_root(),
+                   "ls",
+                   "--json",
+                   "--has-field",
+                   "shuttle",
+                   "--json-field",
+                   projection
+                 ]
              end)
            end)
 
@@ -400,7 +406,8 @@ defmodule Shuttle.PollerTest do
 
     assert get_in(fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-sonnet"
 
-    assert {"shuttle", ["show", "tests/projected-discovery", "--json"]} in MockRunner.commands()
+    assert {"shuttle",
+            ["-C", MockRunner.felt_root(), "show", "tests/projected-discovery", "--json"]} in MockRunner.commands()
   end
 
   test "poller builds document cache entries from candidate rows, no shuttle show" do
@@ -469,12 +476,11 @@ defmodule Shuttle.PollerTest do
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
   end
 
-  # The incident this guards: on an overloaded login node one bad `felt ls`
-  # (timeout, transient failure) used to blank EVERY fiber on the host for the
-  # tick — mass document-cache eviction, cards flapping in and out. A failed
-  # listing is "world unknown", not "fibers gone": the poller must carry the
-  # last-known candidates and serve them from cache without re-shelling felt.
-  test "a failed felt listing carries last-known candidates instead of blanking the store" do
+  # The incident this guards: on an overloaded login node one failed `shuttle ls`
+  # used to blank every fiber on the host for the tick — mass document-cache
+  # eviction, cards flapping in and out. A failed listing is "world unknown", not
+  # "fibers gone": the poller carries last-known candidates without re-shelling.
+  test "a failed Shuttle listing carries last-known candidates instead of blanking the store" do
     uid = "01JZ00000000000000000000CB"
 
     fiber =
@@ -501,15 +507,14 @@ defmodule Shuttle.PollerTest do
 
     show_count = shuttle_show_count()
 
-    # felt wedges: every listing now times out. The tick degrades by retaining the last-known candidate:
-    # the card stays served, and the mtime-keyed cache reuses the entry
-    # without re-shelling a felt that just timed out.
+    # Shuttle's primary listing times out. The tick retains the last-known
+    # candidate, keeps the card served, and reuses its mtime-keyed cache entry.
     # Capture the last all-fresh refreshed_at before the failure, so we can prove
     # the partial tick does NOT advance it.
     fresh_refreshed_at = Poller.snapshot(poller)[:document_cache]["refreshed_at"]
     assert is_binary(fresh_refreshed_at)
 
-    MockRunner.set_felt_ls_timeout(true)
+    MockRunner.set_listing_timeout(true)
     send(poller, :run_poll_cycle)
 
     assert wait_until(fn ->
@@ -529,9 +534,9 @@ defmodule Shuttle.PollerTest do
     assert body.cache.state == "partial"
     assert body.cache.refreshed_at == fresh_refreshed_at
 
-    # felt recovers: the live listing resumes, the entry is served, and the tick
+    # Shuttle recovers: the live listing resumes, the entry is served, and the tick
     # is "fresh" again with an ADVANCED refreshed_at.
-    MockRunner.set_felt_ls_timeout(false)
+    MockRunner.set_listing_timeout(false)
     send(poller, :run_poll_cycle)
 
     assert_eventually(fn ->
@@ -1119,7 +1124,7 @@ defmodule Shuttle.PollerTest do
 
     # The clean-exit marker was stamped, the live tmux was killed, and a fresh
     # session was spawned — all three happened.
-    assert is_integer(marker_idx), "expected a felt mark-runtime --handed-off-at during the cut"
+    assert is_integer(marker_idx), "expected shuttle mark-runtime --handed-off-at during the cut"
     assert is_integer(kill_idx), "expected the live tmux session to be killed during the cut"
     assert is_integer(new_idx), "expected a fresh tmux session after the cut"
 
@@ -1269,7 +1274,7 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber("tests/slow-felt-read")
     MockRunner.set_fiber("tests/slow-felt-read", fiber)
     MockRunner.set_shuttle("tests/slow-felt-read", oneshot_shuttle())
-    MockRunner.set_felt_ls_delay(1_000)
+    MockRunner.set_ls_delay(1_000)
 
     {:ok, poller} =
       start_poller!(
@@ -1327,7 +1332,7 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber("tests/stalled-read")
     MockRunner.set_fiber("tests/stalled-read", fiber)
     MockRunner.set_shuttle("tests/stalled-read", oneshot_shuttle())
-    MockRunner.set_felt_ls_delay(200)
+    MockRunner.set_ls_delay(200)
 
     {:ok, poller} =
       start_poller!(
@@ -1385,7 +1390,7 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber("tests/shutdown-stalled-read")
     MockRunner.set_fiber("tests/shutdown-stalled-read", fiber)
     MockRunner.set_shuttle("tests/shutdown-stalled-read", oneshot_shuttle())
-    MockRunner.set_felt_ls_delay(1_000)
+    MockRunner.set_ls_delay(1_000)
 
     {:ok, poller} =
       start_poller!(
@@ -1533,7 +1538,7 @@ defmodule Shuttle.PollerTest do
 
   test "poller DOES auto-redispatch a status:active pinned role after a CLEAN handoff" do
     # The unified-lifecycle other half: a pinned worker in a long autonomous arc
-    # that ran `felt shuttle handoff` (stamping handed_off_at >= dispatched_at)
+    # that ran `shuttle handoff` (stamping handed_off_at >= dispatched_at)
     # is deliberately asking for a fresh session. tick_kind_eligible? sees the
     # clean handoff and the tick re-dispatches a fresh worker — the arc continues
     # across clean sessions instead of going dark.
@@ -2230,7 +2235,7 @@ defmodule Shuttle.PollerTest do
 
   test "boot quarantine does NOT park a due standing role (cron is the human's pre-given go)" do
     # Field scenario: a deploy restarted the daemon overnight and nobody ran
-    # `bin/shuttle release`; the 09:00 monthly and weekly roles were parked
+    # `shuttle daemon release`; the 09:00 monthly and weekly roles were parked
     # and silently missed their runs. A cron occurrence is bounded and
     # human-authorized at a fixed time, so it flows through the quarantine.
     fiber_id = "tests/quarantine-standing"
@@ -2884,11 +2889,11 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  # ── S2: boot-time CLI/daemon contract handshake ──
+  # ── CLI/daemon contract handshake ──
   #
-  # `Shuttle.Poller.init/1` shells `felt shuttle contract` once and compares it
-  # to `Shuttle.Contract.expected_level/0`. A mismatch (or unparseable/nonzero
-  # exit — an old CLI where `contract` is unknown) rides the SAME dispatch gate
+  # `Shuttle.Poller.init/1` shells `shuttle contract` once and compares it
+  # to `Shuttle.Contract.expected_level/0`. A mismatch or unparseable/nonzero
+  # exit, including an unknown subcommand, rides the same dispatch gate
   # as boot quarantine: fresh launches park, already-observed work still
   # resumes, and the reason surfaces on `snapshot().contract` /
   # `pending_launch`. `config/test.exs` disables `boot_quarantine`, so these
@@ -2970,11 +2975,10 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "unparseable contract output (old CLI, unknown subcommand) is treated as skew, not a crash" do
-    # Mirrors a pre-e1f65b1 CLI: `felt shuttle contract` is an unknown
-    # subcommand, so real felt exits nonzero with its usage text on stdout —
-    # exactly the shape the CLI's own doc-comment says must be treated as
-    # "cannot determine the level", same as an explicit mismatch.
+  test "unparseable contract output (unknown subcommand) is treated as skew, not a crash" do
+    # When `shuttle contract` is unavailable, the CLI exits nonzero with usage
+    # text on stdout. The daemon cannot determine the level, so it treats that
+    # shape as incompatible, just like an explicit mismatch.
     MockRunner.set_contract_level("Error: unknown command \"contract\"", 1)
     fiber_id = "tests/contract-garbage"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
@@ -3103,9 +3107,9 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]})
     MockRunner.set_fiber(fiber_id, fiber)
 
-    # The standing role is read straight from the document (slice 6: no runtime
-    # store). Phase is the schedule-derived label; awaiting/accepted are document
-    # facts (status:closed/tempered), not stored.
+    # The standing role is read straight from the document, with no runtime
+    # store. Phase is schedule-derived; awaiting/accepted are document facts
+    # (status:closed/tempered), not stored.
     MockRunner.set_shuttle(
       fiber_id,
       """
@@ -3143,8 +3147,8 @@ defmodule Shuttle.PollerTest do
     assert state in ["scheduled", "due"]
   end
 
-  # A status:active standing role dispatches off the cron schedule, read straight
-  # from the document (slice 6: no runtime overlay can wedge it). An every-minute
+  # A status:active standing role dispatches off the cron schedule read straight
+  # from the document, with no runtime overlay. An every-minute
   # schedule is reliably due now regardless of wall-clock.
   test "a status:active standing role dispatches off the cron schedule" do
     fiber_id = "tests/standing-wedge"
@@ -3269,7 +3273,7 @@ defmodule Shuttle.PollerTest do
 
   # Accepting a standing run through the Poller re-arms the felt document
   # (status:active, verdict cleared) and that re-arm survives the next poll —
-  # there is no runtime cache to clobber it (slice 6). The document IS the truth.
+  # there is no runtime cache to clobber it. The document is the truth.
   test "accept through the Poller re-arms the document and survives the next poll" do
     fiber_id = "tests/standing-accept-sticks"
 
@@ -3318,11 +3322,11 @@ defmodule Shuttle.PollerTest do
              "status: active"
   end
 
-  # felt is the one writer of accept/resume: the Poller shells `felt shuttle
-  # --felt-store <owning store> <verb> <slug> --local` between poll cycles,
+  # Shuttle writes accept/resume: the Poller shells `shuttle -C <owning store>
+  # <verb> <slug> --local` between poll cycles,
   # then re-reads the fiber into its document cache so the board shows the
   # re-arm without waiting for the next poll.
-  test "lifecycle_transition shells felt's --local writer and refreshes the document cache" do
+  test "lifecycle_transition shells Shuttle's --local writer and refreshes the document cache" do
     fiber_id = "tests/standing-accept-refresh"
     store = MockRunner.felt_root()
 
@@ -3367,7 +3371,7 @@ defmodule Shuttle.PollerTest do
     # re-arms the felt document (status:active), but a poll Task already in flight
     # — snapshotted while the role was still the closed (awaiting) document —
     # must not revert the acceptance when it completes. The poll Task only reads;
-    # the document is the single source of truth (slice 6), so the accept stands.
+    # the document is the single source of truth, so the accept stands.
     fiber_id = "tests/standing-accept-during-poll"
 
     previous_loom_homes = System.get_env("SHUTTLE_STORES")
@@ -3404,7 +3408,7 @@ defmodule Shuttle.PollerTest do
 
     # Hold the next poll inside its read-only felt walk; its snapshot still sees
     # the role as the closed (awaiting) document.
-    MockRunner.set_felt_ls_delay(400)
+    MockRunner.set_ls_delay(400)
     send(poller, :run_poll_cycle)
 
     assert wait_until(fn ->
@@ -3486,12 +3490,12 @@ defmodule Shuttle.PollerTest do
   end
 
   test "ad-hoc dispatch of an awaiting standing role spawns" do
-    # Awaiting is felt-native (slice 5): status:closed + untempered. Every
+    # Awaiting is represented in the document as status:closed + untempered. Every
     # explicit dispatch carries `force` (the controller folds `force or ad_hoc`;
     # Shuttle.Transition passes both), and force IS the human's "go" from the
     # board (New session / Resume / drag) — so an awaiting role spawns, re-arming
     # the doc on the way (the re-arm itself is exercised in
-    # dispatch_integration_test against a real felt home).
+    # dispatch_integration_test against a real store).
     fiber_id = "tests/standing-awaiting-refuses-adhoc"
 
     fiber =
@@ -3536,7 +3540,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "actions/resolve read tmux-live running state, not a stale registry hit" do
-    # C1-adjacent: :dispatch reconciles against tmux before reading state.running,
+    # :dispatch reconciles against tmux before reading state.running,
     # but :actions and :resolve_action used to read the registry raw. So in the
     # window after a worker's session dies (before the poll tick reconciles), a
     # drag→inFlight resolved to `pause` for a worker that no longer exists — and
@@ -3824,8 +3828,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "force-dispatch runs a draft fiber (status: open)" do
-    # A draft (status: open) is not auto-dispatched (slice 5: status is the sole
-    # gate, no enabled flag) but is still available for explicit manual launch —
+    # A draft (status: open) is not auto-dispatched because status is the sole
+    # gate, but it remains available for explicit manual launch —
     # the click is the override.
     fiber_id = "tests/disabled-force"
     fiber = make_fiber(fiber_id, %{"status" => "open"})
@@ -3979,10 +3983,10 @@ defmodule Shuttle.PollerTest do
     )
 
     # Recently serviced ⇒ not due now (what gates is "has an occurrence elapsed
-    # since last service"). felt's prev_due (the last real tick) sits before this
-    # service; next_due is the future tick → valid (validation_errors empty) but
-    # not due. The legacy flat next_due_at above is now inert — felt's resolved
-    # occurrences are the source.
+    # since last service"). Shuttle's prev_due (the last real tick) sits before
+    # this service; next_due is the future tick → valid (validation_errors
+    # empty) but not due. Shuttle's resolved occurrences provide the schedule
+    # times.
     write_dispatch_marker("tests/standing-stale", "seed-recent")
 
     set_resolved_occurrences(
@@ -4027,7 +4031,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber("tests/standing-review", sleeping)
     MockRunner.set_fiber("tests/standing-accepted", paused)
 
-    # A leftover review block is ignored (slice 5: no review axis); the role reads
+    # A leftover review block is ignored because no review axis exists; the role reads
     # scheduled (its next weekday-09:00 tick is in the future).
     MockRunner.set_shuttle(
       "tests/standing-review",
@@ -4041,7 +4045,7 @@ defmodule Shuttle.PollerTest do
     )
 
     # Recently serviced ⇒ not due ⇒ stays "scheduled" (not dispatched/"running").
-    # felt resolves a valid schedule (prev before service, next in the future) so
+    # Shuttle resolves a valid schedule (prev before service, next in the future) so
     # the snapshot reads a genuine "valid but sleeping", not an invalid role.
     write_dispatch_marker("tests/standing-review", "seed-recent")
 
@@ -4053,7 +4057,7 @@ defmodule Shuttle.PollerTest do
 
     # A draft role (status: open) still reads scheduled in the schedule-derived
     # snapshot — paused/draft is a document fact (status), surfaced by the kanban
-    # classifier from the document, not a StandingRole phase (slice 5).
+    # classifier from the document, not a StandingRole phase.
     MockRunner.set_shuttle(
       "tests/standing-accepted",
       """
@@ -4185,8 +4189,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "poller re-dispatches a still-active oneshot after its worker exits (retry collapsed into poll loop)" do
-    # Retries collapsed into the poll loop (slice 6): when a multi-session
-    # oneshot worker exits but its document is still status:active, the claim is
+    # Retries run through the poll loop: when a multi-session oneshot worker
+    # exits but its document is still status:active, the claim is
     # released and the next poll re-picks it (status:active + no live session →
     # eligible) and starts a fresh session.
     fiber = make_fiber("tests/haiku-retry")
@@ -4251,7 +4255,7 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, [])
 
-    # The in-memory running registry is keyed by uid (slice 3/6).
+    # The in-memory running registry is keyed by uid.
     state = :sys.get_state(poller)
     assert Map.has_key?(state.running, uid)
     refute Map.has_key?(state.running, fiber_id)
@@ -4268,7 +4272,7 @@ defmodule Shuttle.PollerTest do
   test "force-dispatch honors resume_mode: previous dispatch param (unified resume path)" do
     # The old kanban-modal flow had two separate paths: "New session"
     # (ad-hoc, force-fresh) and "Resume" (a special accept-then-dispatch
-    # dance via felt shuttle resume). Under unified force semantics, BOTH
+    # dance via shuttle resume). Under unified force semantics, BOTH
     # buttons carry resume_mode on the dispatch call and dispatch with
     # force: true. resolve_resume_intent honors the carried resume_mode
     # regardless of dispatch context (oneshot, standing scheduled, standing
@@ -4421,7 +4425,7 @@ defmodule Shuttle.PollerTest do
     # closed-implies-handoff: a fiber flipping to status:closed while its
     # worker is still running IS the worker's deliberate exit — a crash never
     # changes status, so closed is deliberate by construction. The reaper must
-    # stamp handed_off_at exactly as the worker's own `felt shuttle handoff`
+    # stamp handed_off_at exactly as the worker's own `shuttle handoff`
     # would, so the exit reads back as clean (fresh redispatch), never a dirty
     # death (resume).
     fiber_id = "tests/closed-implies-handoff"
@@ -4453,7 +4457,7 @@ defmodule Shuttle.PollerTest do
     refute get_in(dispatched_fiber, ["shuttle", "runtime", "handed_off_at"])
 
     # The worker's own deliberate exit: status flips to closed while the tmux
-    # session (and the daemon's watcher) are still alive. No `felt shuttle
+    # session (and the daemon's watcher) are still alive. No `shuttle
     # handoff` call — closed itself is now the deliberate-exit signal.
     MockRunner.set_fiber(fiber_id, Map.put(dispatched_fiber, "status", "closed"))
 
@@ -4461,7 +4465,7 @@ defmodule Shuttle.PollerTest do
 
     # The reap here only stops the daemon's watcher (the closed-externally
     # branch never kills the worker's own tmux session — a real worker ends
-    # its own session as its final act, same as a clean `felt shuttle
+    # its own session as its final act, same as a clean `shuttle
     # handoff` exit); wait on the stamp itself rather than tmux teardown.
     assert wait_until(fn ->
              get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) != nil
@@ -4525,12 +4529,12 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "poller adopts uid workers when felt ls writes warnings to stderr" do
+  test "poller adopts uid workers when Shuttle listing warnings go to stderr" do
     fiber_id = "life/french/daily-practice"
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
     MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
-    MockRunner.set_felt_ls_stderr_warning(true)
+    MockRunner.set_ls_stderr_warning(true)
     MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
 
     {:ok, poller} =
@@ -4628,9 +4632,9 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  # Retries collapsed into the poll loop (slice 6): a status:active oneshot whose
-  # worker died while the daemon was down has no live tmux session, so it is
-  # simply eligible again — the next poll re-dispatches it. There is no separate
+  # A status:active oneshot whose worker died while the daemon was down has no
+  # live tmux session, so it is simply eligible again — the next poll re-dispatches
+  # it. There is no separate
   # "resurrection" path or retry row to assert; the contract is that a fresh
   # session is spawned.
   test "poller re-dispatches a status:active oneshot whose worker died while the daemon was down" do
@@ -4871,7 +4875,7 @@ defmodule Shuttle.PollerTest do
 
     send(poller, :run_poll_cycle)
 
-    # Self-heal fired: a `felt shuttle mark-runtime --handed-off-at` write was
+    # Self-heal fired: a `shuttle mark-runtime --handed-off-at` write was
     # issued to conclude the phantom run.
     assert wait_until(
              fn ->
@@ -5126,7 +5130,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "poller re-adopts a live tmux worker on restart (running is tmux-derived)" do
-    # Daemon state is derived and disposable (slice 6: no runtime store). After a
+    # Daemon state is derived and disposable. After a
     # restart the live tmux session is re-adopted by adopt_orphans, so the worker
     # is tracked again — running work survives because tmux owns the process.
     fiber_id = "tests/runtime-rehydrate-live"
@@ -5165,7 +5169,7 @@ defmodule Shuttle.PollerTest do
   end
 
   test "poller does not track a worker whose tmux session disappeared while daemon was down" do
-    # No runtime store to rehydrate from (slice 6): a restart re-scans tmux, and
+    # There is no runtime store to rehydrate from: a restart re-scans tmux, and
     # a dead session is simply absent — nothing is tracked as running, and the
     # still-active fiber is re-dispatched fresh on the next poll.
     fiber_id = "tests/runtime-rehydrate-missing"
@@ -5953,10 +5957,9 @@ defmodule Shuttle.PollerTest do
     snap = Poller.snapshot(poller)
     assert Enum.any?(snap.eligible, &(&1.fiber_id == id))
 
-    # The claim shelled `felt shuttle mark-runtime` to stamp the session uuid into
-    # the fiber's `shuttle.runtime` block (felt owns the nesting — Stage 5), so
-    # resume / continuation can recover it. The daemon's contract is the verb it
-    # issues; felt's own suite covers that the verb nests correctly.
+    # The claim shells `shuttle mark-runtime` to stamp the session UUID into
+    # `shuttle.runtime`. Shuttle owns that nested write; the command path and
+    # its YAML update are covered by the CLI suite.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--session" in args and "uuid-claim-1" in args

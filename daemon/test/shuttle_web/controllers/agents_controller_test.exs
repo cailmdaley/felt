@@ -1,8 +1,8 @@
 defmodule ShuttleWeb.AgentsControllerTest do
   @moduledoc """
   `POST /api/v1/agents/effort` — the settings page's one structured edit of
-  `agents.json`, which shells `shuttle agents effort`. shuttle is stubbed at
-  the `:felt_runner` seam, so the argv is the thing under test.
+  `agents.json`, which shells `shuttle agents effort`. The CLI is stubbed at
+  the shared `:felt_runner` seam, so the argv is the thing under test.
   """
   use ExUnit.Case
   import Shuttle.Test.ApiConn
@@ -70,7 +70,7 @@ defmodule ShuttleWeb.AgentsControllerTest do
              {"shuttle", ["agents", "effort", "claude-opus", "--reset"]}
   end
 
-  test "a missing id or effort is a 400, and felt is never run" do
+  test "a missing id or effort is a 400, and Shuttle is never run" do
     assert post_effort(%{"effort" => "high"}).status == 400
     assert post_effort(%{"id" => "claude-opus"}).status == 400
     assert post_effort(%{"id" => "claude-opus", "effort" => ""}).status == 400
