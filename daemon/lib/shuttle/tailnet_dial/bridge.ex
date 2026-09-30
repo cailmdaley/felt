@@ -5,6 +5,12 @@ defmodule Shuttle.TailnetDial.Bridge do
 
   @connect_timeout_ms 5_000
   @drain_timeout_ms 5_000
+  # Ceiling on a relay that has carried a request and not yet seen any answer.
+  # The caller's own HTTP timeout is what ends a slow exchange (httpc closes
+  # the socket, and the relay drains); this only reaps a relay whose client
+  # never does. It must exceed the longest forward any caller waits on — the
+  # 330 s remote folder picker — or the bridge cuts live requests short.
+  @in_flight_timeout_ms 600_000
   @socket_options [:binary, active: false, packet: :http_bin]
 
   def child_spec(opts) do
@@ -144,7 +150,7 @@ defmodule Shuttle.TailnetDial.Bridge do
         Shuttle.TailnetDial.clear_error(name)
 
         try do
-          case pump(client, tls_socket, Keyword.fetch!(opts, :request_timeout_ms)) do
+          case pump(client, tls_socket, relay_timeouts(opts)) do
             :ok -> :ok
             {:error, reason} -> Shuttle.TailnetDial.record_error(name, :relay, reason)
           end
@@ -306,17 +312,39 @@ defmodule Shuttle.TailnetDial.Bridge do
     end
   end
 
-  defp pump(client, tls_socket, request_timeout_ms) do
+  # Two budgets, chosen by which side spoke last. After the peer's bytes (a
+  # response, or nothing yet) the relay is an idle pooled keep-alive and is
+  # reaped after `2 × request_timeout_ms`. After the client's bytes a request
+  # is awaiting its answer, and the per-remote poll budget says nothing about
+  # how long that may take: a forwarded message waits on the receiver's
+  # delivery for seconds, a remote folder picker for minutes. Reaping those
+  # at the poll budget (4 s by default) closed forwards mid-request, which
+  # httpc reports as `:socket_closed_remotely` — after a keep-alive retry, ~8 s.
+  defp relay_timeouts(opts) do
+    idle = 2 * Keyword.fetch!(opts, :request_timeout_ms)
+
+    in_flight =
+      Application.get_env(:shuttle, :tailnet_dial_in_flight_timeout_ms, @in_flight_timeout_ms)
+
+    %{idle: idle, in_flight: max(in_flight, idle)}
+  end
+
+  defp pump(client, tls_socket, timeouts) do
     with :ok <- :inet.setopts(client, active: :once),
          :ok <- :ssl.setopts(tls_socket, active: :once) do
-      pump(client, tls_socket, true, true, 2 * request_timeout_ms)
+      pump(client, tls_socket, true, true, timeouts, false)
     end
   end
 
-  defp pump(_client, _tls_socket, false, false, _idle_timeout_ms), do: :ok
+  defp pump(_client, _tls_socket, false, false, _timeouts, _awaiting?), do: :ok
 
-  defp pump(client, tls_socket, client_open?, tls_open?, idle_timeout_ms) do
-    timeout = if client_open? and tls_open?, do: idle_timeout_ms, else: @drain_timeout_ms
+  defp pump(client, tls_socket, client_open?, tls_open?, timeouts, awaiting?) do
+    timeout =
+      cond do
+        not (client_open? and tls_open?) -> @drain_timeout_ms
+        awaiting? -> timeouts.in_flight
+        true -> timeouts.idle
+      end
 
     receive do
       {:tcp, ^client, data} ->
@@ -326,7 +354,8 @@ defmodule Shuttle.TailnetDial.Bridge do
           tls_socket,
           client_open?,
           tls_open?,
-          idle_timeout_ms
+          timeouts,
+          true
         )
 
       {:ssl, ^tls_socket, data} ->
@@ -336,16 +365,17 @@ defmodule Shuttle.TailnetDial.Bridge do
           tls_socket,
           client_open?,
           tls_open?,
-          idle_timeout_ms
+          timeouts,
+          false
         )
 
       {:tcp_closed, ^client} ->
         _ = :ssl.shutdown(tls_socket, :write)
-        pump(client, tls_socket, false, tls_open?, idle_timeout_ms)
+        pump(client, tls_socket, false, tls_open?, timeouts, awaiting?)
 
       {:ssl_closed, ^tls_socket} ->
         _ = :gen_tcp.shutdown(client, :write)
-        pump(client, tls_socket, client_open?, false, idle_timeout_ms)
+        pump(client, tls_socket, client_open?, false, timeouts, awaiting?)
 
       {:tcp_error, ^client, reason} ->
         {:error, {:client_tcp, reason}}
@@ -359,10 +389,10 @@ defmodule Shuttle.TailnetDial.Bridge do
     end
   end
 
-  defp relay_result(:ok, client, tls_socket, client_open?, tls_open?, idle_timeout_ms) do
+  defp relay_result(:ok, client, tls_socket, client_open?, tls_open?, timeouts, awaiting?) do
     with :ok <- if(client_open?, do: :inet.setopts(client, active: :once), else: :ok),
          :ok <- if(tls_open?, do: :ssl.setopts(tls_socket, active: :once), else: :ok) do
-      pump(client, tls_socket, client_open?, tls_open?, idle_timeout_ms)
+      pump(client, tls_socket, client_open?, tls_open?, timeouts, awaiting?)
     end
   end
 
@@ -372,7 +402,8 @@ defmodule Shuttle.TailnetDial.Bridge do
          _tls_socket,
          _client_open?,
          _tls_open?,
-         _idle_timeout_ms
+         _timeouts,
+         _awaiting?
        ),
        do: {:error, reason}
 end

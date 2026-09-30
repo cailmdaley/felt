@@ -465,10 +465,15 @@ defmodule Shuttle.TailnetDialTest do
     assert host_header == "#{@host}:#{tls_port}"
   end
 
-  test "an in-flight request reports the bridge's quiet idle close", %{
+  test "a request awaiting its answer outlives the keep-alive idle budget", %{
     base: base,
     tls_port: tls_port
   } do
+    # Regression: the relay reaped every quiet socket after 2 x the remote's
+    # poll `request_timeout_ms` (4 s by default), including one whose request
+    # was still waiting on the peer. A forwarded message to a Claude receiver
+    # waits seconds for delivery, so the forward came back
+    # `:socket_closed_remotely` although the receiver had queued it.
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
     previous_proxy = Application.get_env(:shuttle, :https_proxy)
@@ -481,6 +486,65 @@ defmodule Shuttle.TailnetDialTest do
       restore_cacerts(previous_cacerts)
       restore_app_env(:tailscale_socket, previous_socket)
       restore_app_env(:https_proxy, previous_proxy)
+    end)
+
+    remote =
+      start_bridge(base, localapi, @host, tls_port,
+        request_timeout_ms: 250,
+        name: "slow-answer"
+      )
+
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    request =
+      Task.async(fn ->
+        Shuttle.RemoteRegistry.Client.Default.get(
+          "https://#{@host}:#{tls_port}/in-flight",
+          10_000
+        )
+      end)
+
+    assert_receive {:inflight_request, stalled_pid}, 5_000
+    on_exit(fn -> if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill) end)
+    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+
+    # Three idle budgets (500 ms each) pass with the request unanswered.
+    Process.sleep(1_500)
+    assert Process.alive?(relay_pid)
+    assert Task.yield(request, 0) == nil
+
+    send(stalled_pid, :respond)
+    assert {:ok, {:ok, "in-flight-retried"}} = Task.yield(request, 5_000)
+    refute_receive {:inflight_request, _retried_pid}, 100
+
+    # Once answered, the relay is an idle keep-alive again and is reaped.
+    assert eventually(
+             fn -> relay_pid not in Task.Supervisor.children(Shuttle.TaskSupervisor) end,
+             1_500
+           )
+
+    assert TailnetDial.last_error(remote.name) == nil
+  end
+
+  test "an unanswered request is reaped at the in-flight ceiling", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    previous_proxy = Application.get_env(:shuttle, :https_proxy)
+    previous_ceiling = Application.get_env(:shuttle, :tailnet_dial_in_flight_timeout_ms)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    Application.put_env(:shuttle, :https_proxy, false)
+    Application.put_env(:shuttle, :tailnet_dial_in_flight_timeout_ms, 600)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailscale_socket, previous_socket)
+      restore_app_env(:https_proxy, previous_proxy)
+      restore_app_env(:tailnet_dial_in_flight_timeout_ms, previous_ceiling)
     end)
 
     remote =
@@ -505,7 +569,7 @@ defmodule Shuttle.TailnetDialTest do
 
     assert eventually(
              fn -> relay_pid not in Task.Supervisor.children(Shuttle.TaskSupervisor) end,
-             1_000
+             2_000
            )
 
     assert TailnetDial.last_error(remote.name) == nil
