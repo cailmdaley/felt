@@ -1,9 +1,10 @@
 # Frontmatter
 
 A fiber's frontmatter has two halves. felt owns a fixed set of native fields.
-Everything else belongs to you, and felt carries it without opinion.
+It preserves every other top-level key without interpreting it; the tool that
+writes a key owns its meaning.
 
-The rule: **felt owns the fiber; projects own any additional YAML fields.**
+The rule: **felt owns the fiber; each additional field has its own owner.**
 
 ## Native fields
 
@@ -11,12 +12,12 @@ The rule: **felt owns the fiber; projects own any additional YAML fields.**
 |---|---|---|
 | `id` | ULID string | minted at `felt add` |
 | `name` | string | `felt add <slug> <name>`, `felt edit --name` |
-| `status` | `open` / `active` / `closed` | `-s/--status` |
+| `status` | `open` / `active` / `closed` | `felt edit -s/--status`; shuttle lifecycle verbs |
 | `tags` | list of strings | `-t/--tag`, `--untag` |
 | `created-at` | timestamp | felt, on create |
 | `updated-at` | timestamp | felt, on every write |
 | `closed-at` | timestamp | felt, when status becomes closed |
-| `outcome` | string | `-o/--outcome` |
+| `outcome` | string | `felt edit -o/--outcome`; `shuttle set-outcome` |
 | `due` | date | `-D/--due` (`YYYY-MM-DD`) |
 | `description` | string | **file only** — no CLI flag |
 
@@ -63,7 +64,9 @@ felt ls -j                                     # everything, as JSON
 ```
 
 `--field` formats for shell consumers: scalars on one line, sequences of
-scalars one per line, structured values as YAML.
+scalars one per line, structured values as YAML. `shuttle ls` and `shuttle
+show` accept the corresponding list/read flags and add the resolved Shuttle
+facet to JSON; the `felt` commands leave the block as plain frontmatter.
 
 One convention felt *does* understand: `inputs.from` names another fiber as a
 data-flow input. Every `inputs:` entry with a `from:` is an edge, whether or
@@ -77,11 +80,12 @@ reads. The rest of the block stays yours.
 A key felt treats as opaque can still mean something to whatever else looks at
 your fibers. These are the ones in this repo, so you recognise them if you meet
 them — and so you do not pick the same names for something else. felt validates
-none of them.
+none of them; shuttle validates and resolves its own block.
 
 | Key | Read by | Meaning |
 |---|---|---|
 | `inputs.from` | felt | A data-flow edge to another fiber |
+| `shuttle:` | shuttle CLI and daemon | Dispatch configuration and lifecycle state; felt preserves the block without validating or resolving it |
 | tag `cycle` + `start:` / `due:` | the shuttle board | A named span of calendar time, drawn as a band. Written by dragging in the Chronicle |
 | `horizon: stashed` | the shuttle board | Takes a card off the Now board to Resting. A `due:` day at or past today overrides it and pulls the card back |
 | `cold: true` | the shuttle board | Marks a stashed card *held open*: its Resting cluster renders dimmer, wears a `held open` tag, and sorts below the warm clusters. Cleared alongside `horizon` when the card returns to the desk |

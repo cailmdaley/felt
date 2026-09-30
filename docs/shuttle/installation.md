@@ -1,24 +1,25 @@
-# Installing the shuttle daemon
+# Installing felt, shuttle, and the daemon
 
-The daemon runs one of two ways, and the choice is about what you want on the
-machine.
+The two Go CLIs are installed together: `felt` manages fiber data, and `shuttle`
+owns Shuttle configuration and orchestration. The Elixir daemon and board are
+optional; choose how to add them.
 
-- **Fetch the release.** A prebuilt daemon for your platform, carrying its own
-  Erlang runtime, the board bundle, and its keep-alive supervisor inside it. One
-  command, no toolchain, no checkout.
-- **Build from a checkout.** `scripts/bootstrap.sh` builds the felt CLI and the daemon
-  from source, places the board bundle, and installs the same keep-alive. This
-  is the fleet path — what the deploy script updates, and what you want if you
-  are changing daemon code.
+- **Fetch the release.** The install script puts both Go CLIs on `PATH`. With
+  `SHUTTLE_DAEMON=1`, it also fetches the platform's daemon release, carrying
+  its Erlang runtime and board bundle. No toolchain or checkout is needed.
+- **Build from a checkout.** `scripts/bootstrap.sh` builds both CLIs and the
+  daemon from source, places the board bundle, and installs the keep-alive.
+  This is the fleet path — what the deploy script updates, and what you want if
+  you are changing daemon code.
 
-Either way the daemon needs `tmux` and the `felt` CLI at runtime: workers run in
-tmux sessions, and the daemon shells out to `felt` for every store walk and
-every write.
+The daemon needs `tmux` and both Go CLIs at runtime. Workers run in tmux
+sessions; the daemon shells out to `felt` for fiber content and generic writes,
+and to `shuttle` for resolved reads and Shuttle-owned operations.
 
 !!! note "Platform and operating modes"
     Linux and macOS support single-host use — the daemon, board, and workers on
     one machine, with a keep-alive supervisor that restarts the daemon if it
-    crashes. Multi-host tunnel management (`felt shuttle tunnels`) installs
+    crashes. Multi-host tunnel management (`shuttle tunnels`) installs
     launchd jobs on macOS and systemd user units on Linux. Multi-host operation
     needs SSH access and configured remote daemons. Windows is unsupported.
 
@@ -33,7 +34,8 @@ At runtime, whichever path you take:
 
 | Tool | Required | Purpose |
 | --- | --- | --- |
-| `felt` | yes | The daemon shells out to the CLI for every store walk and every write, so `felt` must be on the daemon's `PATH`. |
+| `felt` | yes | The daemon shells out to felt for fiber content and generic writes. |
+| `shuttle` | yes | The daemon shells out to shuttle for resolved reads, Shuttle operations, and its CLI contract. |
 | `tmux` | yes | Every worker runs in a tmux session. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
@@ -42,7 +44,7 @@ needs:
 
 | Tool | Required | Purpose |
 | --- | --- | --- |
-| `go` 1.23+ | yes | Builds the `felt` CLI from the same checkout, so the CLI and the daemon never skew. |
+| `go` 1.23+ | yes | Builds both Go CLIs from the same checkout as the daemon. |
 | `elixir` 1.19+ / OTP 28 | yes | `daemon/mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
 | `node` 22+ / `npm` | yes | Source builds compile the board into `ui/dist` on each host. A fetched daemon ships the bundle already built. |
 
@@ -50,32 +52,32 @@ needs:
 
 ## Fetch the release
 
-`SHUTTLE=1` on the felt install script installs the CLI as usual, then unpacks
-the daemon beside it:
+The install script always installs both Go CLIs. Set `SHUTTLE_DAEMON=1` to
+also unpack the daemon release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
 ```
 
 !!! warning "Environment variables go after the pipe"
-    `SHUTTLE=1` sets the environment of `sh`, which is what reads the script.
-    Written the other way round — `SHUTTLE=1 curl … | sh` — it sets `curl`'s
-    environment instead, the script never sees it, and you get a CLI install
-    and no daemon, reported as success. The same holds for `FELT_VERSION` and
+    `SHUTTLE_DAEMON=1` sets the environment of `sh`, which is what reads the script.
+    Written the other way round — `SHUTTLE_DAEMON=1 curl … | sh` — it sets `curl`'s
+    environment instead, the script never sees it, and you get both Go CLIs
+    but no daemon, reported as success. The same holds for `FELT_VERSION` and
     `SHUTTLE_HOME`.
 
-The CLI lands where it always does: `/usr/local/bin` if that is writable, else
-`~/.local/bin`, overridable with `FELT_INSTALL_DIR`. The daemon lands in
-`~/.local/share/shuttle` — override with `SHUTTLE_HOME` — and its front door is
-`$SHUTTLE_HOME/bin/shuttle`:
+Both Go CLIs land together: `/usr/local/bin` if that is writable, else
+`~/.local/bin`, overridable with `FELT_INSTALL_DIR`. The Mix release lands in
+`~/.local/share/shuttle` — override with `SHUTTLE_HOME` — and is managed through
+the `shuttle` CLI:
 
 ```bash
-FELT_STORES=~/dev/myproject ~/.local/share/shuttle/bin/shuttle start
+SHUTTLE_STORES=~/dev/myproject shuttle daemon start
 ```
 
 That runs in the foreground and stops on `Ctrl-C`. To have the daemon start at
 login and come back after a crash, hand it to the supervisor that ships in the
-same tarball — `shuttle install-agent`, walked through step by step for macOS in
+same tarball — `shuttle daemon install`, walked through step by step for macOS in
 [Set up a supervised daemon on macOS](#set-up-a-supervised-daemon-on-macos) and
 covered in full under [Keep-alive](#keep-alive).
 
@@ -84,7 +86,8 @@ bundled Erlang runtime and native components, and the board bundle, in one
 directory tree. It reads nothing from the host's toolchain, which is why this
 path asks for no Elixir and no Node. The bundled runtime makes each tarball
 platform-specific — matching OS and CPU architecture — and the matrix covers
-four: `shuttle_{Linux,Darwin}_{x86_64,arm64}.tar.gz`.
+four: `shuttled_{Linux,Darwin}_{x86_64,arm64}.tar.gz`. The separate
+`felt_{os}_{arch}.tar.gz` Go CLI archive contains both `felt` and `shuttle`.
 
 On Linux the one thing the host must supply is a C library at least as new as
 the one the release was built against. The Linux tarballs declare a floor of
@@ -93,7 +96,7 @@ built inside an EL8 container, and CI reads the required `GLIBC_`/`GLIBCXX_`/
 `GCC_` symbol versions back out of every binary and refuses to publish an
 artifact above that floor. So a release that boots on an EL8 login node boots
 on every newer distribution too; `ldd --version` tells you where a host stands.
-The felt CLI has no such requirement — it is a static binary.
+The Go CLIs have no such requirement — they are static binaries.
 
 The installer checks this for you: before it replaces anything it starts the
 bundled runtime (`bin/shuttled eval …`) and reads the version from inside the
@@ -106,13 +109,12 @@ Upgrade by running the same command again. It deletes `$SHUTTLE_HOME` and
 unpacks the new tarball in its place, so keep nothing of your own in there. The
 daemon's state lives in `~/.shuttle` and survives.
 
-The tarball carries what the daemon needs to run *and* to keep running. Under
-its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and `share/`. Two of those
-matter here: `share/` holds both supervisor templates — the launchd plist and
-the systemd unit — and `bin/` holds the `shuttle` shim that renders them,
-alongside `shuttle-launch`, the tmux respawn loop for hosts with no supervisor
-at all. So a fetched install supervises itself, from the same files a checkout
-uses, through [`shuttle install-agent`](#keep-alive).
+The daemon tarball carries what the release needs to run *and* to keep
+running. Under its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and
+`share/`. `bin/` contains `shuttled`, the BEAM launcher; `share/` holds the
+launchd plist and systemd unit templates. The supervisor invokes the installed
+Go `shuttle` CLI with the release path, and `shuttle daemon install` renders
+the same templates in a checkout or fetched install.
 
 What the tarball leaves behind is the repo's *development* surface: the `make`
 targets and `bin/shuttle-deploy`. A fetched host runs a daemon and keeps it
@@ -129,12 +131,12 @@ step 2.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | SHUTTLE=1 sh
+  | SHUTTLE_DAEMON=1 sh
 ```
 
-`SHUTTLE=1` goes *after* the pipe, for the reason in the warning above: in front
-of `curl` it sets the wrong process's environment, and you get a felt CLI with
-no daemon, reported as success.
+`SHUTTLE_DAEMON=1` goes *after* the pipe, for the reason in the warning above: in front
+of `curl` it sets the wrong process's environment, and you get both Go CLIs
+but no daemon, reported as success.
 
 A fresh Mac ships no `tmux`, and the installer says so when it finds none. Every
 worker runs inside a tmux session, so a daemon without it serves a board and
@@ -154,6 +156,15 @@ launchd is allowed to read:
 mkdir -p ~/notes && cd ~/notes && felt init
 ```
 
+Seed the stores registry before installing the supervisor; the installer
+refuses an empty effective store list:
+
+```bash
+mkdir -p ~/.config/shuttle
+printf '{"version":1,"felt_stores":["%s"]}\n' "$HOME/notes" \
+  > ~/.config/shuttle/stores.json
+```
+
 !!! warning "Not `~/Documents`, `~/Desktop`, or `~/Downloads`"
     macOS blocks launchd-started processes from those three folders, and
     granting Full Disk Access does not rescue you — the grant does not inherit
@@ -161,9 +172,10 @@ mkdir -p ~/notes && cd ~/notes && felt init
     one of them is *discovered and unreadable*: the daemon starts, the board
     loads, the board shows nothing, and no error appears anywhere. Anywhere else
     in your home directory works — `~/notes`, `~/dev`, `~/loom`. The same rule
-    covers the daemon itself. `install-agent` checks both — the release it is
-    installing and every store you name — and warns on stderr about any path
-    under one of the three, but it installs anyway, so read what it prints.
+    covers the daemon itself. `shuttle daemon install` checks both — the
+    release it is installing and every store you name — and warns on stderr
+    about any path under one of the three, but it installs anyway, so read what
+    it prints.
 
 !!! warning "macOS: start your tmux server from a terminal, not the daemon"
     Every worker runs inside tmux, and macOS charges file access to a process
@@ -177,11 +189,9 @@ mkdir -p ~/notes && cd ~/notes && felt init
     running terminal (kitty, remote-controlled) to start the server, and if
     none is reachable it declines the dispatch and reports why on the board
     rather than silently rooting a server itself. Keep a tmux server alive
-    from a terminal you started by hand — `felt setup receipt` reports when
-    the current server is daemon-born, meaning it was forked by the daemon
-    before this behaviour existed (or by an older daemon). Dispatch still
-    works; every worker on that server is just charged to the daemon binary,
-    so the remedy is to restart the server from a terminal once no workers are
+    from a terminal you started by hand — `shuttle doctor` reports when the
+    current server is daemon-born. Workers on that server are charged to the
+    daemon binary, so restart the server from a terminal once no workers are
     live.
 
 !!! note "Already using felt on this machine?"
@@ -191,7 +201,7 @@ mkdir -p ~/notes && cd ~/notes && felt init
     perfectly and a board that is perfectly empty. Nothing warns you, because
     nothing is wrong: you asked for this.
 
-    Two ways to bring the existing stores in. Pass them all to
+    Once the daemon is running, bring existing stores in through
     Settings → Stores individually, or — better past the first couple —
     join them by symlink into a single **cross-project store** and
     name only that. felt re-discovers a store's symlinked substores, so the
@@ -209,13 +219,13 @@ mkdir -p ~/notes && cd ~/notes && felt init
 **3. Hand the daemon to launchd.**
 
 ```bash
-~/.local/share/shuttle/bin/shuttle install-agent
+shuttle daemon install
 ```
 
 That writes `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it. The
 daemon comes up immediately, comes back at every login, and restarts on crash.
-Open the board and add `~/notes` in **Settings → Stores**. Register additional
-stores there too; changes take effect without reinstalling the supervisor.
+The board reads `~/notes` from the registry; add any additional stores in
+**Settings → Stores**. Changes take effect without reinstalling the supervisor.
 
 **4. Check it, and know how to undo it.**
 
@@ -230,30 +240,31 @@ Then open <http://127.0.0.1:4000/> for [the board](board.md).
 To undo it:
 
 ```bash
-~/.local/share/shuttle/bin/shuttle uninstall-agent
+shuttle daemon uninstall
 ```
 
 That unloads the job and deletes the plist, which stops the running daemon too.
 Nothing else goes: the release, your store, and the daemon's state in
-`~/.shuttle` all survive, and `install-agent` puts the job back.
+`~/.shuttle` all survive, and `shuttle daemon install` puts the job back.
 
 <a id="release-candidates"></a>
 ### Pin a release
 
 The installer and `felt update` select the latest stable GitHub release by
 default. Set `FELT_VERSION` when you need an exact tag; it skips the
-`releases/latest` lookup and fetches that tag for the CLI and daemon together:
+`releases/latest` lookup and fetches the matching `felt` and `shuttle` CLIs,
+and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=1.1.0 SHUTTLE=1 sh
+  | FELT_VERSION=1.1.0 SHUTTLE_DAEMON=1 sh
 ```
 
 Replace `1.1.0` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
-it has no daemon tarball for your platform, the install names the tag and the
-missing asset rather than leaving a bare `curl` error.
+it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install
+names the tag and missing asset rather than leaving a bare `curl` error.
 
 Prerelease tags and release candidates are excluded from latest and Homebrew
 selection. Pin one explicitly with `FELT_VERSION` when you want to test it.
@@ -265,9 +276,10 @@ are actually running:
 curl -s http://127.0.0.1:4000/api/v1/version    # mix_vsn is the release tag
 ```
 
-To return to the latest stable, run `felt update` without a pin. The daemon has
-no self-update — run the install line again without `FELT_VERSION` and the
-stable tarball replaces `$SHUTTLE_HOME`.
+To return to the latest stable, run `felt update` without a pin to replace
+both Go CLIs together. The daemon has no self-update — run the install line
+again without `FELT_VERSION` and the stable daemon tarball replaces
+`$SHUTTLE_HOME`.
 
 ## Build from a checkout
 
@@ -284,16 +296,15 @@ Six steps run in order.
 
 1. **Prerequisites.** Named, with install hints. A missing required tool aborts
    the run before anything is built.
-2. **`felt` CLI.** `GOBIN=~/.local/bin go install .` from *this* checkout — not
-   the release binary. The daemon shells the CLI, so the two must never skew.
-3. **Daemon release.** `make daemon` assembles the
-   release into `bin/rel` and leaves `bin/shuttle` — a tracked shell shim — as
-   the front door. The step records the checkout path in `~/.shuttle/repo`, so
-   remote revival over SSH can find it without an environment.
+2. **Go CLIs.** `make cli-install` builds and installs `felt` and `shuttle`
+   from *this* checkout, so the daemon and its CLIs share one source revision.
+3. **Daemon release.** `make daemon` assembles the Mix release into `bin/rel`.
+   The step records the checkout path in `~/.shuttle/repo`, which lets
+   `shuttle daemon` find this release and supports remote revival over SSH.
 4. **`ui/dist`.** Builds the served board bundle with Node and npm on this host.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
-   this checkout, so the plugin hooks match the binary. Then it pipes a probe
-   payload through `felt hook event` and checks the line it writes. Details in
+   this checkout, so the plugin hooks match both CLIs. Then it pipes a probe
+   payload through `shuttle hook event` and checks the line it writes. Details in
    [The event stream and the ledgers](#the-event-stream-and-the-ledgers).
 6. **Keep-alive.** Installs a supervisor — the OS service manager that starts
    the daemon at login and restarts it if it dies: a launchd LaunchAgent on
@@ -311,13 +322,13 @@ and bounces in one step.
 
 ```bash
 curl -s http://127.0.0.1:4000/api/v1/version   # daemon answers
-felt shuttle ps                                # running workers
+shuttle ps                                # running workers
 make logs                                      # tail the daemon log
 make status                                    # ps + a snapshot summary
 ```
 
-The two `make` targets belong to a checkout. From a fetched install, ask the
-shim directly — `~/.local/share/shuttle/bin/shuttle status` — and tail the log
+The two `make` targets belong to a checkout. From a fetched install, run
+`shuttle daemon status` and tail the log
 where the supervisor put it: `~/Library/Logs/shuttle.log` on macOS,
 `~/.shuttle/shuttle.log` on Linux, or wherever `--log` pointed it. A daemon you
 started in the foreground logs to your terminal instead.
@@ -335,7 +346,7 @@ trust; do not publish the port to the open internet.
 
 With the daemon up, here is the fastest path from nothing to a worker running.
 
-Register the current directory as a felt store, if `FELT_STORES` does not
+Register the current directory as a felt store, if `SHUTTLE_STORES` does not
 already cover it:
 
 ```bash
@@ -360,23 +371,23 @@ Install the `shuttle:` block. This is what turns the fiber into something the
 daemon will pick up:
 
 ```bash
-felt shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus
+shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus
 ```
 
 Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
 daemon polls every 30 seconds by default, so the card moves to in-flight on
-its own; `felt shuttle dispatch pipeline/first-pass` skips the wait. `felt
-shuttle ps` lists the live tmux session, and `felt shuttle attach
-pipeline/first-pass` drops you into it.
+its own; `shuttle dispatch pipeline/first-pass` skips the wait. `shuttle ps`
+lists the live tmux session, and `shuttle attach pipeline/first-pass` drops
+you into it.
 
 When the worker hands off, the fiber's `outcome` and `## Status` rewrite in
 place and the card lands in Awaiting review.
 
 !!! note "First dispatch not starting?"
     Every restart arms a boot quarantine that holds new work until you run
-    `bin/shuttle release` — see the first entry in [Sharp
-    edges](#sharp-edges) if your card sits armed with nothing happening. From a
-    fetched install the same shim sits at `$SHUTTLE_HOME/bin/shuttle`.
+    `shuttle daemon release` — see the first entry in [Sharp
+    edges](#sharp-edges) if your card sits armed with nothing happening. The
+    `shuttle` CLI is on `PATH` in a fetched install too.
 
 That's the whole path from install to a worker on the board. Everything below
 is what the daemon is doing underneath, and the configuration knobs for a setup
@@ -385,7 +396,7 @@ beyond one machine.
 ## Keep-alive
 
 A supervisor is what turns "the daemon is running" into "the daemon runs": it
-starts the daemon at login and restarts it when it dies. `shuttle install-agent`
+starts the daemon at login and restarts it when it dies. `shuttle daemon install`
 installs one, branching on `uname -s` — a launchd LaunchAgent on macOS, a
 systemd `--user` unit on Linux — and points you at the tmux respawn loop on a
 Linux host that has no user-level systemd.
@@ -394,29 +405,25 @@ The verb is the same wherever the daemon came from:
 
 ```bash
 # fetched install
-~/.local/share/shuttle/bin/shuttle install-agent
+shuttle daemon install
 
 # checkout — builds the release first, then calls the same verb
 make install-agent
 ```
 
-Neither front door is on your `PATH`; the rest of this section writes `shuttle`
-for whichever one you have.
-
-Both arms render a template from `daemon/share/` in a checkout or `share/`
-in a fetched installation. The templates ship in the tarball and are
-tracked in the repo — the same two files, never forked. The templates' one
-placeholder for a location, `__SHUTTLE_DIR__`, resolves to whatever directory
-holds `bin/shuttle`: the checkout root in a checkout, the unpacked release root
-in a tarball. So the two paths install byte-identical jobs, and `make
-install-agent` is a checkout convenience rather than a separate mechanism.
+The `shuttle` Go CLI is installed on `PATH` with `felt`; the Makefile target
+builds the same CLI from a checkout. Both paths render the templates from
+`daemon/share/` in a checkout or `share/` in a fetched installation. The
+service records the absolute `shuttle` executable and sets `SHUTTLE_RELEASE`
+to the Mix release directory, then starts it with `shuttle daemon start
+--force`. The same templates serve both installation paths.
 
 The install fixes these values into the job:
 
 | Flag | Environment variable | Default |
 | --- | --- | --- |
-| `--felt-stores <list>` | `AGENT_FELT_STORES` | empty — use the editable store registry |
-| — | `FELT_STORES_FILE` | `~/.config/felt/stores.json` |
+| `--stores <list>` | `AGENT_STORES` | empty — use the editable store registry |
+| — | `SHUTTLE_STORES_FILE` | `~/.config/shuttle/stores.json` |
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
@@ -430,12 +437,12 @@ supervised daemon replaces that daemon rather than adding one. Give the second
 instance both a label and a port, or the two fight over 4000:
 
 ```bash
-shuttle install-agent --label io.shuttle.daemon-test --port 4394 \
-  --felt-stores ~/test-store
+shuttle daemon install --label io.shuttle.daemon-test --port 4394 \
+  --stores ~/test-store
 ```
 
-`uninstall-agent` takes the same `--label`, and needs it — without one it looks
-for the default job and removes nothing.
+`shuttle daemon uninstall` takes the same `--label`, and needs it — without
+one it looks for the default job and removes nothing.
 
 Two more flags render without installing: `--print` (also `--dry-run`) writes
 the job to stdout and changes nothing, and `--os Darwin|Linux` renders the other
@@ -449,27 +456,28 @@ daemon's output goes, and `--label` names the job itself. A flag beats its envir
 install-agent` passes the `AGENT_*` variables straight through, which is why the
 checkout form spells them that way.
 
-`--felt-stores` has no default on purpose. A daemon that polls nothing boots
+`--stores` has no default on purpose. A daemon that polls nothing boots
 clean, binds `:4000`, serves an empty board and dispatches nothing — a failure
-that looks like success — so `install-agent` refuses rather than installing one.
+that looks like success — so `shuttle daemon install` refuses rather than
+installing one.
 
 To see the job before installing it:
 
 ```bash
-shuttle install-agent --felt-stores ~/notes --print
-shuttle install-agent --felt-stores ~/notes --print --os Linux
+shuttle daemon install --stores ~/notes --print
+shuttle daemon install --stores ~/notes --print --os Linux
 ```
 
 `--print` (or `--dry-run`) renders to stdout and changes nothing. `--os` renders
 the other platform's file for inspection, and it is accepted *only* alongside
 `--print`, so an install can never take a branch this host cannot run.
 
-`shuttle uninstall-agent` reverses the install on either platform, and `make
-uninstall-agent` calls the same verb.
+`shuttle daemon uninstall` reverses the install on either platform, and
+`make uninstall-agent` calls the same command.
 
 ### macOS (launchd)
 
-`install-agent` renders `daemon/share/io.shuttle.daemon.plist.template`
+`shuttle daemon install` renders `daemon/share/io.shuttle.daemon.plist.template`
 (`share/` in a fetched installation) into
 `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it (bootstrap step 6
 does this through `make install-agent`). The agent sets `RunAtLoad` and
@@ -477,22 +485,24 @@ does this through `make install-agent`). The agent sets `RunAtLoad` and
 had started by hand is stopped first — the job starts its own, and two would
 fight over `:4000`.
 
-Three environment variables go into the plist. Each one exists because the
+Five environment variables go into the plist. Each one exists because the
 obvious approach failed:
 
 - **`PATH`** — captured from `bash -lc 'echo $PATH'` *at install time*.
   launchd's own environment is nearly empty, and the daemon cannot find `felt`
-  in it. (The daemon itself needs nothing off `PATH` to boot — it carries its
-  own Erlang runtime — but it shells `felt` for every store walk and every
-  write.) Sourcing the login profile at runtime does not fix it, because the
-  profile is not self-sufficient from a bare environment. So the plist freezes
-  the real login `PATH`. A `PATH` without `felt` on it gives you a daemon that
-  boots, serves the board, and returns 500 on `/api/v1/fibers/composite`.
-- **`FELT_STORES`** — empty by default, so the daemon reads the editable
+  or `shuttle` in it. (The daemon itself needs nothing off `PATH` to boot — it
+  carries its own Erlang runtime — but shells `felt` for fiber content and
+  `shuttle` for resolved views and orchestration.) Sourcing the login profile
+  at runtime does not fix it, because the profile is not self-sufficient from
+  a bare environment. So the plist freezes the real login `PATH`. A `PATH`
+  without `felt` can leave the daemon up but break fiber-content endpoints.
+  Without `shuttle`, the boot contract check holds the daemon and Shuttle-owned
+  reads and operations fail.
+- **`SHUTTLE_STORES`** — empty by default, so the daemon reads the editable
   `stores.json` registry. Empty also clears any override inherited from the
-  supervisor manager. `--felt-stores` explicitly pins a comma-separated list
+  supervisor manager. `--stores` explicitly pins a comma-separated list
   instead and makes Stores read-only in Settings.
-- **`FELT_STORES_FILE`** — the registry location, captured at install time.
+- **`SHUTTLE_STORES_FILE`** — the registry location, captured at install time.
   felt re-discovers a store's symlinked substores, so one
   [cross-project store](../concepts/cross-project.md) is usually enough.
 - **`SSH_AUTH_SOCK`** — `~/.ssh/agent.sock`, the persistent login agent. launchd
@@ -505,7 +515,7 @@ obvious approach failed:
   [Log rotation](#log-rotation)).
 
 Logs go to `~/Library/Logs/shuttle.log` (`make logs` tails it from a checkout).
-Remove the agent with `shuttle uninstall-agent`.
+Remove the agent with `shuttle daemon uninstall`.
 
 launchd cannot read `~/Documents`, `~/Desktop` or `~/Downloads`, and that limit
 binds your *stores* as much as the daemon's own directory —
@@ -513,7 +523,7 @@ see [Sharp edges](#sharp-edges).
 
 ### Linux (systemd user unit)
 
-`install-agent` renders `daemon/share/io.shuttle.daemon.service.template`
+`shuttle daemon install` renders `daemon/share/io.shuttle.daemon.service.template`
 (`share/` in a fetched installation) into
 `~/.config/systemd/user/shuttle-daemon.service`, then runs `systemctl --user
 enable` and `restart`. `Restart=always` with `RestartSec=10` is the KeepAlive analog;
@@ -531,9 +541,9 @@ loginctl enable-linger $(id -un)
 
 Run that once. A systemd user manager normally stops at your last logout, which
 would take the daemon down with your ssh session; lingering keeps it alive
-across logout and starts it at boot. `install-agent` prints the command but does
-not run it, because enabling linger needs privileges the install does not
-assume.
+across logout and starts it at boot. `shuttle daemon install` prints the
+command but does not run it, because enabling linger needs privileges the
+installer does not assume.
 
 Day-to-day:
 
@@ -550,9 +560,10 @@ daemon knows where its own log is and can rotate it (see
 
 Logs go to `~/.shuttle/shuttle.log` on Linux — beside the daemon's other state,
 and the same file `make start` and the respawn loop write, so `make logs` finds
-it whichever path is running. Remove the unit with `shuttle uninstall-agent`.
+it whichever path is running. Remove the unit with `shuttle daemon uninstall`.
 
-`install-agent` kills the tmux respawn loop first; both would bind `:4000`.
+`shuttle daemon install` kills the tmux respawn loop first; both would bind
+`:4000`.
 
 ### Log rotation
 
@@ -591,9 +602,10 @@ value is ignored with a warning in the log.
 ### Linux without systemd (tmux respawn loop)
 
 Plenty of Linux hosts have no systemd user session — an HPC login node typically
-does not, and neither does a bare container. `install-agent` probes for one
-*before* it stops anything, and when the probe fails it refuses and prints the
-respawn loop's command line instead of writing a unit nothing will read.
+does not, and neither does a bare container. `shuttle daemon install` probes
+for one *before* it stops anything, and when the probe fails it refuses and
+prints the respawn loop's command line instead of writing a unit nothing will
+read.
 
 That loop is `bin/shuttle-launch`, and it ships in the tarball as well as the
 repo. Both installers also place a copy at `~/.local/bin/shuttle-launch`:
@@ -613,12 +625,12 @@ SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch               # checkout
 Run the same command after an upgrade to pick up a new `shuttle-launch`: it
 kills the tmux session and recreates it from the refreshed script.
 
-Unlike `install-agent`, the loop bakes nothing in — it hands the daemon the
-environment you start it in. Give it stores through `FELT_STORES`, or persist
-them once in `~/.config/felt/stores.json` (see [Configuring
+Unlike the supervisor install, the loop bakes nothing in — it hands the daemon the
+environment you start it in. Give it stores through `SHUTTLE_STORES`, or persist
+them once in `~/.config/shuttle/stores.json` (see [Configuring
 stores](#configuring-stores)).
 
-The loop runs `./bin/shuttle start --force` and backs off exponentially. A
+The loop runs `shuttle daemon start --force` and backs off exponentially. A
 daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
 One that survives 60 seconds resets it. This exists because a wedged login node
 once drove a fixed 2-second loop to roughly 35,000 restarts.
@@ -646,31 +658,32 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 
 The daemon polls felt stores. It resolves them in this order:
 
-1. `FELT_STORES` — a comma-separated list of store paths.
-2. `~/.config/felt/stores.json` — the persisted registry (override the path with
-   `FELT_STORES_FILE`).
+1. `SHUTTLE_STORES` — a comma-separated list of store paths.
+2. `~/.config/shuttle/stores.json` — the persisted registry (override the path with
+   `SHUTTLE_STORES_FILE`).
 
 **shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. `install-agent` uses
-this editable registry by default and reports a missing registry at install
-time; open **Settings → Stores** to register the first store.
+`:4000`, serves an empty board, and dispatches nothing. `shuttle daemon install`
+refuses an empty effective store list. For the first store, create
+`~/.config/shuttle/stores.json` before installing the supervisor; add further
+stores in **Settings → Stores** once the daemon is running.
 
-### Switching an existing supervisor to the registry
+### Switching a supervisor to the registry
 
-Older installations pinned `FELT_STORES` in the supervisor job. To make Stores
-editable, back up both the job and `stores.json`, then write the daemon's
-**currently effective** store list into the registry. Do not activate a stale
-registry list blindly: it may contain additional stores you did not intend to
-poll. Reinstall with `shuttle install-agent` (or `make install-agent`) without
-`--felt-stores` or `AGENT_FELT_STORES`. Keep any existing PATH, socket, label,
-port, or log overrides when reinstalling. A custom `FELT_STORES_FILE` must be
-present in the installation environment too.
+If a supervisor was installed with `--stores`, its pinned list takes precedence
+over the editable registry. To switch, back up the job and `stores.json`, then
+write the daemon's **currently effective** store list into the registry. Do
+not activate a stale registry list blindly: it may contain additional stores
+you did not intend to poll. Reinstall with `shuttle daemon install` (or `make
+install-agent`) without `--stores` or `AGENT_STORES`. Keep any existing PATH,
+socket, label, port, or log overrides when reinstalling. A custom
+`SHUTTLE_STORES_FILE` must be present in the installation environment too.
 
 Installation replaces and reloads the supervisor. Check Settings → Stores:
 the source should be the registry, the effective stores should be unchanged,
 and editing should be enabled. Verify the board still contains the expected
-fibers, then release the restart quarantine with `shuttle release`.
+fibers, then release the restart quarantine with `shuttle daemon release`.
 
 The registry file takes this canonical shape. A bare JSON array also works.
 
@@ -694,19 +707,20 @@ have no shell on.
 
 ## Configuring agents
 
-`felt shuttle agents` prints the effective registry. It layers your own file
+`shuttle agents` prints the effective registry. It layers your own file
 over the shipped default fleet (enumerated in
-[Constitutions](constitutions.md#agent-selection)). Set `$FELT_AGENTS_FILE` to
-choose the path; otherwise felt reads `~/.config/felt/agents.json`.
+[Constitutions](constitutions.md#agent-selection)). Set `$SHUTTLE_AGENTS_FILE` to
+choose the path; otherwise the shuttle CLI and daemon read
+`~/.config/shuttle/agents.json`.
 
 ```bash
-felt shuttle agents init      # seed the user file from the built-ins
-felt shuttle agents           # the merged table, with a source footer
-felt shuttle agents --source user
+shuttle agents init      # seed the user file from the built-ins
+shuttle agents           # the merged table, with a source footer
+shuttle agents --source user
 ```
 
 Each record names a CLI, a model, and its axis metadata (`effort_levels`,
-`default_effort`, `chrome_capable`). `felt shuttle agents init` seeds the file
+`default_effort`, `chrome_capable`). `shuttle agents init` seeds the file
 from the built-ins, working every field across several harnesses — edit that. A
 missing file is silent. A malformed file fails loudly and names the path.
 
@@ -729,14 +743,14 @@ alike:
 ```
 
 ```bash
-felt shuttle agents effort claude-opus high     # write the override
-felt shuttle agents effort claude-opus --reset  # remove it
+shuttle agents effort claude-opus high     # write the override
+shuttle agents effort claude-opus --reset  # remove it
 ```
 
 An alias key lands on its base agent; the CLI keys the entry by that base id.
 `default_effort` is the only field an override sets. An unknown field, an
 unknown agent, or a level outside the agent's `effort_levels` fails the load
-and names the file. `felt shuttle agents` marks an overridden default as
+and names the file. `shuttle agents` marks an overridden default as
 `default=<level>(override)`, and `--json` carries
 `"default_effort_source": "override"`. The board's settings sheet sets the same
 override from a select on each agent row.
@@ -749,14 +763,14 @@ listener can read and write every registered fiber, read transcripts, and
 launch or kill workers as the user running it. The design makes the
 *listener* the boundary, so the boundary has to match the host it runs on.
 
-Every host declares a class in `~/.config/felt/host.json`:
+Every host declares a class in `~/.config/shuttle/host.json`:
 
 ```json
 {"class": "single-user"}
 ```
 
-Set it with `felt shuttle host class <class>`; read it back with `felt
-shuttle host --json` or the board's settings sheet. Three classes exist.
+Set it with `shuttle host class <class>`; read it back with `shuttle host
+--json` or the board's settings sheet. Three classes exist.
 `single-user` is a laptop, a workstation, a single-user VM — loopback is
 yours alone. `shared-multi-user` is an HPC login node: loopback is shared
 with every logged-in user, `/proc/net/tcp` is world-readable, and any
@@ -804,7 +818,7 @@ the daemon refuses to boot an exposed TCP listener.
 The gate admits the daemon's effective uid by default. `SHUTTLE_PEER_UID` is
 an explicit override; the daemon logs a warning when it is set, and
 `GET /api/v1/version` reports the admitted uid and whether it came from the
-environment. `felt setup receipt` flags an environment override or a uid that
+environment. `shuttle doctor` flags an environment override or a uid that
 differs from the CLI user's uid. Leave the variable unset for normal use.
 
 The gate identifies the last local process, not the original client. A relay
@@ -817,9 +831,9 @@ control that daemon process.
 
 The TCP uid gate does not cover port squatting on a shared host: the port is a shared resource, and another user can bind it while the daemon is down.
 Because that listener runs as the other user, its HTTP response could claim `peer_gate: "uid"` and imitate the daemon.
-On Linux, each felt CLI connection to the local TCP daemon checks the server-side established row in `/proc/net/tcp{,6}` after connecting and refuses a foreign or unverified owner.
-`bin/shuttle` runs `felt shuttle host check-owner` on its own connection before each TCP `curl`; the ownership check and the later `curl` are separate connections.
-`felt setup receipt` reports the uid from matching LISTEN rows when available.
+On Linux, each `shuttle` CLI connection to the local TCP daemon checks the server-side established row in `/proc/net/tcp{,6}` after connecting and refuses a foreign or unverified owner.
+The `shuttle daemon` client uses `shuttle host check-owner` on its own connection before sending a TCP request; the ownership check and request are separate connections.
+`shuttle doctor` reports the uid from matching LISTEN rows when available.
 These checks do not protect a browser request that `tailscale serve` forwards while the daemon is down: Serve does not check the listener owner, and the browser cannot distinguish a squat listener from the daemon.
 A Unix socket in the protected `0700` directory has no equivalent TCP-port squatting window: a co-tenant cannot claim the path or connect through it.
 
@@ -827,7 +841,7 @@ A Unix socket in the protected `0700` directory has no equivalent TCP-port squat
 along the whole path. A shared host refuses to boot TCP when
 `/proc/net/tcp` is unreadable, as on macOS; an exposed host refuses TCP
 regardless. Use the class's Unix socket, or declare `single-user` when
-loopback is private to the operator. `felt setup receipt` reports
+loopback is private to the operator. `shuttle doctor` reports
 `peer_gate: uid` when the daemon gates its shared-class TCP listener and
 treats an ungated TCP listener as a mismatch.
 
@@ -842,11 +856,11 @@ tailscaled's LocalAPI to establish verified per-remote bridges without
 exposing the loopback proxy. Tunnel *local* ends remain plain TCP loopback and
 are flagged, not fixed, on a shared host.
 
-`felt setup receipt` is where this is checked. It reports the declared
-class, the resolved listen address, the set of distinct logged-in users, the
-socket directory's mode and owner, and every listening TCP socket owned by a
-fleet process (the daemon, tunnels, `tailscaled`), and it goes `mismatch`
-with a repair line whenever the host contradicts its declared class. Four
+`shuttle doctor` checks this. It reports the declared class, the resolved
+listen address, the set of distinct logged-in users, the socket directory's
+mode and owner, and every listening TCP socket owned by a fleet process (the
+daemon, tunnels, `tailscaled`); it reports `mismatch` with a repair line when
+the host contradicts its declared class. Four
 checks worth watching turn the receipt red on purpose: declaring
 `single-user` on a login node, `chmod 755`-ing the socket directory, setting
 `SHUTTLE_LISTEN=tcp` on a shared host, and setting `defaults.https_proxy` on
@@ -860,18 +874,18 @@ One daemon can aggregate other daemons over SSH tunnels. The fleet file lists
 them, and both the Go CLI and the daemon read it at runtime.
 
 ```bash
-felt shuttle remotes path                          # ~/.config/felt/remotes.json
-felt shuttle remotes add hub-a --port 4001         # --ssh, --remote-port, --display, --checkout
-felt shuttle remotes add hub-b --port 4004 --multiplex
-felt shuttle remotes list                          # also the validator
-felt shuttle remotes rm hub-a
+shuttle remotes path                          # ~/.config/shuttle/remotes.json
+shuttle remotes add hub-a --port 4001         # --ssh, --remote-port, --display, --checkout
+shuttle remotes add hub-b --port 4004 --multiplex
+shuttle remotes list                          # also the validator
+shuttle remotes rm hub-a
 ```
 
 `list` reports parse errors, duplicate names, and port collisions. `--multiplex`
 rides an existing `ControlMaster` socket — SSH's connection-sharing feature,
 which keeps one authenticated connection open for later commands to reuse —
 which is what a 2FA host needs. A `launchd_label_prefix` key in the file names
-the launchd labels `felt shuttle tunnels install` writes. Single-machine use
+the launchd labels `shuttle tunnels install` writes. Single-machine use
 needs none of this: an absent file means no remotes.
 
 `bin/shuttle-deploy` reads the same file, so the fleet is described once. Give
@@ -889,7 +903,7 @@ instead of failing.
 
 ## Tailscale as fleet transport
 
-`felt shuttle remotes` reaches a remote daemon over an SSH tunnel by default —
+`shuttle remotes` reaches a remote daemon over an SSH tunnel by default —
 see [Configuring remotes](#configuring-remotes). Tailscale is an alternative
 transport for the same registry: a remote entry names a Tailscale URL instead
 of an SSH port, and the composite board reaches it over the tailnet with no
@@ -960,9 +974,9 @@ tunnel process to manage or revive for this remote; it dials `url` directly.
 The general rule, not specific to Tailscale: a remote with no `port` has no
 tunnel for the hub to supervise, full stop. `manager: none` is the default for
 such an entry — you may omit it, as the entries above do implicitly, and
-`felt shuttle remotes add --url` writes it for you. What is an error is naming
+`shuttle remotes add --url` writes it for you. What is an error is naming
 an actual supervisor (`launchd`, `systemd`, `autossh`) on a portless entry:
-there is no local port for that supervisor to forward to, so `felt shuttle
+there is no local port for that supervisor to forward to, so `shuttle
 tunnels install` rejects it rather than writing a job that starts and
 immediately has nothing to do.
 
@@ -991,15 +1005,15 @@ shared/exposed hosts using the default Unix listener, bridge sockets sit beside
 carries local HTTP over its socket, then performs verified TLS to the configured
 hostname through tailscaled's LocalAPI dial endpoint.
 The `/api/v1/version` response reports whether the transport is configured and
-which bridges are ready; `felt setup receipt` shows the same live state and
+which bridges are ready; `shuttle doctor` shows the same live state and
 flags missing or unhealthy bridges. `ready` means the private listener is
 bound with no recorded dial/relay failure; upstream reachability is observed on
 actual requests, not a synthetic probe. Once configured, HTTPS requests fail
 closed without a matching bridge instead of falling back to direct or proxy
 routing.
-`felt shuttle remotes list` validates the socket path.
-`felt setup receipt` checks that it is a Unix socket and, on shared/exposed
-hosts, that ownership, mode bits, and macOS ACLs prevent co-tenants from
+`shuttle remotes list` validates the socket path.
+`shuttle doctor` checks that it is a Unix socket and, on shared/exposed hosts,
+that ownership, mode bits, and macOS ACLs prevent co-tenants from
 traversing to it; it also compares the running daemon's effective socket with
 the fleet file.
 `defaults.tailscale_socket` and `defaults.https_proxy` are mutually exclusive.
@@ -1035,7 +1049,7 @@ A hub with a real TUN-mode Tailscale install (a desktop or laptop running the
 official app, with a kernel route into the tailnet) needs none of this — drop
 `defaults.https_proxy` and the daemon dials `ts.net` addresses directly.
 `$HTTPS_PROXY` is deliberately **not** read for this: a supervised daemon's
-environment is invisible to the person operating it, and `felt shuttle
+environment is invisible to the person operating it, and `shuttle
 remotes list` validates `remotes.json`, not the daemon's environment, so the
 fleet file has to be the single source of truth.
 
@@ -1107,18 +1121,18 @@ is for.
 The daemon ranks in-flight workers by idle time and renders each card's
 sent-files trail. Both read one host-local file, `~/.shuttle/events.jsonl`.
 
-`felt hook event` writes it. The plugin registers that command on seven events —
-SessionStart, UserPromptSubmit, PreToolUse, Stop, SubagentStop, Notification,
-and SessionEnd — for Claude Code and Codex alike. `felt setup claude` and `felt
-setup codex` install the wiring; bootstrap step 5 runs both.
+`shuttle hook event` writes it. The plugin registers that command for
+SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, SubagentStop,
+Notification, and SessionEnd hooks in Claude Code and Codex. `felt setup claude` and
+`felt setup codex` install the wiring; bootstrap step 5 runs both.
 
-The hook writes only when the stream's parent directory already exists, so a
-felt-only install grows no stream. `SHUTTLE_EVENTS_FILE` overrides the path and
-creates its parent. `SHUTTLE_EVENTS=off` disables recording. Probe the writer
-by hand:
+The hook writes only when the stream's parent directory already exists; an
+install without daemon state therefore grows no stream. `SHUTTLE_EVENTS_FILE`
+overrides the path and creates its parent. `SHUTTLE_EVENTS=off` disables
+recording. Probe the writer by hand:
 
 ```bash
-echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event
+echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl shuttle hook event
 ```
 
 The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
@@ -1142,7 +1156,7 @@ with `SHUTTLE_SESSIONS_FILE`.
 ### `commits.jsonl`
 
 Which session made each commit. The plugin writes it from a `PostToolUse` hook
-on `Bash`, at the one moment the pairing is certain: `felt hook commit` reads
+on `Bash`, at the one moment the pairing is certain: `shuttle hook commit` reads
 the commit back whenever the command ran a `git commit`, and appends a line.
 Installing the plugin (`felt setup claude`, `felt setup codex` — bootstrap
 step 5) is all it takes. Like the event stream it writes only when `~/.shuttle`
@@ -1191,7 +1205,7 @@ writes.
 
 **Every restart arms a boot quarantine.** On every (re)start the daemon parks
 each dispatchable candidate it has never observed running into `pending_launch`.
-Nothing *fresh* launches until a human runs `bin/shuttle release`. (Work the
+Nothing *fresh* launches until a human runs `shuttle daemon release`. (Work the
 daemon did observe alive — adopted at boot, or dispatched since — keeps
 redispatching, because that counts as continuation, and a standing role whose
 cron is due fires on schedule. See
@@ -1204,25 +1218,25 @@ still alive and no crash loop behind it — see
 [the one automatic exit](lifecycle.md#the-one-automatic-exit-a-proven-fast-bounce).
 
 ```bash
-bin/shuttle release
+shuttle daemon release
 ```
 
 **A worker needs `project_dir`, `host`, and `active`.** You set these three
 gates by hand on the fiber's `shuttle:` block. All three fail quietly, by simply
 not dispatching. `host` is strict: absent or empty leaves the fiber unowned and
 ineligible on *every* daemon. shuttle offers no `"local"` default and no
-wildcard. The host id is what `felt shuttle host` reports: `SHUTTLE_HOST`,
+wildcard. The host id is what `shuttle host` reports: `SHUTTLE_HOST`,
 else the file `~/.shuttle/host` (override the path with `SHUTTLE_HOST_FILE`),
 else the system hostname. For the full ordered predicate list the daemon
 evaluates, see [Dispatch eligibility](lifecycle.md#dispatch-eligibility).
 
 **`~/.shuttle/host` is the machine's name, and it is a file for a reason.**
-Only felt resolves the host id. The system hostname is consulted once: `felt
-shuttle host seed` — which `shuttle install-agent` runs — or the first CLI
+Only shuttle resolves the host id. The system hostname is consulted once:
+`shuttle host seed` — which `shuttle daemon install` runs — or the first CLI
 command that needs an identity and finds none normalizes it (lowercased, cut
 at the first `.`) and writes it to `~/.shuttle/host`; everything afterwards
-reads the file. The daemon takes `SHUTTLE_HOST` or asks `felt shuttle host
---json` once at boot, and refuses to boot if felt cannot answer. That fixes a
+reads the file. The daemon takes `SHUTTLE_HOST` or asks `shuttle host --json`
+once at boot, and refuses to boot if shuttle cannot answer. That fixes a
 name that would otherwise drift when DHCP renames a laptop mid-session. A
 drifted name is silent: fibers armed under one spelling are invisible to a
 daemon calling itself the other. To give a host a friendlier name, edit that
@@ -1236,8 +1250,8 @@ default. A record whose CLI is absent or unauthenticated fails at dispatch, not
 at install. Use `builtins: "restrict"` when a host should expose only the
 subset it can run — see [Configuring agents](#configuring-agents).
 
-**Source builds compile all three components on each host.** `make build` builds
-the CLI, the UI, and the daemon release; `make daemon` builds only the release.
+**Source builds compile all four artifacts on each host.** `make build` builds
+both CLIs, the UI, and the daemon release; `make daemon` builds only the release.
 Go, Elixir/OTP, and Node/npm must be available in the build shell.
 The fleet deploy helper uses each host's login shell to load its toolchain.
 Fetched releases need none of these build tools.
@@ -1255,10 +1269,9 @@ launchd-started processes cannot read `~/Documents`, `~/Desktop`, or
 the way it does under a terminal, so granting it buys nothing. A daemon rooted
 in a protected folder crash-loops on start. A *store* under one is the quieter
 failure: the daemon starts fine, finds the store, reads nothing out of it, and
-the board loads with no fibers and no error. `install-agent` warns on stderr
-about either — the release root and each `--felt-stores` entry, under `--print`
-as well as a real install — and then installs anyway, so the warning is the
-whole protection. Put both somewhere else: `~/dev/felt` for a checkout,
+the board loads with no fibers and no error. `shuttle daemon install` warns on stderr about either — the release root and
+each `--stores` entry, under `--print` as well as a real install — and then
+installs anyway, so the warning is the whole protection. Put both somewhere else: `~/dev/felt` for a checkout,
 `~/notes` or `~/loom` for a store, or anything outside the three folders.
 
 That turns the symlink direction into a correctness constraint rather than a
@@ -1300,27 +1313,28 @@ systemctl --user restart shuttle-daemon                 # Linux
 `make restart` also works for a daemon started with `make start`; in either case,
 the command waits for `/api/v1/version` after the replacement boots.
 
-**`felt shuttle tunnels` needs a fleet file first.** It renders autossh jobs
-from `~/.config/felt/remotes.json` — launchd plists on macOS, systemd user units
+**`shuttle tunnels` needs a fleet file first.** It renders autossh jobs
+from `~/.config/shuttle/remotes.json` — launchd plists on macOS, systemd user units
 on Linux. With no remotes configured it has nothing to write, and `scripts/bootstrap.sh
 --with-tunnels` does nothing useful. A Linux host with no systemd user session
 cannot start a unit, so `install` says so and writes nothing; `--write-only`
 renders the units for you to supervise yourself.
 
-**The event stream stays empty until `~/.shuttle` exists.** `felt hook event`
-refuses to create its own directory, so a felt-only install records nothing.
+**The event stream stays empty until `~/.shuttle` exists.** `shuttle hook event`
+refuses to create its own directory, so an install without daemon state records
+nothing.
 Degradation is graceful — the board still serves — but the activity ranking and
 the sent-files trail stay empty. Both daemon installs create the directory:
-`scripts/bootstrap.sh` for a checkout, and `install.sh` under `SHUTTLE=1` for a fetched
+`scripts/bootstrap.sh` for a checkout, and `install.sh` under `SHUTTLE_DAEMON=1` for a fetched
 release (it writes `~/.shuttle/repo` there too). So a host with the daemon on it
-is already enabled. The gap is a felt-only install — no `SHUTTLE=1`, no
-checkout — where nothing has made the directory yet: run `mkdir -p ~/.shuttle`
+is already enabled. The gap is a CLI-only install — no `SHUTTLE_DAEMON=1`, no checkout — where
+nothing has made the directory yet: run `mkdir -p ~/.shuttle`
 yourself. See [The event stream and the
 ledgers](#the-event-stream-and-the-ledgers).
 
 ## License
 
-The felt CLI and the board UI carry the MIT license. The daemon (`daemon/lib/`)
+Both Go CLIs and the board UI carry the MIT license. The daemon (`daemon/lib/`)
 contains code derived from OpenAI's Symphony under the Apache License
 2.0, preserved in
 [`NOTICE`](https://github.com/cailmdaley/felt/blob/main/NOTICE).

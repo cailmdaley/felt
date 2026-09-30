@@ -6,19 +6,19 @@ fiber-aware. It shows the agent the active fibers at session start. It nudges
 the agent toward felt instead of raw file edits. It keeps fiber timestamps
 honest when the agent edits a fiber file directly.
 
-## Requirement: `felt` on `PATH`
+## Requirement: both Go CLIs on `PATH`
 
-Every hook shells out to the `felt` binary. If the agent's process doesn't
-have `felt` on `PATH`, the hooks fail quietly.
+The plugin uses two binaries. Felt-owned hooks call `felt`; activity and commit
+hooks call `shuttle`. Each adapter fails quietly when its binary is absent.
 
 - In a terminal-launched session this is usually fine — your shell's `PATH`
   carries over.
 - A GUI-launched agent (no shell profile sourced) can miss `~/.local/bin` or
-  wherever `felt` landed. If SessionStart context never shows up, check
-  `PATH` first.
-- The daemon has the same requirement server-side: a `PATH` missing `felt`
-  turns into 500s on the board's fiber endpoints, so the board loads but the
-  kanban stays empty.
+  wherever the binaries landed. If session context or activity records are
+  missing, check `PATH` first.
+- The daemon also needs both binaries server-side: it shells `felt` for fiber
+  content and writes, and `shuttle` for resolved reads and orchestration. A
+  missing executable degrades the corresponding board operations.
 
 ## Installing the plugin
 
@@ -109,11 +109,12 @@ plugin.
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
-| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Appends one JSON line per event to the shuttle event stream (`~/.shuttle/events.jsonl`), which the daemon reads for activity ranking and the sent-files trail; writes nothing unless `~/.shuttle` exists |
+| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Calls `shuttle hook event` to append one JSON line to `~/.shuttle/events.jsonl` and handle Shuttle mailbox registration/delivery; writes nothing unless `~/.shuttle` exists |
+| `commit.sh` | `PostToolUse` (`Bash`) | Calls `shuttle hook commit` to record commits in `~/.shuttle/commits.jsonl` |
 
-The logic lives in the binary, not the script. `remind.sh`, `touch.sh`, and
-`event.sh` each shim a single line over `felt hook pretool`, `felt hook
-posttool`, and `felt hook event`.
+The logic lives in the owning binary, not the script. `remind.sh` and
+`touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` and
+`commit.sh` call `shuttle hook event` and `shuttle hook commit`.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
 
@@ -129,20 +130,20 @@ logic, the adapter owns the plumbing:
 | `before_agent_start` | Injects `felt session`'s context once per session (pi has no SessionStart context envelope); emits the prompt-submit event |
 | `tool_call` | The activation gate: in a felt-enabled project, blocks tools until the model reads the felt SKILL.md or runs `/skill:felt` — pi activates skills by reading, not by a Skill tool, so the gate lives in the extension rather than the binary |
 | `tool_result` (edit/write) | Recency stamping via `felt hook posttool` |
-| `tool_result` (bash) | Commit ledger via `felt hook commit`; post-tool-use event |
+| `tool_result` (bash) | Commit ledger via `shuttle hook commit`; post-tool-use event via `shuttle hook event` |
 | `agent_end`, `session_shutdown` | Stop / session-end events for the activity stream |
 
 No pi equivalent exists for SubagentStop and Notification events; the activity
 stream simply carries fewer line types from pi sessions.
 
 !!! note
-    **Updating the binary updates hook behavior.** `felt update` (and
-    Homebrew's post-install) refresh the binary and the plugin wiring
-    together, so hooks always run against a matching binary. You only need
-    to re-run `felt setup claude`/`codex` when the *skill content* changes,
-    not when hook logic changes.
+    **Updating the CLIs updates hook behavior.** `felt update` (and
+    Homebrew's post-install) refresh both Go binaries and the plugin wiring
+    together, so hooks always run against matching binaries. You only need to
+    re-run `felt setup claude`/`codex` when the *skill content* changes, not
+    when hook logic changes.
 
 ## Full CLI surface
 
-See the [CLI reference](reference/cli.md) for every `felt` and `felt shuttle`
+See the [CLI reference](reference/cli.md) for every `felt` and `shuttle`
 verb.

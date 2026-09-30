@@ -64,7 +64,7 @@ host-addressed.
 
 ## Assignment
 
-`felt shuttle assign <fiber> --role <name>` and repeatable
+`shuttle assign <fiber> --role <name>` and repeatable
 `--collaborator <name>` flags add roster membership. The additive flags
 preserve existing entries; use `--json-assignment` to replace the entire map
 or `--clear` to remove it. The board's assignment endpoint takes the same

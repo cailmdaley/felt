@@ -10,7 +10,7 @@ The daemon starts one worker per eligible fiber. A terminal worker is a tmux ses
 running the agent CLI in `shuttle.project_dir`. A fiber without an id has no
 worker name, so the daemon refuses to dispatch it and the board shows it
 blocked; `felt backfill-ids` gives every fiber in a store one, and every felt
-write stamps one on a fiber that lacks it. `felt shuttle session-name <fiber>`
+write stamps one on a fiber that lacks it. `shuttle session-name <fiber>`
 prints the name. The daemon composes a deliberately thin
 prompt: the fiber id, the felt store path, an exit contract, and an optional
 per-dispatch "From User" directive.
@@ -33,15 +33,15 @@ From there the worker:
    what "done" looks like; the worker sequences the steps.
 3. **Writes back** — rewrites `outcome:`, rewrites `## Status`, corrects the
    spec if the session sharpened it, files findings as sub-fibers, commits.
-4. **Exits** — with exactly one verb, depending on whether the work
-   continues: to continue, runs `felt shuttle handoff <fiber>` as its final
-   action; to stop, sets `status: closed` as its final write and does
-   nothing else.
+4. **Exits** — with exactly one Shuttle lifecycle verb: to continue, runs
+   `shuttle handoff <fiber>` as its final action; to stop, runs
+   `shuttle close <fiber>` and does nothing else.
 
-To continue, app workers run `env -u TMUX felt -C <felt-store> shuttle handoff
-<fiber>`, then finish the turn; to stop, they set `status: closed` and finish
-the turn without a handoff call. The daemon releases ownership once that turn
-is idle. A normal final reply without a handoff or a close keeps the
+To continue, app workers run `env -u TMUX shuttle -C <felt-store> handoff
+<fiber>`, then finish the turn; to stop, they run
+`shuttle -C <felt-store> close <fiber>` and finish the turn without a handoff
+call. The daemon releases ownership once
+that turn is idle. A normal final reply without a handoff or a close keeps the
 conversation available for the human. Stop interrupts an app turn and releases
 ownership; Resume uses that same conversation, while New session explicitly
 starts another one. Unknown connection state never authorizes a duplicate.
@@ -55,8 +55,8 @@ constitution recovers most of a warm world-model on the next dispatch.
 The worker asks three questions, in order. The answer sets `status`, and
 `status` decides what happens next.
 
-**1. Is the desired state realized?** Set `status: closed` and exit. The card
-lands in Awaiting review. A human accepts it or flips it back to `active`.
+**1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
+The card lands in Awaiting review. A human accepts it or resumes it.
 
 Substantive work needs independent fresh-eyes review before the session that
 produced it closes — a subagent reviewer in-session, or leave the fiber `active`
@@ -64,10 +64,11 @@ and let the next dispatch review it cold. Edits to the fiber's own surfaces
 (spec, `## Status`, `outcome`, `report.html`) count as handoff, not work
 product, and never block a close.
 
-**2. Blocked on something only a human can supply?** Set `status: closed`, and
-lead the outcome with `Blocked: …` so the card reads as a question.
+**2. Blocked on something only a human can supply?** Run
+`shuttle close <fiber>`, and lead the outcome with `Blocked: …` so the card
+reads as a question.
 
-**3. More work, not blocked?** Leave `status: active` and just hand off. The
+**3. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next tick, and it lands on your `## Status`.
 
 ### Closing parks the work
@@ -77,7 +78,7 @@ shuttle obeys the vocabulary literally. Know which word does what.
 | You say | The worker does | Next |
 |---|---|---|
 | "hand off" | case 3 — `status` stays `active`, then handoff | Daemon redispatches |
-| "close it out" | `status: closed`, then stop — never handoff | Card waits for you; no new worker |
+| "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for you; no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
@@ -152,8 +153,8 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 `depends_on` is not on this list. It is an ordering annotation for the board
 ("this is filed after that") and carries no dispatch meaning.
 
-Configured stores come from `FELT_STORES` (comma-separated) or the persisted
-registry at `~/.config/felt/stores.json`. shuttle assumes no default store.
+Configured stores come from `SHUTTLE_STORES` (comma-separated) or the persisted
+registry at `~/.config/shuttle/stores.json`. shuttle assumes no default store.
 
 **The circuit breaker** (7) exists because a worker that dies on startup would
 otherwise be relaunched forever. Five consecutive worker deaths, each under 90
@@ -179,7 +180,7 @@ redundant, token-burning launches on each crash.
 Release is manual — no timeout — with one narrow exception below.
 
 ```bash
-bin/shuttle release
+shuttle daemon release
 ```
 
 A human force-dispatch bypasses the quarantine without clearing it.
@@ -190,8 +191,8 @@ Every restart someone asked for holds: a deploy, `make restart`, `make stop`, a
 supervisor restart (`systemctl --user restart`, `launchctl kickstart -k`). Those
 all stop the daemon with SIGTERM, and a SIGTERM'd daemon touches a stop marker,
 `$SHUTTLE_DATA_DIR/heartbeat.stopped`, first thing on the way down. `make stop`,
-`bin/shuttle`'s own stop (run by `install-agent`) and `bin/shuttle-deploy` touch
-it themselves before they signal — in the `data_dir` that `felt shuttle host
+`shuttle daemon stop`, `shuttle daemon install` and `bin/shuttle-deploy` touch
+it themselves before they signal — in the `data_dir` that `shuttle host
 --json` reports, so they apply the daemon's own trim and `~` rule — and so does
 re-running `bin/shuttle-launch`, whose tmux `kill-session` SIGHUPs the daemon
 with no shutdown at all. The next boot sees the marker and holds.
@@ -201,7 +202,7 @@ capped cluster login node, say — and respawned seconds later. Its workers keep
 running (tmux owns them) and nothing went stale, yet a hold there would stop all
 new work until someone noticed. A hard kill runs no shutdown code and touches no
 marker. Only such a host needs the exception, so it is off unless the host opts
-in, in `~/.config/felt/host.json` (or `$FELT_HOST_FILE`):
+in, in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`):
 
 ```json
 {"class": "shared-multi-user", "quarantine_auto_release": true}
@@ -240,26 +241,37 @@ daemon log records the verdict and its reason either way.
 
 ## CLI verbs
 
-Two commands, cleanly split. `felt shuttle` serves agents: it runs offline,
-validates the schema, and writes to disk. The
-[CLI reference](../reference/cli.md#felt-shuttle-dispatch-layer) tabulates every
-verb and flag.
-
-`bin/shuttle` drives daemon lifecycle. It is a shell shim around the daemon
-release: `start` launches it, `install-agent`/`uninstall-agent` manage the
-[keep-alive](installation.md#keep-alive), and the verbs below ask the running
-daemon over HTTP, so each one needs a daemon up. A checkout has the shim at
-`bin/shuttle`, a fetched install at `$SHUTTLE_HOME/bin/shuttle`.
+`felt` owns fiber content and generic frontmatter. It preserves `shuttle:` as
+opaque data; it does not validate the block or write Shuttle lifecycle state.
+`shuttle` owns the block's schema, resolved reads, host/fleet configuration,
+and lifecycle. Its local writes validate before touching disk; status, snapshot,
+and dispatch can also ask the local daemon. The
+[CLI reference](../reference/cli.md#shuttle-dispatch-layer) lists the commands.
 
 ```bash
-bin/shuttle status            # state JSON; exit 2 when the daemon is down
-bin/shuttle release           # clear the boot quarantine
-bin/shuttle reset <remote>    # reset a remote's circuit breaker
-bin/shuttle version
+shuttle check                         # validate Shuttle blocks in a store
+shuttle ls --has-field shuttle        # fiber listing with resolved Shuttle data
+shuttle show <fiber>                  # read one fiber with its resolved facet
+shuttle status [<fiber>]              # offline eligibility and dispatch state
+shuttle snapshot                      # local daemon snapshot
+shuttle dispatch <fiber> [--ad-hoc]   # ask the daemon to dispatch
+
+shuttle daemon start [--force]        # start the local Mix release
+shuttle daemon stop                   # stop it and record an intentional stop
+shuttle daemon status                 # state JSON; exit 2 when the daemon is down
+shuttle daemon release                # clear the boot quarantine
+shuttle daemon reset <remote>         # reset a remote's circuit breaker
+shuttle daemon install                # install the per-user keep-alive
+shuttle daemon uninstall              # remove the per-user keep-alive
+shuttle doctor                        # diagnose host, listener, and daemon contract
+shuttle version                       # daemon version, or local Mix release version
 ```
 
-Asking the daemon for its state or for a dispatch is a `felt shuttle` verb:
-`felt shuttle snapshot`, `felt shuttle dispatch <fiber> [--ad-hoc]`.
+The daemon uses `felt` for fiber content and generic writes, and `shuttle` for
+resolved reads and Shuttle-owned operations. `shuttle daemon status`,
+`release`, and `reset` contact the local daemon over HTTP; `start` and `stop`
+manage the local release, while `install` and `uninstall` manage the
+[keep-alive](installation.md#keep-alive).
 
 The daemon also speaks HTTP under `/api/v1`, in four groups: a **write plane**
 (`dispatch`, `transition`, `kill`, `lifecycle`, `felt-edit`, …), a **read
@@ -280,16 +292,16 @@ Closing a fiber leaves its block in place, and that is deliberate. Uninstall
 earns its keep in four cases:
 
 1. **Mistake recovery** — wrong slug, immediate undo.
-2. **Full rebuild** — though `felt shuttle reshape` now covers most of the "change the kind or schedule" case in place, without a rebuild.
+2. **Full rebuild** — though `shuttle reshape` now covers most of the "change the kind or schedule" case in place, without a rebuild.
 3. **Archiving** — a closed fiber's card leaves the board entirely.
 4. **Handing ownership** to a different dispatcher.
 
-Never uninstall to end a worker session. Use the ordinary exit — `felt shuttle handoff` to continue, `status: closed` to stop.
+Never uninstall to end a worker session. Use the ordinary exit — `shuttle handoff` to continue, `shuttle close` to stop.
 
 ## Diagnosing a missing card
 
 Most "my card isn't showing" reduces to "no block installed yet." Check in this
-order: is the fiber in a store the daemon polls, does `felt shuttle status` show
+order: is the fiber in a store the daemon polls, does `shuttle status` show
 a block, is `status: active`, does `shuttle.host` match, and is the quarantine
 released?
 
@@ -300,8 +312,8 @@ on it as a bug. If a remote card is missing, debug the tunnel, not the git
 state.
 
 !!! note "Remotes come from one config file"
-    `~/.config/felt/remotes.json` lists every remote daemon: its name, its
+    `~/.config/shuttle/remotes.json` lists every remote daemon: its name, its
     local forwarded port, and how to reach it. The CLI and the daemon both read
-    it at runtime. Manage it with `felt shuttle remotes list|add|rm|path`. A
+    it at runtime. Manage it with `shuttle remotes list|add|rm|path`. A
     single-machine setup needs no such file — see [Configuring
     remotes](installation.md#configuring-remotes).

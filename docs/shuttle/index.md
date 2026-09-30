@@ -1,17 +1,17 @@
 # shuttle
 
-shuttle dispatches coding agents against felt fibers. felt keeps those fibers as
-markdown files in a directory. shuttle adds one optional frontmatter block, plus
-a daemon that acts on it.
+Two Go CLIs divide the work. `felt` stores fibers as Markdown and preserves
+unknown frontmatter as opaque data. `shuttle` interprets an optional `shuttle:`
+block, validates it, and owns orchestration. The optional Elixir daemon polls
+felt stores, launches workers, and serves the board.
 
-Nothing else about felt changes. Leave the block out and the fiber stays a plain
-note. Add the block and the daemon can hand the fiber to a coding agent as a
-**constitution**.
+A fiber without the block stays a plain note. Add it and the daemon can hand
+the fiber to a coding agent as a **constitution**: a description of the desired
+state, not a list of steps.
 
 !!! note "You can skip this whole section"
-    felt works without shuttle. The CLI runs as a Go binary over a markdown
-    tree. If you want a notes-and-tasks store, stop at
-    [Concepts](../concepts/fibers.md) — you lose nothing.
+    felt works without the Shuttle CLI or daemon. Use it for a notes-and-tasks
+    store, and stop at [Concepts](../concepts/fibers.md) — you lose nothing.
 
 ## The block
 
@@ -27,9 +27,10 @@ shuttle:
 ---
 ```
 
-Those keys cover the whole dispatch interface. felt validates the block's shape
-and otherwise treats it as opaque frontmatter. Remove the daemon and you still
-have a readable, greppable, version-controlled markdown file.
+Those keys cover the dispatch interface. felt preserves this block without
+interpreting or validating it; `shuttle install`, `shuttle check`, and the daemon
+own its schema and behavior. Remove Shuttle and you still have a readable,
+greppable, version-controlled markdown file.
 
 (The board reads a small calendar vocabulary outside the block — `start:`,
 `horizon:`, and the `cycle` tag. See [Cycles and eras](cycles.md).)
@@ -37,23 +38,22 @@ have a readable, greppable, version-controlled markdown file.
 ## The loop
 
 1. **Author.** Write a fiber body that describes a *desired state*. Then run
-   `felt shuttle install` to attach the block and arm the fiber.
+   `shuttle install` to attach the block and arm the fiber.
 2. **Dispatch.** The daemon polls the fiber tree every 30 s by default. For each
    eligible fiber it starts exactly one tmux session, running an agent CLI in
-   `project_dir`. `felt shuttle session-name <fiber>` prints the session name,
+   `project_dir`. `shuttle session-name <fiber>` prints the session name,
    `<slug-leaf>-<uid>-shuttle`.
 3. **Work.** The worker reads the constitution fresh from disk. It reads the
    previous session's `## Status` handoff. Then it drives toward the desired
    state and picks its own slice. Sequencing emerges; nobody scripts it.
 4. **Exit.** Before exiting, the worker rewrites `outcome:` (the kanban
    headline) and the body's `## Status` block (the next worker's landing pad).
-   Then it exits one of two ways: to continue, it runs `felt shuttle handoff
+   Then it exits one of two ways: to continue, it runs `shuttle handoff
    <fiber>`, which stamps a clean-exit marker and ends its own tmux session
-   in one move; to stop, it sets `status: closed` as its final write and does
-   nothing else — the daemon reaps the session and stamps the marker itself.
+   in one move; to stop, it runs `shuttle close <fiber>` and does nothing else.
 5. **Redispatch or review.** A fiber still marked `active` gets a fresh worker
    on the next tick, and that worker lands warm on `## Status`. A fiber the
-   worker set to `status: closed` waits for a human verdict.
+   worker closed waits for a human verdict.
 
 ## State across sessions
 
@@ -79,9 +79,12 @@ fresh past that, with its prompt naming the cut-off session.
 
 ## The pieces
 
-- **The daemon** — an Elixir/OTP release that bundles its own Erlang runtime,
-  started through the `bin/shuttle` shim. One process, bound to
-  `127.0.0.1:4000`. It polls, dispatches, and serves an HTTP API.
+- **The shuttle CLI** — a Go binary beside felt. It owns the Shuttle schema,
+  configuration, lifecycle, and resolved fiber reads. `shuttle daemon` manages
+  the local daemon release; `shuttle doctor` diagnoses the host and runtime.
+- **The daemon** — an optional Elixir/OTP release that bundles its own Erlang
+  runtime. The shuttle CLI starts and supervises it. One process, bound to
+  `127.0.0.1:4000`, polls, dispatches, and serves an HTTP API.
 - **tmux** — hosts the worker process and is the view onto it. Not optional.
   tmux owns the worker process; shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot. A
@@ -98,7 +101,7 @@ fresh past that, with its prompt naming the cut-off session.
   the CLI covers every lifecycle operation. (Cycles are the one thing only the
   board draws — see [Cycles and eras](cycles.md).)
 - **The agent registry** — maps an agent id (`claude-opus`, `codex-luna`,
-  `pi-luna`, …) to a CLI invocation. `felt shuttle agents` prints it.
+  `pi-luna`, …) to a CLI invocation. `shuttle agents` prints it.
 
 ## Next
 
@@ -107,5 +110,5 @@ fresh past that, with its prompt naming the cut-off session.
 - [The board](board.md) — the three views, and what each gesture writes.
 - [Cycles and eras](cycles.md) — naming a span of time.
 - [Telemetry and the ledgers](telemetry.md) — what the time views read.
-- [Installation](installation.md) — fetching or building the daemon, and
-  operating it.
+- [Installation](installation.md) — installing both CLIs, fetching or building
+  the optional daemon, and operating it.

@@ -88,8 +88,9 @@ never appended. See
 
 ## Sent files (shuttle only)
 
-A shuttle worker can also push a file at you directly, with `felt shuttle send-file <path> [path...]`.
-`felt hook event` records that push on the host's event stream
+A shuttle worker can also push a file at you directly, with
+`shuttle send-file <path> [path...]`.
+`shuttle hook event` records that push on the host's event stream
 (`~/.shuttle/events.jsonl`), and the board surfaces it two ways: a per-card
 sent-files trail in the fiber viewer, and the [Board
 canvas](../shuttle/board.md#board-what-the-work-produced), where every send from
@@ -109,7 +110,7 @@ Sending a file does not put it in the fiber, and putting a file in the fiber
 does not surface it on the board.
 
 !!! note "Needs `~/.shuttle`"
-    `felt hook event` refuses to create its own directory, so a felt-only
-    install grows no event stream and every trail stays empty. See [The event
+    `shuttle hook event` refuses to create its own directory, so an install
+    without daemon state grows no event stream and every trail stays empty. See [The event
     stream and the
     ledgers](../shuttle/installation.md#the-event-stream-and-the-ledgers).

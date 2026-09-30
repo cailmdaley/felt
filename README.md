@@ -18,16 +18,18 @@ question, or a spec. Directories nest fibers into a hierarchy; `[[wikilinks]]` i
 cross-reference them. The `felt` command adds, edits, searches, and shows them; the markdown holds
 everything, so the store diffs and versions like the rest of your repo.
 
-**shuttle** is a daemon that runs AI coding agents against those fibers. Add a `shuttle:` block to
-a fiber and it becomes a "constitution" — a description of a desired end state, not a list of
-steps. The daemon launches one tmux worker per active constitution; the worker drives toward that
-state, rewrites the fiber's `outcome` and `## Status` on exit, and the next worker lands warm. A
-localhost status board shows the fleet and lets you steer it.
+**shuttle** is a separate Go CLI and optional daemon built on felt. felt treats a `shuttle:`
+frontmatter block as opaque data; shuttle interprets it as a "constitution" — a description of a
+desired end state, not a list of steps. The daemon launches one tmux worker per active
+constitution; the worker drives toward that state, rewrites the fiber's `outcome` and `## Status`
+on exit, and the next worker lands warm. A localhost status board shows the fleet and lets you
+steer it.
 
-This repository ships the felt CLI and the optional shuttle daemon, including its board UI. felt
-works entirely on its own — record, search, and link with nothing running — and it gives AI agents
-the same memory it gives you: one plugin installs into Claude Code and Codex, and a pi package into
-pi. shuttle is strictly optional; adopt it when you want work dispatched, not just recorded.
+This repository ships two Go CLIs — `felt` for memory and notes, `shuttle` for orchestration —
+plus the optional shuttle daemon and its board UI. You can use felt on its own to record, search,
+and link with nothing running. It gives AI agents the same memory it gives you: one plugin
+installs into Claude Code and Codex, and a pi package into pi. The shuttle daemon is optional;
+adopt it when you want work dispatched, not just recorded.
 
 ![Shuttle board with example data](docs/assets/shuttle-board-example.png)
 
@@ -61,24 +63,25 @@ See also [[use-des-y3-weights]].
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh  # release binary
 brew install cailmdaley/tap/felt                                                  # Homebrew
-go install github.com/cailmdaley/felt@latest                                      # from source
+go install github.com/cailmdaley/felt/cmd/felt@latest                            # felt from source
+go install github.com/cailmdaley/felt/cmd/shuttle@latest                         # shuttle from source
 ```
 
 The install script needs only `curl` and `tar`. It supports macOS and Linux on x86_64 and arm64.
-It installs to `/usr/local/bin` if writable, else `~/.local/bin`; override with `FELT_INSTALL_DIR`.
-If `claude`, `codex`, or `pi` is on your `PATH`, it also registers the felt plugin for them. Later,
-`felt update` refreshes both the binary and the plugin wiring.
+It installs both Go CLIs to `/usr/local/bin` if writable, else `~/.local/bin`; override the
+location with `FELT_INSTALL_DIR`. If `claude`, `codex`, or `pi` is on your `PATH`, it also
+registers the shared plugin and package. Later, `felt update` replaces both Go binaries together
+and refreshes the plugin wiring.
 
-The shuttle daemon installs the same way, with `SHUTTLE=1`:
+Add the optional shuttle daemon with `SHUTTLE_DAEMON=1`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
 ```
 
-Note where `SHUTTLE=1` sits — after the pipe, on `sh`. In front of `curl` it sets curl's
-environment, the script never sees it, and you get the CLI and no daemon. What lands is a prebuilt
-daemon carrying its own Erlang runtime and the board bundle — running it needs only tmux and `felt`
-on `PATH`. See [Installation](https://cailmdaley.github.io/felt/shuttle/installation/).
+Put `SHUTTLE_DAEMON=1` after the pipe, on `sh`, so the installer sees it. The daemon release
+carries its own Erlang runtime and board bundle; running it needs tmux plus both Go CLIs on
+`PATH`. See [Installation](https://cailmdaley.github.io/felt/shuttle/installation/).
 
 ## Quickstart
 
@@ -115,6 +118,6 @@ welcome.
 
 ## License
 
-The felt CLI and the board UI are under the [MIT License](LICENSE). The shuttle daemon (`daemon/lib/`)
+Both Go CLIs and the board UI are under the [MIT License](LICENSE). The shuttle daemon (`daemon/lib/`)
 contains code derived from OpenAI's Symphony under the [Apache License 2.0](LICENSE-APACHE),
 preserved in [`NOTICE`](NOTICE).

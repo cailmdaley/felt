@@ -56,36 +56,39 @@ tools can layer their own schema without felt claiming it.
 
 ## felt and shuttle
 
-This repository ships three artifacts across two layers: the **felt** CLI, the
-**shuttle** daemon, and the board UI served by that daemon.
+This repository ships four artifacts: the **felt** CLI, the **shuttle** CLI,
+the **shuttle** daemon, and the board UI served by the daemon.
 
-**felt** gives you the CLI and the data model. Most people need nothing more.
-It runs with no daemon, no server, and no runtime dependencies. Only `felt
-update` and `felt setup` reach the network, and they fetch from GitHub on
-demand; the store itself never leaves your disk. If you want a fiber tracker
-and agent memory, you can stop at felt.
+**felt** is a lean CLI and Go library for fibers: Markdown notes with metadata,
+links, search, and a Git-synchronized store. It needs no daemon or server.
+felt preserves unknown frontmatter as opaque data, so it can store a `shuttle:`
+block without understanding or validating it.
 
-**shuttle** adds an optional orchestration layer on top. Give a fiber a
-`shuttle:` frontmatter block and it becomes a *constitution* — a spec of a
-desired state. An Elixir/OTP daemon polls the tree. It launches one tmux worker
-per eligible fiber, and serves a [board](shuttle/board.md) at
-`http://127.0.0.1:4000/` — a kanban desk for steering the work, and four more
-views for seeing where the time went. Workers hand off to each other through
-the fiber, so a piece of work can span many sessions.
+**shuttle** is the separate Go CLI for network and orchestration features. It
+uses felt's library to read and write fibers, interprets the `shuttle:` block,
+and owns the host, fleet, and worker lifecycle. You can install and use the
+Shuttle CLI without running a daemon.
 
-The daemon installs the way the CLI does:
+The optional Elixir/OTP daemon polls the tree and launches one tmux worker per
+eligible constitution. It serves a [board](shuttle/board.md) at
+`http://127.0.0.1:4000/` — a kanban desk for steering the work and views for
+following activity and sent files. Workers hand off through the fiber, so work
+can span many sessions. The daemon shells `felt` for fiber content and generic
+fiber writes, and `shuttle` for Shuttle-owned operations.
+
+The installer always installs both Go CLIs. Add the daemon release with
+`SHUTTLE_DAEMON=1`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
 ```
 
-That fetches a prebuilt daemon for your platform, carrying its own Erlang
-runtime and the board bundle, so the host needs no toolchain to run it. (The
-variable goes after the pipe, on `sh`. In front of `curl` it sets curl's
-environment and the script never sees it.) Single-host use is supported on
-Linux and macOS. Multi-host operation adds SSH tunnels and host configuration;
-see [Installation](shuttle/installation.md). Ignore shuttle and felt
-behaves the same.
+The variable goes after the pipe, on `sh`, so the installer sees it. The
+prebuilt daemon carries its own Erlang runtime and board bundle; the host needs
+no build toolchain to run it. Single-host use is supported on Linux and macOS.
+Multi-host operation adds SSH tunnels and host configuration; see
+[Installation](shuttle/installation.md). You can use felt independently of
+Shuttle.
 
 ![Shuttle board with example data](assets/shuttle-board-example.png)
 
@@ -107,7 +110,7 @@ behaves the same.
 
 ## License
 
-The felt CLI and the board UI ship under the
+Both Go CLIs and the board UI ship under the
 [MIT License](https://github.com/cailmdaley/felt/blob/main/LICENSE). The shuttle
 daemon (`daemon/lib/`) contains code derived from OpenAI's Symphony under the
 [Apache License 2.0](https://github.com/cailmdaley/felt/blob/main/LICENSE-APACHE),

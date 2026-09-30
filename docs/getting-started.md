@@ -1,12 +1,12 @@
 # Getting started
 
-This page installs the `felt` CLI and walks one fiber from creation to a closed
-outcome. It takes about five minutes. The quickest path needs only `curl` and
-`tar`.
+This page installs both Go CLIs and walks one fiber from creation to a closed
+outcome with `felt`. It takes about five minutes. The quickest path needs only
+`curl` and `tar`.
 
 ## Install
 
-The install script downloads the release binary for your platform:
+The install script downloads both Go CLI binaries for your platform:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
@@ -26,13 +26,15 @@ From source, if you have Go 1.23.4 or newer (`go.mod` declares `go 1.23.4`, so
 an earlier 1.23 patch triggers a toolchain download):
 
 ```bash
-go install github.com/cailmdaley/felt@latest
+go install github.com/cailmdaley/felt/cmd/felt@latest
+go install github.com/cailmdaley/felt/cmd/shuttle@latest
 ```
 
 Check the install:
 
 ```bash
 felt --version
+shuttle --help
 ```
 
 If the command is not found, the install directory is not on your `PATH`. The
@@ -47,8 +49,8 @@ script prints the line to add.
     decide yourself, download the script and run it after reading, or use
     Homebrew and run `felt setup claude` when you want it.
 
-Later, upgrade with `felt update`. That swaps the binary and refreshes the agent
-plugin in the same step, so the two never skew.
+Later, upgrade with `felt update`. That replaces both Go CLIs and refreshes
+the agent plugin in one step, so the binaries never skew.
 
 ## Create a store
 
@@ -244,18 +246,19 @@ optional daemon whose [board](shuttle/board.md) serves your fibers at
 can follow, embedded plots and reports rendered in place, and views of where
 your time actually went. shuttle also runs agents autonomously against fibers,
 but the board is worth having on its own. Re-run the install script with
-`SHUTTLE=1` to add the daemon, then point it at this store:
+`SHUTTLE_DAEMON=1` to add the daemon, then point it at this store:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE=1 sh
-FELT_STORES=$PWD ~/.local/share/shuttle/bin/shuttle start
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
+  | SHUTTLE_DAEMON=1 sh
+SHUTTLE_STORES=$PWD shuttle daemon start
 ```
 
-`SHUTTLE=1` goes after the pipe, where it sets the environment of `sh`. In front
-of `curl` it sets curl's, the script never sees it, and you get the CLI again
-and no daemon. What the script unpacks into `~/.local/share/shuttle` is a
-prebuilt daemon carrying its own Erlang runtime and the board bundle, so this
-adds no toolchain to your machine — it wants `tmux` and the `felt` you just
+`SHUTTLE_DAEMON=1` goes after the pipe, where it sets the environment of `sh`. In front
+of `curl` it sets curl's, the script never sees it, and you get both CLIs but
+no daemon. What the script unpacks into `~/.local/share/shuttle` is a prebuilt
+daemon carrying its own Erlang runtime and the board bundle, so this adds no
+toolchain to your machine — it wants `tmux` and the two Go CLIs you just
 installed, and nothing else.
 
 [Installing the shuttle daemon](shuttle/installation.md) covers the rest,

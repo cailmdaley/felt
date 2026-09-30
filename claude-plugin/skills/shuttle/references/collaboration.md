@@ -21,7 +21,7 @@ Roles live at the top of the *shared* store — the outermost store your project
 ```bash
 felt -C <shared-store> add roles/editor "Editor · skills and docs" -o "<one-line remit>"   # then write the charter body
 felt -C <shared-store> add roles/editor/opus "Opus as editor"                             # only if you'll keep notes
-felt shuttle assign <task> --role editor --collaborator opus
+shuttle assign <task> --role editor --collaborator opus
 ```
 
 `assign` adds to the roster without replacing it; `--json-assignment '{"vizier":["fable","astra"],"editor":[]}'` replaces it exactly, and `--clear` removes it. A role with no collaborators (`editor: []`) is valid. The roster names identities only — `shuttle.agent` still decides what runs — and it is no lock: other sessions can work the same task, and it doesn't change how you exit. When the human wrote the roster and you add a role to it, say why in `## Status`.

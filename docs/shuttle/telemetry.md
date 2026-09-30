@@ -6,9 +6,9 @@ append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
 |---|---|---|
-| `~/.shuttle/events.jsonl` | `felt hook event`, from your agent harness (the coding-agent CLI you're running — Claude Code, Codex, …) | one line per harness hook event |
+| `~/.shuttle/events.jsonl` | `shuttle hook event`, from your agent harness (the coding-agent CLI you're running — Claude Code, Codex, …) | one line per harness hook event |
 | `~/.shuttle/sessions.jsonl` | the daemon, at dispatch / claim / resume | one line per session: which fiber it belonged to |
-| `~/.shuttle/commits.jsonl` | the plugin's `PostToolUse` hook on `Bash` (`felt hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
+| `~/.shuttle/commits.jsonl` | the plugin's `PostToolUse` hook on `Bash` (`shuttle hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
 
 All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`; the value
 is trimmed and a leading `~` expands to your home), and each has its own
@@ -24,17 +24,17 @@ syncing it — which is why every temporal endpoint is host-scoped with a
 
 ## The event stream
 
-The raw material. `felt hook event` appends one JSON line per harness hook
+The raw material. `shuttle hook event` appends one JSON line per harness hook
 event; `Shuttle.Activity` folds those lines into a **per-minute histogram** —
 one bucket per `{minute, tmux session, cwd, kind}` — which is what Chronicle
 draws.
 
-The seven hook types collapse into three kinds, plus one facet laid over them:
+The eight hook types collapse into three kinds, plus one facet laid over them:
 
 - **attention** — a human typed (`UserPromptSubmit`), unless the event carries
   `machine: true`, meaning the harness injected that prompt and nobody was
-  present. The recorder makes that call — `felt hook event` prefix-matches the
-  prompt text against `machinePromptPrefixes` (cmd/hook_event.go), where a new
+  present. The recorder makes that call — `shuttle hook event` prefix-matches the prompt
+  text against `machinePromptPrefixes` (cmd/hook_event.go), where a new
   harness's wrapper is taught by adding its prefix. The daemon never sniffs
   prompt text to guess.
 - **notify** — the agent asked for a human, at the onset of the ask.
@@ -88,7 +88,7 @@ lets the Chronicle narrate a stretch of days in prose and count lines changed.
 
 The pairing is only knowable inside the session's own process tree, where the
 daemon is not — so the plugin writes it from a `PostToolUse` hook on `Bash`,
-whenever the command ran a `git commit`. `felt hook commit` reads the commit
+whenever the command ran a `git commit`. `shuttle hook commit` reads the commit
 back, dedupes against the tail of the ledger, and appends one line. Installing
 the plugin (`felt setup claude`, `felt setup codex`) is all it takes.
 
@@ -118,9 +118,9 @@ result rather than an error. A view with nothing to draw says so and moves on;
 it does not break, and neither does the rest of the board.
 
 That is also the first thing to check when Chronicle is blank: the event
-stream only grows once `~/.shuttle` exists, because `felt hook event` refuses to
+stream only grows once `~/.shuttle` exists, because `shuttle hook event` refuses to
 create its own directory. Bootstrap step 3 creates it, so a bootstrapped host is
-already enabled — a felt-only install is not.
+already enabled — a CLI-only install is not.
 
 ## The endpoints
 

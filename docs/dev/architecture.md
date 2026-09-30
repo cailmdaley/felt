@@ -1,23 +1,27 @@
 # Architecture
 
-One repo, one checkout, three artifacts: the **felt CLI** (Go) is the data
-layer, the **shuttle daemon** (Elixir/OTP) is the dispatcher, and the **board
-UI** (TypeScript, `ui/`) is the surface. felt owns the data model; shuttle owns
-the network and the surface.
+One repo, one checkout, four artifacts: the **felt CLI** and **shuttle CLI**
+(Go), the **shuttle daemon** (Elixir/OTP), and the **board UI** (TypeScript,
+`ui/`). felt is a lean fiber library and notes CLI; shuttle is the orchestration
+layer built on felt. The daemon is the production dispatcher.
 
 ## Architecture stance
 
-- **One CLI surface.** Every caller speaks `felt shuttle <verb>`.
-- **One repo, one checkout, three artifacts.** felt and shuttle live in one
-  source tree, building the felt CLI, the daemon release, and the board UI from
-  it. shuttle is self-contained, with its own browser UI and launch story,
-  assuming no external dispatcher process.
-- **The `shuttle:` block is in felt's surface.** The contract lives once, in
-  felt's Go code, and the Elixir daemon reads it. Continuation state
-  (`session_uuid` / `dispatched_at` / `handed_off_at`) lives entirely in the
-  `shuttle:` block.
-- **felt owns the data model; shuttle owns the network and the surface** — the
-  two are one package, not two that shell to each other.
+- **Two Go CLIs, one-way dependency.** `felt` owns fiber storage and generic
+  frontmatter. `shuttle` owns the network and orchestration, and reads and
+  writes fibers through felt's Go library. felt has no dependency on shuttle or
+  messaging packages; a test enforces that import boundary.
+- **One repo, one checkout, four artifacts.** `cmd/felt` and `cmd/shuttle`
+  build the two CLIs, while the same source tree builds the daemon release and
+  board UI. Shuttle needs no separate browser application or dispatcher.
+- **The `shuttle:` block is opaque to felt.** felt preserves it as ordinary
+  frontmatter. shuttle owns the schema, validation, resolution, and lifecycle
+  fields. The daemon reads and writes fiber content through felt and shells
+  shuttle for Shuttle-owned behavior. Continuation state
+  (`session_uuid` / `dispatched_at` / `handed_off_at`) lives in the block.
+- **Resolved views belong to shuttle.** `shuttle ls` and `shuttle show` use
+  felt's fiber readers and add Shuttle's resolved facet; felt's JSON output
+  contains the plain frontmatter without a `resolved` sub-key.
 
 **The Elixir/OTP daemon is the production dispatcher.** Dispatch, the
 per-worker watcher, and the `:4000` API are where OTP earns its keep. A Go
@@ -65,16 +69,17 @@ The verb contract, in one line each:
   capped with an exact remainder count (`--limit`). `-j` merges both halves
   into one array, each entry naming its `store`.
 - **An id reaches anywhere.** `show`, `edit`, `rm`, `nest`, `tree`, and every
-  `felt shuttle` verb act on the fiber the id names, in the store that holds it.
+  `shuttle` verb acts on the fiber the id names, in the store that holds it.
 
 ## The `shuttle:` block
 
-**The `shuttle:` block is non-native frontmatter felt owns the *shape* of.**
-felt validates and stamps the `shuttle:` block (the `felt shuttle <verb>` Go
-subcommands in `cmd/` + `internal/shuttle/`); the Elixir daemon reads it, and
-shells felt for the human lifecycle verbs. The contract lives in one place
-(felt) rather than being validated on both sides; `kind:` is its only spelling
-of the block's kind.
+**The `shuttle:` block is opaque frontmatter to felt.** felt preserves it like
+any other unknown field and does not validate or resolve it. The shuttle CLI
+owns its typed facet and lifecycle writes; the Elixir daemon reads fiber content
+with `felt`, then uses `shuttle ls`/`shuttle show` when it needs resolved
+Shuttle data and `shuttle` for Shuttle-owned operations. `shuttle contract`
+checks the CLI/daemon contract at boot, and a test keeps felt's import graph
+free of shuttle and messaging packages.
 
 ## Execution surfaces
 
@@ -125,13 +130,13 @@ of the host it runs on rather than the daemon carrying its own authentication
 layer.
 
 A host declares its trust class — `single-user`, `shared-multi-user`, or
-`exposed` — in `~/.config/felt/host.json`, set with `felt shuttle host class`
-and read with `felt shuttle host --json`, which also reports the host id. The
-daemon reads `host.json` with the same rules (`Shuttle.Host`, held to felt by
-shared fixtures), but takes its host id from felt at boot. The class is a declared fact the
-operator asserts, not something the daemon infers from the host; `felt setup
-receipt` is the check that the assertion still holds against reality (logged-in
-users, the socket directory's mode, every fleet-owned listening socket).
+`exposed` — in `~/.config/shuttle/host.json`, set with `shuttle host class`
+and read with `shuttle host --json`, which also reports the host id. The
+daemon reads `host.json` with the same rules, but takes its host id from
+`shuttle` at boot. The class is a declared fact the operator asserts, not
+something the daemon infers from the host; `shuttle doctor` checks that the
+assertion still holds against reality (logged-in users, the socket directory's
+mode, every fleet-owned listening socket).
 
 The class determines where the daemon binds. `single-user` listens on
 `tcp://127.0.0.1:4000` (`SHUTTLE_PORT`). `shared-multi-user` and `exposed`
@@ -194,14 +199,14 @@ loopback is private to its operator.
 ## Platform story
 
 **Linux and macOS are both supported for single-host use.** One host runs the
-daemon, the board, and its workers on either OS. The keep-alive differs — a
-launchd LaunchAgent on macOS, a systemd user unit on Linux (`make
-install-agent` picks the branch from `uname -s`) — and so does the log path,
-but the daemon, the CLI, and the bundle are the same artifacts.
+shuttle CLI, daemon, board, and workers on either OS. The keep-alive differs —
+a launchd LaunchAgent on macOS, a systemd user unit on Linux (`shuttle daemon
+install` picks the branch from `uname -s`) — and so does the log path, but the
+CLI, daemon, and bundle are built from this repo.
 
-**Either platform can be the fleet's hub.** `felt shuttle tunnels install`
+**Either platform can be the fleet's hub.** `shuttle tunnels install`
 writes the hub's autossh jobs as launchd LaunchAgents on macOS and systemd
-`--user` units on Linux, picking the branch the way `make install-agent` does.
+`--user` units on Linux, picking the branch the way `shuttle daemon install` does.
 A Linux host with no systemd user session (an HPC login node usually has none)
 gets a refusal naming `--write-only`, not units nothing would start. Either way
 the tunnel is installed on the hub, not on the remote. One asymmetry remains:
@@ -213,8 +218,7 @@ the cascade's ssh check.
 worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
 Linux. What is mac-specific is only the `osascript` call that raises the kitty
 window, and that is already a no-op off macOS (`activate/1` in
-`daemon/lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `felt
-shuttle attach <fiber>` always works.
+`daemon/lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `shuttle attach <fiber>` always works.
 
 Windows is unsupported.
 

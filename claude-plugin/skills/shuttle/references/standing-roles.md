@@ -30,7 +30,7 @@ Lifecycle is `status` + `tempered`, uniform across kinds.
                       │ (awaitingRev)│   the don't-re-fire / anti-oscillation gate
                       └──────┬───────┘
                              │
-                  user accepts │  via drag or felt shuttle accept
+                  user accepts │  via drag or shuttle accept
                              ▼
                       ┌──────────────┐
                       │ status:active │ ← re-armed; next run = the schedule's next tick
@@ -47,9 +47,9 @@ could spend). While a run awaits review (`status: closed` + untempered),
 scheduled runs do not fire and ad-hoc dispatch refuses — a standing role has
 at most one unaccepted work product.
 
-Two verbs, two scopes: **`felt shuttle accept` closes a run** (re-arms and
+Two verbs, two scopes: **`shuttle accept` closes a run** (re-arms and
 stamps `handed_off_at`, so the served occurrence never re-fires; the outcome
-is kept); **`felt shuttle close` retires the responsibility** —
+is kept); **`shuttle close` retires the responsibility** —
 a verdict on the constitution, not on any single run (`reopen` brings a
 retired role back).
 
@@ -71,7 +71,7 @@ there; the daemon owns the runtime block.
 ## Worker exit handoff
 
 Write the run's work product into `outcome`, rewrite `## Status`, and exit
-with `felt shuttle handoff` — always, never by setting `status: closed`
+with `shuttle handoff` — always, never by setting `status: closed`
 yourself. On exit the daemon writes `status: closed` (untempered): the
 awaiting-review marker, the don't-re-fire gate, and the human's accept anchor.
 It closes because the run is over, not because you asked to stop.
@@ -131,8 +131,8 @@ headings the user expects.>
 <Special-case rules the worker can't derive from "do the thing.">
 ```
 
-Install via `felt shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz
-Europe/Paris`; change the cron later with `felt shuttle reshape`. The
+Install via `shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz
+Europe/Paris`; change the cron later with `shuttle reshape`. The
 `constitution` / `standing` tags are conventional query handles only —
 dispatch is gated by the `shuttle:` block, never a tag.
 
@@ -151,5 +151,5 @@ the awaiting run you are continuing.
 
 **Resume of an awaiting run** (the modal, with a directive) is the
 "rerun this with this directive" path: it dispatches now, into the awaiting
-run's session. `felt shuttle resume` instead re-arms the role and concludes
+run's session. `shuttle resume` instead re-arms the role and concludes
 the run, so the next run comes at the schedule's next tick.
