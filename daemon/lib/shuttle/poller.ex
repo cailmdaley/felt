@@ -2526,8 +2526,10 @@ defmodule Shuttle.Poller do
   #        * otherwise the block's `project_dir` must be declared and be a
   #          directory on this host;
   #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir`,
-  #      which saves it and arms the fiber in one write (a standing role's
-  #      reopen also concludes its run). Without one, a closed or parked
+  #      which saves it and arms the fiber in one write. The worker dispatches
+  #      at once and stamps `dispatched_at`, which advances a standing role's
+  #      schedule baseline, so the run it stood on needs no separate
+  #      conclusion. Without one, a closed or parked
   #      perennial role is re-armed (`LifecycleStore.rearm`) and a closed
   #      oneshot reopened (`shuttle reopen`).
   #

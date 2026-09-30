@@ -278,10 +278,11 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 	}
 }
 
-// TestShuttleReopen_StandingConcludesItsRunWithTheDirectory: reopening a
-// closed standing role with --project-dir sets the directory, arms the role
-// and stamps handed_off_at, all in one write.
-func TestShuttleReopen_StandingConcludesItsRunWithTheDirectory(t *testing.T) {
+// TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen: reopening a closed
+// standing role with --project-dir sets the directory and arms the role in one
+// write, and leaves shuttle.runtime alone — the reopened role re-fires the
+// occurrence it stood on.
+func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
 	dir, storage := newStore(t)
 	tempered := false
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
@@ -290,7 +291,6 @@ func TestShuttleReopen_StandingConcludesItsRunWithTheDirectory(t *testing.T) {
 	}, &tempered)
 	work := t.TempDir()
 
-	before := time.Now().UTC()
 	if out, err := runCommand(t, dir, "reopen", "f", "--project-dir", work, "--local"); err != nil {
 		t.Fatalf("reopen --project-dir --local: %v\n%s", err, out)
 	}
@@ -299,10 +299,12 @@ func TestShuttleReopen_StandingConcludesItsRunWithTheDirectory(t *testing.T) {
 	if err != nil || f.Status != felt.StatusActive || f.ClosedAt != nil || b.ProjectDir != work {
 		t.Fatalf("after reopen: status=%q closedAt=%v block=%#v err=%v", f.Status, f.ClosedAt, b, err)
 	}
-	raw, _ := shuttleRuntimeMap(t, f)["handed_off_at"].(string)
-	handedOff, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil || handedOff.Before(before) {
-		t.Fatalf("reopen of a standing role must stamp handed_off_at, got %q (%v)", raw, err)
+	var block map[string]any
+	if err := f.ExtraFields["shuttle"].Decode(&block); err != nil {
+		t.Fatalf("decoding shuttle: block: %v", err)
+	}
+	if rt, ok := block["runtime"].(map[string]any); ok && rt["handed_off_at"] != nil {
+		t.Fatalf("reopen must not conclude a standing role's run, got handed_off_at=%v", rt["handed_off_at"])
 	}
 }
 
