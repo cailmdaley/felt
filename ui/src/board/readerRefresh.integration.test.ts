@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DESKTOP,
+  DESKTOP_NARROW,
   IPAD_LANDSCAPE,
   IPAD_PORTRAIT,
   PHONE_LANDSCAPE,
   PHONE_PORTRAIT,
+  liveMedia,
   matchMediaFor,
   type Device,
 } from './testDevices.js'
@@ -20,6 +22,9 @@ class FakeStyle {
 
   removeProperty(name: string): void {
     this.values.delete(name)
+    // A real declaration clears the property however it was set, including
+    // by `style.left = …` assignment.
+    delete (this as unknown as Record<string, unknown>)[name]
   }
 }
 
@@ -40,8 +45,8 @@ class FakeElement {
   scrollLeft = 0
   offsetLeft = 0
   offsetTop = 0
-  offsetWidth = 0
-  offsetHeight = 0
+  offsetWidth = 380 // the frame's CSS minimum, as an unplaced window measures
+  offsetHeight = 320
   clientWidth = 0
   clientHeight = 0
 
@@ -315,6 +320,59 @@ describe('the Shelf reader frame', () => {
     expect(win.classList.contains('kbn-shelf-reader-docked')).toBe(true)
     expect((win.style as unknown as Record<string, unknown>).left).toBe('700px')
     expect(docks.some((d) => typeof d === 'number')).toBe(true)
+  })
+
+  /** Open on `from`, then move the live media to `to` with the reader open. */
+  async function reframe(from: Device, to: Device) {
+    const media = liveMedia(from)
+    const nav = { pushState: vi.fn(), back: vi.fn() }
+    vi.stubGlobal('window', { ...fakeWindow, matchMedia: media.matchMedia, history: nav })
+    vi.stubGlobal('document', fakeDocument)
+    vi.stubGlobal('HTMLImageElement', class HTMLImageElement {})
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<p>x</p>', { status: 200 })))
+    vi.resetModules()
+    const { ShelfReader } = await import('./views/ShelfReader.js')
+    const reader = new ShelfReader(() => '', () => BOARD)
+    destroyReader = () => reader.destroy()
+    const docks: Array<number | null> = []
+    reader.onDock = (split) => docks.push(split)
+    reader.open({ fullPath: '/work/report.html', basename: 'report.html', timestamp: 1 })
+    await flushPromises()
+    const win = body.children.find((c) => c.classList.contains('kbn-fileview-window'))!
+    const before = { sheet: win.classList.contains('kbn-detail-sheet') }
+    docks.length = 0
+    media.become(to)
+    return { reader, win, docks, nav, before }
+  }
+
+  it.each([
+    ['a narrow desktop window widened', DESKTOP_NARROW, DESKTOP],
+    ['a tablet whose pointer turns fine', IPAD_LANDSCAPE, { ...IPAD_LANDSCAPE, coarse: false }],
+  ])('a sheet becomes a placed window: %s', async (_name, from, to) => {
+    const { win, nav, before } = await reframe(from, to)
+    expect(before.sheet).toBe(true)
+    expect(win.classList.contains('kbn-detail-sheet')).toBe(false)
+    const style = win.style as unknown as Record<string, unknown>
+    for (const prop of ['left', 'top', 'width', 'height']) expect(style[prop]).toMatch(/^\d+px$/)
+    expect(Number.parseInt(String(style.width), 10)).toBeGreaterThan(380)
+    // The claim is given back: one push at open, one back on the reframe.
+    expect(nav.pushState).toHaveBeenCalledTimes(1)
+    expect(nav.back).toHaveBeenCalledTimes(1)
+  })
+
+  it('a window becomes a sheet when the desktop window narrows', async () => {
+    storage.set('shuttle:shelf:reader', JSON.stringify({ open: [], docked: true, split: 0.5 }))
+    const { reader, win, docks, nav, before } = await reframe(DESKTOP, DESKTOP_NARROW)
+    expect(before.sheet).toBe(false)
+    expect(win.classList.contains('kbn-detail-sheet')).toBe(true)
+    expect(win.classList.contains('kbn-shelf-reader-docked')).toBe(false)
+    const style = win.style as unknown as Record<string, unknown>
+    for (const prop of ['left', 'top', 'width', 'height']) expect(style[prop]).toBeUndefined()
+    expect(docks).toEqual([null])
+    expect(nav.pushState).toHaveBeenCalledTimes(1)
+    // And the claim it took is the one ✕ gives back.
+    reader.close()
+    expect(nav.back).toHaveBeenCalledTimes(1)
   })
 
   it('ignores a remembered dock under a finger', async () => {

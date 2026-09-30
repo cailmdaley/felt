@@ -74,7 +74,7 @@ import {
   type TabRef,
   type TabState,
 } from '../ReaderTabs.js'
-import { coarsePointer, readerFillsScreen } from '../mobile.js'
+import { coarsePointer, onReaderChange, readerFillsScreen } from '../mobile.js'
 import { holdSheet, SHEET_SHELF_READER } from '../sheetHistory.js'
 import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar, showCell } from '../ReaderChrome.js'
 import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
@@ -234,6 +234,8 @@ export class ShelfReader {
   /** Is the open window a full-screen sheet rather than a docked or floating
    *  window? Decided when the window opens. */
   private sheet = false
+  /** Unsubscribes the open window from READER_MEDIA changes. */
+  private stopMediaWatch: (() => void) | null = null
 
   /** The board's own rectangle on screen, so a docked reader can sit beside
    *  the canvas rather than at the window's edge. */
@@ -289,6 +291,9 @@ export class ShelfReader {
     // recomputed from the board every time it opens, and a sheet has none.
     if (!this.persist.docked && !this.sheet) this.persist.geom = readPanelGeometry(this.win)
     if (this.sheet) holdSheet(SHEET_SHELF_READER, false)
+    this.sheet = false
+    this.stopMediaWatch?.()
+    this.stopMediaWatch = null
     this.onDock?.(null)
     this.harvest()
     this.state.tabs.forEach((entry) => this.disposeTab(entry))
@@ -309,6 +314,9 @@ export class ShelfReader {
     if (this.win) {
       if (!this.persist.docked && !this.sheet) this.persist.geom = readPanelGeometry(this.win)
       if (this.sheet) holdSheet(SHEET_SHELF_READER, false)
+      this.sheet = false
+      this.stopMediaWatch?.()
+      this.stopMediaWatch = null
       this.onDock?.(null)
       this.harvest()
       this.state.tabs.forEach((entry) => this.disposeTab(entry))
@@ -350,19 +358,6 @@ export class ShelfReader {
     this.views = views
 
     this.win = win
-    this.sheet = readerFillsScreen()
-    if (this.sheet) {
-      // The sheet's CSS `inset` is its geometry; nothing is written inline and
-      // nothing is remembered, and the canvas keeps its full width.
-      win.classList.add('kbn-detail-sheet')
-      document.body.append(win)
-      holdSheet(SHEET_SHELF_READER, true, () => this.close())
-      this.onDock?.(null)
-      this.rehydrate()
-      return
-    }
-    win.classList.toggle('kbn-shelf-reader-docked', this.persist.docked === true)
-    this.placeWindow()
 
     const remember = (): void => {
       if (this.win && !this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
@@ -386,8 +381,46 @@ export class ShelfReader {
     })
 
     document.body.append(win)
-    this.reportSplit()
+    this.applyFrame(readerFillsScreen())
+    this.stopMediaWatch = onReaderChange((fills) => this.applyFrame(fills))
     this.rehydrate()
+  }
+
+  /**
+   * Frame the open window as a sheet or as a placed window, and keep it so.
+   * Runs at open and again whenever READER_MEDIA changes under an open reader
+   * (a window widened past a phone's width, a tablet's pointer switched), so
+   * the class, the inline geometry, the dock and the back-entry always agree
+   * with what the stylesheet is drawing.
+   *
+   * As a sheet, the CSS `inset` is the geometry: nothing is written inline,
+   * nothing is remembered, the canvas keeps its full width, and the back
+   * gesture closes it. As a window it is placed — docked beside the canvas or
+   * at its remembered rectangle — and reports its split.
+   */
+  private applyFrame(sheet: boolean): void {
+    const win = this.win
+    if (!win) return
+    if (sheet) {
+      // A floating window's rectangle is worth keeping for when it comes back
+      // — but only one that was ever placed; a window framed as a sheet from
+      // birth has no rectangle, only the frame's minimum size.
+      const placed = !this.sheet && Boolean(win.style.width)
+      if (placed && !this.persist.docked) this.persist.geom = readPanelGeometry(win)
+      win.classList.add('kbn-detail-sheet')
+      win.classList.remove('kbn-shelf-reader-docked')
+      for (const prop of ['left', 'top', 'width', 'height']) win.style.removeProperty(prop)
+      this.sheet = true
+      holdSheet(SHEET_SHELF_READER, true, () => this.close())
+      this.onDock?.(null)
+      return
+    }
+    if (this.sheet) holdSheet(SHEET_SHELF_READER, false)
+    this.sheet = false
+    win.classList.remove('kbn-detail-sheet')
+    win.classList.toggle('kbn-shelf-reader-docked', this.persist.docked === true)
+    this.placeWindow()
+    this.reportSplit()
   }
 
   /**

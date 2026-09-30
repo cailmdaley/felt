@@ -58,7 +58,7 @@ import {
   suspendFileViewer,
 } from './FileViewerPanel.js'
 import { refreshLiveFile, watchLiveFile } from './LiveFileRefresh.js'
-import { isMobileViewport, coarsePointer, onMobileChange, readerFillsScreen } from './mobile.js'
+import { isMobileViewport, coarsePointer, onMobileChange, onReaderChange, readerFillsScreen } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import {
   disambiguateBasenames,
@@ -650,6 +650,8 @@ export class FiberDetailModal {
   private viewerWindow: HTMLElement | null = null
   /** Withdraws the viewer from {@link raiseOnFrameFocus} when it closes. */
   private stopViewerFrameRaise: (() => void) | null = null
+  /** Unsubscribes the open viewer from READER_MEDIA changes. */
+  private stopViewerMediaWatch: (() => void) | null = null
   /** Remembered viewer-window geometry for THIS card: loaded from persistence
    *  on open, updated on the window's drag/resize settle, captured before the
    *  window closes. Drives "reopen where you left it" vs the half-and-half
@@ -2088,7 +2090,6 @@ export class FiberDetailModal {
    */
   private openViewerWindow(): void {
     if (this.viewerWindow || !this.overlay) return
-    const card = this.overlay
 
     const { win, bar, tabs, closeBtn: winClose, views } = buildReaderWindow({
       ariaLabel: 'Sent files',
@@ -2148,40 +2149,18 @@ export class FiberDetailModal {
     // written in this mode, so the sheet's CSS `inset` is not outranked by a
     // stale style attribute; no remembered placement is consulted or saved,
     // because a sheet has no placement to remember.
-    const sheet = readerFillsScreen()
-    if (sheet) {
-      win.classList.add('kbn-detail-sheet')
-    } else if (this.viewerGeom) {
-      this.viewerGeom = fitted(this.viewerGeom)
-      applyGeometryTo(win, this.viewerGeom)
-    } else {
-      const { card: cardG, other: viewerG } = halfAndHalf()
-      // A TABBED card has no frame to move — it fills its cell inside the
-      // wikilink panel, so only the viewer takes its half.
-      if (!this.host) {
-        animatePanelGeometry(card, cardG)
-        lastGeometry = cardG
-        this.cardGeom = cardG
-      }
-      applyGeometryTo(win, viewerG)
-      this.viewerGeom = viewerG
-    }
-    if (!sheet) {
-      // Persist the new arrangement (half-and-half or restored) immediately.
+    const rememberViewer = () => {
+      this.viewerGeom = readPanelGeometry(win)
       this.writePersist()
-
-      const rememberViewer = () => {
-        this.viewerGeom = readPanelGeometry(win)
-        this.writePersist()
-      }
-      // Drag (header bar) + resize (eight edge/corner zones) — independent of
-      // the card, reusing the same chrome helpers + handle CSS. Both remember
-      // the window's new geometry for this card.
-      attachPanelDrag(win, bar, { onSettle: rememberViewer })
-      attachPanelResize(win, {
-        onSettle: rememberViewer,
-      })
     }
+    // Drag (header bar) + resize (eight edge/corner zones) — independent of
+    // the card, reusing the same chrome helpers + handle CSS. Both remember
+    // the window's new geometry for this card, and both stand down while the
+    // viewer is a sheet.
+    attachPanelDrag(win, bar, { onSettle: rememberViewer })
+    attachPanelResize(win, {
+      onSettle: rememberViewer,
+    })
     // Clicking anywhere on the viewer raises it above the card — its chrome
     // by `pointerdown`, the file inside it (a frame, whose clicks never reach
     // this document) by the focus move.
@@ -2190,12 +2169,55 @@ export class FiberDetailModal {
 
     this.viewerWindow = win
     document.body.append(win)
+    this.frameViewer(readerFillsScreen())
+    this.stopViewerMediaWatch = onReaderChange((fills) => this.frameViewer(fills))
     bringToFront(win)
-    // A sheet gets its own entry, above the card's. Without one, the back
-    // gesture over an open viewer skipped straight past it and closed the card
-    // underneath — the reader loses the fiber they were reading to dismiss a
-    // file.
-    if (sheet) holdSheet(SHEET_VIEWER, true, () => this.closeViewerWindow())
+  }
+
+  /**
+   * Frame the open viewer as a sheet or a placed window, and keep it so. Runs
+   * at open and again whenever READER_MEDIA changes under an open viewer (a
+   * window widened past a phone's width, a tablet's pointer switched), so its
+   * class, inline geometry and back-entry always agree with what the
+   * stylesheet draws.
+   *
+   * A sheet gets its own back-entry, above the card's. Without one, the back
+   * gesture over an open viewer skipped straight past it and closed the card
+   * underneath — the reader loses the fiber they were reading to dismiss a
+   * file.
+   */
+  private frameViewer(sheet: boolean): void {
+    const win = this.viewerWindow
+    if (!win) return
+    const wasSheet = win.classList.contains('kbn-detail-sheet')
+    if (sheet) {
+      // The window's placement is kept for when it is a window again.
+      if (!wasSheet && Boolean(win.style.width)) this.viewerGeom = readPanelGeometry(win)
+      win.classList.add('kbn-detail-sheet')
+      for (const prop of ['left', 'top', 'width', 'height']) win.style.removeProperty(prop)
+      holdSheet(SHEET_VIEWER, true, () => this.closeViewerWindow())
+      return
+    }
+    if (wasSheet) holdSheet(SHEET_VIEWER, false)
+    win.classList.remove('kbn-detail-sheet')
+    if (this.viewerGeom) {
+      this.viewerGeom = fitted(this.viewerGeom)
+      applyGeometryTo(win, this.viewerGeom)
+    } else {
+      const { card: cardG, other: viewerG } = halfAndHalf()
+      // A TABBED card has no frame to move — it fills its cell inside the
+      // wikilink panel, so only the viewer takes its half. A card that is
+      // itself a sheet keeps its frame too.
+      if (!this.host && this.overlay && !this.isSheet()) {
+        animatePanelGeometry(this.overlay, cardG)
+        lastGeometry = cardG
+        this.cardGeom = cardG
+      }
+      applyGeometryTo(win, viewerG)
+      this.viewerGeom = viewerG
+    }
+    // Persist the new arrangement (half-and-half or restored) immediately.
+    this.writePersist()
   }
 
   /** Tear down the file-viewer window: all tabs/cells die with it, the card
@@ -2217,6 +2239,8 @@ export class FiberDetailModal {
     })
     this.stopViewerFrameRaise?.()
     this.stopViewerFrameRaise = null
+    this.stopViewerMediaWatch?.()
+    this.stopViewerMediaWatch = null
     this.viewerWindow?.remove()
     this.viewerWindow = null
     this.rightCol = null

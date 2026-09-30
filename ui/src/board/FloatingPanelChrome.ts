@@ -185,6 +185,13 @@ export function readPanelGeometry(overlay: HTMLElement): PanelGeometry {
  *  drag handle doubles as a click target consult it so drag-release ≠
  *  click. `onSettle` fires on pointer-up, after the click event has had a
  *  chance to consult the moved state. */
+/** Is this panel currently framed as a full-screen sheet? A reader can become
+ *  one while open, and keeps its drag and resize wiring across the change;
+ *  both stand down while it is. */
+export function isSheetFrame(overlay: HTMLElement): boolean {
+  return overlay.classList.contains('kbn-detail-sheet')
+}
+
 export function attachPanelDrag(
   overlay: HTMLElement,
   handle: HTMLElement,
@@ -200,6 +207,8 @@ export function attachPanelDrag(
   handle.addEventListener('pointerdown', (e: PointerEvent) => {
     const target = e.target as HTMLElement
     if (target.closest('button, input, textarea, select')) return
+    // A panel that is a sheet right now has no placement to drag.
+    if (isSheetFrame(overlay)) return
     e.preventDefault()
     const startX = e.clientX
     const startY = e.clientY
@@ -256,6 +265,7 @@ export function attachPanelResize(
     const h = document.createElement('div')
     h.className = `${prefix} ${prefix}-${dir}`
     h.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (isSheetFrame(overlay)) return
       e.preventDefault()
       e.stopPropagation()
       const startX = e.clientX

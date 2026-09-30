@@ -82,3 +82,18 @@ export function onMobileChange(fn: (mobile: boolean) => void, win: Window = wind
     for (const mq of lists) mq.removeEventListener('change', handler)
   }
 }
+
+/** Subscribe to READER_MEDIA changing; returns unsubscribe. An open reader
+ *  reframes on it — a sheet becomes a placed window again, a window becomes a
+ *  sheet — because the stylesheet draws the sheet frame only while the query
+ *  matches, and a frame decided once at open would fall out of step with it.
+ *  Each half is watched on its own, as in `onMobileChange`, and the caller is
+ *  told the resolved answer. */
+export function onReaderChange(fn: (fills: boolean) => void, win: Window = window): () => void {
+  const lists = [win.matchMedia(`(max-width: ${MOBILE_MAX_PX}px)`), win.matchMedia('(pointer: coarse)')]
+  const handler = (): void => fn(lists.some((mq) => mq.matches))
+  for (const mq of lists) mq.addEventListener('change', handler)
+  return () => {
+    for (const mq of lists) mq.removeEventListener('change', handler)
+  }
+}

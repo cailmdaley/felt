@@ -863,6 +863,9 @@
   z-index: 30;
   touch-action: none;
 }
+/* A sheet has no edges to resize; its handles stay wired for when it is a
+   window again. */
+.kbn-detail-sheet .kbn-detail-rh { display: none; }
 .kbn-detail-rh-n  { top: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
 .kbn-detail-rh-s  { bottom: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
 .kbn-detail-rh-e  { right: -3px; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
