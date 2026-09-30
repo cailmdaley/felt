@@ -46,6 +46,116 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 }
 
+func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
+	migration := shellFunction(t, string(script), "config_migration_cmd")
+	home := t.TempDir()
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	localBin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "second.service"), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(t.TempDir(), "install-args")
+	fakeShuttle := `#!/bin/sh
+[ "$1 $2" = "daemon install" ] || exit 2
+{
+  printf 'STORES_FILE=%s\n' "$SHUTTLE_STORES_FILE"
+  shift 2
+  for arg do printf 'ARG=%s\n' "$arg"; done
+} > "$SHUTTLE_CAPTURE_FILE"
+`
+	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte(fakeShuttle), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	share := filepath.Join(release.Dir, "share")
+	if err := os.MkdirAll(share, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(share, "io.shuttle.daemon.service.template"), serviceTemplate, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+` + probe + migration + `
+config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
+`
+	cmd := exec.Command("/bin/bash", "-c", harness)
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH=/usr/bin:/bin",
+		"SHUTTLE_RELEASE="+release.Dir,
+		"SHUTTLE_CAPTURE_FILE="+capture,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("legacy supervisor migration: %v\n%s", err, out)
+	}
+	captured, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatalf("shuttle daemon install was not called: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(captured)), "\n")
+	storesFile := strings.TrimPrefix(lines[0], "STORES_FILE=")
+	args := make([]string, 0, len(lines)-1)
+	for _, line := range lines[1:] {
+		args = append(args, strings.TrimPrefix(line, "ARG="))
+	}
+	flag := func(name string) string {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == name {
+				return args[i+1]
+			}
+		}
+		t.Fatalf("install argv %v lacks %s", args, name)
+		return ""
+	}
+	options := supervisorOptions{
+		OS: "Linux", Label: flag("--label"), Stores: flag("--stores"), StoresFile: storesFile,
+		Port: flag("--port"), Log: flag("--log"), Path: flag("--path"), SSHSocket: flag("--ssh-auth-sock"),
+		ShuttleBin: "/opt/shuttle",
+	}
+	if options.Label != "io.shuttle.second" || options.Stores != `/mnt/store one,/mnt/store "two" \archive %data` ||
+		options.StoresFile != "/tmp/custom config/stores.json" || options.Port != "4401" ||
+		options.Log != "/tmp/custom logs/shuttle.log" || options.Path != "/opt/custom bin:/usr/bin:/opt/felt bin" ||
+		options.SSHSocket != "/tmp/ssh agent.sock" {
+		t.Fatalf("migrated supervisor options = %+v", options)
+	}
+	rendered, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`Environment="SHUTTLE_STORES=/mnt/store one,/mnt/store \"two\" \\archive %%data"`,
+		`Environment="SHUTTLE_STORES_FILE=/tmp/custom config/stores.json"`,
+		`Environment="SHUTTLE_PORT=4401"`,
+		`Environment="PATH=/opt/custom bin:/usr/bin:/opt/felt bin"`,
+		`Environment="SSH_AUTH_SOCK=/tmp/ssh agent.sock"`,
+		`Environment="SHUTTLE_LOG=/tmp/custom logs/shuttle.log"`,
+		`StandardOutput=append:/tmp/custom logs/shuttle.log`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("new supervisor render missing migrated value %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {

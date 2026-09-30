@@ -1,0 +1,14 @@
+[Unit]
+Description=Shuttle daemon
+
+[Service]
+WorkingDirectory=/tmp/felt-shuttle-migration/repo
+ExecStart=/tmp/felt-shuttle-migration/repo/bin/shuttle start --force
+Environment=PATH=/opt/custom bin:/usr/bin:/opt/felt bin
+Environment=SHUTTLE_PORT=4401
+Environment="FELT_STORES=/mnt/store one,/mnt/store \"two\" \\archive %%data"
+Environment="FELT_STORES_FILE=/tmp/custom config/stores.json"
+Environment=SSH_AUTH_SOCK=/tmp/ssh agent.sock
+Environment=SHUTTLE_LOG=/tmp/custom logs/shuttle.log
+StandardOutput=append:/tmp/custom logs/shuttle.log
+StandardError=append:/tmp/custom logs/shuttle.log

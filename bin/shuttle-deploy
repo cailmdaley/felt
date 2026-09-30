@@ -93,7 +93,90 @@ SH
   PATH="$HOME/.local/bin:$PATH"
   export PATH
   command -v shuttle >/dev/null 2>&1 || { echo "shuttle is not on PATH; cannot refresh the installed supervisor" >&2; exit 1; }
-  shuttle daemon install
+  migrate_legacy_supervisor_options() {
+    plist_value() {
+      plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
+    }
+
+    systemd_value() {
+      awk -v key="$2" '
+        function decode(value, output, i, current, following) {
+          for (i = 1; i <= length(value); i++) {
+            current = substr(value, i, 1)
+            following = substr(value, i + 1, 1)
+            if (current == "\\" && following != "") {
+              if (following == "\\" || following == "\"") { output = output following; i++ }
+              else if (following == "n") { output = output "\\n"; i++ }
+              else if (following == "t") { output = output "\\t"; i++ }
+              else if (following == "r") { output = output "\\r"; i++ }
+              else output = output current
+            } else if (current == "%" && following == "%") {
+              output = output "%"; i++
+            } else output = output current
+          }
+          return output
+        }
+        /^Environment=/ {
+          value = substr($0, 13)
+          if (substr(value, 1, 1) == "\"") value = substr(value, 2, length(value) - 2)
+          prefix = key "="
+          if (index(value, prefix) == 1) print decode(substr(value, length(prefix) + 1))
+        }
+      ' "$1"
+    }
+
+    for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
+      [ -f "$candidate" ] || continue
+      if ! grep -q 'shuttle' "$candidate" || ! { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then
+        continue
+      fi
+
+      case "$candidate" in
+        *.plist)
+          kind=plist
+          label=$(basename "$candidate" .plist)
+          stores=$(plist_value "$candidate" EnvironmentVariables.FELT_STORES)
+          stores_file=$(plist_value "$candidate" EnvironmentVariables.FELT_STORES_FILE)
+          port=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_PORT)
+          log=$(plist_value "$candidate" StandardOutPath)
+          [ -n "$log" ] || log=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_LOG)
+          path=$(plist_value "$candidate" EnvironmentVariables.PATH)
+          ssh_auth_sock=$(plist_value "$candidate" EnvironmentVariables.SSH_AUTH_SOCK)
+          ;;
+        *)
+          kind=systemd
+          unit=$(basename "$candidate" .service)
+          if [ "$unit" = shuttle-daemon ]; then label=io.shuttle.daemon; else label="io.shuttle.$unit"; fi
+          stores=$(systemd_value "$candidate" FELT_STORES)
+          stores_file=$(systemd_value "$candidate" FELT_STORES_FILE)
+          port=$(systemd_value "$candidate" SHUTTLE_PORT)
+          log=$(awk -F= '/^StandardOutput=append:/ { sub(/^StandardOutput=append:/, ""); print; exit }' "$candidate")
+          [ -n "$log" ] || log=$(systemd_value "$candidate" SHUTTLE_LOG)
+          path=$(systemd_value "$candidate" PATH)
+          ssh_auth_sock=$(systemd_value "$candidate" SSH_AUTH_SOCK)
+          ;;
+      esac
+
+      [ -n "$stores" ] || {
+        if [ "$kind" = plist ]; then stores=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_STORES)
+        else stores=$(systemd_value "$candidate" SHUTTLE_STORES); fi
+      }
+      [ -n "$stores_file" ] || {
+        if [ "$kind" = plist ]; then stores_file=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_STORES_FILE)
+        else stores_file=$(systemd_value "$candidate" SHUTTLE_STORES_FILE); fi
+      }
+      [ -n "$stores_file" ] || stores_file="$HOME/.config/shuttle/stores.json"
+      if [ -z "$log" ]; then
+        if [ "$kind" = plist ]; then log="$HOME/Library/Logs/shuttle.log"
+        else log="$HOME/.shuttle/shuttle.log"; fi
+      fi
+
+      SHUTTLE_STORES_FILE="$stores_file" shuttle daemon install \
+        --label "$label" --stores "$stores" --port "$port" --log "$log" \
+        --path "$path" --ssh-auth-sock "$ssh_auth_sock"
+    done
+  }
+  migrate_legacy_supervisor_options
 fi
 SH
   fi
