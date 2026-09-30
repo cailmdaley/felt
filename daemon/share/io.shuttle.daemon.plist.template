@@ -7,13 +7,13 @@
   __SSH_AUTH_SOCK__. The unrendered template is not a valid plist.
 
   __SHUTTLE_BIN__ is the absolute path to the Go CLI. __SHUTTLE_RELEASE__ is
-  the Mix release directory. Launchd starts `shuttle daemon start --force`
-  directly, and `--force` skips the already-running guard during a restart.
+  the Mix release directory. Launchd starts the Go CLI in its forced start
+  mode, which skips the already-running guard during a restart.
 
   Launchd starts with a near-empty environment. The daemon needs both `felt`
   for fiber data and `shuttle` for orchestration, so install captures the
   user's login PATH in a scrubbed login shell and renders it as __PATH__.
-  `--path` overrides the captured value.
+  The path option overrides the captured value.
 
   Keep the Mix release and felt stores outside ~/Documents, ~/Desktop, and
   ~/Downloads. macOS TCC attributes file access to the responsible process in
@@ -57,8 +57,8 @@
         <string>__PORT__</string>
         <!--
           Empty SHUTTLE_STORES selects the editable registry and clears any
-          stale override inherited from launchd. --stores explicitly pins the
-          list instead; Settings then reports the override as read-only.
+          stale override inherited from launchd. An explicit store list pins
+          the values instead; Settings then reports the override as read-only.
         -->
         <key>SHUTTLE_STORES</key>
         <string>__SHUTTLE_STORES__</string>
