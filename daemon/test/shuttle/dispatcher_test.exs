@@ -821,6 +821,8 @@ defmodule Shuttle.DispatcherTest do
 
     commands = MockRunner.commands()
 
+    assert {"shuttle", ["show", "tests/haiku", "--json"]} in commands
+
     assert Enum.any?(commands, fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)

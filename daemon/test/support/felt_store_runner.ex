@@ -460,13 +460,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
           {json, 0}
         end
 
-      command == "felt" and String.contains?(full_args, "show") and
+      command in ["felt", "shuttle"] and String.contains?(full_args, "show") and
           String.contains?(full_args, "--field shuttle") ->
         fiber_id = extract_fiber_id(args)
         shuttle = Agent.get(__MODULE__, & &1.shuttle)
         {Map.get(shuttle, fiber_id, ""), 0}
 
-      command == "felt" and String.contains?(full_args, "show") ->
+      command in ["felt", "shuttle"] and String.contains?(full_args, "show") ->
         # `felt show --json` rounds-trip-the-bytes (felt v1.0.4+): tool-owned
         # frontmatter namespaces like `shuttle:` and `tags:` appear as flat
         # top-level JSON keys, alongside the parsed fields. The mock keeps

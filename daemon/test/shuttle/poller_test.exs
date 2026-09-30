@@ -122,9 +122,9 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
-  defp felt_show_count do
+  defp shuttle_show_count do
     Enum.count(MockRunner.commands(), fn {cmd, args} ->
-      cmd == "felt" and Enum.take(args, 1) == ["show"]
+      cmd == "shuttle" and Enum.take(args, 1) == ["show"]
     end)
   end
 
@@ -384,19 +384,26 @@ defmodule Shuttle.PollerTest do
 
     send(poller, :run_poll_cycle)
 
-    # The poller uses felt's widened kanban projection (the full field set the
-    # document cache builds entries from).
+    # The poller uses shuttle's widened kanban projection (the full field set
+    # the document cache builds entries from).
     projection = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
 
     assert wait_until(fn ->
              Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and
+               cmd == "shuttle" and
                  args == ["ls", "--json", "--has-field", "shuttle", "--json-field", projection]
              end)
            end)
+
+    assert {:ok, fiber} =
+             Poller.fetch_fiber_full("tests/projected-discovery", :sys.get_state(poller))
+
+    assert get_in(fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-sonnet"
+
+    assert {"shuttle", ["show", "tests/projected-discovery", "--json"]} in MockRunner.commands()
   end
 
-  test "poller builds document cache entries from candidate rows, no felt show" do
+  test "poller builds document cache entries from candidate rows, no shuttle show" do
     uid = "01JZ00000000000000000000CA"
 
     fiber =
@@ -426,8 +433,8 @@ defmodule Shuttle.PollerTest do
 
     assert %{"hits" => 0, "misses" => 1, "entries" => 1} = first_stats
     # The cache builds each entry directly from its candidate row — the widened
-    # `felt ls` projection carries every field — so NO `felt show` fires.
-    assert felt_show_count() == 0
+    # `shuttle ls` projection carries every field — so NO `shuttle show` fires.
+    assert shuttle_show_count() == 0
 
     send(poller, :run_poll_cycle)
 
@@ -436,7 +443,7 @@ defmodule Shuttle.PollerTest do
              stats["hits"] == 1 and stats["misses"] == 0
            end)
 
-    assert felt_show_count() == 0
+    assert shuttle_show_count() == 0
 
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "slug" => "tests/cached-document"}}] = body.fibers
@@ -457,7 +464,7 @@ defmodule Shuttle.PollerTest do
              stats["hits"] == 0 and stats["misses"] == 1
            end)
 
-    assert felt_show_count() == 0
+    assert shuttle_show_count() == 0
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
   end
@@ -492,7 +499,7 @@ defmodule Shuttle.PollerTest do
              get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
            end)
 
-    show_count = felt_show_count()
+    show_count = shuttle_show_count()
 
     # felt wedges: every listing now times out. The tick degrades by retaining the last-known candidate:
     # the card stays served, and the mtime-keyed cache reuses the entry
@@ -510,7 +517,7 @@ defmodule Shuttle.PollerTest do
              stats["hits"] == 1 and stats["misses"] == 0 and stats["entries"] == 1
            end)
 
-    assert felt_show_count() == show_count
+    assert shuttle_show_count() == show_count
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "slug" => "tests/retained-document"}}] = body.fibers
 

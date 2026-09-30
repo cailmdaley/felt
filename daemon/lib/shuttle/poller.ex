@@ -1863,7 +1863,7 @@ defmodule Shuttle.Poller do
   end
 
   defp run_shuttle_listing(store, state) do
-    case run_felt_ls_for_shuttle(store, state) do
+    case run_shuttle_ls_for_shuttle(store, state) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
           owned_prefix = Shuttle.FeltStores.store_felt_realpath(store) <> "/"
@@ -1930,16 +1930,15 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp run_felt_ls_for_shuttle(store, state) do
-    # Widened projection: felt filters by raw top-level frontmatter first, then
-    # emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
+  defp run_shuttle_ls_for_shuttle(store, state) do
+    # Widened projection: shuttle filters by raw top-level frontmatter first,
+    # then emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
     # superset of the fields the poller needs for eligibility, ownership, and
     # identity). Widening it lets the document cache build each entry DIRECTLY
-    # from its candidate row (no per-miss `felt show`, no stat), so a poll tick
-    # costs one `felt ls` per store. A failure of any kind degrades
-    # `discover_candidates/1` to the store's last-known rows; a felt too old for
-    # these flags is caught by the boot contract probe (`Shuttle.Contract`).
-    run_felt(store, state.runner, [
+    # from its candidate row (no per-miss `show`, no stat), so a poll tick costs
+    # one `shuttle ls` per store. A failure degrades `discover_candidates/1` to
+    # the store's last-known rows; the boot contract probe checks CLI parity.
+    run_shuttle(store, state.runner, [
       "ls",
       "--json",
       "--has-field",
@@ -3545,26 +3544,22 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Fetch a fiber's full JSON representation via the felt CLI. Routes to the
-  # fiber's owning store via store_for_fiber/2 (cache → felt resolution).
+  # Fetch a fiber's full JSON representation via shuttle so runtime decisions
+  # see resolved Shuttle fields. Routes to the owning store via owning_store/2.
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
 
-    case run_felt(host, state.runner, ["show", fiber_id, "--json"]) do
+    case run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
       {:ok, output} ->
         case Jason.decode(output) do
           {:ok, fiber} -> {:ok, fiber}
           {:error, _} -> {:error, :invalid_json}
         end
 
-      # run_felt already wraps a non-zero exit in a descriptive string naming
-      # the command, the store directory and felt's output. A common case here
-      # is a felt-store path that doesn't exist on THIS host — e.g. a foreign
-      # absolute path (`/path/to/store` on another machine) that lives only in
-      # that host's own `FELT_STORES`/registry config. Naming the path makes
-      # that an actionable error rather than a blank 500. See
-      # `gotcha-remote-daemon-foreign-felt-store-path`.
+      # run_shuttle reports the executable, command, store directory, and CLI
+      # output. A common error is a store path that exists only on another host;
+      # naming it makes that actionable instead of returning a blank 500.
       {:error, reason} ->
         {:error, reason}
     end
@@ -3610,44 +3605,34 @@ defmodule Shuttle.Poller do
 
   defp running_prompt_metadata(_), do: %{}
 
-  # Run a felt CLI command against an explicit host directory.
-  # Every felt-touching helper calls this directly with the resolved host.
-  #
-  # On a non-zero exit, the error is a self-describing string carrying the
-  # command, the host directory it ran in, the exit status, and trimmed
-  # output. felt's own output for a nonexistent store can be empty (it just
-  # finds no index), so the host path is what names the actual fault —
-  # typically a felt-store path that doesn't exist on this machine (a foreign
-  # absolute path registered only in another host's own
-  # `FELT_STORES`/registry config).
-  #
-  # No configured store to route through (empty registry) fails soft rather
-  # than crashing the `is_binary(host)` clause with a FunctionClauseError.
-  defp run_felt(nil, _runner, _args), do: {:error, :no_felt_store}
+  # Run either CLI against an explicit store directory. JSON consumers keep
+  # stderr separate because a successful listing can also warn about an
+  # unrelated unreadable fiber.
+  defp run_felt(host, runner, args),
+    do: run_cli(&Shuttle.CLI.run_felt/2, "felt", host, runner, args)
 
-  defp run_felt(host, runner, args) when is_binary(host) do
-    # These poller calls consume felt's stdout as JSON. Keep stderr separate:
-    # felt can exit 0 while warning about unrelated unreadable fibers, and
-    # folding those warnings into stdout makes the JSON undecodable.
-    opts = [cd: host, stderr_to_stdout: false]
+  defp run_shuttle(host, runner, args),
+    do: run_cli(&Shuttle.CLI.run/2, "shuttle", host, runner, args)
 
-    case runner.cmd("felt", args, opts) do
-      {output, 0} ->
+  defp run_cli(_run, _tool, nil, _runner, _args), do: {:error, :no_felt_store}
+
+  defp run_cli(run, tool, host, runner, args) when is_binary(host) do
+    case run.(args, runner: runner, cd: host, stderr_to_stdout: false) do
+      {:ok, output} ->
         {:ok, output}
 
-      {_output, :timeout} ->
-        # The runner's wall-clock bound fired (felt wedged on an overloaded
-        # node). Surfaced as its own atom — not folded into the exit-status
-        # string — because a timeout says NOTHING about the store's fibers:
-        # callers must treat it as "world unknown", never as "fiber gone"
-        # (see discover_candidates/1), and the poll cycle degrades for one
-        # tick instead of stalling forever.
+      {:command_error, :timeout, _output} ->
+        # A timeout says nothing about the store's fibers: callers treat the
+        # result as "world unknown", never as "fiber gone".
         {:error, :timeout}
 
-      {output, status} ->
+      {:command_error, status, output} ->
         trimmed = String.trim(to_string(output))
         detail = if trimmed == "", do: "(no output)", else: trimmed
-        {:error, "felt #{Enum.join(args, " ")} (cd #{host}) exited #{status}: #{detail}"}
+        {:error, "#{tool} #{Enum.join(args, " ")} (cd #{host}) exited #{status}: #{detail}"}
+
+      {:error, reason} ->
+        {:error, "could not run #{tool} #{Enum.join(args, " ")} (cd #{host}): #{reason}"}
     end
   end
 

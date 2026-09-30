@@ -10,7 +10,9 @@ defmodule Shuttle.CLI do
   """
 
   @type result ::
-          {:ok, String.t()} | {:command_error, integer(), String.t()} | {:error, String.t()}
+          {:ok, String.t()}
+          | {:command_error, non_neg_integer() | :timeout, String.t()}
+          | {:error, String.t()}
 
   @local_verbs ~w(pause resume close reopen accept set-outcome set-model set-agent reshape uninstall)
 
@@ -40,7 +42,7 @@ defmodule Shuttle.CLI do
   defp run_executable(executable, args, opts) do
     {runner, opts} = Keyword.pop(opts, :runner, configured_runner())
 
-    case runner.cmd(executable, args, Keyword.put(opts, :stderr_to_stdout, true)) do
+    case runner.cmd(executable, args, Keyword.put_new(opts, :stderr_to_stdout, true)) do
       {output, 0} -> {:ok, output}
       {output, status} -> {:command_error, status, output}
     end

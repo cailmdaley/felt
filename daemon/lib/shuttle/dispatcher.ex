@@ -677,16 +677,17 @@ defmodule Shuttle.Dispatcher do
 
   # Read the fiber from the store this dispatch was given — the Poller passes
   # the fiber's owning store; the default is `default_felt_store/0`. With no
-  # store there is nothing to read. felt's stderr stays out of the JSON: felt
-  # can exit 0 while warning about an unrelated unreadable fiber.
+  # store there is nothing to read. Shuttle's show includes the resolved agent
+  # record the dispatch preflight consumes; stderr stays out of the JSON.
   defp fetch_fiber(_fiber_id, _runner, nil), do: {:error, :not_found}
 
   defp fetch_fiber(fiber_id, runner, felt_store) do
-    case runner.cmd("felt", ["show", fiber_id, "--json"],
+    case Shuttle.CLI.run(["show", fiber_id, "--json"],
+           runner: runner,
            cd: felt_store,
            stderr_to_stdout: false
          ) do
-      {output, 0} -> decode_fiber(output)
+      {:ok, output} -> decode_fiber(output)
       _ -> {:error, :not_found}
     end
   end
