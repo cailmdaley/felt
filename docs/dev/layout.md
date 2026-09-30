@@ -117,11 +117,13 @@ account configuration, MCP credentials, or credential backups either. Fixtures
 use a fresh home and config with synthetic data and a controlled environment;
 they must not fall back to installed harness executables.
 
-The Go `cmd` unit tests run behind a `TestMain` fence (`cmd/testmain_test.go`):
-`HOME`, the Felt and Shuttle config files and the host identity file point into a temp
-dir, and `SHUTTLE_DAEMON_URL` names a loopback port nothing listens on. A test
-never reaches the machine's live daemon or its fleet; one that needs a daemon
-starts an `httptest` server and sets `SHUTTLE_DAEMON_URL` itself.
+The felt CLI and shuttle CLI unit-test binaries each run behind a `TestMain`
+fence (`internal/feltcli/testmain_test.go` and
+`internal/shuttlecli/testmain_test.go`). The felt CLI fences its home, cache,
+and config paths; the shuttle CLI fences its home, Shuttle config files, host
+identity, and daemon URL. A test never reaches the machine's live daemon or its
+fleet; one that needs a daemon starts an `httptest` server and sets
+`SHUTTLE_DAEMON_URL` itself.
 
 Real harness smoke is an explicit integration operation against the operator's
 runtime. Even starting an idle CLI or running plugin setup can initialize or

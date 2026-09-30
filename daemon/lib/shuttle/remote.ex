@@ -261,7 +261,7 @@ defmodule Shuttle.Remote do
   # nothing: `bounce_tunnel/3` shells `launchctl kickstart`. So a Mac hub's
   # remotes are `:launchd`, and everywhere else a remote with no explicit policy
   # goes straight to the ssh check instead of shelling a `launchctl` that cannot
-  # exist. `defaultTunnelManager()` in cmd/shuttle_remotes.go answers the
+  # exist. `defaultTunnelManager()` in internal/shuttlecli/remotes.go answers the
   # neighbouring question — which supervisor the hub INSTALLS the tunnel with —
   # and so says `systemd` where this says `:none`.
   #

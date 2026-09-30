@@ -95,7 +95,7 @@ lives in the docs site (`docs/`, published to
   same file at runtime, so nothing about hosts is baked into a build.
   `shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
   validator used by the board's settings sheet. Shared fixtures enforce
-  Go/Elixir parity. `cmd/hygiene_test.go` fails the build on a personal
+  Go/Elixir parity. `internal/feltcli/hygiene_test.go` fails the build on a personal
   hostname or path anywhere in the published surface: `daemon/config/`,
   `daemon/lib/`, `cmd/`, `daemon/share/`, `ui/`, `bin/`, every `.md` file,
   `Makefile`, and `scripts/bootstrap.sh`. Keep host-specific details in fibers.

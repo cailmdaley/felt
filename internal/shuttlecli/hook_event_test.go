@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// updateGolden regenerates cmd/testdata/events_golden.jsonl instead of
-// asserting against it: `go test ./cmd -run Golden -update-golden`.
+// updateGolden regenerates internal/shuttlecli/testdata/events_golden.jsonl instead of
+// asserting against it: `go test ./internal/shuttlecli -run Golden -update-golden`.
 var updateGolden = flag.Bool("update-golden", false, "rewrite the events golden file")
 
 const goldenPath = "testdata/events_golden.jsonl"

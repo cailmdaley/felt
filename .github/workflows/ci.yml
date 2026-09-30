@@ -31,7 +31,7 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       - name: Integration Test
-        run: go test -tags integration ./cmd/ -run TestIntegration -v
+        run: go test -tags integration ./internal/feltcli -run TestIntegration -v
 
       # Deliberately in the Go job, not Elixir: that one installs both CLIs to
       # /usr/local/bin, which the hook resolvers find — the absent-binary

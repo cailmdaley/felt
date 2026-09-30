@@ -53,7 +53,7 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 
 	// Side B: a mark-runtime-shaped RMW (lock -> read -> mutate one field ->
 	// write -> unlock) bumping a counter, mirroring the lock/read/update/write
-	// sequence in cmd/shuttle_mark_runtime.go's RunE.
+	// sequence in internal/shuttlecli/mark_runtime.go's RunE.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {

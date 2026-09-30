@@ -15,7 +15,7 @@ defmodule Shuttle.HostTest do
   end
 
   describe "parity with the Go reader" do
-    # The same fixtures and expectation file cmd/shuttle_host_class_test.go
+    # The same fixtures and expectation file internal/shuttlecli/host_class_test.go
     # asserts against. Error kinds are the contract; messages are not.
     expected =
       "../fixtures/host/expected.json"

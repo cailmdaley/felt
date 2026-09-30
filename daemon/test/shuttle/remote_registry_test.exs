@@ -137,7 +137,7 @@ defmodule Shuttle.RemoteRegistryTest do
     end
 
     # Mirrors the remote_socket rows of the rejected-input table in
-    # cmd/shuttle_remotes_test.go, line for line, plus the non-string case.
+    # internal/shuttlecli/remotes_test.go, line for line, plus the non-string case.
     test "entries the Go reader refuses are dropped" do
       for entry <- [
             %{"remote_socket" => "/srv/s.sock", "remote_port" => 4000},

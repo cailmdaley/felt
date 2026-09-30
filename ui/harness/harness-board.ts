@@ -175,7 +175,7 @@ const ULID = {
 } as const
 
 /** The tmux session a Shuttle worker on this fiber runs in — the real
- *  convention from cmd/shuttle_foundation_test.go: `<leaf>-<uid>-shuttle`,
+ *  convention from internal/shuttlecli/foundation_test.go: `<leaf>-<uid>-shuttle`,
  *  where the leaf is the last path segment of the fiber id. */
 const sessionFor = (id: string, uid: string): string =>
   `${id.split('/').filter(Boolean).pop()}-${uid}-shuttle`

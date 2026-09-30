@@ -45,7 +45,7 @@ defmodule Shuttle.TmuxServer do
   requires root) prints the process's resource coalition, whose `name` is the
   launchd label or app bundle that rooted the tree — exactly the attribution TCC
   charges file access to. A coalition of `io.shuttle.daemon` is a daemon-born
-  server; anything else is user-born. See `cmd/shuttle_tmux_origin.go`; nothing
+  server; anything else is user-born. See `internal/shuttlecli/tmux_origin.go`; nothing
   in this module needs to stamp or read a marker.
   """
 

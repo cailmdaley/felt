@@ -8,9 +8,9 @@ and [Telemetry](../shuttle/telemetry.md); this page is the writer/reader contrac
 
 shuttle derives per-minute activity, per-session waiting state and the
 sent-files trail from its OWN agent hook-event stream. `shuttle hook event`
-(`cmd/hook_event.go`) appends one JSON line per hook event to
+(`internal/shuttlecli/hook_event.go`) appends one JSON line per hook event to
 `$SHUTTLE_EVENTS_FILE`, else `events.jsonl` under the data directory.
-`Shuttle.EventStream` is its one reader, and `cmd/shuttle_events.go` mirrors
+`Shuttle.EventStream` is its one reader, and `internal/shuttlecli/events.go` mirrors
 `Shuttle.EventStream.default_events_file/0` so the writer and the reader cannot
 drift.
 
@@ -89,8 +89,8 @@ its worker forever: a false "needs you" is noise a
 person dismisses, a false "nothing to see" is a worker nobody looks at again.
 Past the bound the session categorizes as if the count were zero.
 
-`cmd/testdata/events_golden.jsonl` is the cross-language contract: written
-byte-for-byte by `cmd/hook_event_test.go`, parsed by the Elixir projections in
+`internal/shuttlecli/testdata/events_golden.jsonl` is the cross-language contract: written
+byte-for-byte by `internal/shuttlecli/hook_event_test.go`, parsed by the Elixir projections in
 `daemon/test/shuttle/events_parity_test.exs`. Each host's daemon follows its own
 host's stream.
 

@@ -44,7 +44,7 @@ defmodule Shuttle.Remotes do
   different questions: stores are "what do I poll", remotes are "who else
   exists".
 
-  The Go CLI (`cmd/shuttle_remotes.go`) reads the same file with the same
+  The Go CLI (`internal/shuttlecli/remotes.go`) reads the same file with the same
   defaults rather than shelling the daemon — the same one-way dependency
   `SHUTTLE_STORES` keeps. `test/fixtures/remotes/*.json` is read by both suites so
   the two readers cannot drift.
@@ -286,7 +286,7 @@ defmodule Shuttle.Remotes do
   defp defaults_block(_), do: %{}
 
   # The proxy grammar, shared with the Go reader (`parseProxyEndpoint` in
-  # `cmd/shuttle_remotes.go`): `[scheme://][userinfo@]host:port`.
+  # `internal/shuttlecli/remotes.go`): `[scheme://][userinfo@]host:port`.
   #
   #   * scheme, when present, must be http or https. `socks5://` is rejected
   #     rather than quietly treated as an HTTP CONNECT proxy — silently making
@@ -307,7 +307,7 @@ defmodule Shuttle.Remotes do
   # board, and `shuttle remotes list` is the validator that fails loud
   # with the reason.
   #
-  # `daemon/test/shuttle/remotes_test.exs` and `cmd/shuttle_remotes_test.go`
+  # `daemon/test/shuttle/remotes_test.exs` and `internal/shuttlecli/remotes_test.go`
   # carry mirrored tables of every accepted and rejected form, so a rule that
   # changes in one language fails in both.
   defp parse_proxy(nil), do: nil

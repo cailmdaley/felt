@@ -33,7 +33,7 @@ defmodule Shuttle.RemotesTest do
   end
 
   describe "parity with the Go reader" do
-    # The same fixtures and the same expectation file cmd/shuttle_remotes_test.go
+    # The same fixtures and the same expectation file internal/shuttlecli/remotes_test.go
     # asserts against. Two readers, one contract: a default that drifts in one
     # language fails in both.
     expected =
@@ -180,7 +180,7 @@ defmodule Shuttle.RemotesTest do
   end
 
   describe "https_proxy" do
-    # The mirror of `TestParseProxyEndpoint` in cmd/shuttle_remotes_test.go.
+    # The mirror of `TestParseProxyEndpoint` in internal/shuttlecli/remotes_test.go.
     # Every row here appears there with the same verdict; a grammar rule that
     # changes in one language fails in both.
     @proxy_grammar [

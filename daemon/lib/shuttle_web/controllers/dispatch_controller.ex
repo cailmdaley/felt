@@ -4,7 +4,7 @@ defmodule ShuttleWeb.DispatchController do
 
   The single force/ad-hoc dispatch surface: the kanban's drag-to-inFlight
   launch, the detail modal's requeue / "New session", and `shuttle
-  dispatch` (cmd/shuttle_daemon_verbs.go) all land here.
+  dispatch` (internal/shuttlecli/daemon_verbs.go) all land here.
 
     * a request carrying `origin` — a remote-owned card — is forwarded by
       `Shuttle.OriginRouter` to the owning daemon's identical `/dispatch`

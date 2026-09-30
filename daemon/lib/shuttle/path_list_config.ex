@@ -15,8 +15,8 @@ defmodule Shuttle.PathListConfig do
     * writes are atomic (tmp + rename), and saving `[]` deletes the file;
     * every path is trimmed, expanded, and de-duplicated, in that order.
 
-  That shape is Go-parity surface: `cmd/shuttle_stores.go` reimplements it and
-  `cmd/shuttle_status_test.go` pins it. It is not free to change here alone.
+  That shape is Go-parity surface: `internal/shuttlecli/stores.go` reimplements it and
+  `internal/shuttlecli/status_test.go` pins it. It is not free to change here alone.
 
   Callers stay the named modules (`Shuttle.FeltStores`, `Shuttle.Projects`);
   they keep their own moduledocs, function names, and any caching. This module

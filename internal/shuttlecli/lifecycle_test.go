@@ -197,7 +197,7 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 // test's whole premise (a --host override bypassing a MISMATCHED ambient
 // identity) no longer applies; the alias-guard-fires-without-an-override
 // half survives as `TestShuttleMarkRuntime_AliasGuardWithoutOverride`
-// (cmd/shuttle_mark_runtime_test.go), which exercises the same guard on a
+// (internal/shuttlecli/mark_runtime_test.go), which exercises the same guard on a
 // different verb.
 
 // ---- resume ----------------------------------------------------------------

@@ -111,7 +111,7 @@ type eventHookInput struct {
 }
 
 // eventLine is the wire shape, in wire order. Field set and names are pinned
-// by cmd/testdata/events_golden.jsonl, which the Elixir readers parse in
+// by internal/shuttlecli/testdata/events_golden.jsonl, which the Elixir readers parse in
 // daemon/test/shuttle/events_parity_test.exs — change either side and that test fails.
 type eventLine struct {
 	ID          string `json:"id"`

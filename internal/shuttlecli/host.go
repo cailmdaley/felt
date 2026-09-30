@@ -128,7 +128,7 @@ func normalizeHostname(raw string) string {
 //
 // It writes only into a parent directory that ALREADY exists, and never
 // creates one. That is the same gate the event stream and commit ledger use
-// (shuttleSink, cmd/shuttle_events.go): the existence of ~/.shuttle is what
+// (shuttleSink, internal/shuttlecli/events.go): the existence of ~/.shuttle is what
 // distinguishes a shuttle host from a machine that installed felt for fibers
 // alone. Since resolveOwnHost runs inside `shuttle hook event` — before the
 // stream's own gate is consulted — a mkdir here would create ~/.shuttle on a

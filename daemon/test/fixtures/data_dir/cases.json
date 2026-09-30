@@ -15,7 +15,7 @@
     {"name": "relative kept", "env": "shuttle-data", "expect": "shuttle-data"}
   ],
   "state_files": {
-    "_comment": "Per-file overrides, asserted by the Go suite (cmd/shuttle_events_test.go, shuttleStatePath) and the Elixir suite (test/shuttle/data_dir_test.exs, Shuttle.state_path/2). Every case runs with SHUTTLE_DATA_DIR set to `data_dir`, once for each entry of `files`. `env` is that file's override variable, or null for unset. In `expect`, `<data_dir>` and `<leaf>` stand for the fixture's data_dir and the file's leaf. An override is trimmed and a blank one counts as unset; otherwise it is taken exactly as written — a leading ~ is not expanded.",
+    "_comment": "Per-file overrides, asserted by the Go suite (internal/shuttlecli/events_test.go, shuttleStatePath) and the Elixir suite (test/shuttle/data_dir_test.exs, Shuttle.state_path/2). Every case runs with SHUTTLE_DATA_DIR set to `data_dir`, once for each entry of `files`. `env` is that file's override variable, or null for unset. In `expect`, `<data_dir>` and `<leaf>` stand for the fixture's data_dir and the file's leaf. An override is trimmed and a blank one counts as unset; otherwise it is taken exactly as written — a leading ~ is not expanded.",
     "data_dir": "/srv/shuttle-data",
     "files": [
       {"env_var": "SHUTTLE_EVENTS_FILE", "leaf": "events.jsonl"},

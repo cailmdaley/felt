@@ -136,7 +136,7 @@ defmodule Shuttle.Activity do
   whole-minutes rule below promises.
 
   `shuttle hook event` rotates the stream at 64 MB: the live file is renamed to
-  `events.jsonl.1` and a fresh one starts (`cmd/shuttle_events.go`). The fold
+  `events.jsonl.1` and a fresh one starts (`internal/shuttlecli/events.go`). The fold
   reads the rotated sibling first and the live file second, always — a window
   that reaches back past the last rotation is served from both, and a window
   that does not still gets the spell and pairing state the rotated file leaves

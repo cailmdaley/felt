@@ -1,10 +1,10 @@
 defmodule Shuttle.Contract do
   @moduledoc """
   The daemon's expected level of the CLI's daemon-shelled surface — the
-  Elixir-side companion to `cmd/shuttle_contract.go`'s `ShuttleContractLevel`.
+  Elixir-side companion to `internal/shuttlecli/contract.go`'s `ShuttleContractLevel`.
 
   Bump `@expected_level` IN LOCKSTEP with that Go constant whenever a change
-  touches the daemon-shelled CLI surface (see `cmd/shuttle_contract.go`'s
+  touches the daemon-shelled CLI surface (see `internal/shuttlecli/contract.go`'s
   moduledoc for exactly what counts — a flag added/removed/renamed on
   mark-runtime/reopen/any verb the daemon shells at dispatch/conclude time, or
   a change to what a shelled verb's stdout/exit code means). This is the exact
@@ -19,7 +19,7 @@ defmodule Shuttle.Contract do
 
   require Logger
 
-  # Bumped in lockstep with cmd/shuttle_contract.go's ShuttleContractLevel.
+  # Bumped in lockstep with internal/shuttlecli/contract.go's ShuttleContractLevel.
   # Level 4: the daemon shells `shuttle accept|resume <fiber> --local`.
   @expected_level 5
 
@@ -125,7 +125,7 @@ defmodule Shuttle.Contract do
       Logger.error(
         "CLI/daemon contract skew at boot: #{result.reason}. " <>
           "Fresh dispatches are held until this is fixed and the daemon is restarted " <>
-          "(make daemon installs the matching CLI; see cmd/shuttle_contract.go)."
+          "(make daemon installs the matching CLI; see internal/shuttlecli/contract.go)."
       )
     end
 

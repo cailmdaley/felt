@@ -41,7 +41,7 @@ defmodule Shuttle.SessionLedger do
 
   ## Durability posture
 
-  Same as `events.jsonl` (`cmd/shuttle_events.go`): O_APPEND single-write
+  Same as `events.jsonl` (`internal/shuttlecli/events.go`): O_APPEND single-write
   lines, rotation at a byte cap to a `.1` sibling, readers streaming both. The
   cap is far smaller here because the volume is — one line per session against
   one line per hook event.
@@ -147,7 +147,7 @@ defmodule Shuttle.SessionLedger do
     _ -> nil
   end
 
-  # Rotate-then-append, mirroring `appendEventLine` in cmd/shuttle_events.go:
+  # Rotate-then-append, mirroring `appendEventLine` in internal/shuttlecli/events.go:
   # one O_APPEND write per line (atomic against other appenders on Darwin and
   # Linux alike, which is why the line is built whole before we get here).
   defp append(line, path) do

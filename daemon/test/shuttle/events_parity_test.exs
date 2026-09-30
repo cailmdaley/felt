@@ -4,14 +4,14 @@ defmodule Shuttle.EventsParityTest do
 
   `shuttle hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
   `Shuttle.WaitingTracker` and `Shuttle.SentFiles` (Elixir) project it. Nothing in the type system connects the
-  two, so the contract is a checked-in fixture: `cmd/testdata/events_golden.jsonl`
-  is produced byte-for-byte by `TestEventGoldenParity` in cmd/hook_event_test.go
+  two, so the contract is a checked-in fixture: `internal/shuttlecli/testdata/events_golden.jsonl`
+  is produced byte-for-byte by `TestEventGoldenParity` in `internal/shuttlecli/hook_event_test.go`
   and parsed here.
 
   A writer change that drops a field, renames a type, or reshapes `toolInput`
   fails on one side or the other — instead of quietly emptying the board.
 
-  Regenerate the fixture with: `go test ./cmd -run Golden -update-golden`.
+  Regenerate the fixture with: `go test ./internal/shuttlecli -run Golden -update-golden`.
   """
   use ExUnit.Case, async: true
 
@@ -22,7 +22,7 @@ defmodule Shuttle.EventsParityTest do
   # file, then stopping; worker B (Codex) ending blocked on a human; worker C
   # stopping with two detached shells still running and then being hit by the
   # harness's idle timer; and a subagent stopping outside any tmux session.
-  @golden Path.expand("../../../cmd/testdata/events_golden.jsonl", __DIR__)
+  @golden Path.expand("../../../internal/shuttlecli/testdata/events_golden.jsonl", __DIR__)
   @worker_a "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
   @worker_b "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
   @worker_c "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
@@ -32,7 +32,7 @@ defmodule Shuttle.EventsParityTest do
 
   setup do
     assert File.regular?(@golden),
-           "missing #{@golden} — regenerate with `go test ./cmd -run Golden -update-golden`"
+           "missing #{@golden} — regenerate with `go test ./internal/shuttlecli -run Golden -update-golden`"
 
     :ok
   end

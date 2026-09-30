@@ -17,7 +17,7 @@ shared plugin for both.
   integration.
 - The plugin bundles the `felt` and `shuttle` skills, Felt hooks for
   SessionStart (active and recently touched fibers) and PreToolUse
-  (`cmd/hook.go`), and Shuttle hooks for event and commit records.
+  (`internal/feltcli/hook.go`), and Shuttle hooks for event and commit records.
   **Updating the binaries updates hook behavior** — the plugin only needs
   refreshing when skill content changes.
 - **Binaries and plugin update in lockstep.** `felt update` replaces both Go

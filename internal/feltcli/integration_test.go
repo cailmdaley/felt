@@ -1,6 +1,6 @@
 //go:build integration
 
-package cmd_test
+package feltcli_test
 
 import (
 	"encoding/json"
@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmp)
 
 	binaryPath = filepath.Join(tmp, "felt")
-	buildCmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	buildCmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/felt")
 	buildCmd.Dir = filepath.Join(filepath.Dir(tmp), "..", "..")
 	// Walk up to find go.mod
 	dir, _ := os.Getwd()

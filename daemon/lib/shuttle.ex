@@ -55,7 +55,7 @@ defmodule Shuttle do
   @doc """
   One host-local state file: `$<env_var>` when it names a path — trimmed, a
   blank value counting as unset, and otherwise taken as written — else `leaf`
-  under `data_dir/0`. The Go CLI's `shuttleStatePath` (cmd/shuttle_events.go)
+  under `data_dir/0`. The Go CLI's `shuttleStatePath` (internal/shuttlecli/events.go)
   applies the same rule; `test/fixtures/data_dir/cases.json` holds both to it.
   """
   @spec state_path(String.t(), String.t()) :: String.t()

@@ -34,7 +34,7 @@ The eight hook types collapse into three kinds, plus one facet laid over them:
 - **attention** — a human typed (`UserPromptSubmit`), unless the event carries
   `machine: true`, meaning the harness injected that prompt and nobody was
   present. The recorder makes that call — `shuttle hook event` prefix-matches the prompt
-  text against `machinePromptPrefixes` (cmd/hook_event.go), where a new
+  text against `machinePromptPrefixes` (internal/shuttlecli/hook_event.go), where a new
   harness's wrapper is taught by adding its prefix. The daemon never sniffs
   prompt text to guess.
 - **notify** — the agent asked for a human, at the onset of the ask.

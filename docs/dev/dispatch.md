@@ -16,7 +16,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 - **Host identity is shuttle's.** The Poller takes `SHUTTLE_HOST` (trimmed) or
   asks `shuttle host --json` once at boot and freezes the answer; a shuttle CLI
   that cannot answer stops the daemon from booting. The host-file and hostname
-  chain lives only in the Go CLI (`cmd/shuttle_host.go`).
+  chain lives only in the Go CLI (`internal/shuttlecli/host.go`).
 - **Eligibility is pure; the filesystem is the dispatch action's business.**
   `eligible?/2` reads fiber frontmatter and in-memory runtime maps and nothing
   else. Whether a `project_dir` exists is decided inside
@@ -182,7 +182,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `io.shuttle.daemon` (the daemon's own launchd label) is `daemon_born`, any
   other name is `user_born` and is reported verbatim, an unparsable answer is
   `unknown`, and no server at all is `absent`. Only `daemon_born` is a defect.
-  The parsing lives in `cmd/shuttle_tmux_origin.go` (the resource coalition is
+  The parsing lives in `internal/shuttlecli/tmux_origin.go` (the resource coalition is
   selected by name: `launchctl print` emits a `jetsam coalition` block with
   the same `name` key, and only the resource one is TCC's). `shuttle status`
   and `shuttle doctor` surface the classification so a daemon-born server

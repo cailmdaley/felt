@@ -440,7 +440,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # `shuttle <verb> <fiber> --local` in the fiber's owning store (through
   # the Poller when one is running — none is in this suite) and relays Shuttle's
   # answer. The document write is covered by the CLI's Go tests
-  # (cmd/shuttle_lifecycle_test.go).
+  # (internal/shuttlecli/lifecycle_test.go).
   for verb <- ~w(accept resume) do
     test "#{verb} runs Shuttle's writer with --local in the owning store" do
       store = fixture_store!("shuttle-lifecycle-#{unquote(verb)}", "tests/standing", "Standing")

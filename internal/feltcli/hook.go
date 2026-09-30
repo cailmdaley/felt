@@ -151,7 +151,7 @@ const (
 )
 
 // buildSessionContext renders the markdown additionalContext text. Output is
-// pinned by cmd/hook_test.go — change it deliberately; a wording or layout
+// pinned by internal/feltcli/hook_test.go — change it deliberately; a wording or layout
 // change shows up as a test diff.
 func buildSessionContext() string {
 	var sb strings.Builder
@@ -453,7 +453,7 @@ type preToolInput struct {
 	} `json:"tool_input"`
 }
 
-// runPreToolHook implements the PreToolUse deny gate. See cmd/hook_test.go for
+// runPreToolHook implements the PreToolUse deny gate. See internal/feltcli/hook_test.go for
 // the matrix; the rules are:
 //
 //   - outside felt-enabled projects (no .felt at cwd): pass.

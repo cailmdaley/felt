@@ -121,8 +121,8 @@ defmodule Shuttle.EventStream do
   @doc """
   The host-local event stream, honoring the same env the hook writes:
   `SHUTTLE_EVENTS_FILE`, else `$SHUTTLE_DATA_DIR/events.jsonl`, default
-  `~/.shuttle/events.jsonl`. `cmd/shuttle_events.go` mirrors this resolver
-  exactly; `cmd/hook_event.go` writes the lines.
+  `~/.shuttle/events.jsonl`. `internal/shuttlecli/events.go` mirrors this resolver
+  exactly; `internal/shuttlecli/hook_event.go` writes the lines.
   """
   @spec default_events_file() :: Path.t()
   def default_events_file do
