@@ -72,7 +72,7 @@ defmodule Shuttle.ConfigFiles do
   reports the values the daemon is actually running under.
   """
 
-  alias Shuttle.{Felt, FeltStores, Host, Projects, Remotes}
+  alias Shuttle.{FeltStores, Host, Projects, Remotes}
 
   require Logger
 
@@ -332,13 +332,13 @@ defmodule Shuttle.ConfigFiles do
   # environment variable a human would use, so what passes here is exactly what
   # the daemon and the CLI will read back off disk a moment later.
   defp validate_decoded(:remotes, text, _decoded),
-    do: validate_via_felt(text, "FELT_REMOTES_FILE", ["shuttle", "remotes", "list", "--json"])
+    do: validate_via_shuttle(text, "FELT_REMOTES_FILE", ["remotes", "list", "--json"])
 
   defp validate_decoded(:agents, text, _decoded),
-    do: validate_via_felt(text, "FELT_AGENTS_FILE", ["shuttle", "agents", "--json"])
+    do: validate_via_shuttle(text, "FELT_AGENTS_FILE", ["agents", "--json"])
 
   defp validate_decoded(:host, text, _decoded),
-    do: validate_via_felt(text, "FELT_HOST_FILE", ["shuttle", "host", "--json"])
+    do: validate_via_shuttle(text, "FELT_HOST_FILE", ["host", "--json"])
 
   # No felt verb validates the path-list files, so the shape check lives here —
   # and it is the shape `PathListConfig` accepts, not a stricter one. In
@@ -367,10 +367,10 @@ defmodule Shuttle.ConfigFiles do
   # Run felt against a throwaway copy of the candidate. The env entry is an
   # override on the inherited environment (Port semantics), so felt keeps its
   # PATH and everything else and reads only this one file from somewhere else.
-  defp validate_via_felt(text, env_var, args) do
+  defp validate_via_shuttle(text, env_var, args) do
     with {:ok, tmp} <- write_temp(text) do
       try do
-        case Felt.run(args, env: [{env_var, tmp}], timeout_ms: 15_000) do
+        case Shuttle.CLI.run(args, env: [{env_var, tmp}], timeout_ms: 15_000) do
           {:ok, _output} ->
             :ok
 
@@ -387,14 +387,14 @@ defmodule Shuttle.ConfigFiles do
 
           {:command_error, 127, _output} ->
             {:unavailable,
-             "felt is not on this daemon's PATH, so there is nothing here that can validate " <>
+             "shuttle is not on this daemon's PATH, so there is nothing here that can validate " <>
                "this file. The edit was not saved."}
 
           {:command_error, _status, output} ->
             {:error, output |> scrub_path(tmp) |> String.trim()}
 
           {:error, reason} when is_binary(reason) ->
-            {:unavailable, "could not run felt to validate: #{reason}"}
+            {:unavailable, "could not run shuttle to validate: #{reason}"}
         end
       after
         File.rm(tmp)

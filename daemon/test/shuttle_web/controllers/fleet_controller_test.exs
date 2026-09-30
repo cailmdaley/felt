@@ -52,7 +52,8 @@ defmodule ShuttleWeb.FleetControllerTest do
 
     def reply_with(fun), do: Agent.update(__MODULE__, &Map.put(&1, :reply, fun))
     def calls, do: Agent.get(__MODULE__, & &1.calls)
-    def last_args, do: calls() |> List.last() |> elem(1)
+    def last_call, do: calls() |> List.last()
+    def last_args, do: last_call() |> elem(1)
 
     @impl true
     def cmd(command, args, _opts) do
@@ -141,7 +142,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert conn.status == 200
       body = Jason.decode!(conn.resp_body)
 
-      assert MockFelt.last_args() == ["shuttle", "remotes", "list", "--json"]
+      assert MockFelt.last_call() == {"shuttle", ["remotes", "list", "--json"]}
       assert body["host"] == Shuttle.Poller.own_host_id()
       assert body["error"] == nil
       assert body["launchd_label_prefix"] == "io.shuttle"
@@ -234,7 +235,7 @@ defmodule ShuttleWeb.FleetControllerTest do
 
       # A sparse entry stays sparse: a flag we invented a default for would be
       # written into the file and take its portability away.
-      assert MockFelt.last_args() == ["shuttle", "remotes", "add", "hub-a"]
+      assert MockFelt.last_args() == ["remotes", "add", "hub-a"]
     end
 
     test "builds the argv from the flags that are present" do
@@ -253,7 +254,6 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert conn.status == 200
 
       assert MockFelt.last_args() == [
-               "shuttle",
                "remotes",
                "add",
                "hub-a",
@@ -274,7 +274,7 @@ defmodule ShuttleWeb.FleetControllerTest do
         post_json("/api/v1/fleet/remotes", %{"name" => "hub-a", "remove" => true, "port" => 4001})
 
       assert conn.status == 200
-      assert MockFelt.last_args() == ["shuttle", "remotes", "rm", "hub-a"]
+      assert MockFelt.last_args() == ["remotes", "rm", "hub-a"]
     end
 
     test "a missing name is a 400, and felt is never run" do
@@ -298,10 +298,10 @@ defmodule ShuttleWeb.FleetControllerTest do
   describe "POST /api/v1/tunnels" do
     test "preview is the CLI's own --dry-run, and is the default" do
       assert post_json("/api/v1/tunnels", %{"action" => "preview"}).status == 200
-      assert MockFelt.last_args() == ["shuttle", "tunnels", "install", "--dry-run"]
+      assert MockFelt.last_args() == ["tunnels", "install", "--dry-run"]
 
       assert post_json("/api/v1/tunnels", %{}).status == 200
-      assert MockFelt.last_args() == ["shuttle", "tunnels", "install", "--dry-run"]
+      assert MockFelt.last_args() == ["tunnels", "install", "--dry-run"]
     end
 
     test "install carries no flag" do
@@ -309,14 +309,14 @@ defmodule ShuttleWeb.FleetControllerTest do
 
       assert conn.status == 200
       assert Jason.decode!(conn.resp_body)["ok"] == true
-      assert MockFelt.last_args() == ["shuttle", "tunnels", "install"]
+      assert MockFelt.last_args() == ["tunnels", "install"]
     end
 
     test "a named remote narrows the job set" do
       assert post_json("/api/v1/tunnels", %{"action" => "install", "name" => " candide "}).status ==
                200
 
-      assert MockFelt.last_args() == ["shuttle", "tunnels", "install", "candide"]
+      assert MockFelt.last_args() == ["tunnels", "install", "candide"]
     end
 
     test "an unknown action is a 400 naming the two, and felt is never run" do

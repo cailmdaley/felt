@@ -4,7 +4,7 @@ defmodule Shuttle.Messaging do
   alias Shuttle.Messaging.SessionFiberCache
 
   alias Shuttle.{
-    Felt,
+    CLI,
     Harnesses,
     OriginRouter,
     Poller,
@@ -94,7 +94,7 @@ defmodule Shuttle.Messaging do
   defp local_peers do
     host = Poller.own_host_id()
 
-    case Felt.run(["shuttle", "sessions", "--local", "--json"],
+    case CLI.run(["sessions", "--local", "--json"],
            timeout_ms: @local_discovery_timeout_ms
          ) do
       {:ok, output} ->
@@ -422,7 +422,7 @@ defmodule Shuttle.Messaging do
     timeout =
       if request.attachments == [], do: @local_message_timeout_ms, else: @local_files_timeout_ms
 
-    case Felt.run(["shuttle", "message", "--local", "--json", "--request-json"],
+    case CLI.run(["message", "--local", "--json", "--request-json"],
            timeout_ms: timeout,
            input: frame
          ) do
@@ -436,7 +436,7 @@ defmodule Shuttle.Messaging do
              unknown_receipt(
                request,
                "daemon",
-               "felt returned a malformed message receipt; outcome is unknown"
+               "shuttle returned a malformed message receipt; outcome is unknown"
              )}
         end
 
@@ -454,12 +454,12 @@ defmodule Shuttle.Messaging do
              unknown_receipt(
                request,
                "daemon",
-               "felt failed without a valid receipt; outcome is unknown: #{String.trim(output)}"
+               "shuttle failed without a valid receipt; outcome is unknown: #{String.trim(output)}"
              )}
         end
 
       {:error, reason} ->
-        {:error, 503, "could not run felt: #{reason}"}
+        {:error, 503, "could not run shuttle: #{reason}"}
     end
   end
 
@@ -629,7 +629,7 @@ defmodule Shuttle.Messaging do
        unknown_receipt(
          request,
          "daemon",
-         "felt failed without a valid receipt; outcome is unknown"
+         "shuttle failed without a valid receipt; outcome is unknown"
        )}
     else
       status = receipt_http_status(200, receipt)

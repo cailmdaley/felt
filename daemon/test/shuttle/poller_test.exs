@@ -309,7 +309,7 @@ defmodule Shuttle.PollerTest do
       MockRunner.set_host_json(~s({"id": "candide"}))
 
       asks = fn ->
-        Enum.count(MockRunner.commands(), &(&1 == {"felt", ["shuttle", "host", "--json"]}))
+        Enum.count(MockRunner.commands(), &(&1 == {"shuttle", ["host", "--json"]}))
       end
 
       before = asks.()
@@ -329,7 +329,7 @@ defmodule Shuttle.PollerTest do
       assert asks.() == before + 1
     end
 
-    test "a Poller whose felt cannot name the host refuses to boot" do
+    test "a Poller whose shuttle cannot name the host refuses to boot" do
       System.delete_env("SHUTTLE_HOST")
       MockRunner.set_host_json("parsing host.json: not a JSON object", 1)
 
@@ -351,7 +351,7 @@ defmodule Shuttle.PollerTest do
                    restart: :temporary
                  })
 
-        assert inspect(reason) =~ "felt shuttle host --json"
+        assert inspect(reason) =~ "shuttle host --json"
       end)
     end
   end
@@ -366,10 +366,10 @@ defmodule Shuttle.PollerTest do
   end
 
   defp asked_felt_for_host? do
-    Enum.member?(MockRunner.commands(), {"felt", ["shuttle", "host", "--json"]})
+    Enum.member?(MockRunner.commands(), {"shuttle", ["host", "--json"]})
   end
 
-  test "poller uses the shuttle felt listing for discovery" do
+  test "poller uses shuttle listing for discovery" do
     fiber = make_fiber("tests/projected-discovery")
     MockRunner.set_fiber("tests/projected-discovery", fiber)
     MockRunner.set_shuttle("tests/projected-discovery", oneshot_shuttle())
@@ -1094,7 +1094,7 @@ defmodule Shuttle.PollerTest do
 
     marker_idx =
       Enum.find_index(cut_commands, fn
-        {"felt", args} -> "mark-runtime" in args and "--handed-off-at" in args
+        {"shuttle", args} -> "mark-runtime" in args and "--handed-off-at" in args
         _ -> false
       end)
 
@@ -1245,7 +1245,7 @@ defmodule Shuttle.PollerTest do
     resume_commands = MockRunner.commands() |> Enum.drop(before)
 
     refute Enum.any?(resume_commands, fn
-             {"felt", args} -> "mark-runtime" in args and "--handed-off-at" in args
+             {"shuttle", args} -> "mark-runtime" in args and "--handed-off-at" in args
              _ -> false
            end)
 
@@ -3347,7 +3347,7 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
 
-    assert {"felt", ["shuttle", "--felt-store", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
+    assert {"shuttle", ["-C", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
 
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
 
@@ -4473,7 +4473,7 @@ defmodule Shuttle.PollerTest do
     assert Shuttle.Continuation.clean_handoff_since_dispatch?(closed_fiber)
 
     assert Enum.any?(MockRunner.commands(), fn
-             {"felt", args} -> "mark-runtime" in args and "--handed-off-at" in args
+             {"shuttle", args} -> "mark-runtime" in args and "--handed-off-at" in args
              _ -> false
            end)
   end
@@ -4869,7 +4869,7 @@ defmodule Shuttle.PollerTest do
     assert wait_until(
              fn ->
                Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-                 cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+                 cmd == "shuttle" and match?(["mark-runtime" | _], args) and
                    "--handed-off-at" in args
                end)
              end,
@@ -4930,7 +4930,7 @@ defmodule Shuttle.PollerTest do
 
     # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
                "--handed-off-at" in args
            end)
 
@@ -5951,7 +5951,7 @@ defmodule Shuttle.PollerTest do
     # resume / continuation can recover it. The daemon's contract is the verb it
     # issues; felt's own suite covers that the verb nests correctly.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
                "--session" in args and "uuid-claim-1" in args
            end)
 
@@ -5959,7 +5959,7 @@ defmodule Shuttle.PollerTest do
     # write: that stamp is how the recording's daemon, on any host, finds the
     # fiber its scribe filed.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
                Enum.chunk_every(args, 2, 1, :discard) |> Enum.member?(["--meeting", "launch-xyz"])
            end)
 
@@ -6106,7 +6106,7 @@ defmodule Shuttle.PollerTest do
     # Nothing registered, renamed, or stamped: a retry after install claims cleanly.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              (cmd == "tmux" and hd(args) == "rename-session") or
-               (cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args))
+               (cmd == "shuttle" and match?(["mark-runtime" | _], args))
            end)
 
     assert Shuttle.SessionLedger.read_since(0) == []
@@ -6117,7 +6117,7 @@ defmodule Shuttle.PollerTest do
              Poller.claim_session(poller, id, "capture-uninstalled1", session_uuid: "uuid-early")
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and match?(["shuttle", "mark-runtime" | _], args) and
+             cmd == "shuttle" and match?(["mark-runtime" | _], args) and
                "uuid-early" in args
            end)
   end

@@ -407,8 +407,8 @@ defmodule Shuttle.ConfigFilesTest do
       assert ConfigFiles.validate(:remotes, @remotes_doc) == :ok
 
       call = MockFelt.last()
-      assert call.command == "felt"
-      assert call.args == ["shuttle", "remotes", "list", "--json"]
+      assert call.command == "shuttle"
+      assert call.args == ["remotes", "list", "--json"]
       assert [{"FELT_REMOTES_FILE", tmp}] = call.env
       assert call.opts[:timeout_ms] == 15_000
       assert call.opts[:stderr_to_stdout] == true
@@ -425,7 +425,7 @@ defmodule Shuttle.ConfigFilesTest do
       assert ConfigFiles.validate(:agents, @agents_doc) == :ok
 
       call = MockFelt.last()
-      assert call.args == ["shuttle", "agents", "--json"]
+      assert call.args == ["agents", "--json"]
       assert [{"FELT_AGENTS_FILE", tmp}] = call.env
       refute tmp == ConfigFiles.path(:agents)
       assert call.staged == {:ok, @agents_doc}
@@ -436,7 +436,7 @@ defmodule Shuttle.ConfigFilesTest do
       assert ConfigFiles.validate(:host, doc) == :ok
 
       call = MockFelt.last()
-      assert call.args == ["shuttle", "host", "--json"]
+      assert call.args == ["host", "--json"]
       assert [{"FELT_HOST_FILE", tmp}] = call.env
       refute tmp == ConfigFiles.path(:host)
       assert call.staged == {:ok, doc}

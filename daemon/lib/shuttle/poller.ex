@@ -2398,19 +2398,19 @@ defmodule Shuttle.Poller do
   @spec resolve_own_host_id(keyword()) :: String.t()
   defp resolve_own_host_id(felt_opts) do
     case String.trim(System.get_env("SHUTTLE_HOST", "")) do
-      "" -> felt_host_id(felt_opts)
+      "" -> shuttle_host_id(felt_opts)
       env -> env
     end
   end
 
-  defp felt_host_id(felt_opts) do
-    with {:ok, output} <- Shuttle.Felt.run(["shuttle", "host", "--json"], felt_opts),
+  defp shuttle_host_id(felt_opts) do
+    with {:ok, output} <- Shuttle.CLI.run(["host", "--json"], felt_opts),
          {:ok, %{"id" => id}} when is_binary(id) and id != "" <- Jason.decode(output) do
       id
     else
       other ->
-        raise "Shuttle.Poller could not resolve own_host_id from `felt shuttle host --json`: " <>
-                "#{inspect(other)}. Set SHUTTLE_HOST=<name> or run `felt shuttle host seed`."
+        raise "Shuttle.Poller could not resolve own_host_id from `shuttle host --json`: " <>
+                "#{inspect(other)}. Set SHUTTLE_HOST=<name> or run `shuttle host seed`."
     end
   end
 

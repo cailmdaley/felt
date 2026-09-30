@@ -219,8 +219,8 @@ defmodule Shuttle.DispatcherTest do
       end)
 
       cond do
-        command == "felt" ->
-          handle_felt(args)
+        command in ["felt", "shuttle"] ->
+          handle_cli(args)
 
         # The wrapper preflight: `bash -lc "type -t -- '<wrapper>'"`. Modeled
         # faithfully — zero exit and a kind word when the token resolves in a
@@ -282,12 +282,10 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    defp handle_felt(["shuttle", "agents", "resolve" | rest]) do
-      # Stub of `felt shuttle agents resolve <name> [--effort E] [--chrome]
-      # --json`. felt owns real resolution; here we cover only the agents +
-      # axes the capture tests exercise, returning felt's resolved.agent JSON
-      # shape (exit 0) or its descriptive non-zero diagnostic. Keeps the suite
-      # off a live `felt shuttle agents` verb (it may not be installed yet).
+    defp handle_cli(["agents", "resolve" | rest]) do
+      # Stub of `shuttle agents resolve <name> [--effort E] [--chrome] --json`.
+      # Here we cover only the axes the capture tests exercise, returning the
+      # resolved.agent JSON shape or the CLI's descriptive refusal.
       name = hd(rest)
       effort = flag_value(rest, "--effort")
       chrome = "--chrome" in rest
@@ -328,7 +326,7 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    defp handle_felt(args) do
+    defp handle_cli(args) do
       fiber_id = Enum.find(args, &Map.has_key?(@test_fibers, &1))
 
       cond do
@@ -1032,7 +1030,7 @@ defmodule Shuttle.DispatcherTest do
 
     reopen_call =
       Enum.find(commands, fn
-        {"felt", args} -> "reopen" in args and "tests/closed" in args
+        {"shuttle", args} -> "reopen" in args and "tests/closed" in args
         _ -> false
       end)
 
@@ -1043,14 +1041,14 @@ defmodule Shuttle.DispatcherTest do
     # needs to hand felt its own_host_id; felt resolves it locally, same as
     # every other write verb. `--felt-store` (the STORE selector, not an
     # identity override) is still there.
-    {"felt", reopen_args} = reopen_call
+    {"shuttle", reopen_args} = reopen_call
     refute "--host" in reopen_args, "reopen must not pass --host; got #{inspect(reopen_args)}"
-    assert "--felt-store" in reopen_args
+    assert "-C" in reopen_args
 
     # And it must precede tmux new-session — reopen-then-spawn, not the other way.
     reopen_index =
       Enum.find_index(commands, fn
-        {"felt", args} -> "reopen" in args
+        {"shuttle", args} -> "reopen" in args
         _ -> false
       end)
 
@@ -1076,7 +1074,7 @@ defmodule Shuttle.DispatcherTest do
     assert {:ok, _session} = result
 
     refute Enum.any?(MockRunner.commands(), fn
-             {"felt", args} -> "reopen" in args
+             {"shuttle", args} -> "reopen" in args
              _ -> false
            end),
            "expected no felt shuttle reopen on already-clean fiber; got #{inspect(MockRunner.commands())}"
@@ -1092,7 +1090,7 @@ defmodule Shuttle.DispatcherTest do
     commands = MockRunner.commands()
 
     assert Enum.any?(commands, fn
-             {"felt", args} -> "reopen" in args and "tests/reopen-fails" in args
+             {"shuttle", args} -> "reopen" in args and "tests/reopen-fails" in args
              _ -> false
            end),
            "expected the reopen attempt to have been made; got #{inspect(commands)}"
@@ -1114,7 +1112,7 @@ defmodule Shuttle.DispatcherTest do
     commands = MockRunner.commands()
 
     refute Enum.any?(commands, fn
-             {"felt", args} -> "reopen" in args
+             {"shuttle", args} -> "reopen" in args
              _ -> false
            end),
            "reopen must not be attempted with no felt store; got #{inspect(commands)}"
@@ -2153,12 +2151,12 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ ~s("chrome":true)
   end
 
-  # A wedged felt (runner :timeout) is a server-side failure, never a client
-  # error: it must NOT surface as {:invalid_axes, _} (the HTTP layer maps that
-  # to 422) but as a binary reason (500-shaped).
+  # A wedged shuttle (runner :timeout) is a server-side failure, never a
+  # client error: it must NOT surface as {:invalid_axes, _} (the HTTP layer
+  # maps that to 422) but as a binary reason (500-shaped).
   defmodule TimeoutRunner do
     @behaviour Shuttle.Runner
-    def cmd("felt", _args, _opts), do: {"felt … timed out after 60000ms", :timeout}
+    def cmd("shuttle", _args, _opts), do: {"shuttle … timed out after 60000ms", :timeout}
   end
 
   test "capture axes-resolve timeout stays 500-shaped, not invalid_axes" do

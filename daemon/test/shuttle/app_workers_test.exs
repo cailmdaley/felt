@@ -93,7 +93,7 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defmodule MarkerFailureRunner do
-    def cmd("felt", ["shuttle", "mark-runtime" | _], _opts), do: {"write failed", 1}
+    def cmd("shuttle", ["mark-runtime" | _], _opts), do: {"write failed", 1}
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
   end
 
@@ -102,7 +102,7 @@ defmodule Shuttle.AppWorkersTest do
 
     def start_link(_), do: Agent.start_link(fn -> true end, name: __MODULE__)
 
-    def cmd("felt", ["shuttle", "mark-runtime" | _] = args, opts) do
+    def cmd("shuttle", ["mark-runtime" | _] = args, opts) do
       if Agent.get_and_update(__MODULE__, fn fail? -> {fail?, false} end),
         do: {"write failed", 1},
         else: Runner.cmd("felt", args, opts)

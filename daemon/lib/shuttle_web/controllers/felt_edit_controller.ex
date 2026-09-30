@@ -40,7 +40,7 @@ defmodule ShuttleWeb.FeltEditController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, store_for_fiber: 1]
 
-  alias Shuttle.{Collaboration, Felt, OriginRouter, Poller, RemoteFiberRegistry}
+  alias Shuttle.{CLI, Collaboration, Felt, OriginRouter, Poller, RemoteFiberRegistry}
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -93,7 +93,9 @@ defmodule ShuttleWeb.FeltEditController do
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
     else
-      other -> send_cli_result(conn, "felt", other)
+      other ->
+        tool = if Map.has_key?(params, "collaboration"), do: "shuttle", else: "felt"
+        send_cli_result(conn, tool, other)
     end
   end
 
@@ -101,10 +103,9 @@ defmodule ShuttleWeb.FeltEditController do
   defp run(_store, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
 
   defp run(store, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do
-    Felt.run([
+    CLI.run([
       "-C",
       store,
-      "shuttle",
       "assign",
       fiber_id,
       "--json-assignment",

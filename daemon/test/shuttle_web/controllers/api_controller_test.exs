@@ -297,21 +297,22 @@ defmodule ShuttleWeb.APIControllerTest do
     argv_log = Path.join(stub_dir, "argv.log")
     real_felt = System.find_executable("felt") || "felt"
 
-    # The transition pipeline shells the real felt to resolve the store/target,
-    # THEN shells `felt shuttle <verb>` for the write. Capture only the `shuttle`
-    # subcommand (logging its verb + flags, the `shuttle` prefix dropped) and
-    # delegate everything else to the real felt — so resolution still works and
-    # the log holds just the write's argv.
+    # The transition pipeline shells felt to resolve the store/target and
+    # shuttle for the write. Keep those process boundaries separate and capture
+    # the complete Shuttle argv.
     File.write!(Path.join(stub_dir, "felt"), """
     #!/usr/bin/env bash
-    if [ "$1" = shuttle ]; then
-      printf '%s\\n' "${@:2}" >> "#{argv_log}"
-      exit 0
-    fi
     exec "#{real_felt}" "$@"
     """)
 
+    File.write!(Path.join(stub_dir, "shuttle"), """
+    #!/usr/bin/env bash
+    printf '%s\\n' "$@" >> "#{argv_log}"
+    exit 0
+    """)
+
     File.chmod!(Path.join(stub_dir, "felt"), 0o755)
+    File.chmod!(Path.join(stub_dir, "shuttle"), 0o755)
 
     previous_path = System.get_env("PATH")
     System.put_env("PATH", "#{stub_dir}:#{previous_path}")
@@ -335,7 +336,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["target"] == "tempered"
 
     captured = argv_log |> File.read!() |> String.split("\n", trim: true)
-    assert Enum.take(captured, 2) == ["--felt-store", MockRunner.felt_root()]
+    assert Enum.take(captured, 2) == ["-C", MockRunner.felt_root()]
     assert "close" in captured
     assert "--tempered=true" in captured
   end

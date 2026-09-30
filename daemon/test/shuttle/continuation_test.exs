@@ -162,8 +162,8 @@ defmodule Shuttle.ContinuationTest do
           dispatched_at: "2026-06-21T12:00:00Z"
         })
 
-      assert [{"felt", args, opts}] = RecordingRunner.calls()
-      assert ["shuttle", "mark-runtime", "demo/task" | rest] = args
+      assert [{"shuttle", args, opts}] = RecordingRunner.calls()
+      assert ["mark-runtime", "demo/task" | rest] = args
       assert "--dispatched-at" in rest and "2026-06-21T12:00:00Z" in rest
       assert "--session" in rest and "uuid-1" in rest
       assert "--run-id" in rest and "RUN-1" in rest
@@ -174,7 +174,7 @@ defmodule Shuttle.ContinuationTest do
       :ok =
         Continuation.write_dispatch(RecordingRunner, "/loom", "demo/task", %{session_uuid: nil})
 
-      assert [{"felt", args, _}] = RecordingRunner.calls()
+      assert [{"shuttle", args, _}] = RecordingRunner.calls()
       refute "--session" in args
       refute "--run-id" in args
       assert "--dispatched-at" in args
@@ -183,8 +183,8 @@ defmodule Shuttle.ContinuationTest do
     test "mark_handed_off passes --handed-off-at (no --host override — C1)" do
       :ok = Continuation.mark_handed_off(RecordingRunner, "/loom", "demo/task")
 
-      assert [{"felt", args, _}] = RecordingRunner.calls()
-      assert ["shuttle", "mark-runtime", "demo/task" | rest] = args
+      assert [{"shuttle", args, _}] = RecordingRunner.calls()
+      assert ["mark-runtime", "demo/task" | rest] = args
       assert "--handed-off-at" in rest
       # Post-S1/C1, felt's own resolveOwnHost is pure local state, so the
       # daemon no longer hands it an explicit --host override.

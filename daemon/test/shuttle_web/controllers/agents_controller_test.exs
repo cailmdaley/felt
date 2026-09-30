@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.AgentsControllerTest do
   @moduledoc """
   `POST /api/v1/agents/effort` — the settings page's one structured edit of
-  `agents.json`, which shells `felt shuttle agents effort`. felt is stubbed at
+  `agents.json`, which shells `shuttle agents effort`. shuttle is stubbed at
   the `:felt_runner` seam, so the argv is the thing under test.
   """
   use ExUnit.Case
@@ -46,7 +46,7 @@ defmodule ShuttleWeb.AgentsControllerTest do
     end)
   end
 
-  test "a level sets the override, and felt's line comes back" do
+  test "a level sets the override, and shuttle's line comes back" do
     MockFelt.reply_with(fn _ -> {"claude-opus: default_effort high in /x/agents.json\n", 0} end)
 
     conn = post_effort(%{"id" => "claude-opus", "effort" => "high"})
@@ -56,14 +56,18 @@ defmodule ShuttleWeb.AgentsControllerTest do
     assert body["ok"] == true
     assert body["host"] == Shuttle.Poller.own_host_id()
     assert body["output"] == "claude-opus: default_effort high in /x/agents.json"
-    assert MockFelt.last_args() == ["shuttle", "agents", "effort", "claude-opus", "high"]
+
+    assert MockFelt.calls() |> List.last() ==
+             {"shuttle", ["agents", "effort", "claude-opus", "high"]}
   end
 
   test "a null effort is the reset verb" do
     conn = post_effort(%{"id" => "claude-opus", "effort" => nil})
 
     assert conn.status == 200
-    assert MockFelt.last_args() == ["shuttle", "agents", "effort", "claude-opus", "--reset"]
+
+    assert MockFelt.calls() |> List.last() ==
+             {"shuttle", ["agents", "effort", "claude-opus", "--reset"]}
   end
 
   test "a missing id or effort is a 400, and felt is never run" do
@@ -73,7 +77,7 @@ defmodule ShuttleWeb.AgentsControllerTest do
     assert MockFelt.calls() == []
   end
 
-  test "felt's refusal is relayed as a 400, in its own words" do
+  test "shuttle's refusal is relayed as a 400, in its own words" do
     refusal = ~s(effort "ludicrous" not allowed for agent "claude-opus")
     MockFelt.reply_with(fn _ -> {refusal <> "\n", 1} end)
 
@@ -83,7 +87,7 @@ defmodule ShuttleWeb.AgentsControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] == refusal
   end
 
-  test "felt missing from PATH is a 503, not a refusal" do
+  test "shuttle missing from PATH is a 503, not a refusal" do
     MockFelt.reply_with(fn _ -> {"", 127} end)
 
     conn = post_effort(%{"id" => "claude-opus", "effort" => "high"})

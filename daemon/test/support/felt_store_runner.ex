@@ -388,7 +388,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
           {"file\n", 0}
         end
 
-      command == "felt" and match?(["shuttle", "contract"], args) ->
+      command == "shuttle" and args == ["contract"] ->
         level =
           Agent.get(
             __MODULE__,
@@ -397,38 +397,38 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
 
-      # `felt shuttle [--felt-store s] accept|resume <id> --local` — felt's
+      # `shuttle [-C s] accept|resume <id> --local` — shuttle's
       # lifecycle writer. Mirror its document effect on both surfaces (the
       # fiber map `felt ls`/`show` answer from, and the real file): a pinned
       # accept re-parks to `status: open`, everything else re-arms to `active`;
       # the verdict and closed-at clear; a standing re-arm concludes the run.
-      command == "felt" and lifecycle_write?(args) ->
-        [verb, id, "--local"] = args |> Enum.drop(1) |> drop_felt_store()
+      command == "shuttle" and lifecycle_write?(args) ->
+        [verb, id, "--local"] = drop_cli_store(args)
         apply_lifecycle_write(verb, id)
         {"#{verb} #{id}\n", 0}
 
-      command == "felt" and args == ["shuttle", "host", "--json"] ->
+      command == "shuttle" and args == ["host", "--json"] ->
         Agent.get(__MODULE__, fn state ->
           {Map.get(state, :host_json, ~s({"id": "mock-host"})), Map.get(state, :host_exit, 0)}
         end)
 
-      # `felt shuttle agents resolve <name> ...` — the capture path's no-fiber
-      # resolution. The daemon shells felt (registry owner) rather than
+      # `shuttle agents resolve <name> ...` — the capture path's no-fiber
+      # resolution. The daemon shells shuttle (registry owner) rather than
       # re-resolving; the mock returns felt's resolved.agent JSON shape.
       #
-      # The bare `felt shuttle agents --json` listing is deliberately NOT
-      # answered: it falls through to `{"", 0}`, felt's "verb absent / old
-      # felt" shape, which is the degradation AgentsController must survive.
-      command == "felt" and match?(["shuttle", "agents", "resolve" | _], args) ->
-        name = Enum.at(args, 3)
+      # The bare `shuttle agents --json` listing is deliberately NOT
+      # answered: it falls through to `{"", 0}`, shuttle's "verb absent / old
+      # shuttle" shape, which is the degradation AgentsController must survive.
+      command == "shuttle" and match?(["agents", "resolve" | _], args) ->
+        name = Enum.at(args, 2)
         record = Map.get(@resolved_agents, name, @resolved_agents["claude-sonnet"])
         {Jason.encode!(record), 0}
 
-      command == "felt" and String.contains?(full_args, "ls") and
+      command in ["felt", "shuttle"] and String.contains?(full_args, "ls") and
           Agent.get(__MODULE__, &Map.get(&1, :felt_ls_timeout, false)) ->
         {"felt #{full_args} timed out after 60000ms", :timeout}
 
-      command == "felt" and String.contains?(full_args, "ls") ->
+      command in ["felt", "shuttle"] and String.contains?(full_args, "ls") ->
         delay_ms = Agent.get(__MODULE__, &Map.get(&1, :felt_ls_delay_ms, 0))
         if delay_ms > 0, do: Process.sleep(delay_ms)
 
@@ -560,13 +560,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
         output = sessions |> MapSet.to_list() |> Enum.join("\n")
         {output, 0}
 
-      # `felt shuttle mark-runtime <id> [--handed-off-at ts] [--dispatched-at ts]
+      # `shuttle mark-runtime <id> [--handed-off-at ts] [--dispatched-at ts]
       # [--session s] [--run-id r] [--host h]` — felt's daemon-facing runtime
       # writer. Mirror the real CLI by folding the stamped flags into the
       # fiber's `shuttle:` map (the same surface put_shuttle_fields updates), so
       # a self-heal / conclude write is observable on the next poll.
-      command == "felt" and match?(["shuttle", "mark-runtime", _id | _], args) ->
-        [_shuttle, _mark, id | flags] = args
+      command == "shuttle" and match?(["mark-runtime", _id | _], args) ->
+        [_mark, id | flags] = args
 
         fields =
           flags
@@ -587,13 +587,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
     end
   end
 
-  defp lifecycle_write?(["shuttle" | rest]),
-    do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_felt_store(rest))
+  defp lifecycle_write?(args),
+    do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_cli_store(args))
 
-  defp lifecycle_write?(_), do: false
-
-  defp drop_felt_store(["--felt-store", _store | rest]), do: rest
-  defp drop_felt_store(args), do: args
+  defp drop_cli_store(["-C", _store | rest]), do: rest
+  defp drop_cli_store(args), do: args
 
   defp apply_lifecycle_write(verb, id) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}

@@ -534,46 +534,45 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Resolves an agent name + axes with no fiber on disk (a capture, or
-  # `Shuttle.SessionResume`'s ledger-named agent), so it shells felt — the
+  # `Shuttle.SessionResume`'s ledger-named agent), so it shells shuttle — the
   # registry owner — rather than re-resolving locally:
-  #   felt shuttle agents resolve <name> [--effort <E>] [--chrome] --json
-  # emits the same shape felt inlines as `shuttle.resolved.agent`. The daemon
-  # turns it into a command record via from_resolved/1. felt exits non-zero with
-  # a descriptive stderr message on an unknown agent / dangling alias /
-  # unsupported axis; that becomes `{:error, {:invalid_axes, msg}}` so the HTTP
-  # layer can answer 422 (client error) without string-sniffing — other capture
-  # failures (tmux spawn, missing model config) stay 500-shaped. Routed through
-  # the injected `runner` so tests need no live `felt shuttle agents` verb.
+  #   shuttle agents resolve <name> [--effort <E>] [--chrome] --json
+  # emits the same shape inlines as `shuttle.resolved.agent`. The daemon turns
+  # it into a command record via from_resolved/1. shuttle exits non-zero with a
+  # descriptive diagnostic on an unknown agent / dangling alias / unsupported
+  # axis; that becomes `{:error, {:invalid_axes, msg}}` so the HTTP layer can
+  # answer 422 without string-sniffing. Other capture failures stay 500-shaped.
+  # Routed through the injected `runner` so tests need no live shuttle process.
   @doc false
   def resolve_agent_axes(agent_name, effort, chrome, runner) do
     args =
-      ["shuttle", "agents", "resolve", agent_name] ++
+      ["agents", "resolve", agent_name] ++
         if(is_binary(effort) and effort != "", do: ["--effort", effort], else: []) ++
         if(chrome, do: ["--chrome"], else: []) ++
         ["--json"]
 
-    # `stderr_to_stdout: true`: on success felt writes only the resolved JSON to
-    # stdout (nothing to stderr), so `output` is clean JSON; on a non-zero exit
-    # stdout is empty and stderr carries felt's descriptive diagnostic, so
-    # `output` is the constraint message. Folding gives the right bytes either way.
-    case runner.cmd("felt", args, stderr_to_stdout: true) do
-      {output, 0} ->
+    # `stderr_to_stdout: true` keeps successful resolved JSON and a refused
+    # request's diagnostic in the same result string.
+    case Shuttle.CLI.run(args, runner: runner) do
+      {:ok, output} ->
         {:ok, Agents.from_resolved(Jason.decode!(output))}
 
       # A runner timeout is a wedged node, not a bad request — it must stay
       # 500-shaped (see moduledoc: only axes-validation failures answer 422).
-      {output, :timeout} ->
-        {:error, "felt shuttle agents resolve timed out: #{String.trim(output)}"}
+      {:command_error, :timeout, output} ->
+        {:error, "shuttle agents resolve timed out: #{String.trim(output)}"}
 
-      {output, _status} ->
+      {:command_error, _status, output} ->
         {:error, {:invalid_axes, String.trim(output)}}
+
+      {:error, reason} ->
+        {:error, "shuttle agents resolve failed: #{reason}"}
     end
   rescue
-    # ErlangError: the spawn itself failed — most pointedly `felt` not on PATH
-    # (`:enoent`). Jason.DecodeError: felt exited 0 but emitted non-JSON (a
-    # contract violation). Either surfaces loudly as a 500 rather than crashing.
-    e in [ErlangError, Jason.DecodeError] ->
-      {:error, "felt shuttle agents resolve failed: #{Exception.message(e)}"}
+    # A malformed successful response is a CLI contract violation and surfaces
+    # loudly as a 500 rather than crashing the capture path.
+    e in Jason.DecodeError ->
+      {:error, "shuttle agents resolve failed: #{Exception.message(e)}"}
   end
 
   @doc false

@@ -9,13 +9,13 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
   defmodule Runner do
     @behaviour Shuttle.Runner
-    def cmd("felt", ["shuttle", "sessions", "--local", "--json"], _opts) do
+    def cmd("shuttle", ["sessions", "--local", "--json"], _opts) do
       {Jason.encode!(%{
          sessions: [%{address: "shuttle://actual/codex/native%2Fid", harness: "codex"}]
        }), 0}
     end
 
-    def cmd("felt", ["shuttle", "message", "--local", "--json", "--request-json"], opts) do
+    def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
       request = opts[:input] |> String.trim() |> Jason.decode!()
 
       if request["message_id"] == "malformed-local" do
@@ -79,7 +79,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
   defmodule AppRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("felt", ["shuttle", "sessions", "--local", "--json"], _opts) do
+    def cmd("shuttle", ["sessions", "--local", "--json"], _opts) do
       {Jason.encode!(%{
          sessions: [
            %{
@@ -96,13 +96,13 @@ defmodule ShuttleWeb.MessagingControllerTest do
   defmodule EmptyPeerRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("felt", ["shuttle", "sessions", "--local", "--json"], _opts),
+    def cmd("shuttle", ["sessions", "--local", "--json"], _opts),
       do: {Jason.encode!(%{sessions: [], gaps: []}), 0}
   end
 
   defmodule MalformedPeerRunner do
     @behaviour Shuttle.Runner
-    def cmd("felt", ["shuttle", "sessions", "--local", "--json"], _opts),
+    def cmd("shuttle", ["sessions", "--local", "--json"], _opts),
       do: {Jason.encode!(%{sessions: [], gaps: "wrong"}), 0}
   end
 
