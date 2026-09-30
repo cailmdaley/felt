@@ -328,7 +328,7 @@ func TestSupervisorPathContainsShuttleAndFeltDirectories(t *testing.T) {
 	if !containsPathEntry(entries, binDir) {
 		t.Fatalf("PATH %q lost the directory containing both CLIs", got)
 	}
-	executable, err := resolvedExecutablePath()
+	executable, err := executablePath()
 	if err != nil {
 		t.Fatal(err)
 	}

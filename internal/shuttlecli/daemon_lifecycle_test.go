@@ -278,6 +278,31 @@ func TestDaemonStartGuardRefusesAnAnsweringListener(t *testing.T) {
 	}
 }
 
+func TestAbsoluteExecutablePathPreservesHomebrewLauncherSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Cellar", "shuttle", "1.0", "bin", "shuttle")
+	link := filepath.Join(dir, "bin", "shuttle")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("shuttle"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	got, err := absoluteExecutablePath(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != link {
+		t.Fatalf("executable path = %q; want the stable launcher path %q", got, link)
+	}
+}
+
 func TestFindDaemonReleasePrecedence(t *testing.T) {
 	home := t.TempDir()
 	configured := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "configured"))

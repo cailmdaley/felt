@@ -244,7 +244,7 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 	shuttleBin := options.ShuttleBin
 	if shuttleBin == "" {
 		var err error
-		shuttleBin, err = resolvedExecutablePath()
+		shuttleBin, err = executablePath()
 		if err != nil {
 			return "", err
 		}
@@ -431,7 +431,7 @@ func pathForDaemonSupervisor(pathValue string) string {
 		}
 		entries = append(entries, dir)
 	}
-	if executable, err := resolvedExecutablePath(); err == nil {
+	if executable, err := executablePath(); err == nil {
 		add(filepath.Dir(executable))
 	}
 	felt, err := exec.LookPath("felt")
@@ -440,7 +440,7 @@ func pathForDaemonSupervisor(pathValue string) string {
 	}
 	if felt != "" {
 		add(filepath.Dir(felt))
-	} else if executable, err := resolvedExecutablePath(); err == nil && isExecutable(filepath.Join(filepath.Dir(executable), "felt")) {
+	} else if executable, err := executablePath(); err == nil && isExecutable(filepath.Join(filepath.Dir(executable), "felt")) {
 		add(filepath.Dir(executable))
 	} else {
 		fmt.Fprintln(os.Stderr, "⚠️  no felt executable was found for the supervisor PATH.")

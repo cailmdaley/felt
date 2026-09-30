@@ -270,19 +270,31 @@ func validateDaemonRelease(dir string) (daemonRelease, error) {
 	return daemonRelease{Dir: dir, Launcher: launcher}, nil
 }
 
-func resolvedExecutablePath() (string, error) {
+func executablePath() (string, error) {
 	path, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locating shuttle executable: %w", err)
 	}
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
-	}
+	return absoluteExecutablePath(path)
+}
+
+func absoluteExecutablePath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("resolving shuttle executable path: %w", err)
 	}
 	return abs, nil
+}
+
+func resolvedExecutablePath() (string, error) {
+	path, err := executablePath()
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	return path, nil
 }
 
 var execDaemonRelease = func(path string, args ...string) error {
