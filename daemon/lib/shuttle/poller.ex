@@ -499,13 +499,11 @@ defmodule Shuttle.Poller do
   authority; the kill only stops the process. Idempotent: `{:ok, :no_session}`
   when nothing is running for the fiber.
 
-  A `tmux kill-session` that exits nonzero because the session is already gone
-  ("can't find session" / "session not found" in its stderr) is a SUCCESSFUL
-  teardown, not a failure — tmux itself is reporting there's nothing left to
-  kill, which is exactly the outcome we want. Any other nonzero exit means the
-  kill genuinely failed (an actually-running session survived it); tracking is
-  left in place — no `{:ok, ...}` reply and no runtime teardown — so the board
-  doesn't show a stopped card while a worker keeps mutating the fiber.
+  The stop succeeds once the worker's processes are gone, whether or not tmux
+  could still see its session (`Shuttle.Tmux.stop/2`). A failed stop means a
+  worker may have survived it; tracking is left in place — no `{:ok, ...}`
+  reply and no runtime teardown — so the board doesn't show a stopped card
+  while a worker keeps mutating the fiber.
   """
   @spec kill_session(String.t()) :: {:ok, String.t() | :no_session} | {:error, String.t()}
   def kill_session(fiber_id), do: kill_session(__MODULE__, fiber_id)
@@ -1082,29 +1080,20 @@ defmodule Shuttle.Poller do
             {:reply, {:ok, session}, state}
 
           {output, status} ->
-            if session_already_gone?(output) do
-              # tmux itself reports the session is already gone — a
-              # successful teardown, just one we didn't cause.
-              state = remove_running(state, runtime_key)
-              {:reply, {:ok, session}, state}
-            else
-              # A real failure: the session is (or may still be) alive. Leave
-              # tracking in place — no teardown — so the board doesn't show a
-              # stopped card while a ghost worker keeps mutating the fiber.
-              # But the watcher we stopped above is now gone too, and nothing
-              # else will restart it — without re-arming it, a live session
-              # nobody observes is a second ghost-worker flavor, invisible
-              # until this daemon restarts. Re-start it against the same
-              # session so the exit still gets handled eventually.
-              Logger.error(
-                "kill_session #{fiber_id}: tmux kill-session exited #{inspect(status)}: #{output}"
-              )
+            # A real failure: the worker is (or may still be) alive. Leave
+            # tracking in place — no teardown — so the board doesn't show a
+            # stopped card while a ghost worker keeps mutating the fiber.
+            # But the watcher we stopped above is now gone too, and nothing
+            # else will restart it — without re-arming it, a live session
+            # nobody observes is a second ghost-worker flavor, invisible
+            # until this daemon restarts. Re-start it against the same
+            # session so the exit still gets handled eventually.
+            Logger.error("kill_session #{fiber_id}: stop exited #{inspect(status)}: #{output}")
 
-              state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
+            state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
 
-              {:reply, {:error, "tmux kill-session failed (exit #{inspect(status)}): #{output}"},
-               state}
-            end
+            {:reply, {:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"},
+             state}
         end
     end
   end
@@ -3377,17 +3366,6 @@ defmodule Shuttle.Poller do
     %{state | running: Map.delete(state.running, runtime_key)}
   end
 
-  # tmux's messages for a session (or the whole server) that's already gone,
-  # across tmux versions/platforms — `kill_session` treats any of these as a
-  # successful teardown, not a failure. "no server running" is tmux with no
-  # server at all (every session already dead, the target trivially gone); the
-  # rest are per-session "that session doesn't exist" phrasings.
-  defp session_already_gone?(output) when is_binary(output),
-    do:
-      output =~ "can't find session" or output =~ "session not found" or
-        output =~ "no such session" or output =~ "no server running"
-
-  defp session_already_gone?(_output), do: false
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the

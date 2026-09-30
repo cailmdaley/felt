@@ -8,8 +8,9 @@ defmodule Shuttle.Tmux do
   means alive, ANY non-zero means dead" — conflates three outcomes: the worker
   genuinely exited; `has-session` failed for an environmental reason (tmux not
   on PATH, a server hiccup, a fork failure under load); or tmux's server lost
-  its socket file (`/tmp/tmux-<uid>/default` deleted) and answers "no server
-  running" while every worker under it still runs. Reading the second or
+  its socket file (`/tmp/tmux-<uid>/default` deleted), or listens under a
+  different `TMUX_TMPDIR`, and answers "no server running" while every worker
+  under it still runs. Reading the second or
   third as death re-dispatches a live worker — a resume onto the transcript it
   still holds.
 
@@ -74,8 +75,10 @@ defmodule Shuttle.Tmux do
 
       WorkerProcess.warn_once({:unreachable, session}, fn ->
         "tmux cannot see session #{session}, but its worker is running " <>
-          "(bash pid #{proc.pid}, parent #{proc.ppid}) — the tmux socket was likely " <>
-          "deleted under a live server. Holding it as present; to recover, " <>
+          "(bash pid #{proc.pid}, parent #{proc.ppid}) — its tmux server is " <>
+          "unreachable from this daemon: either the server listens under a " <>
+          "different TMUX_TMPDIR than the daemon's, or its socket was deleted. " <>
+          "Holding it as present; if the socket was deleted, " <>
           WorkerProcess.recovery_hint(server)
       end)
 
@@ -110,15 +113,27 @@ defmodule Shuttle.Tmux do
   to go. The default hangs up and waits, then escalates to SIGTERM, then
   SIGKILL.
 
-  Returns the `kill-session` result as-is when the kill fails (including
-  tmux's "already gone" messages, which the caller classifies); `{"", 0}`
-  once the worker is gone; `{message, 1}` when it survives the ladder.
+  When tmux answers with one of its absence messages, the session is out of
+  this daemon's reach but its worker may not be: a server whose socket was
+  deleted, or one listening under a different `TMUX_TMPDIR`, still runs it.
+  The worker is its processes, so the stop then walks the ladder's signal
+  steps against the run script directly; a worker that is already gone reads
+  `:gone` on the first check.
+
+  Returns `{"", 0}` once the worker is gone; `{message, 1}` when it survives
+  the ladder; and the `kill-session` result as-is when tmux fails without an
+  absence message.
   """
   @spec stop(module(), String.t()) :: {String.t(), integer()}
   def stop(runner, session) do
     case runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true) do
-      {_output, 0} -> await_gone(runner, session, stop_ladder())
-      failure -> failure
+      {_output, 0} ->
+        await_gone(runner, session, stop_ladder())
+
+      {output, _} = failure ->
+        if absent?(output),
+          do: await_gone(runner, session, Enum.filter(stop_ladder(), &elem(&1, 0))),
+          else: failure
     end
   end
 

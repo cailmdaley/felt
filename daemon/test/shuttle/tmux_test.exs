@@ -18,6 +18,13 @@ defmodule Shuttle.TmuxTest do
       send(self(), {:ps_args, args})
       Process.get(:ps_result, {"", 0})
     end
+
+    # A signal ends the worker: later scans find no process.
+    def cmd("kill", args, _opts) do
+      send(self(), {:kill_args, args})
+      Process.put(:ps_result, {"", 0})
+      {"", 0}
+    end
   end
 
   defp stub(result, ps \\ {"", 0}) do
@@ -87,5 +94,32 @@ defmodule Shuttle.TmuxTest do
   test "uses an exact-match target (= prefix) so a prefix sibling can't false-match" do
     Tmux.session_status(stub({"", 0}), "leaf-shuttle")
     assert_received {:tmux_args, ["has-session", "-t", "=leaf-shuttle"]}
+  end
+
+  describe "stop/2" do
+    @worker_ps """
+      700     1 tmux new-session -d -s elsewhere
+      812   700 bash -l /tmp/shuttle-run-leaf-01ABC-shuttle.42.sh
+    """
+
+    test "a worker tmux cannot reach is signalled directly and the stop succeeds" do
+      runner = stub({"can't find session: leaf-01ABC-shuttle", 1}, {@worker_ps, 0})
+
+      assert Tmux.stop(runner, "leaf-01ABC-shuttle") == {"", 0}
+      assert_received {:tmux_args, ["kill-session", "-t", "leaf-01ABC-shuttle"]}
+      assert_received {:kill_args, ["-TERM", "--", "-812", "812"]}
+    end
+
+    test "an absent session with no worker process stops without signalling" do
+      assert Tmux.stop(stub(@absent), "leaf-shuttle") == {"", 0}
+      refute_received {:kill_args, _}
+    end
+
+    test "a kill-session failure without an absence message is returned as-is" do
+      assert Tmux.stop(stub({"fork: Resource temporarily unavailable", 1}), "leaf") ==
+               {"fork: Resource temporarily unavailable", 1}
+
+      refute_received {:kill_args, _}
+    end
   end
 end

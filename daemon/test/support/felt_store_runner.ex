@@ -510,6 +510,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         case Agent.get(__MODULE__, &Map.get(&1, :kill_session_failure, false)) do
           {output, status} ->
+            # An absence answer means the session really is gone from tmux.
+            if Shuttle.Tmux.absence_message?(output), do: remove_tmux_session(session)
             {output, status}
 
           false ->

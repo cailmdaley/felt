@@ -1096,7 +1096,7 @@ defmodule Shuttle.PollerTest do
     # must surface the failure rather than a false {:ok, ...}.
     MockRunner.set_kill_session_failure(true)
     assert {:error, reason} = Poller.kill_session(poller, "tests/killme-fail")
-    assert reason =~ "tmux kill-session failed"
+    assert reason =~ "stopping the worker failed"
 
     {:ok, %{fibers: [still_live]}} = Poller.cached_fiber_documents(poller)
     assert Map.has_key?(still_live, :runtime)
