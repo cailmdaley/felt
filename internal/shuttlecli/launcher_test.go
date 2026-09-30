@@ -9,6 +9,28 @@ import (
 	"testing"
 )
 
+func TestShuttleLaunchRejectsARepositoryWithoutARelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shuttle-launch is a POSIX shell script")
+	}
+	repo := t.TempDir()
+	home := t.TempDir()
+	script, err := os.ReadFile("../../bin/shuttle-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(t.TempDir(), "shuttle-launch")
+	if err := os.WriteFile(launcher, script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", launcher)
+	cmd.Env = append(os.Environ(), "HOME="+home, "SHUTTLE_DIR="+repo)
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "could not find a daemon release") {
+		t.Fatalf("release-less repository result err=%v output=%q", err, out)
+	}
+}
+
 func TestShuttleLaunchUsesGoDaemonLifecycleCommands(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shuttle-launch is a POSIX shell script")

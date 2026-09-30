@@ -69,7 +69,9 @@ resolve_repo() {
 }
 
 REPO=$(resolve_repo)
-[ -n "$REPO" ] && SHUTTLE_RELEASE=$(release_dir "$REPO") || {
+SHUTTLE_RELEASE=""
+[ -n "$REPO" ] && SHUTTLE_RELEASE=$(release_dir "$REPO")
+[ -n "$SHUTTLE_RELEASE" ] || {
   echo "shuttle-launch: could not find a daemon release. Set \$SHUTTLE_DIR to its checkout or release path (or write that path to \$HOME/.shuttle/repo)." >&2
   exit 1
 }
