@@ -66,15 +66,16 @@ defmodule ShuttleWeb.DispatchReply do
      )}
   end
 
-  # A closed fiber `shuttle reopen` refused, so no worker spawned. `message` is
-  # the CLI's own reason, verbatim; `host` is this daemon, where any command
-  # the reason names has to run; `needs` names the block field a human must
-  # supply to retry (`"project_dir"`, sent back as the dispatch's `project_dir`).
-  def render(fiber_id, {:error, {:reopen_failed, %{message: message} = failure}}) do
+  # A forced start that could not arm its fiber, so no worker spawned.
+  # `message` is the refusal (the Shuttle CLI's own words when it refused);
+  # `host` is this daemon, where any command the message names has to run;
+  # `needs` names the block field a human must supply to retry
+  # (`"project_dir"`, sent back as the dispatch's `project_dir`).
+  def render(fiber_id, {:error, {:arm_refused, %{message: message} = failure}}) do
     {422,
      %{
        dispatched: false,
-       reason: "reopen_failed",
+       reason: "arm_refused",
        fiber_id: fiber_id,
        host: Shuttle.Poller.own_host_id(),
        message: message

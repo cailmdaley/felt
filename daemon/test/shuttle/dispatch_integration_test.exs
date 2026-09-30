@@ -1504,6 +1504,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       kind: standing
       agent: claude-sonnet
       host: test-host
+      project_dir: #{host}
       schedule:
         expr: "0 9 * * 1-5"
         tz: Europe/Paris

@@ -269,8 +269,21 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["fiber_id"] == fiber_id
   end
 
-  # A closed oneshot whose block names neither project_dir nor agent — the
-  # shape a worker writes by hand.
+  # A forced start never puts a worker in the felt store. These post the board's
+  # own launch body (force + ad_hoc + fresh) with whatever else a case needs.
+  defp post_start(fiber_id, extra \\ %{}) do
+    body =
+      Map.merge(
+        %{"fiber_id" => fiber_id, "force" => true, "ad_hoc" => true, "resume_mode" => "fresh"},
+        extra
+      )
+
+    conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(body))
+    {conn.status, Jason.decode!(conn.resp_body)}
+  end
+
+  # A closed oneshot whose block names no project_dir and no agent — the shape
+  # a worker writes by hand.
   defp closed_bare_oneshot(fiber_id) do
     fiber =
       make_fiber(fiber_id, %{
@@ -280,102 +293,158 @@ defmodule ShuttleWeb.APIControllerTest do
       })
 
     MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, "kind: oneshot\n", "closed")
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nproject_dir: \"\"\n", "closed")
   end
 
-  test "a refused reopen answers with the CLI's reason, the owning host, and what it needs" do
-    fiber_id = "tests/api-reopen-refused"
+  defp shuttle_calls(verb),
+    do:
+      Enum.filter(MockRunner.commands(), fn
+        {"shuttle", args} -> verb in args
+        _ -> false
+      end)
+
+  defp spawned?, do: Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+  defp spawn_dir do
+    {"tmux", args} = Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+    args |> Enum.drop_while(&(&1 != "-c")) |> Enum.at(1)
+  end
+
+  test "a forced start of a block with no project_dir asks for one and writes nothing" do
+    fiber_id = "tests/api-start-no-dir"
     closed_bare_oneshot(fiber_id)
 
-    reason =
-      "cannot arm #{fiber_id}: its shuttle: block has no project_dir " <>
-        "(set it as you arm it: shuttle reopen #{fiber_id} --project-dir <dir>)"
+    assert {422, body} = post_start(fiber_id)
 
+    assert %{
+             "dispatched" => false,
+             "reason" => "arm_refused",
+             "fiber_id" => ^fiber_id,
+             "needs" => "project_dir",
+             "message" => message
+           } = body
+
+    assert body["host"] == Poller.own_host_id()
+    assert message =~ "no project_dir"
+    assert shuttle_calls("reopen") == []
+    refute spawned?()
+  end
+
+  test "a refused reopen answers in the CLI's own words" do
+    fiber_id = "tests/api-reopen-refused"
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z"})
+    )
+
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-retired\n", "closed")
+    reason = "cannot arm: agent claude-retired is not in the registry"
     MockRunner.set_reopen_result(reason <> "\n", 1)
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/dispatch",
-        Jason.encode!(%{
-          "fiber_id" => fiber_id,
-          "force" => true,
-          "ad_hoc" => true,
-          "resume_mode" => "fresh"
-        })
-      )
+    assert {422, body} = post_start(fiber_id)
 
-    assert conn.status == 422
-
-    assert Jason.decode!(conn.resp_body) == %{
+    assert body == %{
              "dispatched" => false,
-             "reason" => "reopen_failed",
+             "reason" => "arm_refused",
              "fiber_id" => fiber_id,
              "host" => Poller.own_host_id(),
-             "message" => reason,
-             "needs" => "project_dir"
+             "message" => reason
            }
 
-    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+    refute spawned?()
   end
 
   @tag :tmp_dir
-  test "dispatch hands a confirmed project_dir to the reopen and starts the worker there",
+  test "a confirmed project_dir is saved as the CLI resolved it, and the worker starts there",
        %{tmp_dir: tmp_dir} do
-    fiber_id = "tests/api-reopen-project-dir"
+    fiber_id = "tests/api-start-confirmed-dir"
+    closed_bare_oneshot(fiber_id)
+    File.mkdir_p!(Path.join(tmp_dir, "checkout"))
+    System.put_env("SHUTTLE_TEST_PROJECT", "checkout")
+    on_exit(fn -> System.delete_env("SHUTTLE_TEST_PROJECT") end)
+    raw = Path.join(tmp_dir, "$SHUTTLE_TEST_PROJECT")
+
+    assert {200, %{"dispatched" => true}} = post_start(fiber_id, %{"project_dir" => raw})
+
+    # The raw input goes to the CLI, which expands it; the reopen then arms a
+    # block that already carries the resolved directory.
+    assert [{"shuttle", set_args}] = shuttle_calls("set-agent")
+
+    assert Enum.drop_while(set_args, &(&1 != "set-agent")) ==
+             ["set-agent", fiber_id, "--project-dir", raw, "--local"]
+
+    assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
+    refute "--project-dir" in reopen_args
+    assert spawn_dir() == Path.join(tmp_dir, "checkout")
+  end
+
+  test "a confirmed project_dir the CLI rejects is asked for again in its words" do
+    fiber_id = "tests/api-start-bad-dir"
     closed_bare_oneshot(fiber_id)
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/dispatch",
-        Jason.encode!(%{
-          "fiber_id" => fiber_id,
-          "force" => true,
-          "ad_hoc" => true,
-          "resume_mode" => "fresh",
-          "project_dir" => tmp_dir
-        })
-      )
-
-    assert conn.status == 200
-    assert Jason.decode!(conn.resp_body)["dispatched"] == true
-    commands = MockRunner.commands()
-
-    assert Enum.any?(commands, fn
-             {"shuttle", args} ->
-               Enum.drop_while(args, &(&1 != "reopen")) ==
-                 ["reopen", fiber_id, "--project-dir", tmp_dir, "--local"]
-
-             _ ->
-               false
-           end),
-           "expected reopen --project-dir; got #{inspect(commands)}"
-
-    assert {"tmux", new_session} =
-             Enum.find(commands, &match?({"tmux", ["new-session" | _]}, &1))
-
-    assert Enum.drop_while(new_session, &(&1 != "-c")) |> Enum.at(1) == tmp_dir
+    assert {422, body} = post_start(fiber_id, %{"project_dir" => "/nonexistent/checkout"})
+    assert body["reason"] == "arm_refused"
+    assert body["needs"] == "project_dir"
+    assert body["message"] =~ "no such file or directory"
+    assert shuttle_calls("reopen") == []
+    refute spawned?()
   end
 
   test "a blank project_dir confirms nothing" do
-    fiber_id = "tests/api-reopen-blank-dir"
+    fiber_id = "tests/api-start-blank-dir"
     closed_bare_oneshot(fiber_id)
-    MockRunner.set_reopen_result("cannot arm #{fiber_id}: no project_dir\n", 1)
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/dispatch",
-        Jason.encode!(%{"fiber_id" => fiber_id, "ad_hoc" => true, "project_dir" => "   "})
-      )
+    assert {422, %{"needs" => "project_dir"}} = post_start(fiber_id, %{"project_dir" => "   "})
+    assert shuttle_calls("set-agent") == []
+  end
 
-    assert conn.status == 422
+  test "a forced start of a standing role with no project_dir is refused before its re-arm" do
+    fiber_id = "tests/api-standing-no-dir"
 
-    refute Enum.any?(MockRunner.commands(), fn
-             {"shuttle", args} -> "--project-dir" in args
-             _ -> false
-           end)
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z"})
+    )
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      kind: standing
+      project_dir: ""
+      schedule:
+        expr: "0 9 * * 1-5"
+        tz: Europe/Paris
+      """,
+      "closed"
+    )
+
+    assert {422, %{"reason" => "arm_refused", "needs" => "project_dir"}} = post_start(fiber_id)
+    assert MockRunner.fiber(fiber_id)["status"] == "closed"
+    assert File.read!(MockRunner.fiber(fiber_id)["path"]) =~ "status: closed"
+    refute spawned?()
+  end
+
+  test "a forced start of a pinned role with no project_dir is refused" do
+    fiber_id = "tests/api-pinned-no-dir"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "open"}))
+    MockRunner.set_shuttle(fiber_id, "kind: pinned\nproject_dir: \"\"\n", "open")
+
+    assert {422, %{"reason" => "arm_refused", "needs" => "project_dir"}} = post_start(fiber_id)
+    assert File.read!(MockRunner.fiber(fiber_id)["path"]) =~ "status: open"
+    refute spawned?()
+  end
+
+  test "a forced start whose declared project_dir is missing here asks for another" do
+    fiber_id = "tests/api-start-missing-dir"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nproject_dir: /nonexistent/elsewhere\n")
+
+    assert {422, body} = post_start(fiber_id)
+    assert body["reason"] == "arm_refused"
+    assert body["needs"] == "project_dir"
+    assert body["message"] =~ "/nonexistent/elsewhere"
+    refute spawned?()
   end
 
   # ── POST /api/v1/transition ──

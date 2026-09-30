@@ -136,16 +136,6 @@ defmodule Shuttle.DispatcherTest do
         tags: ["constitution"],
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
-      "tests/reopen-fails-armed" => %{
-        # A closed fiber that already declares a project_dir, whose reopen
-        # fails anyway: the refusal needs nothing a human can type inline.
-        status: "closed",
-        tags: ["constitution"],
-        shuttle: %{
-          "project_dir" => "/srv/checkout",
-          "resolved" => %{"agent" => @claude_sonnet_resolved}
-        }
-      },
       "tests/pi-tagged" => %{
         status: "active",
         tags: ["constitution", "pi"],
@@ -343,7 +333,7 @@ defmodule Shuttle.DispatcherTest do
         # `shuttle reopen tests/reopen-fails` fails — the store rejects
         # the reopen. The dispatcher must treat this as fatal for a closed
         # fiber and abort before any tmux spawn.
-        "reopen" in args and fiber_id in ["tests/reopen-fails", "tests/reopen-fails-armed"] ->
+        "reopen" in args and fiber_id == "tests/reopen-fails" ->
           {"reopen: could not reopen fiber in store\n", 1}
 
         # `shuttle show <id> --json` includes the resolved agent alongside
@@ -1091,11 +1081,9 @@ defmodule Shuttle.DispatcherTest do
     # mandate (the doomed "terminal opens and immediately closes" worker).
     result = Dispatcher.dispatch("tests/reopen-fails", runner: MockRunner, force: true)
 
-    # The CLI's own reason rides the error, trimmed, and a block with no
-    # project_dir names the field a human must supply.
+    # The CLI's own reason rides the error, trimmed.
     assert {:error,
-            {:reopen_failed,
-             %{message: "reopen: could not reopen fiber in store", needs: "project_dir"}}} =
+            {:arm_refused, %{message: "reopen: could not reopen fiber in store", needs: nil}}} =
              result
 
     commands = MockRunner.commands()
@@ -1111,75 +1099,6 @@ defmodule Shuttle.DispatcherTest do
              _ -> false
            end),
            "no worker/tmux session may spawn when reopen fails; got #{inspect(commands)}"
-  end
-
-  test "a failed reopen of a block that declares a project_dir needs nothing inline" do
-    result = Dispatcher.dispatch("tests/reopen-fails-armed", runner: MockRunner, force: true)
-
-    assert {:error,
-            {:reopen_failed, %{message: "reopen: could not reopen fiber in store", needs: nil}}} =
-             result
-  end
-
-  @tag :tmp_dir
-  test "a confirmed project_dir rides the reopen and becomes the worker's directory",
-       %{tmp_dir: tmp_dir} do
-    result =
-      Dispatcher.dispatch("tests/closed",
-        runner: MockRunner,
-        force: true,
-        project_dir: "  #{tmp_dir}  "
-      )
-
-    assert {:ok, _session} = result
-    commands = MockRunner.commands()
-
-    assert {"shuttle", reopen_args} =
-             Enum.find(commands, fn
-               {"shuttle", args} -> "reopen" in args
-               _ -> false
-             end)
-
-    assert Enum.drop_while(reopen_args, &(&1 != "reopen")) ==
-             ["reopen", "tests/closed", "--project-dir", tmp_dir, "--local"]
-
-    assert {"tmux", new_session} =
-             Enum.find(commands, fn
-               {"tmux", ["new-session" | _]} -> true
-               _ -> false
-             end)
-
-    assert Enum.drop_while(new_session, &(&1 != "-c")) |> Enum.at(1) == tmp_dir
-  end
-
-  @tag :tmp_dir
-  test "a confirmed project_dir leaves an already-clean fiber's block and directory alone",
-       %{tmp_dir: tmp_dir} do
-    work_dir = Path.join(tmp_dir, "declared")
-    File.mkdir_p!(work_dir)
-
-    result =
-      Dispatcher.dispatch("tests/shuttle-agent-block",
-        runner: MockRunner,
-        force: true,
-        work_dir: work_dir,
-        project_dir: tmp_dir
-      )
-
-    assert {:ok, _session} = result
-
-    refute Enum.any?(MockRunner.commands(), fn
-             {"shuttle", args} -> "reopen" in args
-             _ -> false
-           end)
-
-    assert {"tmux", new_session} =
-             Enum.find(MockRunner.commands(), fn
-               {"tmux", ["new-session" | _]} -> true
-               _ -> false
-             end)
-
-    assert Enum.drop_while(new_session, &(&1 != "-c")) |> Enum.at(1) == work_dir
   end
 
   test "dispatch with force: true on a closed fiber aborts when no felt store is configured" do

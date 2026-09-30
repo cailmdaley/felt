@@ -17,11 +17,12 @@ defmodule ShuttleWeb.DispatchController do
   forward passes `conn.body_params` verbatim, so they survive owner-routing
   intact.
 
-  `project_dir` is a directory the human confirmed for a start that reopens a
-  closed fiber. The owning daemon passes it to `shuttle reopen --project-dir`,
-  which validates it there and writes it to the block, and the worker starts
-  in it. Nothing supplies a directory on the human's behalf: a reopen refused
-  for want of one answers 422 `reopen_failed` with `needs: "project_dir"`.
+  A forced start never runs a worker in the felt store. `project_dir` is a
+  directory the human confirmed: the owning daemon writes it to the block with
+  `shuttle set-agent --project-dir`, which expands and validates it there, and
+  the worker starts in the directory the CLI saved. Nothing supplies a
+  directory on the human's behalf: a forced start of a block without one
+  answers 422 `arm_refused` with `needs: "project_dir"`.
   """
 
   use Phoenix.Controller, formats: [:json]

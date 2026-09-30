@@ -119,6 +119,17 @@ defmodule Shuttle.Test.FeltStoreRunner do
         String.trim_trailing(yaml) <> "\nhost: test-host\n"
       end
 
+    # Armed installs carry a `project_dir`, and a forced start refuses a block
+    # without one. The factory stamps the store root — a directory that exists —
+    # so generic dispatch tests start their workers where they always have. A
+    # test about a missing directory writes `project_dir: ""`, which wins.
+    yaml =
+      if Regex.match?(~r/^\s*project_dir\s*:/m, yaml) do
+        yaml
+      else
+        String.trim_trailing(yaml) <> "\nproject_dir: #{felt_root()}\n"
+      end
+
     dir = felt_dir()
     segments = String.split(id, "/")
     basename = List.last(segments)
@@ -409,6 +420,21 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
         Agent.get(__MODULE__, &Map.get(&1, :reopen_result, {"", 0}))
 
+      # `shuttle set-agent <id> --project-dir <raw> --local`: like the CLI,
+      # expand `$VARS` and `~`, refuse a path that is not a directory here, and
+      # save the resolved path to the block.
+      command == "shuttle" and
+          match?(["set-agent", _id, "--project-dir", _raw | _], drop_cli_store(args)) ->
+        ["set-agent", id, "--project-dir", raw | _] = drop_cli_store(args)
+        resolved = raw |> expand_env() |> Path.expand()
+
+        if File.dir?(resolved) do
+          put_shuttle_fields(id, %{"project_dir" => resolved})
+          {"set agent for #{id} → (default)\n", 0}
+        else
+          {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
+        end
+
       command == "shuttle" and args == ["host", "--json"] ->
         Agent.get(__MODULE__, fn state ->
           {Map.get(state, :host_json, ~s({"id": "mock-host"})), Map.get(state, :host_exit, 0)}
@@ -588,6 +614,9 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {"", 0}
     end
   end
+
+  defp expand_env(raw),
+    do: Regex.replace(~r/\$(\w+)/, raw, fn _, name -> System.get_env(name, "") end)
 
   defp lifecycle_write?(args),
     do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_cli_store(args))
