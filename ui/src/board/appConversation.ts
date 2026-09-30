@@ -77,7 +77,8 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
  * the session in the Claude app when the owning daemon has stamped the bridge
  * address (`sessionLink`), and otherwise a mark of the worker's state. The
  * touch stylesheet keys on the element, not on a class: a `.kbn-card-worker`
- * that is not a link takes no taps, and a link gets a 44px target.
+ * that is not a link takes no taps. In the open card's header a link also gets
+ * a 44px target band; a Desk card has no room for one.
  *
  * `phase` lets the waiting and attention states take the pill over (label,
  * colour, title); a card outside In flight passes false and stays "Aloft".

@@ -2548,16 +2548,6 @@
     pointer-events: none;
     cursor: default;
   }
-  /* The stamp stays small; the thumb's target is 44px tall around it. */
-  a.kbn-card-worker[href] { position: relative; }
-  a.kbn-card-worker[href]::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(50% - 22px);
-    bottom: calc(50% - 22px);
-  }
   /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
      cursor and the lift-on-press would be promising a gesture that isn't
      there. */

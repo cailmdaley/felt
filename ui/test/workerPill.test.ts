@@ -139,13 +139,17 @@ describe('the terminal worker pill under a finger', () => {
     }
   })
 
-  it('gives a link a 44px target around the stamp', () => {
+  it('gives the open card\'s link a 44px target band, and the Desk card\'s none', () => {
     useDevice(PHONE_PORTRAIT)
-    const pill = terminalWorkerPill(worker('waiting', LINK), { classes: 'kbn-detail-aloft' }) as unknown as FakeElement
-    const hit = TOUCH_CSS.replace(/\/\*[\s\S]*?\*\//g, '').match(/a\.kbn-card-worker\[href\]::after\s*\{([^}]*)\}/)?.[1] ?? ''
-    expect(pill.tagName).toBe('A')
-    expect(hit).toMatch(/top:\s*calc\(50% - 22px\)/)
-    expect(hit).toMatch(/bottom:\s*calc\(50% - 22px\)/)
+    const code = TOUCH_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    const bands = [...code.matchAll(/([^{}]+)::after\s*\{([^}]*)\}/g)]
+      .filter(([, , body]) => /calc\(50% - 22px\)/.test(body))
+      .map(([, selector]) => selector.trim())
+    expect(bands).toEqual(['a.kbn-detail-aloft[href]'])
+    const open = terminalWorkerPill(worker('waiting', LINK), { classes: 'kbn-detail-aloft' }) as unknown as FakeElement
+    const desk = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
+    expect(matchesCompound(open, bands[0])).toBe(true)
+    expect(matchesCompound(desk, bands[0])).toBe(false)
   })
 })
 

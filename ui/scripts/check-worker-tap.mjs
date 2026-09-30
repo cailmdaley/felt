@@ -66,6 +66,25 @@ try {
       assert.equal(await cardPill.evaluate((el) => el.tagName), 'A', `${device.name}: card pill is a link`)
       if (!await tap(cardPill, 'card')) failures.push(`${device.name}: card pill tap did not land`)
       await page.goto(home)
+      // The outcome line just above the pill belongs to the card: a tap on it,
+      // as close to the pill as the outcome reaches, opens the card.
+      const outcome = card.locator('.kbn-card-outcome')
+      await outcome.scrollIntoViewIfNeeded()
+      const point = await cardPill.evaluate((pill, text) => {
+        const p = pill.getBoundingClientRect()
+        const o = text.getBoundingClientRect()
+        const x = Math.min(Math.max(p.x + p.width / 2, o.left + 2), o.right - 2)
+        return { x, y: o.bottom - 3, gap: p.y + p.height / 2 - (o.bottom - 3) }
+      }, await outcome.elementHandle())
+      const before = landed.length
+      await page.touchscreen.tap(point.x, point.y)
+      await page.waitForTimeout(400)
+      await shot('outcome-tapped')
+      const opened = await page.locator('.kbn-detail-aloft').isVisible()
+      console.log(`${device.name} outcome ${point.gap.toFixed(1)}px above the pill: navigated=${landed.length > before} card opened=${opened}`)
+      if (landed.length > before) failures.push(`${device.name}: a tap on the outcome opened the session`)
+      if (!opened) failures.push(`${device.name}: a tap on the outcome did not open the card`)
+      await page.goto(home)
     } else {
       assert.equal(await cardPill.evaluate((el) => el.tagName), 'BUTTON', 'desktop: card pill is a button')
     }

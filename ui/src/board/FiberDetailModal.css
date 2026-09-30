@@ -127,6 +127,21 @@
   border-radius: 1px;
   transform: rotate(-1.5deg);
 }
+/* Under a finger the linked stamp stays small, but the thumb's target is 44px
+   tall around it. Only here: the header holds nothing within 22px above or
+   below the stamp, whereas on a Desk card the band would cover the outcome
+   line and steal the tap that opens the card. */
+@media (pointer: coarse) {
+  a.kbn-detail-aloft[href] { position: relative; }
+  a.kbn-detail-aloft[href]::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(50% - 22px);
+    bottom: calc(50% - 22px);
+  }
+}
 .kbn-detail-refresh,
 .kbn-detail-close {
   flex-shrink: 0;
