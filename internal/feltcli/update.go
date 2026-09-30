@@ -3,6 +3,7 @@ package feltcli
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -35,6 +37,14 @@ then moves the agent integrations to the matching tag so hooks and skills stay
 in step with the binary: the Claude Code plugin whenever the claude CLI is on
 PATH, and the Codex and pi integrations where felt is already installed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		feltPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("locating current felt binary: %w", err)
+		}
+		if err := refuseHomebrewUpdate(feltPath); err != nil {
+			return err
+		}
+
 		// Get latest release tag from GitHub
 		latest, err := latestVersion()
 		if err != nil {
@@ -44,9 +54,12 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 		current := Version
 		latestClean := strings.TrimPrefix(latest, "v")
 
-		if current == latestClean {
+		if updatePairIsCurrent(feltPath, current, latest, feltBuildVersion()) {
 			fmt.Printf("Already up to date (%s)\n", current)
 			return nil
+		}
+		if current == latestClean {
+			fmt.Printf("Repairing felt and shuttle pair at %s\n", current)
 		}
 
 		if current == "dev" {
@@ -57,7 +70,7 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 			if answer != "y" && answer != "Y" {
 				return nil
 			}
-		} else {
+		} else if current != latestClean {
 			fmt.Printf("Updating %s → %s\n", current, latestClean)
 		}
 
@@ -78,10 +91,6 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 		binaries, err := extractBinaries(resp.Body)
 		if err != nil {
 			return fmt.Errorf("extracting CLI binaries: %w", err)
-		}
-		feltPath, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("locating current felt binary: %w", err)
 		}
 		if err := replaceBinaryPair(feltPath, binaries); err != nil {
 			return fmt.Errorf("replacing felt and shuttle binaries: %w", err)
@@ -113,6 +122,85 @@ func refreshPluginAfterUpdate(marketplaceRef string) {
 	}
 	refreshCodexSetupIfInstalled(marketplaceRef)
 	refreshPiSetupIfInstalled(marketplaceRef)
+}
+
+func updatePairIsCurrent(feltPath, currentVersion, latestVersion, build string) bool {
+	return currentVersion == strings.TrimPrefix(latestVersion, "v") && siblingShuttleBuildMatches(feltPath, build)
+}
+
+func feltBuildVersion() string {
+	if rootCmd.Version != "" {
+		return rootCmd.Version
+	}
+	return Version
+}
+
+func siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
+	shuttlePath := filepath.Join(filepath.Dir(feltPath), "shuttle")
+	info, err := os.Stat(shuttlePath)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, shuttlePath, "--version").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	version := strings.TrimSpace(string(output))
+	version = strings.TrimPrefix(version, "shuttle version ")
+	return version == expectedBuild
+}
+
+func refuseHomebrewUpdate(path string) error {
+	resolved := filepath.Clean(path)
+	if absolute, err := filepath.Abs(resolved); err == nil {
+		resolved = absolute
+	}
+	if real, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = real
+	}
+	if strings.Contains(filepath.ToSlash(resolved), "/Cellar/") {
+		return homebrewUpdateError(resolved)
+	}
+	brew, err := exec.LookPath("brew")
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, brew, "--prefix").Output()
+	if err != nil {
+		return nil
+	}
+	prefix := strings.TrimSpace(string(output))
+	if real, err := filepath.EvalSymlinks(prefix); err == nil {
+		prefix = real
+	}
+	if prefix != "" && pathWithin(resolved, prefix) {
+		return homebrewUpdateError(resolved)
+	}
+	return nil
+}
+
+func homebrewUpdateError(path string) error {
+	return fmt.Errorf("felt at %s is managed by Homebrew; update it with `brew upgrade felt`", path)
+}
+
+func pathWithin(path, root string) bool {
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
 }
 
 func latestVersion() (string, error) {
