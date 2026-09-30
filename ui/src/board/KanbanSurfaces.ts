@@ -1,4 +1,4 @@
-import { workerStatusLabel, appWorkerLink, workerVariant } from './appConversation.js'
+import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1802,14 +1802,9 @@ export class KanbanSurfaceRenderer {
     //     the daemon stamps `waiting` the instant a worker stops, so without
     //     this gate every momentary pause would flip the pill. Under 60s it
     //     stays the plain "Aloft" pill (the sort still floats it up).
-    // A `working` worker has no badge entry, so it never takes over; the
+    // A `working` worker has no badge entry, so it never takes over.
     // An app worker has no terminal to take over: it takes the `!tmuxSession`
     // branch below and becomes the link into the Codex app.
-    const idleMs = card.lastActivityAt !== undefined ? Date.now() - card.lastActivityAt : Infinity
-    const phaseTakesOverWorker =
-      kind === 'inFlight' &&
-      !!card.tmuxSession &&
-      workerVariant(card) !== 'aloft'
     const showPhase =
       kind === 'inFlight' &&
       ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || ((card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid)) &&
@@ -1879,48 +1874,7 @@ export class KanbanSurfaceRenderer {
       rightChip = heldEl
     }
     if (card.tmuxSession) {
-      const tmuxName = card.tmuxSession
-      const w = document.createElement('button')
-      w.type = 'button'
-      if (phaseTakesOverWorker && card.runtimePhase) {
-        // Attention changes the worker color and label; its title carries the wait age.
-        const age = Number.isFinite(idleMs) ? humanizeIdleAge(idleMs) : null
-        w.className = `kbn-card-worker kbn-card-worker-${workerVariant(card)}`
-        w.textContent = workerStatusLabel(card.runtimePhase)
-        const [aria, verb] = card.runtimePhase === 'attention'
-          ? ['Worker needs you', 'Worker raised its hand']
-          : ['Worker waiting for you', 'Worker paused on input']
-        w.setAttribute('aria-label', `${aria} — open terminal: ${tmuxName}`)
-        w.title = `${verb}${age ? ` ${age} ago` : ''} — click to open ${tmuxName} in kitty`
-      } else {
-        // `-aloft` is the modifier the touch layout keys off: a pill whose
-        // only job is opening a native terminal has nothing to offer a phone,
-        // while the attention/waiting phases stay as visible state.
-        w.className = 'kbn-card-worker kbn-card-worker-aloft'
-        w.textContent = workerStatusLabel()
-        w.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
-        w.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      }
-      w.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.o.openWorker?.(tmuxName, card.shuttleHost)
-      })
-      rightChip = w
-      // Under a finger the terminal is out of reach, but the session is not:
-      // a bridged worker's pill becomes a link to it in the Claude app. The
-      // anchor replaces the button (same classes, same place); the touch
-      // stylesheet hides only the buttons, so a card with a link keeps its
-      // pill and a card without one shows the aloft state elsewhere.
-      if (coarsePointer() && card.sessionLink) {
-        const a = document.createElement('a')
-        a.className = `${w.className} kbn-card-worker-link`
-        a.textContent = w.textContent
-        a.href = card.sessionLink
-        a.title = 'Open this session in the Claude app'
-        a.setAttribute('aria-label', `Open worker session in the Claude app: ${tmuxName}`)
-        a.addEventListener('click', (e) => e.stopPropagation())
-        rightChip = a
-      }
+      rightChip = terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker })
     }
 
     // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions

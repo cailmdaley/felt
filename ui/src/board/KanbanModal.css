@@ -2539,17 +2539,25 @@
 /* ── Touch, wherever it happens ────────────────────────────────────────────
    Asked about the input, not the viewport. */
 @media (pointer: coarse) {
-  /* Unlinked worker marks remain visible on touch screens as status,
-     without offering an unavailable terminal action. */
-  .kbn-card-worker-aloft:not(.kbn-card-worker-link),
-  .kbn-card-worker-attention:not(.kbn-card-worker-link),
-  .kbn-card-worker-waiting:not(.kbn-card-worker-link) {
+  /* A worker pill is a link to its session in the Claude app when the daemon
+     knows where the session lives, on the card and in the open card alike.
+     Anything else is a mark of the worker's state, since there is no
+     terminal to open here. The rule keys on the element, so no class can
+     make a link inert. */
+  .kbn-card-worker:not(a[href]) {
     pointer-events: none;
     cursor: default;
   }
-  /* …unless the daemon knows where the session lives on the web: then the
-     pill is a link to it in the Claude app, in every phase. */
-  .kbn-card-worker-link { text-decoration: none; }
+  /* The stamp stays small; the thumb's target is 44px tall around it. */
+  a.kbn-card-worker[href] { position: relative; }
+  a.kbn-card-worker[href]::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(50% - 22px);
+    bottom: calc(50% - 22px);
+  }
   /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
      cursor and the lift-on-press would be promising a gesture that isn't
      there. */

@@ -2197,12 +2197,6 @@
   .kbn-move-menu.kbn-move-sheet { animation: none; }
 }
 
-/* The aloft mark on a touch device: the same stamp, linking to the session in
-   the Claude app once the daemon has found its address — and until then, or
-   for a session that was never bridged, a stamp without a promise. */
-a.kbn-detail-aloft { text-decoration: none; }
-.kbn-detail-aloft-static { cursor: default; }
-
 /* ── The reader's zoom cluster ─────────────────────────────────────────────
    − FIT + and a percentage, in the chrome bar of both readers. Mounted only
    under a coarse pointer (`installTouchZoom` is a no-op otherwise), so these

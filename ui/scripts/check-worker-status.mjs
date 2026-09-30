@@ -29,10 +29,10 @@ try {
       const button = document.createElement('button')
       button.textContent = 'Aloft'
       anchor.after(button)
-      anchor.className = 'kbn-card-worker kbn-card-worker-link kbn-card-worker-aloft'
+      anchor.className = 'kbn-card-worker kbn-card-worker-aloft'
       for (const property of typography) baseline[property] = getComputedStyle(anchor)[property]
       for (const variant of ['aloft', 'waiting', 'attention', 'blocked']) {
-        anchor.className = `kbn-card-worker kbn-card-worker-link kbn-card-worker-${variant}`
+        anchor.className = `kbn-card-worker kbn-card-worker-${variant}`
         button.className = `kbn-card-worker kbn-card-worker-${variant}`
         const app = getComputedStyle(anchor)
         for (const property of typography) {

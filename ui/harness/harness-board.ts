@@ -524,13 +524,15 @@ const MOCK_FEED = {
         }
       }
       // The second one has been stopped at a prompt for hours — the case the
-      // aged `⏸ waiting · 3h` pill exists for.
+      // aged `⏸ waiting · 3h` pill exists for. Its session is bridged, so under
+      // a finger the pill links to it in the Claude app.
       return {
         ...e,
         origin: f.shuttle?.host ?? LOCAL_HOST,
         runtime: {
           state: 'running',
           tmux_session: sessionFor(f.id, f.uid ?? ''),
+          session_link: 'https://claude.ai/code/session_harness-waiting',
           phase: 'waiting',
           last_activity_at: now - (3 * 3_600_000 + 12 * 60_000),
         },

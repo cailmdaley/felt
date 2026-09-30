@@ -1,4 +1,4 @@
-import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop } from './appConversation.js'
+import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from './appConversation.js'
 import {
   basename,
   cacheBustUrl,
@@ -840,48 +840,17 @@ export class FiberDetailModal {
       void this.forceReload()
     })
 
-    // The Aloft control shares its label and worker styling with the grid.
-    // Its destination follows the conversation backend.
-    //
-    // A TERMINAL IS NOT SOMETHING A PHONE HAS. On a coarse pointer the pill
-    // is a LINK instead: the owning daemon stamps each live worker's claude.ai
-    // bridge URL on the feed row (`sessionLink`), a universal link the Claude
-    // app claims — so the tap opens this very session on the phone. A session
-    // that was never bridged keeps the stamp and drops the promise: a plain
-    // mark, not a link to nowhere.
+    // The Aloft control is the Desk card's own pill: same label, same states,
+    // same destination under a mouse or a finger (see `terminalWorkerPill`).
+    // An app worker's destination follows the conversation backend.
     let aloftPill: HTMLElement | null = null
     const coarse = coarsePointer()
     const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
-    const workerState = workerVariant(card)
-    const workerClasses = `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      aloftPill = appWorkerLink(card, workerClasses)
-    } else if (card.tmuxSession && coarsePointer()) {
-      const mark = document.createElement(card.sessionLink ? 'a' : 'span')
-      mark.className = `kbn-card-worker ${workerClasses}`
-      mark.textContent = workerStatusLabel(workerState === 'aloft' ? undefined : card.runtimePhase)
-      if (mark instanceof HTMLAnchorElement && card.sessionLink) {
-        mark.href = card.sessionLink
-        mark.title = 'Worker aloft — open this session in the Claude app'
-        mark.addEventListener('click', (e) => e.stopPropagation())
-      } else {
-        mark.classList.add('kbn-detail-aloft-static')
-        mark.title = `Worker aloft — ${card.tmuxSession}`
-      }
-      aloftPill = mark
-    } else if (card.tmuxSession && this.onOpenWorker) {
-      const tmuxName = card.tmuxSession
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = `kbn-card-worker ${workerClasses}`
-      btn.setAttribute('aria-label', `Open worker terminal: ${tmuxName}`)
-      btn.title = `Worker aloft — click to open ${tmuxName} in kitty`
-      btn.textContent = workerStatusLabel(workerState === 'aloft' ? undefined : card.runtimePhase)
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.onOpenWorker?.(tmuxName, card.shuttleHost)
-      })
-      aloftPill = btn
+      const workerState = workerVariant(card)
+      aloftPill = appWorkerLink(card, `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`)
+    } else if (card.tmuxSession) {
+      aloftPill = terminalWorkerPill(card, { classes: 'kbn-detail-aloft', openWorker: this.onOpenWorker })
     }
 
     const closeBtn = document.createElement('button')
