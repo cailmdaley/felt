@@ -92,7 +92,7 @@
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>__SHUTTLE_RELEASE__</string>
+    <string>__WORKING_DIRECTORY__</string>
 
     <key>RunAtLoad</key>
     <true/>

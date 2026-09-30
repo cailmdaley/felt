@@ -252,6 +252,7 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 	values := map[string]string{
 		"__SHUTTLE_BIN__":         shuttleBin,
 		"__SHUTTLE_RELEASE__":     release.Dir,
+		"__WORKING_DIRECTORY__":   daemonWorkingDirectory(release.Dir),
 		"__LOG__":                 options.Log,
 		"__SHUTTLE_STORES__":      options.Stores,
 		"__SHUTTLE_STORES_FILE__": options.StoresFile,
@@ -272,7 +273,8 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 		}
 		escaped := map[string]string{
 			"__LABEL__": xmlEscape(options.Label), "__SHUTTLE_BIN__": xmlEscape(values["__SHUTTLE_BIN__"]),
-			"__SHUTTLE_RELEASE__": xmlEscape(release.Dir), "__LOG__": xmlEscape(options.Log),
+			"__SHUTTLE_RELEASE__": xmlEscape(release.Dir), "__WORKING_DIRECTORY__": xmlEscape(values["__WORKING_DIRECTORY__"]),
+			"__LOG__":            xmlEscape(options.Log),
 			"__SHUTTLE_STORES__": xmlEscape(options.Stores), "__SHUTTLE_STORES_FILE__": xmlEscape(options.StoresFile),
 			"__PATH__": xmlEscape(options.Path), "__PORT__": xmlEscape(options.Port),
 			"__SSH_AUTH_SOCK__": xmlEscape(options.SSHSocket),
@@ -289,7 +291,7 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 	if options.SSHSocket == "" {
 		source = removeEnvironmentLine(source, "SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__")
 	}
-	source = strings.ReplaceAll(source, "WorkingDirectory=__SHUTTLE_RELEASE__", "WorkingDirectory="+systemdLiteralPath(release.Dir))
+	source = strings.ReplaceAll(source, "WorkingDirectory=__WORKING_DIRECTORY__", "WorkingDirectory="+systemdLiteralPath(values["__WORKING_DIRECTORY__"]))
 	source = strings.ReplaceAll(source, "StandardOutput=append:__LOG__", "StandardOutput=append:"+systemdUnitValue(options.Log))
 	source = strings.ReplaceAll(source, "StandardError=append:__LOG__", "StandardError=append:"+systemdUnitValue(options.Log))
 	source = replaceSystemdPlaceholder(source, "__LOG__", options.Log)
@@ -305,7 +307,7 @@ func renderSupervisorTemplate(osName, source string, options supervisorOptions, 
 }
 
 func validateTemplatePlaceholderSet(osName, source string) error {
-	want := []string{"__SHUTTLE_BIN__", "__SHUTTLE_RELEASE__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__"}
+	want := []string{"__SHUTTLE_BIN__", "__SHUTTLE_RELEASE__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__"}
 	if osName == "Darwin" {
 		want = append(want, "__LABEL__")
 	}
@@ -323,6 +325,13 @@ func validateTemplatePlaceholderSet(osName, source string) error {
 		return fmt.Errorf("supervisor template placeholders are %v; want exactly %v", got, want)
 	}
 	return nil
+}
+
+func daemonWorkingDirectory(releaseDir string) string {
+	if filepath.Base(releaseDir) == "rel" && filepath.Base(filepath.Dir(releaseDir)) == "bin" {
+		return filepath.Dir(filepath.Dir(releaseDir))
+	}
+	return releaseDir
 }
 
 func rejectUnrenderedPlaceholders(source string) (string, error) {

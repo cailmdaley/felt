@@ -218,6 +218,54 @@ func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
 	}
 }
 
+func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		releaseDir func(string) string
+	}{
+		{"source checkout", func(root string) string { return filepath.Join(root, "bin", "rel") }},
+		{"fetched release", func(root string) string { return filepath.Join(root, "release") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			release := writeTestDaemonRelease(t, tc.releaseDir(root))
+			want, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "fetched release" {
+				want = release.Dir
+			}
+			options := supervisorOptions{
+				Label: defaultDaemonLabel, ShuttleBin: "/tmp/shuttle", StoresFile: "/tmp/stores.json",
+				Path: "/bin", Log: "/tmp/shuttle.log",
+			}
+			for _, osName := range []string{"Darwin", "Linux"} {
+				template := supervisorTemplateFixtures()["io.shuttle.daemon.service.template"]
+				if osName == "Darwin" {
+					template = supervisorTemplateFixtures()["io.shuttle.daemon.plist.template"]
+				}
+				rendered, err := renderSupervisorTemplate(osName, template, options, release)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if osName == "Linux" && !strings.Contains(rendered, "WorkingDirectory="+want+"\n") {
+					t.Errorf("Linux working directory does not use %q:\n%s", want, rendered)
+				}
+				if osName == "Darwin" && !strings.Contains(rendered, "<key>WorkingDirectory</key>\n<string>"+want+"</string>") {
+					t.Errorf("launchd working directory does not use %q:\n%s", want, rendered)
+				}
+				if osName == "Linux" && !strings.Contains(rendered, `Environment="SHUTTLE_RELEASE=`+release.Dir+`"`) {
+					t.Errorf("rendered supervisor lost SHUTTLE_RELEASE=%q:\n%s", release.Dir, rendered)
+				}
+				if osName == "Darwin" && !strings.Contains(rendered, `<key>Release</key><string>`+release.Dir+`</string>`) {
+					t.Errorf("rendered supervisor lost its release path %q:\n%s", release.Dir, rendered)
+				}
+			}
+		})
+	}
+}
+
 func TestSupervisorTemplateSourceCheckoutFallbackIsScopedToBinRel(t *testing.T) {
 	repo := t.TempDir()
 	release := writeTestDaemonRelease(t, filepath.Join(repo, "bin", "rel"))
@@ -302,6 +350,8 @@ func supervisorTemplateFixtures() map[string]string {
 <key>Label</key><string>__LABEL__</string>
 <key>Program</key><string>__SHUTTLE_BIN__</string>
 <key>Release</key><string>__SHUTTLE_RELEASE__</string>
+<key>WorkingDirectory</key>
+<string>__WORKING_DIRECTORY__</string>
 <key>Log</key><string>__LOG__</string>
 <key>Stores</key><string>__SHUTTLE_STORES__</string>
 <key>StoresFile</key><string>__SHUTTLE_STORES_FILE__</string>
@@ -313,7 +363,7 @@ func supervisorTemplateFixtures() map[string]string {
 </dict></plist>
 `,
 		"io.shuttle.daemon.service.template": `[Service]
-WorkingDirectory=__SHUTTLE_RELEASE__
+WorkingDirectory=__WORKING_DIRECTORY__
 ExecStart="__SHUTTLE_BIN__" daemon start --force
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'
 Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
