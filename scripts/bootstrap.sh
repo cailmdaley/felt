@@ -4,28 +4,28 @@
 # fresh machine with a single command.
 #
 # This is the FLEET / dev installer: it builds everything from this checkout.
-# (End users who only want the `felt` CLI use the release installer instead:
-#  curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh)
+# End users can install both Go CLIs from a release instead:
+#   curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 #
 # Composes what were separate manual steps into one bootstrap:
 #
 #   1. prerequisites   — check (go, elixir/OTP, node, tmux; jq optional)
-#   2. felt CLI        — go install . → ~/.local/bin/felt (the daemon shells to it)
-#   3. daemon release  — mix deps.get + mix release → bin/rel (fronted by bin/shuttle)
+#   2. CLI pair        — make cli-install → ~/.local/bin/{felt,shuttle}
+#   3. daemon release  — mix deps.get + mix release → bin/rel (launched by shuttle)
 #   4. ui/dist         — the served kanban board (built locally with npm)
-#   5. event stream    — the plugin hook (`felt hook event`) the daemon reads
+#   5. event stream    — the plugin hook (`shuttle hook event`) the daemon reads
 #   6. keep-alive      — launchd LaunchAgent (macOS) / systemd user unit (Linux),
 #                        falling back to the shuttle-daemon tmux respawn loop
 #
-# `felt shuttle install <fiber>` already means "install a fiber as a dispatch
-# role", so the system bootstrap deliberately is NOT that verb. It is reached
-# via `make install` (which runs this script) or `./scripts/bootstrap.sh` directly.
+# `shuttle install <fiber>` means "install a fiber as a dispatch role", so the
+# system bootstrap deliberately is NOT that verb. It is reached via `make install`
+# or `./scripts/bootstrap.sh` directly.
 #
 # Usage:
 #   ./scripts/bootstrap.sh                 full bootstrap for this host
 #   ./scripts/bootstrap.sh --dry-run       check prerequisites + print the plan, change nothing
 #   ./scripts/bootstrap.sh --skip-hook     don't touch the event-stream step
-#   ./scripts/bootstrap.sh --skip-cli      don't (re)build/install the felt CLI (it's already on PATH)
+#   ./scripts/bootstrap.sh --skip-cli      don't (re)build/install either CLI (both are already on PATH)
 #   ./scripts/bootstrap.sh --with-tunnels  also (re)install the autossh tunnels to remotes (hub-side)
 #   ./scripts/bootstrap.sh -h | --help     this help
 
@@ -86,7 +86,7 @@ optional() { # name, command, why, hint
 }
 
 if [ "$SKIP_CLI" = 0 ]; then
-  require "go"        go      "needed to build the felt CLI (the daemon shells out to it)." \
+  require "go"        go      "needed to build both Go CLIs (felt and shuttle)." \
           "install the Go version declared in go.mod (brew install go / asdf)."
 fi
 require "elixir/mix"  mix     "needed to build the daemon release." \
@@ -94,16 +94,17 @@ require "elixir/mix"  mix     "needed to build the daemon release." \
 require "tmux"        tmux    "workers run in tmux, as does the Linux respawn-loop keep-alive." \
         "brew install tmux  /  apt install tmux."
 if [ "$SKIP_CLI" = 1 ]; then
-  require "felt"      felt    "the daemon shells out to felt for every store walk." \
-          "drop --skip-cli to build it from this checkout, or put it on PATH (~/.local/bin)."
+  require "felt"    felt    "the daemon shells out to felt for fiber data." \
+          "drop --skip-cli to build both CLIs from this checkout, or put felt on PATH."
+  require "shuttle" shuttle "the daemon shells out to shuttle for orchestration." \
+          "drop --skip-cli to build both CLIs from this checkout, or put shuttle on PATH."
 fi
 
 require "node"  node "needed to build the served ui/dist board." "install Node 22+ (brew install node / nvm)."
 require "npm"   npm  "needed to build the served ui/dist board." "ships with Node."
 
-# jq is a nicety now, not a dependency: the event stream is written by the felt
-# binary, and the SessionStart hook falls back to `felt hook session` when jq is
-# absent. It only pretty-prints the SessionStart envelope.
+# jq is a nicety, not a dependency: the SessionStart hook falls back to
+# `felt hook session` when jq is absent. It only pretty-prints that envelope.
 optional "jq" jq "only used to pretty-print the SessionStart envelope; session.sh falls back to \`felt hook session\`." \
          "brew install jq  /  apt install jq."
 
@@ -113,21 +114,21 @@ have_systemd_user() { have systemctl && systemctl --user show-environment >/dev/
 keepalive_desc() {
   if [ "$OS" = Darwin ]; then echo "launchd LaunchAgent (make install-agent: build + render plist + load)"
   elif have_systemd_user; then echo "systemd user unit (make install-agent: render + enable --now shuttle-daemon.service)"
-  else echo "shuttle-daemon respawn loop (tmux: while true; ./bin/shuttle start) — no systemd user session here"; fi
+  else echo "shuttle-daemon respawn loop (tmux: while true; shuttle daemon start --force) — no systemd user session here"; fi
 }
 cli_desc() {
-  if [ "$SKIP_CLI" = 1 ]; then echo "SKIP (--skip-cli; felt already on PATH)"
-  else echo "go install . → $CLI_INSTALL_DIR/felt"; fi
+  if [ "$SKIP_CLI" = 1 ]; then echo "SKIP (--skip-cli; felt and shuttle already on PATH)"
+  else echo "make cli-install → $CLI_INSTALL_DIR/{felt,shuttle}"; fi
 }
 
 if [ "$DRY_RUN" = 1 ]; then
   step "Plan (dry-run — nothing will change)"
-  note "2. felt CLI : $(cli_desc)"
-  note "3. daemon   : make daemon (fetch deps + build) → bin/rel (fronted by bin/shuttle)"
+  note "2. CLI pair : $(cli_desc)"
+  note "3. daemon   : make daemon (fetch deps + build) → bin/rel (launched by shuttle)"
   note "4. ui/dist  : make ui (npm ci when the lockfile moved, then npm run build) → ui/dist"
-  note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe felt hook event')"
+  note "5. events   : $([ "$SKIP_HOOK" = 1 ] && echo SKIP || echo 'felt setup claude/codex (plugin hooks) + probe shuttle hook event')"
   note "6. keepalive: $(keepalive_desc)"
-  [ "$WITH_TUNNELS" = 1 ] && note "+  tunnels  : felt shuttle tunnels install"
+  [ "$WITH_TUNNELS" = 1 ] && note "+  tunnels  : shuttle tunnels install"
   if [ "$MISSING_REQUIRED" = 1 ]; then
     printf '\n%s✗ required prerequisites missing — install them before a real run.%s\n' "$RED$BOLD" "$RESET"; exit 1
   fi
@@ -136,31 +137,43 @@ fi
 
 [ "$MISSING_REQUIRED" = 1 ] && die "required prerequisites missing (see above) — install them and re-run."
 
-# ── 2. felt CLI ─────────────────────────────────────────────────────────────
-# Build + install the CLI from THIS checkout — it's the source of truth now, and
-# the daemon shells out to `felt` for every store walk. Installed to ~/.local/bin
-# so the launchd plist's captured login PATH finds it at runtime.
-step "felt CLI"
+# ── 2. CLI pair ──────────────────────────────────────────────────────────────
+# Build and install both CLIs from this checkout. The daemon needs felt for
+# fiber data and shuttle for orchestration; both live in the same install dir.
+step "felt + shuttle CLIs"
+FELT_BIN=""
+SHUTTLE_BIN=""
 if [ "$SKIP_CLI" = 1 ]; then
-  ok "skipped (--skip-cli); using felt at $(command -v felt)."
+  FELT_BIN="$(command -v felt)"
+  SHUTTLE_BIN="$(command -v shuttle)"
+  ok "skipped (--skip-cli); felt is at $FELT_BIN, shuttle at $SHUTTLE_BIN."
 else
-  ( cd "$REPO" && GOBIN="$CLI_INSTALL_DIR" go install . ) || die "go install . (felt CLI) failed."
-  if "$CLI_INSTALL_DIR/felt" --version >/dev/null 2>&1; then
-    ok "felt CLI installed → $CLI_INSTALL_DIR/felt ($("$CLI_INSTALL_DIR/felt" --version 2>/dev/null | head -1))."
-  else
-    ok "felt CLI installed → $CLI_INSTALL_DIR/felt."
-  fi
+  mkdir -p "$CLI_INSTALL_DIR"
+  make -C "$REPO" cli-install INSTALL_DIR="$CLI_INSTALL_DIR" || die "make cli-install failed."
+  FELT_BIN="$CLI_INSTALL_DIR/felt"
+  SHUTTLE_BIN="$CLI_INSTALL_DIR/shuttle"
+  [ -x "$FELT_BIN" ] || die "felt was not installed to $FELT_BIN."
+  [ -x "$SHUTTLE_BIN" ] || die "shuttle was not installed to $SHUTTLE_BIN."
+  ok "felt installed → $FELT_BIN."
+  ok "shuttle installed → $SHUTTLE_BIN."
   case ":${PATH}:" in
     *":${CLI_INSTALL_DIR}:"*) ;;
     *) warn "$CLI_INSTALL_DIR is not on your PATH."
-       note "add it:  export PATH=\"$CLI_INSTALL_DIR:\$PATH\"  (the launchd daemon uses its own captured PATH)";;
+       note "add it:  export PATH=\"$CLI_INSTALL_DIR:\$PATH\"  (the supervisor uses its own captured PATH)";;
   esac
 fi
 
+case ":${PATH}:" in
+  *":${CLI_INSTALL_DIR}:"*) ;;
+  *) PATH="$CLI_INSTALL_DIR:$PATH"; export PATH ;;
+esac
+"$FELT_BIN" --version >/dev/null 2>&1 || die "felt CLI is not runnable."
+"$SHUTTLE_BIN" --version >/dev/null 2>&1 || die "shuttle CLI is not runnable."
+
 # ── 3. daemon release ──────────────────────────────────────────────────────
 step "Build the daemon release"
-make -C "$REPO" daemon SKIP_CLI="$SKIP_CLI" || die "daemon release build failed."
-ok "bin/shuttle built."
+make -C "$REPO" daemon SKIP_CLI=1 || die "daemon release build failed."
+ok "daemon release built → bin/rel."
 
 # Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
 # state: events.jsonl, tmux.sock). bin/shuttle-launch resolves its repo as
@@ -179,8 +192,8 @@ ok "ui/dist built."
 
 # ── 5. event stream ─────────────────────────────────────────────────────────
 # The daemon derives per-session activity + the sent-files trail from this
-# host's own hook stream (~/.shuttle/events.jsonl). The felt binary writes it
-# (`felt hook event`) and the bundled plugin registers it, so this step is
+# host's own hook stream (~/.shuttle/events.jsonl). The shuttle binary writes it
+# (`shuttle hook event`) and the bundled plugin registers it, so this step is
 # self-contained: install/refresh the plugin, then prove the writer works here.
 #
 # The plugin hook is gated on ~/.shuttle existing — step 3 created it, so the
@@ -189,8 +202,6 @@ step "Event stream (plugin hook → ~/.shuttle/events.jsonl)"
 if [ "$SKIP_HOOK" = 1 ]; then
   warn "skipped (--skip-hook)."
 else
-  FELT_BIN="$([ "$SKIP_CLI" = 1 ] && command -v felt || echo "$CLI_INSTALL_DIR/felt")"
-
   if [ -d "$HOME/.shuttle" ]; then
     ok "~/.shuttle present — the stream is enabled on this host."
   else
@@ -216,12 +227,12 @@ else
   # prefix, GNU mktemp requires the template to carry it and errors without.
   PROBE="$(mktemp "${TMPDIR:-/tmp}/shuttle-events-probe.XXXXXX")"
   printf '%s\n' '{"hook_event_name":"SessionStart","session_id":"bootstrap-probe","cwd":"'"$REPO"'"}' \
-    | SHUTTLE_EVENTS_FILE="$PROBE" SHUTTLE_EVENTS= "$FELT_BIN" hook event >/dev/null 2>&1
+    | SHUTTLE_EVENTS_FILE="$PROBE" SHUTTLE_EVENTS= "$SHUTTLE_BIN" hook event >/dev/null 2>&1
   if [ "$(wc -l < "$PROBE" | tr -d ' ')" = "1" ] && grep -q '"type":"session_start"' "$PROBE"; then
-    ok "felt hook event writes a well-formed line on this host."
+    ok "shuttle hook event writes a well-formed line on this host."
   else
-    warn "felt hook event probe failed — activity ranking + sent-files will stay empty."
-    note "reproduce:  echo '{\"hook_event_name\":\"SessionStart\"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl felt hook event"
+    warn "shuttle hook event probe failed — activity ranking + sent-files will stay empty."
+    note "reproduce:  echo '{\"hook_event_name\":\"SessionStart\"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl shuttle hook event"
   fi
   rm -f "$PROBE"
 
@@ -252,7 +263,7 @@ if [ "$OS" = Darwin ]; then
   # The launchd path lives in the Makefile: it captures the real login PATH and
   # the persistent ssh-agent socket, renders the plist, and (re)loads the agent.
   # Reuse it rather than duplicating that subtle env capture here.
-  make -C "$REPO" install-agent || die "make install-agent failed."
+  make -C "$REPO" install-agent INSTALL_DIR="$CLI_INSTALL_DIR" || die "make install-agent failed."
   ok "launchd agent loaded (KeepAlive + RunAtLoad)."
 else
   # bin/shuttle-launch goes to ~/.local/bin on every Linux host regardless of
@@ -287,7 +298,7 @@ else
     # and renders daemon/share/io.shuttle.daemon.service.template. Stores come
     # from the editable registry. The respawn loop remains the fallback when
     # supervisor installation fails.
-    if make -C "$REPO" install-agent; then
+    if make -C "$REPO" install-agent INSTALL_DIR="$CLI_INSTALL_DIR"; then
       ok "systemd user unit enabled (Restart=always + starts at login)."
       note "survive logout and start at boot:  loginctl enable-linger $(id -un)"
     else
@@ -303,13 +314,13 @@ else
 fi
 
 # ── optional: remote tunnels (hub-side) ──────────────────────────────────────
-# `felt shuttle tunnels install` picks the host's own supervisor — launchd
+# `shuttle tunnels install` picks the host's own supervisor — launchd
 # LaunchAgents on macOS, systemd --user units on Linux — and refuses on a Linux
 # host with no user session rather than writing units nothing would start.
 if [ "$WITH_TUNNELS" = 1 ]; then
   step "Remote tunnels"
-  felt shuttle tunnels install && ok "autossh tunnels (re)installed." \
-    || warn "felt shuttle tunnels install failed (configure remotes first)."
+  shuttle tunnels install && ok "autossh tunnels (re)installed." \
+    || warn "shuttle tunnels install failed (configure remotes first)."
 fi
 
 # ── footer ───────────────────────────────────────────────────────────────
@@ -317,11 +328,11 @@ step "Done"
 note "verify:   curl -s http://127.0.0.1:4000/api/v1/version"
 note "board:    http://127.0.0.1:4000/"
 note "logs:     make logs"
-note "workers:  felt shuttle ps"
+note "workers:  shuttle ps"
 # The trailing guard must not decide the script's exit code: a false test here
 # would make a fully successful bootstrap exit 1, so the explicit `exit 0`
 # below closes it out (caught by the clean-container acceptance run).
 if [ "$WITH_TUNNELS" = 0 ]; then
-  note "remotes:  ./scripts/bootstrap.sh --with-tunnels  (or: felt shuttle tunnels install)"
+  note "remotes:  ./scripts/bootstrap.sh --with-tunnels  (or: shuttle tunnels install)"
 fi
 exit 0

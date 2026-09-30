@@ -1,10 +1,10 @@
 #!/bin/sh
-# install.sh — install the felt CLI (and optionally the shuttle daemon).
+# install.sh — install felt and shuttle CLIs (and optionally the daemon release).
 #
 #   FELT_REPO         source repo (default cailmdaley/felt)
-#   FELT_INSTALL_DIR  where the felt binary lands
+#   FELT_INSTALL_DIR  where both Go binaries land
 #   FELT_VERSION      install this exact tag instead of the latest release
-#   SHUTTLE=1         also install the shuttle daemon
+#   SHUTTLE=1         also install the shuttle daemon release
 #   SHUTTLE_HOME      where the daemon lands (default ~/.local/share/shuttle)
 set -eu
 
@@ -77,12 +77,13 @@ download_asset() {
 # was interrupted; fail while the old installation is still intact.
 verify_cli() {
   _binary="$1"
+  _name="$2"
   _expected="${TAG#v}"
   _line="$("$_binary" --version 2>/dev/null | head -1 || true)"
   _actual="$(printf '%s\n' "$_line" | awk '{print $3}')"
   if [ "$_actual" != "$_expected" ]; then
-    echo "Downloaded felt reports version '${_actual:-unknown}', expected ${_expected}." >&2
-    echo "Refusing to replace ${INSTALL_DIR}/felt." >&2
+    echo "Downloaded ${_name} reports version '${_actual:-unknown}', expected ${_expected}." >&2
+    echo "Refusing to replace ${INSTALL_DIR}/${_name}." >&2
     exit 1
   fi
 }
@@ -93,7 +94,7 @@ verify_cli() {
 # releases/start_erl.data: it prints a version and exits 0 on a tree whose
 # bundled beam.smp cannot start, which is exactly the state a release built
 # against a newer glibc lands in on an older cluster. Ask the VM instead.
-# `eval` boots the bare BEAM (no application start, no FELT_STORES needed) and
+# `eval` boots the bare BEAM (no application start, no SHUTTLE_STORES needed) and
 # the version it prints is the loaded application's own, so one invocation
 # proves the runtime works and establishes identity.
 verify_shuttle() {
@@ -119,7 +120,7 @@ verify_shuttle() {
   fi
 }
 
-echo "Installing felt ${TAG} (${OS}/${ARCH})..."
+echo "Installing felt and shuttle ${TAG} (${OS}/${ARCH})..."
 
 # Download and extract
 TMPDIR="$(mktemp -d)"
@@ -127,29 +128,32 @@ trap 'rm -rf "$TMPDIR"' EXIT
 
 download_asset "felt_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/felt.tar.gz"
 tar xzf "$TMPDIR/felt.tar.gz" -C "$TMPDIR"
-verify_cli "$TMPDIR/felt"
+verify_cli "$TMPDIR/felt" felt
+verify_cli "$TMPDIR/shuttle" shuttle
 
 # ── shuttle daemon (opt-in) ────────────────────────────────────────────────
 # SHUTTLE=1 also installs the shuttle daemon: an ERTS-bundled Mix release
 # fetched from the same GitHub release — no Erlang, Elixir, or Node needed.
-# It lands in $SHUTTLE_HOME (default ~/.local/share/shuttle); the daemon's
-# front door is $SHUTTLE_HOME/bin/shuttle. Runtime prerequisites: tmux + felt.
+# It lands in $SHUTTLE_HOME (default ~/.local/share/shuttle). Runtime
+# prerequisites: tmux, felt, and shuttle.
 if [ "${SHUTTLE:-0}" = "1" ]; then
   SHUTTLE_HOME="${SHUTTLE_HOME:-${HOME}/.local/share/shuttle}"
 
   echo "Installing shuttle daemon ${TAG} to ${SHUTTLE_HOME}..."
-  download_asset "shuttle_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttle.tar.gz"
-  tar xzf "$TMPDIR/shuttle.tar.gz" -C "$TMPDIR"
-  verify_shuttle "$TMPDIR/shuttle/bin/shuttled"
+  download_asset "shuttled_${ARCHIVE_OS}_${ARCHIVE_ARCH}.tar.gz" "$TMPDIR/shuttled.tar.gz"
+  tar xzf "$TMPDIR/shuttled.tar.gz" -C "$TMPDIR"
+  verify_shuttle "$TMPDIR/shuttled/bin/shuttled"
 fi
 
-# Both assets have been downloaded and checked before either installation is
-# changed. A missing or mismatched optional daemon asset therefore leaves an
-# existing CLI untouched as well.
+# Both CLI binaries and any requested daemon release are checked before the
+# installation is changed. A missing or mismatched asset leaves the existing
+# installation intact.
 mkdir -p "$INSTALL_DIR"
 mv "$TMPDIR/felt" "$INSTALL_DIR/felt"
+mv "$TMPDIR/shuttle" "$INSTALL_DIR/shuttle"
 
 echo "felt ${TAG} installed to ${INSTALL_DIR}/felt"
+echo "shuttle ${TAG} installed to ${INSTALL_DIR}/shuttle"
 
 # Check PATH
 case ":${PATH}:" in
@@ -160,7 +164,7 @@ esac
 if [ "${SHUTTLE:-0}" = "1" ]; then
   rm -rf "$SHUTTLE_HOME"
   mkdir -p "$(dirname "$SHUTTLE_HOME")"
-  mv "$TMPDIR/shuttle" "$SHUTTLE_HOME"
+  mv "$TMPDIR/shuttled" "$SHUTTLE_HOME"
 
   # Remote revival over SSH runs `$HOME/.local/bin/shuttle-launch` verbatim
   # (daemon/lib/shuttle/remote_registry.ex) — a hardcoded path only scripts/bootstrap.sh used
@@ -177,8 +181,8 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   #
   #   repo  — shuttle-launch resolves what to launch from $SHUTTLE_DIR, else
   #           this file, else its own parent directory. Revived over SSH it has
-  #           no environment, and its parent here is ~/.local — which holds no
-  #           bin/shuttle — so without this file a fetched host cannot be
+  #           no environment, and its parent here is ~/.local — which does not
+  #           contain the release — so without this file a fetched host cannot be
   #           revived by its hub at all. scripts/bootstrap.sh writes it for checkouts;
   #           this is the fetched equivalent.
   #   dir    — the plugin's activity-event hook writes events only when the
@@ -205,12 +209,10 @@ if [ "${SHUTTLE:-0}" = "1" ]; then
   fi
 
   echo "shuttle daemon ${TAG} installed."
-  echo "  Start it:   FELT_STORES=<your-store> ${SHUTTLE_HOME}/bin/shuttle start"
-  # The tarball carries its own supervisor templates (share/) and the shim
-  # renders + loads them, so a fetched install can survive a logout without a
-  # checkout or a Makefile. Name the command here: it is the only place this
-  # installer's user learns the verb exists.
-  echo "  Keep-alive: ${SHUTTLE_HOME}/bin/shuttle install-agent    # configure stores in Settings"
+  echo "  Start it:   SHUTTLE_STORES=<your-store> SHUTTLE_RELEASE=\"${SHUTTLE_HOME}\" \"${INSTALL_DIR}/shuttle\" daemon start"
+  # The release carries its own supervisor templates (share/), and the Go CLI
+  # renders + loads them, so a fetched install needs no checkout or Makefile.
+  echo "  Keep-alive: SHUTTLE_RELEASE=\"${SHUTTLE_HOME}\" \"${INSTALL_DIR}/shuttle\" daemon install  # configure stores in Settings"
   echo "              (launchd on macOS, systemd --user on Linux; see"
   echo "               https://cailmdaley.github.io/felt/shuttle/installation/)"
 fi
