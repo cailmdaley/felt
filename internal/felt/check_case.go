@@ -132,17 +132,14 @@ func gitIndexPaths(root string) []string {
 	if err != nil {
 		return nil
 	}
-	top, err := filepath.EvalSymlinks(strings.TrimSpace(string(topOut)))
+	// Only the newline is git's; a trailing space can belong to the name.
+	top, err := filepath.EvalSymlinks(strings.TrimSuffix(string(topOut), "\n"))
 	if err != nil {
 		return nil
 	}
-	rel, err := filepath.Rel(top, root)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+	prefix, ok := foldedRel(top, root)
+	if !ok {
 		return nil
-	}
-	prefix := ""
-	if rel != "." {
-		prefix = filepath.ToSlash(rel) + "/"
 	}
 	out, err := gitOutput(top, "-c", "core.quotePath=false", "ls-files", "-z")
 	if err != nil {
@@ -155,6 +152,28 @@ func gitIndexPaths(root string) []string {
 		}
 	}
 	return paths
+}
+
+// foldedRel is root's slash path below top, with its segments matched without
+// case, so a view that reaches the repository through a respelled ancestor
+// still lands inside it. It ends in "/" unless root is top itself, and is not
+// ok when root lies outside top.
+func foldedRel(top, root string) (string, bool) {
+	topParts := strings.Split(filepath.ToSlash(filepath.Clean(top)), "/")
+	rootParts := strings.Split(filepath.ToSlash(filepath.Clean(root)), "/")
+	if len(rootParts) < len(topParts) {
+		return "", false
+	}
+	for i, part := range topParts {
+		if !strings.EqualFold(part, rootParts[i]) {
+			return "", false
+		}
+	}
+	rest := rootParts[len(topParts):]
+	if len(rest) == 0 {
+		return "", true
+	}
+	return strings.Join(rest, "/") + "/", true
 }
 
 func gitOutput(dir string, args ...string) ([]byte, error) {

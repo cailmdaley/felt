@@ -141,3 +141,63 @@ func TestCheckCaseCollisionsThroughRespelledSymlink(t *testing.T) {
 		t.Fatalf("issues = %+v, want the REPORT.md/report.md pair under review", issues)
 	}
 }
+
+// indexTwins builds a repository at repo holding .felt/project/review with
+// REPORT.md on disk and report.md added to the index alone.
+func indexTwins(t *testing.T, repo string) {
+	t.Helper()
+	fiberDir := filepath.Join(repo, ".felt", "project", "review")
+	os.MkdirAll(fiberDir, 0o755)
+	os.WriteFile(filepath.Join(fiberDir, "review.md"), []byte("---\nname: review\n---\n"), 0o644)
+	os.WriteFile(filepath.Join(fiberDir, "REPORT.md"), []byte("report\n"), 0o644)
+	gitIn(t, repo, "init", "-q")
+	gitIn(t, repo, "add", ".")
+	blob := gitIn(t, repo, "hash-object", "-w", filepath.Join(fiberDir, "REPORT.md"))
+	gitIn(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",.felt/project/review/report.md")
+}
+
+func wantReportTwins(t *testing.T, s *Storage) {
+	t.Helper()
+	issues, err := CheckCaseCollisions(s)
+	if err != nil {
+		t.Fatalf("CheckCaseCollisions: %v", err)
+	}
+	if len(issues) != 1 || issues[0].FiberID != "review" || !strings.Contains(issues[0].Message, `"REPORT.md" and "report.md"`) {
+		t.Fatalf("issues = %+v, want the REPORT.md/report.md pair under review", issues)
+	}
+}
+
+// A view reaching the repository through a respelled ancestor (repo for
+// Repo) still sees the index twins. Only a case-insensitive filesystem
+// resolves that symlink.
+func TestCheckCaseCollisionsThroughRespelledRepoAncestor(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	parent := t.TempDir()
+	indexTwins(t, filepath.Join(parent, "Repo"))
+	view := t.TempDir()
+	if err := os.Symlink(filepath.Join(parent, "repo", ".felt", "project"), filepath.Join(view, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(view, ".felt")); err != nil {
+		t.Skip("case-sensitive filesystem: the respelled symlink does not resolve")
+	}
+	wantReportTwins(t, NewStorage(view))
+}
+
+// A trailing space in the repository's name is part of the name, not
+// whitespace around git's output.
+func TestCheckCaseCollisionsRepoNameWithTrailingSpace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := filepath.Join(t.TempDir(), "repo ")
+	os.MkdirAll(repo, 0o755)
+	indexTwins(t, repo)
+	view := t.TempDir()
+	if err := os.Symlink(filepath.Join(repo, ".felt", "project"), filepath.Join(view, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+	wantReportTwins(t, NewStorage(view))
+}
