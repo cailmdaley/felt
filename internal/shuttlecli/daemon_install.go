@@ -27,9 +27,6 @@ var templatePlaceholderPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`)
 func newShuttleDaemonInstallCommand() *cobra.Command {
 	home, _ := os.UserHomeDir()
 	sshSocket, sshSocketSet := os.LookupEnv("AGENT_SSH_AUTH_SOCK")
-	if !sshSocketSet && runtime.GOOS == "darwin" {
-		sshSocket = filepath.Join(home, ".ssh", "agent.sock")
-	}
 	label := os.Getenv("AGENT_LABEL")
 	if label == "" {
 		label = defaultDaemonLabel
@@ -51,7 +48,13 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Print, _ = cmd.Flags().GetBool("print")
 			options.OS, _ = cmd.Flags().GetString("os")
-			options.SSHSocketSet = options.SSHSocketSet || cmd.Flags().Changed("ssh-auth-sock")
+			if cmd.Flags().Changed("ssh-auth-sock") {
+				options.SSHSocketSet = true
+			} else if socket, ok := os.LookupEnv("AGENT_SSH_AUTH_SOCK"); ok {
+				options.SSHSocket, options.SSHSocketSet = socket, true
+			} else {
+				options.SSHSocket, options.SSHSocketSet = defaultDaemonSSHSocket(options.OS, home), false
+			}
 			return installDaemonSupervisor(options)
 		},
 	}
@@ -204,6 +207,13 @@ func validateSupervisorOptions(options supervisorOptions) error {
 		}
 	}
 	return nil
+}
+
+func defaultDaemonSSHSocket(osName, home string) string {
+	if osName == "Darwin" {
+		return filepath.Join(home, ".ssh", "agent.sock")
+	}
+	return ""
 }
 
 func defaultDaemonLog(osName string) string {

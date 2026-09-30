@@ -152,6 +152,40 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 	}
 }
 
+func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	share := filepath.Join(release.Dir, "share")
+	if err := os.MkdirAll(share, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "io.shuttle.daemon.service.template"
+	if err := os.WriteFile(filepath.Join(share, name), []byte(supervisorTemplateFixtures()[name]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHUTTLE_RELEASE", release.Dir)
+	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
+	previous, wasSet := os.LookupEnv("AGENT_SSH_AUTH_SOCK")
+	if err := os.Unsetenv("AGENT_SSH_AUTH_SOCK"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv("AGENT_SSH_AUTH_SOCK", previous)
+		} else {
+			_ = os.Unsetenv("AGENT_SSH_AUTH_SOCK")
+		}
+	})
+	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print", "--os", "Linux", "--path", "/bin", "--log", filepath.Join(home, "shuttle.log"))
+	if err != nil {
+		t.Fatalf("daemon install --print --os Linux: %v\n%s", err, stderr)
+	}
+	if strings.Contains(out, "SSH_AUTH_SOCK") {
+		t.Fatalf("Linux preview inherited a Darwin SSH-agent default:\n%s", out)
+	}
+}
+
 func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
