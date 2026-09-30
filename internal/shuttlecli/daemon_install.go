@@ -589,8 +589,10 @@ func warnProtectedSupervisorPaths(options supervisorOptions, releaseDir string) 
 }
 
 func installLaunchAgent(options supervisorOptions, release daemonRelease, rendered string) error {
-	if err := stopDaemonRelease(release); err != nil {
-		return err
+	if supervisorInstallStopsDaemon(options.Label) {
+		if err := stopDaemonRelease(release); err != nil {
+			return err
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -622,21 +624,23 @@ func installSystemdUserUnit(options supervisorOptions, release daemonRelease, re
 		fmt.Fprintf(os.Stderr, "  SHUTTLE_RELEASE=%s shuttle daemon start   # logs → %s\n", release.Dir, options.Log)
 		return errors.New("systemd user manager is unavailable")
 	}
-	marker, err := daemonStopMarkerPath()
-	if err != nil {
-		return err
-	}
-	if err := touchDaemonStopMarker(marker); err != nil {
-		return fmt.Errorf("marking the requested daemon stop: %w", err)
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	_ = exec.Command("tmux", "-S", filepath.Join(home, ".shuttle", "tmux.sock"), "kill-session", "-t", "shuttle-daemon").Run()
-	_ = exec.Command("tmux", "kill-session", "-t", "shuttle-daemon").Run()
-	if err := stopDaemonRelease(release); err != nil {
-		return err
+	if supervisorInstallStopsDaemon(options.Label) {
+		marker, err := daemonStopMarkerPath()
+		if err != nil {
+			return err
+		}
+		if err := touchDaemonStopMarker(marker); err != nil {
+			return fmt.Errorf("marking the requested daemon stop: %w", err)
+		}
+		_ = exec.Command("tmux", "-S", filepath.Join(home, ".shuttle", "tmux.sock"), "kill-session", "-t", "shuttle-daemon").Run()
+		_ = exec.Command("tmux", "kill-session", "-t", "shuttle-daemon").Run()
+		if err := stopDaemonRelease(release); err != nil {
+			return err
+		}
 	}
 	unitName := systemdUnitName(options.Label)
 	unitPath := filepath.Join(home, ".config", "systemd", "user", unitName)
@@ -691,6 +695,10 @@ func systemdUnitName(label string) string {
 		return "shuttle-daemon.service"
 	}
 	return filepath.Base(label[strings.LastIndex(label, ".")+1:]) + ".service"
+}
+
+func supervisorInstallStopsDaemon(label string) bool {
+	return label == defaultDaemonLabel
 }
 
 func defaultPort(port string) string {
