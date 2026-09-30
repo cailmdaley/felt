@@ -11,6 +11,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 type messageTargetCandidate struct {
@@ -237,7 +238,7 @@ func uniqueMessageCandidates(candidates []messageTargetCandidate) []messageTarge
 // established, or when the peer mapping is ambiguous.
 func currentFiberMessageAddress(f *felt.Felt, records []SessionProvenance, origins map[string]any, peers []messaging.Session) (string, error) {
 	fiberName := f.ID
-	block, ok, err := f.ShuttleBlock()
+	block, ok, err := shuttle.BlockOf(f)
 	if err != nil {
 		return "", fmt.Errorf("reading shuttle block for fiber %q: %w", fiberName, err)
 	} else if !ok {

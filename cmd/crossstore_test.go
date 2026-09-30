@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // newCrossStoreFixture builds the loom shape: an enclosing store, a project
@@ -301,7 +302,7 @@ func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 		// checking it still carries no shuttle block.
 		t.Fatalf("local twin status = %q", got)
 	}
-	if mustRead(t, felt.NewStorage(subProj), "debug").HasShuttleFacet() {
+	if shuttle.HasFacet(mustRead(t, felt.NewStorage(subProj), "debug")) {
 		t.Fatalf("the local same-slug fiber was acted on")
 	}
 }

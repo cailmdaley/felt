@@ -11,8 +11,8 @@ import (
 // TestStampHandedOff_ConcurrentWithStorageRMW is the F4 keystone at the layer
 // handoff actually operates at: `felt shuttle handoff` (stampHandedOff, which
 // locks+reads+writes the raw file at SHUTTLE_FIBER_PATH, bypassing Storage
-// entirely) racing a daemon-shelled `felt shuttle mark-runtime`-shaped write
-// (Storage.LockFiber -> Storage.Read -> SetShuttleRuntimeField -> Storage.Write)
+// entirely) racing a daemon-shelled runtime-field write
+// (Storage.LockFiber -> Storage.Read -> shuttle.SetRuntimeField -> Storage.Write)
 // against the SAME fiber file. This is exactly the production race F4 exists
 // to close: a worker's clean-exit handoff landing at the same instant the
 // daemon shells mark-runtime to stamp a dispatch/conclude field.
@@ -52,9 +52,8 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 	}()
 
 	// Side B: a mark-runtime-shaped RMW (lock -> read -> mutate one field ->
-	// write -> unlock) bumping a counter, mirroring exactly what
-	// resolveOwnedShuttleFiberAs + SetShuttleRuntimeField + Storage.Write do in
-	// cmd/shuttle_mark_runtime.go's RunE.
+	// write -> unlock) bumping a counter, mirroring the lock/read/update/write
+	// sequence in cmd/shuttle_mark_runtime.go's RunE.
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {

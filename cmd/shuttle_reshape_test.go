@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // Tests for `felt shuttle reshape` — the surgical kind setter. Its whole reason
@@ -48,9 +49,9 @@ func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
 	if tv := readTempered(f); tv == nil || !*tv {
 		t.Fatalf("reshape lost the verdict: tempered=%v", tv)
 	}
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if b.Kind != "oneshot" {
 		t.Fatalf("kind = %q, want oneshot", b.Kind)
@@ -87,7 +88,7 @@ func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 	if !strings.Contains(err.Error(), "--schedule") {
 		t.Fatalf("error should point at --schedule; err=%v", err)
 	}
-	b, _, _ := mustRead(t, storage, "role").ShuttleBlock()
+	b, _, _ := shuttle.BlockOf(mustRead(t, storage, "role"))
 	if b.Kind != "oneshot" {
 		t.Fatalf("failed reshape mutated the block: %+v", b)
 	}
@@ -104,9 +105,9 @@ func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reshape: %v\n%s", err, out)
 	}
-	b, ok, err := mustRead(t, storage, "role").ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(mustRead(t, storage, "role"))
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if b.Kind != "standing" || b.Schedule == nil {
 		t.Fatalf("block: %+v", b)
@@ -130,7 +131,7 @@ func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reshape: %v\n%s", err, out)
 	}
-	b, _, _ := mustRead(t, storage, "role").ShuttleBlock()
+	b, _, _ := shuttle.BlockOf(mustRead(t, storage, "role"))
 	if b.Kind != "standing" {
 		t.Fatalf("kind changed on a schedule-only edit: %q", b.Kind)
 	}
@@ -159,7 +160,7 @@ func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "reshape", "role", "standing", "--schedule", "0 7 * * *"); err != nil {
 		t.Fatalf("reshape to standing: %v\n%s", err, out)
 	}
-	if b, _, _ := mustRead(t, storage, "role").ShuttleBlock(); b.Schedule == nil || b.Schedule.TZ != "UTC" {
+	if b, _, _ := shuttle.BlockOf(mustRead(t, storage, "role")); b.Schedule == nil || b.Schedule.TZ != "UTC" {
 		t.Fatalf("schedule = %+v, want tz=UTC for a block that had none", b.Schedule)
 	}
 }
@@ -180,7 +181,7 @@ func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 			if !strings.Contains(err.Error(), "standing") {
 				t.Fatalf("error should explain standing-only; err=%v", err)
 			}
-			b, _, _ := mustRead(t, storage, "role").ShuttleBlock()
+			b, _, _ := shuttle.BlockOf(mustRead(t, storage, "role"))
 			if b.Kind != "standing" {
 				t.Fatalf("failed reshape mutated the block: %+v", b)
 			}

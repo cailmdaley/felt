@@ -2025,11 +2025,10 @@ func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
 	}
 }
 
-// TestExternalProbeStaysOffWhenItCannotMatter guards the daemon's cross-store
-// lookup path: `felt show <id> -j` is run against store after store until one
-// hits, so a MISS is the common case and must not walk the enclosing store.
-// The probe can only change a lookup's outcome when the basename fallback is
-// about to fire; otherwise it is a slow way to reword an error.
+// TestExternalProbeStaysOffWhenItCannotMatter checks the cross-store resolver's
+// cheap miss path. A lookup miss is common and must not walk the enclosing
+// store; the probe can change the outcome only when basename fallback is about
+// to fire.
 func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()

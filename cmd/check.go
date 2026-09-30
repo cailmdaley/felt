@@ -22,9 +22,7 @@ var checkCmd = &cobra.Command{
   - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below the
     root, which belongs at <dir>/<slug>/<slug>.md (felt migrate folds it)
   - two entries in one directory whose names differ only by case, on disk or
-    in the git index (a case-insensitive filesystem can check out only one)
-  - a shuttle host: naming this machine by a pre-normalization spelling
-    (a warning)`,
+    in the git index (a case-insensitive filesystem can check out only one)`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		storage, _, err := felt.RequireStore(changeDir)
@@ -71,7 +69,6 @@ var checkCmd = &cobra.Command{
 			return err
 		}
 		issues = append(issues, legacyIssues...)
-		issues = append(issues, checkHostDrift(felts)...)
 		errors := 0
 		for _, issue := range issues {
 			if issue.Level == felt.CheckLevelError {

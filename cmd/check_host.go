@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // checkHostDrift warns about a shuttle block whose host: differs from this
@@ -38,7 +39,7 @@ func checkHostDrift(felts []*felt.Felt) []felt.CheckIssue {
 
 	var issues []felt.CheckIssue
 	for _, f := range felts {
-		block, ok, err := f.ShuttleBlock()
+		block, ok, err := shuttle.BlockOf(f)
 		if err != nil || !ok || block == nil {
 			continue
 		}

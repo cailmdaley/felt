@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // ---- shared lifecycle test helpers -----------------------------------------
@@ -222,10 +223,8 @@ func TestShuttleResume_RefusesClosed(t *testing.T) {
 	}
 }
 
-// TestShuttleResume_RequiresProjectDir: arming holds a draft to what an armed
-// install requires. A draft installed --disabled without --project-dir is
-// refused by resume (and by edit -s active) with the call that fixes it;
-// resume --project-dir sets it and arms in one step.
+// TestShuttleResume_RequiresProjectDir checks that resuming a draft requires
+// the worker directory and that resume --project-dir sets it while arming.
 func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 	dir, storage := newStore(t)
 	if out, err := runCommand(t, dir, "add", "draft", "Draft"); err != nil {
@@ -235,17 +234,12 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 		t.Fatalf("install --disabled: %v\n%s", err, out)
 	}
 
-	for _, args := range [][]string{
-		{"shuttle", "resume", "draft"},
-		{"edit", "draft", "-s", "active"},
-	} {
-		_, err := runCommand(t, dir, args...)
-		if err == nil || !strings.Contains(err.Error(), "felt shuttle resume draft --project-dir") {
-			t.Fatalf("%v on a draft with no project_dir: err=%v, want a refusal naming --project-dir", args, err)
-		}
-		if got := mustRead(t, storage, "draft").Status; got != felt.StatusOpen {
-			t.Fatalf("%v armed the draft anyway: status=%q", args, got)
-		}
+	_, err := runCommand(t, dir, "shuttle", "resume", "draft")
+	if err == nil || !strings.Contains(err.Error(), "felt shuttle resume draft --project-dir") {
+		t.Fatalf("resume without project_dir: err=%v, want a refusal naming --project-dir", err)
+	}
+	if got := mustRead(t, storage, "draft").Status; got != felt.StatusOpen {
+		t.Fatalf("refused resume changed status to %q", got)
 	}
 
 	work := t.TempDir()
@@ -253,31 +247,24 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 		t.Fatalf("resume --project-dir: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "draft")
-	b, _, err := f.ShuttleBlock()
+	b, _, err := shuttle.BlockOf(f)
 	if err != nil || f.Status != felt.StatusActive || b.ProjectDir != work {
 		t.Fatalf("after resume --project-dir: status=%q block=%#v err=%v", f.Status, b, err)
 	}
 }
 
-// TestShuttleReopen_RequiresProjectDir: a closed fiber whose block has no
-// project_dir is requeued by reopen, not resume, so the refusal — from reopen
-// and from edit -s active alike — names reopen --project-dir, and that call
-// arms it. (The daemon's force-dispatch shells reopen and relays this.)
+// TestShuttleReopen_RequiresProjectDir checks that reopen requires a worker
+// directory when it makes a closed fiber dispatchable.
 func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "old", felt.StatusClosed, map[string]any{"kind": "oneshot", "agent": "claude-opus"}, nil)
 
-	for _, args := range [][]string{
-		{"shuttle", "reopen", "old"},
-		{"edit", "old", "-s", "active"},
-	} {
-		_, err := runCommand(t, dir, args...)
-		if err == nil || !strings.Contains(err.Error(), "felt shuttle reopen old --project-dir <dir>") {
-			t.Fatalf("%v with no project_dir: err=%v, want a refusal naming reopen --project-dir", args, err)
-		}
-		if got := mustRead(t, storage, "old").Status; got != felt.StatusClosed {
-			t.Fatalf("%v armed it anyway: status=%q", args, got)
-		}
+	_, err := runCommand(t, dir, "shuttle", "reopen", "old")
+	if err == nil || !strings.Contains(err.Error(), "felt shuttle reopen old --project-dir <dir>") {
+		t.Fatalf("reopen without project_dir: err=%v, want a refusal naming --project-dir", err)
+	}
+	if got := mustRead(t, storage, "old").Status; got != felt.StatusClosed {
+		t.Fatalf("refused reopen changed status to %q", got)
 	}
 
 	work := t.TempDir()
@@ -285,7 +272,7 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 		t.Fatalf("reopen --project-dir: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "old")
-	b, _, err := f.ShuttleBlock()
+	b, _, err := shuttle.BlockOf(f)
 	if err != nil || f.Status != felt.StatusActive || b.ProjectDir != work {
 		t.Fatalf("after reopen --project-dir: status=%q block=%#v err=%v", f.Status, b, err)
 	}
@@ -711,9 +698,9 @@ func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
 		t.Fatalf("set-model: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
-	b, _, err := f.ShuttleBlock()
+	b, _, err := shuttle.BlockOf(f)
 	if err != nil {
-		t.Fatalf("ShuttleBlock: %v", err)
+		t.Fatalf("BlockOf: %v", err)
 	}
 	if b.Agent != "claude-sonnet" {
 		t.Fatalf("agent = %q, want claude-sonnet", b.Agent)
@@ -780,9 +767,9 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 		t.Fatalf("set-agent: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
-	b, _, err := f.ShuttleBlock()
+	b, _, err := shuttle.BlockOf(f)
 	if err != nil {
-		t.Fatalf("ShuttleBlock: %v", err)
+		t.Fatalf("BlockOf: %v", err)
 	}
 	if b.Agent != "claude-sonnet" || b.Effort != "high" {
 		t.Fatalf("axes not set: %+v", b)
@@ -805,7 +792,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 		t.Fatalf("set-agent preserving surface: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
-	b, _, err := f.ShuttleBlock()
+	b, _, err := shuttle.BlockOf(f)
 	if err != nil || b.Surface != "cli" {
 		t.Fatalf("surface after Codex switch = %#v, %v; want cli", b, err)
 	}
@@ -814,7 +801,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 		t.Fatalf("set-agent app: %v\n%s", err, out)
 	}
 	f = mustRead(t, storage, "f")
-	b, _, err = f.ShuttleBlock()
+	b, _, err = shuttle.BlockOf(f)
 	if err != nil || b.Surface != "app" {
 		t.Fatalf("surface after explicit edit = %#v, %v; want app", b, err)
 	}
@@ -837,7 +824,7 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--surface cli") {
 		t.Fatalf("set-model to Claude on an app block: err=%v, want a refusal naming --surface cli", err)
 	}
-	b, _, err := mustRead(t, storage, "f").ShuttleBlock()
+	b, _, err := shuttle.BlockOf(mustRead(t, storage, "f"))
 	if err != nil || b.Agent != "codex-sol" || b.Surface != "app" {
 		t.Fatalf("refused set-model still wrote: %#v, %v", b, err)
 	}
@@ -846,7 +833,7 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "set-model", "f", "codex-luna"); err != nil {
 		t.Fatalf("set-model within Codex: %v\n%s", err, out)
 	}
-	if b, _, err := mustRead(t, storage, "f").ShuttleBlock(); err != nil || b.Agent != "codex-luna" || b.Surface != "app" {
+	if b, _, err := shuttle.BlockOf(mustRead(t, storage, "f")); err != nil || b.Agent != "codex-luna" || b.Surface != "app" {
 		t.Fatalf("after set-model codex-luna: %#v, %v", b, err)
 	}
 
@@ -868,7 +855,7 @@ func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "uninstall", "f"); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
-	if mustRead(t, storage, "f").HasShuttleFacet() {
+	if shuttle.HasFacet(mustRead(t, storage, "f")) {
 		t.Fatal("uninstall must remove the shuttle: block")
 	}
 	// Idempotent: a second uninstall is a no-op (nothing to do), not an error.
@@ -950,29 +937,17 @@ func TestShuttleRetiredAgent_EditPassesResumeRefuses(t *testing.T) {
 	}
 }
 
-// TestShuttleRetiredAgent_EditStatusActiveRefuses covers the second arming
-// gate the reviewer flagged: `edit --status active` on a fiber carrying a
-// shuttle: block must resolve the agent, same as resume/reopen. A plain
-// content edit (no status flip, or a flip to a non-arming status) must still
-// pass untouched.
-func TestShuttleRetiredAgent_EditStatusActiveRefuses(t *testing.T) {
+// TestFeltEditChangesStatusWithoutResolvingAgent checks that ordinary fiber
+// edits treat Shuttle fields as opaque metadata.
+func TestFeltEditChangesStatusWithoutResolvingAgent(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{"kind": "oneshot", "agent": "retired-agent", "project_dir": "/srv/work"}, nil)
 
-	if out, err := runCommand(t, dir, "edit", "f", "-s", "active"); err == nil {
-		t.Fatalf("edit -s active with a retired agent must refuse\n%s", out)
-	} else if !strings.Contains(err.Error()+out, "retired-agent") {
-		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)
+	if out, err := runCommand(t, dir, "edit", "f", "-s", "active"); err != nil {
+		t.Fatalf("felt edit status with a retired agent: %v\n%s", err, out)
 	}
-	if mustRead(t, storage, "f").Status != felt.StatusOpen {
-		t.Fatal("refused edit -s active must not arm the fiber")
-	}
-
-	if out, err := runCommand(t, dir, "edit", "f", "-s", "closed"); err != nil {
-		t.Fatalf("edit -s closed (non-arming) must pass even with a retired agent: %v\n%s", err, out)
-	}
-	if got := mustRead(t, storage, "f").Status; got != felt.StatusClosed {
-		t.Fatalf("status = %q, want closed", got)
+	if got := mustRead(t, storage, "f").Status; got != felt.StatusActive {
+		t.Fatalf("status = %q, want active", got)
 	}
 }
 

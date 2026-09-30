@@ -107,13 +107,24 @@ type Felt struct {
 	// Distinguishes the root from top-level folder fibers; both have
 	// unslashed IDs, only EntryPoint tells them apart.
 	EntryPoint bool `yaml:"-" json:"entry_point,omitempty"`
-	// resolvedShuttle holds the resolved view of the shuttle: facet — the flat
-	// block plus a `resolved` sub-key — attached by AttachShuttleResolution on
-	// the JSON read paths (felt show -j / ls --json). Unexported: never marshaled
-	// directly, never persisted to disk. MarshalJSON and the ls --json-field
-	// projector substitute it for the raw shuttle ExtraField so resolution rides
-	// the JSON contract while the flat fields the daemon reads stay unchanged.
-	resolvedShuttle map[string]interface{}
+	// jsonOverrides replaces selected top-level fields in JSON output without
+	// changing frontmatter or the persisted fiber.
+	jsonOverrides map[string]any
+}
+
+// SetJSONField replaces one top-level field in the JSON representation without
+// changing the fiber's frontmatter or persisted form.
+func (f *Felt) SetJSONField(key string, value any) {
+	if f.jsonOverrides == nil {
+		f.jsonOverrides = make(map[string]any)
+	}
+	f.jsonOverrides[key] = value
+}
+
+// JSONField returns a top-level field override, if one has been set.
+func (f *Felt) JSONField(key string) (any, bool) {
+	value, ok := f.jsonOverrides[key]
+	return value, ok
 }
 
 // MarshalJSON implements custom JSON marshaling for Felt. The default behavior
@@ -136,8 +147,8 @@ func (f *Felt) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("marshal known fields: %w", err)
 	}
 
-	// Fast path: no extras → emit the alias-encoded bytes directly.
-	if len(f.ExtraFields) == 0 {
+	// Fast path: no extras or overrides → emit the alias-encoded bytes directly.
+	if len(f.ExtraFields) == 0 && len(f.jsonOverrides) == 0 {
 		return knownBytes, nil
 	}
 
@@ -163,11 +174,8 @@ func (f *Felt) MarshalJSON() ([]byte, error) {
 		}
 	}
 
-	// When a resolved shuttle facet has been attached (felt show -j / ls --json),
-	// substitute it for the raw passthrough: it carries the same flat block plus
-	// an additive `resolved` sub-key, so the daemon's flat-field contract holds.
-	if f.resolvedShuttle != nil {
-		merged[ShuttleFacetKey] = f.resolvedShuttle
+	for key, value := range f.jsonOverrides {
+		merged[key] = value
 	}
 
 	return json.Marshal(merged)

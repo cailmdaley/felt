@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber: the daemon's
-// poll reads fibers while felt writes them, so every read must be the old
-// document or the new one in full — never an in-place write's empty or
-// partial file.
+// TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber checks that a
+// concurrent reader sees either complete version of a fiber document, never
+// an in-place write's empty or partial file.
 func TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber(t *testing.T) {
 	s := NewStorage(t.TempDir())
 	if err := s.Init(); err != nil {

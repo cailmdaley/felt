@@ -51,14 +51,10 @@ func TestLockFiberFile_MutualExclusion(t *testing.T) {
 	}
 }
 
-// TestStorage_LockFiber_GuardsConcurrentRMW is the F4 keystone: two concurrent
-// read-modify-write cycles on the SAME fiber — one bumping counters.a, the
-// other counters.b, each for a run of iterations — must each preserve the
-// other's field, exactly the "two daemon-shelled writes race the same fiber"
-// scenario (a worker's handoff vs a daemon's mark-runtime). Without the lock
-// this is racy: last-writer-wins silently drops whichever field the losing
-// read was stale on. With the lock (acquire -> read -> mutate -> write ->
-// release) it must be exact every time.
+// TestStorage_LockFiber_GuardsConcurrentRMW checks that concurrent
+// read-modify-write cycles on the same fiber preserve independent fields. Two
+// writers bump counters.a and counters.b; without the lock, last-writer-wins
+// can silently drop whichever field the losing read was stale on.
 func TestStorage_LockFiber_GuardsConcurrentRMW(t *testing.T) {
 	_, st := newStore(t)
 
@@ -131,15 +127,10 @@ func TestStorage_LockFiber_GuardsConcurrentRMW(t *testing.T) {
 	}
 }
 
-// TestLockFiberFile_ResolvesSymlinkedPaths is the symlink-identity fix: loom is
-// one physical store reached via different symlinked paths (the daemon via
-// ~/loom/.felt/<project>/..., a worker's SHUTTLE_FIBER_PATH via
-// ~/project/.felt/..., a symlink into loom). Two lockers naming the SAME
-// physical fiber via different path strings — one through the real directory,
-// one through a symlinked one — must still contend on a single lock. Without
-// resolving symlinks first, they'd derive two unrelated ".lock" sidecars and
-// never serialize, silently reopening the exact handoff-vs-mark-runtime race
-// this lock exists to close.
+// TestLockFiberFile_ResolvesSymlinkedPaths checks that two lockers naming the
+// same physical fiber through a real directory and a symlink contend on one
+// lock. Without resolving symlinks first, they would derive unrelated
+// ".lock" sidecars and fail to serialize.
 func TestLockFiberFile_ResolvesSymlinkedPaths(t *testing.T) {
 	realDir := t.TempDir()
 	realPath := filepath.Join(realDir, "f.md")

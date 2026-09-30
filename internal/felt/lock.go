@@ -10,32 +10,15 @@ import (
 	"time"
 )
 
-// F4 — cross-process mutual exclusion for a fiber's read-modify-write cycle.
+// LockFiberFile provides cross-process mutual exclusion for a fiber's
+// read-modify-write cycle. Two writers that both read the same file before
+// either writes can otherwise race: whichever writes last silently discards
+// fields changed by the other.
 //
-// This serializes the Go CLI write verbs that mutate a fiber — both a direct
-// `felt <verb>` invocation and one the daemon shells as a subprocess. Every
-// such verb follows the same shape: read the current file, mutate the
-// in-memory Felt, write it back. Two processes doing this concurrently on the
-// SAME fiber — e.g. a worker's `felt shuttle handoff` stamping handed_off_at at
-// the same instant the daemon shells `felt shuttle mark-runtime` to stamp
-// dispatched_at — race: whichever writes last wins, and the other's read
-// (already stale) silently clobbers it on write. Rare (needs true simultaneity)
-// but real for shared fibers, and silent — nothing errors, a field just
-// reverts.
-//
-// Scope: this lock covers Go CLI writers only. The daemon's OWN in-process
-// Elixir document writers — LifecycleStore mark_awaiting / park / rearm via
-// FiberDoc.write! — do NOT take this flock; they write inside the daemon
-// process and are outside this cross-process guard. In practice they run
-// sequentially within the daemon rather than being concurrently excluded, so
-// they don't race each other; the flock's job is to keep the CLI writers above
-// from racing anyone (including a daemon-shelled CLI subprocess).
-//
-// LockFiberFile/Storage.LockFiber close that window: acquire the lock, THEN
-// read (so the read is guaranteed fresh, not raced against a writer that
-// finishes between an earlier unlocked read and lock acquisition), mutate,
-// write, release. It lives here — not special-cased into any one verb — so
-// every read-modify-write call site gets it by construction.
+// The lock serializes callers that use this API. A caller acquires it before
+// reading, then holds it through the write, so its in-memory copy cannot become
+// stale between those operations. Writers outside this package must coordinate
+// their own document updates.
 
 // lockSuffix names a fiber's advisory-lock sidecar file: "<mdPath>.lock". It is
 // never a fiber itself (felt only reads/globs "*.md"), so it is completely
@@ -46,9 +29,8 @@ const lockSuffix = ".lock"
 // fiberLockTimeout bounds how long LockFiberFile waits for a contended lock
 // before failing loud. A read-modify-write cycle is a handful of small file
 // operations — a few seconds is generous headroom for another process to
-// finish its own cycle. Waiting longer would mean the CLI (a human command, or
-// a daemon-shelled subprocess already under the daemon's own Runner timeout)
-// hangs instead of surfacing genuine contention or a wedged holder.
+// finish its own cycle. Waiting longer would make a command-line caller or
+// subprocess hang instead of surfacing contention or a wedged holder.
 const fiberLockTimeout = 5 * time.Second
 
 // lockPollInterval is the spacing between non-blocking lock attempts.
@@ -66,14 +48,11 @@ const lockPollInterval = 25 * time.Millisecond
 // than via a blocking Flock call, so a wedged holder produces a bounded, loud
 // timeout (fiberLockTimeout) instead of hanging the caller forever.
 //
-// Resolves mdPath through symlinks before deriving the lock path, because loom
-// is one physical store reached via different symlinked paths: the daemon may
-// address a fiber via ~/loom/.felt/<project>/... while a worker's
-// SHUTTLE_FIBER_PATH goes via ~/project/.felt/... (a symlink into loom). Those
-// are different strings that name the SAME file — locking on the raw string
-// would give each caller its own, unrelated ".lock" sidecar and never
-// serialize them, silently reopening exactly the handoff-vs-mark-runtime race
-// this lock exists to close. EvalSymlinks needs the target to exist; a
+// Resolves mdPath through symlinks before deriving the lock path, because one
+// physical store can be reached through different symlinked paths. Those are
+// different strings that name the same file — locking on the raw string would
+// give each caller its own, unrelated ".lock" sidecar and fail to serialize
+// them. EvalSymlinks needs the target to exist; a
 // brand-new fiber's directory usually already does (installed before any
 // runtime write), so resolving the parent directory and rejoining the leaf
 // name covers that case too. Falls back to the unresolved path only if BOTH

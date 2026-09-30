@@ -114,7 +114,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 		// A block already on the fiber is a refusal, not a rewrite (a
 		// malformed-but-mapping block surfaces its decode error cleanly rather than
 		// nil-dereferencing).
-		existing, ok, err := f.ShuttleBlock()
+		existing, ok, err := shuttle.BlockOf(f)
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			}
 		}
 
-		if err := f.SetShuttleConfig(block); err != nil {
+		if err := shuttle.SetConfig(f, block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {
@@ -242,7 +242,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 		// A block already on the fiber is a refusal, not a rewrite (a
 		// malformed-but-mapping block surfaces its decode error cleanly rather than
 		// nil-dereferencing).
-		existing, hasBlock, err := f.ShuttleBlock()
+		existing, hasBlock, err := shuttle.BlockOf(f)
 		if err != nil {
 			return err
 		}
@@ -294,7 +294,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			statusChanged = true
 		}
 
-		if err := f.SetShuttleConfig(block); err != nil {
+		if err := shuttle.SetConfig(f, block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {
@@ -358,7 +358,7 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 		defer unlock()
 
 		// A block already on the fiber is a refusal, not a rewrite.
-		existing, ok, err := f.ShuttleBlock()
+		existing, ok, err := shuttle.BlockOf(f)
 		if err != nil {
 			return err
 		}
@@ -398,7 +398,7 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 			statusChanged = true
 		}
 
-		if err := f.SetShuttleConfig(block); err != nil {
+		if err := shuttle.SetConfig(f, block); err != nil {
 			return fmt.Errorf("attaching shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {

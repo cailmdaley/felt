@@ -216,7 +216,7 @@ func runStatusOneFiber(query string) error {
 	if err != nil {
 		return err
 	}
-	block, ok, err := f.ShuttleBlock()
+	block, ok, err := shuttle.BlockOf(f)
 	if err != nil {
 		return err
 	}
@@ -396,13 +396,13 @@ func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
 // is not a dispatchable role), matching the daemon's is_map + decode gate.
 func listShuttleFibers(store string) ([]shuttleEntry, error) {
 	storage := felt.NewStorage(store)
-	felts, err := storage.ListMetadataHavingFrontmatterFields([]string{felt.ShuttleFacetKey})
+	felts, err := storage.ListMetadataHavingFrontmatterFields([]string{shuttle.FacetKey})
 	if err != nil {
 		return nil, err
 	}
 	entries := make([]shuttleEntry, 0, len(felts))
 	for _, f := range felts {
-		block, ok, err := f.ShuttleBlock()
+		block, ok, err := shuttle.BlockOf(f)
 		if err != nil || !ok || block == nil {
 			continue
 		}

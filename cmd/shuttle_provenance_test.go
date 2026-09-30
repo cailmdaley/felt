@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 const provenanceSession = "01a02f80-b023-7ed2-8f3d-8f5b7b94ce21"
@@ -241,7 +243,7 @@ func TestIdentityPendingAppendsAlongsideHistoricalSessions(t *testing.T) {
 	if !runtimeDispatched(f) {
 		t.Fatal("dispatched_at without session_uuid should be pending")
 	}
-	if err := f.SetShuttleRuntimeField("session_uuid", provenanceSession); err != nil {
+	if err := shuttle.SetRuntimeField(f, "session_uuid", provenanceSession); err != nil {
 		t.Fatal(err)
 	}
 	if runtimeDispatched(f) {

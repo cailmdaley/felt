@@ -129,9 +129,6 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				return outputShowField(storage, f, showField)
 			}
 			if jsonOutput {
-				if err := attachShuttleResolution(f); err != nil {
-					return err
-				}
 				return outputJSON(f)
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // seedPlainFiber writes a pure note (no shuttle: block) with the given status, so
@@ -30,7 +31,7 @@ func TestShuttleInstall_Armed(t *testing.T) {
 	if f.Status != felt.StatusActive {
 		t.Fatalf("armed install should set status active, got %q", f.Status)
 	}
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {
 		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
 	}
@@ -48,7 +49,7 @@ func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "install", "app", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol"); err != nil {
 		t.Fatalf("Codex install: %v\n%s", err, out)
 	}
-	app, _, _ := mustRead(t, storage, "app").ShuttleBlock()
+	app, _, _ := shuttle.BlockOf(mustRead(t, storage, "app"))
 	if app.Surface != "app" {
 		t.Fatalf("new Codex surface = %q, want app", app.Surface)
 	}
@@ -56,7 +57,7 @@ func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "install", "cli", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol", "--surface", "cli"); err != nil {
 		t.Fatalf("explicit CLI install: %v\n%s", err, out)
 	}
-	cli, _, _ := mustRead(t, storage, "cli").ShuttleBlock()
+	cli, _, _ := shuttle.BlockOf(mustRead(t, storage, "cli"))
 	if cli.Surface != "cli" {
 		t.Fatalf("explicit surface = %q, want cli", cli.Surface)
 	}
@@ -88,7 +89,7 @@ func TestShuttleInstall_DisabledKeepsExplicitProjectDir(t *testing.T) {
 	if out, err := runCommand(t, dir, "shuttle", "install", "task", "--host", "testhost", "--disabled", "--project-dir", pdir); err != nil {
 		t.Fatalf("install --disabled --project-dir: %v\n%s", err, out)
 	}
-	b, ok, err := mustRead(t, storage, "task").ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(mustRead(t, storage, "task"))
 	if err != nil || !ok {
 		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
 	}
@@ -164,7 +165,7 @@ func TestShuttleRepeat_Standing(t *testing.T) {
 	if f.Status != felt.StatusActive {
 		t.Fatalf("standing role should be born active, got %q", f.Status)
 	}
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {
 		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
 	}
@@ -202,7 +203,7 @@ func TestShuttlePin_Parked(t *testing.T) {
 	if f.Status != felt.StatusOpen {
 		t.Fatalf("pinned role rests at status: open, got %q", f.Status)
 	}
-	b, _, _ := f.ShuttleBlock()
+	b, _, _ := shuttle.BlockOf(f)
 	if b == nil || b.Kind != "pinned" {
 		t.Fatalf("pinned block: %+v", b)
 	}

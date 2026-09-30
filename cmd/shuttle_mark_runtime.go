@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -19,8 +20,7 @@ var (
 // shuttle.runtime, preserving every config sibling and every unspecified runtime
 // key. It is felt's single channel for the daemon's runtime writes (the dispatch
 // marker, the re-arm conclude) — the daemon shells this instead of editing the
-// fiber .md itself, so ALL runtime nesting lives in felt's yaml.Node engine, not
-// in daemon-side text surgery.
+// fiber .md itself, so runtime nesting stays in Shuttle's YAML-node facet API.
 //
 // Unlike `handoff` (the worker's exit ritual, which also ends the tmux session),
 // mark-runtime only writes the fields — no session management. An empty flag
@@ -61,7 +61,7 @@ touches tmux.`,
 			if !cmd.Flags().Changed(fl.flag) {
 				continue
 			}
-			if err := f.SetShuttleRuntimeField(fl.key, fl.val); err != nil {
+			if err := shuttle.SetRuntimeField(f, fl.key, fl.val); err != nil {
 				return err
 			}
 			set = true

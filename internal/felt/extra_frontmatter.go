@@ -242,9 +242,8 @@ func mappingScalar(mapping *yaml.Node, key string) string {
 // setMappingScalar sets key=value as a plain string scalar inside a mapping node
 // IN PLACE — replacing the existing value node (whatever its prior kind) or
 // appending a new key/value pair at the end. It mutates only the one key; every
-// sibling key and its node identity is preserved, which is what lets a config
-// edit ride past the daemon-owned runtime keys without touching them. The
-// caller must pass a real mapping node.
+// sibling key and its node identity is preserved, so callers can update one
+// field without disturbing other metadata. The caller must pass a real mapping node.
 func setMappingScalar(mapping *yaml.Node, key, value string) {
 	if mapping == nil || mapping.Kind != yaml.MappingNode {
 		return
@@ -283,11 +282,9 @@ func removeMappingKey(mapping *yaml.Node, key string) bool {
 
 // setMappingNode sets key=value inside mapping in place, encoding value to a YAML
 // node of its natural type (bool stays !!bool, int stays !!int, string stays
-// !!str) so a typed config field round-trips with the right type. A nil value
-// removes the key/value pair entirely — mirroring `omitempty`, so a cleared axis
-// (effort "", chrome false) drops from the block rather than persisting as a
-// zero. Like setMappingScalar it preserves every sibling and the node identity of
-// an existing key (mutating its value node in place).
+// !!str) so values round-trip with the right type. A nil value removes the
+// key/value pair entirely. Like setMappingScalar it preserves every sibling and
+// the node identity of an existing key (mutating its value node in place).
 func setMappingNode(mapping *yaml.Node, key string, value any) error {
 	if mapping == nil || mapping.Kind != yaml.MappingNode {
 		return nil
@@ -309,6 +306,26 @@ func setMappingNode(mapping *yaml.Node, key string, value any) error {
 		&encoded,
 	)
 	return nil
+}
+
+// MappingValueNode returns the value node for key in a YAML mapping.
+func MappingValueNode(mapping *yaml.Node, key string) *yaml.Node {
+	return mappingValueNode(mapping, key)
+}
+
+// SetMappingScalar sets key to a string scalar inside a YAML mapping.
+func SetMappingScalar(mapping *yaml.Node, key, value string) {
+	setMappingScalar(mapping, key, value)
+}
+
+// RemoveMappingKey removes key and its value from a YAML mapping.
+func RemoveMappingKey(mapping *yaml.Node, key string) bool {
+	return removeMappingKey(mapping, key)
+}
+
+// SetMappingNode sets key to a typed YAML value, or removes it when value is nil.
+func SetMappingNode(mapping *yaml.Node, key string, value any) error {
+	return setMappingNode(mapping, key, value)
 }
 
 func fragmentIDsFromNode(node *yaml.Node) []string {

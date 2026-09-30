@@ -16,8 +16,8 @@ import (
 
 // shuttleRuntimeMap decodes the fiber's shuttle.runtime sub-mapping into a
 // plain map for assertions, mirroring the nested-write contract
-// SetShuttleRuntimeField (internal/felt/shuttle.go) establishes: runtime
-// fields live under shuttle.runtime, never as flat shuttle siblings.
+// shuttle.SetRuntimeField establishes that runtime fields live under
+// shuttle.runtime, never as flat shuttle siblings.
 func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
 	t.Helper()
 	node, ok := f.ExtraFields["shuttle"]

@@ -103,9 +103,6 @@ included; --limit caps it only when given.`,
 					hit.Body = ""
 				}
 			}
-			if err := attachShuttleResolution(feltsOf(hits)...); err != nil {
-				return err
-			}
 			return outputJSON(hits)
 		}
 
@@ -174,14 +171,6 @@ func (h findHit) MarshalJSON() ([]byte, error) {
 	}
 	fields["store"] = store
 	return json.Marshal(fields)
-}
-
-func feltsOf(hits []findHit) []*felt.Felt {
-	felts := make([]*felt.Felt, 0, len(hits))
-	for _, hit := range hits {
-		felts = append(felts, hit.Felt)
-	}
-	return felts
 }
 
 // limitOuter trims the outer block to --limit. apply is false for a wire that

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 func configureRemoteLifecycleTest(t *testing.T) {
@@ -311,7 +312,7 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 			if fiber.Status != tc.status {
 				t.Fatalf("remote lifecycle verb mutated status in the mirror for %s", tc.id)
 			}
-			if !fiber.HasShuttleFacet() {
+			if !shuttle.HasFacet(fiber) {
 				t.Fatalf("remote lifecycle verb removed the shuttle block from the mirror for %s", tc.id)
 			}
 		})

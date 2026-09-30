@@ -99,12 +99,6 @@ resolution and uses <slug> as spelled.`,
 		// orders a never-edited fiber by when it was born, not file mtime.
 		f.Touch(f.CreatedAt)
 
-		// felt owns the shuttle: facet's schema — validate it before the block
-		// reaches disk. A no-op for a pure note (the optional-facet invariant).
-		if err := f.ValidateShuttleFacet(); err != nil {
-			return err
-		}
-
 		if err := storage.Write(f); err != nil {
 			return err
 		}

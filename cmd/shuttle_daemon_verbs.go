@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 			fields["user_message"] = message
 		}
 		if fiber, _, _, resolveErr := shuttleResolveFiberRef(args[0], true); resolveErr == nil {
-			if block, ok, blockErr := fiber.ShuttleBlock(); blockErr != nil {
+			if block, ok, blockErr := shuttle.BlockOf(fiber); blockErr != nil {
 				return blockErr
 			} else if ok && block != nil {
 				owner, ownerErr := routeOwnerForCommand(cmd, args, block.Host)

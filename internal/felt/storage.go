@@ -509,8 +509,8 @@ func (s *Storage) CheckAvailableID(id string) error {
 }
 
 // Write saves a felt to disk. The file is replaced atomically, so a
-// concurrent reader — another felt, the daemon's poll — sees the old document
-// or the new one, never a truncated file. A felt without an intrinsic id is
+// concurrent reader sees the old document or the new one, never a truncated
+// file. A felt without an intrinsic id is
 // given a fresh ULID first (see WriteFiberFile), so f.UID matches the file.
 func (s *Storage) Write(f *Felt) error {
 	if f == nil {
@@ -1300,9 +1300,8 @@ func (s *Storage) ListMetadata() ([]*Felt, error) {
 
 // ListMetadataHavingFrontmatterFields returns metadata for fibers whose raw
 // frontmatter contains all requested top-level keys. It is a narrow listing
-// path for machine consumers that need only one tool-owned namespace (for
-// example, every fiber with a `shuttle:` block) and should not pay a full YAML
-// parse for unrelated fibers.
+// path for machine consumers that need only one namespace and should not pay a
+// full YAML parse for unrelated fibers.
 func (s *Storage) ListMetadataHavingFrontmatterFields(fields []string) ([]*Felt, error) {
 	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, false, fields)
 }

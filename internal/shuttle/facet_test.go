@@ -1,4 +1,4 @@
-package felt
+package shuttle
 
 import (
 	"encoding/json"
@@ -6,75 +6,72 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/felt"
 	"gopkg.in/yaml.v3"
 )
 
 // fiberWithShuttleNode plants a raw yaml.Node as the shuttle: ExtraField,
 // bypassing SetExtraField's mapping wrapper — so a degenerate (scalar/null/
 // sequence) shuttle value can be exercised.
-func fiberWithShuttleNode(t *testing.T, node *yaml.Node) *Felt {
+func fiberWithShuttleNode(t *testing.T, node *yaml.Node) *felt.Felt {
 	t.Helper()
-	f, err := New("test-fiber", "Test Fiber")
+	f, err := felt.New("test-fiber", "Test Fiber")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	f.ExtraFields = map[string]*yaml.Node{ShuttleFacetKey: node}
-	f.ExtraFieldOrder = []string{ShuttleFacetKey}
+	f.ExtraFields = map[string]*yaml.Node{FacetKey: node}
+	f.ExtraFieldOrder = []string{FacetKey}
 	return f
 }
 
-// TestShuttleFacet_NonMappingIsNotAFacet proves a degenerate shuttle: value (a
-// scalar, null, or sequence — not a YAML mapping) is treated as a pure
-// ExtraField: felt does not interpret it, never validates or resolves it, and —
-// critically — never crashes or fails a read on it (the daemon polls felt ls
-// --json over the whole loom; one malformed block must not take it down).
+// TestShuttleFacet_NonMappingIsNotAFacet checks that scalar, null, and sequence
+// values stay opaque to Shuttle's facet decoder and JSON decorator.
 func TestShuttleFacet_NonMappingIsNotAFacet(t *testing.T) {
 	cases := map[string]*yaml.Node{
 		"scalar":   {Kind: yaml.ScalarNode, Tag: "!!str", Value: "just-a-string"},
 		"null":     {Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"},
 		"sequence": {Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "a"}}},
 	}
-	reg, err := shuttle.LoadAgentRegistry()
+	reg, err := LoadAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
 	for name, node := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := fiberWithShuttleNode(t, node)
-			if f.HasShuttleFacet() {
+			if HasFacet(f) {
 				t.Fatal("a non-mapping shuttle value must not count as a facet")
 			}
-			if _, ok, err := f.ShuttleBlock(); ok || err != nil {
-				t.Fatalf("ShuttleBlock: ok=%v err=%v, want false/nil", ok, err)
+			if _, ok, err := BlockOf(f); ok || err != nil {
+				t.Fatalf("BlockOf: ok=%v err=%v, want false/nil", ok, err)
 			}
-			if err := f.ValidateShuttleFacet(); err != nil {
+			if err := ValidateFacet(f); err != nil {
 				t.Fatalf("validation must be a no-op on a non-facet, got: %v", err)
 			}
 			// The read path must not panic or error, and must attach nothing.
-			if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
-				t.Fatalf("AttachShuttleResolution must not fail on a non-facet, got: %v", err)
+			if err := Resolve(f, reg, time.Now()); err != nil {
+				t.Fatalf("Resolve must not fail on a non-facet, got: %v", err)
 			}
-			if _, ok := f.ResolvedShuttle(); ok {
+			if _, ok := f.JSONField(FacetKey); ok {
 				t.Fatal("a non-facet must attach no resolution")
 			}
 			// And the raw value still round-trips through MarshalJSON unchanged.
 			out := marshalShuttle(t, f)
-			if _, ok := out[ShuttleFacetKey]; !ok {
+			if _, ok := out[FacetKey]; !ok {
 				t.Fatal("the raw shuttle value must still emit (opaque round-trip)")
 			}
 		})
 	}
 }
 
-func shuttleFiber(t *testing.T, block map[string]any) *Felt {
+func shuttleFiber(t *testing.T, block map[string]any) *felt.Felt {
 	t.Helper()
-	f, err := New("test-fiber", "Test Fiber")
+	f, err := felt.New("test-fiber", "Test Fiber")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
+		if err := f.SetExtraField(FacetKey, block); err != nil {
 			t.Fatalf("SetExtraField: %v", err)
 		}
 	}
@@ -83,23 +80,23 @@ func shuttleFiber(t *testing.T, block map[string]any) *Felt {
 
 func TestShuttleFacet_PureNoteIsNoOp(t *testing.T) {
 	f := shuttleFiber(t, nil)
-	if f.HasShuttleFacet() {
+	if HasFacet(f) {
 		t.Fatal("a fiber with no shuttle: block must not report a facet")
 	}
-	if _, ok, err := f.ShuttleBlock(); ok || err != nil {
-		t.Fatalf("ShuttleBlock on a pure note: ok=%v err=%v, want false/nil", ok, err)
+	if _, ok, err := BlockOf(f); ok || err != nil {
+		t.Fatalf("BlockOf on a pure note: ok=%v err=%v, want false/nil", ok, err)
 	}
-	if err := f.ValidateShuttleFacet(); err != nil {
+	if err := ValidateFacet(f); err != nil {
 		t.Fatalf("pure note must validate as a no-op, got: %v", err)
 	}
 }
 
 func TestShuttleFacet_ValidOneshot(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "claude-opus", "host": "somehost"})
-	if !f.HasShuttleFacet() {
+	if !HasFacet(f) {
 		t.Fatal("expected a shuttle facet")
 	}
-	if err := f.ValidateShuttleFacet(); err != nil {
+	if err := ValidateFacet(f); err != nil {
 		t.Fatalf("valid oneshot must pass, got: %v", err)
 	}
 }
@@ -110,41 +107,39 @@ func TestShuttleFacet_ValidStanding(t *testing.T) {
 		"agent":    "claude-sonnet",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	})
-	if err := f.ValidateShuttleFacet(); err != nil {
+	if err := ValidateFacet(f); err != nil {
 		t.Fatalf("valid standing must pass, got: %v", err)
 	}
 }
 
 func TestShuttleFacet_RejectsBadKind(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{"kind": "bogus"})
-	err := f.ValidateShuttleFacet()
+	err := ValidateFacet(f)
 	if err == nil || !strings.Contains(err.Error(), "kind") {
 		t.Fatalf("bad kind must fail mentioning kind, got: %v", err)
 	}
 }
 
-// A retired agent id (a closed constitution that still says `agent: codex`)
-// must never block a content write: the agent is resolved only where the block
-// is armed or dispatched.
+// Facet schema validation does not resolve an agent identity; Shuttle resolves
+// agents where a block is armed or dispatched.
 func TestShuttleFacet_ToleratesUnknownAgent(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "no-such-agent"})
-	if err := f.ValidateShuttleFacet(); err != nil {
-		t.Fatalf("unknown agent must not fail a content write, got: %v", err)
+	if err := ValidateFacet(f); err != nil {
+		t.Fatalf("unknown agent must not fail facet validation, got: %v", err)
 	}
 }
 
 func TestShuttleFacet_StandingRequiresSchedule(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{"kind": "standing", "agent": "claude-sonnet"})
-	err := f.ValidateShuttleFacet()
+	err := ValidateFacet(f)
 	if err == nil || !strings.Contains(err.Error(), "schedule") {
 		t.Fatalf("standing without a schedule must fail mentioning schedule, got: %v", err)
 	}
 }
 
 func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
-	// The daemon and shuttle-ctl write continuation/runtime fields as flat
-	// siblings of the config keys. felt's validation must accept a block that
-	// carries them, and the typed view must ignore them (they ride opaquely).
+	// The daemon writes continuation/runtime fields as flat siblings of the
+	// config keys. Facet validation accepts them, and the typed view ignores them.
 	f := shuttleFiber(t, map[string]any{
 		"kind":          "oneshot",
 		"agent":         "claude-opus",
@@ -153,36 +148,33 @@ func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
 		"handed_off_at": "2026-06-21T01:00:00Z",
 		"run_id":        "adhoc-xyz",
 	})
-	if err := f.ValidateShuttleFacet(); err != nil {
+	if err := ValidateFacet(f); err != nil {
 		t.Fatalf("a block carrying runtime fields must validate, got: %v", err)
 	}
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := BlockOf(f)
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if b.Kind != "oneshot" || b.Agent != "claude-opus" {
 		t.Fatalf("typed view should decode only config fields, got: %+v", b)
 	}
 }
 
-// TestSetShuttleField_PreservesRuntimeKeys is the load-bearing test for the
-// Stage-3 write primitive: stamping a single config/runtime field (as a worker's
-// `handoff` does, or `set-model`) must leave every sibling key — especially the
-// daemon-owned continuation fields — exactly in place, and survive a full
-// Marshal -> Parse round-trip through the on-disk frontmatter format.
-func TestSetShuttleField_PreservesRuntimeKeys(t *testing.T) {
+// TestSetField_PreservesRuntimeKeys checks that writing one config/runtime key
+// preserves sibling fields and survives a Marshal -> Parse round-trip.
+func TestSetField_PreservesRuntimeKeys(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
 	// A worker's clean-exit stamp.
-	if err := f.SetShuttleField("handed_off_at", "2026-06-21T01:00:00Z"); err != nil {
-		t.Fatalf("SetShuttleField(handed_off_at): %v", err)
+	if err := SetField(f, "handed_off_at", "2026-06-21T01:00:00Z"); err != nil {
+		t.Fatalf("SetField(handed_off_at): %v", err)
 	}
 	// A config edit (set-model) on the same block.
-	if err := f.SetShuttleField("agent", "claude-sonnet"); err != nil {
-		t.Fatalf("SetShuttleField(agent): %v", err)
+	if err := SetField(f, "agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetField(agent): %v", err)
 	}
 
 	// Round-trip through the on-disk format to prove durability, not just memory.
@@ -190,7 +182,7 @@ func TestSetShuttleField_PreservesRuntimeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	f2, err := Parse(f.ID, raw)
+	f2, err := felt.Parse(f.ID, raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -209,11 +201,9 @@ func TestSetShuttleField_PreservesRuntimeKeys(t *testing.T) {
 	}
 }
 
-// TestSetShuttleRuntimeField_NestsAndPreserves proves the Stage-5 nested writer:
-// runtime fields land under shuttle.runtime (not as flat siblings), a config edit
-// rides past them untouched, an empty value removes a nested key, and it all
-// survives the on-disk round-trip.
-func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
+// TestSetRuntimeField_NestsAndPreserves checks that runtime keys nest below
+// shuttle.runtime, config edits preserve them, and empty values remove keys.
+func TestSetRuntimeField_NestsAndPreserves(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
 	})
@@ -224,12 +214,12 @@ func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
 		"session_uuid":  "abc-123",
 		"run_id":        "20260621T000000Z",
 	} {
-		if err := f.SetShuttleRuntimeField(k, v); err != nil {
-			t.Fatalf("SetShuttleRuntimeField(%s): %v", k, err)
+		if err := SetRuntimeField(f, k, v); err != nil {
+			t.Fatalf("SetRuntimeField(%s): %v", k, err)
 		}
 	}
-	if err := f.SetShuttleField("agent", "claude-sonnet"); err != nil {
-		t.Fatalf("SetShuttleField(agent): %v", err)
+	if err := SetField(f, "agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetField(agent): %v", err)
 	}
 
 	// Round-trip through the on-disk format to prove durability, not just memory.
@@ -237,7 +227,7 @@ func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	f2, err := Parse(f.ID, raw)
+	f2, err := felt.Parse(f.ID, raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -268,8 +258,8 @@ func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
 	}
 
 	// Empty value removes a nested key (omitempty), leaving the others.
-	if err := f2.SetShuttleRuntimeField("session_uuid", ""); err != nil {
-		t.Fatalf("SetShuttleRuntimeField(clear): %v", err)
+	if err := SetRuntimeField(f2, "session_uuid", ""); err != nil {
+		t.Fatalf("SetRuntimeField(clear): %v", err)
 	}
 	sh2 := marshalShuttle(t, roundTrip(t, f2))["shuttle"].(map[string]any)
 	rt2 := sh2["runtime"].(map[string]any)
@@ -283,63 +273,60 @@ func TestSetShuttleRuntimeField_NestsAndPreserves(t *testing.T) {
 
 // roundTrip marshals f to bytes and re-parses it — proves a mutation persists on
 // disk, not just in the in-memory node.
-func roundTrip(t *testing.T, f *Felt) *Felt {
+func roundTrip(t *testing.T, f *felt.Felt) *felt.Felt {
 	t.Helper()
 	raw, err := f.Marshal()
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	f2, err := Parse(f.ID, raw)
+	f2, err := felt.Parse(f.ID, raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	return f2
 }
 
-// TestSetShuttleField_NoBlockErrors proves the primitive refuses to invent a
-// block: a pure note (or a fiber whose block was uninstalled) has no mapping to
-// set a field on, and the caller must build one via SetExtraField instead.
-func TestSetShuttleField_NoBlockErrors(t *testing.T) {
+// TestSetField_NoBlockErrors checks that field writes require a mapping-valued
+// facet.
+func TestSetField_NoBlockErrors(t *testing.T) {
 	f := shuttleFiber(t, nil)
-	if err := f.SetShuttleField("handed_off_at", "2026-06-21T01:00:00Z"); err == nil {
-		t.Fatal("SetShuttleField on a pure note must error, got nil")
+	if err := SetField(f, "handed_off_at", "2026-06-21T01:00:00Z"); err == nil {
+		t.Fatal("SetField on a pure note must error, got nil")
 	}
 }
 
-// TestSetShuttleNodeField_TypedAndDelete proves the typed counterpart writes a
-// real !!bool (so the daemon/validation decode chrome correctly), drops a key on
-// a nil value (omitempty), and — like SetShuttleField — preserves the runtime
-// siblings across a Marshal -> Parse round-trip. This is the set-agent primitive.
-func TestSetShuttleNodeField_TypedAndDelete(t *testing.T) {
+// TestSetNodeField_TypedAndDelete checks typed scalar values, key removal, and
+// preservation of runtime siblings across a Marshal -> Parse round-trip.
+func TestSetNodeField_TypedAndDelete(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
 	// chrome as a real bool; effort cleared (deleted); agent replaced.
-	if err := f.SetShuttleNodeField("chrome", true); err != nil {
-		t.Fatalf("SetShuttleNodeField(chrome): %v", err)
+	if err := SetNodeField(f, "chrome", true); err != nil {
+		t.Fatalf("SetNodeField(chrome): %v", err)
 	}
-	if err := f.SetShuttleNodeField("effort", nil); err != nil {
-		t.Fatalf("SetShuttleNodeField(effort, nil): %v", err)
+	if err := SetNodeField(f, "effort", nil); err != nil {
+		t.Fatalf("SetNodeField(effort, nil): %v", err)
 	}
-	if err := f.SetShuttleNodeField("agent", "claude-sonnet"); err != nil {
-		t.Fatalf("SetShuttleNodeField(agent): %v", err)
+	if err := SetNodeField(f, "agent", "claude-sonnet"); err != nil {
+		t.Fatalf("SetNodeField(agent): %v", err)
 	}
 
 	raw, err := f.Marshal()
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	f2, err := Parse(f.ID, raw)
+	f2, err := felt.Parse(f.ID, raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	// chrome must decode to a typed bool through the typed Block (not a string).
-	b, ok, err := f2.ShuttleBlock()
+	b, ok, err := BlockOf(f2)
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if !b.Chrome {
 		t.Fatalf("chrome must decode to bool true, got block %+v", b)
@@ -361,37 +348,35 @@ func TestSetShuttleNodeField_TypedAndDelete(t *testing.T) {
 	}
 }
 
-// TestSetShuttleConfig_PreservesRuntimeKeys is the regression for the repeat
-// runtime-key clobber: re-installing a block's config (a recurrence redefinition)
-// must keep the daemon-owned continuation siblings, drop a cleared config key, and
-// apply the new config — the felt analogue of shuttle's mergeUnknownShuttleFields.
-func TestSetShuttleConfig_PreservesRuntimeKeys(t *testing.T) {
+// TestSetConfig_PreservesRuntimeKeys checks that replacing block configuration
+// retains daemon-owned continuation fields and drops omitted config keys.
+func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
 		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
 	// Redefine as a standing role with a new agent and no effort.
-	newBlock := &shuttle.Block{
+	newBlock := &Block{
 		Kind: "standing", Host: "h", ProjectDir: "/tmp/x", Agent: "claude-sonnet",
-		Schedule: &shuttle.Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"},
+		Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"},
 	}
-	if err := f.SetShuttleConfig(newBlock); err != nil {
-		t.Fatalf("SetShuttleConfig: %v", err)
+	if err := SetConfig(f, newBlock); err != nil {
+		t.Fatalf("SetConfig: %v", err)
 	}
 
 	raw, err := f.Marshal()
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	f2, err := Parse(f.ID, raw)
+	f2, err := felt.Parse(f.ID, raw)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	b, ok, err := f2.ShuttleBlock()
+	b, ok, err := BlockOf(f2)
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if b.Kind != "standing" || b.Agent != "claude-sonnet" || b.Schedule == nil || b.Schedule.Expr != "0 9 * * 1-5" {
 		t.Fatalf("new config not applied: %+v", b)
@@ -405,29 +390,29 @@ func TestSetShuttleConfig_PreservesRuntimeKeys(t *testing.T) {
 	}
 }
 
-// TestSetShuttleConfig_FreshInstall installs wholesale on a fiber with no block.
-func TestSetShuttleConfig_FreshInstall(t *testing.T) {
+// TestSetConfig_FreshInstall installs a block on a fiber without a facet.
+func TestSetConfig_FreshInstall(t *testing.T) {
 	f := shuttleFiber(t, nil)
-	if err := f.SetShuttleConfig(&shuttle.Block{Kind: "oneshot", Host: "h", Agent: "claude-opus"}); err != nil {
-		t.Fatalf("SetShuttleConfig (fresh): %v", err)
+	if err := SetConfig(f, &Block{Kind: "oneshot", Host: "h", Agent: "claude-opus"}); err != nil {
+		t.Fatalf("SetConfig (fresh): %v", err)
 	}
-	if !f.HasShuttleFacet() {
-		t.Fatal("fresh SetShuttleConfig must install a facet")
+	if !HasFacet(f) {
+		t.Fatal("fresh SetConfig must install a facet")
 	}
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := BlockOf(f)
 	if err != nil || !ok || b.Kind != "oneshot" || b.Agent != "claude-opus" {
 		t.Fatalf("fresh block: ok=%v err=%v b=%+v", ok, err, b)
 	}
 }
 
-func marshalShuttle(t *testing.T, f *Felt) map[string]any {
+func marshalShuttle(t *testing.T, f *felt.Felt) map[string]any {
 	t.Helper()
-	reg, err := shuttle.LoadAgentRegistry()
+	reg, err := LoadAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
-	if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
-		t.Fatalf("AttachShuttleResolution: %v", err)
+	if err := Resolve(f, reg, time.Now()); err != nil {
+		t.Fatalf("Resolve: %v", err)
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {
@@ -440,7 +425,7 @@ func marshalShuttle(t *testing.T, f *Felt) map[string]any {
 	return out
 }
 
-func TestAttachShuttleResolution_AdditiveAndFlatPreserved(t *testing.T) {
+func TestResolve_AdditiveAndFlatPreserved(t *testing.T) {
 	// The daemon reads the flat config+runtime fields directly off `shuttle`.
 	// Resolution must leave every one of them in place and add ONLY `resolved`.
 	f := shuttleFiber(t, map[string]any{
@@ -470,7 +455,7 @@ func TestAttachShuttleResolution_AdditiveAndFlatPreserved(t *testing.T) {
 	}
 }
 
-func TestAttachShuttleResolution_StandingNextDue(t *testing.T) {
+func TestResolve_StandingNextDue(t *testing.T) {
 	f := shuttleFiber(t, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
@@ -486,13 +471,13 @@ func TestAttachShuttleResolution_StandingNextDue(t *testing.T) {
 	}
 }
 
-func TestAttachShuttleResolution_PureNoteIsNoOp(t *testing.T) {
+func TestResolve_PureNoteIsNoOp(t *testing.T) {
 	f := shuttleFiber(t, nil)
-	reg, _ := shuttle.LoadAgentRegistry()
-	if err := f.AttachShuttleResolution(reg, time.Now()); err != nil {
-		t.Fatalf("AttachShuttleResolution on a note: %v", err)
+	reg, _ := LoadAgentRegistry()
+	if err := Resolve(f, reg, time.Now()); err != nil {
+		t.Fatalf("Resolve on a note: %v", err)
 	}
-	if _, ok := f.ResolvedShuttle(); ok {
+	if _, ok := f.JSONField(FacetKey); ok {
 		t.Fatal("a pure note must attach no resolution")
 	}
 	out := marshalShuttle(t, f)

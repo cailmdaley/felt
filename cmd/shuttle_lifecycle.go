@@ -19,7 +19,7 @@ import (
 // status (the sole dispatch gate) is f.Status, the human verdict is the
 // top-level `tempered` ExtraField, closed-at is f.ClosedAt; only the config
 // verbs (set-model/set-agent/reshape) touch the shuttle: block, and they do it
-// surgically (SetShuttleField / SetShuttleNodeField) so the daemon-owned runtime
+// surgically (shuttle.SetField / shuttle.SetNodeField) so the daemon-owned runtime
 // keys ride through untouched. Every write passes the ownership guard. felt is
 // the one writer of every lifecycle transition: resume and accept hop through
 // the owning daemon, which runs the same verb with --local inside its Poller
@@ -66,7 +66,7 @@ func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt
 	if err != nil {
 		return nil, nil, nil, felt.Ref{}, nil, err
 	}
-	block, ok, err := f.ShuttleBlock()
+	block, ok, err := shuttle.BlockOf(f)
 	if err != nil {
 		unlock()
 		return nil, nil, nil, felt.Ref{}, nil, err
@@ -298,7 +298,7 @@ func rearmStanding(f *felt.Felt) error {
 	if err := unclose(f, felt.StatusActive); err != nil {
 		return err
 	}
-	if err := f.SetShuttleRuntimeField("handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("stamping handed_off_at: %w", err)
 	}
 	return nil
@@ -318,7 +318,7 @@ func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Bloc
 	if err != nil {
 		return false, nil
 	}
-	block, ok, err := f.ShuttleBlock()
+	block, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok || !qualifies(f, block) || ensureOwnedHere(f, query) != nil {
 		return false, nil
 	}
@@ -338,15 +338,15 @@ func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Bloc
 }
 
 // checkArmable is the arming gate: every verb that makes a fiber dispatchable
-// (resume, reopen, accept, edit -s active) holds the block to what an armed
+// (resume, reopen, accept) holds the block to what an armed
 // install requires. It needs a project_dir — without one the daemon still
 // dispatches the fiber but starts its worker in the felt store instead of the
 // checkout the work belongs to, the fallback an armed install never takes —
 // and an agent the registry resolves, so a retired id (kept on closed fibers
 // as history — content edits never check it) is refused with the registry's
 // list rather than failing later inside the daemon. verb is the lifecycle
-// verb that arms this fiber from where it stands (armVerb), which the refusal
-// names with the --project-dir that satisfies it.
+// verb that arms this fiber from where it stands, which the refusal names with
+// the --project-dir that satisfies it.
 func checkArmable(fiberID, verb string, block *shuttle.Block) error {
 	if strings.TrimSpace(block.ProjectDir) == "" {
 		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it as you arm it: felt shuttle %s %s --project-dir <dir>)", fiberID, verb, fiberID)
@@ -368,16 +368,6 @@ func checkArmable(fiberID, verb string, block *shuttle.Block) error {
 	return nil
 }
 
-// armVerb names the lifecycle verb that arms a fiber standing at status:
-// reopen for a closed fiber, except a standing role awaiting review, which
-// resume re-arms through its daemon (concluding the run); resume otherwise.
-func armVerb(status string, f *felt.Felt, block *shuttle.Block) string {
-	if status == felt.StatusClosed && !(block.Kind == "standing" && readTempered(f) == nil) {
-		return "reopen"
-	}
-	return "resume"
-}
-
 // setProjectDirFlag applies an arming verb's --project-dir, when given, to
 // f's shuttle: block and to block, so the arming gate reads the block as it
 // will be written.
@@ -389,7 +379,7 @@ func setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shut
 	if err != nil {
 		return err
 	}
-	if err := f.SetShuttleField("project_dir", projectDir); err != nil {
+	if err := shuttle.SetField(f, "project_dir", projectDir); err != nil {
 		return err
 	}
 	block.ProjectDir = projectDir
@@ -407,7 +397,7 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 	if projectDir == "" {
 		return fmt.Errorf("--project-dir is required")
 	}
-	if err := f.SetShuttleField("project_dir", projectDir); err != nil {
+	if err := shuttle.SetField(f, "project_dir", projectDir); err != nil {
 		return err
 	}
 	block.ProjectDir = projectDir
@@ -945,20 +935,20 @@ func (a agentAxes) write(f *felt.Felt, reg *shuttle.AgentRegistry) error {
 		return fmt.Errorf("surface app is supported only by Codex agents, got %q (to move this block off the app: felt shuttle set-agent <fiber> %s --surface cli)", base.ID, name)
 	}
 
-	if err := f.SetShuttleNodeField("agent", axisValue(a.agent)); err != nil {
+	if err := shuttle.SetNodeField(f, "agent", axisValue(a.agent)); err != nil {
 		return err
 	}
-	if err := f.SetShuttleNodeField("effort", axisValue(a.effort)); err != nil {
+	if err := shuttle.SetNodeField(f, "effort", axisValue(a.effort)); err != nil {
 		return err
 	}
 	var chrome any
 	if a.chrome {
 		chrome = true
 	}
-	if err := f.SetShuttleNodeField("chrome", chrome); err != nil {
+	if err := shuttle.SetNodeField(f, "chrome", chrome); err != nil {
 		return err
 	}
-	return f.SetShuttleNodeField("surface", axisValue(a.surface))
+	return shuttle.SetNodeField(f, "surface", axisValue(a.surface))
 }
 
 // axisValue maps a string axis to a typed-set value: an empty string deletes the
@@ -981,7 +971,7 @@ var (
 // whole block (re-resolving project_dir and host) and refuse a closed fiber,
 // so they cannot re-shape a role in Awaiting review; here kind (and, for a
 // standing role, the schedule) is set exactly the way set-model sets agent:
-// f.SetShuttleField on the live node, so the daemon-owned runtime: keys ride
+// shuttle.SetField on the live node, so the daemon-owned runtime: keys ride
 // through and nothing else on the block or the fiber is disturbed.
 //
 // Like every other config verb, it NEVER touches felt status / closed_at /
@@ -1095,14 +1085,14 @@ pause / resume / close / reopen for that.`,
 
 		// Surgical writes: kind as a scalar, schedule as a typed sub-mapping — or
 		// deleted (nil) for a schedule-less kind.
-		if err := f.SetShuttleField("kind", kind); err != nil {
+		if err := shuttle.SetField(f, "kind", kind); err != nil {
 			return err
 		}
 		if candidate.Schedule != nil {
-			if err := f.SetShuttleNodeField("schedule", candidate.Schedule); err != nil {
+			if err := shuttle.SetNodeField(f, "schedule", candidate.Schedule); err != nil {
 				return err
 			}
-		} else if err := f.SetShuttleNodeField("schedule", nil); err != nil {
+		} else if err := shuttle.SetNodeField(f, "schedule", nil); err != nil {
 			return err
 		}
 		if err := st.Write(f); err != nil {
@@ -1157,7 +1147,7 @@ and a live worker is left running.`,
 		if err != nil {
 			return err
 		}
-		if !f.HasShuttleFacet() {
+		if !shuttle.HasFacet(f) {
 			fmt.Printf("fiber %s has no shuttle: block (nothing to do)\n", args[0])
 			return nil
 		}
@@ -1166,7 +1156,7 @@ and a live worker is left running.`,
 			return err
 		}
 		defer unlock()
-		block, ok, err := f.ShuttleBlock()
+		block, ok, err := shuttle.BlockOf(f)
 		if err != nil {
 			return err
 		}
@@ -1184,7 +1174,7 @@ and a live worker is left running.`,
 		if err := ensureOwnedHere(f, args[0]); err != nil {
 			return err
 		}
-		if err := f.SetExtraField(felt.ShuttleFacetKey, nil); err != nil {
+		if err := f.SetExtraField(shuttle.FacetKey, nil); err != nil {
 			return fmt.Errorf("removing shuttle block: %w", err)
 		}
 		if err := st.Write(f); err != nil {

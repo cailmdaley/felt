@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // resolveOwnHost determines the host id to stamp on a freshly installed block,
@@ -250,7 +251,7 @@ func (e ownerMismatchError) Error() string {
 // through routeOwnerForCommand instead, which refuses with this same error
 // under --local.
 func ensureOwnedHere(f *felt.Felt, fiber string) error {
-	block, ok, err := f.ShuttleBlock()
+	block, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok || block == nil {
 		return nil
 	}

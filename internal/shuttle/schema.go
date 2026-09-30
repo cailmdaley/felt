@@ -1,9 +1,6 @@
-// Package shuttle is felt's owned schema for the optional `shuttle:` facet a
-// fiber can carry. A fiber with no `shuttle:` block is a pure note; a fiber that
-// carries one is a constitution that the Shuttle daemon can dispatch, and the
-// block's shape is validated here. felt is the schema authority: it validates on
-// add/edit and resolves agents in `felt show -j`. The networked daemon owns
-// dispatch and the watcher; the data model — this block — lives with felt.
+// Package shuttle owns the schema and behavior for the optional `shuttle:`
+// facet a fiber can carry. Felt stores the facet as opaque frontmatter; Shuttle
+// interprets and validates it for CLI and daemon operations.
 package shuttle
 
 import (
@@ -22,12 +19,10 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 
 // ---- Types -----------------------------------------------------------------
 
-// Block is the in-memory representation of the shuttle: YAML block. felt is the
-// schema authority for these fields (the share/schema.json that once mirrored
-// them is a stale doc artifact, not loaded at runtime). There is no enabled flag
-// and no review axis: a fiber is shuttle-managed iff it carries this block, and
-// it dispatches iff the felt-native status is "active". Lifecycle is status +
-// tempered, uniform across kinds.
+// Block is the in-memory representation of a Shuttle facet. There is no
+// enabled flag and no review axis: a fiber is shuttle-managed iff it carries
+// this block, and it dispatches iff its status is "active". Lifecycle is status
+// plus tempered, uniform across kinds.
 type Block struct {
 	Kind       string `json:"kind" yaml:"kind"`
 	Host       string `json:"host,omitempty" yaml:"host,omitempty"`

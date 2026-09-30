@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -120,7 +121,7 @@ func canonicalPath(p string) (string, error) {
 }
 
 // stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the
-// fiber's frontmatter, surgically (SetShuttleRuntimeField touches only that one
+// fiber's frontmatter, surgically (shuttle.SetRuntimeField touches only that one
 // nested key, so the daemon-written session_uuid / dispatched_at ride through),
 // and writes atomically. This is the clean-exit
 // signal: the daemon compares handed_off_at against dispatched_at to decide
@@ -153,7 +154,7 @@ func stampHandedOff(path string) (string, error) {
 		return "", err
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := f.SetShuttleRuntimeField("handed_off_at", at); err != nil {
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
 		return "", err
 	}
 	data, err := f.Marshal()

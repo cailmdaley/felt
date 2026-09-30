@@ -8,17 +8,12 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// attachShuttleResolution resolves the shuttle: facet on each fiber that carries
-// one, for the JSON emit paths (felt show -j / ls --json). The agent registry is
-// loaded once, and only when at least one fiber actually has a facet, so a query
-// over pure notes pays nothing. Fibers without a facet are untouched. Per-fiber
-// resolution errors (e.g. an unknown agent on a legacy block) are non-fatal —
-// AttachShuttleResolution emits the flat block without a resolved sub-key — so a
-// read never fails on a stale block; only a corrupt block surfaces an error.
-func attachShuttleResolution(felts ...*felt.Felt) error {
+// resolveShuttleJSON decorates mapping-valued Shuttle facets for a Shuttle JSON
+// view. It loads the agent registry only when the result contains a facet.
+func resolveShuttleJSON(felts ...*felt.Felt) error {
 	hasFacet := false
 	for _, f := range felts {
-		if f.HasShuttleFacet() {
+		if shuttle.HasFacet(f) {
 			hasFacet = true
 			break
 		}
@@ -32,7 +27,7 @@ func attachShuttleResolution(felts ...*felt.Felt) error {
 	}
 	now := time.Now()
 	for _, f := range felts {
-		if err := f.AttachShuttleResolution(reg, now); err != nil {
+		if err := shuttle.Resolve(f, reg, now); err != nil {
 			return err
 		}
 	}

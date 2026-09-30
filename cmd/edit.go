@@ -27,10 +27,8 @@ var editCmd = &cobra.Command{
 	Use:   "edit <id>",
 	Short: "Change a fiber's native fields or scalar frontmatter",
 	Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
-stamps closed-at; -s open or -s active clears it. Setting active on a fiber
-with a shuttle: block that is not already active arms it for dispatch, so the
-block needs what every arming verb requires: an agent the registry resolves
-and a project_dir. For a change smaller than the whole body, edit the file.
+stamps closed-at; -s open or -s active clears it. Status changes do not alter
+project-owned frontmatter. For a change smaller than the whole body, edit the file.
 
 --set writes a top-level scalar to frontmatter felt does not own, read as
 YAML so true and 12 keep their types; native keys, empty values, and keys
@@ -67,7 +65,6 @@ own, structured ones included.`,
 		if cmd.Flags().Changed("name") {
 			f.Name = editName
 		}
-		statusBefore := f.Status
 		if cmd.Flags().Changed("status") {
 			if err := f.SetStatus(editStatus, time.Now()); err != nil {
 				return err
@@ -125,29 +122,6 @@ own, structured ones included.`,
 		// clone's recency at this moment rather than mtime. Stamped before
 		// Write so it lands in the file the mechanical event then hashes.
 		f.Touch(time.Now())
-
-		// felt owns the shuttle: facet's schema — validate it before the block
-		// reaches disk, so an invalid edit (or a round-tripped invalid block)
-		// fails loudly rather than persisting. A no-op for a pure note.
-		if err := f.ValidateShuttleFacet(); err != nil {
-			return err
-		}
-
-		// A status write that arms the fiber (status: active on a fiber
-		// carrying a shuttle: block that was not active) passes the same gate
-		// as every other arming verb — otherwise `edit -s active` could arm a
-		// fiber with no project_dir, or whose shuttle.agent has since been
-		// retired. Any other edit of an active fiber — a tag, an outcome, a
-		// worker writing to its own fiber — arms nothing, so it is not gated.
-		if f.Status == felt.StatusActive && statusBefore != felt.StatusActive {
-			if block, ok, err := f.ShuttleBlock(); err != nil {
-				return err
-			} else if ok {
-				if err := checkArmable(f.ID, armVerb(statusBefore, f, block), block); err != nil {
-					return err
-				}
-			}
-		}
 
 		if err := storage.Write(f); err != nil {
 			return err

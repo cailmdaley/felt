@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // runAgents executes a `felt shuttle agents …` invocation and returns stdout and
@@ -259,9 +261,9 @@ func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 		t.Fatalf("install with a user-registry agent: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "task")
-	b, ok, err := f.ShuttleBlock()
+	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {
-		t.Fatalf("ShuttleBlock: ok=%v err=%v", ok, err)
+		t.Fatalf("BlockOf: ok=%v err=%v", ok, err)
 	}
 	if b.Agent != "my-agent" {
 		t.Fatalf("agent = %q, want my-agent", b.Agent)
