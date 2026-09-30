@@ -106,7 +106,7 @@ export function buildKanbanResponseFromComposite(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
   );
-  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(feed.entries), nowMs);
+  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs);
 
   return {
     feltHost: feed.host,
@@ -627,7 +627,7 @@ function toCard(
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
     shuttleProjectDir: f.shuttleProjectDir,
-    inheritedProjectDir: inheritedProjectDir(f, dirs),
+    inheritedProjectDir: inheritedProjectDir(entry, dirs),
     nextLaunchAt: nextStandingLaunch(f, nowMs),
     storedHorizon: horizon.storedHorizon,
     effectiveHorizon: horizon.effectiveHorizon,
@@ -642,21 +642,23 @@ function toCard(
 }
 
 /**
- * Every declared `shuttle.project_dir` in the feed, keyed by owning host and
- * fiber id. A directory is a path on one machine, and the same slug can arrive
- * from several hosts (a git-synced store is served by every daemon that has
- * it), so the host is part of the key: one host's row never answers for
- * another's.
+ * Every declared `shuttle.project_dir` among the board's reconciled rows (one
+ * per fiber, the authoritative owner's — see `dedupeMirroredRows`), keyed by
+ * owning host, felt store and fiber id. A directory is a path on one machine,
+ * and a suggestion should come from the fiber's own tree: neither another
+ * host's copy of a slug nor a same-named fiber in another store on the same
+ * host answers for it.
  */
 export type ProjectDirIndex = Map<string, string>;
 
-const dirKey = (host: string, id: string): string => `${host}\u0000${id}`;
+const dirKey = (host: string, store: string, id: string): string =>
+  [host, store, id].join('\u0000');
 
 export function projectDirIndex(entries: CompositeEntry[]): ProjectDirIndex {
   const dirs: ProjectDirIndex = new Map();
-  for (const { fiber } of entries) {
+  for (const { fiber, feltStore } of entries) {
     if (fiber.shuttleHost && fiber.shuttleProjectDir) {
-      dirs.set(dirKey(fiber.shuttleHost, fiber.id), fiber.shuttleProjectDir);
+      dirs.set(dirKey(fiber.shuttleHost, feltStore, fiber.id), fiber.shuttleProjectDir);
     }
   }
   return dirs;
@@ -665,19 +667,20 @@ export function projectDirIndex(entries: CompositeEntry[]): ProjectDirIndex {
 /**
  * The nearest ancestor's `shuttle.project_dir` for a fiber whose block names
  * none — the directory the board suggests when a start is refused for want of
- * one. Ancestors are the fiber's id prefixes (`a/b/c` → `a/b` → `a`), and only
- * an ancestor owned by the fiber's own host counts. `undefined` when the fiber
- * declares its own directory, names no host, or no ancestor qualifies.
+ * one. Ancestors are the fiber's id prefixes (`a/b/c` → `a/b` → `a`) in the
+ * same felt store, owned by the same host. `undefined` when the fiber declares
+ * its own directory, names no host, or no ancestor qualifies.
  */
 export function inheritedProjectDir(
-  fiber: Fiber,
+  entry: CompositeEntry,
   dirs: ProjectDirIndex,
 ): InheritedProjectDir | undefined {
+  const { fiber, feltStore } = entry;
   const host = fiber.shuttleHost;
   if (fiber.shuttleProjectDir || !host) return undefined;
   for (let id = fiber.id; id.includes('/'); ) {
     id = id.slice(0, id.lastIndexOf('/'));
-    const path = dirs.get(dirKey(host, id));
+    const path = dirs.get(dirKey(host, feltStore, id));
     if (path) return { path, from: id };
   }
   return undefined;

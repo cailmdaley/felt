@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FiberDetailModal } from './FiberDetailModal.js'
-import type { Fiber } from './KanbanFiber.js'
 import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } from './KanbanModalShared.js'
 import { parseCompositeFeed, type CompositeEntry } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
@@ -113,27 +112,45 @@ describe('a refused start reads in the owning host’s words', () => {
 })
 
 describe('inheritedProjectDir', () => {
-  // Feed rows as the daemon serves them: `origin` is the serving host, and the
-  // block's `host` owns the fiber.
-  const row = (id: string, origin: string, shuttle: Record<string, unknown>, status = 'active') => ({
+  // Feed rows as the daemon serves them: `origin` is the serving host, the
+  // block's `host` owns the fiber, and `felt_store` is the store it lives in.
+  const row = (
+    id: string,
+    origin: string,
+    shuttle: Record<string, unknown>,
+    over: { status?: string; store?: string; uid?: string } = {},
+  ) => ({
     origin,
-    felt_store: `/stores/${origin}`,
+    felt_store: over.store ?? `/stores/${origin}`,
     path: `.felt/${id}.md`,
-    fiber: { id, name: id, status, created_at: '2026-01-01T00:00:00Z', shuttle: { kind: 'oneshot', ...shuttle } },
+    fiber: {
+      id,
+      uid: over.uid,
+      name: id,
+      status: over.status ?? 'active',
+      created_at: '2026-01-01T00:00:00Z',
+      shuttle: { kind: 'oneshot', ...shuttle },
+    },
   })
   const feed = (...rows: ReturnType<typeof row>[]) =>
     parseCompositeFeed({
       host: 'here',
       fibers: rows,
-      origins: { here: { kind: 'local', stale: false, fiber_count: rows.length } },
+      origins: {
+        here: { kind: 'local', stale: false, fiber_count: rows.length },
+        far: { kind: 'remote', stale: false, fiber_count: rows.length },
+      },
     })
-  const inherited = (entries: CompositeEntry[], id: string) => {
-    const f = entries.find((e) => e.fiber.id === id)?.fiber
-    expect(f).toBeDefined()
-    return inheritedProjectDir(f as Fiber, projectDirIndex(entries))
+  const inherited = (entries: CompositeEntry[], id: string, store?: string) => {
+    const entry = entries.find((e) => e.fiber.id === id && (!store || e.feltStore === store))
+    expect(entry).toBeDefined()
+    return inheritedProjectDir(entry as CompositeEntry, projectDirIndex(entries))
   }
+  const suggested = (...rows: ReturnType<typeof row>[]) =>
+    buildKanbanResponseFromComposite(feed(...rows)).now.awaitingReview.find((c) => c.id === 'a/b/c')
+      ?.inheritedProjectDir
 
-  it('takes the nearest ancestor on the same host', () => {
+  it('takes the nearest ancestor on the same host and store', () => {
     const { entries } = feed(
       row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
       row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
@@ -142,23 +159,31 @@ describe('inheritedProjectDir', () => {
     expect(inherited(entries, 'a/b/c')).toEqual({ path: '/srv/b', from: 'a/b' })
   })
 
-  it('never lets another host’s row of the same slug answer for this host', () => {
-    // The same `a/b` served by two hosts, the remote copy last: a slug-keyed
-    // map keeps only the remote row, whose directory is a path on the other
-    // machine.
-    const { entries } = feed(
-      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
-      row('a/b/c', 'here', { host: 'here' }, 'closed'),
-      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
-    )
-    expect(inherited(entries, 'a/b/c')).toEqual({ path: '/srv/b', from: 'a/b' })
+  it('reads the reconciled owner row, not whichever copy the feed listed last', () => {
+    // The same fiber (one uid) served by its owner and by a stale mirror whose
+    // copy (same store path) still carries an old directory; the board keeps
+    // the owner's row.
+    expect(suggested(
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }, { uid: '01KVBRFX0SV981X18845Z912Z3' }),
+      row('a/b/c', 'here', { host: 'here' }, { status: 'closed' }),
+      row('a/b', 'far', { host: 'here', project_dir: '/old/b' }, { uid: '01KVBRFX0SV981X18845Z912Z3', store: '/stores/here' }),
+    )).toEqual({ path: '/srv/b', from: 'a/b' })
+  })
 
-    const card = buildKanbanResponseFromComposite(feed(
+  it('never lets another host’s fiber of the same slug answer', () => {
+    expect(suggested(
       row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
-      row('a/b/c', 'here', { host: 'here' }, 'closed'),
+      row('a/b/c', 'here', { host: 'here' }, { status: 'closed' }),
       row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
-    )).now.awaitingReview.find((c) => c.id === 'a/b/c')
-    expect(card?.inheritedProjectDir).toEqual({ path: '/srv/b', from: 'a/b' })
+    )).toEqual({ path: '/srv/b', from: 'a/b' })
+  })
+
+  it('never lets another store on the same host answer', () => {
+    const { entries } = feed(
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/other' }, { store: '/stores/other' }),
+      row('a/b/c', 'here', { host: 'here' }, { store: '/stores/mine' }),
+    )
+    expect(inherited(entries, 'a/b/c', '/stores/mine')).toBeUndefined()
   })
 
   it('walks past an ancestor owned elsewhere and one missing from the feed', () => {
