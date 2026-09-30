@@ -2824,3 +2824,28 @@ func TestFiberFileSpelledAsIDIsNotStray(t *testing.T) {
 		t.Fatalf("FindInScope = %v, %v; want science/cmbx", f, err)
 	}
 }
+
+// TestAmbiguousSlugNamesItsCandidates: a slug that tails several fibers
+// resolves to none and says which, while still reading as no match.
+func TestAmbiguousSlugNamesItsCandidates(t *testing.T) {
+	_, s := newStore(t)
+	writeRawFiber(t, s.root, "science/cmbx/data")
+	writeRawFiber(t, s.root, "science/lensing/data")
+	writeRawFiber(t, s.root, "science/cmbx/likelihood")
+
+	_, err := s.FindMetadataWithoutGuessing("", "data")
+	var ambiguous *AmbiguousFiberError
+	if !errors.As(err, &ambiguous) || !reflect.DeepEqual(ambiguous.Candidates, []string{"science/cmbx/data", "science/lensing/data"}) {
+		t.Errorf("Find(data) error = %v, want an ambiguity naming both data fibers", err)
+	}
+	var missing *NoFiberMatchError
+	if !errors.As(err, &missing) {
+		t.Errorf("Find(data) ambiguity does not read as no match: %v", err)
+	}
+	if f, err := s.FindMetadataWithoutGuessing("", "cmbx/data"); err != nil || f.ID != "science/cmbx/data" {
+		t.Errorf("Find(cmbx/data) = %v, %v; want science/cmbx/data", f, err)
+	}
+	if f, err := s.FindMetadataWithoutGuessing("", "likelihood"); err != nil || f.ID != "science/cmbx/likelihood" {
+		t.Errorf("Find(likelihood) = %v, %v; want science/cmbx/likelihood", f, err)
+	}
+}

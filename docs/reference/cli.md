@@ -243,7 +243,7 @@ shuttle message <address> "Background for your next task" --context-only
 `shuttle message` accepts that address, a unique native session ID, or a
 Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
 one exact match across configured stores; they refuse guesses and duplicate
-matches. A fiber resolves to the worker in its newest dispatch, resume, or
+matches, and a slug naming several fibers is refused with their full paths. A fiber resolves to the worker in its newest dispatch, resume, or
 claim ledger row, which the owning host writes. When the fiber's
 `shuttle.runtime.session_uuid` or another live session registered for the
 fiber differs, the command notes it on stderr and still uses the ledger's

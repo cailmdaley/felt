@@ -542,3 +542,52 @@ func TestResolveMessageTargetRejectsBareIDThatNamesSessionAndFiber(t *testing.T)
 		t.Fatalf("expected session/fiber collision refusal, got %v", err)
 	}
 }
+
+// A bare slug naming several fibers in one store is refused with every full
+// path it names, never reported as matching nothing.
+func TestResolveMessageTargetAmbiguousSlugListsFullPaths(t *testing.T) {
+	store, storage := newStore(t)
+	for _, id := range []string{"science/cmbx/data", "science/lensing/data"} {
+		if err := storage.Write(&felt.Felt{ID: id, Name: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, nil)
+
+	_, err := resolveMessageTarget("data")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
+		!strings.Contains(err.Error(), "fiber science/cmbx/data") || !strings.Contains(err.Error(), "fiber science/lensing/data") {
+		t.Fatalf("expected both full paths, got %v", err)
+	}
+	if _, err := shuttleAddressFiber("data"); err == nil || !strings.Contains(err.Error(), "science/cmbx/data") || !strings.Contains(err.Error(), "science/lensing/data") {
+		t.Fatalf("address fiber lookup did not list candidates: %v", err)
+	}
+}
+
+// A slug unique in the store resolves like the fiber's full path.
+func TestResolveMessageTargetUniqueNestedSlugResolvesLikeFullPath(t *testing.T) {
+	block := map[string]any{
+		"kind":        "oneshot",
+		"host":        "worker-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+	}
+	store := writeMessageTargetFiberWithID(t, "science/cmbx/sims/glass/6x2pt-mocks", messageTargetFiberUID, block)
+	isolateMessageFiberStore(t, store)
+	messageTargetDaemon(t, nil, []SessionProvenance{{
+		Session: messageTargetSession,
+		UID:     messageTargetFiberUID,
+		Host:    "worker-node",
+		Harness: "claude-code",
+		Fiber:   "science/cmbx/sims/glass/6x2pt-mocks",
+		Kind:    "dispatch",
+	}})
+	want := "shuttle://worker-node/claude/" + messageTargetSession
+	for _, target := range []string{"science/cmbx/sims/glass/6x2pt-mocks", "6x2pt-mocks", "glass/6x2pt-mocks"} {
+		got, err := resolveMessageTarget(target)
+		if err != nil || got != want {
+			t.Fatalf("%s resolved to %q, %v; want %q", target, got, err, want)
+		}
+	}
+}

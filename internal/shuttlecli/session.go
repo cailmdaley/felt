@@ -17,11 +17,33 @@ import (
 // to its canonical id + intrinsic uid (shuttleAddressFiber) and derive the
 // worker's tmux session name.
 
-// addressFiberLookup keeps exact matches and rejected guesses separate so a
-// caller never turns a storage hint into a recipient choice.
+// addressFiberLookup keeps exact matches, rejected guesses and ambiguous slugs
+// separate so a caller never turns a storage hint into a recipient choice.
 type addressFiberLookup struct {
-	Fibers  []*felt.Felt
-	Guesses []guessedAddressFiber
+	Fibers    []*felt.Felt
+	Guesses   []guessedAddressFiber
+	Ambiguous []ambiguousAddressFiber
+}
+
+// ambiguousAddressFiber is a slug naming several fibers in one store.
+type ambiguousAddressFiber struct {
+	Candidates []string
+	Store      string
+}
+
+// refused reports whether the lookup found anything a caller must not choose
+// from: a guess or an ambiguous slug.
+func (lookup addressFiberLookup) refused() bool {
+	return len(lookup.Guesses) > 0 || len(lookup.Ambiguous) > 0
+}
+
+// candidateCount counts every fiber the query could name.
+func (lookup addressFiberLookup) candidateCount() int {
+	n := len(lookup.Fibers) + len(lookup.Guesses)
+	for _, ambiguous := range lookup.Ambiguous {
+		n += len(ambiguous.Candidates)
+	}
+	return n
 }
 
 type guessedAddressFiber struct {
@@ -52,6 +74,11 @@ func lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
 			}
 			continue
 		}
+		var ambiguous *felt.AmbiguousFiberError
+		if errors.As(err, &ambiguous) {
+			lookup.Ambiguous = append(lookup.Ambiguous, ambiguousAddressFiber{Candidates: ambiguous.Candidates, Store: store})
+			continue
+		}
 		var guess *felt.GuessError
 		if errors.As(err, &guess) {
 			lookup.Guesses = append(lookup.Guesses, guessedAddressFiber{Guess: guess, Store: store})
@@ -67,7 +94,7 @@ func lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
 }
 
 func (lookup addressFiberLookup) candidateLabels() []string {
-	labels := make([]string, 0, len(lookup.Fibers)+len(lookup.Guesses))
+	labels := make([]string, 0, lookup.candidateCount())
 	for _, f := range lookup.Fibers {
 		label := f.ID
 		if f.Path != "" {
@@ -86,6 +113,11 @@ func (lookup addressFiberLookup) candidateLabels() []string {
 		}
 		labels = append(labels, label)
 	}
+	for _, ambiguous := range lookup.Ambiguous {
+		for _, id := range ambiguous.Candidates {
+			labels = append(labels, id+" (in "+ambiguous.Store+")")
+		}
+	}
 	sort.Strings(labels)
 	return labels
 }
@@ -97,10 +129,10 @@ func shuttleAddressFiber(query string) (*felt.Felt, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(lookup.Fibers) == 1 && len(lookup.Guesses) == 0 {
+	if len(lookup.Fibers) == 1 && !lookup.refused() {
 		return lookup.Fibers[0], nil
 	}
-	if len(lookup.Fibers) > 1 || len(lookup.Guesses) > 0 {
+	if len(lookup.Fibers) > 1 || lookup.refused() {
 		return nil, fmt.Errorf("fiber target %q is ambiguous or only resolves by guessing; candidates: %s", query, strings.Join(lookup.candidateLabels(), ", "))
 	}
 	return nil, fmt.Errorf("no fiber found matching %q", query)

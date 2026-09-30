@@ -88,8 +88,8 @@ func resolveMessageTarget(target string) (string, error) {
 	if len(unmappedLedger) > 0 {
 		return "", fmt.Errorf("message target %q is ambiguous or has an unmapped Codex transcript candidate; use a peer address or explicit shuttle:// address: %s", target, messageTargetLabels(sessionCandidates, fiberLookup, unmappedLedger))
 	}
-	matchCount := len(sessionCandidates) + len(fiberLookup.Fibers) + len(fiberLookup.Guesses)
-	if len(fiberLookup.Guesses) > 0 || matchCount > 1 {
+	matchCount := len(sessionCandidates) + fiberLookup.candidateCount()
+	if fiberLookup.refused() || matchCount > 1 {
 		return "", fmt.Errorf("message target %q is ambiguous or guessed; candidates: %s", target, messageTargetLabels(sessionCandidates, fiberLookup, nil))
 	}
 	if len(sessionCandidates) == 1 {
@@ -113,7 +113,7 @@ func resolveMessageTarget(target string) (string, error) {
 // messageTargetLabels lists every candidate a target could name, sorted, for
 // an error that asks the sender to choose.
 func messageTargetLabels(sessions []messageTargetCandidate, fibers addressFiberLookup, extra []string) string {
-	labels := make([]string, 0, len(sessions)+len(fibers.Fibers)+len(fibers.Guesses)+len(extra))
+	labels := make([]string, 0, len(sessions)+fibers.candidateCount()+len(extra))
 	for _, session := range sessions {
 		label := "session " + session.Address
 		if session.Fiber != "" {

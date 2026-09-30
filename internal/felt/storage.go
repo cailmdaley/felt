@@ -597,6 +597,20 @@ func (e *NoFiberMatchError) Error() string {
 	return fmt.Sprintf("no fiber found matching %q", e.Query)
 }
 
+// AmbiguousFiberError reports a query that names the tail of several fibers
+// and so resolves to none of them. It unwraps to a NoFiberMatchError: no
+// fiber answers to the query.
+type AmbiguousFiberError struct {
+	Query      string
+	Candidates []string
+}
+
+func (e *AmbiguousFiberError) Error() string {
+	return fmt.Sprintf("fiber %q is ambiguous; it names %s", e.Query, strings.Join(e.Candidates, ", "))
+}
+
+func (e *AmbiguousFiberError) Unwrap() error { return &NoFiberMatchError{Query: e.Query} }
+
 // GuessError is a query that only a guess resolves — to Guess, in the
 // enclosing store at Root when set (see FindMetadataWithoutGuessing).
 type GuessError struct {
@@ -2001,6 +2015,9 @@ func (r *scopedIDResolver) resolve(scopeID, query string) (string, resolution, e
 		return ids[0], resolvedBySlug, nil
 	}
 
+	if matches := r.suffixMatches(query); len(matches) > 1 {
+		return "", resolvedExact, &AmbiguousFiberError{Query: query, Candidates: matches}
+	}
 	return "", resolvedExact, &NoFiberMatchError{Query: query}
 }
 
@@ -2122,14 +2139,15 @@ func (r *scopedIDResolver) inferInStore(scopeID, query string) (string, resoluti
 	// it. This lets a globally-unique slug be referenced from any scope
 	// (including across projects) without a full path, and is scope-independent
 	// so the same link resolves from the monorepo and a substore.
-	if match, ok := r.uniqueSuffixMatch(query); ok {
-		return match, resolvedByTail, true, nil
+	if matches := r.suffixMatches(query); len(matches) == 1 {
+		return matches[0], resolvedByTail, true, nil
 	}
 
 	return "", resolvedExact, false, nil
 }
 
-// uniqueSuffixMatch resolves a query naming the tail of exactly one id.
+// suffixMatches lists the ids a query names the tail of; exactly one is a
+// resolution, several an ambiguity.
 //
 // The match must land on a SEGMENT boundary, and the whole query has to
 // participate: matching only `path.Base(query)` would turn a link written out
@@ -2137,20 +2155,18 @@ func (r *scopedIDResolver) inferInStore(scopeID, query string) (string, resoluti
 // link to whatever local fiber happens to be called `debug`. A path that fails
 // here is a path with no home in this store, and saying so is the honest
 // answer. A one-segment query is its own tail.
-func (r *scopedIDResolver) uniqueSuffixMatch(query string) (string, bool) {
+func (r *scopedIDResolver) suffixMatches(query string) []string {
 	// Any id ending in `query` ends in its basename, so the basename bucket is
 	// the candidate set — the loop only has to reject the near misses.
 	suffix := "/" + query
-	var match string
-	found := 0
+	var matches []string
 	for _, id := range r.byBase[path.Base(query)] {
-		if id != query && !strings.HasSuffix(id, suffix) {
-			continue
+		if id == query || strings.HasSuffix(id, suffix) {
+			matches = append(matches, id)
 		}
-		match = id
-		found++
 	}
-	return match, found == 1
+	sort.Strings(matches)
+	return matches
 }
 
 func (r *scopedIDResolver) prefixMatches(candidate string) []string {
