@@ -1,4 +1,14 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  DESKTOP,
+  IPAD_LANDSCAPE,
+  IPAD_PORTRAIT,
+  PHONE_LANDSCAPE,
+  PHONE_PORTRAIT,
+  matchMediaFor,
+  type Device,
+} from './testDevices.js'
 
 class FakeStyle {
   cssText = ''
@@ -107,7 +117,10 @@ class FakeElement {
   }
 
   click(): void {
-    for (const listener of this.listeners.get('click') ?? []) listener()
+    const event = { stopPropagation: () => {}, preventDefault: () => {} }
+    for (const listener of this.listeners.get('click') ?? []) {
+      ;(listener as (e: typeof event) => void)(event)
+    }
   }
 
   querySelector<T extends HTMLElement = HTMLElement>(selector: string): T | null {
@@ -240,3 +253,75 @@ it('polls only the active reader tab and revalidates it when reactivated', async
 async function flushPromises(): Promise<void> {
   for (let i = 0; i < 12; i += 1) await Promise.resolve()
 }
+
+// ── The Shelf reader's frame, by device ─────────────────────────────────────
+//
+// Under a finger (a phone either way up, or a tablet) the reader is a sheet:
+// the shared `.kbn-detail-sheet` class, no inline geometry, no dock reported to
+// the canvas, and a back-gesture entry that the ✕ gives back. On a desktop it
+// is the docked window beside the canvas.
+describe('the Shelf reader frame', () => {
+  const BOARD = { left: 0, top: 0, width: 1400, height: 860 }
+
+  async function openOn(device: Device) {
+    const nav = { pushState: vi.fn(), back: vi.fn() }
+    vi.stubGlobal('window', { ...fakeWindow, matchMedia: matchMediaFor(device), history: nav })
+    vi.stubGlobal('document', fakeDocument)
+    vi.stubGlobal('HTMLImageElement', class HTMLImageElement {})
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<p>x</p>', { status: 200 })))
+    vi.resetModules()
+    const { ShelfReader } = await import('./views/ShelfReader.js')
+    const reader = new ShelfReader(() => '', () => BOARD)
+    destroyReader = () => reader.destroy()
+    const docks: Array<number | null> = []
+    reader.onDock = (split) => docks.push(split)
+    reader.open({ fullPath: '/work/report.html', basename: 'report.html', timestamp: 1 })
+    await flushPromises()
+    const win = body.children.find((c) => c.classList.contains('kbn-fileview-window'))!
+    return { reader, win, docks, nav }
+  }
+
+  it.each([
+    ['phone portrait', PHONE_PORTRAIT],
+    ['phone landscape', PHONE_LANDSCAPE],
+    ['iPad portrait', IPAD_PORTRAIT],
+    ['iPad landscape', IPAD_LANDSCAPE],
+  ])('fills the screen on a %s', async (_name, device) => {
+    const { reader, win, docks, nav } = await openOn(device)
+    expect(win.classList.contains('kbn-detail-sheet')).toBe(true)
+    expect(win.classList.contains('kbn-shelf-reader-docked')).toBe(false)
+    const style = win.style as unknown as Record<string, unknown>
+    for (const prop of ['left', 'top', 'width', 'height']) expect(style[prop]).toBeUndefined()
+    expect(docks.every((d) => d === null)).toBe(true)
+    expect(nav.pushState).toHaveBeenCalledTimes(1)
+
+    const close = win.querySelector('.kbn-fileview-win-close') as unknown as FakeElement
+    close.click()
+    expect(reader.isOpen()).toBe(false)
+    expect(nav.back).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays a placed window on a desktop', async () => {
+    const { win, nav } = await openOn(DESKTOP)
+    expect(win.classList.contains('kbn-detail-sheet')).toBe(false)
+    const style = win.style as unknown as Record<string, unknown>
+    for (const prop of ['left', 'top', 'width', 'height']) expect(style[prop]).toMatch(/^\d+px$/)
+    expect(nav.pushState).not.toHaveBeenCalled()
+  })
+
+  it('docks beside the canvas on a desktop that remembers docking', async () => {
+    storage.set('shuttle:shelf:reader', JSON.stringify({ open: [], docked: true, split: 0.5 }))
+    const { win, docks } = await openOn(DESKTOP)
+    expect(win.classList.contains('kbn-shelf-reader-docked')).toBe(true)
+    expect((win.style as unknown as Record<string, unknown>).left).toBe('700px')
+    expect(docks.some((d) => typeof d === 'number')).toBe(true)
+  })
+
+  it('ignores a remembered dock under a finger', async () => {
+    storage.set('shuttle:shelf:reader', JSON.stringify({ open: [], docked: true, split: 0.5 }))
+    const { win, docks } = await openOn(IPAD_LANDSCAPE)
+    expect(win.classList.contains('kbn-detail-sheet')).toBe(true)
+    expect(win.classList.contains('kbn-shelf-reader-docked')).toBe(false)
+    expect(docks.every((d) => d === null)).toBe(true)
+  })
+})

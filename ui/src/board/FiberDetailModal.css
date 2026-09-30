@@ -1895,20 +1895,27 @@
   border-color: rgba(154, 123, 53, 0.55);
 }
 
-/* ── The sheet: the panel below 700px ─────────────────────────────────────
-   Not a smaller window — a different object. It fills the viewport, drops
-   its shadow and its rounded edge (there is nothing behind it to float
-   over), and re-reads its own parts: the header becomes a title bar, and
-   the drawer's strip becomes the bottom bar, because a phone's controls
-   belong under the thumb rather than above the fold.
+/* ── The sheet frame ───────────────────────────────────────────────────────
+   Not a smaller window — a different object. It fills the viewport and drops
+   its shadow and its rounded edge (there is nothing behind it to float over).
+
+   The frame answers to READER_MEDIA, the widest of the three forms, because
+   the file reader is a sheet under any finger — a tablet included — while the
+   card and the followed-reference panel become sheets only on a mobile
+   viewport. Which panels wear `.kbn-detail-sheet` is decided in TypeScript,
+   each by its own predicate; this block only draws the class wherever any of
+   them may apply it.
 
    Note what is NOT here: any width or height. The sheet's geometry is
-   `inset`, and FiberDetailModal deliberately writes no inline geometry in
-   this mode — an inline `left` would outrank every rule below. */
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+   `inset`, and no panel writes inline geometry in this mode — an inline
+   `left` would outrank every rule below. */
+@media (max-width: 700px), (pointer: coarse) {
   .kbn-detail-overlay.kbn-detail-sheet {
     inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
            env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    /* A window's floor is not a sheet's: the screen is the size. */
+    min-width: 0;
+    min-height: 0;
     border: none;
     border-radius: 0;
     box-shadow: none;
@@ -1917,6 +1924,38 @@
        working while the height comes from `inset`. */
     container-type: inline-size;
   }
+
+  /* The reader's own chrome: the tab strip scrolls sideways rather than
+     wrapping into a second row that eats the page, the bar stops being a
+     drag handle, and its ✕ becomes a real target. A pan inside a view cell
+     stays in the cell rather than dragging the board behind the sheet. */
+  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-tabstrip {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
+    cursor: default;
+    touch-action: auto;
+    padding-left: 6px;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-views {
+    overscroll-behavior: contain;
+  }
+}
+
+/* ── The card as a sheet: the panel on a mobile viewport ───────────────────
+   The card re-reads its own parts: the header becomes a title bar, and the
+   drawer's strip becomes the bottom bar, because a phone's controls belong
+   under the thumb rather than above the fold. */
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The card's sheet is ONE scroll surface: header, files, page and drawer
      stack at their own heights and the sheet scrolls them together, the
      title bar pinned to the top edge and the folded strip to the bottom.
@@ -2099,29 +2138,12 @@
   .kbn-detail-sheet textarea {
     font-size: 16px;
   }
-  /* The reader's tab strip scrolls sideways rather than wrapping into a
-     second row that eats the page. */
-  .kbn-detail-sheet .kbn-detail-tabstrip,
-  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-tabstrip {
+  /* A card's tab strip scrolls sideways rather than wrapping into a second
+     row that eats the page. */
+  .kbn-detail-sheet .kbn-detail-tabstrip {
     overflow-x: auto;
     flex-wrap: nowrap;
     -webkit-overflow-scrolling: touch;
-  }
-
-  /* The file viewer and the followed-reference panel are the same frame, so
-     they inherit every rule above. What is left is their own chrome: the bar
-     stops being a handle, and its ✕ becomes a real target. */
-  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
-    cursor: default;
-    touch-action: auto;
-    padding-left: 6px;
-  }
-  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
-    min-width: 44px;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
 
   /* The move menu rises from the bottom edge. Same list, different arrival. */

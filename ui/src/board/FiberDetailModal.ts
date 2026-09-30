@@ -58,7 +58,7 @@ import {
   suspendFileViewer,
 } from './FileViewerPanel.js'
 import { refreshLiveFile, watchLiveFile } from './LiveFileRefresh.js'
-import { isMobileViewport, coarsePointer, onMobileChange } from './mobile.js'
+import { isMobileViewport, coarsePointer, onMobileChange, readerFillsScreen } from './mobile.js'
 import { holdSheet, swapSheet, SHEET_CARD, SHEET_VIEWER } from './sheetHistory.js'
 import {
   disambiguateBasenames,
@@ -2139,14 +2139,16 @@ export class FiberDetailModal {
     // right half. Once placed, the viewer geometry is remembered (settle +
     // close) so the next open restores it instead of re-splitting.
     //
-    // ON A PHONE there are no halves. The viewer opens as its own sheet OVER
-    // the card — one full-viewport thing at a time, which is what a hand-held
-    // screen can actually show — and the card is left exactly where it was, to
-    // be read again when the viewer's ✕ takes this sheet away. No geometry is
+    // UNDER A FINGER, or on a phone-sized screen, there are no halves. The
+    // viewer opens as its own sheet OVER the card — one full-screen thing at a
+    // time, which is how a hand reads — and the card is left exactly where it
+    // was, scroll and all, to be read again when the viewer's ✕ (or the back
+    // gesture) takes this sheet away. A tablet lands here too, though the card
+    // itself stays a window: see READER_MEDIA in mobile.ts. No geometry is
     // written in this mode, so the sheet's CSS `inset` is not outranked by a
     // stale style attribute; no remembered placement is consulted or saved,
     // because a sheet has no placement to remember.
-    const sheet = isMobileViewport()
+    const sheet = readerFillsScreen()
     if (sheet) {
       win.classList.add('kbn-detail-sheet')
     } else if (this.viewerGeom) {

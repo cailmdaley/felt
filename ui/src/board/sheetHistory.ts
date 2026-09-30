@@ -29,11 +29,14 @@
  * claim without issuing a back — one stale entry beats popping someone else's.
  */
 
-/** The board's three sheet layers, innermost last. Ids rather than an enum so
- *  the stack stays a plain string machine that tests can drive directly. */
+/** The board's sheet layers. The first three stack, innermost last; the
+ *  Shelf's reader belongs to another view and stands alone. Ids rather than an
+ *  enum so the stack stays a plain string machine that tests can drive
+ *  directly. */
 export const SHEET_CARD = 'card'
 export const SHEET_VIEWER = 'viewer'
 export const SHEET_LINKED = 'linked'
+export const SHEET_SHELF_READER = 'shelf-reader'
 
 export interface SheetHistoryDriver {
   push(): void

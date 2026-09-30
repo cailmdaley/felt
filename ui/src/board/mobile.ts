@@ -15,15 +15,28 @@
  * who dragged their browser flat, with a mouse and a whole screen behind it —
  * out of the phone layout, where it would be an insult rather than a help.
  *
- * There are two named forms and no others: MOBILE_MEDIA (either face) and
- * SHORT_MEDIA (the phone on its side). CSS and TS must agree, so the numbers
- * live here and every prelude in the board is one of the two written out by
- * hand (media queries cannot read a
- * custom property). `test/mobileMedia.test.ts` fails the suite if a
+ * The third named form is READER_MEDIA, and it answers a narrower question:
+ * does an opened FILE take the whole screen? It does on every mobile viewport,
+ * and it also does under any finger at all — which is what brings in a tablet.
+ * An iPad is wider than 700px and taller than 500px, so it is not mobile and
+ * the board, the card and the followed-reference panel keep their desktop
+ * arrangement there. But the file reader's desktop arrangement is side-by-side
+ * windows you drag and resize by their edges, a posture built for a mouse; a
+ * hand on a tablet reads one document at a time, and wants it the size of the
+ * glass with one obvious way back. The reader is therefore the one surface
+ * whose layout keys off the pointer rather than the shape. Written out, the
+ * form is `MOBILE_MEDIA, (pointer: coarse)` with the short-and-coarse face
+ * absorbed into the broader `(pointer: coarse)`.
+ *
+ * So there are three named forms and no others: MOBILE_MEDIA (either face),
+ * SHORT_MEDIA (the phone on its side) and READER_MEDIA (mobile, or any
+ * finger). CSS and TS must agree, so the numbers live here and every prelude
+ * in the board is one of the three written out by hand (media queries cannot
+ * read a custom property). `test/mobileMedia.test.ts` fails the suite if a
  * stylesheet drifts from them.
  *
  * `coarsePointer()` stays a separate question — whether the primary input is a
- * finger — used only where the interaction, not the layout, must change
+ * finger — used where the interaction, not the layout, must change
  * (drag-and-drop has no touch backend; tap targets need 44px; there is no
  * wheel to zoom a PDF with).
  */
@@ -36,8 +49,18 @@ export const MOBILE_SHORT_MAX_PX = 500
 export const SHORT_MEDIA = `(max-height: ${MOBILE_SHORT_MAX_PX}px) and (pointer: coarse)`
 export const MOBILE_MEDIA = `(max-width: ${MOBILE_MAX_PX}px), ${SHORT_MEDIA}`
 
+/** Mobile, or any finger: where an opened file fills the screen. */
+export const READER_MEDIA = `(max-width: ${MOBILE_MAX_PX}px), (pointer: coarse)`
+
 export function isMobileViewport(win: Pick<Window, 'matchMedia'> = window): boolean {
   return win.matchMedia?.(MOBILE_MEDIA)?.matches ?? false
+}
+
+/** Does an opened file take the whole screen, as a sheet with one ✕, rather
+ *  than a window beside the card? True on a phone in either orientation and on
+ *  a tablet; false on a desktop unless its window is narrower than a phone. */
+export function readerFillsScreen(win: Pick<Window, 'matchMedia'> = window): boolean {
+  return win.matchMedia?.(READER_MEDIA)?.matches ?? false
 }
 
 export function coarsePointer(win: Pick<Window, 'matchMedia'> = window): boolean {

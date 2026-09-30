@@ -8,6 +8,7 @@ import {
   MOBILE_MAX_PX,
   MOBILE_MEDIA,
   MOBILE_SHORT_MAX_PX,
+  READER_MEDIA,
   SHORT_MEDIA,
 } from '../src/board/mobile.js'
 
@@ -74,14 +75,15 @@ function sheets(): Array<{ path: string; text: string }> {
 
 const PRELUDE = /@media([^{]*)\{/g
 
-/** The two forms the board is allowed to write, and nothing else. A prelude
+/** The three forms the board is allowed to write, and nothing else. A prelude
  *  that mentions either number must be exactly one of these. */
-const FORMS = [MOBILE_MEDIA, SHORT_MEDIA]
+const FORMS = [MOBILE_MEDIA, SHORT_MEDIA, READER_MEDIA]
 
 describe('the mobile threshold is one contract', () => {
-  it('has two named forms built from the same two numbers', () => {
+  it('has three named forms built from the same two numbers', () => {
     expect(MOBILE_MEDIA).toBe(`(max-width: ${MOBILE_MAX_PX}px), ${SHORT_MEDIA}`)
     expect(SHORT_MEDIA).toBe(`(max-height: ${MOBILE_SHORT_MAX_PX}px) and (pointer: coarse)`)
+    expect(READER_MEDIA).toBe(`(max-width: ${MOBILE_MAX_PX}px), (pointer: coarse)`)
   })
 
   // A scanner that finds nothing passes every assertion below it. This is the
@@ -99,7 +101,7 @@ describe('the mobile threshold is one contract', () => {
     expect(sheets().filter((f) => f.text.includes('max-width: 700px')).length).toBeGreaterThan(4)
   })
 
-  it('every prelude that names either number is exactly one of the two forms', () => {
+  it('every prelude that names either number is exactly one of the three forms', () => {
     const offenders: string[] = []
     for (const { path, text } of sheets()) {
       for (const m of text.matchAll(PRELUDE)) {

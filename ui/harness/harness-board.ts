@@ -1028,6 +1028,21 @@ const MOCK_SENT_FILES = [
   host: host ?? LOCAL_HOST,
 }))
 
+/** The arXiv digest card's body and sent-files trail — see the fetch stub. */
+const MOCK_DIGEST_BODY = [
+  'Three cosmic-shear papers and one CMB-lensing cross-correlation this morning.',
+  '',
+  ':::{embed} /work/arxiv/digest-report.html',
+  ':title: Full digest',
+  ':::',
+  '',
+  'The shear papers all use the same IA model; worth a closer look.',
+].join('\n')
+const MOCK_DIGEST_SENT = [
+  { fullPath: '/work/arxiv/digest.md', basename: 'digest.md', timestamp: now - 9 * 3_600_000 },
+  { fullPath: '/work/shear/report/null-tests.html', basename: 'null-tests.html', timestamp: now - 3 * 3_600_000 },
+]
+
 const MOCK_TEMPORAL: TemporalFetchers = {
   activity: (fromMs, toMs) => Promise.resolve(mockActivity(fromMs, toMs)),
   // Oldest first, and filtered by the bound, exactly as the daemon serves it.
@@ -1193,6 +1208,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   // The board's composite feed and the local-only meeting control plane.
   if (url.includes('/api/v1/fibers/composite')) return json(MOCK_FEED)
+  // The arXiv digest card carries both kinds of file a card can open: a
+  // `:::{embed}` report in its body (the attachment strip) and a sent-files
+  // trail. Every other card's body and trail stay empty.
+  if (url.includes('/api/v1/fibers/work/arxiv/daily-digest?body=true')) {
+    return json({ fibers: [{ fiber: { body: MOCK_DIGEST_BODY, outcome: 'Digest delivered.' } }] })
+  }
+  if (url.includes('/api/v1/sent-files?')) {
+    const uid = new URL(url, 'http://harness').searchParams.get('uid')
+    return json({ files: uid === ULID.arxivDigest ? MOCK_DIGEST_SENT : [] })
+  }
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
   if (url.endsWith('/api/v1/fibers')) {

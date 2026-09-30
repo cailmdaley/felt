@@ -37,6 +37,12 @@
  *                           the two readers on the board are visibly one idea.
  * What is written here is the window's own lifecycle and its persistence.
  *
+ * UNDER A FINGER the window is none of that. On a phone or a tablet
+ * (`readerFillsScreen`) the reader opens as a full-screen sheet over the
+ * canvas: no dock, no split, no drag or resize, one ✕ and the back gesture to
+ * put it away. The canvas underneath is not reflowed, so closing the sheet
+ * returns to the board exactly as it was left.
+ *
  * PERSISTENCE (`shuttle:shelf:reader`): the open tabs in order, which was
  * active, each tab's scroll offset and zoom, and the window's geometry.
  * Escape or ✕ dismisses the reader; the next ↗ brings it back with the strip
@@ -68,7 +74,8 @@ import {
   type TabRef,
   type TabState,
 } from '../ReaderTabs.js'
-import { coarsePointer } from '../mobile.js'
+import { coarsePointer, readerFillsScreen } from '../mobile.js'
+import { holdSheet, SHEET_SHELF_READER } from '../sheetHistory.js'
 import { buildReaderWindow, buildTabButton, buildViewCell, buildZoomBar, showCell } from '../ReaderChrome.js'
 import { installTouchZoom, setZoomTarget, zoomOnWheel, type ZoomableTab } from '../ReaderZoom.js'
 import type { ShelfFile } from './shelfData.js'
@@ -224,6 +231,9 @@ export class ShelfReader {
   private strip: HTMLElement | null = null
   private views: HTMLElement | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
+  /** Is the open window a full-screen sheet rather than a docked or floating
+   *  window? Decided when the window opens. */
+  private sheet = false
 
   /** The board's own rectangle on screen, so a docked reader can sit beside
    *  the canvas rather than at the window's edge. */
@@ -276,8 +286,9 @@ export class ShelfReader {
   close(): void {
     if (!this.win) return
     // Only a floating window's rectangle is worth remembering; a docked one is
-    // recomputed from the board every time it opens.
-    if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
+    // recomputed from the board every time it opens, and a sheet has none.
+    if (!this.persist.docked && !this.sheet) this.persist.geom = readPanelGeometry(this.win)
+    if (this.sheet) holdSheet(SHEET_SHELF_READER, false)
     this.onDock?.(null)
     this.harvest()
     this.state.tabs.forEach((entry) => this.disposeTab(entry))
@@ -296,7 +307,8 @@ export class ShelfReader {
     if (this.saveTimer) clearTimeout(this.saveTimer)
     this.saveTimer = null
     if (this.win) {
-      if (!this.persist.docked) this.persist.geom = readPanelGeometry(this.win)
+      if (!this.persist.docked && !this.sheet) this.persist.geom = readPanelGeometry(this.win)
+      if (this.sheet) holdSheet(SHEET_SHELF_READER, false)
       this.onDock?.(null)
       this.harvest()
       this.state.tabs.forEach((entry) => this.disposeTab(entry))
@@ -338,6 +350,17 @@ export class ShelfReader {
     this.views = views
 
     this.win = win
+    this.sheet = readerFillsScreen()
+    if (this.sheet) {
+      // The sheet's CSS `inset` is its geometry; nothing is written inline and
+      // nothing is remembered, and the canvas keeps its full width.
+      win.classList.add('kbn-detail-sheet')
+      document.body.append(win)
+      holdSheet(SHEET_SHELF_READER, true, () => this.close())
+      this.onDock?.(null)
+      this.rehydrate()
+      return
+    }
     win.classList.toggle('kbn-shelf-reader-docked', this.persist.docked === true)
     this.placeWindow()
 
@@ -399,7 +422,7 @@ export class ShelfReader {
 
   /** Re-dock after the board's own rectangle changed (a window resize). */
   relayout(): void {
-    if (!this.win || !this.persist.docked) return
+    if (!this.win || this.sheet || !this.persist.docked) return
     this.placeWindow()
   }
 
