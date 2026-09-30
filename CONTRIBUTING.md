@@ -2,32 +2,34 @@
 
 Thank you for your interest in felt.
 
-felt is one repo with three shipped artifacts — the **felt CLI** (Go; the data
-layer, including the `felt shuttle <verb>` subcommands), the **shuttle daemon**
-(Elixir/OTP Mix release; the dispatcher), and the served board **UI**
-(TypeScript; a kanban desk, three temporal views, and a file canvas). See
-`AGENTS.md` for the full architecture and operator guide.
+felt is one repo with four shipped artifacts — the **felt CLI** (Go; a lean
+fiber and notes tool), the **shuttle CLI** (Go; the orchestration layer built on
+felt), the **shuttle daemon** (Elixir/OTP Mix release; the dispatcher), and the
+served board **UI** (TypeScript; a kanban desk, three temporal views, and a file
+canvas). felt preserves `shuttle:` as opaque frontmatter; Shuttle owns that
+schema and behavior. See `AGENTS.md` for the architecture and operator guide.
 
 ## Getting started
 
 ```bash
 git clone https://github.com/cailmdaley/felt
 cd felt
-go build .                    # the felt CLI
+make cli                      # build both Go CLIs
 (cd daemon && mix deps.get && mix compile)  # the daemon
 make build                    # CLI + UI + daemon release
 ```
 
-Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+, Node 22+ and npm. Working on the felt CLI
-alone needs only Go. `tmux` matters once you touch the shuttle daemon or its
-dispatch path — it launches each worker in a tmux session. Node 22+ is needed to
+Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+, Node 22+ and npm.
+Working on either Go CLI alone needs only Go. `tmux` matters once you touch
+the shuttle daemon or its dispatch path — it launches each worker in a tmux
+session. Node 22+ is needed to
 build the UI bundle (`cd ui && npm run build`) and to run the board's test
 suite, so `make test` needs it too.
 
 ## Running tests
 
 ```bash
-go test ./...                       # Go (felt CLI)
+go test ./...                       # Go (felt and shuttle CLIs)
 make mix-test                       # Elixir (daemon)
 (cd ui && npm test)                 # TypeScript (board) — runs twice, once per pinned timezone
 bash scripts/test-plugin-hooks.sh   # shell hook shims (claude-plugin/hooks/*)
@@ -52,13 +54,13 @@ Before opening a PR, verify:
 - No personal hostnames, usernames, or absolute home paths (`/Users/...`) in
   tracked source, docs, or skills — `go test ./cmd -run
   TestNoPersonalIdentifiersInSource` enforces the list. Fleet data belongs in
-  `~/.config/felt/remotes.json`; test files and `testdata/` are exempt.
+  `~/.config/shuttle/remotes.json`; test files and `testdata/` are exempt.
 - `~/loom` is not a personal path here: it is the deliberate running example for
   a cross-project store (see the docs site). Leave it in place; substitute your
   own store path when following the docs.
-- felt owns the agent registry — the daemon reads the already-resolved record
-  off felt's `shuttle.resolved.agent` JSON and shells `felt shuttle agents`; do
-  not add a parallel registry in Elixir config or Go source.
+- shuttle owns the agent registry. The daemon reads resolved agent data from
+  `shuttle ls`/`shuttle show` and shells `shuttle agents` for registry-only
+  reads; do not add a parallel registry in Elixir config or Go source.
 
 ## Scope
 
@@ -69,9 +71,8 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 
 ## Opening issues
 
-- **Bugs:** include steps to reproduce. For a shuttle/daemon bug, also include
-  the output of `felt shuttle snapshot`; a felt-CLI-only bug report doesn't need
-  it.
+- **Bugs:** include steps to reproduce. For a Shuttle/daemon bug, also include
+  the output of `shuttle snapshot`; a felt-only bug report doesn't need it.
 - **Features:** describe the problem, not just the solution. A concrete
   use-case helps.
 

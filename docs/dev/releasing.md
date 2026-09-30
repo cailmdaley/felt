@@ -15,21 +15,22 @@ shared plugin for both.
   package manager. `felt update` refreshes pi only when the Felt package is
   already registered, so an update never opts a new harness into the
   integration.
-- The plugin bundles the `felt` and `shuttle` skills, a SessionStart hook (lists active +
-  recently touched fibers), and a PreToolUse deny gate (`cmd/hook.go`).
-  **Updating the binary updates hook behavior** — the plugin only needs
+- The plugin bundles the `felt` and `shuttle` skills, Felt hooks for
+  SessionStart (active and recently touched fibers) and PreToolUse
+  (`cmd/hook.go`), and Shuttle hooks for event and commit records.
+  **Updating the binaries updates hook behavior** — the plugin only needs
   refreshing when skill content changes.
-- **Binary and plugin update in lockstep.** `felt update` swaps the binary then
-  refreshes each installed integration; the Homebrew formula's `post_install`
-  does the same on `brew upgrade felt`.
+- **Binaries and plugin update in lockstep.** `felt update` replaces both Go
+  CLIs as a pair, then refreshes each installed integration; the Homebrew
+  formula's `post_install` does the same on `brew upgrade felt`.
 
 Every Claude/Codex setup source enters the same transaction. Remote GitHub refs
 are first acquired into a disposable checkout; local `--source` paths enter
 directly. Setup validates and copies only the complete marketplace payload into
 `~/.felt/plugin-runtime/`, then promotes it under a cross-process lock with a
 crash journal. Both manifests must describe the same version; the two skills,
-hook manifest, executable hook files, and running felt executable's Shuttle
-contract must all validate before the native CLI sees the candidate. Native
+hook manifest, executable hook files, and the installed Shuttle CLI contract
+must all validate before the native CLI sees the candidate. Native
 harness CLIs receive only the stable promoted `current` path and remain the
 sole writers of their caches and configuration. If native installation reports
 failure, setup restores both the last known-good staged generation and the
@@ -49,21 +50,20 @@ state, and retains the journal until reconciliation succeeds.
 
 Every promoted plugin carries `.felt-generation.json` inside the payload the
 harness copies. It binds the canonical local or GitHub source, requested ref,
-resolved commit, plugin version, felt build identity, and a deterministic
-payload digest. A same-version payload change is therefore a different
-generation. The receipt recomputes the digest in both `current` and the loaded
-harness cache and reports pending journals, missing markers, or identity
-disagreement as unhealthy with a setup command to repair it. The receipt also
-binds the marker's felt build to the resolved executable it is diagnosing: a
-promotion sealed by a different felt build reports mismatch even when source
-and caches agree with each other. Marker and journal writes are fsynced and
-renamed with a parent-directory sync, so the recovery guarantees hold across
-power loss, not only process death.
+resolved commit, plugin version, both Go CLI build identities, and a
+deterministic payload digest. A same-version payload change is therefore a
+different generation. The receipt recomputes the digest in `current` and the
+loaded harness cache and reports pending journals, missing markers, or identity
+disagreement as unhealthy with a setup command to repair it. It also checks
+that the generation records the installed felt and shuttle builds. Marker and
+journal writes are fsynced and renamed with a parent-directory sync, so the
+recovery guarantees hold across power loss, not only process death.
 
 Use `felt setup validate --source <checkout>` as the non-mutating candidate
-gate. Use `felt setup receipt --json` after installation to report the bundle
-the harness CLIs actually load, the resolved felt binary, hooks, and the live
-daemon contract; incidental cache directories are not authoritative evidence.
+gate. Use `felt setup receipt --json` to report the bundle the harness CLIs
+load, the felt binary, and Felt-owned hook state. Run `shuttle doctor` for the
+host, listener, and live daemon contract; incidental cache directories are not
+authoritative evidence.
 
 CI is a release gate as well as a pull-request check. The UI job runs
 `npm test`, which executes the board suite twice under the pinned
@@ -87,8 +87,9 @@ creates the annotated tag. The script prints the explicit
 
 Pushing the tag triggers the GoReleaser workflow (darwin/linux ×
 amd64/arm64; it updates the Homebrew formula for final public releases). The
-workflow pins GoReleaser to the version used for the published 1.1.0-rc.3
-assets. Before packaging, GoReleaser runs the complete candidate validator,
+workflow puts both Go CLIs in `felt_<os>_<arch>.tar.gz` and pins GoReleaser to
+the version used for the published 1.1.0-rc.3 assets. The Mix daemon release
+uses `shuttled_<os>_<arch>.tar.gz`. Before packaging, GoReleaser runs the complete candidate validator,
 requires the two plugin manifests to agree, and on a real tag refuses a
 manifest version that does not match it. Local snapshots skip only the tag
 comparison, which keeps development packaging usable while retaining the
@@ -120,7 +121,7 @@ archives; for a final release, that job pushes the preserved file
 to the tap through the GitHub Contents API only after publication. A failed
 native platform therefore leaves a
 draft for repair instead of exposing a stable CLI release that cannot satisfy
-`SHUTTLE=1` installs; a tap update cannot point at draft assets either.
+`SHUTTLE_DAEMON=1` installs; a tap update cannot point at draft assets either.
 Rerunning the same tag reuses that draft and replaces its artifacts.
 
 The tap currently publishes a Homebrew **Formula**, so keep using
@@ -136,20 +137,21 @@ daemon:
 ```bash
 PROBE_ROOT="$(mktemp -d)"
 HOME="$PROBE_ROOT/felt-home" PATH=/usr/bin:/bin \
-  FELT_INSTALL_DIR="$PROBE_ROOT/felt-bin" \
-  FELT_VERSION=1.1.0-rc.3 SHUTTLE=1 \
+  FELT_INSTALL_DIR="$PROBE_ROOT/cli" \
+  FELT_VERSION=1.1.0-rc.3 SHUTTLE_DAEMON=1 \
   SHUTTLE_HOME="$PROBE_ROOT/shuttle" sh ./install.sh
-"$PROBE_ROOT/felt-bin/felt" --version
-"$PROBE_ROOT/shuttle/bin/shuttled" eval 'Application.load(:shuttle); IO.puts(Application.spec(:shuttle, :vsn))'
+"$PROBE_ROOT/cli/felt" --version
+SHUTTLE_RELEASE="$PROBE_ROOT/shuttle" "$PROBE_ROOT/cli/shuttle" version
 ```
 
-The installer verifies those version identities before replacing an existing
-binary or daemon tree. The daemon line goes through `eval` rather than the
-launcher's `version` verb because only `eval` starts the bundled BEAM, so it
-fails loudly on a host whose glibc is older than the build machine's. The
-native release matrix boots each assembled daemon artifact before upload, while the
-[Linux container acceptance test](layout.md#the-stranger-test-bootstrap-in-a-clean-container)
-builds from a clean image and polls `/api/v1/version` until its contract is healthy.
+The installer verifies both Go CLI versions and the daemon release before
+replacing an existing installation. With no daemon listener, `shuttle version`
+uses the release directory and runs its `shuttled version` command, which starts
+the bundled BEAM and fails on a host whose glibc is older than the build
+machine's. The native release matrix boots each assembled daemon artifact before
+upload, while the [Linux container acceptance test](layout.md#the-stranger-test-bootstrap-in-a-clean-container)
+builds from a clean image and polls `/api/v1/version` until its contract is
+healthy.
 
 Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`
 version cuts a prerelease. Three things then keep it away from everyone who

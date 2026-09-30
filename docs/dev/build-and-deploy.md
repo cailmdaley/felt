@@ -7,13 +7,13 @@ The developer-side build and fleet-deploy loop. For *installing* a daemon
 ## Build targets
 
 ```
-make build        # felt CLI + UI + daemon release
+make build        # both Go CLIs + UI + daemon release
 make build SKIP_UI=1   # same, but leave ui/dist alone (host gets its bundle elsewhere)
-make cli          # felt CLI only → ./felt
-make cli-install  # felt CLI → ~/.local/bin (go install .)
+make cli          # build felt and shuttle
+make cli-install  # install both Go CLIs → ~/.local/bin
 make ui           # install UI dependencies and build ui/dist
 make daemon       # daemon release only → bin/rel (MIX_ENV=prod)
-make daemon SKIP_CLI=1 # same, trusting the felt already on PATH
+make daemon SKIP_CLI=1 # same, trusting felt and shuttle on PATH
 make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks  +  the bootstrap shims
 make go-test / mix-test / js-test / plugin-hooks-test / bootstrap-test   # one suite each
 make lint-personal   # the hygiene test alone: no maintainer host or account names in tracked source
@@ -22,21 +22,21 @@ make all          # restart
 make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
 make stop         # SIGTERM with 5s grace
 make logs         # tail -f the log
-make status       # felt shuttle ps + snapshot summary
+make status       # daemon status and snapshot summary
 make clean        # rm daemon/_build, stray Elixir.*.beam, built binaries
 make install      # full from-source bootstrap (scripts/bootstrap.sh)
 make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / systemd user unit (Linux)
 ```
 
 Source builds require Go, Elixir/OTP, Node 22+, and npm on every build host.
-`make build` compiles all three components; `make daemon` builds only the daemon release.
+`make build` compiles both Go CLIs, the UI, and daemon release; `make daemon` builds only the daemon release.
 The fleet helper builds in each host's login shell, where its toolchain is configured.
 Fetched releases include the runtime and UI, so users need none of these build tools;
 the target must match the release's OS and CPU architecture.
 
 **`bin/rel` is a Mix release** — an ERTS-bundled directory with compiled
-modules, assembled by `make daemon` and launched through the tracked
-`bin/shuttle` shim (`bin/rel/bin/shuttled`). A running BEAM keeps using the
+modules, assembled by `make daemon` and managed by `shuttle daemon` commands.
+The release's BEAM launcher is `shuttled`. A running BEAM keeps using the
 release it booted, so a restart without `make daemon` picks up no source edit:
 use `make restart`, then verify both `booted_at` and `git_short_sha` on
 `/api/v1/version` so the answer proves the new process is serving. If `mix
@@ -70,14 +70,13 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 
 ### The CLI/daemon contract
 
-The daemon shells the felt CLI for its writes, so the two are versioned
-together: `felt shuttle contract` prints an integer level (4), and a daemon
-whose expected level differs holds at boot with a contract skew reported on
-`/api/v1/version` and `/api/v1/state`. `make daemon` therefore rebuilds and
-installs the CLI first (`SKIP_CLI=1` trusts the felt already on `PATH`). The
-Elixir suite shells the real CLI too — `dispatch_integration_test` drives
-`felt shuttle accept|resume --local` — so after pulling a change that moves the
-level, run `make cli-install` before `make mix-test`.
+The daemon shells `felt` for fiber content and generic writes, and `shuttle`
+for Shuttle-owned operations. The Shuttle CLI/daemon contract is versioned
+together: `shuttle contract` prints its integer level, and a daemon whose
+expected level differs holds at boot with a skew reported on `/api/v1/version`
+and `/api/v1/state`. `make daemon` therefore builds both Go CLIs first
+(`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
+run `make cli-install` before `make mix-test` after changing either boundary.
 
 ### The release's runtime stays out of workers and builds
 
@@ -99,7 +98,7 @@ does a shell carrying another checkout's release.
 
 ## Deploying
 
-**Remote hosts are configured in `~/.config/felt/remotes.json`** (`felt shuttle
+**Remote hosts are configured in `~/.config/shuttle/remotes.json`** (`shuttle
 remotes list|add|rm|path`). SSH entries name an alias and local forwarded port;
 the daemon reaches their API over that tunnel.
 HTTPS `url` entries use the configured dial transport. When
@@ -114,7 +113,7 @@ opens a terminal that flashes and dies.
 Refresh the credential before concluding shuttle is broken.
 
 `bin/shuttle-deploy` is a developer convenience for source checkouts.
-It reads `~/.config/felt/remotes.json`; entries with a `checkout` field are deploy targets.
+It reads `~/.config/shuttle/remotes.json`; entries with a `checkout` field are deploy targets.
 Release users install packaged releases through the [installer](../shuttle/installation.md).
 
 Push the verified revision, then deploy it on each host:
@@ -125,13 +124,13 @@ Push the verified revision, then deploy it on each host:
    and `ready` is `true` (up to 15 minutes by default; set
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
 4. Check the changed behavior through the live API or board.
-5. Run `bin/shuttle release` to release the boot quarantine.
+5. Run `shuttle daemon release` to release the boot quarantine.
 
-The helper builds the CLI, daemon, and — on every host that is not marked
+The helper builds both CLIs, the daemon, and — on every host that is not marked
 `"build_ui": false` — the UI, on that host.
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
-Every deploy quarantines new launches and resumes until `bin/shuttle release`:
+Every deploy quarantines new launches and resumes until `shuttle daemon release`:
 the cycle touches `$SHUTTLE_DATA_DIR/heartbeat.stopped` on the target host and
 then stops the daemon with SIGTERM (whose shutdown touches the marker again), so
 the rebuilt daemon sees a graceful stop and holds. Only on a host that opts in
@@ -163,7 +162,7 @@ The board bundle is identical on every host, and building it is expensive
 exactly where it is least worth doing: on a cluster login node whose home
 directory is a network filesystem, `npm ci` takes minutes and `vite build`
 several more. Such a host opts out with `"build_ui": false` in its
-`~/.config/felt/remotes.json` entry:
+`~/.config/shuttle/remotes.json` entry:
 
 ```json
 {"name": "hub-a", "port": 4001, "checkout": "/home/op/dev/felt", "build_ui": false}
@@ -194,7 +193,7 @@ human is only one of them:
   full cascade, with the attempt counter reset so it gets the whole ladder
   again. `trip_cooldown_schedule_ms` (default 15min, 30min, then hourly)
   widens the gap with each successive trip.
-- **`bin/shuttle reset <remote>`** or `POST /api/v1/remotes/:name/reset` —
+- **`shuttle daemon reset <remote>`** or `POST /api/v1/remotes/:name/reset` —
   forces a cascade now instead of waiting out the cooldown. One reset buys
   exactly one cascade, and it 409s if the breaker isn't currently tripped.
 
@@ -221,11 +220,10 @@ either builds with `SKIP_UI=1` and takes its `ui/dist` from elsewhere — see
 When changing API routes, update the matching UI and `docs/reference/api.md` in the same change.
 Deploy with `make build` so the daemon and UI come from the same revision.
 
-`bin/shuttle` is a tracked POSIX shell shim, not a build artifact: it execs the
-release launcher for `start`, installs the keep-alive (`install-agent`,
-`uninstall-agent`), and speaks HTTP to the running daemon for `status`,
-`release`, `reset` and `version`. Everything else an operator asks of a running
-daemon — `snapshot`, `dispatch` — is a `felt shuttle` verb.
+The `shuttle` Go CLI owns both orchestration commands and daemon lifecycle:
+`shuttle daemon start|stop|status|release|reset|install|uninstall` controls the
+Mix release and its keep-alive, while `shuttle snapshot` and `shuttle dispatch`
+speak to the running daemon.
 
 ## Plugin maintenance and authentication
 

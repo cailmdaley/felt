@@ -10,9 +10,16 @@ felt/
 ├── LICENSE / LICENSE-APACHE / NOTICE
 ├── Makefile                 builds, tests, and daemon lifecycle from the repo root
 ├── install.sh               public release-binary installer
-├── main.go  go.mod  go.sum   felt CLI entrypoint and Go module
-├── cmd/                     CLI commands, including felt shuttle
-├── internal/                felt storage and parsing; shuttle schema and registry
+├── cmd/
+│   ├── felt/main.go         felt CLI entrypoint
+│   └── shuttle/main.go      shuttle CLI entrypoint
+├── internal/
+│   ├── feltcli/             felt command tree
+│   ├── shuttlecli/          shuttle command tree
+│   ├── felt/                fiber storage, parsing, and generic frontmatter
+│   ├── shuttle/             Shuttle schema, registry, and orchestration
+│   └── messaging/           Shuttle session and message transport
+├── go.mod  go.sum           Go module
 ├── daemon/                  shuttle's Elixir/OTP Mix project
 │   ├── mix.exs  mix.lock  .formatter.exs
 │   ├── lib/                 dispatcher, poller, and HTTP API
@@ -21,7 +28,7 @@ felt/
 │   ├── rel/                 release environment template
 │   ├── share/               launchd and systemd templates
 │   └── test/                daemon tests and shared parity fixtures
-├── bin/                     tracked operator commands, including bin/shuttle
+├── bin/                     tracked operator and deploy helpers
 │   └── rel/                 built daemon release (gitignored)
 ├── ui/                      TypeScript board; npm run build produces ui/dist
 │   ├── src/board/views/     temporal and artifact views
@@ -32,9 +39,9 @@ felt/
 ```
 
 `daemon/deps/` and `daemon/_build/` are Mix-managed and gitignored.
-The tracked `bin/shuttle` shim launches `bin/rel/bin/shuttled`.
+The `shuttle` Go CLI manages the Mix daemon release and its BEAM launcher.
 Run root Make targets for the daily loop; run direct Mix commands inside `daemon/`.
-`make build` builds the CLI, UI, and daemon; `make ui` builds just the board;
+`make build` builds both CLIs, the UI, and the daemon; `make ui` builds just the board;
 `make build SKIP_UI=1` leaves the bundle to whatever put it there.
 The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
 
@@ -47,8 +54,8 @@ They open over `file://` without a running daemon.
 
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks + the bootstrap shims
-go test ./...              # Go (felt CLI)
-make mix-test              # full Elixir suite; shells the felt on PATH, so `make cli-install` first
+go test ./...              # Go (felt and shuttle CLIs)
+make mix-test              # full Elixir suite; shells both CLIs on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; runs vitest TWICE, under two
                            # pinned TZs (America/Los_Angeles, Europe/Paris)
@@ -75,7 +82,7 @@ Linux account can go from a clone to a running daemon with
 `/src`: it installs the prerequisites a stranger would (tmux, git, jq, curl,
 Node, npm, and the Go toolchain `go.mod` pins), creates an unprivileged user
 with no systemd, clones `/src` as that user, and runs `bootstrap.sh --dry-run`
-and then the full bootstrap. It passes when the felt CLI is installed and runs,
+and then the full bootstrap. It passes when both Go CLIs are installed and run,
 the release is built, `~/.shuttle/repo` names the clone, `shuttle-launch` is
 installed, the tmux respawn loop is up, and `/api/v1/version` answers with a
 healthy contract (`contract.ok`, expected equal to observed):
@@ -111,7 +118,7 @@ use a fresh home and config with synthetic data and a controlled environment;
 they must not fall back to installed harness executables.
 
 The Go `cmd` unit tests run behind a `TestMain` fence (`cmd/testmain_test.go`):
-`HOME`, the felt config files and the host identity file point into a temp
+`HOME`, the Felt and Shuttle config files and the host identity file point into a temp
 dir, and `SHUTTLE_DAEMON_URL` names a loopback port nothing listens on. A test
 never reaches the machine's live daemon or its fleet; one that needs a daemon
 starts an `httptest` server and sets `SHUTTLE_DAEMON_URL` itself.
