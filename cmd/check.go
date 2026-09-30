@@ -21,6 +21,8 @@ var checkCmd = &cobra.Command{
     .felt root
   - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below the
     root, which belongs at <dir>/<slug>/<slug>.md (felt migrate folds it)
+  - two entries in one directory whose names differ only by case, on disk or
+    in the git index (a case-insensitive filesystem can check out only one)
   - a shuttle host: naming this machine by a pre-normalization spelling
     (a warning)`,
 	Args: cobra.NoArgs,
@@ -59,6 +61,11 @@ var checkCmd = &cobra.Command{
 			return err
 		}
 		issues = append(issues, structureIssues...)
+		caseIssues, err := felt.CheckCaseCollisions(storage)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, caseIssues...)
 		legacyIssues, err := felt.CheckLegacyFormat(storage)
 		if err != nil {
 			return err
