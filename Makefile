@@ -82,7 +82,7 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 AGENT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install ui daemon test go-test mix-test js-test plugin-hooks-test bootstrap-test \
+.PHONY: build cli cli-install ui daemon test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test \
         all start stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
@@ -205,6 +205,11 @@ test: go-test mix-test js-test plugin-hooks-test bootstrap-test
 
 go-test:
 	go test ./...
+
+# The Go suite on Linux (dash as /bin/sh, as on CI) via Apple's `container`
+# or docker; see scripts/test-linux.sh.
+test-linux:
+	scripts/test-linux.sh
 
 mix-test:
 	cd daemon && $(MIX) test
