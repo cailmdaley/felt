@@ -8,7 +8,7 @@ on:
 
 jobs:
   go:
-    name: Go (felt CLI — build + test)
+    name: Go (felt + shuttle CLIs — build + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
         run: go build -v ./...
 
       - name: Validate complete plugin candidate
-        run: go run . setup validate --source .
+        run: go run ./cmd/felt setup validate --source .
 
       - name: Test
         run: go test -v ./...
@@ -33,9 +33,9 @@ jobs:
       - name: Integration Test
         run: go test -tags integration ./cmd/ -run TestIntegration -v
 
-      # Deliberately in the go job, not elixir: that one installs felt to
-      # /usr/local/bin, which felt-bin.sh's candidate loop finds — the
-      # felt-absent fallback assertion would silently test the wrong branch.
+      # Deliberately in the Go job, not Elixir: that one installs both CLIs to
+      # /usr/local/bin, which the hook resolvers find — the absent-binary
+      # fallback assertions would silently test the wrong branch.
       - name: Plugin hook tests
         run: bash scripts/test-plugin-hooks.sh
 
@@ -68,18 +68,19 @@ jobs:
           otp-version: "28"
           elixir-version: "1.19"
 
-      # The daemon shells out to `felt` for store walks; build it from THIS
-      # checkout (source of truth in the merged repo) rather than downloading a
+      # The daemon shells out to `felt` for fiber data and `shuttle` for
+      # orchestration; build both from THIS checkout rather than downloading a
       # possibly-older release.
-      - name: Set up Go (to build felt CLI)
+      - name: Set up Go (to build both CLIs)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - name: Build + install felt CLI
+      - name: Build + install felt and shuttle CLIs
         run: |
-          GOBIN=/usr/local/bin go install .
+          GOBIN=/usr/local/bin go install ./cmd/felt ./cmd/shuttle
           felt --version
+          shuttle --help >/dev/null
 
       - name: Cache deps
         uses: actions/cache@v4

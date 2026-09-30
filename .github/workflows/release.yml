@@ -86,20 +86,20 @@ jobs:
           # workflow schema validation ("Unexpected value ''").
           - os: ubuntu-latest
             container: "almalinux:8"
-            artifact: shuttle_Linux_x86_64.tar.gz
+            artifact: shuttled_Linux_x86_64.tar.gz
           - os: ubuntu-24.04-arm
             container: "almalinux:8"
-            artifact: shuttle_Linux_arm64.tar.gz
+            artifact: shuttled_Linux_arm64.tar.gz
           # Intel macOS is macos-15-intel now. macos-13 was retired: a job
           # targeting it does not fail, it queues forever against a label with
           # no runners (observed on v1.1.0-rc.1 — 50 minutes, no runner, while
           # every other platform finished in about a minute).
           - os: macos-15-intel
             container: ""
-            artifact: shuttle_Darwin_x86_64.tar.gz
+            artifact: shuttled_Darwin_x86_64.tar.gz
           - os: macos-14
             container: ""
-            artifact: shuttle_Darwin_arm64.tar.gz
+            artifact: shuttled_Darwin_arm64.tar.gz
     runs-on: ${{ matrix.os }}
     container:
       image: ${{ matrix.container || '' }}
@@ -201,9 +201,10 @@ jobs:
         with:
           node-version: "22"
 
-      # The daemon shells `felt` at runtime; the boot test below runs a real
-      # poller tick, so give it a real CLI.
-      - name: Set up Go (felt CLI for the boot test)
+      # The daemon shells `felt` for fiber data and `shuttle` for
+      # orchestration; the boot test below runs a real poller tick, so install
+      # both CLIs from this checkout.
+      - name: Set up Go (both CLIs for boot test)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -237,22 +238,23 @@ jobs:
           # the .app would record an empty module list).
           MIX_ENV=prod mix compile
           MIX_ENV=prod mix compile.app --force
-          MIX_ENV=prod mix release shuttled --path ../out/shuttle
+          MIX_ENV=prod mix release shuttled --path ../out/shuttled
 
       # Linux only: macOS has no glibc and nothing to check. This must run
       # before the boot test, because the boot test cannot fail the way a
       # cluster does — it runs on the host that produced the binaries.
       - name: Check the artifact's glibc floor
         if: matrix.container != ''
-        run: bash scripts/check-glibc-floor.sh out/shuttle
+        run: bash scripts/check-glibc-floor.sh out/shuttled
 
       - name: Boot-test the artifact
         run: |
-          go install .
+          go install ./cmd/felt ./cmd/shuttle
           export PATH="$(go env GOPATH)/bin:$PATH"
           mkdir -p /tmp/boot-store/.felt
-          export SHUTTLE_PORT=4390 SHUTTLE_HOST=ci-boot-test FELT_STORES=/tmp/boot-store
-          out/shuttle/bin/shuttle start --force >/tmp/daemon.log 2>&1 &
+          export SHUTTLE_PORT=4390 SHUTTLE_HOST=ci-boot-test SHUTTLE_STORES=/tmp/boot-store
+          export SHUTTLE_RELEASE="$PWD/out/shuttled"
+          shuttle daemon start --force >/tmp/daemon.log 2>&1 &
           DAEMON_PID=$!
           trap 'kill "$DAEMON_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
@@ -276,13 +278,13 @@ jobs:
             curl -fsS http://127.0.0.1:4390/api/v1/version
             exit 1
           fi
-          # A bound daemon is still unhealthy if it loaded a stale felt CLI.
+          # A bound daemon is still unhealthy if either CLI is stale or missing.
           curl -fsS http://127.0.0.1:4390/api/v1/version |
             jq -e '.contract.ok == true and .contract.expected == .contract.observed' >/dev/null
           # The artifact must serve the UI bundle it shipped with.
           curl -fsS -o /dev/null http://127.0.0.1:4390/index.html
-          # And the shim's HTTP verbs must answer.
-          SHUTTLE_PORT=4390 out/shuttle/bin/shuttle status >/dev/null
+          # And the Go CLI's status check must answer.
+          SHUTTLE_PORT=4390 shuttle daemon status >/dev/null
           # `status` passes whenever /version answers, even if /state fails;
           # a ready daemon must serve a real snapshot there too.
           curl -fsS http://127.0.0.1:4390/api/v1/state |
@@ -293,13 +295,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tar -C out -czf "${{ matrix.artifact }}" shuttle
+          tar -C out -czf "${{ matrix.artifact }}" shuttled
           gh release upload "${GITHUB_REF_NAME}" "${{ matrix.artifact }}" --clobber --repo "${GITHUB_REPOSITORY}"
 
   # GoReleaser creates the CLI draft first so the daemon jobs can attach their
   # native artifacts. Keep that release as a draft until every matrix
   # member booted and uploaded its tarball; a failed platform therefore cannot
-  # leave a public stable release that makes SHUTTLE=1 installs fail halfway
+  # leave a public stable release that makes SHUTTLE_DAEMON=1 installs fail halfway
   # through.
   publish:
     name: Publish complete release
@@ -326,8 +328,8 @@ jobs:
           for asset in \
             felt_Darwin_arm64.tar.gz felt_Darwin_x86_64.tar.gz \
             felt_Linux_arm64.tar.gz felt_Linux_x86_64.tar.gz \
-            shuttle_Darwin_arm64.tar.gz shuttle_Darwin_x86_64.tar.gz \
-            shuttle_Linux_arm64.tar.gz shuttle_Linux_x86_64.tar.gz; do
+            shuttled_Darwin_arm64.tar.gz shuttled_Darwin_x86_64.tar.gz \
+            shuttled_Linux_arm64.tar.gz shuttled_Linux_x86_64.tar.gz; do
             if ! grep -Fqx "$asset" <<<"$assets"; then
               echo "release is missing required asset: $asset" >&2
               exit 1
