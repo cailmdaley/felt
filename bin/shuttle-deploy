@@ -127,7 +127,9 @@ SH
 
     for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
       [ -f "$candidate" ] || continue
-      if ! grep -q 'shuttle' "$candidate" || ! { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then
+      # Only a supervisor rendered by the pre-split shim needs re-rendering;
+      # those always bake FELT_STORES, which current templates never write.
+      if ! grep -q 'shuttle' "$candidate" || ! grep -q 'FELT_STORES' "$candidate"; then
         continue
       fi
 
@@ -165,7 +167,9 @@ SH
         if [ "$kind" = plist ]; then stores_file=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_STORES_FILE)
         else stores_file=$(systemd_value "$candidate" SHUTTLE_STORES_FILE); fi
       }
-      [ -n "$stores_file" ] || stores_file="$HOME/.config/shuttle/stores.json"
+      if [ -z "$stores_file" ] || [ "$stores_file" = "$HOME/.config/felt/stores.json" ]; then
+        stores_file="$HOME/.config/shuttle/stores.json"
+      fi
       if [ -z "$log" ]; then
         if [ "$kind" = plist ]; then log="$HOME/Library/Logs/shuttle.log"
         else log="$HOME/.shuttle/shuttle.log"; fi
@@ -484,6 +488,9 @@ deploy_local() {
     launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
       || bash -lc "cd $(shell_quote "$REPO") && make restart" >/dev/null
   else
+    # A listener outside the loop's tmux session would keep the port and make
+    # the new loop stand down, so stop it before the loop is replaced.
+    run_on "" "$(daemon_kill)"
     run_on "" "$(respawn_launcher_restart_cmd "$REPO")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
@@ -524,6 +531,9 @@ deploy_remote() {
   if [ "$supervisor" = 1 ]; then
     run_on "$host" "$(daemon_kill)"
   else
+    # A listener outside the loop's tmux session would keep the port and make
+    # the new loop stand down, so stop it before the loop is replaced.
+    run_on "$host" "$(daemon_kill)"
     run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
