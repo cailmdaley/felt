@@ -3,6 +3,7 @@ package feltcli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,11 @@ var hookCmd = &cobra.Command{
 	Long: `Each subcommand reads a harness hook payload on stdin and writes the envelope
 that harness expects. They are plumbing for the plugin; felt session prints the
 session context as readable text.`,
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return nil
+	},
 }
 
 type sessionEnvelope struct {

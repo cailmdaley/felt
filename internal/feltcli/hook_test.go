@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +19,85 @@ import (
 // the additionalContext text matches the format the bash hook emitted: the
 // directive line, then either Active / Open + entries (or the empty marker),
 // then Recently Touched with truncated outcomes.
+func TestUnknownHookVerbDrainsStdinWithoutOutput(t *testing.T) {
+	dir, _ := newStore(t)
+	stdin, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook":"event","message":"payload"}`
+	if _, err := writer.WriteString(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() {
+		os.Stdin = previous
+		_ = stdin.Close()
+	})
+	stdout, stderr, err := executeCLI(t, dir, "hook", "event")
+	if err != nil || stdout != "" || stderr != "" {
+		t.Fatalf("unknown hook result stdout=%q stderr=%q err=%v", stdout, stderr, err)
+	}
+	remaining, err := io.ReadAll(stdin)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("unknown hook left unread stdin %q, err=%v", remaining, err)
+	}
+}
+
+func TestOldEventHookPipesPayloadToSilentUnknownVerb(t *testing.T) {
+	home := t.TempDir()
+	hookDir := t.TempDir()
+	oldEvent, err := os.ReadFile("testdata/old-event.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	feltResolver, err := os.ReadFile("../../claude-plugin/hooks/felt-bin.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{"event.sh": oldEvent, "felt-bin.sh": feltResolver} {
+		if err := os.WriteFile(filepath.Join(hookDir, name), content, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(t.TempDir(), "felt")
+	wrapperScript := `#!/bin/sh
+if [ "$1 $2" = "hook --help" ]; then exit 0; fi
+FELT_TEST_HOOK_ARGS="$*" exec "$FELT_TEST_BINARY" -test.run=^TestUnknownHookVerbSubprocessHelper$
+`
+	if err := os.WriteFile(wrapper, []byte(wrapperScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/bash", filepath.Join(hookDir, "event.sh"))
+	cmd.Stdin = strings.NewReader(`{"hook":"event","payload":"keep this out of agent context"}`)
+	cmd.Env = append(os.Environ(), "HOME="+home, "FELT_BIN="+wrapper, "FELT_TEST_BINARY="+testBinary)
+	out, err := cmd.CombinedOutput()
+	if err != nil || len(out) != 0 {
+		t.Fatalf("old event hook result err=%v output=%q", err, out)
+	}
+}
+
+func TestUnknownHookVerbSubprocessHelper(t *testing.T) {
+	args := os.Getenv("FELT_TEST_HOOK_ARGS")
+	if args == "" {
+		return
+	}
+	rootCmd.SetArgs(strings.Fields(args))
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func TestHookSessionEnvelope(t *testing.T) {
 	dir, storage := newStore(t)
 
