@@ -31,6 +31,7 @@
  */
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
+import { hasLiveWorker } from './KanbanTypes.js'
 import { stackDropVerdict } from './KanbanRules.js'
 import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'
 
@@ -86,7 +87,7 @@ function planningIgnored(card: KanbanCard): boolean {
  */
 function restingNow(card: KanbanCard): boolean {
   return (
-    !card.runningWorker &&
+    !hasLiveWorker(card) &&
     card.status === 'open' &&
     card.effectiveHorizon === 'stashed' &&
     (card.cold ?? false) === false
@@ -155,7 +156,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   if (card.shuttleKind !== undefined) {
     if (card.shuttleKind !== 'pinned') {
       out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
-    } else if (card.runningWorker) {
+    } else if (hasLiveWorker(card)) {
       // The drag's own reading of "back to the strip" for a live pinned role:
       // stop it, so it comes to rest.
       out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })

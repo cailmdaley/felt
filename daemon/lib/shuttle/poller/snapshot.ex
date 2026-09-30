@@ -238,8 +238,9 @@ defmodule Shuttle.Poller.Snapshot do
   end
 
   # The worker fields the `eligible` snapshot row and the feed's `runtime`
-  # payload share, so the two agree on shape; the viewer reads `tmux_session`
-  # for liveness and may surface the rest.
+  # payload share, so the two agree on shape. The payload's presence is the
+  # viewer's liveness signal and `state` qualifies it; `tmux_session` is only
+  # the CLI worker's terminal handle (nil for an app worker).
   defp worker_fields(meta) do
     app_id = Shuttle.AppWorkers.id(meta.session)
 

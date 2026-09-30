@@ -61,32 +61,34 @@ export interface KanbanCard {
    * in its own column again.
    */
   foldedUnder?: string
-  /** When set, a Shuttle worker is currently running for this fiber. */
-  runningWorker?: string
   /**
-   * The owning daemon's phase at request time. Two disjoint vocabularies share
-   * this field, discriminated by `runningWorker` presence:
-   *   • LIVE-worker activity category (when `runningWorker` is set):
-   *     `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
-   *     (paused at a stop — "waiting for you" once idle ≥60s), `attention`
-   *     (raised its hand via the Notification hook — "needs you", sorts
-   *     top). Computed at serve time from the activity tracker's last hook
-   *     event for the session.
-   *   • Worker-LESS lifecycle phase (when `runningWorker` is absent):
-   *     `running` (rare unmatched), `retrying` (failed dispatch in backoff),
-   *     `due` (standing role past its tick), `dispatched`, plus the
-   *     column-driving `scheduled`/`awaiting`/`accepted`/`dormant`. Stamped by
-   *     the dispatch state machine, NOT the activity tracker.
-   * `KanbanSurfaces` renders a phase chip from this so the In-flight card
-   * explains itself instead of reading as an anomaly. Undefined when the daemon
-   * reports no runtime for the fiber.
+   * The owning daemon's worker for this fiber: `running`, or `blocked` (an app
+   * launch or conversation that failed and waits on a human, explained by
+   * `launchError`). Absent when the daemon holds no worker for the fiber. This
+   * is the card's liveness — ask it through `hasLiveWorker`, never through
+   * `tmuxSession`, which only CLI workers have.
+   */
+  workerState?: 'running' | 'blocked'
+  /**
+   * The live CLI worker's tmux session name — the terminal handle that attach,
+   * open-in-terminal and the join to session ledgers key on. Absent for an app
+   * worker, which is reached through `desktopLink` / `sessionUuid` instead.
+   */
+  tmuxSession?: string
+  /**
+   * What the live worker is doing, for the chips and the In-flight sort:
+   * `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
+   * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
+   * its hand — "needs you", sorts top), or `blocked` (the worker is
+   * `workerState: 'blocked'` — sorts top with `launchError`). Absent when there
+   * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string
   /** Durable explanation for a blocked app launch. */
   launchError?: string
   /**
    * Real ms timestamp of the live worker's most-recent hook event (any type).
-   * Present only for a tracked running worker (paired with `runningWorker`);
+   * Present only for a live worker (paired with `workerState`);
    * drives the In-flight idle-descending sort (`now - lastActivityAt`, longest-
    * stopped first) and the 60s waiting-chip gate. Absent for worker-less cards.
    */
@@ -94,7 +96,7 @@ export interface KanbanCard {
   /**
    * True when the owning daemon is holding this fiber under boot quarantine — a
    * genuinely-fresh launch parked in `pending_launch`, awaiting
-   * `bin/shuttle release`. Distinct from `runningWorker` (a live worker) and from
+   * `bin/shuttle release`. Distinct from `workerState` (a live worker) and from
    * an idle-active card: it reads as "held, awaiting release", not "running" or
    * "idle between workers". Served per-fiber by the owning host.
    */
@@ -118,8 +120,8 @@ export interface KanbanCard {
   /**
    * Where a phone opens the live worker: the claude.ai bridge URL its session
    * wrote into its own transcript, stamped by the owning daemon on the feed
-   * row's `runtime` (see `Shuttle.SessionLink`). Present only with
-   * `runningWorker`, and only for a session that was bridged.
+   * row's `runtime` (see `Shuttle.SessionLink`). Present only for a live CLI
+   * worker (`tmuxSession`), and only for a session that was bridged.
    */
   sessionLink?: string
   /** Native desktop app route; never treated as a phone universal link. */
@@ -127,7 +129,7 @@ export interface KanbanCard {
   /**
    * `shuttle.runtime.session_uuid` — the harness session the daemon most
    * recently launched for this fiber, and the key that says WHICH session
-   * `sessionLink` points at. The tmux session name (`runningWorker`) is keyed
+   * `sessionLink` points at. The tmux session name (`tmuxSession`) is keyed
    * on the fiber's uid and so is byte-for-byte identical across dispatches;
    * this is not. Absent for a codex/pi worker until the scrape backfills it.
    */
@@ -236,18 +238,24 @@ export interface KanbanCard {
 }
 
 /**
- * Whether lifecycle mutations must ask the owning daemon to stop a worker.
- *
- * A terminal worker has a tmux name; a Codex app worker deliberately does
- * not.  Its durable thread id still represents owned work, including a turn
- * whose launch is blocked and needs explicit release before the card moves.
- * Keep this distinct from `runningWorker`, which is specifically the terminal
- * opener affordance.
+ * Whether the owning daemon holds a worker for this card — a running one of
+ * either surface, or a blocked app launch awaiting a human. A card with one is
+ * in flight whatever its document says between workers.
+ */
+export function hasLiveWorker(card: Pick<KanbanCard, 'workerState'>): boolean {
+  return card.workerState !== undefined
+}
+
+/**
+ * Whether lifecycle mutations must ask the owning daemon to stop a worker:
+ * any live worker, and also an app card with a durable thread id — a Codex
+ * app conversation outlives its turn and still represents owned work, so this
+ * is wider than `hasLiveWorker`.
  */
 export function hasWorkerToStop(
-  card: Pick<KanbanCard, 'runningWorker' | 'shuttleSurface' | 'workerSurface' | 'sessionUuid'>,
+  card: Pick<KanbanCard, 'workerState' | 'shuttleSurface' | 'workerSurface' | 'sessionUuid'>,
 ): boolean {
-  return Boolean(card.runningWorker) ||
+  return hasLiveWorker(card) ||
     ((card.workerSurface ?? card.shuttleSurface) === 'app' && typeof card.sessionUuid === 'string' && card.sessionUuid.length > 0)
 }
 

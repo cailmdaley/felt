@@ -63,6 +63,7 @@ import {
 } from './TemporalData.js'
 import { ChronicleFeeds } from './chronicleFeeds.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
+import { hasLiveWorker } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
 import {
   civilDayToLocalDate,
@@ -922,7 +923,7 @@ function buildFiberRow(
     startIdx,
     endIdx,
     closeIdx,
-    live: Boolean(card.runningWorker),
+    live: hasLiveWorker(card),
     closed,
     closedOk: card.tempered !== false,
     dueIdx: idxOfDue(card.due, dayIndex),
@@ -1674,7 +1675,8 @@ class ChronicleView implements TemporalView {
           c.modifiedAt ?? '', // sort
           c.due ?? '', // ◴
           c.nextLaunchAt ?? '', // ◐
-          c.runningWorker ?? '', // live flag, join rung 1
+          c.workerState ?? '', // live flag
+          c.tmuxSession ?? '', // join rung 1
           c.tempered === undefined ? '' : String(c.tempered), // ✓ vs ✗
           c.originId, // host note
           c.shuttleHost ?? '', // host note

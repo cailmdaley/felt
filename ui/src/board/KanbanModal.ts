@@ -45,7 +45,7 @@ import type {
   KanbanCard,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { hasWorkerToStop } from './KanbanTypes.js'
+import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
@@ -895,7 +895,7 @@ export class KanbanModal {
     // A verdict on a card with a LIVE worker kills that worker (commitTransition
     // → killWorkerIfRunning), and it did so silently — one click on Compost and
     // a running session was gone, while "New session", which destroys less,
-    // asked first. Confirm the destructive one too. Gated on `runningWorker`, so
+    // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
     // the overwhelmingly common case (a verdict on a finished run) stays a
     // single click. This is the choke point for every path — the card's inline
     // buttons, the detail panel's terminal moves, and a drag onto the column —
@@ -1677,7 +1677,7 @@ export class KanbanModal {
     const r = this.lastResponse
     if (!r) return undefined
     const cards = [...r.now.drafts, ...r.now.inFlight, ...r.now.awaitingReview]
-    return cards.find((c) => c.runningWorker === tmux)?.sessionLink
+    return cards.find((c) => c.tmuxSession === tmux)?.sessionLink
   }
 
   /**
@@ -2655,7 +2655,7 @@ export function clearQueueEdge(
  *  frame between a drop and the refetch that reclassifies properly. */
 function unfoldedColumn(card: KanbanCard): 'drafts' | 'inFlight' | 'awaitingReview' {
   if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview'
-  if (card.runningWorker || card.status === 'active') return 'inFlight'
+  if (hasLiveWorker(card) || card.status === 'active') return 'inFlight'
   return 'drafts'
 }
 
@@ -2755,7 +2755,8 @@ function applyOptimisticTransition(
     moved.status = 'active'
     moved.tempered = undefined
     moved.closedAt = undefined
-    moved.runningWorker = undefined
+    moved.workerState = undefined
+    moved.tmuxSession = undefined
     moved.runtimePhase = undefined
     if (card.shuttleKind === 'pinned') {
       return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash, folded })
@@ -2775,7 +2776,8 @@ function applyOptimisticTransition(
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
     moved.tempered = target === 'tempered'
-    moved.runningWorker = undefined           // closing the fiber stops its worker
+    moved.workerState = undefined           // closing the fiber stops its worker
+    moved.tmuxSession = undefined
     moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
     timeline.past = [moved, ...timeline.past] // past renders recency-desc — freshest first
   } else if (target !== 'pinned') {
@@ -2791,7 +2793,8 @@ function applyOptimisticTransition(
       moved.status = 'open'
       moved.tempered = undefined
       moved.closedAt = undefined
-      moved.runningWorker = undefined
+      moved.workerState = undefined
+      moved.tmuxSession = undefined
       moved.runtimePhase = undefined
       moved.storedHorizon = undefined
       moved.effectiveHorizon = 'now'
@@ -2801,7 +2804,8 @@ function applyOptimisticTransition(
       moved.status = 'closed'
       moved.tempered = undefined
       moved.closedAt = card.closedAt ?? nowIso
-      moved.runningWorker = undefined
+      moved.workerState = undefined
+      moved.tmuxSession = undefined
       moved.runtimePhase = undefined
     } else if (target === 'inFlight') {
       moved.status = 'active'
@@ -2835,7 +2839,8 @@ function applyOptimisticSurface(
     status: 'open',
     tempered: undefined,
     closedAt: undefined,
-    runningWorker: undefined,
+    workerState: undefined,
+    tmuxSession: undefined,
     runtimePhase: undefined,
     storedHorizon: 'stashed',
     effectiveHorizon: 'stashed',
@@ -2889,7 +2894,8 @@ function applyOptimisticPin(
   return placeOptimistically(resp, cardId, 'pinned', () => ({
     shuttleKind: 'pinned',
     status: 'open',
-    runningWorker: undefined,
+    workerState: undefined,
+    tmuxSession: undefined,
     runtimePhase: undefined,
     tempered: undefined,
     closedAt: undefined,

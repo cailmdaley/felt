@@ -371,7 +371,7 @@ describe('a mirrored fiber renders as ONE card', () => {
       const feed = feedWith(
         [
           owned('kelvin', {
-            runtime: { tmuxSession: 'final-push-01K-shuttle', phase: 'attention', lastActivityAt: NOW },
+            runtime: { state: 'running', tmuxSession: 'final-push-01K-shuttle', phase: 'attention', lastActivityAt: NOW },
           }),
           owned('laptop'),
         ],
@@ -380,7 +380,7 @@ describe('a mirrored fiber renders as ONE card', () => {
       const cards = inFlight(feed)
       expect(cards).toHaveLength(1)
       expect(cards[0].originId).toBe('kelvin')
-      expect(cards[0].runningWorker).toBe('final-push-01K-shuttle')
+      expect(cards[0].tmuxSession).toBe('final-push-01K-shuttle')
       expect(cards[0].runtimePhase).toBe('attention')
       expect(cards[0].shuttleHost).toBe('kelvin')
     })
@@ -401,12 +401,12 @@ describe('a mirrored fiber renders as ONE card', () => {
       // that host does not run. If the owner is absent from the feed entirely,
       // the card reads worker-less; that is the truth available.
       const feed = feedWith(
-        [owned('laptop', { runtime: { tmuxSession: 'ghost-shuttle', phase: 'working' } })],
+        [owned('laptop', { runtime: { state: 'running', tmuxSession: 'ghost-shuttle', phase: 'working' } })],
         origins,
       )
       const cards = inFlight(feed)
       expect(cards[0].originId).toBe('laptop')
-      expect(cards[0].runningWorker).toBeUndefined()
+      expect(cards[0].tmuxSession).toBeUndefined()
     })
 
     it('leaves an OWNERLESS mirrored fiber on the old local-first rule', () => {
@@ -608,7 +608,7 @@ describe('Resting clusters split when they overflow', () => {
         ...restingCard('roles/sleeper'),
         shuttleKind: 'standing',
         status: 'active',
-        runningWorker: undefined,
+        tmuxSession: undefined,
       }
       const { undated, dated } = splitStashByReturn([sleeping])
       expect(undated).toEqual([])
@@ -875,7 +875,7 @@ describe('cycles — a named span of time, not work', () => {
     }
 
     it('routes to cycles even with a live worker — liveness overrides everything ELSE', () => {
-      expect(classifyFiber(cycle({ hasShuttleBlock: true }), { runningWorker: true })).toBe('cycles')
+      expect(classifyFiber(cycle({ hasShuttleBlock: true }), { liveWorker: true })).toBe('cycles')
     })
 
     it('leaves ordinary work exactly where it was', () => {
@@ -1164,7 +1164,7 @@ describe('sessionWindow', () => {
 
   it('says since when for a live worker, and claims no clean exit', () => {
     const w = sessionWindow(
-      { dispatchedAt: at(-20 * 60_000), runningWorker: 'a-shuttle' },
+      { dispatchedAt: at(-20 * 60_000), workerState: 'running' },
       NOW,
     )
     expect(w?.text).toMatch(/^since \d{2}:\d{2}$/)
@@ -1356,7 +1356,7 @@ describe('the cycle lens — membership is derived, never assigned', () => {
             card({ id: 'work/later', due: asFeltWrites(dayFromNow(60)) }),
             card({ id: 'work/undated' }),
           ],
-          inFlight: [card({ id: 'work/aloft', runningWorker: 'sess' })],
+          inFlight: [card({ id: 'work/aloft', tmuxSession: 'sess' })],
           awaitingReview: [],
         },
       }), 'cycles/now', NOW)!
@@ -1466,7 +1466,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     const resp = buildKanbanResponseFromComposite(
       {
         host: 'laptop',
-        entries: [{ ...role(), runtime: { tmuxSession: 'shuttle-cc', phase: 'running' } }],
+        entries: [{ ...role(), runtime: { state: 'running', tmuxSession: 'shuttle-cc', phase: 'running' } }],
         origins: { laptop: { kind: 'local', stale: false, fiberCount: 1 } },
       },
       { nowMs: NOW },
@@ -1598,7 +1598,7 @@ describe('the fold', () => {
 
   it('stands a card with a LIVE WORKER in its own column', () => {
     const feed = seqFeed(step('a'), step('b', { dependsOn: ['a'] }))
-    feed.entries[1].runtime = { tmuxSession: 'shuttle-b' }
+    feed.entries[1].runtime = { state: 'running', tmuxSession: 'shuttle-b' }
     const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
     expect(resp.now.inFlight.map((c) => c.id)).toEqual(['b'])
     expect(resp.folded).toHaveLength(0)

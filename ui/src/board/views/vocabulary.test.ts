@@ -30,18 +30,18 @@ describe('cardState', () => {
       cardState({
         status: 'closed',
         tempered: true,
-        runningWorker: 'sess-1',
+        workerState: 'running',
         shuttleKind: 'pinned',
         effectiveHorizon: 'stashed',
       }),
     ).toBe('tempered')
   })
 
-  it('calls a running worker in flight, whatever the fiber does at rest', () => {
-    expect(cardState(card({ runningWorker: 'sess-1' }))).toBe('inFlight')
-    expect(cardState(card({ runningWorker: 'sess-1', shuttleKind: 'pinned' }))).toBe('inFlight')
-    expect(cardState(card({ runningWorker: 'sess-1', shuttleKind: 'standing' }))).toBe('inFlight')
-    expect(cardState(card({ runningWorker: 'sess-1', effectiveHorizon: 'stashed' }))).toBe(
+  it('calls a live worker in flight, whatever the fiber does at rest', () => {
+    expect(cardState(card({ workerState: 'running' }))).toBe('inFlight')
+    expect(cardState(card({ workerState: 'running', shuttleKind: 'pinned' }))).toBe('inFlight')
+    expect(cardState(card({ workerState: 'running', shuttleKind: 'standing' }))).toBe('inFlight')
+    expect(cardState(card({ workerState: 'running', effectiveHorizon: 'stashed' }))).toBe(
       'inFlight',
     )
   })

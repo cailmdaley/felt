@@ -16,6 +16,7 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js'
+import { hasLiveWorker } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
@@ -697,7 +698,7 @@ export class KanbanSurfaceRenderer {
 
     // Status/staleness dot: stale (grey), live worker (teal, pulsing), or at-
     // rest (faint). The dot is the whole health read — no text needed.
-    const dotState = isStale ? 'stale' : card.runningWorker ? 'live' : card.held ? 'held' : 'rest'
+    const dotState = isStale ? 'stale' : hasLiveWorker(card) ? 'live' : card.held ? 'held' : 'rest'
     const dot = document.createElement('span')
     dot.className = `kbn-pin-chip-dot kbn-pin-chip-dot-${dotState}`
     dot.setAttribute('aria-hidden', 'true')
@@ -1802,17 +1803,17 @@ export class KanbanSurfaceRenderer {
     //     this gate every momentary pause would flip the pill. Under 60s it
     //     stays the plain "Aloft" pill (the sort still floats it up).
     // A `working` worker has no badge entry, so it never takes over; the
-    // worker-less lifecycle phases take the `!runningWorker` branch below,
-    // untouched by the idle gate (their `lastActivityAt` is absent → Infinity).
+    // An app worker has no terminal to take over: it takes the `!tmuxSession`
+    // branch below and becomes the link into the Codex app.
     const idleMs = card.lastActivityAt !== undefined ? Date.now() - card.lastActivityAt : Infinity
     const phaseTakesOverWorker =
       kind === 'inFlight' &&
-      !!card.runningWorker &&
+      !!card.tmuxSession &&
       workerVariant(card) !== 'aloft'
     const showPhase =
       kind === 'inFlight' &&
       ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || ((card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid)) &&
-      !card.runningWorker
+      !card.tmuxSession
     // The RIGHT region: at most one of phase badge / held pill / worker pill
     // is ever live at once (they're mutually exclusive states), collected
     // here rather than appended immediately so the spacer logic at the
@@ -1840,7 +1841,7 @@ export class KanbanSurfaceRenderer {
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct
     // from the "Aloft" running pill and from an idle-active card (mutually
-    // exclusive with `runningWorker`: held means parked, not running). The badge
+    // exclusive with `tmuxSession`: held means parked, not running). The badge
     // IS the release control: hover flips `⏹︎ held` → `▶ release`, click POSTs
     // the release to the card's OWNING host. Release is global per daemon (one
     // restart parks the whole board, one click frees every held launch on that
@@ -1877,8 +1878,8 @@ export class KanbanSurfaceRenderer {
       })
       rightChip = heldEl
     }
-    if (card.runningWorker) {
-      const tmuxName = card.runningWorker
+    if (card.tmuxSession) {
+      const tmuxName = card.tmuxSession
       const w = document.createElement('button')
       w.type = 'button'
       if (phaseTakesOverWorker && card.runtimePhase) {

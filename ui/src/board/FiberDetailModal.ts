@@ -20,7 +20,7 @@ import {
   previewText,
   type Attachment,
 } from './attachments.js'
-import { hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
+import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from './KanbanTypes.js'
 import { agentGroups } from '../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../forms/meetingApi'
 import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from './meeting.js'
@@ -164,7 +164,7 @@ export interface SessionWindow {
  * over two instants and the clock.
  */
 export function sessionWindow(
-  card: Pick<KanbanCard, 'dispatchedAt' | 'handedOffAt' | 'runningWorker'>,
+  card: Pick<KanbanCard, 'dispatchedAt' | 'handedOffAt' | 'workerState'>,
   nowMs: number = Date.now(),
 ): SessionWindow | null {
   const dispatched = instantMs(card.dispatchedAt)
@@ -175,7 +175,7 @@ export function sessionWindow(
   const startedToday = isoDayLocal(dispatched) === isoDayLocal(nowMs)
   const start = startedToday ? clockTime(dispatched) : dayStamp(dispatched)
 
-  if (card.runningWorker) {
+  if (hasLiveWorker(card)) {
     return {
       text: `since ${start}`,
       state: 'running',
@@ -854,7 +854,7 @@ export class FiberDetailModal {
     const workerClasses = `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
       aloftPill = appWorkerLink(card, workerClasses)
-    } else if (card.runningWorker && coarsePointer()) {
+    } else if (card.tmuxSession && coarsePointer()) {
       const mark = document.createElement(card.sessionLink ? 'a' : 'span')
       mark.className = `kbn-card-worker ${workerClasses}`
       mark.textContent = workerStatusLabel(workerState === 'aloft' ? undefined : card.runtimePhase)
@@ -864,11 +864,11 @@ export class FiberDetailModal {
         mark.addEventListener('click', (e) => e.stopPropagation())
       } else {
         mark.classList.add('kbn-detail-aloft-static')
-        mark.title = `Worker aloft — ${card.runningWorker}`
+        mark.title = `Worker aloft — ${card.tmuxSession}`
       }
       aloftPill = mark
-    } else if (card.runningWorker && this.onOpenWorker) {
-      const tmuxName = card.runningWorker
+    } else if (card.tmuxSession && this.onOpenWorker) {
+      const tmuxName = card.tmuxSession
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = `kbn-card-worker ${workerClasses}`
@@ -2397,8 +2397,8 @@ export class FiberDetailModal {
           shuttleBase: this.shuttleBase,
           uid: card.uid,
           fiberHost: card.shuttleHost,
-          liveSession: card.runningWorker || card.runtimePhase ? card.sessionUuid : undefined,
-          liveTmux: card.runningWorker,
+          liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined,
+          liveTmux: card.tmuxSession,
           desktop: atDesktop(navigator.userAgent, coarsePointer()),
           onError: (message) => {
             errorEl.textContent = message

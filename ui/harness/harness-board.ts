@@ -197,7 +197,7 @@ interface MockFiber {
    *  frontmatter felt preserves and re-emits; `KanbanFiber` reads it as
    *  `Fiber.start` and the read model turns it into `cycleStart`. */
   start?: string
-  shuttle?: ReturnType<typeof shuttleBlock>
+  shuttle?: ReturnType<typeof shuttleBlock> & { surface?: string }
 }
 
 const fiber = (f: MockFiber) => ({
@@ -514,7 +514,9 @@ const MOCK_FEED = {
       if (i === 0) {
         return {
           ...e,
+          origin: f.shuttle?.host ?? LOCAL_HOST,
           runtime: {
+            state: 'running',
             tmux_session: sessionFor(f.id, f.uid ?? ''),
             phase: 'working',
             last_activity_at: now - 4_000,
@@ -525,7 +527,9 @@ const MOCK_FEED = {
       // aged `⏸ waiting · 3h` pill exists for.
       return {
         ...e,
+        origin: f.shuttle?.host ?? LOCAL_HOST,
         runtime: {
+          state: 'running',
           tmux_session: sessionFor(f.id, f.uid ?? ''),
           phase: 'waiting',
           last_activity_at: now - (3 * 3_600_000 + 12 * 60_000),
@@ -536,6 +540,29 @@ const MOCK_FEED = {
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
     ...PINNED.map(fiber),
+    // A pinned role with a live Codex app worker: no tmux session, so the card
+    // must reach In flight through the runtime's `state` and open the app.
+    {
+      ...fiber({
+        id: 'roles/pinned-app',
+        name: 'codex app role',
+        status: 'active',
+        outcome: 'Launcher role running in the Codex app.',
+        tags: ['pinned'],
+        shuttle: { ...shuttleBlock('pinned'), agent: 'codex-sol', surface: 'app' },
+      }),
+      origin: 'ada-workstation',
+      runtime: {
+        state: 'running',
+        phase: 'waiting',
+        surface: 'app',
+        tmux_session: null,
+        session_uuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',
+        agent: 'codex-sol',
+        last_activity_at: now - 25 * 60_000,
+        desktop_link: 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693',
+      },
+    },
     ...CYCLES.map(fiber),
     // The SAME fiber served by two daemons — a git-synced store is served by
     // every host that has it on disk. The board must render ONE card (the

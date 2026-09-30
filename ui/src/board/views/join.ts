@@ -62,7 +62,7 @@ export function buildJoinIndex(
     byId.set(card.id, card)
     const ulid = typeof card.uid === 'string' ? card.uid.trim().toUpperCase() : ''
     if (ulid) byUlid.set(ulid, card)
-    if (card.runningWorker) byWorker.set(card.runningWorker, card)
+    if (card.tmuxSession) byWorker.set(card.tmuxSession, card)
   }
   return { byId, byUlid, byWorker, byTmux }
 }

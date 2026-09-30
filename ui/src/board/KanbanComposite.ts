@@ -21,7 +21,7 @@
 //         felt_store: string,       // owning store path
 //         path: string,             // fiber path relative to .felt/
 //         fiber: {...felt JSON...}, // → mapFeltJsonToFiber
-//         runtime?: { tmux_session: string } | null,  // owner-served liveness
+//         runtime?: { state, tmux_session?, session_uuid?, phase?, ... } | null,  // owner-served liveness
 //         dir?: string,             // fiber's own dir (embed/image base), owner-resolved
 //         report_path?: string,     // sibling report.html, owner-resolved
 //         origin: string,           // owning host/remote name
@@ -41,22 +41,26 @@
 import { validDesktopThreadLink } from './appConversation.js';
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
+/**
+ * The owning daemon's worker for one fiber. The daemon emits a `runtime` only
+ * for a fiber in its running map, so the record's presence IS the liveness
+ * observation; `state` says whether that worker is running or stuck.
+ */
 interface CompositeRuntime {
-  /** Owner-served tmux session name for a CLI worker. App workers have none. */
+  /** `running` for a live worker; `blocked` for an app worker whose launch or
+   * conversation failed and now waits on a human (with `launchError`). */
+  state: 'running' | 'blocked';
+  /** Owner-served tmux session name for a CLI worker — the terminal handle.
+   * App workers have none. */
   tmuxSession?: string;
   surface?: 'cli' | 'app';
   agent?: string;
   sessionUuid?: string;
-  /** Owner-served activity category for a tracked LIVE worker — one of:
-   *   `"attention"` (last hook event is a Notification — "needs you",
-   *     sorts top), `"waiting"` (last event is stop/subagent_stop — the worker
-   *     has paused; "waiting for you" once idle ≥60s), `"working"` (last event
-   *     is a tool/prompt/session event — busy, sinks to the bottom, no chip).
-   * Worker-LESS lifecycle phases (`retrying`/`due`/`dispatched`/`running` and
-   * the column-driving `scheduled`/`awaiting`/`accepted`/`dormant`) also arrive
-   * through this field, stamped by the dispatch state machine rather than the
-   * activity tracker — they only appear when there's no live `tmuxSession`, so
-   * the two vocabularies never collide. Free-form passthrough. */
+  /** Owner-served activity category — one of `"attention"` (raised its hand —
+   * "needs you", sorts top), `"waiting"` (paused at a stop — "waiting for you"
+   * once idle ≥60s), `"working"` (mid-tool — busy, sinks to the bottom, no
+   * chip). Absent until the worker's first hook event (or, for an app worker,
+   * while its launch is not running). */
   phase?: string;
   /** Real ms timestamp of this live session's most-recent hook event of ANY
    * type. Replaces the old bogus `== started_at` value, which never updated on
@@ -82,8 +86,8 @@ export interface CompositeEntry {
   /** Fiber path relative to the owning `.felt/` root. */
   path: string;
   fiber: Fiber;
-  /** Owner-served liveness — present iff the owning daemon runs a live worker
-   * for this fiber. The single reconciled liveness observation per fiber. */
+  /** Owner-served liveness — present iff the owning daemon holds a worker for
+   * this fiber. The single reconciled liveness observation per fiber. */
   runtime?: CompositeRuntime;
   /** Owner-served boot-quarantine hold — true iff the owning daemon is
    * withholding this fiber as a genuinely-fresh launch in `pending_launch`
@@ -179,11 +183,14 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   if (!isRecord(value)) return undefined;
   const session = value.tmux_session;
   const tmuxSession = typeof session === 'string' && session.length > 0 ? session : undefined;
-  // App workers are deliberate non-tmux runtime records. Keep their state so
-  // starting/blocked Codex app launches stay visible on the board.
-  const phase = typeof value.phase === 'string' && value.phase.length > 0
-    ? value.phase
-    : typeof value.state === 'string' && value.state.length > 0 ? value.state : undefined;
+  const sessionUuid = typeof value.session_uuid === 'string' && value.session_uuid.length > 0
+    ? value.session_uuid
+    : undefined;
+  // A record that neither names a worker (terminal or app thread) nor states
+  // one observes nothing.
+  if (!tmuxSession && !sessionUuid && typeof value.state !== 'string') return undefined;
+  const state = value.state === 'blocked' ? 'blocked' : 'running';
+  const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
   const launchError = typeof value.launch_error === 'string' && value.launch_error.length > 0
     ? value.launch_error
@@ -195,9 +202,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const desktopLink = validDesktopThreadLink(value.desktop_link);
   const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
-  const sessionUuid = typeof value.session_uuid === 'string' ? value.session_uuid : undefined;
-  if (!tmuxSession && !phase) return undefined;
-  return { tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, sessionLink, desktopLink, launchError };
+  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, sessionLink, desktopLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

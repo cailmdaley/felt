@@ -243,7 +243,7 @@ const RUN_PARAM = params.get('run')
 const HOUR = 3_600_000
 const RUN: Partial<KanbanCard> =
   RUN_PARAM === 'clean' ? { dispatchedAt: new Date(Date.now() - 3 * HOUR).toISOString(), handedOffAt: new Date(Date.now() - 1.6 * HOUR).toISOString() }
-    : RUN_PARAM === 'aloft' ? { dispatchedAt: new Date(Date.now() - 0.7 * HOUR).toISOString(), runningWorker: 'shuttle-board-chrome', runtimePhase: 'working' }
+    : RUN_PARAM === 'aloft' ? { dispatchedAt: new Date(Date.now() - 0.7 * HOUR).toISOString(), workerState: 'running', tmuxSession: 'shuttle-board-chrome', runtimePhase: 'working' }
       : RUN_PARAM === 'dirty' ? { dispatchedAt: new Date(Date.now() - 5 * HOUR).toISOString() }
         : RUN_PARAM === 'yesterday' ? { dispatchedAt: new Date(Date.now() - 26 * HOUR).toISOString(), handedOffAt: new Date(Date.now() - 24.5 * HOUR).toISOString() }
           : {}

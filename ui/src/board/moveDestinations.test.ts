@@ -108,7 +108,7 @@ describe('moveDestinations', () => {
   })
 
   it('offers to stop a live pinned role back onto the strip', () => {
-    const d = ids(card({ shuttleKind: 'pinned', status: 'active', runningWorker: 'w' }), 'inFlight')
+    const d = ids(card({ shuttleKind: 'pinned', status: 'active', workerState: 'running', tmuxSession: 'w' }), 'inFlight')
     expect(d).toContain('pin')
     expect(d).toContain('unpin')
   })

@@ -88,7 +88,7 @@ export const STATE_KEY_ITEMS: LifecycleState[] = [
 export interface StateBearing {
   status: string
   tempered?: boolean
-  runningWorker?: string
+  workerState?: 'running' | 'blocked'
   shuttleKind?: 'oneshot' | 'standing' | 'pinned'
   effectiveHorizon?: 'now' | 'stashed'
 }
@@ -108,7 +108,7 @@ export function cardState(card: StateBearing): LifecycleState {
     if (card.tempered === false) return 'discarded'
     return 'awaitingReview'
   }
-  if (card.runningWorker) return 'inFlight'
+  if (card.workerState !== undefined) return 'inFlight'
   if (card.effectiveHorizon === 'stashed') return 'resting'
   if (card.shuttleKind === 'pinned') return 'resting'
   if (card.status === 'active') {

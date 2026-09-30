@@ -207,7 +207,8 @@ export function lensCycles(
  * Classify a fiber into the kanban column it belongs in. The single source
  * of truth for "what column is this?". Reads ONLY the document-lifecycle
  * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,
- * and live tmux liveness (`runningWorker`). There is no `enabled` and no
+ * and whether the owning daemon holds a worker (`liveWorker`, from the
+ * card's `hasLiveWorker` — a CLI or app worker alike). There is no `enabled` and no
  * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
  *
  *   1. A closed fiber is a human verdict, terminal regardless of tags or
@@ -218,11 +219,12 @@ export function lensCycles(
  *      BOTH kinds — a standing role's awaiting run is `status:closed`, not an
  *      `active` role carrying a review field.
  *
- *   2. A live tmux worker overrides the open/active branch — the user
- *      dragging a card and seeing it stay in drafts is the dissonance we're
- *      avoiding. Running comes from tmux (never stored); only shuttle fibers
- *      have workers. A running pinned role is caught here too, so it shows as
- *      live work in Now rather than at rest on the Pinned strip.
+ *   2. A live worker overrides the open/active branch — the user dragging a
+ *      card and seeing it stay in drafts is the dissonance we're avoiding.
+ *      Liveness is the owning daemon's observation (never stored), for a
+ *      terminal and an app worker alike; only shuttle fibers have workers. A
+ *      running pinned or standing role is caught here too, so it shows as live
+ *      work in Now rather than at rest on the Pinned strip or the timeline.
  *
  *   2b. A resting `kind:pinned` umbrella role (shuttle block, status:active,
  *      no live worker) → `pinned`. Schedule-less and never auto-dispatched;
@@ -253,7 +255,7 @@ export function lensCycles(
  */
 export function classifyFiber(
   f: Fiber,
-  opts: { runningWorker?: boolean } = {},
+  opts: { liveWorker?: boolean } = {},
 ): KanbanColumn {
   // A CYCLE is an annotation on time, not work, so it leaves before any
   // lifecycle question is asked. This branch is FIRST on purpose and it is
@@ -271,7 +273,7 @@ export function classifyFiber(
     return 'awaitingReview';
   }
 
-  if (opts.runningWorker && f.hasShuttleBlock === true) {
+  if (opts.liveWorker && f.hasShuttleBlock === true) {
     return 'inFlight';
   }
 

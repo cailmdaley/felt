@@ -239,7 +239,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
   })
 
   it('disarms a live worker before stopping it after reshaping', async () => {
-    const c = card({ id: 'running-1', shuttleKind: 'oneshot', runningWorker: 'tmux-42' })
+    const c = card({ id: 'running-1', shuttleKind: 'oneshot', workerState: 'running', tmuxSession: 'tmux-42' })
     await asPrivate(makeBoard()).commitPin(c)
     await wire.settled()
 
@@ -270,7 +270,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
 
   it('parks an already-pinned live role through pause, not a runtime-only kill', async () => {
     asPrivate(makeBoard()).pinRole(card({
-      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      id: 'debug', status: 'active', shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
     }))
     await wire.settled()
     expect(wire.writes().map((w) => [w.url, w.body])).toEqual([
@@ -282,7 +282,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
   it('removes a live role’s latent queue before parking it on the strip', async () => {
     // Live workers stand alone even with depends_on, so foldedUnder is absent.
     asPrivate(makeBoard()).pinRole(card({
-      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      id: 'debug', status: 'active', shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
       dependsOn: ['practice'], dependsOnShape: 'scalar', originId: 'remote',
     }))
     await wire.settled()
@@ -295,7 +295,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
 
   it('routes the runtime stop to the worker host when it differs from the document origin', async () => {
     asPrivate(makeBoard()).pinRole(card({
-      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      id: 'debug', status: 'active', shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
       originId: 'document-owner', shuttleHost: 'worker-host',
     }))
     await wire.settled()
@@ -322,7 +322,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
 
   it('optimistically shows a parked card without stale worker, verdict, or queue fields', async () => {
     const c = card({
-      id: 'debug', status: 'active', shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      id: 'debug', status: 'active', shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
       runtimePhase: 'working', tempered: false, closedAt: '2026-01-01T00:00:00Z',
       dependsOn: ['practice'], dependsOnShape: 'scalar', dependsOnUnresolved: ['practice'],
     })
@@ -333,7 +333,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
     const parked = paint.mock.calls[0][0]
     expect(parked.now.inFlight).toEqual([])
     expect(parked.pinned[0]).toMatchObject({ id: 'debug', status: 'open', shuttleKind: 'pinned' })
-    for (const key of ['runningWorker', 'runtimePhase', 'tempered', 'closedAt',
+    for (const key of ['workerState', 'tmuxSession', 'runtimePhase', 'tempered', 'closedAt',
       'dependsOn', 'dependsOnShape', 'dependsOnUnresolved', 'foldedUnder'] as const) {
       expect(parked.pinned[0][key]).toBeUndefined()
     }
@@ -342,7 +342,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
 
   it('refuses a handwritten dependency list before stopping the worker', async () => {
     asPrivate(makeBoard()).pinRole(card({
-      shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
       dependsOn: ['a', 'b'], dependsOnShape: 'list',
     }))
     expect(wire.calls).toEqual([])
@@ -351,7 +351,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
   it('does not stop the worker if releasing its queue fails', async () => {
     wire.fail('/api/v1/felt-edit', 500, 'owner unavailable')
     asPrivate(makeBoard()).pinRole(card({
-      shuttleKind: 'pinned', runningWorker: 'tmux-debug',
+      shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug',
       dependsOn: ['practice'], dependsOnShape: 'scalar',
     }))
     await wire.settled()
@@ -361,7 +361,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
 
   it('does not kill the worker if pause cannot disarm the role', async () => {
     wire.fail('/api/v1/lifecycle', 500, 'pause refused')
-    asPrivate(makeBoard()).pinRole(card({ shuttleKind: 'pinned', runningWorker: 'tmux-debug' }))
+    asPrivate(makeBoard()).pinRole(card({ shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug' }))
     await wire.settled()
     expect(wire.bodiesTo('/api/v1/kill')).toEqual([])
   })
@@ -370,7 +370,7 @@ describe('commitPin — the strip drop parks the role before stopping its worker
     wire.fail('/api/v1/kill', 500, 'tmux refused')
     const board = asPrivate(makeBoard())
     const announce = vi.spyOn(board, 'announce')
-    board.pinRole(card({ shuttleKind: 'pinned', runningWorker: 'tmux-debug' }))
+    board.pinRole(card({ shuttleKind: 'pinned', workerState: 'running', tmuxSession: 'tmux-debug' }))
     await wire.settled()
     expect(announce.mock.calls).toHaveLength(1)
     expect(announce.mock.calls[0][0]).toContain('Pin failed:')
@@ -512,7 +512,7 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
       id: 'active-stashed-1',
       status: 'active',
       shuttleKind: 'oneshot',
-      runningWorker: 'tmux-active-stashed',
+      workerState: 'running', tmuxSession: 'tmux-active-stashed',
       storedHorizon: 'stashed',
       effectiveHorizon: 'stashed',
     })
@@ -540,7 +540,7 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
       id: 'open-stashed-live-1',
       status: 'open',
       shuttleKind: 'oneshot',
-      runningWorker: 'tmux-open-stashed-live',
+      workerState: 'running', tmuxSession: 'tmux-open-stashed-live',
       storedHorizon: 'stashed',
       effectiveHorizon: 'stashed',
     })
@@ -736,7 +736,7 @@ describe('FiberDetailModal.livePatch — the kind branch', () => {
     // nothing about now, so the live worker runs on and the classifier keeps
     // the card In-flight via its live-worker override.
     await asPrivate(makePanel()).livePatch(
-      card({ id: 'role-3', shuttleKind: 'oneshot', runningWorker: 'tmux-42' }),
+      card({ id: 'role-3', shuttleKind: 'oneshot', workerState: 'running', tmuxSession: 'tmux-42' }),
       { shuttleKind: 'pinned' },
       fakeEl(),
       fakeEl(),

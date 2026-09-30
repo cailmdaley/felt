@@ -127,11 +127,11 @@ describe('attributing activity to fibers', () => {
   const bmodes = card({
     id: 'work/spt3g_papers/bmodes-2d/run',
     uid: '01KVBR1F9BWBVKF97473PV67K8',
-    runningWorker: 'bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle',
+    tmuxSession: 'bmodes-2d-01KVBR1F9BWBVKF97473PV67K8-shuttle',
   })
   const morning = card({
     id: 'loom/email/morning-post/refine',
-    runningWorker: 'morning-post-shuttle',
+    tmuxSession: 'morning-post-shuttle',
   })
   const ledgerCard = card({ id: 'loom/felt-maintenance/ledger/sweep' })
   const cards = [bmodes, morning, ledgerCard]
@@ -243,7 +243,7 @@ describe('attributing activity to fibers', () => {
 
   // Rung 1. A bucket's session name is exactly a live worker's tmux name.
   it('joins a live worker\u2019s exact tmux name with no ledger at all', () => {
-    const at = attributeActivity([bucket(1, { s: bmodes.runningWorker })], cards)
+    const at = attributeActivity([bucket(1, { s: bmodes.tmuxSession })], cards)
     expect(at.get(bmodes.id)).toHaveLength(1)
   })
 

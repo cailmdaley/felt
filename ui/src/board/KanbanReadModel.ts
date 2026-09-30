@@ -6,8 +6,8 @@
 // assemble surfaces → build cards → compute staleness, producing the
 // `KanbanResponse` shape `KanbanSurfaces` (the renderer) consumes.
 //
-// The single most important property lives in `toCard`: a card's
-// `runningWorker` comes from the feed row's owner-served `runtime`, never from a
+// The single most important property lives in `toCard`: a card's liveness
+// (`workerState`) comes from the feed row's owner-served `runtime`, never from a
 // second tmux read. Every fiber's liveness is resolved once, by its owning
 // host, so there is no second local observer to disagree with the daemon's
 // reconciled `status` — and no drag-to-drafts bounce between the two.
@@ -35,6 +35,7 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js';
+import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 
 export interface BuildKanbanResponseOptions {
@@ -284,7 +285,7 @@ function assembleSurfaces(
     const card = toCard(entry, byId, nowMs);
     return {
       card,
-      column: classifyFiber(entry.fiber, { runningWorker: !!card.runningWorker }),
+      column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
     };
   });
   // Keyed by BOTH names an edge can call a fiber by — the slug id and the
@@ -306,7 +307,7 @@ function assembleSurfaces(
   }
   const folded: KanbanCard[] = [];
   for (const { card, column } of classified) {
-    const standsAlone = !!card.runningWorker || card.status === 'active';
+    const standsAlone = hasLiveWorker(card) || card.status === 'active';
     const head = standsAlone
       ? undefined
       : foldHeadId(nodes.get(card.id) ?? { id: card.id, dependsOn: card.dependsOn, foldable: false },
@@ -328,8 +329,9 @@ function assembleSurfaces(
   drafts.sort(byCreatedAtDesc);
   // In-flight order surfaces the workers most likely to need the human at the TOP and
   // sinks the busy ones to the bottom — the inverse of a newest-first list.
-  //   tier 0  attention   — the worker raised its hand (last hook event is a
-  //                         Notification). Pinned to the very top.
+  //   tier 0  attention / — the worker raised its hand (last hook event is a
+  //           blocked       Notification), or its app launch is blocked on a
+  //                         human. Pinned to the very top.
   //   tier 1  waiting     — the worker is STOPPED (last event stop/subagent_
   //                         stop). Ranked CONTINUOUSLY by idle = nowMs −
   //                         lastActivityAt, longest-stopped first: a review
@@ -339,13 +341,14 @@ function assembleSurfaces(
   //           else          sinks here regardless of how long its long-running
   //                         tool has been going — the CATEGORY, not raw wall-
   //                         clock, is what guards against a mid-tool worker
-  //                         being mistaken for idle. Worker-less lifecycle
-  //                         phases land here too and fall through to the
-  //                         existing active / createdAt tiebreaks.
+  //                         being mistaken for idle. A worker with no phase
+  //                         yet, and an armed card with no worker, land here
+  //                         too and fall through to the active / createdAt
+  //                         tiebreaks.
   // 60s is ONLY the chip threshold (KanbanSurfaces); the sort is continuous, so
   // a worker stopped 30s still ranks above a working one — just without a chip.
   const inFlightActivityRank = (card: KanbanCard): { tier: number; idle: number } => {
-    if (card.runtimePhase === 'attention') return { tier: 0, idle: 0 };
+    if (card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return { tier: 0, idle: 0 };
     if (card.runtimePhase === 'waiting') {
       const idle = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : 0;
       return { tier: 1, idle };
@@ -357,8 +360,8 @@ function assembleSurfaces(
     const bRank = inFlightActivityRank(b);
     if (aRank.tier !== bRank.tier) return aRank.tier - bRank.tier;
     if (aRank.tier === 1 && aRank.idle !== bRank.idle) return bRank.idle - aRank.idle; // longest-stopped first
-    const aActive = a.runningWorker || a.status === 'active' ? 0 : 1;
-    const bActive = b.runningWorker || b.status === 'active' ? 0 : 1;
+    const aActive = hasLiveWorker(a) || a.status === 'active' ? 0 : 1;
+    const bActive = hasLiveWorker(b) || b.status === 'active' ? 0 : 1;
     if (aActive !== bActive) return aActive - bActive;
     return byCreatedAtDesc(a, b);
   });
@@ -441,7 +444,7 @@ export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
  *  worker, waiting on its own cron. The Resting region says so differently from
  *  a snooze, and `nextLaunchAt` is the day it names. */
 export function isSleepingOnSchedule(card: KanbanCard): boolean {
-  return card.shuttleKind === 'standing' && card.status === 'active' && !card.runningWorker;
+  return card.shuttleKind === 'standing' && card.status === 'active' && !hasLiveWorker(card);
 }
 
 /** The Desk columns a lensed member can appear in. */
@@ -522,7 +525,7 @@ export function deriveCycleLens(
  */
 function ghostColumn(card: KanbanCard): LensColumn {
   if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview';
-  if (card.runningWorker || card.status === 'active') return 'inFlight';
+  if (hasLiveWorker(card) || card.status === 'active') return 'inFlight';
   return 'drafts';
 }
 
@@ -547,8 +550,9 @@ export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()
 }
 
 /**
- * One composite row → one card. `runningWorker` is the feed row's owner-served
- * `runtime.tmuxSession` — uniform for local and remote, ONE observer per fiber,
+ * One composite row → one card. Liveness (`workerState`) and the terminal
+ * handle (`tmuxSession`) are the feed row's owner-served `runtime` — uniform
+ * for local and remote, ONE observer per fiber,
  * no local tmux index and no per-origin branch. Edge resolution reads `byId`
  * across the whole feed.
  */
@@ -563,8 +567,10 @@ function toCard(
   // `dependsOnUnresolved` (a badge on the card) and holds nothing back. A typo
   // must never be able to hide work.
   const unresolved = unresolvedDependencies(dependsOn, (id) => byId.has(id));
-  const runningWorker = entry.runtime?.tmuxSession;
-  const runtimePhase = entry.runtime?.phase;
+  const runtime = entry.runtime;
+  const tmuxSession = runtime?.tmuxSession;
+  // A blocked worker's phase is its block; otherwise the activity category.
+  const runtimePhase = runtime?.state === 'blocked' ? 'blocked' : runtime?.phase;
   const lastActivityAt = entry.runtime?.lastActivityAt;
   const held = entry.held === true;
   const heldSince = entry.heldSince;
@@ -594,13 +600,14 @@ function toCard(
     dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     dependsOnShape: f.dependsOnShape,
     dependsOnUnresolved: unresolved.length > 0 ? unresolved : undefined,
-    runningWorker,
+    workerState: runtime?.state,
+    tmuxSession,
     runtimePhase,
     launchError: entry.runtime?.launchError,
     sessionLink: entry.runtime?.sessionLink,
     desktopLink: entry.runtime?.desktopLink,
     sessionUuid: entry.runtime?.sessionUuid ?? f.shuttleSessionUuid,
-    workerSurface: entry.runtime?.surface ?? (runningWorker ? 'cli' : undefined),
+    workerSurface: entry.runtime?.surface ?? (tmuxSession ? 'cli' : undefined),
     workerAgent: entry.runtime?.agent,
     lastActivityAt,
     held,
