@@ -46,6 +46,50 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 }
 
+func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration := shellFunction(t, string(script), "config_migration_cmd")
+	home := t.TempDir()
+	oldDir := filepath.Join(home, ".config", "felt")
+	newDir := filepath.Join(home, ".config", "shuttle")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{
+		"host.json":   `{"source":"felt"}`,
+		"agents.json": `{"source":"felt"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(oldDir, name), []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "agents.json"), []byte(`{"source":"shuttle"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", migration+"\nconfig_migration_cmd 0 | bash")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("config migration: %v\n%s", err, out)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(oldDir, "host.json"):   `{"source":"felt"}`,
+		filepath.Join(oldDir, "agents.json"): `{"source":"felt"}`,
+		filepath.Join(newDir, "host.json"):   `{"source":"felt"}`,
+		filepath.Join(newDir, "agents.json"): `{"source":"shuttle"}`,
+	} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q, %v; want %q", path, got, err, want)
+		}
+	}
+}
+
 func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {

@@ -82,7 +82,7 @@ new="$HOME/.config/shuttle"
 for name in host.json remotes.json agents.json stores.json projects.json; do
   if [ -f "$old/$name" ] && [ ! -e "$new/$name" ] && [ ! -L "$new/$name" ]; then
     mkdir -p "$new"
-    mv "$old/$name" "$new/$name"
+    cp -p "$old/$name" "$new/$name"
   fi
 done
 SH
