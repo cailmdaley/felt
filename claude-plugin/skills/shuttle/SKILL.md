@@ -9,7 +9,16 @@ description: >
 
 # shuttle
 
-Shuttle turns fibers into work that agents carry across sessions. You describe how things should be in a fiber — a *constitution* — and a daemon launches an agent session, a *worker*, to move the world toward it; when one worker stops, the next picks up where it left off. The human steers from a board in the browser, where every constitution is a card. And because many workers serve the same people over months, shuttle gives them identities: *roles*, whose charters hold what each office has learned, and *collaborators*, the models that hold them.
+Shuttle turns fibers into work that agents carry across sessions. The `felt`
+Go CLI stores fibers and preserves the `shuttle:` block as opaque frontmatter;
+the `shuttle` Go CLI validates and interprets that block, owns lifecycle
+writes, and adds resolved views. An optional Elixir daemon launches an agent
+session, a *worker*, to move the world toward the fiber's desired state; when
+one worker stops, the next picks up where it left off. The human steers from a
+board in the browser, where every constitution is a card. Because many workers
+serve the same people over months, Shuttle gives them identities: *roles*,
+whose charters hold what each office has learned, and *collaborators*, the
+models that hold them.
 
 If you were launched to capture an idea or a meeting, go straight to its reference under [Where to go next](#where-to-go-next).
 
@@ -45,7 +54,7 @@ The B-mode null test in [[bmodes/paper]] needs a covariance we trust at large sc
 The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validate/offdiag.py`: the mock loader works, the plotting doesn't. The patch count is settled at 150 ([[jackknife-patches]]); don't reopen it.
 ```
 
-- **`shuttle:`** — the block that makes this fiber a constitution. With `kind: oneshot`, workers keep coming until the work is done; a `standing` fiber fires on a cron `schedule`, and a `pinned` one waits for a human to start it. `agent` picks the harness and model each worker runs as (`felt shuttle agents` lists them), `host` says which machine's daemon dispatches it, and `project_dir` where the worker starts. `felt shuttle install` writes the block and checks it.
+- **`shuttle:`** — the block that makes this fiber a constitution. With `kind: oneshot`, workers keep coming until the work is done; a `standing` fiber fires on a cron `schedule`, and a `pinned` one waits for a human to start it. `agent` picks the harness and model each worker runs as (`shuttle agents` lists them), `host` says which machine's daemon dispatches it, and `project_dir` where the worker starts. `shuttle install` writes the block and checks it.
 - **status** — tells the daemon what to do: `active` asks for a worker, `open` keeps the card in drafts, and `closed` parks it for the human.
 - **outcome** — the headline on the card. Each worker rewrites it to say where the work stands and what the reader should do next, and starts it with "Blocked: …" when stuck.
 - **the lede** — the unheaded first paragraph tells a human skimming the card, and a worker arriving cold, what this is and why it matters.
@@ -56,7 +65,7 @@ The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validat
 
 ## The lifecycle
 
-To put a todo on the board, give it a shuttle block; the board shows nothing else. `felt shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`felt shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
+To put a todo on the board, give it a shuttle block; the board shows nothing else. `shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
 
 A worker leaves in one of two ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. Or it **closes**, moving the card to **Awaiting review**, and nobody is launched. The human then tempers the card (accepts it), discards it, or resumes it. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times.
 
@@ -78,11 +87,11 @@ The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts
 
 First commit, run `felt -C <store> sync --push`, and resolve any conflicts. Then exit with exactly one verb, and choose it by asking in order:
 
-1. **Is the desired state realized?** Close: make `felt edit <id> --status closed` your final write, then do nothing more; the daemon reaps your session. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews it.
-2. **Blocked on something only the human can answer?** Close, and start the outcome with "Blocked: …" so the human reads the card as a question rather than a review. Put questions in the outcome and `## Status`, where the human will see them; a `question` fiber sediments.
-3. **More to do?** Hand off: make `felt shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX felt -C <store> shuttle handoff <id>` and end your turn.
+1. **Is the desired state realized?** Close: make `shuttle close <id>` your final action, then do nothing more; the daemon reaps your session. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews it.
+2. **Blocked on something only the human can answer?** Run `shuttle close <id>`, and start the outcome with "Blocked: …" so the human reads the card as a question rather than a review. Put questions in the outcome and `## Status`, where the human will see them; a `question` fiber sediments.
+3. **More to do?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
 
-If you arrive to find the work already done, update the outcome and close. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
+If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
 **When the human names the exit, take it literally.** "Hand off" means hand off. "Close out", "wrap it up" or "I'm done for now" means close, even when you can see more to do — unfinished is often exactly why they want it back on their desk.
 
@@ -95,16 +104,16 @@ Only the human sets `tempered`. Leave the shuttle block in place when you close;
 ## Other sessions and the human
 
 ```bash
-felt shuttle sessions --json                        # conversations across the fleet, with addresses
-felt shuttle message <target> "Please investigate this"
-felt shuttle message <target> "Background for later" --context-only
-felt shuttle message <target> "Results attached" --attach results.csv
-felt shuttle reopen <fiber> --message "Pick up X"     # start a worker on the fiber's own host
+shuttle sessions --json                        # conversations across the fleet, with addresses
+shuttle message <target> "Please investigate this"
+shuttle message <target> "Background for later" --context-only
+shuttle message <target> "Results attached" --attach results.csv
+shuttle reopen <fiber> --message "Pick up X"     # start a worker on the fiber's own host
 ```
 
-A target is an address, a session ID, or a fiber, meaning its current worker. A plain message starts or steers a turn; `--context-only` waits for the receiver's next pause. The receipt says how far delivery got (`accepted` means the receiver's model replied), never that the work is done. felt prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`felt shuttle remotes list`); without a route, leave a note in the fiber and `felt sync --push`.
+A target is an address, a session ID, or a fiber, meaning its current worker. A plain message starts or steers a turn; `--context-only` waits for the receiver's next pause. The receipt says how far delivery got (`accepted` means the receiver's model replied), never that the work is done. The `shuttle` CLI prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`shuttle remotes list`); without a route, leave a note in the fiber and `felt sync --push`.
 
-To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `felt shuttle send-file <path>...` for the Board tab.
+To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `shuttle send-file <path>...` for the Board tab.
 
 ## Where to go next
 

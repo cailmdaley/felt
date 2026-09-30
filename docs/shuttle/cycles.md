@@ -67,7 +67,7 @@ the activity, uses it.
 
 ## Working with them
 
-Cycles are a board gesture. There is no `felt shuttle cycle` verb — a cycle is
+Cycles are a board gesture. There is no `shuttle cycle` verb — a cycle is
 ordinary frontmatter (`tags`, `start:`, `due:`), so nothing stops you writing
 one in the file, and everything below is the board's shorthand for that.
 
@@ -86,8 +86,9 @@ one in the file, and everything below is the board's shorthand for that.
   this cycle."
 
 !!! note "The look back reads the commit ledger"
-    The era memoir is composed from `~/.shuttle/commits.jsonl`, which the felt
-    plugin's `PostToolUse` hook writes. Commits made outside an agent session
+    The era memoir is composed from `~/.shuttle/commits.jsonl`, which the
+    `shuttle hook commit` PostToolUse hook writes. Commits made outside an
+    agent session
     leave no trail, so an era worked entirely by hand reads *the era left no
     trail* — the band still draws and the membership still resolves.
     See [Telemetry and the ledgers](telemetry.md#the-commit-ledger).

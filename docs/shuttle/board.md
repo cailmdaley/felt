@@ -108,7 +108,7 @@ gets nothing from the button.
 That is terminal lock-in, not platform lock-in: it drives kitty's
 remote-control CLI, and kitty runs on Linux and macOS alike. The only
 mac-specific part is the `osascript` call that raises the kitty window, and
-that is already a no-op elsewhere. `felt shuttle attach <fiber>` reaches
+that is already a no-op elsewhere. `shuttle attach <fiber>` reaches
 any worker on any platform.
 
 ## Chronicle — where the time went
@@ -147,7 +147,7 @@ data while Chronicle is closed.
 
 ## Board — what the work produced
 
-Hotkey `3`. Every file a worker pushed with `felt shuttle send-file <path> [path...]` in the last 30 days,
+Hotkey `3`. Every file a worker pushed with `shuttle send-file <path> [path...]` in the last 30 days,
 laid out on a canvas as cards that render their own contents: the report
 renders inside its frame, the plot draws, the page is the thing itself rather
 than a link to it. A list of filenames is an index of work; a wall of rendered
@@ -225,15 +225,15 @@ the sheet hold *all* the configuration rather than all of it there is a widget
 for, and it is the only safe way to touch `remotes.json`: a structured round
 trip drops every key the model does not know about, and that file carries
 several (`auth`, `ssh_flags`, `tunnel.label`, per-entry timeouts) that
-`felt shuttle remotes add` has no flag for. A save is refused unless the tool
+`shuttle remotes add` has no flag for. A save is refused unless the tool
 that really reads the file accepts it first, and the refusal is that tool's own
 sentence — see [the API reference](../reference/api.md#the-operator-files).
 
 Two things the sheet will not do. It will not edit `~/.shuttle/host`: the
 daemon freezes its host id at boot, so a file rewritten under a live daemon
 would leave the CLI and the dispatcher disagreeing about what this machine is
-called, and that is the worst failure this system has. And when `FELT_STORES`
-or `FELT_PROJECTS` is set in a daemon's environment — which overrides the
+called, and that is the worst failure this system has. And when `SHUTTLE_STORES`
+or `SHUTTLE_PROJECTS` is set in a daemon's environment — which overrides the
 file's contents outright — the section says so and turns editing off, rather
 than letting you carefully fix a setting that has no effect.
 

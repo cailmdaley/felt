@@ -10,15 +10,15 @@ The user starts a meeting from the board, either from the Capture form in meetin
 
 ### The transcript
 
-Follow it with `felt shuttle follow <path>`, under `Monitor` in Claude Code, elsewhere by reading its stdout. It waits for the file, prints what is already there, then delivers batches, flushing at once when someone says your name, and exits at `# ended`. The transcript mostly explains itself. Three things it can't show: lines are whole turns and can land slightly out of order around interruptions; the recognizer mangles names and jargon, so read generously; and you can name a speaker yourself by appending a line such as `# S2 = Martin` once the content makes it clear.
+Follow it with `shuttle follow <path>`, under `Monitor` in Claude Code, elsewhere by reading its stdout. It waits for the file, prints what is already there, then delivers batches, flushing at once when someone says your name, and exits at `# ended`. The transcript mostly explains itself. Three things it can't show: lines are whole turns and can land slightly out of order around interruptions; the recognizer mangles names and jargon, so read generously; and you can name a speaker yourself by appending a line such as `# S2 = Martin` once the content makes it clear.
 
 ### Steps
 
 1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`. This page defines the office; the `roles/scribe` charter holds only the user's conventions and what past meetings taught, and outranks this page where they differ. If the store has none, create it with just its name and an empty working-knowledge section. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.
 2. **Follow quietly, from the moment you've claimed.** The meeting is already running, so start watching before you polish the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
-3. **Act when addressed.** A line spoken to you by name is a request (`follow` already catches "Cloud", "Clawed" and "Klaud"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `felt shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
+3. **Act when addressed.** A line spoken to you by name is a request (`follow` already catches "Cloud", "Clawed" and "Klaud"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
 4. **Keep the report live.** Keep `report.html` in the fiber folder as the meeting's current state — summary, decisions, action items, figures — rewritten whole and self-contained ([report.md](report.md)). Send it once with `send-file` so it sits on the Board, then rewrite it in place after each substantive change.
-5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then close the fiber.
+5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then run `shuttle close <meeting-fiber>`.
 
 ### Joined to a constitution
 
@@ -27,7 +27,7 @@ When the message says the meeting joins this constitution, you stay that constit
 1. **File the meeting as a child fiber**, `<constitution>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, with the time, the mode and the transcript path. It holds the running notes and its own `report.html`.
 2. **Take `scribe` for the meeting's duration**, alongside the roles you already hold (create `roles/scribe` from this page if the store has none), and drop it at `# ended`.
 3. **Follow, act and keep the report live** as in steps 2–4, in the child fiber.
-4. **Carry it home.** At `# ended`, consolidate and close the child fiber as in step 5. Then bring what bears on the constitution back into its work: decisions into its body and plan, your own action items into your next steps, the rest as proposals. The constitution stays open.
+4. **Carry it home.** At `# ended`, consolidate, then close the ordinary child fiber with `felt edit <child-fiber> --status closed`. Bring what bears on the constitution back into its work: decisions into its body and plan, your own action items into your next steps, the rest as proposals. The constitution stays open.
 
 ## From transcript to notes
 
@@ -62,14 +62,14 @@ Present the plan as *probably file* and *probably skip* (other people's action i
 
 A `Previous session: <uuid> (<harness>)` line in your dispatch prompt names the last worker's transcript. Its `## Status` is that worker's summary; the transcript holds what actually happened — the searches, the dead ends, the thinking left mid-flight. Read it when the handoff leaves you wanting that texture, and read it surgically: sessions run to hundreds of thousands of tokens, so never load the whole file, and prefer `## Status` when it already answers the question.
 
-`felt shuttle` resolves the lineage for you; don't grep raw ledgers or guess harness paths.
+`shuttle` resolves the lineage for you; don't grep raw ledgers or guess harness paths.
 
 ```bash
-felt shuttle sessions <fiber-id>                 # every session a fiber has had
-felt shuttle sessions <session-uuid>             # the fiber a session served, and its siblings
-felt shuttle sessions --commit <sha>             # the fiber behind a commit, and its sessions
-F=$(felt shuttle transcript <session-uuid>)      # the transcript as a local file, fetched if remote
-felt shuttle sessions <fiber-id> --materialize --dir <d>   # every transcript, plus manifest.json
+shuttle sessions <fiber-id>                 # every session a fiber has had
+shuttle sessions <session-uuid>             # the fiber a session served, and its siblings
+shuttle sessions --commit <sha>             # the fiber behind a commit, and its sessions
+F=$(shuttle transcript <session-uuid>)      # the transcript as a local file, fetched if remote
+shuttle sessions <fiber-id> --materialize --dir <d>   # every transcript, plus manifest.json
 ```
 
 Each row gives its transcript's availability — `available_local`, `available_remote`, `host_unreachable`, `transcript_missing`, or `identity_pending` while the session id is still unknown — and an unreachable host never reads as absence. `--json` gives the structured rows. A subagent spawned natively by a harness leaves no ledger entry, so find it by searching resolved transcripts for a phrase you know it used.

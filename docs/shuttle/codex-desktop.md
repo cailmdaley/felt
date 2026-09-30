@@ -1,6 +1,6 @@
 # Share the Mac Desktop backend
 
-`felt shuttle codex-desktop-bridge` lets the Desktop app and Shuttle use one
+`shuttle codex-desktop-bridge` lets the Desktop app and Shuttle use one
 native local App Server. Desktop launches the bridge through its
 `CODEX_CLI_PATH` executable override. The bridge preserves Desktop's native
 arguments and app-tools environment, execs the bundled App Server in the
@@ -25,7 +25,7 @@ Use the native executable bundled with the installed Desktop app. A wrapper at
 
 ```sh
 #!/bin/sh
-exec "$HOME/.local/bin/felt" shuttle codex-desktop-bridge \
+exec "$HOME/.local/bin/shuttle" codex-desktop-bridge \
   --codex /Applications/ChatGPT.app/Contents/Resources/codex \
   --socket "${CODEX_HOME:-$HOME/.codex}/shuttle-desktop/app-server.sock" \
   -- "$@"

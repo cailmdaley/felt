@@ -47,9 +47,9 @@ is not enough.
 | `POST /felt-stores` | host-addressed | Persist a daemon's registered felt stores (whole list; takes `expected_digest`) |
 | `POST /projects` | host-addressed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` (which takes `expected_digest`) |
 | `POST /config/:id` | host-addressed | Replace one operator file's text, validated first by whoever owns its grammar |
-| `POST /agents/effort` | host-addressed | `{id, effort}` sets one agent's default effort, `effort: null` resets it — shells `felt shuttle agents effort <id> <level>\|--reset` |
-| `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `felt shuttle remotes add\|rm` |
-| `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `felt shuttle tunnels install [--dry-run]` |
+| `POST /agents/effort` | host-addressed | `{id, effort}` sets one agent's default effort, `effort: null` resets it — shells `shuttle agents effort <id> <level>\|--reset` |
+| `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `shuttle remotes add\|rm` |
+| `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a tmux session in kitty — a worker's, or a past session's resume — where the human is, ssh-ing out for a remote host |
 | `POST /sessions/resume` | local | Start (or find) the `resume-<uuid>` tmux session resuming a past harness session on this host |
@@ -62,7 +62,7 @@ of collaborator slugs, for example
 `{"vizier":["fable","astra"],"organizer":[]}`. An empty collaborator
 array keeps a role-only entry. Send this separately from body, status, or
 other document edits: the owner runs one locked
-`felt shuttle assign --json-assignment` write. This changes the roster without
+`shuttle assign --json-assignment` write. This changes the roster without
 launching a worker or changing the execution agent. The roster stores readable
 names, not copied profile bodies; workers synchronize their store and read
 relevant role and collaborator content locally. The request's top-level
@@ -72,16 +72,16 @@ relevant role and collaborator content locally. The request's top-level
 ### Lifecycle actions
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
-fields, and runs the matching `felt shuttle <action>` on the owning host:
+fields, and runs the matching `shuttle <action>` on the owning host:
 `install`, `pin`, `repeat`, `reshape`, `pause`, `resume`, `accept`,
 `set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept` and `resume`
-run felt's writer (`felt shuttle <verb> <fiber> --local`) inside the owning
-daemon's Poller, serialized with its state changes, which then refreshes that
-fiber's document cache; a poll read in flight sees the old document or the new
-one, whose status and `handed_off_at` land in one atomic write. The outcome is
-always kept. A success is 200 with felt's
-output as text. A felt refusal is 422 with `shuttle exited <status>:
-<message>`; an unknown action or a missing field is 400.
+run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+owning daemon's Poller, serialized with its state changes, which then refreshes
+that fiber's document cache; a poll read in flight sees the old document or
+the new one, whose status and `handed_off_at` land in one atomic write. The
+outcome is always kept. A success is 200 with the Shuttle CLI's output as
+text. A Shuttle refusal is 422 with `shuttle exited <status>: <message>`; an
+unknown action or a missing field is 400.
 
 ### Capture and meeting mode
 
@@ -178,7 +178,7 @@ harness processes sharing one transcript.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
-| `GET /agents` | host-addressed | The effective agent registry (shells `felt shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's felt binary |
+| `GET /agents` | host-addressed | The effective agent registry (shells `shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's shuttle binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
 | `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents`, `remotes` or `host` — plus `entries` for the two path lists |
@@ -402,7 +402,7 @@ weak `ETag` over its local inputs and every remote's cached copy, and answers
 ## The operator files
 
 `GET`/`POST /api/v1/config/:id` is a **text** plane over the five JSON files a
-daemon reads from `~/.config/felt/` — `stores`, `projects`, `agents`,
+daemon reads from `~/.config/shuttle/` — `stores`, `projects`, `agents`,
 `remotes`, `host`. It deliberately does not parse a file into a structure and
 re-encode it: that round trip drops every key the structure does not know
 about, and `remotes.json` carries several (`auth`, `ssh_flags`,
@@ -415,9 +415,9 @@ commits:
 
 | File | Validator |
 |---|---|
-| `remotes` | `felt shuttle remotes list --json` under `FELT_REMOTES_FILE` |
-| `agents` | `felt shuttle agents --json` under `FELT_AGENTS_FILE` |
-| `host` | `felt shuttle host --json` under `FELT_HOST_FILE` |
+| `remotes` | `shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE` |
+| `agents` | `shuttle agents --json` under `SHUTTLE_AGENTS_FILE` |
+| `host` | `shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` |
 | `stores`, `projects` | shape-checked in the daemon — no felt verb validates them |
 
 A refusal is a 400 carrying that tool's own sentence verbatim. Empty text
@@ -442,13 +442,14 @@ refusal with a recovery move attached — show me what it says now — and an
 affordance keyed to a status survives a rewording of the sentence.
 
 A **503** is not a refusal of the bytes. It means the host could not RUN the
-check — felt off a supervised daemon's PATH, or wedged past its bound — so
-nothing is known about what was sent and nothing the author retypes will help.
+check — `felt` or `shuttle` is missing from a supervised daemon's PATH, or a
+CLI timed out — so nothing is known about what was sent and nothing the author
+retypes will help.
 A 400 says "fix this"; a 503 says "ask again".
 
 Reads are owner-routed as well as writes, which is unusual here and is the
 point: a config file describes the daemon that reads it, and only that daemon
-can see its own `~/.config/felt/`. A host whose daemon predates these routes
+can see its own `~/.config/shuttle/`. A host whose daemon predates these routes
 answers 404, and the board renders that as "deploy it to configure it from
 here" rather than as a missing file.
 
@@ -459,7 +460,7 @@ here" rather than as a missing file.
 | `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing roles, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
-| `POST /quarantine/release` | Release the boot quarantine (host-addressed; `bin/shuttle release`) |
+| `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
 
 The endpoint binds before synchronous store resolution, orphan adoption,
@@ -472,7 +473,7 @@ before the gate), `GET`/`HEAD /version`, `GET /peers`, `GET /sessions`, and
 `POST /messages` plus `/messages/files`. Session discovery and direct message
 delivery do not call into the initializing Poller. Remote message delivery can
 still return its explicit `no_bridge` result before this host's Tailnet bridge
-has initialized. `bin/shuttle status` reports a bound listener as alive while
+has initialized. `shuttle daemon status` reports a bound listener as alive while
 booting, and the launcher polls every five seconds until it is ready or stops
 answering.
 

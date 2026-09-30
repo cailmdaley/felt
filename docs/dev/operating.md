@@ -3,39 +3,44 @@
 ## Quick start — operating without rebuilding
 
 ```bash
-# bin/shuttle — daemon lifecycle
-bin/shuttle status                            # state JSON (a version receipt while booting); exit 2 when down
-bin/shuttle release                           # release the boot quarantine (parked launches dispatch next tick)
-bin/shuttle reset <remote>                    # reset a tripped remote circuit breaker (revive cascade resumes)
+# shuttle — local daemon lifecycle
+shuttle daemon start [--force]                   # run the Mix release in the foreground
+shuttle daemon stop                              # stop it and mark the shutdown intentional
+shuttle daemon status                            # state JSON; exit 2 when down
+shuttle daemon release                           # release the boot quarantine
+shuttle daemon reset <remote>                    # reset a tripped remote circuit breaker
+shuttle daemon install                           # install the keep-alive supervisor
+shuttle daemon uninstall                         # remove the keep-alive supervisor
+shuttle doctor                                   # host, listener, daemon-contract diagnostics
 
-# felt shuttle — agent-facing CLI; schema-validating
-felt shuttle status                            # fibers with shuttle: blocks (closed hidden; --closed)
-felt shuttle status --all                      # local + every configured remote
-felt shuttle status --remote <name>            # single remote
-felt shuttle ps                                # live tmux workers only
-felt shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
-felt shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
-felt shuttle pin <fiber> --project-dir "$PWD"    # pinned, schedule-less perennial role
-felt shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an existing block's kind/schedule in place
-felt shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
-felt shuttle resume / accept / reopen <fiber>
-felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
-felt shuttle snapshot                            # the daemon's state snapshot
-felt shuttle dispatch <fiber> [--ad-hoc]         # dispatch now
-felt shuttle handoff <fiber>                     # worker's clean-exit ritual: stamp
+# shuttle — orchestration CLI; schema-validating
+shuttle status                            # fibers with shuttle: blocks (closed hidden; --closed)
+shuttle status --all                      # local + every configured remote
+shuttle status --remote <name>            # single remote
+shuttle ps                                # live tmux workers only
+shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
+shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
+shuttle pin <fiber> --project-dir "$PWD"    # pinned, schedule-less perennial role
+shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an existing block's kind/schedule in place
+shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
+shuttle resume / accept / reopen <fiber>
+shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
+shuttle snapshot                            # the daemon's state snapshot
+shuttle dispatch <fiber> [--ad-hoc]         # dispatch now
+shuttle handoff <fiber>                     # worker's clean-exit ritual: stamp
                                                 #   shuttle.runtime.handed_off_at (→ next
                                                 #   is fresh) + end own tmux session. The
                                                 #   single final action; folds in kill $PPID.
-felt shuttle attach <fiber>
-felt shuttle validate-identity                # fiber UID invariants across daemon feeds
-felt setup receipt --json                     # loaded plugins/skills/hooks/binary + daemon contract
+shuttle attach <fiber>
+shuttle validate-identity                # fiber UID invariants across daemon feeds
+felt setup receipt --json                     # Felt binary and loaded plugin generations
 ```
 
 ## Inspecting state
 
 ```bash
-felt shuttle status                      # offline walker view (independent of daemon)
-felt shuttle snapshot                    # raw JSON snapshot
+shuttle status                      # offline walker view (independent of daemon)
+shuttle snapshot                    # raw JSON snapshot
 make status                              # daemon-side view (ps + snapshot)
 make logs                                # daemon stdout/stderr — ~/Library/Logs/shuttle.log
                                          # (macOS) / ~/.shuttle/shuttle.log (Linux)
@@ -43,26 +48,27 @@ tmux ls | grep -- '-shuttle:'            # live workers (<leaf>-<uid>-shuttle)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
 curl -s http://127.0.0.1:4000/api/v1/state/composite | jq
-felt setup receipt --json | jq
-felt shuttle validate-identity           # the local daemon plus every configured remote
+felt setup receipt --json | jq                # Felt binary and plugin state
+shuttle doctor                                 # Shuttle binary, host, listener, daemon contract
+shuttle validate-identity           # the local daemon plus every configured remote
 ```
 
 Dispatch sanity ladder:
 
-1. `felt shuttle status` shows the fiber with `KIND oneshot` and an
+1. `shuttle status` shows the fiber with `KIND oneshot` and an
    active/idle state? → fiber is well-formed and the offline walker sees it.
-2. `felt shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
+2. `shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
 3. Fiber is `active` but sitting in `pending_launch`? → the daemon restarted
-   and the boot quarantine is armed. `bin/shuttle release`. Check this before
+   and the boot quarantine is armed. `shuttle daemon release`. Check this before
    reaching for `make restart` — a restart *re-arms* the quarantine. (On a host
    that opted in with host.json `"quarantine_auto_release": true`, a released
    daemon killed hard and back within seconds, workers intact, releases itself;
    the boot log line `boot quarantine auto-released (…)` or `boot quarantine
    held (…)` says which happened and why.)
-4. `felt shuttle` sees it but daemon doesn't → daemon binary is stale.
-   `make restart` (then `bin/shuttle release`).
+4. `shuttle` sees it but daemon doesn't → daemon binary is stale.
+   `make restart` (then `shuttle daemon release`).
 5. Daemon sees it but agent never appears → check the resolved agent's `cli`
-   (`felt shuttle agents`) and that the wrapper is on `PATH`.
+   (`shuttle agents`) and that the wrapper is on `PATH`.
 
 **"The terminal opens and closes instantly", or the card never moves and no
 session exists.** The daemon preflights the resolved agent's wrapper before it
@@ -100,7 +106,7 @@ store and remote discovery run in one supervised, unlinked task while the
 poller continues serving its cached state. At the bound the task is killed, a
 new cycle is scheduled, and any late token from the abandoned read is ignored.
 Repeatedly increasing `stalls` means the daemon is alive but an input remains
-wedged; inspect `~/.config/felt/stores.json` and remote tunnel health rather
+wedged; inspect `~/.config/shuttle/stores.json` and remote tunnel health rather
 than restarting the daemon to clear the symptom.
 
 ## A worker tmux cannot see
@@ -139,14 +145,14 @@ proceeds once no process holds the session.
 
 ## Remedying a daemon-born tmux server (macOS)
 
-`felt setup receipt` (or `felt shuttle status`) prints a one-liner when the
-current tmux server is daemon-born (see dispatch.md, "tmux server ownership")
+`shuttle doctor` (or `shuttle status`) prints a one-liner when the current
+tmux server is daemon-born (see dispatch.md, "tmux server ownership")
 — it means the server's fork chain roots at the daemon's beam executable, so
 macOS charges every worker's file access to that binary rather than to a
 process that can hold the TCC grant. The fix is a restart, done from a
 terminal, not from the daemon:
 
-1. **Confirm no worker is live first** — `felt shuttle ps` or `tmux ls`. A
+1. **Confirm no worker is live first** — `shuttle ps` or `tmux ls`. A
    session inside the bad server is still a running worker; killing the
    server under it ends that session mid-thought.
 2. **Kill the server**, not just a session: `tmux kill-server` (with the

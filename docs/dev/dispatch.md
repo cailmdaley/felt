@@ -6,15 +6,15 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 ## How dispatch works
 
 - **Poller** (`daemon/lib/shuttle/poller.ex`) owns the tick. It walks each
-  configured felt store with one projected listing (`felt ls --json
+  configured felt store with one projected listing (`shuttle ls --json
   --has-field shuttle --json-field …`), and considers a fiber eligible iff it
   carries a `shuttle:` block owned by this host (`shuttle.host` matches), felt
   `status` is `active`, and it isn't already running/claimed (see `eligible?/2`
   in poller.ex). A listing that fails or times out degrades that store to its
-  last-known rows for the tick; there is no broader fallback listing. A felt
-  too old for the projection flags shows up at boot as a contract skew.
-- **Host identity is felt's.** The Poller takes `SHUTTLE_HOST` (trimmed) or
-  asks `felt shuttle host --json` once at boot and freezes the answer; a felt
+  last-known rows for the tick; there is no broader fallback listing. A shuttle
+  CLI too old for the projection flags shows up at boot as a contract skew.
+- **Host identity is shuttle's.** The Poller takes `SHUTTLE_HOST` (trimmed) or
+  asks `shuttle host --json` once at boot and freezes the answer; a shuttle CLI
   that cannot answer stops the daemon from booting. The host-file and hostname
   chain lives only in the Go CLI (`cmd/shuttle_host.go`).
 - **Eligibility is pure; the filesystem is the dispatch action's business.**
@@ -43,13 +43,13 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   in one `project_dir` at once, and shuttle says nothing about it. Coordinating
   concurrent work in a shared checkout is the operator's call, not the
   dispatcher's.
-- **Configured stores** come from `FELT_STORES` (comma-separated env var) →
-  persisted `~/.config/felt/stores.json`. There is no implicit default store.
+- **Configured stores** come from `SHUTTLE_STORES` (comma-separated env var) →
+  persisted `~/.config/shuttle/stores.json`. There is no implicit default store.
   `POST /api/v1/felt-stores` rewrites the persisted file. Inside the daemon,
   `Shuttle.FeltStores` maps a fiber to the store that holds it
   (`store_for_fiber`, `resolve_fiber` → `%{store, fiber_id, path, uid}`).
-- **Picker projects** are a separate list — `FELT_PROJECTS` → persisted
-  `~/.config/felt/projects.json` (`Shuttle.Projects`) — and answer a different
+- **Picker projects** are a separate list — `SHUTTLE_PROJECTS` → persisted
+  `~/.config/shuttle/projects.json` (`Shuttle.Projects`) — and answer a different
   question: which checkouts a human can file INTO from the Stash/Capture forms.
   Kept out of the poll list on purpose, so polling never walks TCC-protected
   paths. Served at `origins.<host>.projects` of `GET /api/v1/felt-stores`. The
@@ -97,12 +97,12 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation
   (`StandingRoles.standing_role_due?/1`). Manual dispatch is ad-hoc
   (`adhoc-<ms>` run id). Worker exit closes the role into Awaiting review, and
-  `felt shuttle accept` or `resume` re-arms it and stamps `handed_off_at` in
+  `shuttle accept` or `resume` re-arms it and stamps `handed_off_at` in
   the same write, so the just-served occurrence never fires again.
 - **A finished run is finished — there is no reopen.** When a oneshot's
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than
-  `dispatched_at` (the worker's own `felt shuttle handoff`) means fresh. No
+  `dispatched_at` (the worker's own `shuttle handoff`) means fresh. No
   newer handoff means the session died without handing off, and then its
   transcript's age decides: last written within the warm window (45 minutes,
   `config :shuttle, :resume_warm_window_s`) → resume `session_uuid`; older, or
@@ -130,10 +130,10 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A clean handoff therefore *is* the end of that conversation: the next worker
   lands on the rewritten `## Status`, and `resume`/`reopen` on a closed or
   awaiting fiber re-arm the document for a fresh dispatch rather than
-  reattaching. The only reattach window is while the run is live (`felt
-  shuttle attach`); a worker that wants a human's word before it ends stays
-  alive at the checkpoint instead of handing off (the pinned-role contract).
-  This is the contract, not a gap.
+  reattaching. The only reattach window is while the run is live (`shuttle
+  attach`); a worker that wants a human's word before it ends stays alive at
+  the checkpoint instead of handing off (the pinned-role contract). This is
+  the contract, not a gap.
 
 ## tmux server ownership (macOS)
 
@@ -184,9 +184,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `unknown`, and no server at all is `absent`. Only `daemon_born` is a defect.
   The parsing lives in `cmd/shuttle_tmux_origin.go` (the resource coalition is
   selected by name: `launchctl print` emits a `jetsam coalition` block with
-  the same `name` key, and only the resource one is TCC's). `felt shuttle
-  status` and `felt setup receipt` surface the classification so a daemon-born
-  server reads as a one-line remedy: restart it from a terminal.
+  the same `name` key, and only the resource one is TCC's). `shuttle status`
+  and `shuttle doctor` surface the classification so a daemon-born server
+  reads as a one-line remedy: restart it from a terminal.
 - **A present server is hardened, not just accepted.** tmux's `exit-empty`
   makes a server exit as soon as it holds no sessions, and the window between
   `tmux ls` answering "present" and the dispatcher's `new-session` is real: a

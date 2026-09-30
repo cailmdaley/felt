@@ -4,10 +4,10 @@ Operator-facing coverage lives in
 [Installing the shuttle daemon](../shuttle/installation.md#the-event-stream-and-the-ledgers)
 and [Telemetry](../shuttle/telemetry.md); this page is the writer/reader contract.
 
-## Owning the event stream — `felt hook event`
+## Owning the event stream — `shuttle hook event`
 
 shuttle derives per-minute activity, per-session waiting state and the
-sent-files trail from its OWN agent hook-event stream. `felt hook event`
+sent-files trail from its OWN agent hook-event stream. `shuttle hook event`
 (`cmd/hook_event.go`) appends one JSON line per hook event to
 `$SHUTTLE_EVENTS_FILE`, else `events.jsonl` under the data directory.
 `Shuttle.EventStream` is its one reader, and `cmd/shuttle_events.go` mirrors
@@ -34,21 +34,22 @@ already knew (`WaitingTracker.merge_known/2`). The byte mechanics live in
 `Shuttle.FileTail`.
 
 **The writer is the binary; the plugin registers it.**
-`claude-plugin/hooks/event.sh` is a one-line shim (`exec felt hook event`), wired
-in `claude-plugin/hooks/hooks.json` on SessionStart, UserPromptSubmit,
-PreToolUse, Stop, SubagentStop, Notification, and SessionEnd. `.codex-plugin`
-points at the same file, so Codex sessions feed the stream too. Install with
-`felt setup claude` / `felt setup codex`; `scripts/bootstrap.sh` step 5 does both and
-then probes the writer. No `jq`, `perl`, or `hostname` — the whole line is built
-in Go, which is what makes it work on a bare remote login node.
+`claude-plugin/hooks/event.sh` is a one-line shim (`exec shuttle hook event`),
+registered in `claude-plugin/hooks/hooks.json` for SessionStart,
+UserPromptSubmit, PreToolUse, PostToolUse, Stop, SubagentStop, Notification,
+and SessionEnd. `.codex-plugin` points at the same file, so Codex sessions
+feed the stream too. Install with `felt setup claude` / `felt setup codex`;
+`scripts/bootstrap.sh` step 5 does both and then probes the writer. No `jq`,
+`perl`, or `hostname` — the whole line is built in Go, which is what makes it
+work on a bare remote login node.
 
 **Writing is gated on `~/.shuttle` already existing** — the daemon's state
-directory is the opt-in, and the hook never creates it, so a felt-only install
-grows no stream. `SHUTTLE_EVENTS_FILE` overrides the gate (and creates its
-parent); `SHUTTLE_EVENTS=off` disables recording. The live file rotates to
+directory is the opt-in, and the hook never creates it, so an install without
+daemon state grows no stream. `SHUTTLE_EVENTS_FILE` overrides the gate and
+creates its parent; `SHUTTLE_EVENTS=off` disables recording. The live file rotates to
 `.jsonl.1` past `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB) — once, under a flock of
-the `.lock` sidecar, however many hooks see it full at the same moment — and a `toolInput` over
-8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
+the `.lock` sidecar, however many hooks see it full at the same moment — and a
+`toolInput` over 8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
 `Write` parks a whole file body in the stream.
 
 ### The two fields that keep a busy worker out of the attention column
@@ -114,7 +115,7 @@ views as **join rung 0** — the structural pairing that replaces an inference.
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces
   parsing a fiber name out of a commit subject. **The hook writes it** —
-  `felt hook commit`, which the plugin runs on `PostToolUse` for a Bash call
+  `shuttle hook commit`, which the plugin runs on `PostToolUse` for a Bash call
   (`claude-plugin/hooks/commit.sh`), appending a line when the call ran a `git
   commit` — because the pairing is only knowable inside the session's own
   process tree. The daemon is a reader only. Coverage is therefore partial:

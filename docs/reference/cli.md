@@ -1,21 +1,21 @@
 # CLI Reference
 
-This page lists every `felt` verb, grouped by area. Scan it to find a command.
-Then read that command's `--help` text, which adds examples and the full
-story.
+This page covers both Go CLIs. `felt` creates, searches, and edits fibers;
+`shuttle` interprets the optional `shuttle:` block and owns orchestration.
+Scan for a command, then read its `--help` text for examples and detail.
 
-Every command accepts these global flags:
+Their global flags are separate:
 
-| Flag | Purpose |
-|---|---|
-| `-C, --directory <dir>` | Run as if felt was started in `<dir>` |
-| `-j, --json` | Output in JSON format |
-| `-h, --help` | Show help for the command |
+| CLI | Flag | Purpose |
+|---|---|---|
+| `felt` | `-C, --directory <dir>` | Run as if felt was started in `<dir>` |
+| `felt` | `-j, --json` | Output in JSON format |
+| `shuttle` | `-C, --store <dir>` | Select a felt store root |
+| `shuttle` | `-j, --json` | Output in JSON format |
+| both | `-h, --help` | Show help for the command |
 
-`felt -v` / `felt --version` prints the version and build: a release names
-its commit and date, a local build the source revision it was built from
-(`dev (3e5bcef70529)`). `felt shuttle` also accepts
-`--felt-store <dir>` as an alias for `-C`.
+`felt --version` prints its build version. `shuttle version` reports the
+running daemon's version when reachable, otherwise the local Mix release version.
 
 ## Core fiber verbs
 
@@ -59,11 +59,11 @@ its commit and date, a local build the source revision it was built from
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
 | `felt setup pi` | Install the felt package for pi (`--uninstall`) |
-| `felt setup receipt` | Report the executable, promoted and actually loaded harness generations, hooks, pending promotion state, and live daemon contract (`--json` for the machine-readable receipt) |
+| `felt setup receipt` | Report the Felt executable and promoted/loaded harness generations, hooks, and pending plugin-promotion state (`--json` for the machine-readable receipt) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
-| `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate (`--executable` overrides the felt binary probed for contract compatibility) |
+| `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate, including both skills and registered hook files |
 | `felt uninstall` | Remove the felt plugin from Claude Code and Codex and the felt package from pi (inverse of `setup claude`/`codex`/`pi`) |
-| `felt update` | Update felt to the latest release, moving the Claude Code plugin and any installed Codex or pi integration to the matching tag |
+| `felt update` | Update the `felt` and `shuttle` Go binaries together, then refresh the Claude Code plugin and any installed Codex or pi integration to the matching tag |
 
 ## `felt hook` (agent-harness adapters)
 
@@ -75,20 +75,30 @@ people.
 | `felt hook session` | Emit the SessionStart `additionalContext` envelope |
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
-| `felt hook event` | Append one harness hook event to the host-local shuttle activity stream (`~/.shuttle/events.jsonl`) |
-| `felt hook commit` | Record a commit a Bash call just made on the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
 
-## `felt shuttle` (dispatch layer)
+## Shuttle hooks
 
-These optional verbs apply once a fiber carries a `shuttle:` block. Local-host
-write verbs work offline and validate before they touch disk. When a fiber's
-`shuttle.host` names an enabled remote in `~/.config/felt/remotes.json`,
+These event and commit adapters are also installed by the felt plugin, but the
+`shuttle` binary owns their ledgers and mailbox behavior.
+
+| Command | Purpose |
+|---|---|
+| `shuttle hook event` | Append one harness event to the host-local activity stream (`~/.shuttle/events.jsonl`) and handle Shuttle mailbox registration/delivery |
+| `shuttle hook commit` | Record a commit from a Bash call in the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
+
+## `shuttle` (dispatch layer)
+
+The `shuttle:` block is opaque frontmatter to felt: `felt show -j` and `felt
+ls -j` return it without a resolved facet, and felt never validates its schema.
+`shuttle` owns that schema and the resolved view. Its local write verbs work
+offline and validate before they touch disk. When a fiber's
+`shuttle.host` names an enabled remote in `~/.config/shuttle/remotes.json`,
 `pause`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
 `set-outcome`, `reshape`, and `uninstall` route through the local daemon to the
 owner; `dispatch` does the same. `snapshot`, `dispatch`, `status --all`/`--remote`,
 `sessions`, `transcript`, `message`, and
 `validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
-per `felt shuttle host`). `accept` and `resume` on a fiber this host owns go
+per `shuttle host`). `accept` and `resume` on a fiber this host owns go
 through its daemon when it answers, which applies them with `--local` inside
 its Poller, serialized with the Poller's state changes (a poll read in flight
 sees the old document or the new one, written in one atomic step); a daemon
@@ -104,11 +114,11 @@ the daemon speaks directly, see the [HTTP API](api.md).
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
-| `felt shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--surface`, `--host`) |
-| `felt shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
-| `felt shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
-| `felt shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
+| `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
+| `shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--surface`, `--host`) |
+| `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
+| `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
+| `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
 `install`, `pin`, and `repeat` are create-only: each refuses a fiber that
 already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
@@ -126,40 +136,61 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `felt shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
-| `felt shuttle accept <fiber>` | Resolve the human verdict on an untempered role, closed or still active: a standing role re-arms and its run concludes (`handed_off_at`); a pinned role re-parks to `open`. The outcome is kept. `--local` skips the daemon |
-| `felt shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
-| `felt shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
-| `felt shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
-| `felt shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
-| `felt shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
-| `felt shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
-| `felt shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
+| `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
+| `shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
+| `shuttle accept <fiber>` | Resolve the human verdict on an untempered role, closed or still active: a standing role re-arms and its run concludes (`handed_off_at`); a pinned role re-parks to `open`. The outcome is kept. `--local` skips the daemon |
+| `shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
+| `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
+| `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
+| `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
+| `shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
+| `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
+| `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
 
 ### Read / inspect
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so |
-| `felt shuttle ps` | Live tmux worker sessions only |
-| `felt shuttle snapshot` | Print the local daemon's state snapshot |
-| `felt shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
-| `felt shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `felt shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
-| `felt shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
-| `felt shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
-| `felt shuttle agents init` | Seed `~/.config/felt/agents.json` from the built-ins (`--path`, `--force`) |
-| `felt shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
-| `felt shuttle attach <fiber>` | Attach to a running worker's tmux session |
-| `felt shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
+| `shuttle ls [query]` | Felt-compatible fiber listing/search with Shuttle's resolved facet in JSON output |
+| `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
+| `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
+| `shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so |
+| `shuttle ps` | Live tmux worker sessions only |
+| `shuttle snapshot` | Print the local daemon's state snapshot |
+| `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
+| `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
+| `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
+| `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
+| `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
+| `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
+| `shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
+| `shuttle attach <fiber>` | Attach to a running worker's tmux session |
+| `shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.
 
+### Daemon and host operations
+
+| Command | Purpose |
+|---|---|
+| `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration |
+| `shuttle daemon start [--force]` | Start the local Mix release in the foreground |
+| `shuttle daemon stop` | Stop the local daemon and mark the shutdown as intentional |
+| `shuttle daemon status` | Print daemon state; exits 2 when the daemon is down |
+| `shuttle daemon release` | Release the boot quarantine |
+| `shuttle daemon reset <remote>` | Reset a remote's circuit breaker |
+| `shuttle daemon install [options]` | Install the per-user keep-alive supervisor (`--stores` replaces the store-list option) |
+| `shuttle daemon uninstall [--label <name>]` | Remove the per-user keep-alive supervisor |
+| `shuttle version` | Print the running daemon version or, when it is down, the local Mix release version |
+
+`shuttle` reads ordinary fiber data through felt's Go library. The daemon
+shells out to `felt` for fiber content and writes and to `shuttle` for resolved
+views and Shuttle-owned operations.
+
 ### Codex desktop bridge
 
-`felt shuttle codex-desktop-bridge` adapts the desktop application's JSONL
+`shuttle codex-desktop-bridge` adapts the desktop application's JSONL
 `CODEX_CLI_PATH` protocol to a native Codex App Server websocket. It execs the
 bundled native executable in the original desktop-child process, preserving
 the signed Desktop → Codex → app-tools ancestry. A separate relay child owns
@@ -175,7 +206,7 @@ variables. `CODEX_CLI_PATH` points at the real executable for nested launches.
 Non-server invocations exec the native binary directly, retaining its exit code.
 
 ```sh
-felt shuttle codex-desktop-bridge --codex /absolute/path/to/codex -- \
+shuttle codex-desktop-bridge --codex /absolute/path/to/codex -- \
   -c features.code_mode_host=true app-server \
   --analytics-default-enabled \
   -c plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true
@@ -202,12 +233,12 @@ provenance rows include a canonical `address` when the host and harness are know
 Messages wake idle receivers or steer ongoing work by default:
 
 ```bash
-felt shuttle sessions --json
-felt shuttle message <address> "Please review the results" --attach results.csv
-felt shuttle message <address> "Background for your next task" --context-only
+shuttle sessions --json
+shuttle message <address> "Please review the results" --attach results.csv
+shuttle message <address> "Background for your next task" --context-only
 ```
 
-`felt shuttle message` accepts that address, a unique native session ID, or a
+`shuttle message` accepts that address, a unique native session ID, or a
 Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
 one exact match across configured stores; they refuse guesses and duplicate
 matches. A fiber resolves to the worker in its newest dispatch, resume, or
@@ -243,9 +274,9 @@ processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports
 `preflight_failed`; preflight refusals may include a rejection receipt. HTTP 409
 reports `message_id_conflict` when an ID is reused for changed content. Other
 rejected receipts—including `session_unavailable`, `session_not_found`,
-`wake_required`, and `wake_refused`—return 200. HTTP 5xx means Felt did not
+`wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
-include a synthetic `unknown` receipt. `felt shuttle message` exits 0 for
+include a synthetic `unknown` receipt. `shuttle message` exits 0 for
 `accepted`, `submitted`, `queued`, and `context_added`; it exits 1 for
 `rejected`, `unknown`, or another command error. A target that does not
 resolve, is ambiguous, or has no session-ledger worker fails before any
@@ -297,8 +328,8 @@ native discovery locations when a harness uses a nondefault runtime directory.
 Attach up to eight files totaling 20 MiB with the same command:
 
 ```sh
-felt shuttle message <address> "Here are the notes and plot" --attach notes.txt --attach plot.png
-felt shuttle message <address> --attach results.pdf
+shuttle message <address> "Here are the notes and plot" --attach notes.txt --attach plot.png
+shuttle message <address> --attach results.pdf
 ```
 
 Attachments are stable copies, stored outside the project on the receiving
@@ -311,32 +342,32 @@ message ID are refused. An older daemon that cannot receive attachments refuses
 the whole file message instead of dropping its files.
 
 `--file` supplies message text. `--attach` transfers file bytes to another
-session. `felt shuttle send-file` publishes artifacts to the human's IDE using
+session. `shuttle send-file` publishes artifacts to the human's IDE using
 the existing owner-served file surface.
 
 ### Fleet / operator plumbing
 
 | Command | Purpose |
 |---|---|
-| `felt shuttle remotes list` | List the configured remote daemons and document defaults; validates paths, proxy/dial exclusivity, duplicate names, and port collisions |
-| `felt shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
-| `felt shuttle remotes rm <name>` | Remove a remote |
-| `felt shuttle remotes path` | Print the fleet file path (`~/.config/felt/remotes.json`) |
-| `felt shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file, data_dir}`; the daemon reads its host id from it at boot, and the stop scripts put `heartbeat.stopped` in `data_dir`) |
-| `felt shuttle host seed` | Write this host's id to `~/.shuttle/host` (or `$SHUTTLE_HOST_FILE`) unless it already holds one: `$SHUTTLE_HOST`, else the normalized hostname. `bin/shuttle install-agent` runs it |
-| `felt shuttle host class <class>` | Set this host's trust class in `~/.config/felt/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
-| `felt shuttle host check-owner` | Verify that a socket-class TCP listener belongs to this user, from `/proc/net/tcp{,6}` (a no-op for Unix listeners and off Linux) |
-| `felt shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`, `--dry-run`). launchd on macOS, systemd user units on Linux |
-| `felt shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
-| `felt shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |
-| `felt shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--meeting`; at least one required); daemon-facing, not for manual use |
+| `shuttle remotes list` | List the configured remote daemons and document defaults; validates paths, proxy/dial exclusivity, duplicate names, and port collisions |
+| `shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
+| `shuttle remotes rm <name>` | Remove a remote |
+| `shuttle remotes path` | Print the fleet file path (`~/.config/shuttle/remotes.json`) |
+| `shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file, data_dir}`; the daemon reads its host id from it at boot, and the stop scripts put `heartbeat.stopped` in `data_dir`) |
+| `shuttle host seed` | Write this host's id to `~/.shuttle/host` (or `$SHUTTLE_HOST_FILE`) unless it already holds one: `$SHUTTLE_HOST`, else the normalized hostname. `shuttle daemon install` runs it |
+| `shuttle host class <class>` | Set this host's trust class in `~/.config/shuttle/host.json` (`single-user`, `shared-multi-user`, `exposed`) |
+| `shuttle host check-owner` | Verify that a socket-class TCP listener belongs to this user, from `/proc/net/tcp{,6}` (a no-op for Unix listeners and off Linux) |
+| `shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`, `--dry-run`). launchd on macOS, systemd user units on Linux |
+| `shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
+| `shuttle contract` | Print the daemon-facing CLI contract version (used at daemon boot to detect a stale CLI) |
+| `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--meeting`; at least one required); daemon-facing, not for manual use |
 
 !!! note
-    `felt shuttle remotes`, `tunnels`, `validate-identity`, `contract`, and
+    `shuttle remotes`, `tunnels`, `validate-identity`, `contract`, and
     `mark-runtime` serve daemon and fleet plumbing. An adopter running
     shuttle solo will not need them.
 
-### `felt shuttle send-file <path> [path...]`
+### `shuttle send-file <path> [path...]`
 
 Publish readable regular files to the Shuttle Board and the session/fiber sent-files
 trail. Claude, Codex and Pi sessions use this command. Paths are resolved to absolute
@@ -348,14 +379,14 @@ Session identity comes from `--session`; else `PI_SESSION_ID` when
 `AI_AGENT=pi` (Pi's own marker, so Pi nested under another harness is
 attributed to Pi); else the first set of `CODEX_THREAD_ID`,
 `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `PI_SESSION_ID`; else the
-current tmux session's local ledger. `felt shuttle message` derives its
+current tmux session's local ledger. `shuttle message` derives its
 automatic `--from` the same way. A worker's tmux name identifies its
 fiber. Outside a harness, pass `--session <native-session-id>`.
-The event stream uses the same configuration as `felt hook event`; recording
+The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
 The daemon also reads `SendUserFile` hook events as sends.
 
-### `felt shuttle follow <transcript>`
+### `shuttle follow <transcript>`
 
 Stream a live meeting transcript to an agent in batches, each followed by one
 blank line. Run it under a harness monitor that reads stdout as it arrives.

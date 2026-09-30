@@ -116,9 +116,10 @@ lives in the docs site (`docs/`, published to
   falling back to the felt store.
 - **Shuttle CLI and daemon lifecycle have one command tree.** Local Shuttle
   writes validate before writing and work offline; `snapshot` and `dispatch`
-  ask the daemon. `shuttle daemon start|status|release|reset` manages the
-  daemon, `shuttle version` reports versions, and `shuttle doctor` diagnoses
-  host and daemon state.
+  ask the daemon. `shuttle daemon start|stop|status|release|reset|install|uninstall`
+  manages the daemon and its supervisor. `shuttle version` reports the running
+  daemon version or local Mix release version; `shuttle doctor` diagnoses host
+  and daemon state.
 - **No tag predicate for dispatch — two gates, both explicit.** A fiber is
   Shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
   felt `status` is `active` and (2) the boot quarantine is released: every

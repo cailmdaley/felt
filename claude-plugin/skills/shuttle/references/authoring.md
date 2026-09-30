@@ -10,8 +10,8 @@ Write one when the desired state is clear, or can be made clear, but the path is
 2. **Create the fiber** under the parent it belongs to: `felt add <root>/<branch>/<slug> "<name>" -t constitution`. The tag lets people browse constitutions (`felt ls -t constitution`); it never gates dispatch.
 3. **Write the spec** (below). The `ideating` skill carries the thinking: name what done *is* before designing how to get there, fence what stays untouched, and test whether the framing is right at all.
 4. **Refine it with the user.** Show the draft, revise it, and check it once more for goal, constraints and success criteria before launch. A live uncertainty can sit in an "Open questions" section until it's resolved; then fold the answer in and delete the section.
-5. **Install the block.** `felt shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes and validates the `shuttle:` block and arms the fiber, an existing open draft included; add `--disabled` to leave it in Drafts. A hand-written block works too but skips validation, and without `status: active` it won't dispatch.
-6. **Give it a role.** `felt shuttle assign <fiber-id> --role <role> [--collaborator <model>]`, choosing or creating the charter that fits ([collaboration.md](collaboration.md)). Without one, each worker has to rediscover the playbooks and the human gates.
+5. **Install the block.** `shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes and validates the `shuttle:` block and arms the fiber, an existing open draft included; add `--disabled` to leave it in Drafts. A hand-written block works too but skips validation, and without `status: active` it won't dispatch.
+6. **Give it a role.** `shuttle assign <fiber-id> --role <role> [--collaborator <model>]`, choosing or creating the charter that fits ([collaboration.md](collaboration.md)). Without one, each worker has to rediscover the playbooks and the human gates.
 
 Workers re-read the constitution at every dispatch, so keep refining it between sessions.
 
@@ -38,9 +38,9 @@ A constitution that shapes an artifact rather than code — documentation, a res
 
 ## Drafts or dispatch
 
-An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lands it in Drafts, and `felt shuttle resume` arms it later — keep `--project-dir` on the draft install, since arming refuses a block without one (`resume --project-dir` supplies it late). Default to drafts: most constitutions are stashed now and launched later. Dispatch straight away when the user plainly wants action — they are mid-iteration, name the agent in an action-shaped sentence, or say "launch", "go" or "dispatch now". When the signals are mixed, write the constitution first and then ask; that is the one thing worth confirming.
+An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lands it in Drafts, and `shuttle resume` arms it later — keep `--project-dir` on the draft install, since arming refuses a block without one (`resume --project-dir` supplies it late). Default to drafts: most constitutions are stashed now and launched later. Dispatch straight away when the user plainly wants action — they are mid-iteration, name the agent in an action-shaped sentence, or say "launch", "go" or "dispatch now". When the signals are mixed, write the constitution first and then ask; that is the one thing worth confirming.
 
-`install` only creates. On a fiber that already has a block it refuses and points you to `felt shuttle status` (inspect), `reshape` (kind or schedule), `set-agent` (agent and its settings), or `uninstall` (start over).
+`install` only creates. On a fiber that already has a block it refuses and points you to `shuttle status` (inspect), `reshape` (kind or schedule), `set-agent` (agent and its settings), or `uninstall` (start over).
 
 ## The human in the loop
 
@@ -52,4 +52,4 @@ To talk to a worker later, the human resumes its card, which reopens the stored 
 
 ## Choosing the agent
 
-Use the agent the user or constitution names; otherwise pick from `felt shuttle agents`, the registry on this machine (built-ins plus `~/.config/felt/agents.json`, read separately on each host). Check the listing before assuming an agent exists, and remember there is no `human` agent — write a human gate instead. Change it with `felt shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents run with `--permission-mode auto`. For headless (`claude -p`) runs, add an alias to the registry, such as `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}`; no built-in agent is headless.
+Use the agent the user or constitution names; otherwise pick from `shuttle agents`, the registry on this machine (built-ins plus `~/.config/shuttle/agents.json`, read separately on each host). Check the listing before assuming an agent exists, and remember there is no `human` agent — write a human gate instead. Change it with `shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents run with `--permission-mode auto`. For headless (`claude -p`) runs, add an alias to the registry, such as `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}`; no built-in agent is headless.

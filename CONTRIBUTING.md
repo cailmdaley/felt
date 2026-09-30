@@ -16,7 +16,7 @@ git clone https://github.com/cailmdaley/felt
 cd felt
 make cli                      # build both Go CLIs
 (cd daemon && mix deps.get && mix compile)  # the daemon
-make build                    # CLI + UI + daemon release
+make build                    # both Go CLIs + UI + daemon release
 ```
 
 Requirements: Go 1.23+, Erlang/OTP 28+, Elixir 1.19+, Node 22+ and npm.
@@ -72,7 +72,7 @@ belong in a fork or a `Shuttle.WorkSource` adapter once that abstraction lands.
 ## Opening issues
 
 - **Bugs:** include steps to reproduce. For a Shuttle/daemon bug, also include
-  the output of `shuttle snapshot`; a felt-only bug report doesn't need it.
+  the output of `shuttle snapshot`; a bug isolated to the felt CLI doesn't need it.
 - **Features:** describe the problem, not just the solution. A concrete
   use-case helps.
 
