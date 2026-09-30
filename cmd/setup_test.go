@@ -539,7 +539,21 @@ func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for link, target := range map[string]string{"felt": cloneSkills, "shuttle": runtimeSkill, "shuttle-dev": checkoutSkill} {
+	// Two links whose text starts inside the runtime but which land outside
+	// it, through .. and through a further symlink: both stay.
+	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
+	localSkill := filepath.Join(home, "src", "local")
+	if err := os.MkdirAll(localSkill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "src"), filepath.Join(runtimeDir, "external")); err != nil {
+		t.Fatal(err)
+	}
+	escapes := map[string]string{
+		"dotdot":  runtimeDir + "/../../src/local", // unjoined, so the .. survives in the link text
+		"through": filepath.Join(runtimeDir, "external", "local"),
+	}
+	for link, target := range map[string]string{"felt": cloneSkills, "shuttle": runtimeSkill, "shuttle-dev": checkoutSkill, "dotdot": escapes["dotdot"], "through": escapes["through"]} {
 		if err := os.Symlink(target, filepath.Join(skillsDir, link)); err != nil {
 			t.Fatal(err)
 		}
@@ -573,5 +587,10 @@ func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(skillsDir, "unrelated")); err != nil {
 		t.Errorf("unrelated skill directory was removed: %v", err)
+	}
+	for link := range escapes {
+		if _, err := os.Lstat(filepath.Join(skillsDir, link)); err != nil {
+			t.Errorf("link %q resolving outside the runtime was removed: %v", link, err)
+		}
 	}
 }

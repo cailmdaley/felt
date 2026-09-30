@@ -508,12 +508,13 @@ func uninstallPlugin() error {
 // not tracked anywhere, so we cannot reach it — best-effort by design, and
 // silent when there is nothing to do.
 func pruneMarketplaceSkillLinks() []string {
+	// Roots that do not exist hold nothing a link could resolve into.
 	var managed []string
-	if clone := claudeMarketplaceClonePath(); clone != "" {
-		managed = append(managed, clone)
-	}
-	if runtimeDir, err := pluginRuntimeDir(); err == nil {
-		managed = append(managed, runtimeDir)
+	runtimeDir, _ := pluginRuntimeDir()
+	for _, dir := range []string{claudeMarketplaceClonePath(), runtimeDir} {
+		if resolved, err := canonicalPath(dir); dir != "" && err == nil {
+			managed = append(managed, resolved)
+		}
 	}
 	skillsDir, err := homePath(".claude", "skills")
 	if err != nil {
@@ -527,9 +528,15 @@ func pruneMarketplaceSkillLinks() []string {
 	var pruned []string
 	for _, entry := range entries {
 		path := filepath.Join(skillsDir, entry.Name())
-		target, err := os.Readlink(path)
-		if err != nil {
+		if _, err := os.Readlink(path); err != nil {
 			continue // not a symlink; not ours to touch
+		}
+		// Judge where the link lands, not how its text is spelled: a path
+		// through .. or through a further symlink can leave a managed root.
+		// A link that does not resolve is left alone.
+		target, err := canonicalPath(path)
+		if err != nil {
+			continue
 		}
 		if !slices.ContainsFunc(managed, func(dir string) bool {
 			return strings.HasPrefix(target, dir+string(filepath.Separator))
