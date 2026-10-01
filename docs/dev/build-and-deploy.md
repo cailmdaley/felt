@@ -204,9 +204,12 @@ checkout must also have no tracked edits or deletions (`git status
 edited paths, and so does one git cannot inspect. Untracked files are ignored, since pi's npm install leaves a
 `package-lock.json` in its clone.
 
-If setup fails, or `felt setup receipt` still fails afterwards, the host's line
-carries the receipt's repair text (for example a stale `felt` shadowing the new
-one on `PATH`, or Codex hooks awaiting approval). The host counts as failed
+If setup fails, the host's line carries its output. If `felt setup receipt`
+still fails afterwards, the line names each component that is not healthy
+(`felt`, a harness plugin, `hooks`, `generation`) with that component's own
+repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
+mismatch: open a Codex session and approve felt's hooks`. It falls back to the
+receipt's top-level repair when no component reports one. The host counts as failed
 only after its daemon cycle and quarantine release have run, so a harness
 problem never leaves the daemon on the old build. A pi clone that cannot reach
 `HEAD` also fails the host; this happens when the deployed revision is not on

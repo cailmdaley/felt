@@ -224,7 +224,8 @@ instead — for a cluster login node on a network filesystem, where `npm ci` alo
 costs minutes. It brings each harness's felt plugin up to the new build
 (Claude Code and Codex from the checkout itself, skipped when the receipt
 already passes at `HEAD` from a clean build), and a host whose `felt setup
-receipt` still fails afterwards fails with the receipt's repair text.
+receipt` still fails afterwards fails, naming each unhealthy component and
+its repair.
 **Every deploy and operator restart arms the boot quarantine**
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
 oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing roles

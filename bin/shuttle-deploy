@@ -511,6 +511,29 @@ harness_setup_cmd() { # $1 = checkout dir
 report() { printf 'harness-%s %s\n' "$1" "$2"; }
 fail() { report fail "$1"; exit 1; }
 tail_of() { printf '%s\n' "$1" | tail -n 2 | tr '\n' ' '; }
+# problems names each receipt component that is not healthy (felt, a bundle,
+# hooks, generation) with its own repair, a repair shared by several only
+# once, and falls back to the receipt's top-level repair. Components sit two
+# spaces in, their fields four (a bundle's six); a generation's per-harness
+# copies are deeper and already folded into its own repair.
+problems() (
+  felt setup receipt --json 2>/dev/null | awk '
+    function val(line) { sub(/^[^:]*: *"?/, "", line); sub(/"?,?$/, "", line); gsub(/\\"/, "\"", line); return line }
+    function add(what, why) {
+      if (why != "" && !(why in seen)) { seen[why] = 1; what = what ": " why }
+      out = out (out == "" ? "" : "; ") what
+    }
+    /^  "repair":/ { top = val($0); next }
+    /^  "[a-z_]+": [[{]$/ { sect = $0; sub(/^  "/, "", sect); sub(/".*/, "", sect); st = ""; rp = ""; next }
+    /^  []}],?$/ { if (sect != "bundles" && st != "" && st != "healthy") add(sect " " st, rp); sect = ""; next }
+    sect == "bundles" && /^      "harness":/ { h = val($0) }
+    sect == "bundles" && /^      "status":/ { st = val($0) }
+    sect == "bundles" && /^      "repair":/ { rp = val($0) }
+    sect == "bundles" && /^    },?$/ { if (st != "healthy") add(h " plugin " st, rp); st = ""; rp = "" }
+    sect != "bundles" && /^    "status":/ { st = val($0) }
+    sect != "bundles" && /^    "repair":/ { rp = val($0) }
+    END { print (out != "" ? out : top) }'
+)
 tab=$(printf '\t')
 command -v felt >/dev/null 2>&1 || fail "felt is not on PATH"
 head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || fail "cannot read HEAD in $dir"
@@ -563,7 +586,7 @@ if [ -n "$harnesses" ]; then
       out=$(felt setup "$h" --source "$dir" 2>&1) || fail "felt setup $h failed: $(tail_of "$out")"
     done
     if ! felt setup receipt >/dev/null 2>&1; then
-      repair=$(felt setup receipt 2>&1 | sed -n 's/^repair: //p' | head -n 1)
+      repair=$(problems)
       fail "setup receipt still fails after felt setup: ${repair:-run felt setup receipt}"
     fi
     summary="${harnesses}set up"
