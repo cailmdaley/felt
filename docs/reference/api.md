@@ -86,10 +86,10 @@ unknown action or a missing field is 400.
 ### Capture and meeting mode
 
 `POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
-terminal execution. It also accepts an optional `meeting: {mode: "call" | "room"}`
-object. Meeting mode starts hark on the daemon that receives the request before
-owner-routing the capture, so the local microphone records immediately while
-the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
+terminal execution. It also accepts an optional
+`meeting: {mode: "call" | "room" | "phone"}` object. Meeting mode starts hark on
+the daemon that receives the request before owner-routing the capture, so the
+recording starts immediately while the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
 allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
 (mode and transcript path, plus a pointer to the shuttle skill's
 `references/meeting.md`) followed by the user's note. It replaces `meeting` with
@@ -190,6 +190,7 @@ harness processes sharing one transcript.
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | local | Report hark availability and meeting state on this daemon's host |
+| `GET /meeting/audio` | local | WebSocket: relay a phone's microphone into the live `phone` meeting's hark socket |
 
 `GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
 configured daemon once with `local=true`; an offline, old, timed-out, or
@@ -251,7 +252,9 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `GET /meeting` returns `{available, meeting}`. The row is `null` when this
 daemon has no local meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
-`fiber`, `joined`, `tmux_session`, and `error`. `tail` is the
+`fiber`, `joined`, `phone`, `tmux_session`, and `error`. `phone` is true when
+the meeting takes its audio from a phone (`mode: "phone"`), so a page can offer
+to connect one. `tail` is the
 transcript's last spoken lines (at most 30, oldest first, `#` lines left out),
 read from the end of the file on each request, so the route stays cheap to
 poll. `fiber` names the fiber whose card the meeting rides on. For a joined
@@ -263,7 +266,10 @@ reach this daemon, and a renamed fiber is still found. `mirror_host` is the conf
 the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
 A `null` mirror host means the transcript is local.
 
-`POST /capture` accepts `meeting: {mode: "call" | "room"}`. The daemon derives
+`POST /capture` accepts `meeting: {mode: "call" | "room" | "phone"}`. `call`
+records this machine's microphone and system audio, `room` its microphone
+alone, and `phone` a phone's microphone streamed in over `GET /meeting/audio`
+(hark `--phone`, an in-person meeting diarized like `room`). The daemon derives
 the meeting title and transcript name from the first line of `prompt`, or uses
 `Meeting` when no note is supplied. It starts hark in the local `hark-meeting`
 tmux session, then continues the normal local or forwarded capture flow.
@@ -317,6 +323,24 @@ with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
 exists. It sends at most one SIGINT to a live hark process, even while hark's
 lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
 no-op; a `starting` or `failed` meeting dismisses its tmux session.
+
+`GET /meeting/audio` upgrades to a WebSocket that feeds the live `phone`
+meeting. The page sends binary frames of raw s16le 16 kHz mono PCM, which the
+daemon writes unchanged into hark's Unix socket, the path `meeting.json` names as
+`phone`. hark binds that socket only once its models load, so until a connect
+succeeds the daemon holds the most recent minute of audio, retries every half
+second, and flushes the held audio first once connected. hark takes one sender;
+a new connection replaces the old one. The daemon answers in small JSON text
+frames: `{"state":"waiting","reason"}` while there is no socket yet,
+`{"state":"connected"}` (with `dropped_bytes` when the held minute overflowed),
+and before closing, `{"state":"refused","reason"}` (close code 4404: no meeting,
+or one recording this machine's microphone), `{"state":"ended","reason"}` (4410:
+the meeting stopped or failed), or `{"state":"replaced","reason"}` (4409: hark
+took another sender). Every meeting state upgrades, so the page can read why;
+a request that is not a WebSocket upgrade gets **426**. Browsers open
+WebSockets cross-site without CORS, so the upgrade takes the same origin rule as
+a write: no `Origin`, an allowlisted dev origin, or the page's own; any other
+origin gets **403**. An idle socket closes after a minute.
 
 These meeting routes control this daemon's local recording and never owner-route
 it. `POST /capture` and `POST /meeting/join` start that recording before they
@@ -519,5 +543,9 @@ curl -s http://127.0.0.1:4000/api/v1/version | jq
 curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 ```
 
-`GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build
-hint when `ui/dist` has never been built.
+`GET /` outside `/api/v1` serves the board's `index.html`, and `GET /phone` the
+phone page's `phone.html`, or a 404 with a build hint when `ui/dist` has never
+been built. The phone page starts a `phone` meeting (or connects to a live one)
+and streams the phone's microphone to `GET /api/v1/meeting/audio`; browsers
+grant the microphone only over HTTPS, so reach it through an HTTPS front such as
+`tailscale serve`.

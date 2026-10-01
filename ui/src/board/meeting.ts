@@ -18,6 +18,8 @@ export interface MeetingRecord {
   fiber: string | null
   /** Whether `fiber` is a constitution the meeting joined. */
   joined: boolean
+  /** The meeting takes its audio from a phone (`/phone`), not this machine. */
+  phone: boolean
   tmux_session: string | null
   error: string | null
 }
@@ -44,6 +46,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     mirror_host: nullableString('mirror_host'),
     fiber: nullableString('fiber'),
     joined: raw.joined === true,
+    phone: raw.phone === true,
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }

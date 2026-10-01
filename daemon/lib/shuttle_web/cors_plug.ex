@@ -58,24 +58,7 @@ defmodule ShuttleWeb.CORSPlug do
   end
 
   def call(%Plug.Conn{method: method} = conn, _opts) when method in @unsafe_methods do
-    if trusted_request_authority?(conn) do
-      case request_origin(conn) do
-        nil ->
-          conn
-
-        origin when origin in @allowed_origins ->
-          put_cors_headers(conn)
-
-        origin ->
-          if same_origin?(conn, origin) do
-            conn
-          else
-            reject_cross_origin(conn)
-          end
-      end
-    else
-      reject_cross_origin(conn)
-    end
+    if write_permitted?(conn), do: put_cors_headers(conn), else: reject_cross_origin(conn)
   end
 
   def call(conn, _opts) do
@@ -84,6 +67,22 @@ defmodule ShuttleWeb.CORSPlug do
     else
       reject_cross_origin(conn)
     end
+  end
+
+  @doc """
+  Whether a request may act, not only read: its authority is trusted and its
+  `Origin` is absent (a CLI or daemon leg), an allowlisted dev origin, or the
+  page's own. Unsafe methods pass through this; so does a WebSocket upgrade,
+  a GET that browsers send cross-site without CORS.
+  """
+  @spec write_permitted?(Plug.Conn.t()) :: boolean()
+  def write_permitted?(conn) do
+    trusted_request_authority?(conn) and
+      case request_origin(conn) do
+        nil -> true
+        origin when origin in @allowed_origins -> true
+        origin -> same_origin?(conn, origin)
+      end
   end
 
   defp request_origin(conn), do: conn |> get_req_header("origin") |> List.first()

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MeetingControl } from './CaptureForm'
 
-const render = (mode: 'call' | 'room' | null): string =>
+const render = (mode: 'call' | 'room' | 'phone' | null): string =>
   renderToStaticMarkup(<MeetingControl mode={mode} disabled={false} onChange={() => {}} />)
 
 describe('capture meeting control', () => {
@@ -18,7 +18,8 @@ describe('capture meeting control', () => {
     expect(off).toContain('role="radiogroup"')
     expect(off).toMatch(/<div class="capture-meeting-modes"[^>]* hidden=""/)
     expect(on).not.toMatch(/capture-meeting-modes"[^>]* hidden/)
-    expect(off.match(/role="radio"/g)).toHaveLength(2)
+    expect(off.match(/role="radio"/g)).toHaveLength(3)
     expect(on).toMatch(/aria-checked="true"[^>]*>Room</)
+    expect(render('phone')).toMatch(/aria-checked="true"[^>]*>Phone</)
   })
 })

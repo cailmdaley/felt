@@ -1,8 +1,13 @@
-export type MeetingMode = 'call' | 'room'
+/**
+ * What hark records: `call` this machine's mic and system audio, `room` its mic
+ * alone, `phone` a phone's mic streamed in from the phone page (`/phone`).
+ */
+export type MeetingMode = 'call' | 'room' | 'phone'
 
 export const MEETING_MODES: ReadonlyArray<{ value: MeetingMode; label: string }> = [
   { value: 'call', label: 'Call' },
   { value: 'room', label: 'Room' },
+  { value: 'phone', label: 'Phone' },
 ]
 
 function responseError(body: unknown, status: number): string {

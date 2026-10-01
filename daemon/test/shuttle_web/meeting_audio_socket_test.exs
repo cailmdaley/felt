@@ -1,0 +1,278 @@
+defmodule ShuttleWeb.MeetingAudioSocketTest do
+  use ExUnit.Case, async: true
+
+  alias ShuttleWeb.MeetingAudioSocket, as: Relay
+
+  # macOS caps a Unix socket path at 104 bytes, so the socket lives in a short
+  # directory of its own rather than ExUnit's tmp_dir.
+  setup do
+    dir =
+      Path.join(System.tmp_dir!(), "hk-" <> Integer.to_string(System.unique_integer([:positive])))
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    %{path: Path.join(dir, "phone.sock")}
+  end
+
+  defp listen(path) do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, ifaddr: {:local, path}, active: false, reuseaddr: false])
+
+    listener
+  end
+
+  defp accept(listener) do
+    {:ok, peer} = :gen_tcp.accept(listener, 1_000)
+    peer
+  end
+
+  defp received(peer, bytes) do
+    {:ok, data} = :gen_tcp.recv(peer, bytes, 1_000)
+    data
+  end
+
+  defp json({:text, body}), do: Jason.decode!(body)
+
+  defp resolve_to(answer), do: [resolve: fn -> answer end, retry_ms: 10]
+
+  test "connects at once to a listening hark and relays binary frames unchanged", %{path: path} do
+    listener = listen(path)
+
+    assert {:push, [status], state} = Relay.init(resolve_to({:ok, path}))
+    assert json(status) == %{"state" => "connected"}
+    peer = accept(listener)
+
+    assert {:ok, state} = Relay.handle_in({<<1, 2, 3, 4>>, opcode: :binary}, state)
+    assert {:ok, state} = Relay.handle_in({<<5, 6>>, opcode: :binary}, state)
+    assert received(peer, 6) == <<1, 2, 3, 4, 5, 6>>
+
+    assert {:ok, ^state} = Relay.handle_in({"hello", opcode: :text}, state)
+    assert :ok = Relay.terminate(:normal, state)
+    assert {:error, :closed} = :gen_tcp.recv(peer, 0, 1_000)
+  end
+
+  test "holds audio while hark loads, retries, and flushes it in order once it listens", %{
+    path: path
+  } do
+    assert {:push, [status], state} = Relay.init(resolve_to({:ok, path}))
+    assert %{"state" => "waiting", "reason" => reason} = json(status)
+    assert reason =~ "loading"
+    assert_receive :retry, 200
+
+    {:ok, state} = Relay.handle_in({"early-", opcode: :binary}, state)
+    {:ok, state} = Relay.handle_in({"speech", opcode: :binary}, state)
+
+    # Still not listening: the retry stays quiet rather than repeating "waiting".
+    assert {:ok, state} = Relay.handle_info(:retry, state)
+    assert_receive :retry, 200
+
+    listener = listen(path)
+    assert {:push, [status], state} = Relay.handle_info(:retry, state)
+    assert json(status) == %{"state" => "connected"}
+    peer = accept(listener)
+    assert received(peer, 12) == "early-speech"
+
+    {:ok, state} = Relay.handle_in({"live", opcode: :binary}, state)
+    assert received(peer, 4) == "live"
+    Relay.terminate(:normal, state)
+  end
+
+  test "the buffer keeps the newest audio and reports what it dropped", %{path: path} do
+    opts = resolve_to({:ok, path}) |> Keyword.put(:buffer_bytes, 8)
+    {:push, _waiting, state} = Relay.init(opts)
+
+    state =
+      Enum.reduce(["aaaa", "bbbb", "cccc"], state, fn chunk, state ->
+        {:ok, state} = Relay.handle_in({chunk, opcode: :binary}, state)
+        state
+      end)
+
+    assert state.buffered == 8
+    listener = listen(path)
+    assert {:push, [status], _state} = Relay.handle_info(:retry, state)
+    assert json(status) == %{"state" => "connected", "dropped_bytes" => 4}
+    peer = accept(listener)
+    assert received(peer, 8) == "bbbbcccc"
+  end
+
+  test "a launch that has not written its lifecycle file yet is waited for" do
+    assert {:push, [status], _state} = Relay.init(resolve_to(:pending))
+    assert %{"state" => "waiting", "reason" => reason} = json(status)
+    assert reason =~ "starting"
+  end
+
+  test "no phone meeting closes with a reason the page can show" do
+    for {answer, code, kind, words} <- [
+          {{:error, :none}, 4404, "refused", "no meeting"},
+          {{:error, :not_phone}, 4404, "refused", "not a phone"},
+          {{:error, :ended}, 4410, "ended", "ended"},
+          {{:error, {:failed, "no models"}}, 4410, "ended", "failed: no models"}
+        ] do
+      assert {:stop, :normal, {^code, reason}, [status], _state} = Relay.init(resolve_to(answer))
+      assert reason =~ words
+      assert json(status) == %{"state" => kind, "reason" => reason}
+    end
+  end
+
+  test "hark closing the socket at the meeting's end closes the WebSocket as ended", %{
+    path: path
+  } do
+    listener = listen(path)
+    {:ok, phase} = Agent.start_link(fn -> {:ok, path} end)
+    opts = [resolve: fn -> Agent.get(phase, & &1) end, retry_ms: 10]
+
+    {:push, _connected, state} = Relay.init(opts)
+    peer = accept(listener)
+    Agent.update(phase, fn _ -> {:error, :ended} end)
+    :gen_tcp.close(peer)
+
+    assert_receive {:tcp_closed, socket} = closed, 1_000
+    assert socket == state.socket
+    assert {:stop, :normal, {4410, reason}, [status], state} = Relay.handle_info(closed, state)
+    assert reason =~ "ended"
+    assert json(status)["state"] == "ended"
+    assert state.socket == nil
+  end
+
+  test "hark closing the socket while the meeting is still live means another sender took over",
+       %{path: path} do
+    listener = listen(path)
+    {:push, _connected, state} = Relay.init(resolve_to({:ok, path}))
+    peer = accept(listener)
+    :gen_tcp.close(peer)
+
+    assert_receive {:tcp_closed, _socket} = closed, 1_000
+    assert {:stop, :normal, {4409, reason}, [status], _state} = Relay.handle_info(closed, state)
+    assert reason =~ "another device"
+    assert json(status)["state"] == "replaced"
+  end
+
+  describe "through the endpoint" do
+    setup %{path: path} do
+      previous = Application.fetch_env(:shuttle, :meeting_audio_socket)
+      {:ok, phase} = Agent.start_link(fn -> {:ok, path} end)
+
+      Application.put_env(:shuttle, :meeting_audio_socket,
+        resolve: fn -> Agent.get(phase, & &1) end,
+        retry_ms: 10
+      )
+
+      {:ok, server} =
+        Bandit.start_link(
+          plug: ShuttleWeb.Endpoint,
+          ip: {127, 0, 0, 1},
+          port: 0,
+          startup_log: false
+        )
+
+      {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:shuttle, :meeting_audio_socket, value)
+          :error -> Application.delete_env(:shuttle, :meeting_audio_socket)
+        end
+      end)
+
+      %{port: port, phase: phase}
+    end
+
+    test "a same-origin page streams into hark and hears when the meeting ends", %{
+      path: path,
+      port: port,
+      phase: phase
+    } do
+      listener = listen(path)
+      {status, ws} = handshake(port, "http://127.0.0.1:#{port}")
+      assert status =~ "HTTP/1.1 101"
+      peer = accept(listener)
+
+      assert {:text, connected} = read_frame(ws)
+      assert Jason.decode!(connected) == %{"state" => "connected"}
+
+      :ok = :gen_tcp.send(ws, client_frame(0x2, <<0, 1, 255, 127>>))
+      assert received(peer, 4) == <<0, 1, 255, 127>>
+
+      Agent.update(phase, fn _ -> {:error, :ended} end)
+      :gen_tcp.close(peer)
+
+      assert {:text, ended} = read_frame(ws)
+      assert %{"state" => "ended"} = Jason.decode!(ended)
+      assert {:close, <<4410::16, reason::binary>>} = read_frame(ws)
+      assert reason =~ "ended"
+    end
+
+    test "a plain GET is told the route takes a WebSocket", %{port: port} do
+      {:ok, http} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
+
+      :ok =
+        :gen_tcp.send(
+          http,
+          "GET /api/v1/meeting/audio HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
+        )
+
+      assert read_head(http, "") =~ "HTTP/1.1 426"
+    end
+
+    test "another site's page cannot open the relay", %{port: port} do
+      {status, _ws} = handshake(port, "https://elsewhere.example")
+      assert status =~ "HTTP/1.1 403"
+    end
+  end
+
+  defp handshake(port, origin) do
+    {:ok, ws} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
+    key = Base.encode64(:crypto.strong_rand_bytes(16))
+
+    request =
+      "GET /api/v1/meeting/audio HTTP/1.1\r\n" <>
+        "Host: 127.0.0.1:#{port}\r\n" <>
+        "Origin: #{origin}\r\n" <>
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n" <>
+        "Sec-WebSocket-Key: #{key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+
+    :ok = :gen_tcp.send(ws, request)
+    {read_head(ws, ""), ws}
+  end
+
+  defp read_head(ws, acc) do
+    if String.contains?(acc, "\r\n\r\n") do
+      acc
+    else
+      {:ok, data} = :gen_tcp.recv(ws, 0, 2_000)
+      read_head(ws, acc <> data)
+    end
+  end
+
+  # A server frame: unmasked, payloads here under 64 KiB.
+  defp read_frame(ws) do
+    {:ok, <<_fin::1, _rsv::3, opcode::4, 0::1, len::7>>} = :gen_tcp.recv(ws, 2, 2_000)
+
+    len =
+      if len == 126 do
+        {:ok, <<extended::16>>} = :gen_tcp.recv(ws, 2, 2_000)
+        extended
+      else
+        len
+      end
+
+    {:ok, payload} = if len == 0, do: {:ok, ""}, else: :gen_tcp.recv(ws, len, 2_000)
+    {%{0x1 => :text, 0x2 => :binary, 0x8 => :close}[opcode], payload}
+  end
+
+  # A client frame: masked, as browsers send them.
+  defp client_frame(opcode, payload) do
+    mask = :crypto.strong_rand_bytes(4)
+    <<1::1, 0::3, opcode::4, 1::1, byte_size(payload)::7>> <> mask <> mask(payload, mask)
+  end
+
+  defp mask(payload, <<a, b, c, d>>) do
+    keys = Stream.cycle([a, b, c, d])
+
+    payload
+    |> :binary.bin_to_list()
+    |> Enum.zip(keys)
+    |> Enum.map(fn {byte, key} -> Bitwise.bxor(byte, key) end)
+    |> :binary.list_to_bin()
+  end
+end

@@ -41,11 +41,17 @@ defmodule Shuttle.Meeting do
   fibers this daemon serves and the remote feeds it polls. The scribe may run
   on any host, reachable or not from its own side, and may rename its fiber;
   the stamp travels with the fiber either way.
+
+  The mode picks hark's audio: `call` records this machine's mic and system
+  audio, `room` its mic alone, and `phone` a Unix socket that a phone's mic
+  streams into through `ShuttleWeb.MeetingAudioSocket`; `phone_socket/1` names
+  that socket.
   """
 
   alias Shuttle.{Remote, Remotes, Runner, Tmux}
 
   @session "hark-meeting"
+  @modes ~w(call room phone)
   @launch_option "@hark_launch"
   @fiber_option "@hark_fiber"
   @active_phases ~w(loading live stopping)
@@ -150,12 +156,53 @@ defmodule Shuttle.Meeting do
   """
   @spec meeting_message(String.t(), String.t(), target()) :: String.t()
   def meeting_message(mode, transcript_path, target \\ {:capture, nil})
-      when mode in ["call", "room"] do
-    "Meeting mode (#{mode}). hark is transcribing a live meeting to `#{transcript_path}` on this host. " <>
+      when mode in @modes do
+    "Meeting mode (#{mode}). hark is transcribing #{meeting_kind(mode)} to `#{transcript_path}` on this host. " <>
       "Read the shuttle skill's references/meeting.md before anything else and follow it. " <>
       joined_line(target) <>
       "The user's note about the meeting follows (it may be empty)."
   end
+
+  defp meeting_kind("phone"),
+    do: "a live in-person meeting, recorded through a phone's microphone,"
+
+  defp meeting_kind(_mode), do: "a live meeting"
+
+  @doc """
+  Where the live phone meeting takes its audio: hark's Unix socket, named in
+  `meeting.json` as `phone`. `:pending` while a launch has not yet written its
+  lifecycle file; the socket itself is bound only once hark's models load, so
+  a connect may still be refused for a while after `{:ok, path}`.
+  """
+  @spec phone_socket(keyword()) ::
+          {:ok, String.t()}
+          | :pending
+          | {:error, :none | :not_phone | :ended | {:failed, String.t() | nil} | term()}
+  def phone_socket(opts \\ []) do
+    with {:ok, observed} <- observe(opts) do
+      {row, _reap?} =
+        derive(observed.tmux, observed.raw_meeting, observed.pid_alive?)
+
+      phone_target(row, observed.meeting_json)
+    end
+  end
+
+  defp phone_target(nil, _meeting_json), do: {:error, :none}
+  defp phone_target(%{state: "starting"}, _meeting_json), do: :pending
+  defp phone_target(%{state: "stopping"}, _meeting_json), do: {:error, :ended}
+
+  defp phone_target(%{state: "failed", error: error}, _meeting_json),
+    do: {:error, {:failed, error}}
+
+  defp phone_target(%{state: state}, meeting_json) when state in ["loading", "live"] do
+    case phone_path(meeting_json) do
+      nil -> {:error, :not_phone}
+      path -> {:ok, path}
+    end
+  end
+
+  defp phone_path(%{"phone" => path}) when is_binary(path) and path != "", do: path
+  defp phone_path(_meeting_json), do: nil
 
   defp joined_line({:fiber, fiber_id}),
     do:
@@ -248,7 +295,7 @@ defmodule Shuttle.Meeting do
          fiber <- target_fiber(target),
          argv <- hark_argv(executable, paths, title, mode, launch_id),
          :ok <- create_session(argv, launch_id, fiber, opts),
-         {:ok, row} <- await_launch(launch_id, paths, title, fiber, opts) do
+         {:ok, row} <- await_launch(launch_id, paths, title, fiber, mode, opts) do
       message = meeting_message(mode, paths.transcript, target)
       {:ok, %{meeting: row, prompt: message <> "\n\n" <> note, launch: launch_id}}
     else
@@ -267,10 +314,10 @@ defmodule Shuttle.Meeting do
   defp target_fiber({:fiber, fiber_id}), do: fiber_id
   defp target_fiber(_capture), do: nil
 
-  defp validate_meeting(%{"mode" => mode}) when mode in ["call", "room"], do: {:ok, mode}
+  defp validate_meeting(%{"mode" => mode}) when mode in @modes, do: {:ok, mode}
 
   defp validate_meeting(_),
-    do: {:error, {:validation, "meeting.mode must be 'call' or 'room'"}}
+    do: {:error, {:validation, "meeting.mode must be 'call', 'room' or 'phone'"}}
 
   defp first_line(note) do
     (note || "")
@@ -317,9 +364,13 @@ defmodule Shuttle.Meeting do
 
   defp hark_argv(executable, paths, title, mode, launch_id) do
     [executable, "-o", paths.local_transcript, "--launch", launch_id, "--title", title] ++
-      if(mode == "room", do: ["--room"], else: []) ++
+      mode_flag(mode) ++
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end
+
+  defp mode_flag("room"), do: ["--room"]
+  defp mode_flag("phone"), do: ["--phone"]
+  defp mode_flag("call"), do: []
 
   defp create_session(argv, launch_id, fiber, opts) do
     command = "exec " <> Enum.map_join(argv, " ", &shell_quote/1)
@@ -395,13 +446,13 @@ defmodule Shuttle.Meeting do
 
   # Watch the new launch briefly so a hark that dies at once never gets a
   # scribe. A slow import or an unreadable tmux leaves it `starting`.
-  defp await_launch(launch_id, paths, title, fiber, opts) do
+  defp await_launch(launch_id, paths, title, fiber, mode, opts) do
     wait_ms = Application.get_env(:shuttle, :meeting_launch_wait_ms, @launch_wait_ms)
     deadline = System.monotonic_time(:millisecond) + wait_ms
-    await_launch(launch_id, paths, title, fiber, opts, deadline)
+    await_launch(launch_id, paths, title, fiber, mode, opts, deadline)
   end
 
-  defp await_launch(launch_id, paths, title, fiber, opts, deadline) do
+  defp await_launch(launch_id, paths, title, fiber, mode, opts, deadline) do
     observed =
       case inspect_current(opts) do
         {:ok, %{meeting: %{state: state} = row}, %{tmux: %{launch: ^launch_id}}}
@@ -420,15 +471,15 @@ defmodule Shuttle.Meeting do
         observed
 
       System.monotonic_time(:millisecond) >= deadline ->
-        {:ok, starting_row(paths, title, fiber)}
+        {:ok, starting_row(paths, title, fiber, mode)}
 
       true ->
         Process.sleep(@launch_poll_ms)
-        await_launch(launch_id, paths, title, fiber, opts, deadline)
+        await_launch(launch_id, paths, title, fiber, mode, opts, deadline)
     end
   end
 
-  defp starting_row(paths, title, fiber) do
+  defp starting_row(paths, title, fiber, mode) do
     %{
       state: "starting",
       title: title,
@@ -438,6 +489,7 @@ defmodule Shuttle.Meeting do
       mirror_host: paths.mirror_host,
       fiber: fiber,
       joined: not is_nil(fiber),
+      phone: mode == "phone",
       tmux_session: @session,
       error: nil
     }
@@ -465,11 +517,27 @@ defmodule Shuttle.Meeting do
 
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
-  defp inspect_current(opts) do
+  # The tmux session, hark's lifecycle file as read and as trusted for that
+  # session, and whether its pid is still hark.
+  defp observe(opts) do
     with {:ok, tmux} <- tmux_status(opts) do
       raw_meeting = read_meeting_json(opts)
       usable_meeting = if fresh_for_session?(tmux, raw_meeting), do: raw_meeting, else: nil
-      pid_alive? = pid_mentions_hark?(usable_meeting, opts)
+
+      {:ok,
+       %{
+         tmux: tmux,
+         raw_meeting: raw_meeting,
+         meeting_json: usable_meeting,
+         pid_alive?: pid_mentions_hark?(usable_meeting, opts)
+       }}
+    end
+  end
+
+  defp inspect_current(opts) do
+    with {:ok, %{tmux: tmux, raw_meeting: raw_meeting, meeting_json: usable_meeting} = observed} <-
+           observe(opts) do
+      pid_alive? = observed.pid_alive?
       tail = if failed_dead_pane?(tmux, usable_meeting), do: pane_tail(opts), else: nil
       {meeting, reap?} = derive(tmux, raw_meeting, pid_alive?, tail)
       :ok = Shuttle.Meeting.Control.reconcile(meeting_identity(tmux, usable_meeting, pid_alive?))
@@ -707,6 +775,7 @@ defmodule Shuttle.Meeting do
       mirror_host: mirror_host(data["mirror"]),
       fiber: joined_fiber,
       joined: not is_nil(joined_fiber),
+      phone: not is_nil(phone_path(data)),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]
     }

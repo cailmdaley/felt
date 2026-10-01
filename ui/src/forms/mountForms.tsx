@@ -21,9 +21,8 @@
  */
 
 import { createRoot, type Root } from 'react-dom/client'
-import { parseCompositeFeed } from '../board/KanbanComposite.js'
-import { daemonFetch } from '../board/daemonApi.js'
-import { deriveProjects, type Project, type ProjectModel } from './projectModel'
+import { loadFeed, type LoadedFeed } from './projectFeed'
+import type { Project } from './projectModel'
 import { StashForm, injectStashFormStyles } from './StashForm'
 import { CaptureForm, injectCaptureFormStyles } from './CaptureForm'
 import { SettingsDialog } from './settings/SettingsDialog'
@@ -55,24 +54,6 @@ function ensureRoot(): Root {
 
 function close(): void {
   root?.render(null)
-}
-
-interface LoadedFeed {
-  model: ProjectModel
-  tags: string[]
-}
-
-async function loadFeed(shuttleBase: string): Promise<LoadedFeed> {
-  const [res, storesRes] = await Promise.all([
-    daemonFetch(`${shuttleBase}/api/v1/fibers/composite`),
-    daemonFetch(`${shuttleBase}/api/v1/felt-stores`).catch(() => null),
-  ])
-  if (!res.ok) throw new Error(`composite ${res.status}`)
-  const feed = parseCompositeFeed(await res.json())
-  const storesJson: unknown = storesRes?.ok ? await storesRes.json().catch(() => undefined) : undefined
-  const tagSet = new Set<string>()
-  for (const e of feed.entries) for (const t of e.fiber.tags ?? []) tagSet.add(t)
-  return { model: deriveProjects(feed, storesJson), tags: [...tagSet].sort() }
 }
 
 /**

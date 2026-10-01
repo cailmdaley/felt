@@ -161,6 +161,10 @@ defmodule ShuttleWeb.Router do
     # Exact native JSONL bytes. Kept outside the JSON pipeline like `/file` so
     # arbitrary harness bytes are relayed without content negotiation.
     get("/transcript/raw", TranscriptController, :raw)
+    # The phone page's microphone, relayed into the live `phone` meeting's
+    # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside
+    # `:api` like the byte routes above.
+    get("/meeting/audio", MeetingAudioController, :upgrade)
   end
 
   # The served frontend's bare-root document. Static assets are served by
@@ -168,5 +172,8 @@ defmodule ShuttleWeb.Router do
   # daemon hosts the board itself — one `shuttle` process, API + UI.
   scope "/", ShuttleWeb do
     get("/", SpaController, :index)
+    # One screen for a phone held up in a meeting: start or join a phone
+    # meeting and stream its microphone to `/api/v1/meeting/audio`.
+    get("/phone", SpaController, :phone)
   end
 end

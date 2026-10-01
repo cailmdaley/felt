@@ -260,6 +260,8 @@ human is only one of them:
 kanban with Stash/Capture and the fiber/file viewer, plus the Chronicle and
 Board views on hotkeys 2-3, served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
+The bundle's second page, `phone.html`, is served at `/phone`: a phone's
+microphone for an in-person meeting.
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh
 checkout that hasn't built the bundle gets a 404 with the hint
 `cd ui && npm run build`; the API stays usable regardless.

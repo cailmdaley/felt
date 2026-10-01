@@ -26,7 +26,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
-import { captureOutcome, captureRequestBody, type CaptureResponseData } from './captureApi'
+import {
+  CAPTURE_DEFAULT_AGENT,
+  CAPTURE_DEFAULT_EFFORT,
+  captureOutcome,
+  captureRequestBody,
+  type CaptureResponseData,
+} from './captureApi'
 import { daemonErrorMessage } from '../board/daemonApi'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
@@ -56,12 +62,6 @@ const FALLBACK_AGENTS: AgentEntry[] = [
   { id: 'codex', default: false },
 ]
 
-// Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
-// often a real piece of thinking to crystallize, not throwaway — worth the
-// strong model. The seed keeps the dialog correct before the registry loads;
-// switching the agent re-derives effort from that agent's own default_effort.
-const CAPTURE_DEFAULT_AGENT = 'claude-opus'
-const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
 export interface CaptureFormProps {
   /** Every project, in picker order; each carries its own originId + path. */
@@ -298,7 +298,7 @@ export function CaptureForm({
 }
 
 /**
- * Meeting: a pressed-state button, then the Call | Room segments. The
+ * Meeting: a pressed-state button, then the Call | Room | Phone segments. The
  * segments are always laid out and only hidden, so switching meeting on
  * reveals them in space the row already holds and nothing below moves.
  */

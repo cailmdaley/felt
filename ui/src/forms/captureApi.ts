@@ -1,6 +1,14 @@
 import type { ExecutionSurface } from './executionSurface'
 import type { MeetingMode } from './meetingApi'
 
+// Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
+// often a real piece of thinking to crystallize, not throwaway — worth the
+// strong model. Every surface that starts a capture (the Capture form, the
+// phone page) seeds from these; the effort then resolves against the agent's
+// registry record.
+export const CAPTURE_DEFAULT_AGENT = 'claude-opus'
+export const CAPTURE_DEFAULT_EFFORT = 'xhigh'
+
 export interface CaptureRequestInput {
   prompt: string
   projectDir: string

@@ -5,9 +5,10 @@ import { resolve } from 'node:path'
 /**
  * The Shuttle UI build.
  *
- * One entry: `index.html` → `src/main.ts`, the kanban board + Stash/Capture
- * (vanilla TS DOM with React form islands). The vellum/parchment look is
- * hand-rolled CSS.
+ * Two entries: `index.html` → `src/main.ts`, the kanban board + Stash/Capture
+ * (vanilla TS DOM with React form islands), served at `/`; and `phone.html` →
+ * `src/phone/main.ts`, the phone mic page, served at `/phone`. The
+ * vellum/parchment look is hand-rolled CSS.
  *
  * The board fetches the daemon with a *relative* base (`/api/v1/...`):
  *
@@ -35,7 +36,10 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
-      input: { index: resolve(__dirname, 'index.html') },
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        phone: resolve(__dirname, 'phone.html'),
+      },
     },
   },
 })

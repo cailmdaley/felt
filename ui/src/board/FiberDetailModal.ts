@@ -2486,8 +2486,9 @@ export class FiberDetailModal {
 
   /**
    * Meeting, for this constitution: a verb that asks one question first.
-   * Meeting opens a two-item menu, Call or Room, and picking one starts the
-   * recording on this machine — nothing records before that pick. The
+   * Meeting opens a menu, Call, Room or Phone, and picking one starts the
+   * recording on this machine — nothing records before that pick; Phone then
+   * listens for a phone's mic from the phone page (`/phone`). The
    * composer's message becomes the meeting's note, and the worker — live or
    * not — receives the meeting as a joined constitution.
    *

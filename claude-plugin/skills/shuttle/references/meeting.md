@@ -6,7 +6,7 @@ What people say in a conversation is a candidate, not a decision: propose promot
 
 ## Live meeting
 
-The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode (call or room), then the user's note, which may be empty. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
+The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode, then the user's note, which may be empty. The mode says where the audio comes from: `call` is a call on the user's machine (the user is `me`, the others `S1`, `S2`, …), `room` an in-person meeting on the machine's mic, and `phone` an in-person meeting recorded through a phone's mic; in `room` and `phone` every voice is numbered, the user's included. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
 
 ### The transcript
 

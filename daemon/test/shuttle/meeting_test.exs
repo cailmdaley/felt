@@ -119,6 +119,98 @@ defmodule Shuttle.MeetingTest do
     assert call =~ "The user's note about the meeting follows (it may be empty)."
   end
 
+  test "a phone meeting's message says it is in person, through a phone's mic" do
+    phone = Meeting.meeting_message("phone", "/tmp/meetings/session.txt")
+
+    assert phone =~ "Meeting mode (phone)."
+    assert phone =~ "in-person meeting, recorded through a phone's microphone"
+    assert phone =~ "`/tmp/meetings/session.txt` on this host"
+    refute Meeting.meeting_message("room", "x") =~ "phone"
+  end
+
+  test "phone mode launches hark with --phone and its row says it takes phone audio", %{
+    hark_dir: hark_dir
+  } do
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["new-session" | args], _opts, _state ->
+        launch = launch_from_tmux_args(args)
+
+        write_meeting(hark_dir, %{
+          "launch" => launch,
+          "pid" => 321,
+          "phase" => "loading",
+          "title" => "Lunch",
+          "started" => "2026-09-25T14:03:00+02:00",
+          "transcript" => Path.join(hark_dir, "meetings/lunch.txt"),
+          "phone" => Path.join(hark_dir, "phone.sock")
+        })
+
+        {{"$4\n", 0}, launch}
+
+      "tmux", ["display-message" | _], _opts, launch ->
+        {{"0|0|1234|#{launch}|\n", 0}, launch}
+
+      "ps", ["-p", "321", "-o", "command="], _opts, launch ->
+        {{"python hark --phone", 0}, launch}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+
+    assert {:ok, %{meeting: row, prompt: prompt}} =
+             Meeting.start(%{"mode" => "phone"}, {:capture, "cli"}, "Lunch", nil)
+
+    assert %{state: "loading", phone: true} = row
+    assert prompt =~ "Meeting mode (phone)."
+
+    {"tmux", ["new-session" | args], _} =
+      Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    command = List.last(Enum.take_while(args, &(&1 != ";")))
+    assert command =~ "'--phone'"
+    refute command =~ "--room"
+
+    assert {:ok, Path.join(hark_dir, "phone.sock")} == Meeting.phone_socket()
+
+    conn = api_conn() |> get("/api/v1/meeting")
+    assert %{"meeting" => %{"phone" => true}} = Jason.decode!(conn.resp_body)
+  end
+
+  test "phone_socket answers for each meeting state", %{hark_dir: hark_dir} do
+    # Nothing recording.
+    assert {:error, :none} = Meeting.phone_socket()
+
+    base = %{
+      "launch" => "launch-current",
+      "pid" => 321,
+      "title" => "t",
+      "started" => "2026-09-25T14:03:12+02:00",
+      "transcript" => Path.join(hark_dir, "t.txt")
+    }
+
+    set_current_meeting_handler("launch-current", 321)
+
+    # A room meeting is live: there is no phone to feed.
+    write_meeting(hark_dir, Map.merge(base, %{"phase" => "live", "phone" => nil}))
+    assert {:error, :not_phone} = Meeting.phone_socket()
+    assert {:ok, %{meeting: %{phone: false}}} = Meeting.show()
+
+    write_meeting(hark_dir, Map.merge(base, %{"phase" => "live", "phone" => "/x/phone.sock"}))
+    assert {:ok, "/x/phone.sock"} = Meeting.phone_socket()
+
+    write_meeting(hark_dir, Map.merge(base, %{"phase" => "stopping", "phone" => "/x/phone.sock"}))
+    assert {:error, :ended} = Meeting.phone_socket()
+
+    # The tmux session is up but hark has not written this launch's file yet.
+    write_meeting(hark_dir, Map.merge(base, %{"launch" => "older", "phase" => "live"}))
+    assert :pending = Meeting.phone_socket()
+  end
+
   test "a joined meeting's message names the constitution it joins" do
     joined = Meeting.meeting_message("room", "~/.hark/meetings/x.txt", {:fiber, "proj/shear"})
 

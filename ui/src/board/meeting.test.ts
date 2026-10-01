@@ -24,6 +24,7 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   mirror_host: null,
   fiber: null,
   joined: false,
+  phone: false,
   tmux_session: 'hark-meeting',
   error: null,
   ...overrides,
@@ -160,6 +161,8 @@ describe('a meeting on its card', () => {
     expect(row?.tail).toEqual(['14:03:12 S2  hello'])
     expect(row?.joined).toBe(false)
     expect(parseMeetingStatus({ available: true, meeting: { ...meeting(), joined: true } })?.meeting?.joined).toBe(true)
+    expect(parseMeetingStatus({ available: true, meeting: { ...meeting(), phone: true } })?.meeting?.phone).toBe(true)
+    expect(parseMeetingStatus({ available: true, meeting: { state: 'live' } })?.meeting?.phone).toBe(false)
     expect(parseMeetingStatus({ available: true, meeting: { state: 'live' } })?.meeting?.tail).toEqual([])
   })
 

@@ -1614,9 +1614,10 @@ export class KanbanSurfaceRenderer {
     }
     const block = root.querySelector<HTMLElement>('.kbn-meeting')!
     block.setAttribute('aria-label', `Meeting ${meetingStateWord(meeting.state).toLowerCase()}: ${title}`)
-    block.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent = meeting.mirror_host
-      ? `→ ${meeting.mirror_host}`
-      : 'this Mac'
+    // Where the audio comes from (a phone meeting's), then where the
+    // transcript is written.
+    block.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent =
+      (meeting.phone ? 'phone mic · ' : '') + (meeting.mirror_host ? `→ ${meeting.mirror_host}` : 'this Mac')
     block.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
     const duration = block.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
     const value = meetingDuration(meeting)
