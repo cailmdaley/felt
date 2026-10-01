@@ -15,9 +15,11 @@ defmodule Shuttle.Remote do
   (`http://127.0.0.1:<port>`); give a `url` outright for a remote reached
   without a locally-managed tunnel.
 
-  Entries come from `Shuttle.Remotes` (the fleet file `~/.config/shuttle/remotes.json`)
-  or from `config :shuttle, :remotes, [...]`. Each entry may be a map
-  (string- or atom-keyed) or a keyword list.
+  Entries come from `Shuttle.Remotes` (the fleet file `~/.config/shuttle/remotes.json`
+  merged with the peers `Shuttle.TailnetPeers` discovered) or from
+  `config :shuttle, :remotes, [...]`. Each entry may be a map (string- or
+  atom-keyed) or a keyword list. `source` says which: `:configured` for an
+  entry from the file or application config, `:discovered` for a tailnet peer.
 
   The cross-host contract: each daemon owns its host's `.felt/`, and the hub
   is a viewer that composites snapshots over HTTP.
@@ -36,7 +38,8 @@ defmodule Shuttle.Remote do
     enabled: true,
     poll_interval_ms: 5_000,
     request_timeout_ms: 2_000,
-    stale_multiplier: 4
+    stale_multiplier: 4,
+    source: :configured
   ]
 
   @type tunnel :: %{
@@ -57,7 +60,8 @@ defmodule Shuttle.Remote do
           enabled: boolean(),
           poll_interval_ms: pos_integer(),
           request_timeout_ms: pos_integer(),
-          stale_multiplier: pos_integer()
+          stale_multiplier: pos_integer(),
+          source: :configured | :discovered
         }
 
   @default_remote_port 4_000

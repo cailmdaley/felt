@@ -4,7 +4,14 @@ defmodule Shuttle.Remotes do
   how to reach each one — a locally-forwarded SSH tunnel port, or an outright
   URL on a mesh VPN.
 
-  Source: `~/.config/shuttle/remotes.json` (or `$SHUTTLE_REMOTES_FILE`) →
+  Two sources, merged by `resolve/2`. `Shuttle.TailnetPeers` discovers every
+  Shuttle daemon on this host's tailnet and names each by the host id it
+  reports, so a host with no fleet file still reaches every tailnet daemon.
+  The fleet file adds hosts outside the tailnet and overrides discovered ones:
+  a configured entry wins wholesale over a discovered peer of the same name or
+  `https` authority, and a disabled entry suppresses one.
+
+  The file is `~/.config/shuttle/remotes.json` (or `$SHUTTLE_REMOTES_FILE`) →
 
       {
         "version": 1,
@@ -12,7 +19,8 @@ defmodule Shuttle.Remotes do
         "defaults": {
           "poll_interval_ms": 5000,
           "request_timeout_ms": 20000,
-          "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock"
+          "tailscale_socket": "/home/example/.local/state/tailscale/tailscaled.sock",
+          "discover": true
         },
         "remotes": [
           {"name": "hub-a", "ssh": "hub-a", "port": 4001},
@@ -28,12 +36,16 @@ defmodule Shuttle.Remotes do
   `tunnel.manager: "none"` is reached directly; unless it names an `ssh`, this
   host has no way to touch that daemon at all and an unreachable one is simply
   reported stale. `tailscale_socket/0` selects the private LocalAPI dial
-  transport for `https://` URLs; `https_proxy/0` is the single-user-only
-  alternative.
+  transport for `https://` URLs, defaulting to `bin/tailscaled-launch`'s socket
+  when one exists (`tailscale_socket_source/0`); `https_proxy/0` is the
+  single-user-only alternative.
+
+  `defaults.discover: false` turns tailnet discovery off for this host.
 
   A bare JSON array of entries is also accepted. Absent, unreadable, or
-  malformed file → `[]`: a hub with no fleet file is a correct local-only
-  daemon, and a daemon that refuses to boot over a typo in an operator file is
+  malformed file → no configured entries: a hub with no fleet file serves its
+  tailnet peers or, off the tailnet, is a correct local-only daemon, and a
+  daemon that refuses to boot over a typo in an operator file is
   worse than one that serves its own board. `shuttle remotes list` is the
   validator that reports the typo.
 
@@ -52,10 +64,10 @@ defmodule Shuttle.Remotes do
   ## Resolution
 
     1. `Application.get_env(:shuttle, :remotes)` when **not nil** — `[]` means
-       "explicitly none". This is what keeps the controller tests (which
-       `put_env` their own list) and `config/test.exs` authoritative.
-    2. the file
-    3. `[]`
+       "explicitly none", and discovery does not apply. This is what keeps the
+       controller tests (which `put_env` their own list) and `config/test.exs`
+       authoritative.
+    2. the file's entries merged with the discovered peers
 
   There is deliberately no compact `SHUTTLE_REMOTES` env form: a remote carries
   structured fields (tunnel options, per-remote timeouts) no comma-separated
@@ -74,27 +86,99 @@ defmodule Shuttle.Remotes do
   # cascade kickstarts are one value with two readers.
   @default_launchd_label_prefix "io.shuttle"
 
+  # `defaults.tailscale_socket: "system"` names the system tailscaled. The
+  # default socket is `bin/tailscaled-launch`'s, relative to $HOME.
+  @system_socket "system"
+  @default_socket_path ".local/state/tailscale/tailscaled.sock"
+
   @doc """
-  The fleet this daemon should use, as `[%Shuttle.Remote{}]`. Disabled entries
-  are dropped.
+  The fleet this daemon should use, as `[%Shuttle.Remote{}]`: the file's
+  enabled entries merged with the tailnet peers `Shuttle.TailnetPeers` last
+  discovered (see `resolve/2`). Application config, when set, is the whole
+  fleet and discovery does not apply.
   """
   @spec configured() :: [Remote.t()]
   def configured do
     case Application.get_env(:shuttle, :remotes) do
-      nil -> registered()
-      entries when is_list(entries) -> normalize(entries)
+      nil -> resolve(document(), Shuttle.TailnetPeers.peers(), tailscale_socket_configured?())
+      entries when is_list(entries) -> normalize(entries, tailscale_socket_configured?())
       _ -> []
     end
   end
 
-  @doc "The fleet as persisted in the file, ignoring application config."
+  @doc "The fleet as persisted in the file, ignoring application config and discovery."
   @spec registered() :: [Remote.t()]
   def registered do
-    case read_document() do
-      {:ok, doc} -> doc |> entries() |> normalize()
-      :error -> []
-    end
+    document() |> entries() |> normalize(tailscale_socket_configured?())
   end
+
+  @doc """
+  Merge a fleet document with discovered tailnet peers.
+
+  `doc` is the decoded fleet file (`nil` when there is none); `discovered` is
+  a list of `%{"name" => host_id, "url" => "https://<magicdns-name>"}` peers.
+  The result is the document's enabled entries in file order, then the
+  discovered peers sorted by name, each carrying its `source`.
+
+  A configured entry wins wholesale: a discovered peer is dropped when any
+  entry in the document, enabled or not, has its name or already reaches the
+  same `https` authority. So `{"name": "hub-a", "url": "...", "enabled": false}`
+  suppresses a discovered `hub-a`. `"defaults": {"discover": false}` drops
+  every discovered peer. Discovered peers take the document's polling
+  defaults and have no tunnel and no ssh path.
+
+  Pure, and mirrored by `resolveRemotes` in `internal/shuttlecli/remotes.go`;
+  `test/fixtures/tailnet_peers/*.json` drives both.
+  """
+  @spec resolve(map() | list() | nil, [map()]) :: [Remote.t()]
+  def resolve(doc, discovered),
+    do: resolve(doc, discovered, doc_tailscale_socket_configured?(doc))
+
+  defp resolve(doc, discovered, socket_configured?) do
+    configured = doc |> entries() |> normalize(socket_configured?)
+    if discover?(doc), do: configured ++ admit(doc, discovered), else: configured
+  end
+
+  @doc """
+  Whether the document lets this host discover tailnet peers: true unless
+  `defaults.discover` is `false`.
+  """
+  @spec discover?(map() | list() | nil) :: boolean()
+  def discover?(doc), do: Map.get(defaults_block(doc), "discover") != false
+
+  # A discovered peer becomes a portless URL remote with the document's
+  # polling defaults. Every document entry claims its name and its https
+  # authority, disabled ones included, since disabling is how an operator
+  # suppresses a discovered host.
+  defp admit(doc, discovered) do
+    claimed = doc |> entries() |> Shuttle.RegistryCommon.normalize_remotes()
+    names = MapSet.new(claimed, & &1.name)
+    authorities = claimed |> Enum.map(&https_authority(&1.url)) |> MapSet.new()
+    defaults = defaults_block(doc)
+
+    discovered
+    |> Enum.flat_map(fn peer ->
+      %{"name" => peer_field(peer, :name), "url" => peer_field(peer, :url)}
+      |> Map.put("tunnel", %{"manager" => "none"})
+      |> apply_defaults(defaults)
+      |> Remote.from_config()
+      |> List.wrap()
+    end)
+    |> Enum.filter(fn %Remote{name: name, url: url} ->
+      authority = https_authority(url)
+
+      not MapSet.member?(names, name) and authority != nil and
+        not MapSet.member?(authorities, authority)
+    end)
+    |> Enum.uniq_by(& &1.name)
+    |> Enum.sort_by(& &1.name)
+    |> Enum.map(&%{&1 | source: :discovered})
+  end
+
+  defp peer_field(peer, key) when is_map(peer),
+    do: Map.get(peer, Atom.to_string(key)) || Map.get(peer, key)
+
+  defp peer_field(_peer, _key), do: nil
 
   @doc """
   The launchd label prefix for tunnel jobs: `:launchd_label_prefix` app config,
@@ -155,49 +239,198 @@ defmodule Shuttle.Remotes do
   end
 
   @doc """
-  Whether the fleet requests private Tailscale dialing, including when its
-  configured socket value is invalid.
+  Where this host's tailscaled LocalAPI socket comes from, as `{source, value}`:
+
+    * `{:configured, value}` — `defaults.tailscale_socket` (or the
+      `:tailscale_socket` application config) names a socket. An invalid value
+      stays `:configured`, so `https://` requests fail closed rather than
+      dialing directly.
+    * `{:system, nil}` — the value is `"system"`: use the system tailscaled
+      (its CLI and kernel route) and never a private socket.
+    * `{:default, path}` — nothing is configured, no `https_proxy` is set, and
+      `bin/tailscaled-launch`'s socket,
+      `$HOME/.local/state/tailscale/tailscaled.sock`, exists as a Unix socket.
+    * `{:none, nil}` — otherwise.
 
   `$TS_SOCKET` is deliberately not read: the fleet file is the operator-visible
-  source of truth shared by the daemon and `shuttle remotes list`.
+  source of truth shared by the daemon and `shuttle remotes list`, which
+  applies the same default (`effectiveTailscaleSocket` in
+  `internal/shuttlecli/remotes.go`).
+  """
+  @spec tailscale_socket_source() ::
+          {:configured, term()} | {:system, nil} | {:default, String.t()} | {:none, nil}
+  def tailscale_socket_source do
+    case Application.get_env(:shuttle, :tailscale_socket) do
+      nil -> doc_socket_source(document())
+      false -> {:none, nil}
+      value -> explicit_socket_source(value)
+    end
+  end
+
+  @doc """
+  Whether the host dials `https://` remotes through a private LocalAPI socket,
+  configured or default, including when the configured value is invalid.
   """
   @spec tailscale_socket_configured?() :: boolean()
   def tailscale_socket_configured? do
+    match?({source, _} when source in [:configured, :default], tailscale_socket_source())
+  end
+
+  @doc """
+  The hub's normalized tailscaled LocalAPI socket (see
+  `tailscale_socket_source/0`), or `nil` when there is no valid private dial
+  transport.
+  """
+  @spec tailscale_socket() :: String.t() | nil
+  def tailscale_socket do
     case Application.get_env(:shuttle, :tailscale_socket) do
-      nil -> file_tailscale_socket_configured?()
-      false -> false
+      false ->
+        nil
+
+      nil ->
+        case doc_socket_source(document()) do
+          {:configured, _} -> file_tailscale_socket()
+          {:default, path} -> path
+          _ -> nil
+        end
+
+      value ->
+        case explicit_socket_source(value) do
+          {:configured, configured} -> normalized_tailscale_socket(configured)
+          _ -> nil
+        end
+    end
+  end
+
+  @doc """
+  `bin/tailscaled-launch`'s LocalAPI socket when it is trustworthy, else `nil`.
+  See `default_tailscale_socket_check/0`.
+  """
+  @spec default_tailscale_socket() :: String.t() | nil
+  def default_tailscale_socket do
+    case default_tailscale_socket_check() do
+      {:ok, path} -> path
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The default LocalAPI socket, `$HOME/.local/state/tailscale/tailscaled.sock`:
+
+    * `{:ok, path}` — on Linux, a Unix socket owned by this daemon's uid,
+      reached from `$HOME` through real directories only, none writable by
+      group or others (`Shuttle.Host.private_socket_problem/3`), so no
+      co-tenant could have planted it. macOS is excluded because its ACLs do
+      not show in mode bits, and a Mac uses the system tailscaled;
+    * `{:refused, path, reason}` — something is there but fails that check;
+      it is not used, and `/api/v1/version` reports the reason;
+    * `:absent` — nothing is there.
+
+  `:tailscale_home` application config replaces `$HOME` (`false` means none),
+  which keeps the test suite off the developer's real socket.
+  """
+  @spec default_tailscale_socket_check() ::
+          {:ok, String.t()} | {:refused, String.t(), String.t()} | :absent
+  def default_tailscale_socket_check do
+    home =
+      case Application.get_env(:shuttle, :tailscale_home) do
+        nil -> System.get_env("HOME")
+        false -> nil
+        home -> home
+      end
+
+    with "/" <> _ <- home,
+         path = Path.join(home, @default_socket_path),
+         {:ok, ^path} <- Remote.normalize_socket_path(path),
+         {:ok, _stat} <- File.lstat(path) do
+      cond do
+        (Application.get_env(:shuttle, :os_type) || :os.type()) != {:unix, :linux} ->
+          {:refused, path, "default socket is Linux-only"}
+
+        why = Shuttle.Host.private_socket_problem(path, home, Shuttle.Host.euid()) ->
+          {:refused, path, why}
+
+        true ->
+          {:ok, path}
+      end
+    else
+      _ -> :absent
+    end
+  end
+
+  defp doc_socket_source(doc) do
+    defaults = defaults_block(doc)
+
+    case explicit_socket_source(Map.get(defaults, "tailscale_socket")) do
+      {:none, nil} ->
+        if proxy_set?(defaults) or Application.get_env(:shuttle, :https_proxy) not in [nil, false],
+          do: {:none, nil},
+          else: default_socket_source()
+
+      chosen ->
+        chosen
+    end
+  end
+
+  defp explicit_socket_source(nil), do: {:none, nil}
+
+  defp explicit_socket_source(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> {:none, nil}
+      @system_socket -> {:system, nil}
+      _ -> {:configured, value}
+    end
+  end
+
+  defp explicit_socket_source(value), do: {:configured, value}
+
+  @doc false
+  # Why a default socket that exists was refused, for `/api/v1/version`.
+  def default_tailscale_socket_refusal do
+    case default_tailscale_socket_check() do
+      {:refused, path, why} -> "#{path}: #{why}"
+      _ -> nil
+    end
+  end
+
+  @doc false
+  # `tailscale_socket_source/0`'s source as the string `/api/v1/version` reports.
+  def tailscale_socket_source_name, do: tailscale_socket_source() |> elem(0) |> Atom.to_string()
+
+  defp default_socket_source do
+    case default_tailscale_socket() do
+      nil -> {:none, nil}
+      path -> {:default, path}
+    end
+  end
+
+  defp proxy_set?(defaults) do
+    case Map.get(defaults, "https_proxy") do
+      nil -> false
       value when is_binary(value) -> String.trim(value) != ""
       _ -> true
     end
   end
 
   @doc """
-  The hub's normalized tailscaled LocalAPI socket from
-  `defaults.tailscale_socket`, or `nil` when the fleet has no valid private
-  dial transport configured.
+  A cheap change token for the resolved fleet: the file's `{mtime, size}` (or
+  `nil` when absent), `Shuttle.TailnetPeers.generation/0`, and the default
+  LocalAPI socket when one exists. The registries and the dial reconciler
+  compare it each tick, so `shuttle remotes add`, a newly discovered peer, and
+  a userspace tailscaled starting after the daemon all take effect without a
+  daemon bounce. Size is folded in because POSIX mtime has 1-second
+  granularity and an edit-and-save inside the same second is ordinary.
   """
-  @spec tailscale_socket() :: String.t() | nil
-  def tailscale_socket do
-    case Application.get_env(:shuttle, :tailscale_socket) do
-      nil -> file_tailscale_socket()
-      false -> nil
-      value -> normalized_tailscale_socket(value)
-    end
-  end
-
-  @doc """
-  A cheap change token for the fleet file — `{mtime, size}`, or `nil` when the
-  file is absent. The registries stat this each tick so `shuttle remotes
-  add` takes effect without a daemon bounce. Size is folded in because POSIX
-  mtime has 1-second granularity and an edit-and-save inside the same second is
-  ordinary.
-  """
-  @spec config_token() :: {integer(), non_neg_integer()} | nil
+  @spec config_token() ::
+          {{integer(), non_neg_integer()} | nil, non_neg_integer(), String.t() | nil}
   def config_token do
-    case File.stat(config_path(), time: :posix) do
-      {:ok, %File.Stat{mtime: mtime, size: size}} -> {mtime, size}
-      _ -> nil
-    end
+    file =
+      case File.stat(config_path(), time: :posix) do
+        {:ok, %File.Stat{mtime: mtime, size: size}} -> {mtime, size}
+        _ -> nil
+      end
+
+    {file, Shuttle.TailnetPeers.generation(), default_tailscale_socket()}
   end
 
   @doc "Path the fleet is read from. Only the Go CLI writes it."
@@ -211,8 +444,16 @@ defmodule Shuttle.Remotes do
 
   # ── Internals ──
 
-  # `{:ok, decoded}` for any JSON the file holds, `:error` for absent /
-  # unreadable / malformed. The document shape is checked by `entries/1`.
+  @doc false
+  # The decoded fleet file, or `nil` when it is absent, unreadable or
+  # malformed. The document shape is checked by `entries/1`.
+  def document do
+    case read_document() do
+      {:ok, doc} -> doc
+      :error -> nil
+    end
+  end
+
   defp read_document do
     path = config_path()
 
@@ -232,20 +473,11 @@ defmodule Shuttle.Remotes do
     end
   end
 
-  defp file_tailscale_socket_configured? do
-    case read_document() do
-      {:ok, doc} ->
-        defaults = defaults_block(doc)
-
-        case Map.get(defaults, "tailscale_socket") do
-          value when is_binary(value) -> String.trim(value) != ""
-          nil -> false
-          _ -> Map.has_key?(defaults, "tailscale_socket")
-        end
-
-      :error ->
-        false
-    end
+  defp doc_tailscale_socket_configured?(doc) do
+    match?(
+      {:configured, _},
+      doc |> defaults_block() |> Map.get("tailscale_socket") |> explicit_socket_source()
+    )
   end
 
   defp file_tailscale_socket do
@@ -270,7 +502,13 @@ defmodule Shuttle.Remotes do
 
   defp valid_defaults?(defaults) do
     proxy = Map.get(defaults, "https_proxy")
-    socket = Map.get(defaults, "tailscale_socket")
+
+    socket =
+      case explicit_socket_source(Map.get(defaults, "tailscale_socket")) do
+        {:configured, value} -> value
+        _ -> nil
+      end
+
     proxy_absent? = is_nil(proxy) or (is_binary(proxy) and String.trim(proxy) == "")
     proxy_valid? = proxy_absent? or not is_nil(parse_proxy(proxy))
 
@@ -394,13 +632,13 @@ defmodule Shuttle.Remotes do
 
   defp apply_defaults(entry, _defaults), do: entry
 
-  defp normalize(entries) do
+  defp normalize(entries, socket_configured?) do
     remotes =
       entries
       |> Shuttle.RegistryCommon.normalize_remotes()
       |> Enum.filter(& &1.enabled)
 
-    if tailscale_socket_configured?(),
+    if socket_configured?,
       do: reject_duplicate_https_authorities(remotes),
       else: remotes
   end

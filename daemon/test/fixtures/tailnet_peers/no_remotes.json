@@ -1,0 +1,148 @@
+{
+  "_comment": "No fleet file: every same-user tailnet daemon that answers is a remote, named by the host id it reports. The phone refuses the probe, the web server answers without a host id, the booting daemon is not ready, the offline node is not probed, and the node whose MagicDNS label differs from its host id is named by the host id.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "hub-b",
+        "DNSName": "hub-b.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0002": {
+        "HostName": "phone",
+        "DNSName": "phone.example.ts.net.",
+        "UserID": 1001,
+        "OS": "iOS",
+        "Online": true
+      },
+      "nodekey:0003": {
+        "HostName": "web",
+        "DNSName": "web.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0004": {
+        "HostName": "booting",
+        "DNSName": "booting.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0005": {
+        "HostName": "asleep",
+        "DNSName": "asleep.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": false
+      },
+      "nodekey:0006": {
+        "HostName": "label-x",
+        "DNSName": "label-x.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://hub-b.example.ts.net": {
+      "body": {
+        "host": "hub-b",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://phone.example.ts.net": {
+      "error": "connection refused"
+    },
+    "https://web.example.ts.net": {
+      "body": {
+        "status": "ok"
+      }
+    },
+    "https://booting.example.ts.net": {
+      "body": {
+        "host": "booting",
+        "ready": false,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://label-x.example.ts.net": {
+      "body": {
+        "host": "hub-x",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    }
+  },
+  "remotes": null,
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net"
+    },
+    {
+      "name": "hub-x",
+      "url": "https://label-x.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "asleep.example.ts.net",
+    "booting.example.ts.net",
+    "phone.example.ts.net",
+    "web.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    },
+    {
+      "name": "hub-x",
+      "url": "https://label-x.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

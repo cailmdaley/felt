@@ -885,23 +885,31 @@ live state of each private remote bridge.
 
 ## Configuring remotes
 
-One daemon can aggregate other daemons over SSH tunnels. The fleet file lists
-them, and both the Go CLI and the daemon read it at runtime.
+One daemon aggregates the others. On a tailnet it needs no configuration: every
+daemon served with `tailscale serve` (see [Tailscale as fleet
+transport](#tailscale-as-fleet-transport)) is discovered and named by its host
+id. The fleet file lists what discovery cannot find or should not decide: hosts
+reached over SSH tunnels, non-default URLs, and overrides. Both the Go CLI and
+the daemon read it at runtime.
 
 ```bash
 shuttle remotes path                          # ~/.config/shuttle/remotes.json
 shuttle remotes add hub-a --port 4001         # --ssh, --remote-port, --display, --checkout
 shuttle remotes add hub-b --port 4004 --multiplex
-shuttle remotes list                          # also the validator
+shuttle remotes list                          # every peer and its SOURCE; also the validator
+shuttle remotes list --configured             # the file alone, without asking the daemon
 shuttle remotes rm hub-a
 ```
 
-`list` reports parse errors, duplicate names, and port collisions. `--multiplex`
+`list` reports parse errors, duplicate names, and port collisions, and shows
+each remote's source: `configured` for a file entry, `discovered` for a tailnet
+peer the local daemon found. When the daemon cannot be reached, it lists the
+file alone and says so. `add` and `rm` edit only the file. `--multiplex`
 rides an existing `ControlMaster` socket — SSH's connection-sharing feature,
 which keeps one authenticated connection open for later commands to reuse —
 which is what a 2FA host needs. A `launchd_label_prefix` key in the file names
 the launchd labels `shuttle tunnels install` writes. Single-machine use
-needs none of this: an absent file means no remotes.
+needs none of this: an absent file on a host off the tailnet means no remotes.
 
 `bin/shuttle-deploy` reads the same file, so the fleet is described once. Give
 a remote a `checkout` (its repo path) to make it a deploy target — a remote
@@ -974,10 +982,42 @@ on a login node where you cannot install a kernel module or a system service:
    after joining: it lists this node and its peers when `up` succeeded, and
    refuses or reports "Logged out" when it has not.
 
+### Discovery
+
+A daemon finds the other daemons on its tailnet by itself. Every minute it
+reads the tailnet status, from the LocalAPI when a socket is in effect (see
+[`defaults.tailscale_socket`](#defaultstailscale_socket), including its default),
+and otherwise from the `tailscale` CLI. It keeps the nodes owned by your own
+Tailscale user and probes each online one at
+`https://<node>.<tailnet>.ts.net/api/v1/version`. A daemon that answers is
+added to the fleet under the `host` id it reports, which is the name its
+fibers carry in `shuttle.host`. Nodes shared into your tailnet from another
+user are never probed. A phone, or any node without a daemon, drops out
+because it does not answer. A node that answered once stays for ten minutes
+while its probes fail, so a daemon restarting for a deploy shows as stale
+rather than disappearing.
+
+A newly joined host is reachable from every other daemon within a minute of
+its daemon answering, with no `remotes.json` anywhere. The file still wins
+where it speaks:
+
+- an entry with the same name, or the same `https` URL under another name,
+  replaces the discovered peer wholesale (give it an `ssh` name for the
+  recovery cascade, a longer timeout, or a `checkout` for `bin/shuttle-deploy`);
+- an entry with `"enabled": false` keeps a discovered host out of the fleet;
+- `"defaults": {"discover": false}` turns discovery off for this host.
+
+When Tailscale is absent, stopped, or failing, the daemon falls back to the
+file alone. `/api/v1/version` reports the discovery state (`discovery`), and
+`shuttle doctor` prints a warning naming the reason and stating that the host
+is running on `remotes.json` alone. A peer whose daemon is too old to report
+its host id is not discovered; configure it by hand or upgrade it.
+
 ### The remotes.json entry
 
-A Tailscale-fronted remote skips SSH entirely — no `--ssh`, no port, no
-`ControlMaster`:
+Discovery covers the ordinary Tailscale-fronted remote. Write an entry when
+you need to override one. A Tailscale-fronted remote skips SSH entirely — no
+`--ssh`, no port, no `ControlMaster`:
 
 ```json
 {"name": "hub-a", "url": "https://hub-a.example.ts.net", "tunnel": {"manager": "none"}}
@@ -1013,8 +1053,9 @@ For example, a per-user userspace instance might use:
 }
 ```
 
-The daemon creates one owner-only client socket per enabled HTTPS remote
-immediately under `$SHUTTLE_DATA_DIR/sock/`, named `dial-<component>.sock`. On
+The daemon reads the tailnet status for discovery through the same socket
+and dials each probe through it. It creates one owner-only client socket per
+enabled HTTPS remote, discovered or configured, immediately under `$SHUTTLE_DATA_DIR/sock/`, named `dial-<component>.sock`. On
 shared/exposed hosts using the default Unix listener, bridge sockets sit beside
 `daemon.sock` and share its `0700` owner-only directory guard. Each bridge
 carries local HTTP over its socket, then performs verified TLS to the configured
@@ -1027,6 +1068,26 @@ actual requests, not a synthetic probe. Once configured, HTTPS requests fail
 closed without a matching bridge instead of falling back to direct or proxy
 routing.
 `shuttle remotes list` validates the socket path.
+
+When `defaults.tailscale_socket` is unset and no `defaults.https_proxy` is
+set, the daemon uses `bin/tailscaled-launch`'s socket,
+`$HOME/.local/state/tailscale/tailscaled.sock`, on Linux only and only if it is
+trustworthy. Every component below `$HOME` must be a real directory (no
+symlinks) owned by your uid or root and not writable by group or others, and
+the socket itself must be a Unix socket owned by your uid. Otherwise a
+co-tenant could plant a fake LocalAPI there. On macOS the default is never
+used: its ACLs do not show in mode bits, and a Mac runs the system
+`tailscaled`, which discovery reaches through the CLI. A socket that fails the check is not used: the daemon
+falls back to the `tailscale` CLI, `/api/v1/version` reports the reason as
+`tailnet_dial.default_socket_refused`, and `shuttle remotes list` and
+`shuttle doctor` report it too. `shuttle doctor` treats it as a mismatch.
+A host running the recipe above therefore needs no `remotes.json` for either
+discovery or private dialing. An explicit path always wins. Set
+`"tailscale_socket": "system"` to use the system `tailscaled` (its CLI and
+kernel route) even when that file exists. `shuttle remotes list` and
+`shuttle doctor` print the effective socket with its source (`configured` or
+`default`), and `/api/v1/version` reports it as `tailnet_dial.socket` and
+`tailnet_dial.socket_source`.
 `shuttle doctor` checks that it is a Unix socket and, on shared/exposed hosts,
 that ownership, mode bits, and macOS ACLs prevent co-tenants from
 traversing to it; it also compares the running daemon's effective socket with

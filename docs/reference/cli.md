@@ -59,7 +59,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | `felt setup claude` | Install the felt plugin for Claude Code (`--source`, `--uninstall`) |
 | `felt setup codex` | Install the felt plugin for Codex (`--source`, `--uninstall`) |
 | `felt setup pi` | Install the felt package for pi (`--uninstall`) |
-| `felt setup receipt` | Report the Felt executable and promoted/loaded harness generations, hooks, and pending plugin-promotion state (`--json` for the machine-readable receipt) |
+| `felt setup receipt` | Report the Felt executable and promoted/loaded harness generations, hooks, and pending plugin-promotion state (`--json` for the machine-readable receipt, where each bundle's `inspection` is `confirmed` by the harness's plugin list, `configured` from its config and cache alone, or `unknown`) |
 | `felt setup skills` | Link felt skills into a target directory (`--source`, `--target`, default `~/.claude/skills`) |
 | `felt setup validate --source <checkout>` | Non-mutating validation of a complete local plugin candidate, including both skills and registered hook files |
 | `felt uninstall` | Remove the felt plugin from Claude Code and Codex and the felt package from pi (inverse of `setup claude`/`codex`/`pi`) |
@@ -92,7 +92,9 @@ The `shuttle:` block is opaque frontmatter to felt: `felt show -j` and `felt
 ls -j` return it without a resolved facet, and felt never validates its schema.
 `shuttle` owns that schema and the resolved view. Its local write verbs work
 offline and validate before they touch disk. When a fiber's
-`shuttle.host` names an enabled remote in `~/.config/shuttle/remotes.json`,
+`shuttle.host` names a remote in the resolved fleet (an enabled entry in
+`~/.config/shuttle/remotes.json`, or a tailnet peer the local daemon
+discovered),
 `pause`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
 `set-outcome`, `reshape`, and `uninstall` route through the local daemon to the
 owner; `dispatch` does the same. `snapshot`, `dispatch`, `status --all`/`--remote`,
@@ -351,9 +353,9 @@ the existing owner-served file surface.
 
 | Command | Purpose |
 |---|---|
-| `shuttle remotes list` | List the configured remote daemons and document defaults; validates paths, proxy/dial exclusivity, duplicate names, and port collisions |
-| `shuttle remotes add <name>` | Add or replace a remote (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
-| `shuttle remotes rm <name>` | Remove a remote |
+| `shuttle remotes list` | List the fleet: the file's entries (disabled ones included) and the local daemon's discovered tailnet peers, with a SOURCE column (`configured` or `discovered`) and a line on discovery's state; an unreachable daemon lists the file alone and says so. Validates paths, proxy/dial exclusivity, duplicate names, and port collisions. `--configured` lists and validates the file alone; `--json` adds `discovery` (or `discovery_error`) to the normalized document |
+| `shuttle remotes add <name>` | Add or replace a remote in the file (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
+| `shuttle remotes rm <name>` | Remove a remote from the file; a discovered peer is suppressed with an `"enabled": false` entry instead |
 | `shuttle remotes path` | Print the fleet file path (`~/.config/shuttle/remotes.json`) |
 | `shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file, data_dir}`; the daemon reads its host id from it at boot, and the stop scripts put `heartbeat.stopped` in `data_dir`) |
 | `shuttle host seed` | Write this host's id to `~/.shuttle/host` (or `$SHUTTLE_HOST_FILE`) unless it already holds one: `$SHUTTLE_HOST`, else the normalized hostname. `shuttle daemon install` runs it |

@@ -19,7 +19,8 @@ import (
 const maxLaunchMessageBytes = 64 << 10
 
 // routeOwnerForCommand returns a remote owner only when the fiber's explicit
-// shuttle.host differs from this host and is configured in remotes.json. An
+// shuttle.host differs from this host and names a remote in the resolved
+// fleet: remotes.json or a tailnet peer the local daemon discovered. An
 // unknown or malformed fleet entry must fail before an origin-routed endpoint
 // can degrade the request to this daemon's local mirror.
 //
@@ -43,18 +44,31 @@ func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (
 		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source}
 	}
 
-	remotes, err := configuredRemotes()
+	// The file answers first, so a configured owner costs no daemon read.
+	doc, err := loadRemotesFile()
 	if err != nil {
 		return "", ownerRouteRefusal(cmd, args, owner, fmt.Sprintf("cannot read the configured fleet: %v", err))
 	}
-	for _, remote := range remotes {
+	for _, remote := range resolveRemotes(doc, nil) {
 		if remote.Name == owner {
 			return owner, nil
 		}
 	}
 	path, _ := shuttleRemotesPath()
-	return "", ownerRouteRefusal(cmd, args, owner,
-		fmt.Sprintf("host %q is not an enabled remote in %s", owner, path))
+	reason := fmt.Sprintf("host %q is neither an enabled remote in %s nor a discovered tailnet peer", owner, path)
+	if doc.discoverEnabled() {
+		discovery, err := fetchDaemonDiscovery()
+		if err != nil {
+			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
+		} else {
+			for _, remote := range admitDiscovered(doc, discovery.Peers) {
+				if remote.Name == owner {
+					return owner, nil
+				}
+			}
+		}
+	}
+	return "", ownerRouteRefusal(cmd, args, owner, reason)
 }
 
 // localFlagUsage is the one description of --local on every verb that can

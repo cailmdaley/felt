@@ -175,6 +175,13 @@ defmodule Shuttle.TailnetDial.Bridge do
     :gen_tcp.close(client)
   end
 
+  @doc false
+  # A verified TLS connection to `host:port` dialled through tailscaled's
+  # LocalAPI at `localapi_socket`, or `{:error, stage, reason}`. The caller
+  # owns the socket. `Shuttle.TailnetPeers` probes candidate peers with it.
+  def open_tls(localapi_socket, host, port),
+    do: dial(localapi_socket: localapi_socket, host: host, port: port)
+
   defp dial(opts) do
     localapi_socket = Keyword.fetch!(opts, :localapi_socket)
 

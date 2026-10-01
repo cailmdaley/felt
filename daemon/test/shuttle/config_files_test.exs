@@ -408,7 +408,7 @@ defmodule Shuttle.ConfigFilesTest do
 
       call = MockFelt.last()
       assert call.command == "shuttle"
-      assert call.args == ["remotes", "list", "--json"]
+      assert call.args == ["remotes", "list", "--configured", "--json"]
       assert [{"SHUTTLE_REMOTES_FILE", tmp}] = call.env
       assert call.opts[:timeout_ms] == 15_000
       assert call.opts[:stderr_to_stdout] == true

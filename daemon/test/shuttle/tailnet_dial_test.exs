@@ -34,6 +34,11 @@ defmodule Shuttle.TailnetDialTest do
           send(parent, :redirect_followed)
           Plug.Conn.send_resp(conn, 200, "redirect-followed")
 
+        "/peer/api/v1/version" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.send_resp(200, ~s({"host":"hub-a","ready":true}))
+
         "/large" ->
           Plug.Conn.send_resp(conn, 200, :binary.copy(<<0, 255, 0xC3, 0xA9>>, 524_288))
 
@@ -223,6 +228,31 @@ defmodule Shuttle.TailnetDialTest do
     assert host_header == "#{@host}:#{tls_port}"
     assert TailnetDial.last_error(remote.name) == nil
     assert Process.alive?(Process.whereis(Shuttle.TailnetDial))
+  end
+
+  test "a tailnet peer probe dials through the LocalAPI and reads the version", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+
+    on_exit(fn ->
+      restore_cacerts(previous)
+      restore_app_env(:tailscale_socket, previous_socket)
+    end)
+
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+
+    assert %{"body" => %{"host" => "hub-a", "ready" => true}} =
+             Shuttle.TailnetPeers.probe("https://#{@host}/peer")
+
+    assert_receive {:dial_request, request}, 5_000
+    assert request =~ "Dial-Host: #{@host}\r\n"
+    assert request =~ "Dial-Port: 443\r\n"
+    assert_receive {:https_request, [@host]}, 5_000
   end
 
   test "the private HTTP authority omits an explicit default HTTPS port", %{

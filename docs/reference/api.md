@@ -182,7 +182,7 @@ harness processes sharing one transcript.
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |
 | `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents`, `remotes` or `host` — plus `entries` for the two path lists |
-| `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file joined to live reachability and each remote's build |
+| `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file and its discovered tailnet peers (each row's `source` says which), joined to live reachability and each remote's build |
 | `GET /file` | owner-routed | Raw bytes by absolute path, with `ETag` / `Last-Modified` conditional GET for live HTML, markdown, and text readers |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
@@ -432,7 +432,7 @@ commits:
 
 | File | Validator |
 |---|---|
-| `remotes` | `shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE` |
+| `remotes` | `shuttle remotes list --configured --json` under `SHUTTLE_REMOTES_FILE` |
 | `agents` | `shuttle agents --json` under `SHUTTLE_AGENTS_FILE` |
 | `host` | `shuttle host --json` under `SHUTTLE_HOST_CONFIG_FILE` |
 | `stores`, `projects` | shape-checked in the daemon — no felt verb validates them |
@@ -474,7 +474,7 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `listen`, `host_class`, peer-gate mode/uid/source, and `tailnet_dial` |
+| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing roles, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |

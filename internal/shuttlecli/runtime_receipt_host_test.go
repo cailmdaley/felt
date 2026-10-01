@@ -563,7 +563,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 		tailscaleSocket:       "/run/from-file/tailscaled.sock",
 		daemonVersionReported: true,
 	})
-	if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "does not report private Tailscale dial support") {
+	if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "does not report the private Tailscale dial support") {
 		t.Fatalf("old daemon tailnet support receipt = %+v", got)
 	}
 }

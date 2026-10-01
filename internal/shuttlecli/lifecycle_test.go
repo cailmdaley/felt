@@ -955,7 +955,7 @@ func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 	if err == nil {
 		t.Fatal("close on a cineca-owned fiber from macbook must be refused")
 	}
-	if !strings.Contains(err.Error(), "not an enabled remote") || !strings.Contains(err.Error(), "shuttle close remote") {
+	if !strings.Contains(err.Error(), "nor a discovered tailnet peer") || !strings.Contains(err.Error(), "shuttle close remote") {
 		t.Fatalf("expected an actionable routing refusal, got %T: %v", err, err)
 	}
 	after, _ := os.ReadFile(storage.Path("remote"))

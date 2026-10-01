@@ -12,9 +12,10 @@ defmodule ShuttleWeb.FleetController do
 
     * **Configured** — `shuttle remotes list --json`, which reports the
       file *normalized*: defaults applied, `url` derived from `port`, the
-      tunnel manager resolved against this host's supervisor. That is what the
-      daemon and the CLI actually act on, and it differs from the file's own
-      text often enough to be worth showing on its own.
+      tunnel manager resolved against this host's supervisor — followed by the
+      tailnet peers this daemon discovered, each row carrying its `source`.
+      That is what the daemon and the CLI actually act on, and it differs from
+      the file's own text often enough to be worth showing on its own.
     * **Reachable** — `Shuttle.RemoteRegistry`'s cached poll result: stale or
       fresh, when it last answered, the last error, and where the recovery
       cascade currently stands. Never a fresh probe fired by this request: a

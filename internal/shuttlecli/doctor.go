@@ -46,12 +46,14 @@ type ReceiptDaemon struct {
 	PeerGateUID       *int                `json:"peer_gate_uid,omitempty"`
 	PeerGateUIDSource string              `json:"peer_gate_uid_source,omitempty"`
 	TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
+	Discovery         *daemonDiscovery    `json:"discovery,omitempty"`
 }
 
 type ReceiptTailnetDial struct {
-	Configured bool                   `json:"configured"`
-	Socket     string                 `json:"socket,omitempty"`
-	Bridges    []ReceiptTailnetBridge `json:"bridges"`
+	Configured   bool                   `json:"configured"`
+	Socket       string                 `json:"socket,omitempty"`
+	SocketSource string                 `json:"socket_source,omitempty"`
+	Bridges      []ReceiptTailnetBridge `json:"bridges"`
 }
 
 type ReceiptTailnetBridge struct {
@@ -88,6 +90,7 @@ var doctorCmd = &cobra.Command{
 			printShuttleBinaryReceipt(receipt.ShuttleBinary)
 			printHostReceipt(receipt.Host)
 			printTailnetDialReceipt(receipt.Daemon.TailnetDial)
+			printDiscoveryReceipt(receipt.Daemon.Discovery)
 			if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
 				fmt.Printf("tmux server: daemon-born — %s\n", receipt.TmuxServer.Repair)
 			}
@@ -202,7 +205,7 @@ func printHostReceipt(host ReceiptHost) {
 		fmt.Printf("host %s (%s)\n", host.Class, host.Listen)
 	}
 	if host.TailscaleSocket != "" {
-		fmt.Printf("tailscale LocalAPI socket: %s", host.TailscaleSocket)
+		fmt.Printf("tailscale LocalAPI socket: %s (%s)", host.TailscaleSocket, host.TailscaleSocketSource)
 		if host.TailnetSocketEvidence != nil {
 			evidence := host.TailnetSocketEvidence
 			fmt.Printf(" (unix=%t, owner_ok=%t, private=%t", evidence.Socket, evidence.OwnerOK, evidence.Private)
@@ -244,6 +247,34 @@ func printTailnetDialReceipt(dial *ReceiptTailnetDial) {
 	}
 }
 
+// printDiscoveryReceipt reports the daemon's tailnet peer discovery. A failed
+// or unavailable discovery is a warning, not a doctor failure: the daemon
+// still serves the fleet file's remotes, and a host off the tailnet is a
+// correct host.
+func printDiscoveryReceipt(discovery *daemonDiscovery) {
+	if discovery == nil {
+		return
+	}
+	switch discovery.State {
+	case "ok":
+		names := make([]string, 0, len(discovery.Peers))
+		for _, peer := range discovery.Peers {
+			names = append(names, peer.Name)
+		}
+		fmt.Printf("tailnet discovery via %s: %d peer(s)", discovery.Via, len(names))
+		if len(names) > 0 {
+			fmt.Printf(" (%s)", strings.Join(names, ", "))
+		}
+		fmt.Println()
+	case "pending":
+		fmt.Println("tailnet discovery: first round still running")
+	case "disabled":
+		fmt.Printf("tailnet discovery: off (%s)\n", discovery.Error)
+	default:
+		fmt.Printf("warning: tailnet discovery unavailable (%s); this host is running on remotes.json alone\n", discovery.Error)
+	}
+}
+
 func collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
 	if daemon.Ready != nil && !*daemon.Ready {
 		return ReceiptHost{Status: receiptBooting, Repair: daemon.Repair}
@@ -268,6 +299,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 		PeerGateUID       *int                `json:"peer_gate_uid"`
 		PeerGateUIDSource string              `json:"peer_gate_uid_source"`
 		TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial"`
+		Discovery         *daemonDiscovery    `json:"discovery"`
 		Ready             *bool               `json:"ready"`
 		Contract          struct {
 			Expected json.RawMessage `json:"expected"`
@@ -279,6 +311,7 @@ func collectDaemonReceipt() ReceiptDaemon {
 	d.Listen, d.HostClass, d.PeerGate = response.Listen, response.HostClass, response.PeerGate
 	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
 	d.TailnetDial, d.Ready = response.TailnetDial, response.Ready
+	d.Discovery = response.Discovery
 	if decodeErr != nil {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d

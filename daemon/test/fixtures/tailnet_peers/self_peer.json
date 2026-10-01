@@ -1,0 +1,96 @@
+{
+  "_comment": "A peer that reports this daemon's own host id is dropped, and so is every peer reporting a host id another peer also reports.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "clone",
+        "DNSName": "clone.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0002": {
+        "HostName": "twin-1",
+        "DNSName": "twin-1.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0003": {
+        "HostName": "twin-2",
+        "DNSName": "twin-2.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://clone.example.ts.net": {
+      "body": {
+        "host": "hub-self",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://twin-1.example.ts.net": {
+      "body": {
+        "host": "hub-t",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://twin-2.example.ts.net": {
+      "body": {
+        "host": "hub-t",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    }
+  },
+  "remotes": null,
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "clone.example.ts.net",
+    "twin-1.example.ts.net",
+    "twin-2.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

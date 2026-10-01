@@ -336,14 +336,14 @@ defmodule Shuttle.RemotesTest do
   end
 
   describe "config_token/0" do
-    test "nil when absent, and changes when the file changes" do
+    test "names an absent file, and changes when the file changes" do
       path = Path.join(tmp_dir(), "token.json")
       System.put_env("SHUTTLE_REMOTES_FILE", path)
-      assert Remotes.config_token() == nil
+      assert {nil, 0, nil} = Remotes.config_token()
 
       File.write!(path, ~s({"remotes": [{"name": "a", "port": 4001}]}))
       first = Remotes.config_token()
-      assert first != nil
+      assert {{_mtime, _size}, 0, nil} = first
 
       File.write!(
         path,
@@ -351,6 +351,188 @@ defmodule Shuttle.RemotesTest do
       )
 
       assert Remotes.config_token() != first
+    end
+  end
+
+  describe "the default LocalAPI socket" do
+    setup do
+      prev_home = Application.get_env(:shuttle, :tailscale_home)
+      prev_os = Application.get_env(:shuttle, :os_type)
+
+      on_exit(fn ->
+        restore_app_env(:tailscale_home, prev_home)
+        restore_app_env(:os_type, prev_os)
+      end)
+
+      # The default is Linux-only; these cases run as Linux on any host.
+      Application.put_env(:shuttle, :os_type, {:unix, :linux})
+
+      # A unix socket path must fit sun_path, so this stays under /tmp.
+      home = "/tmp/rt-#{System.unique_integer([:positive])}"
+      state = Path.join(home, ".local/state/tailscale")
+      File.mkdir_p!(state)
+      on_exit(fn -> File.rm_rf(home) end)
+
+      for dir <- [home, Path.join(home, ".local"), Path.join(home, ".local/state")],
+          do: File.chmod!(dir, 0o755)
+
+      File.chmod!(state, 0o700)
+      socket = Path.join(state, "tailscaled.sock")
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket}])
+      on_exit(fn -> :gen_tcp.close(listener) end)
+
+      Application.put_env(:shuttle, :tailscale_home, home)
+      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(home, "absent.json"))
+      {:ok, socket: socket, home: home, state: state}
+    end
+
+    test "applies when nothing is configured", %{socket: socket} do
+      assert Remotes.default_tailscale_socket_check() == {:ok, socket}
+      assert Remotes.tailscale_socket_source() == {:default, socket}
+      assert Remotes.tailscale_socket_configured?()
+      assert Remotes.tailscale_socket() == socket
+    end
+
+    test "an explicit defaults.tailscale_socket wins", %{home: home} do
+      explicit = Path.join(home, "explicit.sock")
+
+      System.put_env(
+        "SHUTTLE_REMOTES_FILE",
+        write_remotes(Jason.encode!(%{"defaults" => %{"tailscale_socket" => explicit}}))
+      )
+
+      assert Remotes.tailscale_socket_source() == {:configured, explicit}
+      assert Remotes.tailscale_socket() == explicit
+    end
+
+    test "\"system\" names the system tailscaled and keeps the fleet readable" do
+      System.put_env(
+        "SHUTTLE_REMOTES_FILE",
+        write_remotes(
+          Jason.encode!(%{
+            "defaults" => %{"tailscale_socket" => "system"},
+            "remotes" => [%{"name" => "hub-a", "url" => "https://hub-a.example.ts.net"}]
+          })
+        )
+      )
+
+      assert Remotes.tailscale_socket_source() == {:system, nil}
+      refute Remotes.tailscale_socket_configured?()
+      assert Remotes.tailscale_socket() == nil
+      assert [%Remote{name: "hub-a"}] = Remotes.registered()
+    end
+
+    test "a configured https_proxy suppresses it" do
+      System.put_env(
+        "SHUTTLE_REMOTES_FILE",
+        write_remotes(Jason.encode!(%{"defaults" => %{"https_proxy" => "localhost:1055"}}))
+      )
+
+      assert Remotes.tailscale_socket_source() == {:none, nil}
+    end
+
+    test "is refused under a directory others can write, and says why", %{
+      home: home,
+      socket: socket
+    } do
+      File.chmod!(Path.join(home, ".local"), 0o775)
+
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why =~ "writable by group or others"
+      assert Remotes.tailscale_socket_source() == {:none, nil}
+      assert Remotes.default_tailscale_socket_refusal() =~ socket
+    end
+
+    test "a FIFO or a regular file at the path is refused, not used", %{socket: socket} do
+      File.rm!(socket)
+      {_, 0} = System.cmd("mkfifo", [socket])
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why == "#{socket} is not a Unix socket"
+
+      File.rm!(socket)
+      File.write!(socket, "")
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why == "#{socket} is a regular, not a Unix socket"
+    end
+
+    test "a world-writable .local refuses it", %{home: home, socket: socket} do
+      File.chmod!(Path.join(home, ".local"), 0o777)
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why =~ "#{home}/.local: its mode is 0777"
+    end
+
+    test "a symlinked state directory refuses it, even into a protected tree", %{
+      home: home,
+      socket: socket
+    } do
+      # The resolved path is all private; the literal one runs through a
+      # directory anyone could have re-pointed.
+      protected = Path.join(home, "protected")
+      File.mkdir_p!(protected)
+      File.chmod!(protected, 0o700)
+      File.rename!(Path.join(home, ".local/state"), Path.join(protected, "state"))
+      File.ln_s!(Path.join(protected, "state"), Path.join(home, ".local/state"))
+      File.chmod!(Path.join(home, ".local"), 0o777)
+
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why =~ "is a symlink" or why =~ "its mode is 0777"
+
+      File.chmod!(Path.join(home, ".local"), 0o755)
+      assert {:refused, ^socket, why} = Remotes.default_tailscale_socket_check()
+      assert why == "#{home}/.local/state is a symlink"
+    end
+
+    # The fleet's real layouts: a 0666 socket (as tailscaled creates it) under
+    # user-owned directories with these modes, and no symlinks, is trusted.
+    for {host, modes} <- [
+          {"cineca", [0o700, 0o700, 0o700]},
+          {"candide", [0o755, 0o700, 0o700]},
+          {"nibi", [0o750, 0o700, 0o700]},
+          {"amundsen", [0o700, 0o755, 0o700]}
+        ] do
+      @modes modes
+      test "#{host}'s layout is trusted", %{home: home, socket: socket} do
+        [".local", ".local/state", ".local/state/tailscale"]
+        |> Enum.zip(@modes)
+        |> Enum.each(fn {dir, mode} -> File.chmod!(Path.join(home, dir), mode) end)
+
+        File.chmod!(socket, 0o666)
+        assert Remotes.default_tailscale_socket_check() == {:ok, socket}
+      end
+    end
+
+    test "is Linux-only", %{socket: socket} do
+      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+
+      assert {:refused, ^socket, "default socket is Linux-only"} =
+               Remotes.default_tailscale_socket_check()
+
+      assert Remotes.tailscale_socket_source() == {:none, nil}
+    end
+
+    test "is absent when nothing is there", %{socket: socket} do
+      File.rm!(socket)
+      assert Remotes.default_tailscale_socket_check() == :absent
+      assert Remotes.tailscale_socket_source() == {:none, nil}
+      refute Remotes.tailscale_socket_configured?()
+    end
+
+    test "with the default in effect, a duplicate https authority is dropped" do
+      System.put_env(
+        "SHUTTLE_REMOTES_FILE",
+        Path.join(@fixture_dir, "duplicate_https_authority_default_socket.json")
+      )
+
+      assert ["hub-a"] = Enum.map(Remotes.registered(), & &1.name)
+
+      Application.put_env(:shuttle, :tailscale_home, false)
+      assert ["hub-a", "hub-a-alias"] = Enum.map(Remotes.registered(), & &1.name)
+    end
+
+    test "joins the change token, so a tailscaled started later is noticed", %{socket: socket} do
+      assert {_file, _generation, ^socket} = Remotes.config_token()
+      Application.put_env(:shuttle, :tailscale_home, false)
+      assert {_file, _generation, nil} = Remotes.config_token()
     end
   end
 

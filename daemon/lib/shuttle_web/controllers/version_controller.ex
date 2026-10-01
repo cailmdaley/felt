@@ -3,7 +3,10 @@ defmodule ShuttleWeb.VersionController do
   Agent-API endpoint: GET /api/v1/version
 
   Returns the daemon's compile-time build stamp, listener and host identity,
-  plus the independent application-readiness bit. It never calls into the
+  plus the independent application-readiness bit. `host` is the frozen host id
+  this daemon dispatches under; other daemons' tailnet discovery
+  (`Shuttle.TailnetPeers`) names this daemon by it. `discovery` is this
+  daemon's own discovery report. It never calls into the
   Poller: this probe must stay prompt while Poller boot work is still running.
   """
 
@@ -18,12 +21,14 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:ready, readiness.ready)
       |> Map.put(:boot_duration_ms, readiness.duration_ms)
       |> Map.put(:contract, contract_check(readiness.ready))
+      |> Map.put(:host, Shuttle.Poller.daemon_host_id())
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
       |> Map.put(:peer_gate, Application.get_env(:shuttle, :peer_gate, "none"))
       |> Map.put(:peer_gate_uid, Application.get_env(:shuttle, :peer_gate_expected_uid))
       |> Map.put(:peer_gate_uid_source, Application.get_env(:shuttle, :peer_gate_uid_source))
       |> Map.put(:tailnet_dial, tailnet_dial_status(readiness.ready))
+      |> Map.put(:discovery, Shuttle.TailnetPeers.status())
     )
   end
 

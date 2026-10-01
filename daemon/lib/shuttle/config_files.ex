@@ -40,8 +40,8 @@ defmodule Shuttle.ConfigFiles do
   pointed at that file through its own path-override environment variable, and
   only a clean exit commits:
 
-    * `:remotes` → `shuttle remotes list --json` under `SHUTTLE_REMOTES_FILE`
-      — the CLI that is already the fleet file's sole writer, and whose `list`
+    * `:remotes` → `shuttle remotes list --configured --json` under
+      `SHUTTLE_REMOTES_FILE` — the CLI that is already the fleet file's sole writer, and whose `list`
       verb is documented as its validator (duplicate names, port collisions,
       an unparseable `defaults.https_proxy`, a managed tunnel with no port).
     * `:agents` → `shuttle agents --json` under `SHUTTLE_AGENTS_FILE` — which
@@ -332,7 +332,13 @@ defmodule Shuttle.ConfigFiles do
   # environment variable a human would use, so what passes here is exactly what
   # the daemon and the CLI will read back off disk a moment later.
   defp validate_decoded(:remotes, text, _decoded),
-    do: validate_via_shuttle(text, "SHUTTLE_REMOTES_FILE", ["remotes", "list", "--json"])
+    do:
+      validate_via_shuttle(text, "SHUTTLE_REMOTES_FILE", [
+        "remotes",
+        "list",
+        "--configured",
+        "--json"
+      ])
 
   defp validate_decoded(:agents, text, _decoded),
     do: validate_via_shuttle(text, "SHUTTLE_AGENTS_FILE", ["agents", "--json"])

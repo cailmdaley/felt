@@ -114,6 +114,7 @@ defmodule Shuttle.Application do
   # these children so it binds before slow store, event-stream, follower seed,
   # or bridge initialization.
   @optional_children [
+    {:start_tailnet_peers, Shuttle.TailnetPeers},
     {:start_tailnet_dial, Shuttle.TailnetDial},
     {:start_remote_registry, Shuttle.RemoteRegistry},
     {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},

@@ -182,7 +182,9 @@ The bridge verifies the remote TLS certificate and hostname before it relays
 traffic; it never exposes a loopback proxy to co-tenants.
 When the private socket is configured, HTTPS requests fail closed if their
 bridge is missing or unavailable; they never fall back to direct or proxy
-routing. The two transport defaults are mutually exclusive.
+routing. The two transport defaults are mutually exclusive. Tailnet discovery
+uses the same socket: it reads the status from the LocalAPI and dials each probe
+through it with the same certificate and hostname checks.
 
 Every connection gets peer facts in `conn.assigns.peer`: transport (`unix` or
 `tcp`), TCP uid when `/proc` resolves it, whether forwarding headers are
@@ -195,6 +197,38 @@ independent credential. A shared TCP listener refuses to boot when
 `/proc/net/tcp` is unreadable; an exposed TCP listener is refused regardless
 of `/proc`. Use the class's Unix socket or declare the host `single-user` when
 loopback is private to its operator.
+
+## The fleet
+
+Every daemon finds the others itself. `Shuttle.TailnetPeers` reads the tailnet
+status, keeps the peers owned by this node's own Tailscale user, probes each
+online one at `https://<magicdns-name>/api/v1/version`, and names every
+Shuttle daemon that answers by the `host` id it reports there. Fibers route by
+`shuttle.host`, so a peer is named by its host id, never by its MagicDNS label.
+A node shared in from another tailnet is never probed or trusted; a peer that
+reports this daemon's own id, reports no id, or shares an id with another peer
+is dropped. Phones and other nodes without a daemon drop out because they do
+not answer. The round runs shortly after boot, off the boot path, and every
+minute after that. A peer that answered once survives ten minutes of failed
+probes, so a daemon restarting for a deploy goes stale on the board instead of
+vanishing from it.
+
+`~/.config/shuttle/remotes.json` holds the exceptions: hosts outside the
+tailnet (reached through an ssh tunnel port), non-default URLs, ssh names for
+the recovery cascade, and deploy metadata. `Shuttle.Remotes.resolve/2` merges
+the two sources. A configured entry wins over a discovered peer with the same
+name or `https` authority, `"enabled": false` suppresses a discovered host, and
+`defaults.discover: false` turns discovery off. The resolved fleet feeds the
+registries, `Shuttle.OriginRouter`, messaging, and the dial bridges. A newly
+discovered peer reaches them without a restart, because the discovery
+generation is part of `Shuttle.Remotes.config_token/0`.
+
+The Go CLI does not probe the tailnet. `shuttle remotes list` and every verb
+that routes by host name read the local daemon's discovered peers from
+`/api/v1/version` and merge them with the file through `resolveRemotes`, the Go
+mirror of the Elixir resolver. `daemon/test/fixtures/tailnet_peers/` holds the
+shared cases. When Tailscale is absent, stopped, or failing, the daemon uses
+the file alone and records why, and `shuttle doctor` reports the reason.
 
 ## Platform story
 

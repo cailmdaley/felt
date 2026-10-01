@@ -12,6 +12,9 @@ config :shuttle,
   # Left off in the suite so no test run can copytruncate the developer's real
   # ~/Library/Logs/shuttle.log. log_rotator_test starts its own against tmp_dir.
   start_log_rotator: false,
+  # Discovery would read this machine's real tailnet; the suite drives
+  # Shuttle.TailnetPeers with injected status and probes instead.
+  start_tailnet_peers: false,
   start_tailnet_dial: false,
   start_remote_registry: false,
   start_remote_fiber_registry: false,
@@ -21,6 +24,9 @@ config :shuttle,
   # test can pick up the developer's real fleet proxy and try to CONNECT
   # through it.
   https_proxy: false,
+  # And the same for the userspace tailscaled socket under $HOME: no test may
+  # dial through the developer's real LocalAPI by default.
+  tailscale_home: false,
   tailnet_dial_test_cacerts_enabled: true
 
 # Test daemon identity. Application start freezes SHUTTLE_HOST when it is set

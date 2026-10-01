@@ -1,0 +1,106 @@
+{
+  "_comment": "A host outside the tailnet, reached through an ssh tunnel port, passes through untouched beside the discovered peers.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "hub-b",
+        "DNSName": "hub-b.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0002": {
+        "HostName": "phone",
+        "DNSName": "phone.example.ts.net.",
+        "UserID": 1001,
+        "OS": "iOS",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://hub-b.example.ts.net": {
+      "body": {
+        "host": "hub-b",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://phone.example.ts.net": {
+      "error": "connection refused"
+    }
+  },
+  "remotes": {
+    "version": 1,
+    "remotes": [
+      {
+        "name": "hub-n",
+        "ssh": "hub-n-login",
+        "port": 4005,
+        "tunnel": {
+          "multiplex": true
+        }
+      }
+    ]
+  },
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "phone.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "hub-n",
+      "url": "http://127.0.0.1:4005",
+      "source": "configured",
+      "ssh": "hub-n-login",
+      "port": 4005
+    },
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

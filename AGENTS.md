@@ -90,12 +90,28 @@ lives in the docs site (`docs/`, published to
   resolve` when it has no fiber record to read. There is no daemon-embedded
   registry. Loom's `setup.sh` separately owns interactive Pi's global
   `~/.pi/agent/settings.json`; this registry does not configure that default.
-- **Remote daemons live in `~/.config/shuttle/remotes.json`.** The Go CLI
-  (`internal/shuttle`) and the daemon (`daemon/lib/shuttle/remotes.ex`) read the
-  same file at runtime, so nothing about hosts is baked into a build.
-  `shuttle remotes list|add|rm|path` manages it, and `list` doubles as the
-  validator used by the board's settings sheet. Shared fixtures enforce
-  Go/Elixir parity. `internal/feltcli/hygiene_test.go` fails the build on a personal
+- **Remote daemons come from the tailnet, with `~/.config/shuttle/remotes.json`
+  for exceptions.** Each daemon's `Shuttle.TailnetPeers` reads the tailnet
+  status (the LocalAPI over `defaults.tailscale_socket`, else over
+  `bin/tailscaled-launch`'s `$HOME/.local/state/tailscale/tailscaled.sock` on
+  Linux when it is a socket owned by this uid reached through real, private
+  directories from `$HOME`, else the `tailscale` CLI; `"system"` forces the
+  CLI),
+  probes each same-user peer's `/api/v1/version`, and names every Shuttle daemon
+  by the `host` id it reports; it refreshes every minute and falls back to the
+  file alone when Tailscale is absent or failing. The file adds hosts outside
+  the tailnet and overrides discovered ones: a configured entry wins over a
+  discovered peer of the same name or URL, `"enabled": false` suppresses one,
+  and `defaults.discover: false` turns discovery off. The daemon
+  (`daemon/lib/shuttle/remotes.ex`) and the Go CLI (`internal/shuttlecli`) read
+  the file at runtime and merge it with the same pure resolver; the CLI takes
+  discovered peers from the local daemon's `/api/v1/version` and never probes
+  the tailnet itself. Nothing about hosts is baked into a build.
+  `shuttle remotes list|add|rm|path` manages the file, and `list` (which shows
+  each peer's source) doubles as the validator used by the board's settings
+  sheet. Shared fixtures (`daemon/test/fixtures/remotes/`,
+  `daemon/test/fixtures/tailnet_peers/`) enforce Go/Elixir parity.
+  `internal/feltcli/hygiene_test.go` fails the build on a personal
   hostname or path anywhere in the published surface: `daemon/config/`,
   `daemon/lib/`, `cmd/`, `daemon/share/`, `ui/`, `bin/`, every `.md` file,
   `Makefile`, and `scripts/bootstrap.sh`. Keep host-specific details in fibers.
@@ -170,10 +186,17 @@ To cycle a supervised daemon directly, use
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks
 go test ./...              # Go (felt and shuttle CLIs)
+make test-linux            # the Go suite in a Linux container, as CI runs it
 make mix-test              # full Elixir suite (shells felt and shuttle: make cli-install first)
 cd ui && npm test          # vitest, run TWICE under two pinned TZs
                            # (America/Los_Angeles, Europe/Paris)
 ```
+
+**macOS is not CI's platform.** `/bin/sh` is bash on macOS and dash on CI's
+Ubuntu runner, and `/proc`, systemd and tmux differ too, so shell scripts and
+OS-facing Go can pass locally and fail on CI. Before pushing changes there,
+run `make test-linux` (`scripts/test-linux.sh [go test args]`; Apple's
+`container` CLI, or docker). Cached runs take seconds.
 
 **The board suite runs twice on purpose, in both local tests and CI.** The
 second pinned offset is where the civil-day logic breaks, so a hand-run `npx
@@ -188,16 +211,21 @@ the watcher, so restarting the daemon never kills running jobs. An autonomous
 worker that has built and verified a change SHOULD deploy it.
 
 ```
-push → on the host: pull → make build → cycle the :4000
-listener (the host's supervisor brings it back) → poll /api/v1/version until
-git_short_sha matches, booted_at advances, and ready is true → shuttle daemon release
+push → on the host: pull → make build → felt setup <harness> for each
+harness carrying felt's plugin → cycle the :4000 listener (the host's
+supervisor brings it back) → poll /api/v1/version until git_short_sha matches,
+booted_at advances, and ready is true → shuttle daemon release
 ```
 
 `bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
 `~/.config/shuttle/remotes.json`. A host marked `"build_ui": false` there is built
 with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
 instead — for a cluster login node on a network filesystem, where `npm ci` alone
-costs minutes. **Every deploy and operator restart arms the boot quarantine**
+costs minutes. It brings each harness's felt plugin up to the new build
+(Claude Code and Codex from the checkout itself, skipped when the receipt
+already passes at `HEAD` from a clean build), and a host whose `felt setup
+receipt` still fails afterwards fails with the receipt's repair text.
+**Every deploy and operator restart arms the boot quarantine**
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
 oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing roles
 still fire). Only on a host that opted in does a hard-killed, previously

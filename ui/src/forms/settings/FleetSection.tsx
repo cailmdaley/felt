@@ -7,9 +7,11 @@
  * thing you need:
  *
  *   - **how it is reached** — a Tailscale URL, or a local port this host
- *     forwards through a supervised tunnel. Read off the NORMALIZED file, so
- *     what you see is what the daemon acts on rather than what the file's text
- *     happens to say.
+ *     forwards through a supervised tunnel. Read off the NORMALIZED file plus
+ *     the tailnet peers the daemon discovered, so what you see is what the
+ *     daemon acts on rather than what the file's text happens to say. A
+ *     discovered row has no ✕: it is not in the file, and an entry with
+ *     `"enabled": false` is what keeps it out.
  *   - **whether it answered** — the hub's cached poll, never a fresh probe
  *     fired by opening this page. A page that healed the fleet by being looked
  *     at would be useless for diagnosing it.
@@ -213,13 +215,16 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
                     {remote.enabled === false && (
                       <span style={{ color: '#7A7068' }}> · disabled</span>
                     )}
+                    {remote.source === 'discovered' && (
+                      <span style={{ color: '#7A7068' }}> · discovered on the tailnet</span>
+                    )}
                   </span>
                   <span className="set-row-note">{transport(remote)}</span>
                   <span
                     className={`set-row-note${h.stale ? ' set-row-note-owed' : ''}`}
                   >
                     {!h.polled
-                      ? 'not polled yet — configured since this daemon last reloaded the file'
+                      ? 'not polled yet — added since this daemon last reloaded its fleet'
                       : h.stale
                         ? `stale · last answered ${ago(h.last_polled_at)}`
                         : `answering · ${ago(h.last_polled_at)}`}
@@ -256,16 +261,18 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
                     </span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  className="set-btn set-btn-drop"
-                  disabled={busy}
-                  title={`Remove ${remote.name} from the fleet file`}
-                  aria-label={`Remove ${remote.name}`}
-                  onClick={() => void run(() => removeRemote(shuttleBase, host, remote.name))}
-                >
-                  ✕
-                </button>
+                {remote.source !== 'discovered' && (
+                  <button
+                    type="button"
+                    className="set-btn set-btn-drop"
+                    disabled={busy}
+                    title={`Remove ${remote.name} from the fleet file`}
+                    aria-label={`Remove ${remote.name}`}
+                    onClick={() => void run(() => removeRemote(shuttleBase, host, remote.name))}
+                  >
+                    ✕
+                  </button>
+                )}
               </li>
             )
           })}

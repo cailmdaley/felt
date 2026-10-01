@@ -483,8 +483,9 @@ var reopenCmd = &cobra.Command{
 	Long: `Sets status = active and clears tempered / closed-at so a closed card
 re-enters the in-flight loop. status is the fiber's only dispatch switch.
 
-From a host with the owner in remotes.json, a default reopen uses the owner's
-force-dispatch route and starts a fresh worker there. --message and --message-file
+From a host whose fleet holds the owner (remotes.json or a discovered tailnet
+peer), a default reopen uses the owner's force-dispatch route and starts a
+fresh worker there. --message and --message-file
 supply the launch directive (the From User prompt block) on that route. On the
 owning host, reopen keeps its existing local requeue behavior.
 

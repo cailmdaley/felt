@@ -1,0 +1,96 @@
+{
+  "_comment": "A configured entry wins wholesale over a discovered peer of the same name: hub-a keeps its ssh path. Configured entries come first in file order, then discovered peers by name.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "hub-b",
+        "DNSName": "hub-b.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0002": {
+        "HostName": "phone",
+        "DNSName": "phone.example.ts.net.",
+        "UserID": 1001,
+        "OS": "iOS",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://hub-b.example.ts.net": {
+      "body": {
+        "host": "hub-b",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://phone.example.ts.net": {
+      "error": "connection refused"
+    }
+  },
+  "remotes": {
+    "version": 1,
+    "remotes": [
+      {
+        "name": "hub-a",
+        "ssh": "hub-a-login",
+        "url": "https://hub-a.example.ts.net"
+      }
+    ]
+  },
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "phone.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "configured",
+      "ssh": "hub-a-login",
+      "port": 0
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

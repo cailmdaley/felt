@@ -78,6 +78,8 @@ defmodule Shuttle.TailnetDial.Reconciler do
      %{
        configured: Shuttle.Remotes.tailscale_socket_configured?(),
        socket: state.tailscale_socket,
+       socket_source: Shuttle.Remotes.tailscale_socket_source_name(),
+       default_socket_refused: Shuttle.Remotes.default_tailscale_socket_refusal(),
        bridges: bridges
      }, state}
   end

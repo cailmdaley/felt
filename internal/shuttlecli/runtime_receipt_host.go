@@ -47,11 +47,13 @@ type ReceiptHost struct {
 	// Listeners are the fleet processes listening on TCP; ListenersFrom names
 	// the tool that enumerated them ("ss", "proc", "lsof"), empty when none
 	// could.
-	Listeners             []ReceiptListener     `json:"listeners"`
-	ListenersFrom         string                `json:"listeners_from,omitempty"`
-	HTTPSProxy            string                `json:"https_proxy,omitempty"`
-	TailscaleSocket       string                `json:"tailscale_socket,omitempty"`
-	TailnetSocketEvidence *ReceiptTailnetSocket `json:"tailscale_socket_evidence,omitempty"`
+	Listeners              []ReceiptListener     `json:"listeners"`
+	ListenersFrom          string                `json:"listeners_from,omitempty"`
+	HTTPSProxy             string                `json:"https_proxy,omitempty"`
+	TailscaleSocket        string                `json:"tailscale_socket,omitempty"`
+	TailscaleSocketSource  string                `json:"tailscale_socket_source,omitempty"`
+	TailscaleSocketRefused string                `json:"tailscale_socket_default_refused,omitempty"`
+	TailnetSocketEvidence  *ReceiptTailnetSocket `json:"tailscale_socket_evidence,omitempty"`
 	// Problems are the individual findings behind a non-healthy status, one
 	// line each, for the human path.
 	Problems []string `json:"problems,omitempty"`
@@ -134,9 +136,12 @@ type hostEvidence struct {
 	tailnetRemoteNames    []string
 	httpsProxy            string
 	tailscaleSocket       string
-	tailscaleConfigError  string
-	remotesConfigError    string
-	tailnetSocketEvidence *ReceiptTailnetSocket
+	tailscaleSocketSource string
+	// tailscaleDefaultRefused says why an untrusted default socket was not used.
+	tailscaleDefaultRefused string
+	tailscaleConfigError    string
+	remotesConfigError      string
+	tailnetSocketEvidence   *ReceiptTailnetSocket
 	// daemonListen and daemonClass are what the running daemon reports on
 	// /api/v1/version; empty when it was not reached.
 	daemonTailnetDial       *ReceiptTailnetDial
@@ -197,30 +202,36 @@ func gatherHostEvidence() hostEvidence {
 				ev.tunnelPorts = append(ev.tunnelPorts, r.Port)
 			}
 		}
+		var proxy proxyEndpoint
+		var proxyErr error
 		if doc.Defaults != nil {
 			ev.httpsProxy = strings.TrimSpace(doc.Defaults.HTTPSProxy)
+			proxy, proxyErr = doc.Defaults.normalizedHTTPSProxy()
+		}
+		socket, source, socketErr := effectiveTailscaleSocket(doc.Defaults)
+		ev.tailscaleSocketSource = source
+		ev.tailscaleDefaultRefused = defaultSocketRefusal(doc.Defaults)
+		if source == socketSourceConfigured {
 			ev.tailscaleSocket = strings.TrimSpace(doc.Defaults.TailscaleSocket)
-			proxy, proxyErr := doc.Defaults.normalizedHTTPSProxy()
-			socket, socketErr := doc.Defaults.normalizedTailscaleSocket()
-			switch {
-			case proxyErr != nil:
-				ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.https_proxy: %v", proxyErr)
-			case socketErr != nil:
-				ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.tailscale_socket: %v", socketErr)
-			case proxy.configured() && socket != "":
-				ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
-			case socket != "":
-				ev.tailscaleSocket = socket
-			}
-			if ev.tailscaleSocket != "" && socketErr == nil {
-				ev.tailnetSocketEvidence = inspectTailnetSocket(ev.tailscaleSocket, os.Geteuid())
-			}
-			if socket != "" && socketErr == nil && !proxy.configured() {
-				for _, remote := range doc.Remotes {
-					parsed, err := url.Parse(remote.URL)
-					if remote.enabledOr() && err == nil && strings.EqualFold(parsed.Scheme, "https") {
-						ev.tailnetRemoteNames = append(ev.tailnetRemoteNames, remote.Name)
-					}
+		}
+		switch {
+		case proxyErr != nil:
+			ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.https_proxy: %v", proxyErr)
+		case socketErr != nil:
+			ev.tailscaleConfigError = fmt.Sprintf("invalid defaults.tailscale_socket: %v", socketErr)
+		case proxy.configured() && socket != "":
+			ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
+		case socket != "":
+			ev.tailscaleSocket = socket
+		}
+		if ev.tailscaleSocket != "" && socketErr == nil {
+			ev.tailnetSocketEvidence = inspectTailnetSocket(ev.tailscaleSocket, os.Geteuid())
+		}
+		if socket != "" && socketErr == nil && !proxy.configured() {
+			for _, remote := range doc.Remotes {
+				parsed, err := url.Parse(remote.URL)
+				if remote.enabledOr() && err == nil && strings.EqualFold(parsed.Scheme, "https") {
+					ev.tailnetRemoteNames = append(ev.tailnetRemoteNames, remote.Name)
 				}
 			}
 		}
@@ -363,6 +374,10 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	h.Class, h.ClassSource, h.Listen = ev.settings.Class, ev.settings.ClassSource, ev.settings.Listen
 	h.UsersLoggedIn, h.SocketDir, h.ListenersFrom, h.HTTPSProxy = ev.users, ev.socketDir, ev.listenFrom, ev.httpsProxy
 	h.TailscaleSocket, h.TailnetSocketEvidence = ev.tailscaleSocket, ev.tailnetSocketEvidence
+	if h.TailscaleSocket != "" {
+		h.TailscaleSocketSource = ev.tailscaleSocketSource
+	}
+	h.TailscaleSocketRefused = ev.tailscaleDefaultRefused
 	h.Listeners = classifyFleetListeners(ev.listeners, ev.daemonPorts, ev.tunnelPorts, ev.isDaemonCommand)
 
 	var repairs []string
@@ -416,12 +431,16 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 		mismatch(fmt.Sprintf("cannot read or parse the remotes file: %s", ev.remotesConfigError),
 			"repair the fleet file and rerun `shuttle remotes list` before trusting this receipt")
 	}
+	if ev.tailscaleDefaultRefused != "" {
+		mismatch(fmt.Sprintf("the default Tailscale LocalAPI socket is not trusted: %s", ev.tailscaleDefaultRefused),
+			"make the socket and every directory up to $HOME owned by this uid and not writable by group or others, or set defaults.tailscale_socket explicitly (\"system\" for the system tailscaled)")
+	}
 	if ev.tailscaleConfigError != "" {
 		mismatch(ev.tailscaleConfigError,
 			"fix the fleet defaults so exactly one valid HTTPS dial transport is configured, then rerun `shuttle remotes list`")
 	}
 	if ev.daemonVersionReported && h.TailscaleSocket != "" && ev.daemonTailnetDial == nil {
-		mismatch("the running daemon does not report private Tailscale dial support configured in remotes.json",
+		mismatch("the running daemon does not report the private Tailscale dial support this host resolves",
 			"upgrade or restart the daemon so /api/v1/version reports tailnet_dial")
 	}
 	if ev.daemonTailnetDial != nil {
@@ -436,7 +455,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 			if fileSocket == "" {
 				fileSocket = "(none)"
 			}
-			mismatch(fmt.Sprintf("the daemon uses Tailscale LocalAPI socket %s; remotes.json configures %s", daemonSocket, fileSocket),
+			mismatch(fmt.Sprintf("the daemon uses Tailscale LocalAPI socket %s; this host resolves %s", daemonSocket, fileSocket),
 				"remove the daemon-only tailscale_socket override or update remotes.json, then restart the daemon")
 		}
 		bridges := make(map[string]ReceiptTailnetBridge, len(ev.daemonTailnetDial.Bridges))

@@ -124,16 +124,16 @@ Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
 	},
 }
 
-// defaultIdentityDaemonURLs is the local daemon plus every configured remote's
-// URL. The fleet file is the single source of the port map, so this list can no
-// longer drift from what the tunnels install and the daemon polls.
+// defaultIdentityDaemonURLs is the local daemon plus every resolved remote's
+// URL: the fleet file's entries and the local daemon's discovered peers, the
+// same fleet the daemon polls.
 func defaultIdentityDaemonURLs() ([]string, error) {
 	local, err := daemonURL()
 	if err != nil {
 		return nil, err
 	}
 	urls := []string{local}
-	remotes, err := configuredRemotes()
+	remotes, err := resolvedRemotes()
 	if err != nil {
 		return nil, err
 	}

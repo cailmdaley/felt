@@ -1,0 +1,66 @@
+{
+  "_comment": "A node shared in from another tailnet user is never probed or trusted, even when it runs Shuttle.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "guest",
+        "DNSName": "guest.example.ts.net.",
+        "UserID": 2002,
+        "OS": "linux",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://guest.example.ts.net": {
+      "body": {
+        "host": "guest",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    }
+  },
+  "remotes": null,
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "guest.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/spf13/cobra"
@@ -92,8 +93,13 @@ type remoteDefaults struct {
 
 	// TailscaleSocket is tailscaled's private LocalAPI unix socket. The daemon
 	// uses it to establish per-remote dial bridges without exposing a loopback
-	// proxy to other users on a shared host.
+	// proxy to other users on a shared host, and to read the tailnet status its
+	// peer discovery starts from.
 	TailscaleSocket string `json:"tailscale_socket,omitempty"`
+
+	// Discover false turns tailnet peer discovery off: the fleet is this
+	// file's entries alone. Absent means on.
+	Discover *bool `json:"discover,omitempty"`
 }
 
 // proxyEndpoint is defaults.https_proxy after parsing: a host with no IPv6
@@ -115,17 +121,153 @@ type proxyEndpoint struct {
 func (p proxyEndpoint) configured() bool { return p.Host != "" && p.Port != 0 }
 
 // normalizedTailscaleSocket validates defaults.tailscale_socket using the same
-// path grammar as remote_socket. An absent value is an ordinary fleet; a
-// present but unsafe path is an error because `remotes list` validates the file.
+// path grammar as remote_socket. An absent value, or "system", is an ordinary
+// fleet; a present but unsafe path is an error because `remotes list`
+// validates the file.
 func (d remoteDefaults) normalizedTailscaleSocket() (string, error) {
 	path := strings.TrimSpace(d.TailscaleSocket)
-	if path == "" {
+	if path == "" || path == systemTailscaleSocket {
 		return "", nil
 	}
 	if err := validateRemoteSocket(path); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+const (
+	// systemTailscaleSocket as defaults.tailscale_socket names the system
+	// tailscaled (its CLI and kernel route) and turns the default off.
+	systemTailscaleSocket = "system"
+
+	// defaultTailscaleSocketPath is bin/tailscaled-launch's LocalAPI socket,
+	// relative to $HOME.
+	defaultTailscaleSocketPath = ".local/state/tailscale/tailscaled.sock"
+
+	socketSourceConfigured = "configured"
+	socketSourceDefault    = "default"
+	socketSourceSystem     = "system"
+)
+
+// effectiveTailscaleSocket is the LocalAPI socket the daemon dials https://
+// remotes and reads tailnet status through, and where it comes from. It
+// mirrors Shuttle.Remotes.tailscale_socket_source/0:
+//
+//   - a configured defaults.tailscale_socket wins, validated ("configured");
+//   - "system" means no private socket ("system");
+//   - with neither, and no https_proxy, bin/tailscaled-launch's socket under
+//     $HOME when it exists as a Unix socket ("default");
+//   - otherwise none ("").
+func effectiveTailscaleSocket(defaults *remoteDefaults) (path, source string, err error) {
+	var d remoteDefaults
+	if defaults != nil {
+		d = *defaults
+	}
+	switch strings.TrimSpace(d.TailscaleSocket) {
+	case systemTailscaleSocket:
+		return "", socketSourceSystem, nil
+	case "":
+	default:
+		path, err := d.normalizedTailscaleSocket()
+		return path, socketSourceConfigured, err
+	}
+	if strings.TrimSpace(d.HTTPSProxy) != "" {
+		return "", "", nil
+	}
+	if path, _ := defaultTailscaleSocketCheck(); path != "" {
+		return path, socketSourceDefault, nil
+	}
+	return "", "", nil
+}
+
+// defaultSocketRefusal says why the default socket was refused, when the
+// fleet document leaves the choice to the default and something untrusted is
+// there; "" otherwise.
+func defaultSocketRefusal(defaults *remoteDefaults) string {
+	if defaults != nil && (strings.TrimSpace(defaults.TailscaleSocket) != "" || strings.TrimSpace(defaults.HTTPSProxy) != "") {
+		return ""
+	}
+	if _, refused := defaultTailscaleSocketCheck(); refused != "" {
+		return filepath.Join(os.Getenv("HOME"), defaultTailscaleSocketPath) + ": " + refused
+	}
+	return ""
+}
+
+// defaultTailscaleSocketCheck mirrors Shuttle.Remotes.default_tailscale_socket_check/0.
+// On Linux it returns bin/tailscaled-launch's socket under $HOME when
+// literalSocketProblem finds nothing wrong, so no co-tenant could have planted
+// it. macOS is excluded: its ACLs do not show in mode bits, and a Mac uses the
+// system tailscaled. When something is at the path but is not used, path is ""
+// and refused says why. Both are "" when nothing is there.
+func defaultTailscaleSocketCheck() (path, refused string) {
+	home := os.Getenv("HOME")
+	if !filepath.IsAbs(home) {
+		return "", ""
+	}
+	path = filepath.Join(home, defaultTailscaleSocketPath)
+	if validateRemoteSocket(path) != nil {
+		return "", ""
+	}
+	if _, err := os.Lstat(path); err != nil {
+		return "", ""
+	}
+	if hostGOOS != "linux" {
+		return "", "default socket is Linux-only"
+	}
+	if reason := literalSocketProblem(path, home, os.Geteuid()); reason != "" {
+		return "", reason
+	}
+	return path, ""
+}
+
+// literalSocketProblem mirrors Shuttle.Host.private_socket_problem/3. top is
+// stat'ed (a cluster's $HOME is often a symlink the system set up) and must
+// pass unsafeDirReason. Every component below it is walked literally with
+// lstat: a symlink anywhere is refused, each directory must pass
+// unsafeDirReason, and the last component must be a Unix socket owned by euid.
+// The socket's own mode is not constrained: it governs who may connect, while
+// who may replace it is decided by the directories above it.
+func literalSocketProblem(path, top string, euid int) string {
+	rel, err := filepath.Rel(top, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return fmt.Sprintf("%s is not under %s", path, top)
+	}
+	info, err := os.Stat(top)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", top, err)
+	}
+	if !info.IsDir() {
+		return top + ": not a directory"
+	}
+	if reason := unsafeDirReason(info, euid); reason != "" {
+		return fmt.Sprintf("%s: %s", top, reason)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	current := top
+	for i, name := range parts {
+		current = filepath.Join(current, name)
+		info, err := os.Lstat(current)
+		switch {
+		case err != nil:
+			return fmt.Sprintf("%s: %v", current, err)
+		case info.Mode()&os.ModeSymlink != 0:
+			return current + " is a symlink"
+		case i < len(parts)-1:
+			if !info.IsDir() {
+				return current + ": not a directory"
+			}
+			if reason := unsafeDirReason(info, euid); reason != "" {
+				return fmt.Sprintf("%s: %s", current, reason)
+			}
+		case info.Mode()&os.ModeSocket == 0:
+			return current + ": not a Unix socket"
+		default:
+			if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != euid {
+				return fmt.Sprintf("%s: owned by uid %d, not this uid %d", current, st.Uid, euid)
+			}
+		}
+	}
+	return ""
 }
 
 // String is the human form `remotes list` prints and nothing parses back. It
@@ -249,6 +391,11 @@ type remoteSpec struct {
 	Auth     string   `json:"auth,omitempty"`
 	SSHFlags []string `json:"ssh_flags,omitempty"`
 	BuildUI  *bool    `json:"build_ui,omitempty"`
+
+	// Source says where a resolved remote came from: sourceConfigured for
+	// this file, sourceDiscovered for a tailnet peer the daemon found. Set by
+	// resolveRemotes and printed by `remotes list`; never written to the file.
+	Source string `json:"source,omitempty"`
 }
 
 // remotesFile is the whole document: fleet-wide settings plus the entries.
@@ -328,17 +475,28 @@ func loadRemotesFileRaw() (remotesFile, error) {
 		}
 		return remotesFile{}, fmt.Errorf("reading %s: %w", path, err)
 	}
+	doc, err := parseRemotesDocument(content)
+	if err != nil {
+		return remotesFile{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return doc, nil
+}
 
-	// Tolerate both shapes the Elixir reader accepts:
-	//   {"version": 1, "remotes": [...]}  ← canonical
-	//   [...]                             ← bare list
+// parseRemotesDocument decodes both shapes the Elixir reader accepts:
+//
+//	{"version": 1, "remotes": [...]}  ← canonical
+//	[...]                             ← bare list
+func parseRemotesDocument(content []byte) (remotesFile, error) {
 	var doc remotesFile
 	if err := json.Unmarshal(content, &doc); err != nil {
 		var bare []remoteSpec
 		if berr := json.Unmarshal(content, &bare); berr != nil {
-			return remotesFile{}, fmt.Errorf("parsing %s: %w", path, err)
+			return remotesFile{}, err
 		}
 		doc = remotesFile{Version: 1, Remotes: bare}
+	}
+	for i := range doc.Remotes {
+		doc.Remotes[i].Source = ""
 	}
 	return doc, nil
 }
@@ -386,7 +544,6 @@ func normalizeRemotes(doc *remotesFile) error {
 	}
 
 	defaults := remoteDefaults{}
-	privateDialConfigured := false
 	if doc.Defaults != nil {
 		defaults = *doc.Defaults
 		proxy, err := defaults.normalizedHTTPSProxy()
@@ -400,10 +557,16 @@ func normalizeRemotes(doc *remotesFile) error {
 		if proxy.configured() && socket != "" {
 			return fmt.Errorf("defaults.https_proxy and defaults.tailscale_socket are mutually exclusive")
 		}
-		defaults.TailscaleSocket = socket
-		privateDialConfigured = socket != ""
+		// "system" stays in the document: it is a choice, not an absent value.
+		if socket != "" {
+			defaults.TailscaleSocket = socket
+		}
 		doc.Defaults = &defaults
 	}
+	// Duplicate https authorities matter whenever the daemon dials through a
+	// private socket, configured or default, exactly as the daemon decides.
+	effectiveSocket, _, _ := effectiveTailscaleSocket(doc.Defaults)
+	privateDialConfigured := effectiveSocket != ""
 
 	seenNames := map[string]bool{}
 	seenPorts := map[int]string{}
@@ -666,13 +829,17 @@ var (
 var remotesCmd = &cobra.Command{
 	Use:   "remotes",
 	Short: "Inspect and edit the remote shuttle daemon fleet",
-	Long: `The fleet file lists the other shuttle daemons this host aggregates: a name
-for each, and either a local tunnel port (forwarded over ssh) or a URL that
-reaches the daemon directly.
+	Long: `The daemon finds every Shuttle daemon on its tailnet by itself and names each
+by the host id it reports. The fleet file adds hosts outside the tailnet and
+overrides discovered ones: a name for each, and either a local tunnel port
+(forwarded over ssh) or a URL that reaches the daemon directly. An entry wins
+over a discovered peer of the same name or URL, "enabled": false suppresses
+one, and "defaults": {"discover": false} turns discovery off.
 
 The daemon reads the same file directly — this command edits and validates it,
 it is not the transport. ` + "`list`" + ` is also the validator: it reports parse
-errors, duplicate names, and port collisions.
+errors, duplicate names, and port collisions. ` + "`add`" + ` and ` + "`rm`" + ` edit the
+file only.
 
 Examples:
   shuttle remotes list
@@ -684,33 +851,97 @@ Examples:
   shuttle remotes path`,
 }
 
+var remotesListConfigured bool
+
+// remotesListing is `remotes list --json`: the normalized fleet document, its
+// remotes extended with the discovered peers and each row's source, plus the
+// local daemon's discovery report or why it could not be read.
+type remotesListing struct {
+	Version            int             `json:"version"`
+	LaunchdLabelPrefix string          `json:"launchd_label_prefix,omitempty"`
+	Defaults           *remoteDefaults `json:"defaults,omitempty"`
+	Remotes            []remoteSpec    `json:"remotes"`
+	// TailscaleSocket is the effective LocalAPI socket (see
+	// effectiveTailscaleSocket) and TailscaleSocketSource where it came from.
+	TailscaleSocket       string `json:"tailscale_socket,omitempty"`
+	TailscaleSocketSource string `json:"tailscale_socket_source,omitempty"`
+	// TailscaleSocketRefused says why an untrusted default socket was not used.
+	TailscaleSocketRefused string           `json:"tailscale_socket_default_refused,omitempty"`
+	Discovery              *daemonDiscovery `json:"discovery,omitempty"`
+	DiscoveryError         string           `json:"discovery_error,omitempty"`
+}
+
 var remotesListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List the configured remotes",
-	Args:  cobra.NoArgs,
+	Short: "List the fleet: configured remotes and discovered tailnet peers",
+	Long: `Lists every remote this host's daemon uses: the fleet file's entries
+(disabled ones included) and the tailnet peers the local daemon discovered,
+with a SOURCE column saying which. Discovered peers come from the running
+daemon; when it cannot be reached the list is the file alone, and says so.
+
+--configured lists and validates the file alone, without asking the daemon.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		doc, err := loadRemotesFile()
-		if err != nil {
-			return err
+		var fleet resolvedFleet
+		if remotesListConfigured {
+			doc, err := loadRemotesFile()
+			if err != nil {
+				return err
+			}
+			fleet = resolvedFleet{Doc: doc}
+		} else {
+			var err error
+			if fleet, err = loadResolvedFleet(); err != nil {
+				return err
+			}
 		}
+		doc := fleet.Doc
+		rows := make([]remoteSpec, 0, len(doc.Remotes))
+		for _, r := range doc.Remotes {
+			r.Source = sourceConfigured
+			rows = append(rows, r)
+		}
+		if fleet.Discovery != nil {
+			rows = append(rows, admitDiscovered(doc, fleet.Discovery.Peers)...)
+		}
+
 		if jsonOutput {
-			return outputJSON(doc)
+			listing := remotesListing{
+				Version:            doc.Version,
+				LaunchdLabelPrefix: doc.LaunchdLabelPrefix,
+				Defaults:           doc.Defaults,
+				Remotes:            rows,
+				Discovery:          fleet.Discovery,
+			}
+			listing.TailscaleSocket, listing.TailscaleSocketSource, _ = effectiveTailscaleSocket(doc.Defaults)
+			listing.TailscaleSocketRefused = defaultSocketRefusal(doc.Defaults)
+			if fleet.DiscoveryErr != nil {
+				listing.DiscoveryError = fleet.DiscoveryErr.Error()
+			}
+			return outputJSON(listing)
 		}
-		if len(doc.Remotes) == 0 {
+		if !remotesListConfigured {
+			fmt.Println(fleet.discoverySummary())
+		}
+		if len(rows) == 0 {
 			path, _ := shuttleRemotesPath()
-			fmt.Printf("no remotes configured (%s)\n", path)
+			fmt.Printf("no remotes (fleet file %s)\n", path)
 			return nil
 		}
 		if doc.Defaults != nil {
 			if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
-				fmt.Printf("https:// remotes via proxy %s\n\n", proxy)
-			}
-			if socket, _ := doc.Defaults.normalizedTailscaleSocket(); socket != "" {
-				fmt.Printf("https:// remotes via tailscale LocalAPI socket %s\n\n", socket)
+				fmt.Printf("https:// remotes via proxy %s\n", proxy)
 			}
 		}
-		fmt.Printf("%-16s %-6s %-18s %-12s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "URL")
-		for _, r := range doc.Remotes {
+		if socket, source, _ := effectiveTailscaleSocket(doc.Defaults); socket != "" {
+			fmt.Printf("https:// remotes and discovery via tailscale LocalAPI socket %s (%s)\n", socket, source)
+		}
+		if refused := defaultSocketRefusal(doc.Defaults); refused != "" {
+			fmt.Printf("warning: default tailscale LocalAPI socket refused (%s)\n", refused)
+		}
+		fmt.Println()
+		fmt.Printf("%-16s %-6s %-18s %-12s %-11s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "SOURCE", "URL")
+		for _, r := range rows {
 			opts := r.tunnelOpts()
 			tunnel := opts.Manager
 			if opts.Multiplex {
@@ -728,7 +959,7 @@ var remotesListCmd = &cobra.Command{
 			if r.SSH != "" {
 				ssh = r.SSH
 			}
-			fmt.Printf("%-16s %-6s %-18s %-12s %s\n", r.Name, port, ssh, tunnel, r.URL)
+			fmt.Printf("%-16s %-6s %-18s %-12s %-11s %s\n", r.Name, port, ssh, tunnel, r.Source, r.URL)
 			if r.Port == defaultRemoteDaemonPort {
 				fmt.Fprintf(os.Stderr,
 					"warning: remote %q uses port %d, which the local daemon binds\n",
@@ -860,6 +1091,7 @@ func init() {
 	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor for a --port entry, none without one)")
 	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")
 	remotesAddCmd.Flags().BoolVar(&remotesAddMultiplex, "multiplex", false, "Ride an existing ControlMaster socket (2FA hosts)")
+	remotesListCmd.Flags().BoolVar(&remotesListConfigured, "configured", false, "List and validate the fleet file alone, without asking the daemon for discovered peers")
 	remotesCmd.AddCommand(remotesListCmd, remotesAddCmd, remotesRmCmd, remotesPathCmd)
 	addShuttleCommand(remotesCmd)
 }

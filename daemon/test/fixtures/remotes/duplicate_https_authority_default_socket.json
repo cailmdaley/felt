@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "remotes": [
+    {"name": "hub-a", "url": "https://hub-a.example.ts.net"},
+    {"name": "hub-a-alias", "url": "https://hub-a.example.ts.net:443"}
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "_comment": "A configured entry that already reaches a discovered peer's https authority, under another name, suppresses the discovered one: the operator chose that name.",
+  "own_host": "hub-self",
+  "status": {
+    "BackendState": "Running",
+    "MagicDNSSuffix": "example.ts.net",
+    "Self": {
+      "HostName": "hub-self",
+      "DNSName": "hub-self.example.ts.net.",
+      "UserID": 1001,
+      "OS": "macOS",
+      "Online": true
+    },
+    "Peer": {
+      "nodekey:0000": {
+        "HostName": "hub-a",
+        "DNSName": "hub-a.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0001": {
+        "HostName": "hub-b",
+        "DNSName": "hub-b.example.ts.net.",
+        "UserID": 1001,
+        "OS": "linux",
+        "Online": true
+      },
+      "nodekey:0002": {
+        "HostName": "phone",
+        "DNSName": "phone.example.ts.net.",
+        "UserID": 1001,
+        "OS": "iOS",
+        "Online": true
+      }
+    }
+  },
+  "probes": {
+    "https://hub-a.example.ts.net": {
+      "body": {
+        "host": "hub-a",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://hub-b.example.ts.net": {
+      "body": {
+        "host": "hub-b",
+        "ready": true,
+        "git_short_sha": "abc1234"
+      }
+    },
+    "https://phone.example.ts.net": {
+      "error": "connection refused"
+    }
+  },
+  "remotes": {
+    "version": 1,
+    "remotes": [
+      {
+        "name": "b-alias",
+        "url": "https://hub-b.example.ts.net:443"
+      }
+    ]
+  },
+  "discovered": [
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net"
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net"
+    }
+  ],
+  "rejected": [
+    "phone.example.ts.net"
+  ],
+  "resolved": [
+    {
+      "name": "b-alias",
+      "url": "https://hub-b.example.ts.net:443",
+      "source": "configured",
+      "ssh": "",
+      "port": 0
+    },
+    {
+      "name": "hub-a",
+      "url": "https://hub-a.example.ts.net",
+      "source": "discovered",
+      "ssh": "",
+      "port": 0
+    }
+  ]
+}

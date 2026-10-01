@@ -35,7 +35,14 @@ defmodule Shuttle.TailnetDial do
   catch
     :exit, _ ->
       socket = Shuttle.Remotes.tailscale_socket()
-      %{configured: Shuttle.Remotes.tailscale_socket_configured?(), socket: socket, bridges: []}
+
+      %{
+        configured: Shuttle.Remotes.tailscale_socket_configured?(),
+        socket: socket,
+        socket_source: Shuttle.Remotes.tailscale_socket_source_name(),
+        default_socket_refused: Shuttle.Remotes.default_tailscale_socket_refusal(),
+        bridges: []
+      }
   end
 
   @doc "The dial bridge socket for a URL host and port, or nil when absent."

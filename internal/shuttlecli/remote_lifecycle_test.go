@@ -341,7 +341,7 @@ func TestRemoteLifecycleUnknownOwnerAndLocalDaemonDownRefuseWithCommand(t *testi
 		dir, storage := newStore(t)
 		seedShuttleRole(t, storage, "task", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
 		_, err := runCommand(t, dir, "reopen", "task")
-		if err == nil || !strings.Contains(err.Error(), "not an enabled remote") || !strings.Contains(err.Error(), "shuttle reopen task") || !strings.Contains(err.Error(), missing) {
+		if err == nil || !strings.Contains(err.Error(), "nor a discovered tailnet peer") || !strings.Contains(err.Error(), "shuttle reopen task") || !strings.Contains(err.Error(), missing) {
 			t.Fatalf("unknown-owner refusal = %v", err)
 		}
 		if mustRead(t, storage, "task").Status != felt.StatusClosed {

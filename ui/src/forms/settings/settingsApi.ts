@@ -168,6 +168,8 @@ export interface FleetRemote {
   poll_interval_ms?: number
   request_timeout_ms?: number
   stale_multiplier?: number
+  /** `discovered`: a tailnet peer the daemon found, not an entry in the file. */
+  source?: 'configured' | 'discovered'
   health: RemoteHealth
   build: BuildStamp | null
   tunnel_label: string | null

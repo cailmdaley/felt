@@ -566,33 +566,128 @@ defmodule Shuttle.Host do
   end
 
   defp check_ancestor!(dir, euid) do
+    case ancestor_problem(dir, euid) do
+      nil -> :ok
+      why -> raise ArgumentError, "refusing to listen under #{dir}: #{why}"
+    end
+  end
+
+  @doc """
+  Why `dir` cannot sit on the path to a private socket, or `nil`. The rule
+  `prepare_unix_socket!/2` applies to each ancestor: a real directory, owned by
+  `euid` or root, and not writable by group or others unless sticky.
+  """
+  @spec ancestor_problem(String.t(), non_neg_integer()) :: String.t() | nil
+  def ancestor_problem(dir, euid) do
     case File.lstat(dir) do
-      {:ok, %File.Stat{type: :directory, uid: uid, mode: mode}} ->
-        perms = Bitwise.band(mode, 0o7777)
-        writable? = Bitwise.band(perms, 0o022) != 0
-        sticky? = Bitwise.band(perms, 0o1000) != 0
+      {:ok, %File.Stat{} = stat} -> dir_stat_problem(stat, euid)
+      {:error, reason} -> :file.format_error(reason) |> to_string()
+    end
+  end
 
-        cond do
-          uid not in [euid, 0] ->
-            raise ArgumentError,
-                  "refusing to listen under #{dir}: it is owned by uid #{uid}, " <>
-                    "neither this daemon's uid #{euid} nor root"
+  defp dir_stat_problem(%File.Stat{type: :directory, uid: uid, mode: mode}, euid) do
+    perms = Bitwise.band(mode, 0o7777)
+    writable? = Bitwise.band(perms, 0o022) != 0
+    sticky? = Bitwise.band(perms, 0o1000) != 0
 
-          writable? and not sticky? ->
-            raise ArgumentError,
-                  "refusing to listen under #{dir}: its mode is #{format_mode(perms)}, " <>
-                    "writable by group or others, so the socket directory beneath it " <>
-                    "could be swapped for someone else's"
+    cond do
+      uid not in [euid, 0] ->
+        "it is owned by uid #{uid}, neither this daemon's uid #{euid} nor root"
 
-          true ->
-            :ok
+      writable? and not sticky? ->
+        "its mode is #{format_mode(perms)}, writable by group or others, so the socket " <>
+          "directory beneath it could be swapped for someone else's"
+
+      true ->
+        nil
+    end
+  end
+
+  defp dir_stat_problem(%File.Stat{type: type}, _euid), do: "it is a #{type}, not a directory"
+
+  @doc """
+  Why the Unix socket at `path` cannot be trusted as `euid`'s own, or `nil`.
+
+  `path` must lie below `top`. `top` itself is stat'ed (it may be a symlink
+  the system set up, as a cluster's `$HOME` often is) and must pass the
+  ancestor rule of `ancestor_problem/2`. Every component below it is walked
+  literally with lstat: a symlink anywhere is refused, each directory must
+  pass the ancestor rule, and the last component must be a Unix socket (not a
+  FIFO or anything else) owned by `euid`. The socket's own mode is not
+  constrained: it governs who may connect, while who may replace it is
+  decided by the directories above it, which are checked. A co-tenant who
+  could write or redirect any of those could plant a socket of their own.
+  """
+  @spec private_socket_problem(String.t(), String.t(), non_neg_integer()) :: String.t() | nil
+  def private_socket_problem(path, top, euid) do
+    relative = Path.relative_to(path, top)
+
+    cond do
+      relative == path or relative == "." or String.starts_with?(relative, "../") ->
+        "#{path} is not under #{top}"
+
+      true ->
+        case File.stat(top) do
+          {:ok, stat} ->
+            case dir_stat_problem(stat, euid) do
+              nil -> walk_socket_path(top, Path.split(relative), euid)
+              why -> "#{top}: #{why}"
+            end
+
+          {:error, reason} ->
+            "#{top}: #{:file.format_error(reason)}"
+        end
+    end
+  end
+
+  # S_IFMT and S_IFSOCK: File.Stat reports sockets and FIFOs alike as :other,
+  # and its mode keeps the file-type bits that tell them apart.
+  @s_ifmt 0o170000
+  @s_ifsock 0o140000
+
+  defp walk_socket_path(dir, [name | rest], euid) do
+    path = Path.join(dir, name)
+
+    case {File.lstat(path), rest} do
+      {{:ok, %File.Stat{type: :symlink}}, _} ->
+        "#{path} is a symlink"
+
+      {{:ok, stat}, []} ->
+        socket_problem(stat, path, euid)
+
+      {{:ok, stat}, _} ->
+        case dir_stat_problem(stat, euid) do
+          nil -> walk_socket_path(path, rest, euid)
+          why -> "#{path}: #{why}"
         end
 
-      {:ok, %File.Stat{type: type}} ->
-        raise ArgumentError, "refusing to listen under #{dir}: it is a #{type}, not a directory"
+      {{:error, reason}, _} ->
+        "#{path}: #{:file.format_error(reason)}"
+    end
+  end
 
-      {:error, reason} ->
-        raise ArgumentError, "refusing to listen under #{dir}: #{:file.format_error(reason)}"
+  defp socket_problem(%File.Stat{type: :other, mode: mode, uid: uid}, path, euid) do
+    cond do
+      Bitwise.band(mode, @s_ifmt) != @s_ifsock -> "#{path} is not a Unix socket"
+      uid != euid -> "#{path} is owned by uid #{uid}, not this daemon's uid #{euid}"
+      true -> nil
+    end
+  end
+
+  defp socket_problem(%File.Stat{type: type}, path, _euid),
+    do: "#{path} is a #{type}, not a Unix socket"
+
+  @doc "This VM's effective uid, asked of `id -u` once and cached."
+  @spec euid() :: non_neg_integer()
+  def euid do
+    case :persistent_term.get({__MODULE__, :euid}, nil) do
+      nil ->
+        uid = effective_uid()
+        :persistent_term.put({__MODULE__, :euid}, uid)
+        uid
+
+      uid ->
+        uid
     end
   end
 
