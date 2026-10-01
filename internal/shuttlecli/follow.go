@@ -29,7 +29,8 @@ file at the first read is printed at once as the first batch. After that, new
 complete lines are held pending until one of these flushes them:
 
   - a line addressing the agent: a whole word from --names, case-insensitive,
-    in the utterance text (after any leading HH:MM:SS timestamp)
+    in the utterance text (after any leading HH:MM:SS timestamp or
+    HH:MM:SS-HH:MM:SS range)
   - the pending utterance text reaching --words words
   - --seconds elapsing since the first pending line arrived
   - a line starting "# ended", which flushes and ends the follow (exit 0)
@@ -75,8 +76,9 @@ func init() {
 	addShuttleCommand(shuttleFollowCmd)
 }
 
-// followTimestamp matches a leading HH:MM:SS stamp and captures the utterance after it.
-var followTimestamp = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}\s+(.*)$`)
+// followTimestamp matches a leading HH:MM:SS stamp, or an HH:MM:SS-HH:MM:SS
+// range, and captures the utterance after it.
+var followTimestamp = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+(.*)$`)
 
 // followBatcher holds transcript lines until a flush condition is met. It is
 // pure: callers supply every line and clock reading.

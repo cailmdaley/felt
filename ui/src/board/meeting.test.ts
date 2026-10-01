@@ -195,8 +195,11 @@ describe('a meeting on its card', () => {
 
   it('splits a transcript line into stamp, speaker and words', () => {
     expect(parseTranscriptLine('14:03:12 S2  so the covariance looks fine')).toEqual({
-      time: '14:03:12', speaker: 'S2', text: 'so the covariance looks fine',
+      time: '14:03:12', end: null, speaker: 'S2', text: 'so the covariance looks fine',
     })
-    expect(parseTranscriptLine('unstamped words')).toEqual({ time: null, speaker: null, text: 'unstamped words' })
+    expect(parseTranscriptLine('14:03:12-14:03:20 S2  so the covariance looks fine')).toEqual({
+      time: '14:03:12', end: '14:03:20', speaker: 'S2', text: 'so the covariance looks fine',
+    })
+    expect(parseTranscriptLine('unstamped words')).toEqual({ time: null, end: null, speaker: null, text: 'unstamped words' })
   })
 })

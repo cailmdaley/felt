@@ -398,7 +398,7 @@ The file may not exist yet; follow waits for it. Everything already in the file
 at the first read is printed at once. After that, new complete lines are held
 until a line addresses the agent (a whole word from `--names`, case-insensitive,
 default `claude,cloud,clawed,klaud`, matched after any leading `HH:MM:SS`
-timestamp), the pending utterance text reaches `--words` (default 150), or
+timestamp or `HH:MM:SS-HH:MM:SS` range), the pending utterance text reaches `--words` (default 150), or
 `--seconds` (default 15) pass since the first pending line arrived. A line
 starting `# ended` flushes and ends the follow with exit 0. Lines starting `#`
 ride along without counting words or addressing the agent. A partial trailing

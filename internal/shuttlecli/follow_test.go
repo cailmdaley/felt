@@ -62,6 +62,18 @@ func TestFollowWordThresholdFlushesOnceReached(t *testing.T) {
 	}
 }
 
+func TestFollowWordCountSkipsTheStampOrRange(t *testing.T) {
+	for _, stamp := range []string{"00:00:01", "00:00:01-00:00:04"} {
+		b := newFollowBatcher(4, 1000*time.Second, defaultFollowNames)
+		if batch := b.Add(stamp+" S1  two words", followAt(0)); batch != nil {
+			t.Errorf("%s: the stamp counted as a word: %q", stamp, batch)
+		}
+		if batch := b.Add(stamp+" S1  hey Claude", followAt(1)); len(batch) != 2 {
+			t.Errorf("%s: addressed line did not flush: %q", stamp, batch)
+		}
+	}
+}
+
 func TestFollowTimeThresholdFlushesAfterSecondsSinceFirstPendingLine(t *testing.T) {
 	b := newFollowBatcher(1000, 15*time.Second, defaultFollowNames)
 	if batch := b.Add("00:00:01 me   hi", followAt(100)); batch != nil {

@@ -189,17 +189,21 @@ export function meetingHostCard(meeting: MeetingRecord | null, cards: Iterable<K
 }
 
 export interface TranscriptLine {
+  /** When the turn began. */
   time: string | null
+  /** When it ended, for a line stamped with a range. */
+  end: string | null
   speaker: string | null
   text: string
 }
 
-/** Split `14:03:12 S2  words` into its stamp, speaker and words. */
+/** Split `14:03:12 S2  words`, or `14:03:12-14:03:20 S2  words`, into its
+ *  stamp, speaker and words. */
 export function parseTranscriptLine(line: string): TranscriptLine {
-  const match = /^(\d{1,2}:\d{2}:\d{2})\s+(\S+)\s+(.*)$/.exec(line)
+  const match = /^(\d{1,2}:\d{2}:\d{2})(?:-(\d{1,2}:\d{2}:\d{2}))?\s+(\S+)\s+(.*)$/.exec(line)
   return match
-    ? { time: match[1], speaker: match[2], text: match[3] }
-    : { time: null, speaker: null, text: line }
+    ? { time: match[1], end: match[2] ?? null, speaker: match[3], text: match[4] }
+    : { time: null, end: null, speaker: null, text: line }
 }
 
 
@@ -216,7 +220,7 @@ export function paintTranscript(tail: HTMLOListElement, lines: string[]): void {
     const line = parseTranscriptLine(raw)
     const item = document.createElement('li')
     item.className = 'kbn-meeting-line'
-    if (line.time) item.title = line.time
+    if (line.time) item.title = line.end ? `${line.time}–${line.end}` : line.time
     if (line.speaker) {
       const speaker = document.createElement('span')
       speaker.className = 'kbn-meeting-speaker'
