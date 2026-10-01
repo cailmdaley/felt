@@ -26,6 +26,21 @@ const (
 	receiptPartial  receiptStatus = "partial"
 )
 
+// receiptInspection says how a bundle's enablement was established, so a
+// consumer can act on a bundle without parsing its evidence text.
+type receiptInspection string
+
+const (
+	// The harness's own plugin list reported the bundle.
+	inspectionConfirmed receiptInspection = "confirmed"
+	// The harness's config and cache describe the bundle, but its plugin list
+	// is absent or does not report felt.
+	inspectionConfigured receiptInspection = "configured"
+	// The plugin list failed or the config could not be read, so whether
+	// felt is enabled there is not known.
+	inspectionUnknown receiptInspection = "unknown"
+)
+
 // RuntimeReceipt is intentionally compact and stable enough for installers to
 // consume.  Paths are included as evidence: a version without the path cannot
 // distinguish the active cache from a source checkout which merely happens to
@@ -59,14 +74,16 @@ type ReceiptFeltCopy struct {
 }
 
 type ReceiptBundle struct {
-	Harness  string        `json:"harness"`
-	Source   string        `json:"source,omitempty"`
-	Path     string        `json:"path,omitempty"`
-	Version  string        `json:"version,omitempty"`
-	Enabled  bool          `json:"enabled"`
-	Evidence string        `json:"evidence,omitempty"`
-	Status   receiptStatus `json:"status"`
-	Repair   string        `json:"repair,omitempty"`
+	Harness string `json:"harness"`
+	Source  string `json:"source,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Version string `json:"version,omitempty"`
+	Enabled bool   `json:"enabled"`
+	// Inspection is how Enabled was established.
+	Inspection receiptInspection `json:"inspection"`
+	Evidence   string            `json:"evidence,omitempty"`
+	Status     receiptStatus     `json:"status"`
+	Repair     string            `json:"repair,omitempty"`
 }
 
 // ReceiptGenerationReceipt is the receipt-side view of the promoted source
@@ -276,7 +293,7 @@ func collectCodexBundle() []ReceiptBundle {
 		}
 		// A present CLI whose structured output cannot be read is not safe to
 		// interpret as a healthy cache; make the degraded boundary visible.
-		return []ReceiptBundle{{Harness: "codex", Enabled: true, Evidence: "codex plugin list unavailable", Status: receiptPartial, Repair: "upgrade Codex or repair its plugin list, then rerun `felt setup codex`"}}
+		return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionUnknown, Evidence: "codex plugin list unavailable", Status: receiptPartial, Repair: "upgrade Codex or repair its plugin list, then rerun `felt setup codex`"}}
 	}
 	return collectCodexBundleFallback()
 }
@@ -285,7 +302,7 @@ func collectCodexBundleFallback() []ReceiptBundle {
 	home, _ := os.UserHomeDir()
 	cfg, err := readCodexConfig()
 	if err != nil {
-		return []ReceiptBundle{{Harness: "codex", Enabled: true, Status: receiptMismatch, Repair: "repair ~/.codex/config.toml, then rerun `felt setup codex`"}}
+		return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionUnknown, Status: receiptMismatch, Repair: "repair ~/.codex/config.toml, then rerun `felt setup codex`"}}
 	}
 	plugins, _ := cfg["plugins"].(map[string]interface{})
 	enabled, configured := false, false
@@ -301,13 +318,14 @@ func collectCodexBundleFallback() []ReceiptBundle {
 		return nil // Codex is not part of this host's enabled installation.
 	}
 	if !enabled {
-		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: false, Status: receiptPartial, Repair: "remove the orphaned Codex cache or enable it with `felt setup codex`"}}
+		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: false, Inspection: inspectionConfigured, Status: receiptPartial, Repair: "remove the orphaned Codex cache or enable it with `felt setup codex`"}}
 	}
 	if len(manifestPaths) != 1 {
-		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: true, Status: receiptMissing, Repair: "run `felt setup codex` to materialize exactly one active plugin cache"}}
+		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: true, Inspection: inspectionConfigured, Status: receiptMissing, Repair: "run `felt setup codex` to materialize exactly one active plugin cache"}}
 	}
 	b := bundleFromManifest("codex", manifestPaths[0], codexSource(cfg))
 	b.Evidence = "config/cache fallback"
+	b.Inspection = inspectionConfigured
 	if b.Status == receiptHealthy {
 		b.Status = receiptPartial
 		b.Repair = "install Codex so the active plugin source can be verified, then rerun the receipt"
@@ -353,7 +371,7 @@ func collectClaudeBundle() []ReceiptBundle {
 				return collectClaudeBundleFallback()
 			}
 		}
-		return []ReceiptBundle{{Harness: "claude", Enabled: true, Evidence: "claude plugin list unavailable", Status: receiptPartial, Repair: "upgrade Claude Code or repair its plugin list, then rerun `felt setup claude`"}}
+		return []ReceiptBundle{{Harness: "claude", Enabled: true, Inspection: inspectionUnknown, Evidence: "claude plugin list unavailable", Status: receiptPartial, Repair: "upgrade Claude Code or repair its plugin list, then rerun `felt setup claude`"}}
 	}
 	return collectClaudeBundleFallback()
 }
@@ -364,7 +382,7 @@ func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) Recei
 		root = plugin.InstallPath
 	}
 	if root == "" {
-		return ReceiptBundle{Harness: harness, Version: plugin.Version, Enabled: plugin.Enabled, Evidence: harness + " plugin list", Status: receiptMissing, Repair: "run the matching felt setup command to restore the active plugin path"}
+		return ReceiptBundle{Harness: harness, Version: plugin.Version, Enabled: plugin.Enabled, Inspection: inspectionConfirmed, Evidence: harness + " plugin list", Status: receiptMissing, Repair: "run the matching felt setup command to restore the active plugin path"}
 	}
 	manifest := filepath.Join(root, ".codex-plugin", "plugin.json")
 	if harness == "claude" {
@@ -374,6 +392,7 @@ func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) Recei
 	b.Path = root
 	b.Version = plugin.Version
 	b.Evidence = harness + " plugin list"
+	b.Inspection = inspectionConfirmed
 	if b.Status == receiptHealthy && plugin.Version == "" {
 		b.Status, b.Repair = receiptMismatch, "the harness did not report a plugin version; reinstall the felt plugin"
 	}
@@ -392,7 +411,7 @@ func collectClaudeBundleFallback() []ReceiptBundle {
 		return nil
 	}
 	if err != nil {
-		return []ReceiptBundle{{Harness: "claude", Enabled: true, Status: receiptMismatch, Repair: "repair ~/.claude/settings.json, then rerun `felt setup claude`"}}
+		return []ReceiptBundle{{Harness: "claude", Enabled: true, Inspection: inspectionUnknown, Status: receiptMismatch, Repair: "repair ~/.claude/settings.json, then rerun `felt setup claude`"}}
 	}
 	if !settings.EnabledPlugins["felt@"+marketplaceName] {
 		return nil
@@ -400,11 +419,12 @@ func collectClaudeBundleFallback() []ReceiptBundle {
 	root := claudeMarketplaceClonePath()
 	manifest := filepath.Join(root, "claude-plugin", ".claude-plugin", "plugin.json")
 	if _, err := os.Stat(manifest); err != nil {
-		return []ReceiptBundle{{Harness: "claude", Enabled: true, Path: root, Status: receiptMissing, Repair: "run `felt setup claude` to restore the enabled marketplace clone"}}
+		return []ReceiptBundle{{Harness: "claude", Enabled: true, Inspection: inspectionConfigured, Path: root, Status: receiptMissing, Repair: "run `felt setup claude` to restore the enabled marketplace clone"}}
 	}
 	source := claudeConfiguredSourceFrom(settings)
 	b := bundleFromManifest("claude", manifest, source)
 	b.Evidence = "settings/cache fallback"
+	b.Inspection = inspectionConfigured
 	if b.Status == receiptHealthy {
 		b.Status = receiptPartial
 		b.Repair = "install Claude Code so the active plugin path can be verified, then rerun the receipt"

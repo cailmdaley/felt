@@ -124,12 +124,15 @@ Push the verified revision, then deploy it on each host:
    (the word appears nowhere in it) — through `shuttle daemon install`, keeping
    its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
    `TMUX_TMPDIR` from the login shell.
-3. Cycle the daemon through its supervisor or respawn loop.
-4. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
+3. Run `felt setup <harness>` for each harness that carries felt's plugin, so
+   its hooks and skills match the felt just built, and check that `felt setup
+   receipt` passes (see [harness plugins](#harness-plugins)).
+4. Cycle the daemon through its supervisor or respawn loop.
+5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
    and `ready` is `true` (up to 15 minutes by default; set
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
-5. Check the changed behavior through the live API or board.
-6. Run `shuttle daemon release` to release the boot quarantine.
+6. Check the changed behavior through the live API or board.
+7. Run `shuttle daemon release` to release the boot quarantine.
 
 The helper builds both CLIs, the daemon, and — on every host that is not marked
 `"build_ui": false` — the UI, on that host.
@@ -160,6 +163,54 @@ For a manual remote build:
 ```bash
 ssh <host> "bash -lc 'cd <checkout> && git pull --ff-only && make build'"
 ```
+
+### Harness plugins
+
+`make build` installs a new `felt`, but each harness keeps running the plugin
+generation it was last set up with, and `felt setup receipt` fails once the
+two disagree. The helper therefore runs `felt setup` on every host, in its
+login shell, after the build.
+
+A harness counts as installed where felt's plugin is enabled in it: Claude Code
+and Codex as the enabled bundles in `felt setup receipt --json`, and pi as a
+felt package in `pi list`, either `git:github.com/cailmdaley/felt` or a local
+directory whose committed `package.json` (its working copy, outside git) names
+felt. A harness binary on `PATH` without
+felt's plugin is left alone, so the deploy never installs a plugin the operator
+did not install or has removed. A host with no such harness reports
+`harness plugins: none carry felt`.
+
+Each receipt bundle's `inspection` says how its enablement was established:
+`confirmed` by the harness's own plugin list, `configured` by its config and
+cache alone, or `unknown` when the list failed or the config could not be read.
+The helper sets up confirmed and configured bundles. An unknown bundle fails the
+host with the receipt's repair and no setup runs. So does a receipt that is
+missing or incomplete (its bundles list unclosed, or no closing brace on the
+top-level object), rather than reading a partial answer as "no harness".
+
+Claude Code and Codex are set up with `--source <checkout>`, so the sealed
+generation holds the tree the felt binary was built from, and setup needs no
+network. They are skipped when the receipt already passes and its active
+generation was sealed at the checkout's `HEAD` by a clean build. A dirty
+checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
+tree, so a dirty host is set up again on every deploy. pi has no `--source`
+flag and no generation. For pi's GitHub package, `felt setup pi` installs the
+default branch, so the helper runs it only when pi's clone is not at the
+checkout's `HEAD`. A local felt package is never re-pointed: it is current when
+it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
+with the package's path and commit. Any pi package other than the deployed
+checkout must also have no tracked edits or deletions (`git status
+--porcelain --untracked-files=no`); a package with them fails the host with the
+edited paths, and so does one git cannot inspect. Untracked files are ignored, since pi's npm install leaves a
+`package-lock.json` in its clone.
+
+If setup fails, or `felt setup receipt` still fails afterwards, the host's line
+carries the receipt's repair text (for example a stale `felt` shadowing the new
+one on `PATH`, or Codex hooks awaiting approval). The host counts as failed
+only after its daemon cycle and quarantine release have run, so a harness
+problem never leaves the daemon on the old build. A pi clone that cannot reach
+`HEAD` also fails the host; this happens when the deployed revision is not on
+the default branch.
 
 ### The bundle on a host that does not build it
 

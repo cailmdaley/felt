@@ -417,3 +417,103 @@ func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T
 		t.Fatalf("matching felt_build reported mismatch: %#v", got)
 	}
 }
+
+// TestReceiptBundleInspectionSaysHowEnablementWasEstablished pins the
+// "inspection" field that bin/shuttle-deploy reads to tell a bundle the
+// harness confirmed from one whose enablement is unknown.
+func TestReceiptBundleInspectionSaysHowEnablementWasEstablished(t *testing.T) {
+	cases := []struct {
+		name    string
+		bin     map[string]string // fake harness CLIs on PATH
+		files   map[string]string // files under HOME
+		collect func() []ReceiptBundle
+		want    receiptInspection
+	}{
+		{
+			name:    "codex plugin list reports felt",
+			bin:     map[string]string{"codex": `printf '%s\n' '{"installed":[{"pluginId":"felt@cailmdaley-felt","name":"felt","marketplaceName":"cailmdaley-felt","version":"1.0.0","enabled":true}]}'`},
+			collect: collectCodexBundle,
+			want:    inspectionConfirmed,
+		},
+		{
+			name:    "codex plugin list fails",
+			bin:     map[string]string{"codex": "exit 1"},
+			collect: collectCodexBundle,
+			want:    inspectionUnknown,
+		},
+		{
+			name:    "codex config cannot be parsed",
+			files:   map[string]string{".codex/config.toml": "[plugins\n"},
+			collect: collectCodexBundle,
+			want:    inspectionUnknown,
+		},
+		{
+			name:    "codex config enables felt that its list omits",
+			bin:     map[string]string{"codex": `printf '%s\n' '{"installed":[]}'`},
+			files:   map[string]string{".codex/config.toml": "[plugins.\"felt@cailmdaley-felt\"]\nenabled = true\n"},
+			collect: collectCodexBundle,
+			want:    inspectionConfigured,
+		},
+		{
+			name:    "claude plugin list reports felt",
+			bin:     map[string]string{"claude": `printf '%s\n' '[{"id":"felt@cailmdaley-felt","version":"1.0.0","enabled":true}]'`},
+			collect: collectClaudeBundle,
+			want:    inspectionConfirmed,
+		},
+		{
+			name:    "claude plugin list fails",
+			bin:     map[string]string{"claude": "exit 1"},
+			collect: collectClaudeBundle,
+			want:    inspectionUnknown,
+		},
+		{
+			name:    "claude settings cannot be parsed",
+			files:   map[string]string{".claude/settings.json": "{"},
+			collect: collectClaudeBundle,
+			want:    inspectionUnknown,
+		},
+		{
+			name:    "claude settings enable felt without the claude CLI",
+			files:   map[string]string{".claude/settings.json": `{"enabledPlugins":{"felt@cailmdaley-felt":true}}`},
+			collect: collectClaudeBundle,
+			want:    inspectionConfigured,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			for rel, contents := range c.files {
+				path := filepath.Join(home, rel)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			binDir := t.TempDir()
+			for name, body := range c.bin {
+				if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
+
+			bundles := c.collect()
+			if len(bundles) != 1 {
+				t.Fatalf("bundles = %#v, want one", bundles)
+			}
+			if bundles[0].Inspection != c.want {
+				t.Fatalf("inspection = %q, want %q (bundle %#v)", bundles[0].Inspection, c.want, bundles[0])
+			}
+			data, err := json.Marshal(bundles[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"inspection":"`+string(c.want)+`"`) {
+				t.Fatalf("bundle JSON %s lacks the inspection field", data)
+			}
+		})
+	}
+}
