@@ -35,10 +35,12 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
 
   defp resolve_to(answer), do: [resolve: fn -> answer end, retry_ms: 10]
 
+  defp live(path, launch \\ "L1"), do: {:ok, %{path: path, launch: launch}}
+
   test "connects at once to a listening hark and relays binary frames unchanged", %{path: path} do
     listener = listen(path)
 
-    assert {:push, [status], state} = Relay.init(resolve_to({:ok, path}))
+    assert {:push, [status], state} = Relay.init(resolve_to(live(path)))
     assert json(status) == %{"state" => "connected"}
     peer = accept(listener)
 
@@ -51,10 +53,8 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert {:error, :closed} = :gen_tcp.recv(peer, 0, 1_000)
   end
 
-  test "holds audio while hark loads, retries, and flushes it in order once it listens", %{
-    path: path
-  } do
-    assert {:push, [status], state} = Relay.init(resolve_to({:ok, path}))
+  test "drops audio while hark loads: nothing said before it listens reaches it", %{path: path} do
+    assert {:push, [status], state} = Relay.init(resolve_to(live(path)))
     assert %{"state" => "waiting", "reason" => reason} = json(status)
     assert reason =~ "loading"
     assert_receive :retry, 200
@@ -70,29 +70,13 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert {:push, [status], state} = Relay.handle_info(:retry, state)
     assert json(status) == %{"state" => "connected"}
     peer = accept(listener)
-    assert received(peer, 12) == "early-speech"
 
     {:ok, state} = Relay.handle_in({"live", opcode: :binary}, state)
+    # Exactly the live frame: hark pads gaps itself, so replayed audio would
+    # be counted twice.
     assert received(peer, 4) == "live"
+    assert {:error, :timeout} = :gen_tcp.recv(peer, 0, 100)
     Relay.terminate(:normal, state)
-  end
-
-  test "the buffer keeps the newest audio and reports what it dropped", %{path: path} do
-    opts = resolve_to({:ok, path}) |> Keyword.put(:buffer_bytes, 8)
-    {:push, _waiting, state} = Relay.init(opts)
-
-    state =
-      Enum.reduce(["aaaa", "bbbb", "cccc"], state, fn chunk, state ->
-        {:ok, state} = Relay.handle_in({chunk, opcode: :binary}, state)
-        state
-      end)
-
-    assert state.buffered == 8
-    listener = listen(path)
-    assert {:push, [status], _state} = Relay.handle_info(:retry, state)
-    assert json(status) == %{"state" => "connected", "dropped_bytes" => 4}
-    peer = accept(listener)
-    assert received(peer, 8) == "bbbbcccc"
   end
 
   test "a launch that has not written its lifecycle file yet is waited for" do
@@ -114,12 +98,40 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     end
   end
 
+  test "a socket bound to one meeting refuses another", %{path: path} do
+    opts = resolve_to(live(path, "other")) |> Keyword.put(:launch, "L1")
+    assert {:stop, :normal, {4404, reason}, [status], _state} = Relay.init(opts)
+    assert reason =~ "different meeting"
+    assert json(status)["state"] == "refused"
+
+    listener = listen(path)
+
+    assert {:push, _connected, state} =
+             Relay.init(Keyword.put(resolve_to(live(path)), :launch, "L1"))
+
+    accept(listener)
+    Relay.terminate(:normal, state)
+  end
+
+  test "a long close reason is cut to 123 bytes on a character boundary; the frame keeps it all" do
+    error = String.duplicate("é", 100)
+
+    assert {:stop, :normal, {4410, reason}, [status], _state} =
+             Relay.init(resolve_to({:error, {:failed, error}}))
+
+    assert byte_size(reason) <= 123
+    assert String.valid?(reason)
+    assert json(status)["reason"] == "the meeting failed: " <> error
+    assert Relay.truncate_utf8("short") == "short"
+    assert Relay.truncate_utf8("aé", 2) == "a"
+  end
+
   test "hark closing the socket at the meeting's end closes the WebSocket as ended", %{
     path: path
   } do
     listener = listen(path)
-    {:ok, phase} = Agent.start_link(fn -> {:ok, path} end)
-    opts = [resolve: fn -> Agent.get(phase, & &1) end, retry_ms: 10]
+    {:ok, phase} = Agent.start_link(fn -> live(path) end)
+    opts = [resolve: fn -> Agent.get(phase, & &1) end, retry_ms: 10, launch: "L1"]
 
     {:push, _connected, state} = Relay.init(opts)
     peer = accept(listener)
@@ -134,10 +146,27 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert state.socket == nil
   end
 
+  test "hark closing the socket while a new meeting is live ends this one, not replaced", %{
+    path: path
+  } do
+    listener = listen(path)
+    {:ok, phase} = Agent.start_link(fn -> live(path) end)
+    opts = [resolve: fn -> Agent.get(phase, & &1) end, retry_ms: 10, launch: "L1"]
+
+    {:push, _connected, state} = Relay.init(opts)
+    peer = accept(listener)
+    Agent.update(phase, fn _ -> live(path, "L2") end)
+    :gen_tcp.close(peer)
+
+    assert_receive {:tcp_closed, _socket} = closed, 1_000
+    assert {:stop, :normal, {4410, _reason}, [status], _state} = Relay.handle_info(closed, state)
+    assert json(status)["state"] == "ended"
+  end
+
   test "hark closing the socket while the meeting is still live means another sender took over",
        %{path: path} do
     listener = listen(path)
-    {:push, _connected, state} = Relay.init(resolve_to({:ok, path}))
+    {:push, _connected, state} = Relay.init(Keyword.put(resolve_to(live(path)), :launch, "L1"))
     peer = accept(listener)
     :gen_tcp.close(peer)
 
@@ -150,7 +179,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
   describe "through the endpoint" do
     setup %{path: path} do
       previous = Application.fetch_env(:shuttle, :meeting_audio_socket)
-      {:ok, phase} = Agent.start_link(fn -> {:ok, path} end)
+      {:ok, phase} = Agent.start_link(fn -> {:ok, %{path: path, launch: "L1"}} end)
 
       Application.put_env(:shuttle, :meeting_audio_socket,
         resolve: fn -> Agent.get(phase, & &1) end,
@@ -183,7 +212,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
       phase: phase
     } do
       listener = listen(path)
-      {status, ws} = handshake(port, "http://127.0.0.1:#{port}")
+      {status, ws} = handshake(port, "http://127.0.0.1:#{port}", "L1")
       assert status =~ "HTTP/1.1 101"
       peer = accept(listener)
 
@@ -200,6 +229,14 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
       assert %{"state" => "ended"} = Jason.decode!(ended)
       assert {:close, <<4410::16, reason::binary>>} = read_frame(ws)
       assert reason =~ "ended"
+    end
+
+    test "the launch query binds the socket: another meeting's id is refused", %{port: port} do
+      {status, ws} = handshake(port, "http://127.0.0.1:#{port}", "L9")
+      assert status =~ "HTTP/1.1 101"
+      assert {:text, refused} = read_frame(ws)
+      assert %{"state" => "refused"} = Jason.decode!(refused)
+      assert {:close, <<4404::16, _reason::binary>>} = read_frame(ws)
     end
 
     test "a plain GET is told the route takes a WebSocket", %{port: port} do
@@ -220,12 +257,12 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     end
   end
 
-  defp handshake(port, origin) do
+  defp handshake(port, origin, launch \\ "L1") do
     {:ok, ws} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
     request =
-      "GET /api/v1/meeting/audio HTTP/1.1\r\n" <>
+      "GET /api/v1/meeting/audio?launch=#{launch} HTTP/1.1\r\n" <>
         "Host: 127.0.0.1:#{port}\r\n" <>
         "Origin: #{origin}\r\n" <>
         "Upgrade: websocket\r\nConnection: Upgrade\r\n" <>

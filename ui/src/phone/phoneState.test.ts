@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { MeetingRecord, MeetingStatus } from '../board/meeting'
 import {
-  ChunkQueue,
   audioHealth,
+  clockTime,
   closeMeaning,
+  linkWords,
   parseRelayStatus,
   phoneView,
   reconnectDelay,
@@ -20,6 +21,7 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   fiber: null,
   joined: false,
   phone: true,
+  launch: 'L1',
   tmux_session: 'hark-meeting',
   error: null,
   ...overrides,
@@ -32,9 +34,8 @@ const view = (s: MeetingStatus | null, more: Partial<Parameters<typeof phoneView
 describe('relay status frames', () => {
   it('reads the relay’s states and ignores anything else', () => {
     expect(parseRelayStatus('{"state":"waiting","reason":"hark is loading"}')).toEqual({
-      state: 'waiting', reason: 'hark is loading', droppedBytes: 0,
+      state: 'waiting', reason: 'hark is loading',
     })
-    expect(parseRelayStatus('{"state":"connected","dropped_bytes":3200}')?.droppedBytes).toBe(3200)
     expect(parseRelayStatus('{"state":"dancing"}')).toBeNull()
     expect(parseRelayStatus('not json')).toBeNull()
     expect(parseRelayStatus('[1]')).toBeNull()
@@ -55,15 +56,16 @@ describe('relay status frames', () => {
   })
 })
 
-describe('held audio', () => {
-  it('keeps the newest bytes under its cap and counts what it dropped', () => {
-    const queue = new ChunkQueue(10)
-    for (const size of [4, 4, 4]) queue.push(new ArrayBuffer(size))
-    expect(queue.bytes).toBe(8)
-    expect(queue.dropped).toBe(4)
-    expect(queue.drain().map((chunk) => chunk.byteLength)).toEqual([4, 4])
-    expect(queue.bytes).toBe(0)
-    expect(queue.dropped).toBe(0)
+describe('the status line', () => {
+  it('says plainly when speech is not being captured', () => {
+    expect(linkWords('waiting', 'hark is loading its models')).toBe('Loading models — speech isn’t captured until Listening')
+    expect(linkWords('connected', null)).toBe('Listening')
+    const since = new Date(2026, 9, 1, 14, 3, 7).getTime()
+    expect(clockTime(since)).toBe('14:03:07')
+    expect(linkWords('reconnecting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
+    expect(linkWords('waiting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
+    expect(linkWords('connected', null, since)).toMatch(/audio lost since 14:03:07/)
+    expect(linkWords('ended', 'the meeting has ended', since)).toBe('Ended: the meeting has ended')
   })
 })
 
@@ -107,16 +109,17 @@ describe('what the screen offers', () => {
 
 describe('audio health and the relay URL', () => {
   it('reads a live track in a running context as healthy', () => {
-    expect(audioHealth('live', 'running')).toBe('ok')
-    expect(audioHealth('live', 'suspended')).toBe('suspended')
-    expect(audioHealth('live', 'interrupted')).toBe('suspended')
-    expect(audioHealth('ended', 'running')).toBe('ended')
-    expect(audioHealth('missing', 'running')).toBe('ended')
+    expect(audioHealth('live', false, 'running')).toBe('ok')
+    expect(audioHealth('live', true, 'running')).toBe('muted')
+    expect(audioHealth('live', false, 'suspended')).toBe('suspended')
+    expect(audioHealth('live', false, 'interrupted')).toBe('suspended')
+    expect(audioHealth('ended', false, 'running')).toBe('ended')
+    expect(audioHealth('missing', false, 'running')).toBe('ended')
   })
 
-  it('puts the relay beside the page, secure when the page is', () => {
-    expect(relayUrl('', { protocol: 'https:', host: 'mac.tailnet.example' })).toBe('wss://mac.tailnet.example/api/v1/meeting/audio')
-    expect(relayUrl('', { protocol: 'http:', host: '127.0.0.1:4000' })).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio')
-    expect(relayUrl('http://127.0.0.1:4000/', { protocol: 'https:', host: 'x' })).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio')
+  it('puts the relay beside the page, secure when the page is, bound to the meeting', () => {
+    expect(relayUrl('', { protocol: 'https:', host: 'mac.tailnet.example' }, 'a+b/c')).toBe('wss://mac.tailnet.example/api/v1/meeting/audio?launch=a%2Bb%2Fc')
+    expect(relayUrl('', { protocol: 'http:', host: '127.0.0.1:4000' }, null)).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio')
+    expect(relayUrl('http://127.0.0.1:4000/', { protocol: 'https:', host: 'x' }, 'L1')).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio?launch=L1')
   })
 })

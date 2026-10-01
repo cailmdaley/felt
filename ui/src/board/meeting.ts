@@ -20,6 +20,8 @@ export interface MeetingRecord {
   joined: boolean
   /** The meeting takes its audio from a phone (`/phone`), not this machine. */
   phone: boolean
+  /** The recording's launch id: what a phone's audio socket binds to. */
+  launch: string | null
   tmux_session: string | null
   error: string | null
 }
@@ -47,6 +49,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     fiber: nullableString('fiber'),
     joined: raw.joined === true,
     phone: raw.phone === true,
+    launch: nullableString('launch'),
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }

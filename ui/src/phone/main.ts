@@ -3,6 +3,7 @@ import {
   meetingDuration,
   meetingStateWord,
   paintTranscript,
+  parseMeetingRecord,
   parseMeetingStatus,
   type MeetingStatus,
 } from '../board/meeting.js'
@@ -18,20 +19,20 @@ import {
 import { stopMeeting } from '../forms/meetingApi'
 import type { Host, Project } from '../forms/projectModel'
 import { Mic, ScreenLock, audioContextForGesture } from './mic'
-import { TERMINAL_LINKS, linkWords, phoneView, relayUrl, type LinkState } from './phoneState'
+import { linkWords, phoneView, relayUrl } from './phoneState'
 import { RelayLink } from './relay'
+import { AudioSession } from './session'
 
 /**
  * The phone page (`/phone`): a phone held up in an in-person meeting as hark's
  * microphone. It starts a `phone` meeting through the same capture request the
  * board's Capture form sends, or connects to one already live, and streams the
- * mic over `/api/v1/meeting/audio`. One screen, polled every 2 s.
+ * mic over `/api/v1/meeting/audio`, bound to that meeting's launch id. The
+ * audio itself is owned by an `AudioSession`. One screen, polled every 2 s.
  */
 
 const shuttleBase = (import.meta.env.VITE_SHUTTLE_BASE as string | undefined) ?? ''
 const POLL_MS = 2_000
-/** Silence from the worklet longer than this is an interruption worth saying. */
-const AUDIO_GAP_MS = 3_000
 const PROJECT_KEY = 'shuttle.phone.project'
 
 interface Page {
@@ -39,17 +40,8 @@ interface Page {
   reachable: boolean
   starting: boolean
   stopping: boolean
-  mic: Mic | null
-  relay: RelayLink | null
-  link: LinkState
-  linkReason: string | null
   error: string | null
   notice: string | null
-  warning: string | null
-  /** The interruption needs a tap to bring the mic back. */
-  needsRestore: boolean
-  lastChunkAt: number
-  gapSince: number | null
   hosts: Host[]
   projects: Project[]
   projectId: string | null
@@ -61,16 +53,8 @@ const page: Page = {
   reachable: true,
   starting: false,
   stopping: false,
-  mic: null,
-  relay: null,
-  link: 'idle',
-  linkReason: null,
   error: null,
   notice: null,
-  warning: null,
-  needsRestore: false,
-  lastChunkAt: 0,
-  gapSince: null,
   hosts: [],
   projects: [],
   projectId: null,
@@ -78,6 +62,26 @@ const page: Page = {
 }
 
 const lock = new ScreenLock()
+
+const session = new AudioSession({
+  // The AudioContext is made here, synchronously inside the tap, and
+  // getUserMedia is Mic.open's first await: both stay in the gesture on iOS.
+  openMic: (handlers) => Mic.open(audioContextForGesture(), handlers),
+  createRelay: (launch, events) => new RelayLink({ url: relayUrl(shuttleBase, window.location, launch), ...events }),
+  lock,
+  onChange: () => {
+    if (session.link === 'ended' && !page.notice) {
+      page.notice = session.linkReason ? `The meeting ended: ${session.linkReason}.` : 'The meeting ended.'
+    }
+    render()
+  },
+  onLevel: (peak) => {
+    const percent = Math.round(Math.sqrt(peak) * 100)
+    meterFill.style.width = `${percent}%`
+    meter.setAttribute('aria-valuenow', String(percent))
+    meter.classList.toggle('ph-meter-hot', peak > 0.9)
+  },
+})
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -147,7 +151,7 @@ stopButton.type = 'button'
 root.append(eyebrow, meta, headline, detail, warning, error, notice, startForm, connectButton, live, tail, stopButton)
 
 function streaming(): boolean {
-  return page.mic !== null
+  return session.mic !== null
 }
 
 function render(): void {
@@ -170,24 +174,27 @@ function render(): void {
   detail.hidden = !view.detail
 
   startForm.hidden = view.primary !== 'start'
-  startButton.disabled = page.starting || !page.projectId
+  startButton.disabled = page.starting || session.busy || !page.projectId
   connectButton.hidden = view.primary !== 'connect'
+  connectButton.disabled = session.busy
   stopButton.hidden = !view.canStop
   stopButton.disabled = page.stopping
   stopButton.textContent = page.stopping ? 'Stopping…' : active ? 'Stop meeting' : 'Turn the mic off'
 
   live.hidden = !streaming()
-  live.dataset.link = page.link
-  linkLine.textContent = linkWords(page.link, page.linkReason)
+  live.dataset.link = session.lostSince !== null ? 'lost' : session.link
+  linkLine.textContent = linkWords(session.link, session.linkReason, session.lostSince)
   keepOn.textContent = lock.held
     ? 'Keep this screen on and Safari in front: iOS may cut the mic when the screen locks or you switch apps. (Screen kept awake.)'
     : 'Keep this screen on and Safari in front: iOS may cut the mic when the screen locks or you switch apps.'
 
-  warning.hidden = !page.warning
-  warningText.textContent = page.warning ?? ''
-  restoreButton.hidden = !page.needsRestore
-  error.hidden = !page.error
-  error.textContent = page.error ?? ''
+  const terminal = session.link === 'refused' || session.link === 'replaced'
+  const errorText = page.error ?? session.error ?? (terminal ? linkWords(session.link, session.linkReason) : null)
+  warning.hidden = !session.warning && !session.needsRestore
+  warningText.textContent = session.warning ?? 'The mic needs restoring.'
+  restoreButton.hidden = !session.needsRestore
+  error.hidden = !errorText
+  error.textContent = errorText ?? ''
   notice.hidden = !page.notice
   notice.textContent = page.notice ?? ''
 
@@ -280,104 +287,28 @@ async function loadChoices(): Promise<void> {
   }
 }
 
-// ---- Audio ----------------------------------------------------------------
-
-function micError(err: unknown): string {
-  const name = (err as { name?: string })?.name
-  if (name === 'NotAllowedError') {
-    return 'Microphone permission was denied. Allow it for this site in Safari (aA → Website Settings → Microphone), then tap again.'
-  }
-  if (name === 'NotFoundError') return 'This device has no microphone the browser can use.'
-  return `Couldn’t start the microphone: ${(err as Error)?.message ?? String(err)}`
-}
-
-function onLink(link: LinkState, reason: string | null): void {
-  page.link = link
-  page.linkReason = reason
-  if (TERMINAL_LINKS.has(link)) {
-    releaseAudio()
-    if (link === 'ended') page.notice = reason ? `The meeting ended: ${reason}.` : 'The meeting ended.'
-    else page.error = linkWords(link, reason)
-    void poll()
-  }
-  render()
-}
-
-function interrupted(why: string): void {
-  if (!page.mic) return
-  const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  page.warning = `Audio was interrupted at ${at} (${why}); speech since then may be missing.`
-  render()
-}
-
-/**
- * Open the mic inside the tap, then hand the stream to a relay. Chunks that
- * arrive before the socket opens (while a start request is in flight) wait in
- * the relay's queue.
- */
-async function beginAudio(): Promise<RelayLink | null> {
-  const context = audioContextForGesture()
-  const relay = new RelayLink({ url: relayUrl(shuttleBase, window.location), onLink })
-  try {
-    page.mic = await Mic.open(context, {
-      onChunk: (pcm) => {
-        const now = Date.now()
-        if (page.gapSince !== null) {
-          const seconds = Math.round((now - page.gapSince) / 1000)
-          page.warning = `No audio for ${seconds} s (the screen locked or Safari went to the background); that stretch is missing.`
-          page.gapSince = null
-        }
-        page.lastChunkAt = now
-        relay.send(pcm)
-      },
-      onLevel: (peak) => {
-        const percent = Math.round(Math.sqrt(peak) * 100)
-        meterFill.style.width = `${percent}%`
-        meter.setAttribute('aria-valuenow', String(percent))
-        meter.classList.toggle('ph-meter-hot', peak > 0.9)
-      },
-      onInterrupted: interrupted,
-    })
-  } catch (err) {
-    void context.close().catch(() => {})
-    page.error = micError(err)
-    return null
-  }
-  page.lastChunkAt = Date.now()
-  page.relay = relay
-  page.link = 'idle'
-  void lock.acquire().catch(() => {}).finally(render)
-  return relay
-}
-
-function releaseAudio(): void {
-  page.relay?.close()
-  page.relay = null
-  page.mic?.close()
-  page.mic = null
-  page.needsRestore = false
-  page.gapSince = null
-  lock.release()
-  meterFill.style.width = '0%'
-}
-
 // ---- Actions --------------------------------------------------------------
 
+function clearMessages(): void {
+  page.error = null
+  page.notice = null
+}
+
 async function start(): Promise<void> {
-  if (page.starting) return
+  if (page.starting || session.busy) return
   const project = page.projects.find((candidate) => candidate.id === page.projectId)
   if (!project) {
     page.error = 'Pick a project for the scribe to work in.'
     render()
     return
   }
-  page.error = null
-  page.notice = null
-  page.warning = null
+  clearMessages()
+  // Inside the tap: the mic first, then the meeting.
+  const opening = session.begin()
   page.starting = true
   render()
-  const relay = await beginAudio()
-  if (!relay) {
+  const generation = await opening
+  if (generation === null) {
     page.starting = false
     render()
     return
@@ -404,9 +335,10 @@ async function start(): Promise<void> {
     if (outcome.kind === 'meeting-recording' && outcome.error) page.error = outcome.error
     else page.notice = `Recording; the scribe is starting on ${host}.`
     note.value = ''
-    relay.open()
+    // `stream` ignores a generation that Stop has already moved past.
+    session.stream(generation, parseMeetingRecord(data.meeting)?.launch ?? null)
   } catch (err) {
-    releaseAudio()
+    session.stop()
     page.error = daemonErrorMessage(err)
   } finally {
     page.starting = false
@@ -415,11 +347,11 @@ async function start(): Promise<void> {
 }
 
 async function connect(): Promise<void> {
-  page.error = null
-  page.notice = null
-  page.warning = null
-  const relay = await beginAudio()
-  relay?.open()
+  if (session.busy) return
+  const launch = page.status?.meeting?.launch ?? null
+  clearMessages()
+  const generation = await session.begin()
+  if (generation !== null) session.stream(generation, launch)
   render()
 }
 
@@ -427,9 +359,7 @@ async function stop(): Promise<void> {
   if (page.stopping) return
   const meeting = page.status?.meeting
   if (!meeting || meeting.state === 'failed') {
-    releaseAudio()
-    page.link = 'idle'
-    render()
+    session.stop()
     return
   }
   page.stopping = true
@@ -437,8 +367,7 @@ async function stop(): Promise<void> {
   render()
   try {
     await stopMeeting(shuttleBase)
-    releaseAudio()
-    page.link = 'idle'
+    session.stop()
     page.notice = 'Meeting stopped.'
   } catch (err) {
     // The meeting still records, and this phone is still its mic.
@@ -447,26 +376,6 @@ async function stop(): Promise<void> {
     page.stopping = false
     await poll()
   }
-}
-
-/** On return to the tab: is the mic still live and the context running? */
-async function checkAudio(): Promise<void> {
-  const mic = page.mic
-  if (!mic) return
-  if (mic.health() === 'ok') return
-  interrupted(mic.health() === 'ended' ? 'the mic stopped' : 'audio was suspended')
-  try {
-    if ((await mic.revive()) === 'ok') {
-      page.needsRestore = false
-      page.warning = `${page.warning ?? ''} The mic is back.`
-    } else {
-      page.needsRestore = true
-    }
-  } catch {
-    // iOS wants a fresh tap before it hands the mic back.
-    page.needsRestore = true
-  }
-  render()
 }
 
 startForm.addEventListener('submit', (event) => {
@@ -480,39 +389,23 @@ projectSelect.addEventListener('change', () => {
   remember(projectSelect.value)
   render()
 })
-restoreButton.addEventListener('click', () => {
-  const mic = page.mic
-  if (!mic) return
-  void mic.revive()
-    .then((health) => {
-      page.needsRestore = health !== 'ok'
-      if (health === 'ok') page.warning = `${page.warning ?? ''} The mic is back.`
-    })
-    .catch((err: unknown) => { page.error = micError(err) })
-    .finally(render)
-})
+restoreButton.addEventListener('click', () => { void session.restore() })
 dismissWarning.addEventListener('click', () => {
-  page.warning = null
+  session.warning = null
   render()
 })
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
-  void lock.reacquire().catch(() => {}).finally(render)
-  page.relay?.nudge()
-  void checkAudio()
+  session.returned()
   void poll()
 })
 
-// A stalled worklet (the tab suspended, the system took the audio) shows as
-// missing chunks; the gap is reported when audio comes back.
-setInterval(() => {
-  if (page.mic && page.gapSince === null && Date.now() - page.lastChunkAt > AUDIO_GAP_MS) {
-    page.gapSince = page.lastChunkAt
-  }
-}, 1_000)
+// The mic can fail while the page stays in front (a call, the system taking
+// the audio): look once a second so Restore shows at once.
+setInterval(() => session.check(), 1_000)
 
-window.addEventListener('pagehide', () => releaseAudio())
+window.addEventListener('pagehide', () => session.stop())
 
 render()
 void loadChoices()

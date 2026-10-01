@@ -1,8 +1,9 @@
 /**
  * The phone page's decisions, kept apart from the DOM and the audio graph so
  * the suite can hold them to account: what the screen offers for a meeting
- * state, what the relay's status frames mean, when to reconnect, and how much
- * audio to hold while the socket is down.
+ * state, what the relay's status frames mean, when to reconnect, and what to
+ * say about audio that never reached hark. Nothing is held for later: hark
+ * pads gaps with silence on its own clock, so late audio would count twice.
  */
 
 import type { MeetingRecord, MeetingStatus } from '../board/meeting.js'
@@ -32,7 +33,6 @@ export const RELAY_CLOSE_CODES: Readonly<Record<number, LinkState>> = {
 export interface RelayStatus {
   state: 'waiting' | 'connected' | 'refused' | 'ended' | 'replaced'
   reason: string | null
-  droppedBytes: number
 }
 
 const RELAY_STATES = new Set<RelayStatus['state']>(['waiting', 'connected', 'refused', 'ended', 'replaced'])
@@ -51,7 +51,6 @@ export function parseRelayStatus(text: string): RelayStatus | null {
   return {
     state: record.state as RelayStatus['state'],
     reason: typeof record.reason === 'string' ? record.reason : null,
-    droppedBytes: typeof record.dropped_bytes === 'number' ? record.dropped_bytes : 0,
   }
 }
 
@@ -70,43 +69,9 @@ export function reconnectDelay(attempt: number): number {
   return Math.min(500 * 2 ** Math.max(0, attempt), 8_000)
 }
 
-/** Audio held while the socket is down, newest kept: about 30 s of 16 kHz s16. */
-export const HOLD_BYTES = 30 * 16_000 * 2
-
-export class ChunkQueue {
-  private chunks: ArrayBuffer[] = []
-  private held = 0
-  /** Bytes dropped since the last drain, oldest first. */
-  dropped = 0
-
-  private readonly maxBytes: number
-
-  constructor(maxBytes = HOLD_BYTES) {
-    this.maxBytes = maxBytes
-  }
-
-  get bytes(): number {
-    return this.held
-  }
-
-  push(chunk: ArrayBuffer): void {
-    this.chunks.push(chunk)
-    this.held += chunk.byteLength
-    while (this.held > this.maxBytes && this.chunks.length > 0) {
-      const oldest = this.chunks.shift()!
-      this.held -= oldest.byteLength
-      this.dropped += oldest.byteLength
-    }
-  }
-
-  drain(): ArrayBuffer[] {
-    const out = this.chunks
-    this.chunks = []
-    this.held = 0
-    this.dropped = 0
-    return out
-  }
-}
+/** An open socket with more than this queued (about 2 s of audio) is not
+ *  keeping up; further chunks are dropped and counted as lost. */
+export const BUFFERED_LIMIT = 2 * 16_000 * 2
 
 /** What the screen offers. */
 export interface PhoneView {
@@ -172,30 +137,59 @@ export function phoneView({ status, reachable, streaming, starting }: PhoneViewI
 }
 
 /** Whether captured audio is still flowing, judged from the track and context. */
-export type AudioHealth = 'ok' | 'suspended' | 'ended'
+export type AudioHealth = 'ok' | 'muted' | 'suspended' | 'ended'
 
-export function audioHealth(trackState: MediaStreamTrackState | 'missing', contextState: string): AudioHealth {
+export function audioHealth(
+  trackState: MediaStreamTrackState | 'missing',
+  muted: boolean,
+  contextState: string,
+): AudioHealth {
   if (trackState !== 'live') return 'ended'
+  if (muted) return 'muted'
   return contextState === 'running' ? 'ok' : 'suspended'
 }
 
-/** The relay socket's URL beside the page (or beside an absolute API base). */
-export function relayUrl(shuttleBase: string, location: Pick<Location, 'protocol' | 'host'>): string {
+/**
+ * The relay socket's URL beside the page (or beside an absolute API base),
+ * bound to the meeting with launch id `launch`.
+ */
+export function relayUrl(
+  shuttleBase: string,
+  location: Pick<Location, 'protocol' | 'host'>,
+  launch: string | null,
+): string {
   const base = shuttleBase ? new URL(shuttleBase) : null
   const protocol = (base?.protocol ?? location.protocol) === 'https:' ? 'wss:' : 'ws:'
   const host = base?.host ?? location.host
   const prefix = base ? base.pathname.replace(/\/+$/, '') : ''
-  return `${protocol}//${host}${prefix}/api/v1/meeting/audio`
+  const query = launch ? `?launch=${encodeURIComponent(launch)}` : ''
+  return `${protocol}//${host}${prefix}/api/v1/meeting/audio${query}`
 }
 
-/** The link state as words for the status line. */
-export function linkWords(link: LinkState, reason: string | null): string {
+/** A wall-clock time as HH:MM:SS, local. */
+export function clockTime(ms: number): string {
+  const date = new Date(ms)
+  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((part) => String(part).padStart(2, '0'))
+    .join(':')
+}
+
+/**
+ * The status line. `lostSince` is when audio stopped reaching hark after it
+ * had been listening (a drop, or a socket that could not keep up).
+ */
+export function linkWords(link: LinkState, reason: string | null, lostSince: number | null = null): string {
+  if (lostSince !== null && !TERMINAL_LINKS.has(link) && link !== 'idle') {
+    return link === 'connected'
+      ? `The connection can’t keep up — audio lost since ${clockTime(lostSince)}`
+      : `Reconnecting — audio lost since ${clockTime(lostSince)}`
+  }
   switch (link) {
     case 'idle': return 'Mic off'
     case 'opening': return 'Connecting…'
-    case 'waiting': return reason ? `Holding audio: ${reason}` : 'Holding audio until hark listens'
-    case 'connected': return 'Streaming to hark'
-    case 'reconnecting': return 'Connection lost; reconnecting (audio held)'
+    case 'waiting': return 'Loading models — speech isn’t captured until Listening'
+    case 'connected': return 'Listening'
+    case 'reconnecting': return 'Reconnecting — speech isn’t captured until Listening'
     case 'refused': return reason ? `Refused: ${reason}` : 'The relay refused the mic'
     case 'ended': return reason ? `Ended: ${reason}` : 'The meeting ended'
     case 'replaced': return reason ?? 'Another device is now the microphone'

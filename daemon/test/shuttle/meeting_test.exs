@@ -175,10 +175,14 @@ defmodule Shuttle.MeetingTest do
     assert command =~ "'--phone'"
     refute command =~ "--room"
 
-    assert {:ok, Path.join(hark_dir, "phone.sock")} == Meeting.phone_socket()
+    socket_path = Path.join(hark_dir, "phone.sock")
+    assert {:ok, %{path: ^socket_path, launch: launch}} = Meeting.phone_socket()
+    assert is_binary(launch)
+
+    assert row.launch == launch
 
     conn = api_conn() |> get("/api/v1/meeting")
-    assert %{"meeting" => %{"phone" => true}} = Jason.decode!(conn.resp_body)
+    assert %{"meeting" => %{"phone" => true, "launch" => ^launch}} = Jason.decode!(conn.resp_body)
   end
 
   test "phone_socket answers for each meeting state", %{hark_dir: hark_dir} do
@@ -198,10 +202,10 @@ defmodule Shuttle.MeetingTest do
     # A room meeting is live: there is no phone to feed.
     write_meeting(hark_dir, Map.merge(base, %{"phase" => "live", "phone" => nil}))
     assert {:error, :not_phone} = Meeting.phone_socket()
-    assert {:ok, %{meeting: %{phone: false}}} = Meeting.show()
+    assert {:ok, %{meeting: %{phone: false, launch: "launch-current"}}} = Meeting.show()
 
     write_meeting(hark_dir, Map.merge(base, %{"phase" => "live", "phone" => "/x/phone.sock"}))
-    assert {:ok, "/x/phone.sock"} = Meeting.phone_socket()
+    assert {:ok, %{path: "/x/phone.sock", launch: "launch-current"}} = Meeting.phone_socket()
 
     write_meeting(hark_dir, Map.merge(base, %{"phase" => "stopping", "phone" => "/x/phone.sock"}))
     assert {:error, :ended} = Meeting.phone_socket()

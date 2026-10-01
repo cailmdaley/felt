@@ -1,7 +1,8 @@
 defmodule ShuttleWeb.MeetingAudioController do
   @moduledoc """
-  `GET /api/v1/meeting/audio`: upgrades to the WebSocket that relays a phone's
-  microphone into the live `phone` meeting (`ShuttleWeb.MeetingAudioSocket`).
+  `GET /api/v1/meeting/audio?launch=<id>`: upgrades to the WebSocket that
+  relays a phone's microphone into the live `phone` meeting with that launch id
+  (`ShuttleWeb.MeetingAudioSocket`).
 
   Browsers open WebSockets cross-site without CORS, so the upgrade is held to
   the same origin rule as a write (`ShuttleWeb.CORSPlug.write_permitted?/1`):
@@ -16,7 +17,7 @@ defmodule ShuttleWeb.MeetingAudioController do
   # this long has been suspended, and reconnects when it wakes.
   @idle_timeout_ms 60_000
 
-  def upgrade(conn, _params) do
+  def upgrade(conn, params) do
     cond do
       not ShuttleWeb.CORSPlug.write_permitted?(conn) ->
         conn |> put_status(403) |> json(%{error: "origin not allowed"}) |> halt()
@@ -32,7 +33,11 @@ defmodule ShuttleWeb.MeetingAudioController do
         conn
         |> WebSockAdapter.upgrade(
           ShuttleWeb.MeetingAudioSocket,
-          Application.get_env(:shuttle, :meeting_audio_socket, []),
+          Keyword.put(
+            Application.get_env(:shuttle, :meeting_audio_socket, []),
+            :launch,
+            params["launch"]
+          ),
           timeout: @idle_timeout_ms,
           max_frame_size: 1_000_000
         )

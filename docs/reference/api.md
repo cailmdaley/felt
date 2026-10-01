@@ -252,9 +252,10 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `GET /meeting` returns `{available, meeting}`. The row is `null` when this
 daemon has no local meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
-`fiber`, `joined`, `phone`, `tmux_session`, and `error`. `phone` is true when
-the meeting takes its audio from a phone (`mode: "phone"`), so a page can offer
-to connect one. `tail` is the
+`fiber`, `joined`, `phone`, `launch`, `tmux_session`, and `error`. `phone` is
+true when the meeting takes its audio from a phone (`mode: "phone"`), so a page
+can offer to connect one; `launch` is the recording's launch id, which a phone's
+audio socket binds to. `tail` is the
 transcript's last spoken lines (at most 30, oldest first, `#` lines left out),
 read from the end of the file on each request, so the route stays cheap to
 poll. `fiber` names the fiber whose card the meeting rides on. For a joined
@@ -324,23 +325,28 @@ exists. It sends at most one SIGINT to a live hark process, even while hark's
 lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
 no-op; a `starting` or `failed` meeting dismisses its tmux session.
 
-`GET /meeting/audio` upgrades to a WebSocket that feeds the live `phone`
-meeting. The page sends binary frames of raw s16le 16 kHz mono PCM, which the
-daemon writes unchanged into hark's Unix socket, the path `meeting.json` names as
-`phone`. hark binds that socket only once its models load, so until a connect
-succeeds the daemon holds the most recent minute of audio, retries every half
-second, and flushes the held audio first once connected. hark takes one sender;
-a new connection replaces the old one. The daemon answers in small JSON text
-frames: `{"state":"waiting","reason"}` while there is no socket yet,
-`{"state":"connected"}` (with `dropped_bytes` when the held minute overflowed),
-and before closing, `{"state":"refused","reason"}` (close code 4404: no meeting,
-or one recording this machine's microphone), `{"state":"ended","reason"}` (4410:
-the meeting stopped or failed), or `{"state":"replaced","reason"}` (4409: hark
-took another sender). Every meeting state upgrades, so the page can read why;
-a request that is not a WebSocket upgrade gets **426**. Browsers open
-WebSockets cross-site without CORS, so the upgrade takes the same origin rule as
-a write: no `Origin`, an allowlisted dev origin, or the page's own; any other
-origin gets **403**. An idle socket closes after a minute.
+`GET /meeting/audio?launch=<id>` upgrades to a WebSocket that feeds the live
+`phone` meeting whose launch id is `id` (the row's `launch`). The page sends
+binary frames of raw s16le 16 kHz mono PCM, which the daemon writes unchanged
+into hark's Unix socket, the path `meeting.json` names as `phone`. Nothing is
+buffered: hark places phone audio on its own wall clock and pads gaps with
+silence, so audio replayed late would be counted twice and shift every later
+timestamp. Until hark's socket accepts a connection (it binds once the models
+load), frames are discarded and the daemon retries every half second. hark
+takes one sender; a new connection replaces the old one. The daemon answers in
+small JSON text frames: `{"state":"waiting","reason"}` while there is no socket
+yet (audio is dropped), `{"state":"connected"}` once audio reaches hark, and
+before closing, `{"state":"refused","reason"}` (close code 4404: no meeting, a
+different meeting than `launch`, or one recording this machine's microphone),
+`{"state":"ended","reason"}` (4410: the meeting stopped, failed, or gave way to
+another), or `{"state":"replaced","reason"}` (4409: hark took another sender).
+The frame carries the full reason; the close frame's reason is cut, on a
+character boundary, to the 123 bytes a close frame holds. Without `launch` the
+socket feeds whichever phone meeting is live. Every meeting state upgrades, so
+the page can read why; a request that is not a WebSocket upgrade gets **426**.
+Browsers open WebSockets cross-site without CORS, so the upgrade takes the same
+origin rule as a write: no `Origin`, an allowlisted dev origin, or the page's
+own; any other origin gets **403**. An idle socket closes after a minute.
 
 These meeting routes control this daemon's local recording and never owner-route
 it. `POST /capture` and `POST /meeting/join` start that recording before they
@@ -546,6 +552,11 @@ curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 `GET /` outside `/api/v1` serves the board's `index.html`, and `GET /phone` the
 phone page's `phone.html`, or a 404 with a build hint when `ui/dist` has never
 been built. The phone page starts a `phone` meeting (or connects to a live one)
-and streams the phone's microphone to `GET /api/v1/meeting/audio`; browsers
+and streams the phone's microphone to `GET /api/v1/meeting/audio`, bound to
+that meeting's launch id. It sends audio only while hark listens and says so
+when it doesn't: "Loading models — speech isn't captured until Listening" while
+hark loads, "Reconnecting — audio lost since HH:MM:SS" after a drop. Nothing is
+queued for later, and an open socket more than about 2 s behind drops audio
+rather than queueing it; browsers
 grant the microphone only over HTTPS, so reach it through an HTTPS front such as
 `tailscale serve`.

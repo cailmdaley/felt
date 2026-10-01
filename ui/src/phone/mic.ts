@@ -25,6 +25,8 @@ export interface MicHandlers {
   /** The system took the audio away: the track ended or muted, or the
    *  context stopped running. */
   onInterrupted: (why: string) => void
+  /** The system gave a muted track back. */
+  onRecovered?: () => void
 }
 
 /**
@@ -95,7 +97,7 @@ export class Mic {
   }
 
   health(): AudioHealth {
-    return audioHealth(this.track?.readyState ?? 'missing', this.context.state)
+    return audioHealth(this.track?.readyState ?? 'missing', this.track?.muted ?? false, this.context.state)
   }
 
   get sampleRate(): number {
@@ -103,15 +105,27 @@ export class Mic {
   }
 
   /**
-   * Bring the audio back after the tab returns: resume a suspended context and
-   * ask for the mic again when its track ended. Throws when the system will
-   * not give it back without a fresh tap.
+   * Bring the audio back: resume a suspended context, and ask for the mic again
+   * when its track ended or the system muted it. One revival runs at a time;
+   * a stream that arrives after `close()` is stopped at once. Throws when the
+   * system will not give the mic back without a fresh tap.
    */
-  async revive(): Promise<AudioHealth> {
+  revive(): Promise<AudioHealth> {
+    this.reviving ??= this.reviveOnce().finally(() => { this.reviving = null })
+    return this.reviving
+  }
+
+  private reviving: Promise<AudioHealth> | null = null
+
+  private async reviveOnce(): Promise<AudioHealth> {
     if (this.closed) return this.health()
     if (this.context.state !== 'running') await this.context.resume()
-    if (this.track?.readyState !== 'live') {
+    if (!this.closed && (this.track?.readyState !== 'live' || this.track.muted)) {
       const stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS)
+      if (this.closed) {
+        for (const track of stream.getTracks()) track.stop()
+        return this.health()
+      }
       this.attach(stream)
     }
     return this.health()
@@ -138,6 +152,9 @@ export class Mic {
     track.onmute = () => {
       if (!this.closed) this.handlers.onInterrupted('the system muted the mic')
     }
+    track.onunmute = () => {
+      if (!this.closed) this.handlers.onRecovered?.()
+    }
     this.track = track
     this.source = this.context.createMediaStreamSource(stream)
     this.source.connect(this.worklet)
@@ -149,19 +166,43 @@ export class Mic {
     if (this.track) {
       this.track.onended = null
       this.track.onmute = null
+      this.track.onunmute = null
       this.track.stop()
     }
     this.track = null
   }
 }
 
-/** The screen wake lock, held while streaming and taken again on return. */
+export interface WakeLockLike {
+  readonly released: boolean
+  release(): Promise<void>
+  addEventListener(type: 'release', listener: () => void): void
+}
+
+/**
+ * The screen wake lock, held while streaming and taken again on return. A
+ * grant that arrives after `release()` (the request was still pending) is
+ * released at once.
+ */
 export class ScreenLock {
-  private sentinel: WakeLockSentinel | null = null
+  private sentinel: WakeLockLike | null = null
   private wanted = false
+  private generation = 0
+  private pending = false
+  private readonly request: (() => Promise<WakeLockLike>) | null
+  private readonly visible: () => boolean
+
+  constructor(
+    request: (() => Promise<WakeLockLike>) | null =
+      'wakeLock' in navigator ? () => navigator.wakeLock.request('screen') : null,
+    visible: () => boolean = () => document.visibilityState === 'visible',
+  ) {
+    this.request = request
+    this.visible = visible
+  }
 
   get supported(): boolean {
-    return 'wakeLock' in navigator
+    return this.request !== null
   }
 
   get held(): boolean {
@@ -170,9 +211,25 @@ export class ScreenLock {
 
   async acquire(): Promise<void> {
     this.wanted = true
-    if (!this.supported || this.held || document.visibilityState !== 'visible') return
-    this.sentinel = await navigator.wakeLock.request('screen')
-    this.sentinel.addEventListener('release', () => { this.sentinel = null })
+    if (!this.request || this.held || this.pending || !this.visible()) return
+    const generation = this.generation
+    this.pending = true
+    let sentinel: WakeLockLike
+    try {
+      sentinel = await this.request()
+    } finally {
+      this.pending = false
+    }
+    if (generation !== this.generation || !this.wanted) {
+      void sentinel.release().catch(() => {})
+      // Wanted again since (released, then acquired while this was pending).
+      if (this.wanted) await this.acquire()
+      return
+    }
+    this.sentinel = sentinel
+    sentinel.addEventListener('release', () => {
+      if (this.sentinel === sentinel) this.sentinel = null
+    })
   }
 
   /** Take the lock again if it is wanted (the browser drops it when hidden). */
@@ -182,6 +239,7 @@ export class ScreenLock {
 
   release(): void {
     this.wanted = false
+    this.generation += 1
     const sentinel = this.sentinel
     this.sentinel = null
     void sentinel?.release().catch(() => {})

@@ -170,12 +170,13 @@ defmodule Shuttle.Meeting do
 
   @doc """
   Where the live phone meeting takes its audio: hark's Unix socket, named in
-  `meeting.json` as `phone`. `:pending` while a launch has not yet written its
-  lifecycle file; the socket itself is bound only once hark's models load, so
-  a connect may still be refused for a while after `{:ok, path}`.
+  `meeting.json` as `phone`, with the launch id of the meeting it belongs to.
+  `:pending` while a launch has not yet written its lifecycle file; the socket
+  itself is bound only once hark's models load, so a connect may still be
+  refused for a while after `{:ok, _}`.
   """
   @spec phone_socket(keyword()) ::
-          {:ok, String.t()}
+          {:ok, %{path: String.t(), launch: String.t() | nil}}
           | :pending
           | {:error, :none | :not_phone | :ended | {:failed, String.t() | nil} | term()}
   def phone_socket(opts \\ []) do
@@ -197,7 +198,7 @@ defmodule Shuttle.Meeting do
   defp phone_target(%{state: state}, meeting_json) when state in ["loading", "live"] do
     case phone_path(meeting_json) do
       nil -> {:error, :not_phone}
-      path -> {:ok, path}
+      path -> {:ok, %{path: path, launch: launch_from(meeting_json)}}
     end
   end
 
@@ -471,7 +472,7 @@ defmodule Shuttle.Meeting do
         observed
 
       System.monotonic_time(:millisecond) >= deadline ->
-        {:ok, starting_row(paths, title, fiber, mode)}
+        {:ok, starting_row(paths, title, fiber, mode, launch_id)}
 
       true ->
         Process.sleep(@launch_poll_ms)
@@ -479,7 +480,7 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp starting_row(paths, title, fiber, mode) do
+  defp starting_row(paths, title, fiber, mode, launch_id) do
     %{
       state: "starting",
       title: title,
@@ -490,6 +491,7 @@ defmodule Shuttle.Meeting do
       fiber: fiber,
       joined: not is_nil(fiber),
       phone: mode == "phone",
+      launch: launch_id,
       tmux_session: @session,
       error: nil
     }
@@ -776,6 +778,7 @@ defmodule Shuttle.Meeting do
       fiber: joined_fiber,
       joined: not is_nil(joined_fiber),
       phone: not is_nil(phone_path(data)),
+      launch: launch_from(data) || tmux_launch(tmux),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]
     }
