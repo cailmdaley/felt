@@ -417,7 +417,7 @@ export function StashForm({
         schedule,
         tz: scheduleTz,
         projectDir: selectedProject.path,
-        chrome,
+        chrome: chrome && chromeCapable,
         surface,
       }),
     }
@@ -461,13 +461,16 @@ export function StashForm({
   // The agent whose constraint metadata gates the dependent axes.
   const constraintAgent = agents.find((a) => a.id === agentId) ?? defaultAgentEntry
   const effectiveEffort = resolveEffort(constraintAgent, effort)
-  const chromeCapable = agents.length === 0 ? true : constraintAgent?.chrome_capable ?? false
+  const chromeCapable = selectedHost.browserCapable && constraintAgent?.chrome_capable === true
 
-  // Clamp axes whenever the constraint agent shifts under them.
   useEffect(() => {
     if (chrome && !chromeCapable) setChrome(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [constraintAgent?.id, registry])
+  }, [chrome, chromeCapable])
+
+  const handleStashHostChange = (id: string): void => {
+    setChrome(false)
+    handleHostChange(id)
+  }
 
   const handleAgentChange = (id: string): void => {
     const wasCodex = isCodexAgent(agents.find((a) => a.id === agentId) ?? defaultAgentEntry)
@@ -566,7 +569,7 @@ export function StashForm({
             <HostProjectFields
               hosts={hosts}
               selectedHostId={selectedHostId}
-              onHostChange={handleHostChange}
+              onHostChange={handleStashHostChange}
               projects={hostProjects}
               selectedProjectId={selectedProjectId}
               onProjectChange={setSelectedProjectId}

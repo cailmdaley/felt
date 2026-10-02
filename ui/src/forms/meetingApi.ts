@@ -1,4 +1,4 @@
-import { parseMeetingRecord, type MeetingRecord } from '../board/meeting'
+import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord } from '../board/meeting'
 
 /**
  * What hark records: `call` this machine's mic and system audio, `room` its mic
@@ -11,6 +11,29 @@ export const MEETING_MODES: ReadonlyArray<{ value: MeetingMode; label: string }>
   { value: 'room', label: 'Room' },
   { value: 'phone', label: 'Phone' },
 ]
+
+const KNOWN_MEETING_MODES = new Set<MeetingMode>(MEETING_MODES.map(({ value }) => value))
+
+export interface CaptureMeetingCapabilities {
+  available: boolean
+  modes: MeetingMode[]
+}
+
+/** Parse the serving daemon's meeting modes and fail closed while it records. */
+export function parseCaptureMeetingCapabilities(value: unknown): CaptureMeetingCapabilities {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { available: false, modes: [] }
+  const raw = value as Record<string, unknown>
+  const status = parseMeetingStatus(raw)
+  const modes = Array.isArray(raw.modes)
+    ? [...new Set(raw.modes.filter((mode): mode is MeetingMode =>
+        typeof mode === 'string' && KNOWN_MEETING_MODES.has(mode as MeetingMode),
+      ))]
+    : []
+  return {
+    available: status !== null && meetingJoinable(status),
+    modes,
+  }
+}
 
 function responseError(body: unknown, status: number): string {
   if (body && typeof body === 'object' && !Array.isArray(body)) {

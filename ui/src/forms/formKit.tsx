@@ -136,7 +136,7 @@ export function SessionField({
   )
 }
 
-/** The `--chrome` launch flag, greyed for a harness that has no browser. */
+/** The `--chrome` launch flag, offered only when its host and agent support it. */
 export function ChromeFlag({
   checked,
   capable,
@@ -145,12 +145,13 @@ export function ChromeFlag({
   checked: boolean
   capable: boolean
   onChange: (checked: boolean) => void
-}): JSX.Element {
+}): JSX.Element | null {
+  if (!capable) return null
   return (
-    <label className={`form-chrome${capable ? '' : ' form-chrome-off'}`}>
-      <input type="checkbox" checked={checked} disabled={!capable} onChange={(e) => onChange(e.target.checked)} />
+    <label className="form-chrome">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <code>--chrome</code>
-      <span className="form-chrome-hint">{capable ? 'browser automation mode' : 'claude harness only'}</span>
+      <span className="form-chrome-hint">browser automation mode</span>
     </label>
   )
 }
@@ -348,10 +349,6 @@ export function injectFormKitStyles(): void {
       color: #2E2A26;
       cursor: pointer;
       user-select: none;
-    }
-    .form-chrome-off {
-      cursor: not-allowed;
-      opacity: 0.45;
     }
     .form-chrome input[type="checkbox"] {
       width: 14px;

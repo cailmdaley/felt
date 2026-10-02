@@ -74,6 +74,8 @@ export interface Host {
   /** This host can raise its own OS folder dialog. False for every remote:
    *  a dialog there would open on a desktop nobody is sitting at. */
   nativeFolderPicker: boolean
+  /** This host can run browser automation. */
+  browserCapable: boolean
 }
 
 export interface ProjectModel {
@@ -99,6 +101,8 @@ interface StoreRegistryOrigin {
   projects?: string[]
   /** This host can raise its own OS folder dialog (`POST /api/v1/choose-folder`). */
   native_folder_picker?: boolean
+  /** This host can run browser automation. */
+  browser_capable?: boolean
   /** Presentation label a remote carries for itself. */
   display?: string
 }
@@ -274,6 +278,7 @@ export function deriveHosts(
         label: id || 'local',
         isLocal: true,
         nativeFolderPicker: nativePicker(registry, feedHost),
+        browserCapable: origin?.browser_capable === true,
       })
     } else {
       seen.add(id)
@@ -283,6 +288,7 @@ export function deriveHosts(
         isLocal: false,
         // Never native: the dialog would open on that host's own desktop.
         nativeFolderPicker: false,
+        browserCapable: origin?.browser_capable === true,
       })
     }
   }
@@ -293,6 +299,7 @@ export function deriveHosts(
       label: localId || 'local',
       isLocal: true,
       nativeFolderPicker: nativePicker(registry, feedHost),
+      browserCapable: false,
     })
   }
 
@@ -328,6 +335,7 @@ function parseStoreRegistry(body: unknown): StoreRegistry {
         felt_stores: stringArray(rec.felt_stores) ?? [],
         projects: stringArray(rec.projects),
         native_folder_picker: rec.native_folder_picker === true,
+        browser_capable: rec.browser_capable === true,
         display: typeof rec.display === 'string' ? rec.display : undefined,
       }
     }
