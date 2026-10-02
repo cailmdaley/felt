@@ -32,7 +32,7 @@ felt/
 │   └── rel/                 built daemon release (gitignored)
 ├── ui/                      TypeScript board; npm run build produces ui/dist
 │   ├── src/board/views/     temporal and artifact views
-│   ├── src/phone/           the phone mic page served at /phone
+│   ├── src/phone/           browser microphone, PCM worklet, relay, and audio session
 │   └── harness/             offline visual-verification harnesses
 ├── claude-plugin/           Claude Code and Codex plugin payload
 ├── scripts/                 bootstrap, release, and verification tooling

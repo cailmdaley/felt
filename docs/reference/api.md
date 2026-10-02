@@ -92,7 +92,9 @@ the daemon that receives the request before owner-routing the capture, so the
 recording starts immediately while the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
 allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
 (mode and transcript path, plus a pointer to the shuttle skill's
-`references/meeting.md`) followed by the user's note. It replaces `meeting` with
+`references/meeting.md`) followed by the user's note.
+The capture scribe infers the meeting's identity, participants, and filing location from the transcript and felt tree; it doesn't require a title before recording.
+It replaces `meeting` with
 `meeting_launch`, the recording's launch id, before forwarding, so the owner
 handles an ordinary terminal capture whose supplied `Claim` body carries
 `meeting: <launch id>`. The transcript is mirrored to the
@@ -549,14 +551,17 @@ curl -s http://127.0.0.1:4000/api/v1/version | jq
 curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 ```
 
-`GET /` outside `/api/v1` serves the board's `index.html`, and `GET /phone` the
-phone page's `phone.html`, or a 404 with a build hint when `ui/dist` has never
-been built. The phone page starts a `phone` meeting (or connects to a live one)
-and streams the phone's microphone to `GET /api/v1/meeting/audio`, bound to
-that meeting's launch id. It sends audio only while hark listens and says so
-when it doesn't: "Loading models — speech isn't captured until Listening" while
-hark loads, "Reconnecting — audio lost since HH:MM:SS" after a drop. Nothing is
-queued for later, and an open socket more than about 2 s behind drops audio
-rather than queueing it; browsers
-grant the microphone only over HTTPS, so reach it through an HTTPS front such as
-`tailscale serve`.
+`GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build hint when `ui/dist` has never been built.
+`GET /phone` redirects to `/`.
+Capture starts a `phone` meeting with an optional prompt; the scribe infers the meeting and where to file it from the transcript.
+On a mobile viewport, Capture defaults to Meeting → Phone and remembers the host and project from the last meeting start.
+Desktop Capture defaults to an ordinary idea, with Phone selectable in the meeting modes.
+The Start tap opens the microphone, then binds its audio session to the returned meeting's launch id at `GET /api/v1/meeting/audio`.
+The live card offers Connect mic when this tab isn't streaming, a level meter, Restore mic after an interruption, and Stop.
+Keep the screen on and the browser in front; on iOS, screen lock stops the microphone.
+The tab requests a screen wake lock to prevent auto-lock where supported.
+A background-interruption warning retains the time the tab went hidden even when timers were suspended; Restore mic may ask for permission again.
+
+Audio is sent only while hark listens, and the card says when it doesn't: "Loading models — speech isn't captured until Listening" while hark loads, "Reconnecting — audio lost since HH:MM:SS" after a drop.
+Nothing is queued for later, and an open socket more than about 2 s behind drops audio rather than queueing it.
+Browsers grant the microphone only in a secure context, so reach the board from a phone through an HTTPS front such as `tailscale serve`.
