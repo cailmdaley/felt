@@ -261,7 +261,12 @@ kanban with Stash/Capture and the fiber/file viewer, plus the Chronicle and
 Board views on hotkeys 2-3, served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
 Phone meetings start from Capture on the board.
-On a mobile viewport, Capture selects Meeting → Phone; the live meeting card holds the microphone controls.
+Capture reads meeting availability and supported modes from the daemon serving the board.
+On a mobile viewport, it selects Meeting with phone audio and no mode selector; the live meeting card holds the microphone controls.
+On desktop, the selector appears only when the recording host supports several modes.
+The host picker chooses where the scribe runs; open the desired recording host's board to record there.
+When recorder and scribe differ, Capture names both beside the Meeting toggle.
+The `--chrome` flag appears only for a browser-capable agent on a macOS host with an active GUI session.
 `/phone` redirects to `/`.
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh
 checkout that hasn't built the bundle gets a 404 with the hint

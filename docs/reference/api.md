@@ -191,8 +191,20 @@ harness processes sharing one transcript.
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
-| `GET /meeting` | local | Report hark availability and meeting state on this daemon's host |
+| `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
 | `GET /meeting/audio` | local | WebSocket: relay a phone's microphone into the live `phone` meeting's hark socket |
+
+`GET /meeting?origin=<host>` returns `{available, modes, meeting}` from the selected daemon.
+`modes` lists the recording inputs that host supports: `call` (local microphone and system audio), `room` (local microphone), or `phone` (streamed phone microphone).
+Without hark, the list is empty.
+Capture reads the serving daemon's modes, narrows them to `phone` on mobile, and hides the mode selector when only one mode remains.
+A live meeting on the serving daemon prevents starting another there.
+The board's host picker chooses the scribe host, not the recorder: open the desired recording host's board to record there.
+When the scribe runs elsewhere, Capture names both hosts beside the Meeting toggle.
+
+Each origin in `GET /felt-stores` also reports `browser_capable`.
+It is true only for a macOS daemon whose user has an active GUI session.
+Capture and Stash offer `--chrome` only when both the selected host and selected agent support it.
 
 `GET /peers` returns `{host, sessions, gaps}`. Fleet discovery queries each
 configured daemon once with `local=true`; an offline, old, timed-out, or
@@ -251,8 +263,10 @@ may total at most 20 MiB. Successful receipts include
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
 
-`GET /meeting` returns `{available, meeting}`. The row is `null` when this
-daemon has no local meeting capture to report. Otherwise it carries
+`GET /meeting` returns `{available, modes, meeting}` for the serving daemon, or the host named by `origin`.
+Hark exposes no capability-reporting CLI protocol, and its help includes device flags even on Linux.
+The daemon therefore derives `modes` from hark availability and the OS: macOS offers call/room/phone; other hosts offer phone.
+The row is `null` when the addressed daemon has no meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
 `fiber`, `joined`, `phone`, `launch`, `tmux_session`, and `error`. `phone` is
 true when the meeting takes its audio from a phone (`mode: "phone"`), so a page
@@ -283,7 +297,7 @@ prompt. `project_dir` remains required by the ordinary capture flow.
 
 An unavailable hark executable returns **503**. An existing meeting in
 `starting`, `loading`, `live`, or `stopping` returns **409** with its row.
-Meeting mode rejects `surface: "app"` and an invalid mode with **422**.
+Meeting mode rejects `surface: "app"`, an invalid mode, or a mode unsupported by the recorder with **422**.
 If capture fails after hark starts, the capture's status and error body include
 the meeting row and `recording: true`; the local recording continues.
 
@@ -350,9 +364,9 @@ Browsers open WebSockets cross-site without CORS, so the upgrade takes the same
 origin rule as a write: no `Origin`, an allowlisted dev origin, or the page's
 own; any other origin gets **403**. An idle socket closes after a minute.
 
-These meeting routes control this daemon's local recording and never owner-route
-it. `POST /capture` and `POST /meeting/join` start that recording before they
-route the agent's half to the project's or the fiber's owner.
+Meeting writes and audio control the serving daemon's recording and never owner-route it.
+`POST /capture` and `POST /meeting/join` start that recording before routing the agent's half to the project's or the fiber's owner.
+`GET /meeting?origin=<host>` can inspect another host's capabilities and recording without transferring recording ownership.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
@@ -554,8 +568,8 @@ curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 `GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build hint when `ui/dist` has never been built.
 `GET /phone` redirects to `/`.
 Capture starts a `phone` meeting with an optional prompt; the scribe infers the meeting and where to file it from the transcript.
-On a mobile viewport, Capture defaults to Meeting → Phone and remembers the host and project from the last meeting start.
-Desktop Capture defaults to an ordinary idea, with Phone selectable in the meeting modes.
+On a mobile viewport, Capture defaults to Meeting with phone audio and no mode selector, and remembers the scribe host and project from the last meeting start.
+Desktop Capture defaults to an ordinary idea; enabling Meeting uses the recorder's first supported mode and shows a selector only when several modes are available.
 The Start tap opens the microphone, then binds its audio session to the returned meeting's launch id at `GET /api/v1/meeting/audio`.
 The live card offers Connect mic when this tab isn't streaming, a level meter, Restore mic after an interruption, and Stop.
 Keep the screen on and the browser in front; on iOS, screen lock stops the microphone.
