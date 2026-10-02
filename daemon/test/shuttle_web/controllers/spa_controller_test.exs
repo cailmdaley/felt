@@ -23,6 +23,13 @@ defmodule ShuttleWeb.SpaControllerTest do
     assert ShuttleWeb.Assets.dist() == expected
   end
 
+  test "GET /phone redirects to the board root" do
+    conn = get(local_conn(), "/phone")
+
+    assert conn.status == 302
+    assert get_resp_header(conn, "location") == ["/"]
+  end
+
   test "GET / serves index.html when built, else 404s with a build hint" do
     conn = get(local_conn(), "/")
     index = Path.join(ShuttleWeb.Assets.dist(), "index.html")

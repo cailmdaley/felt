@@ -32,6 +32,18 @@ defmodule ShuttleWeb.CaptureControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "prompt"
   end
 
+  test "POST /api/v1/capture rejects a whitespace-only ordinary prompt" do
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/capture",
+        Jason.encode!(%{prompt: " \n\t ", project_dir: "/no/such/project"})
+      )
+
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ "prompt"
+  end
+
   test "POST /api/v1/capture without project_dir is a 400" do
     conn =
       api_conn()
@@ -98,5 +110,4 @@ defmodule ShuttleWeb.CaptureControllerTest do
     assert forwarded["prompt"] == "an idea"
     assert forwarded["project_dir"] == "/candide/project"
   end
-
 end

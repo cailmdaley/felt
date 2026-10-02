@@ -172,8 +172,7 @@ defmodule ShuttleWeb.Router do
   # daemon hosts the board itself — one `shuttle` process, API + UI.
   scope "/", ShuttleWeb do
     get("/", SpaController, :index)
-    # One screen for a phone held up in a meeting: start or join a phone
-    # meeting and stream its microphone to `/api/v1/meeting/audio`.
+    # `/phone` redirects to the board root.
     get("/phone", SpaController, :phone)
   end
 end

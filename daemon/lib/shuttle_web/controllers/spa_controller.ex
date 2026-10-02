@@ -1,10 +1,8 @@
 defmodule ShuttleWeb.SpaController do
   @moduledoc """
-  Serve the Shuttle UI's pages: `index.html` at `GET /`, the board, and
-  `phone.html` at `GET /phone` — the entries the daemon hosts so `shuttle` is
-  one process yielding both the `:4000` API and its frontend. Static assets
-  (`/assets`, `/fonts`, …) are served by `Plug.Static` in the endpoint; this
-  only covers the page documents.
+  Serve the Shuttle board at `GET /` and redirect `GET /phone` to it. Static
+  assets (`/assets`, `/fonts`, …) are served by `Plug.Static` in the endpoint;
+  this controller handles the page document.
 
   When the bundle is not built (a fresh checkout that hasn't run `npm run
   build`), respond 404 with the build hint rather than 500 — the API is still
@@ -15,8 +13,8 @@ defmodule ShuttleWeb.SpaController do
 
   def index(conn, _params), do: page(conn, "index.html")
 
-  @doc "The phone page, `GET /phone`: the bundle's second entry, `phone.html`."
-  def phone(conn, _params), do: page(conn, "phone.html")
+  @doc "Redirect `GET /phone` to the board root."
+  def phone(conn, _params), do: redirect(conn, to: "/")
 
   defp page(conn, file) do
     path = Path.join(ShuttleWeb.Assets.dist(), file)

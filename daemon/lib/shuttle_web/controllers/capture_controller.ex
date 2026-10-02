@@ -68,7 +68,7 @@ defmodule ShuttleWeb.CaptureController do
     project_dir = Map.get(params, "project_dir")
 
     cond do
-      not present?(prompt) ->
+      not present?(prompt) or String.trim(prompt) == "" ->
         capture_error(conn, 400, %{error: "prompt is required"}, meeting_row)
 
       not present?(project_dir) ->

@@ -2,10 +2,10 @@ defmodule ShuttleWeb.ReadinessPlug do
   @moduledoc """
   Fail fast on API routes whose state is not safe to serve until boot completes.
 
-  The board and phone page shells, version, direct text/file message delivery,
-  peer discovery and the append-only local session ledger do not depend on
-  Poller initialization and remain available. Plug.Static runs before this
-  gate, so its assets also load. The booting response intentionally has no
+  The board shell and `/phone` redirect remain available before Poller
+  initialization, as do version, direct text/file message delivery, peer
+  discovery and the append-only local session ledger. Plug.Static runs before
+  this gate, so its assets also load. The booting response intentionally has no
   Retry-After header: HTTP clients such as OTP :httpc may replay POST requests
   when that header accompanies 503.
   """

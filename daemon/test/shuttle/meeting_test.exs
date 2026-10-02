@@ -645,6 +645,50 @@ defmodule Shuttle.MeetingTest do
     assert conn.status == 404
   end
 
+  test "meeting capture accepts a whitespace-only yap and sends transcript-first scribe instructions",
+       %{
+         hark_dir: hark_dir,
+         tmp_dir: tmp_dir
+       } do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient,
+       {:ok, 200, Jason.encode!(%{"spawned" => true, "tmux_session" => "capture-session"})}}
+    )
+
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_starting_meeting_handler(hark_dir)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/capture",
+        Jason.encode!(%{
+          "meeting" => %{"mode" => "phone"},
+          "prompt" => " \n\t ",
+          "project_dir" => Path.join(tmp_dir, "remote-project"),
+          "origin" => "project-host"
+        })
+      )
+
+    assert conn.status == 200
+    assert %{"meeting" => %{"state" => "live"}} = Jason.decode!(conn.resp_body)
+
+    forwarded = Shuttle.Test.MeetingCaptureForwardClient.last()
+    assert forwarded.url == "http://127.0.0.1:4001/api/v1/capture"
+    request = Jason.decode!(forwarded.body)
+    assert request["prompt"] =~ "Meeting mode (phone)."
+    assert request["prompt"] =~ "infer the meeting's identity, topic, participants"
+    assert request["prompt"] =~ "appropriate filing location"
+    assert request["prompt"] =~ "Do not ask the user for a title"
+    assert request["prompt"] =~ "provisional date-based name"
+    assert request["prompt"] =~ "The user's note about the meeting follows (it may be empty)."
+    assert request["prompt"] =~ "~/.hark/meetings/2026-09-25_1403.txt"
+  end
+
   test "meeting mode starts locally, forwards a normal capture, and resolves the mirror name", %{
     hark_dir: hark_dir,
     tmp_dir: tmp_dir
