@@ -318,6 +318,7 @@ export class KanbanModal {
           join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
           current: () => this.meetingStatus.meeting,
         },
+        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
       },
     )
     this.surfaces = new KanbanSurfaceRenderer({
@@ -1854,7 +1855,9 @@ export class KanbanModal {
       if (!wasFirstRender && sig === this.lastResponseSig) {
         // The Desk skips an identical-payload re-render, but a temporal view
         // still gets its poll: its content moves with the clock (and with
-        // activity and the ledgers), not only with the fiber feed.
+        // activity and the ledgers), not only with the fiber feed. The open
+        // card's worker pill crosses its idle threshold on the clock too.
+        this.syncDetailRuntime(data)
         this.mountOrRefreshActiveView()
         return
       }
@@ -1966,8 +1969,16 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
+  /** Hand the open card's fresh copy to its panel, whose worker pill follows
+   *  the worker's runtime phase. */
+  private syncDetailRuntime(data: KanbanResponse): void {
+    const id = this.detailModal.openCardId
+    if (id) this.detailModal.syncRuntime(findCardById(data, id))
+  }
+
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
+    this.syncDetailRuntime(data)
 
     // Never rebuild the Desk while it is hidden behind a temporal view. Every
     // pass at the end of this method MEASURES — `expandOutcomesToFillSpace`

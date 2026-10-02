@@ -737,6 +737,15 @@ export class FiberDetailModal {
   private transcriptPane: HTMLElement | null = null
   /** Repaints the drawer's Meeting verb from the board's meeting status. */
   private meetingPaint: (() => void) | null = null
+  /** Whether the open card's worker pill shows its waiting/attention phase.
+   *  The Desk draws phase only on In flight cards, and the board answers the
+   *  same way here; absent, the phase always shows. */
+  private readonly workerPhase: (card: KanbanCard) => boolean
+  /** The header's worker pill, the status pill it sits before, and the runtime
+   *  state it was drawn from — repainted by {@link syncRuntime}. */
+  private workerPill: HTMLElement | null = null
+  private statusPill: HTMLElement | null = null
+  private workerPillKey = ''
 
   constructor(
     shuttleBase: string,
@@ -748,6 +757,7 @@ export class FiberDetailModal {
       panel?: LinkedFiberPanel
       onCloseRequest?: () => void
       meeting?: MeetingJoinControl
+      workerPhase?: (card: KanbanCard) => boolean
     },
   ) {
     this.shuttleBase = shuttleBase
@@ -758,6 +768,7 @@ export class FiberDetailModal {
     this.linkPanel = opts?.panel ?? null
     this.onCloseRequest = opts?.onCloseRequest ?? null
     this.meeting = opts?.meeting ?? null
+    this.workerPhase = opts?.workerPhase ?? (() => true)
   }
 
   /**
@@ -844,18 +855,12 @@ export class FiberDetailModal {
       void this.forceReload()
     })
 
-    // The Aloft control is the Desk card's own pill: same label, same states,
-    // same destination under a mouse or a finger (see `terminalWorkerPill`).
-    // An app worker's destination follows the conversation backend.
-    let aloftPill: HTMLElement | null = null
     const coarse = coarsePointer()
     const appTarget = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
-    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      const workerState = workerVariant(card)
-      aloftPill = appWorkerLink(card, `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`)
-    } else if (card.tmuxSession) {
-      aloftPill = terminalWorkerPill(card, { classes: 'kbn-detail-aloft', openWorker: this.onOpenWorker })
-    }
+    const aloftPill = this.buildWorkerPill(card)
+    this.workerPill = aloftPill
+    this.statusPill = pill
+    this.workerPillKey = this.workerPillState(card)
 
     const closeBtn = document.createElement('button')
     closeBtn.type = 'button'
@@ -1119,7 +1124,68 @@ export class FiberDetailModal {
     paintTranscript(pane.querySelector<HTMLOListElement>('.kbn-detail-transcript-lines')!, meeting.tail)
   }
 
+  /**
+   * The Aloft control is the Desk card's own pill: same label, same states,
+   * same destination under a mouse or a finger (see `terminalWorkerPill`).
+   * An app worker's destination follows the conversation backend.
+   */
+  private buildWorkerPill(card: KanbanCard): HTMLElement | null {
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
+      const workerState = workerVariant(card)
+      return appWorkerLink(card, `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`)
+    }
+    if (card.tmuxSession) {
+      return terminalWorkerPill(card, {
+        classes: 'kbn-detail-aloft',
+        phase: this.workerPhase(card),
+        openWorker: this.onOpenWorker,
+      })
+    }
+    return null
+  }
+
+  /** The id of the card the panel is showing, or null when closed. */
+  get openCardId(): string | null {
+    return this.overlay ? this.card?.id ?? null : null
+  }
+
+  /** Everything the worker pill is drawn from, as one comparable string. */
+  private workerPillState(card: KanbanCard): string {
+    return JSON.stringify([
+      card.workerSurface ?? card.shuttleSurface ?? null,
+      card.sessionUuid ?? null,
+      card.tmuxSession ?? null,
+      card.sessionLink ?? null,
+      card.runtimePhase ?? null,
+      card.lastActivityAt ?? null,
+      card.launchError ?? null,
+      this.workerPhase(card),
+      workerVariant(card),
+    ])
+  }
+
+  /**
+   * Repaint the header's worker pill from a fresher copy of the open card —
+   * the board calls this after every poll, so the pill follows the worker
+   * between Waiting, Aloft and Blocked while the panel stays open. A card
+   * other than the open one is ignored.
+   */
+  syncRuntime(card: KanbanCard | null): void {
+    if (!card || !this.overlay || !this.statusPill || this.card?.id !== card.id) return
+    const key = this.workerPillState(card)
+    if (key === this.workerPillKey) return
+    this.workerPillKey = key
+    const next = this.buildWorkerPill(card)
+    if (this.workerPill && next) this.workerPill.replaceWith(next)
+    else if (next) this.statusPill.before(next)
+    else this.workerPill?.remove()
+    this.workerPill = next
+  }
+
   close(): void {
+    this.workerPill = null
+    this.statusPill = null
+    this.workerPillKey = ''
     this.transcriptCard = null
     this.transcriptPane = null
     this.meetingPaint = null
@@ -1932,7 +1998,7 @@ export class FiberDetailModal {
       this.onSaved,
       this.onTransition,
       this.onOpenWorker,
-      { host, panel, onCloseRequest: requestClose, meeting: this.meeting ?? undefined },
+      { host, panel, onCloseRequest: requestClose, meeting: this.meeting ?? undefined, workerPhase: this.workerPhase },
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
