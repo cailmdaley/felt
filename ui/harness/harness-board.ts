@@ -1251,7 +1251,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
     return json({ meeting: mockMeeting }, 202)
   }
-  if (url.endsWith('/api/v1/meeting')) return json({ available: true, meeting: mockMeeting })
+  if (url.endsWith('/api/v1/meeting')) return json({ available: true, modes: ['call', 'room', 'phone'], meeting: mockMeeting })
   if (url.endsWith('/api/v1/meeting/join') && init?.method === 'POST') {
     const request = body()
     if (mockMeeting && mockMeeting.state !== 'failed') return json({ error: 'a meeting is already active', meeting: mockMeeting }, 409)
@@ -1327,6 +1327,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
             display: h,
             stale: false,
             native_folder_picker: h === LOCAL_HOST,
+            browser_capable: h === LOCAL_HOST,
             felt_stores: h === LOCAL_HOST ? ['/home/you/loom'] : ['/scratch/you/loom'],
             expanded_felt_stores: h === LOCAL_HOST ? ['/home/you/loom', '/home/you/dev/felt'] : undefined,
             projects: h === LOCAL_HOST ? ['/home/you/loom', '/home/you/dev/felt'] : ['/scratch/you/analysis'],

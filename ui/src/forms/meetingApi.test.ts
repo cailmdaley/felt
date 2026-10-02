@@ -1,8 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
-import { joinMeeting, joinMeetingBody, stopMeeting } from './meetingApi'
+import { joinMeeting, joinMeetingBody, parseCaptureMeetingCapabilities, stopMeeting } from './meetingApi'
 
 const reply = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
+describe('parseCaptureMeetingCapabilities', () => {
+  it('keeps only known unique modes in daemon order', () => {
+    expect(parseCaptureMeetingCapabilities({
+      available: true, modes: ['phone', 'room', 'phone', 'unknown', 3, null, 'call'], meeting: null,
+    })).toEqual({ available: true, modes: ['phone', 'room', 'call'] })
+  })
+
+  it('does not infer modes from missing or malformed capabilities', () => {
+    for (const modes of [undefined, null, 'phone', {}, []]) {
+      expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: null })).toEqual({ available: true, modes: [] })
+    }
+    for (const value of [undefined, null, [], 'phone', {}, { available: 'true', modes: ['phone'] }]) {
+      expect(parseCaptureMeetingCapabilities(value).available).toBe(false)
+    }
+  })
+
+  it('fails closed for unavailable or occupied recorders but permits replacing a failed meeting', () => {
+    const modes = ['phone']
+    for (const state of ['starting', 'loading', 'live', 'stopping', 'unknown']) {
+      expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: { state } }).available).toBe(false)
+    }
+    expect(parseCaptureMeetingCapabilities({ available: false, modes, meeting: null }).available).toBe(false)
+    expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: { state: 'failed' } })).toEqual({ available: true, modes })
+  })
+})
 
 describe('stopMeeting', () => {
   it('posts to the local meeting stop route and treats a missing meeting as already stopped', async () => {

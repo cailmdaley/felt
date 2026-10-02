@@ -108,17 +108,17 @@ describe('deriveHosts', () => {
   it('normalizes the local origin to the id the projects carry, and sorts it first', () => {
     const hosts = deriveHosts(registry, 'laptop', feedOrigins)
     expect(hosts.map((h) => h.id)).toEqual(['local', 'candide'])
-    expect(hosts[0]).toMatchObject({ label: 'laptop', isLocal: true, nativeFolderPicker: true })
+    expect(hosts[0]).toMatchObject({ label: 'laptop', isLocal: true, nativeFolderPicker: true, browserCapable: false })
   })
 
   it('never calls a remote native — its dialog would open on a desktop nobody is at', () => {
     const candide = deriveHosts(registry, 'laptop', feedOrigins).find((h) => h.id === 'candide')
-    expect(candide).toMatchObject({ label: 'Candide', isLocal: false, nativeFolderPicker: false })
+    expect(candide).toMatchObject({ label: 'Candide', isLocal: false, nativeFolderPicker: false, browserCapable: false })
   })
 
   it('always yields a local host, even from a registry that names no origins', () => {
     expect(deriveHosts({}, 'laptop', {})).toEqual([
-      { id: 'local', label: 'laptop', isLocal: true, nativeFolderPicker: false },
+      { id: 'local', label: 'laptop', isLocal: true, nativeFolderPicker: false, browserCapable: false },
     ])
   })
 

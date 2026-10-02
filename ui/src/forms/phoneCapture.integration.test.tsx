@@ -15,8 +15,8 @@ vi.mock('../phone/relay', () => ({ RelayLink: vi.fn(function () {
 }) }))
 
 const hosts: Host[] = [
-  { id: 'local', label: 'Audio host', isLocal: true, nativeFolderPicker: false },
-  { id: 'remote', label: 'Scribe host', isLocal: false, nativeFolderPicker: false },
+  { id: 'local', label: 'Audio host', isLocal: true, nativeFolderPicker: false, browserCapable: true },
+  { id: 'remote', label: 'Scribe host', isLocal: false, nativeFolderPicker: false, browserCapable: false },
 ]
 const projects = [
   { id: 'local:/desk', name: 'Desk', path: '/desk', originId: 'local' },
@@ -74,7 +74,7 @@ beforeEach(() => {
   result = vi.fn()
   fetcher = vi.fn(async (url: string) => {
     if (url.endsWith('/agents')) return { ok: true, json: async () => [] }
-    if (url.endsWith('/meeting')) return { ok: true, json: async () => ({ available: true }) }
+    if (url.endsWith('/meeting')) return { ok: true, json: async () => ({ available: true, modes: ['call', 'room', 'phone'], meeting: null }) }
     order.push('capture')
     return { ok: true, status: 200, json: async () => ({ spawned: true, meeting: recording }) }
   })
@@ -94,11 +94,13 @@ describe('phone Capture form wiring', () => {
     await mount()
     click('.capture-meeting-toggle')
     click('.capture-meeting-toggle')
-    expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Phone')
+    expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Start meeting')
   })
 
   it('does not offer another meeting while the daemon reports a live recording', async () => {
-    fetcher.mockImplementation(async () => ({ ok: true, json: async () => ({ available: true, meeting: recording }) }))
+    fetcher.mockImplementation(async () => ({ ok: true, json: async () => ({ available: true, modes: ['call', 'room', 'phone'], meeting: recording }) }))
     await mount()
     expect(document.querySelector('.capture-meeting-toggle')).toBeNull()
     expect(document.querySelector('.form-submit')?.textContent).toBe('Spawn')
@@ -150,7 +152,8 @@ describe('phone Capture form wiring', () => {
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
     expect(window.matchMedia).toHaveBeenCalledWith(MOBILE_MEDIA)
-    expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Phone')
+    expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
     expect(choices().slice(0, 2)).toEqual([saved.hostId, saved.projectId])
     expect(document.querySelector('textarea')?.placeholder).toBe('Optional — the scribe works it out as you talk')
     expect(document.activeElement?.tagName).not.toBe('TEXTAREA')
@@ -227,7 +230,7 @@ describe('phone Capture form wiring', () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
-    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 503, json: async () => url.endsWith('/meeting') ? { available: true } : { error: 'not recording' } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 503, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { error: 'not recording' } }))
     await mount()
     click('.form-submit')
     await tick()
@@ -242,7 +245,7 @@ describe('phone Capture form wiring', () => {
   it('keeps confirmed recording connected when the remote scribe fails without replacing successful project memory', async () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
-    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 500, json: async () => url.endsWith('/meeting') ? { available: true } : { recording: true, error: 'scribe unavailable', meeting: recording } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 500, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { recording: true, error: 'scribe unavailable', meeting: recording } }))
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
     const projectSelect = document.querySelectorAll<HTMLSelectElement>('.form-select')[1]
@@ -262,7 +265,7 @@ describe('phone Capture form wiring', () => {
   it('fails closed on a recording response without a launch and reports the continuing recording', async () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
-    fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/meeting') ? { available: true } : { spawned: true, meeting: { ...recording, launch: null } } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { spawned: true, meeting: { ...recording, launch: null } } }))
     await mount()
     click('.form-submit')
     await tick()

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MeetingControl } from './CaptureForm'
 
 const render = (mode: 'call' | 'room' | 'phone' | null): string =>
-  renderToStaticMarkup(<MeetingControl mode={mode} disabled={false} onChange={() => {}} />)
+  renderToStaticMarkup(<MeetingControl enabled={mode !== null} mode={mode} modes={['call', 'room', 'phone']} disabled={false} onChange={() => {}} />)
 
 describe('capture meeting control', () => {
   it('is a pressed-state button, not a checkbox', () => {
