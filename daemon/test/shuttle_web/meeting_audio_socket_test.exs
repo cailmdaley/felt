@@ -248,7 +248,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
           "GET /api/v1/meeting/audio HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
         )
 
-      assert read_head(http, "") =~ "HTTP/1.1 426"
+      assert read_head(http) =~ "HTTP/1.1 426"
     end
 
     test "another site's page cannot open the relay", %{port: port} do
@@ -269,16 +269,22 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
         "Sec-WebSocket-Key: #{key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
 
     :ok = :gen_tcp.send(ws, request)
-    {read_head(ws, ""), ws}
+    {read_head(ws), ws}
   end
 
-  defp read_head(ws, acc) do
-    if String.contains?(acc, "\r\n\r\n") do
-      acc
-    else
-      {:ok, data} = :gen_tcp.recv(ws, 0, 2_000)
-      read_head(ws, acc <> data)
-    end
+  # The response head, read a line at a time so that WebSocket frames sent in
+  # the same TCP segment stay in the socket for read_frame.
+  defp read_head(ws) do
+    :ok = :inet.setopts(ws, packet: :line)
+    head = read_lines(ws, "")
+    :ok = :inet.setopts(ws, packet: :raw)
+    head
+  end
+
+  defp read_lines(ws, acc) do
+    {:ok, line} = :gen_tcp.recv(ws, 0, 2_000)
+    acc = acc <> line
+    if line == "\r\n", do: acc, else: read_lines(ws, acc)
   end
 
   # A server frame: unmasked, payloads here under 64 KiB.
