@@ -5,35 +5,46 @@ import (
 	"strings"
 )
 
-// Who forked the tmux server on this host — a macOS-only question with
+// Who rooted the tmux server on this host — a macOS-only question with
 // day-ruining consequences.
 //
-// macOS privacy (TCC) charges a process tree's file access to the tree's
-// *responsible process*. `tmux new-session` forks a server when none is
-// running, so if the Shuttle daemon is what runs it first, the server — and
-// therefore every worker on it, every shell, every tool — is charged to the
-// daemon's executable, surfaced to the human as "erlexec". The daemon cannot
-// hold those grants (Full Disk Access does not inherit under launchd), so the
-// human gets an unending stream of "erlexec wants to access data from other
-// apps" prompts that approving does not fix. The daemon now refuses to fork the
-// server (Shuttle.TmuxServer), but a server forked before that change — or by
-// an older daemon — keeps poisoning workers until a human restarts it.
+// macOS privacy (TCC) charges a process tree's file, microphone and
+// system-audio access to the tree's *responsible app*: the launchd resource
+// coalition the tree sits in. Every worker on the tmux server inherits the
+// server's coalition, so the app that rooted the server is the app whose grants
+// every worker gets. Three cases matter:
 //
-// So the receipt has to be able to SAY so, and it asks the kernel rather than
-// guessing. `launchctl procinfo <pid>` names the responsible process outright
-// but needs root (verified: rc=1, "This subcommand requires root privileges:
-// procinfo"). `launchctl print pid/<pid>` needs no privileges and prints the
-// process's resource coalition, whose `name` is the launchd label (or app
-// bundle id) of the job that rooted the tree — which is exactly the attribution
-// TCC uses. Verified on this host: the daemon-born server → `io.shuttle.daemon`;
-// a server forked by `kitty @ launch --type=background` →
-// `com.koekeishiya.skhd`, the app that launched kitty.
+//   - the Shuttle daemon (`io.shuttle.daemon`): `tmux new-session` forked the
+//     server under the daemon, which cannot hold grants (Full Disk Access does
+//     not inherit under launchd), so every worker raises "erlexec wants to
+//     access data from other apps" prompts that approving does not fix. A
+//     receipt mismatch: the daemon refuses to fork the server
+//     (Shuttle.TmuxServer), so only a server it should not have made gets here.
+//   - kitty itself (`application.net.kovidgoyal.kitty.<n>.<n>`): the intended
+//     root, the app the human grants once.
+//   - any other app: a kitty started by another app's child process sits in
+//     that app's coalition — the Quick Access panel toggled by an Alfred or
+//     skhd hotkey is charged to the launcher — and so does a server forked
+//     through it. Workers then get that app's grants, typically none: an
+//     all-zero microphone. Reported as a warning, since a server rooted by
+//     another terminal the human granted is legitimate.
+//
+// The kernel is asked rather than guessed at. `launchctl procinfo <pid>` names
+// the responsible process outright but needs root; `launchctl print pid/<pid>`
+// needs no privileges and prints the resource coalition, whose `name` is the
+// launchd label, or `application.<bundle id>.<n>.<n>` for an app LaunchServices
+// started.
 const (
 	tmuxOriginDaemonBorn = "daemon_born"
-	tmuxOriginUserBorn   = "user_born"
+	tmuxOriginKittyBorn  = "kitty_born"
+	tmuxOriginAppBorn    = "app_born"
 	tmuxOriginUnknown    = "unknown"
 	tmuxOriginAbsent     = "absent"
 )
+
+// kittyBundleID is the bundle id of kitty's main app. The Quick Access panel
+// is a separate bundle with its own grants and does not count.
+const kittyBundleID = "net.kovidgoyal.kitty"
 
 // daemonLaunchdLabel is the launchd label the daemon's own agent is installed
 // under (`daemon/share/io.shuttle.daemon.plist.template`, and `install-agent
@@ -43,13 +54,14 @@ const (
 const daemonLaunchdLabel = defaultLaunchdLabelPrefix + ".daemon"
 
 // tmuxOriginReport is what the receipt and `shuttle status` report about
-// the running tmux server. Coalition is the raw launchd label the kernel
-// attributes the server to — reported verbatim so a `user_born` server still
-// says WHICH app owns it (the one the human will see in TCC prompts).
+// the running tmux server. Coalition is the raw resource-coalition name the
+// kernel attributes the server to; RootedBy is the app or launchd job it names
+// (coalitionRoot), the one the human will see in TCC prompts and settings.
 type tmuxOriginReport struct {
 	Origin    string
 	ServerPID string
 	Coalition string
+	RootedBy  string
 }
 
 // parseResourceCoalitionName pulls the `name` out of `launchctl print
@@ -85,15 +97,45 @@ func parseResourceCoalitionName(out string) string {
 	return ""
 }
 
+// coalitionRoot names the app or launchd job a resource coalition belongs to:
+// the bundle id of an `application.<bundle id>.<n>.<n>` coalition, else the
+// name verbatim (a launchd label such as io.shuttle.daemon). Pure.
+func coalitionRoot(name string) string {
+	rest, ok := strings.CutPrefix(name, "application.")
+	if !ok {
+		return name
+	}
+	parts := strings.Split(rest, ".")
+	end := len(parts)
+	for end > 1 && isDigits(parts[end-1]) {
+		end--
+	}
+	return strings.Join(parts[:end], ".")
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // classifyCoalition maps a resource-coalition name to an origin. Pure.
 func classifyCoalition(name string) string {
-	switch name {
-	case "":
+	switch {
+	case name == "":
 		return tmuxOriginUnknown
-	case daemonLaunchdLabel:
+	case name == daemonLaunchdLabel:
 		return tmuxOriginDaemonBorn
+	case strings.HasPrefix(name, "application.") && coalitionRoot(name) == kittyBundleID:
+		return tmuxOriginKittyBorn
 	default:
-		return tmuxOriginUserBorn
+		return tmuxOriginAppBorn
 	}
 }
 
@@ -114,9 +156,18 @@ var detectTmuxOrigin = func() tmuxOriginReport {
 	printed, _ := exec.Command("launchctl", "print", "pid/"+pid).CombinedOutput()
 	name := parseResourceCoalitionName(string(printed))
 
-	return tmuxOriginReport{Origin: classifyCoalition(name), ServerPID: pid, Coalition: name}
+	return tmuxOriginReport{Origin: classifyCoalition(name), ServerPID: pid, Coalition: name, RootedBy: coalitionRoot(name)}
 }
 
 // tmuxOriginRepair is the one-line remedy a human acts on. Deliberately spells
 // out the ordering constraint: killing the server kills every worker on it.
 const tmuxOriginRepair = "tmux server is charged to the Shuttle daemon (launchd coalition " + daemonLaunchdLabel + ") — macOS charges every worker's file access to the daemon binary; restart your tmux server from a terminal (kill it once no workers are live, then tmux new-session -d -s shuttle-anchor from a kitty window)"
+
+// tmuxOriginWarning is the advisory for a server rooted by an app other than
+// kitty or the daemon; "" for every other origin.
+func tmuxOriginWarning(report tmuxOriginReport) string {
+	if report.Origin != tmuxOriginAppBorn {
+		return ""
+	}
+	return "tmux server rooted by " + report.RootedBy + ": workers inherit that app's privacy grants (mic, system audio); restart the server from kitty (kill it once no workers are live, then tmux new-session -d -s shuttle-anchor from a kitty opened from the Dock or Finder)"
+}

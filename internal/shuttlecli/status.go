@@ -471,14 +471,19 @@ func computeState(b *shuttle.Block, status string, running bool) string {
 }
 
 // printTmuxOriginWarning prints the one-line remedy when this host's tmux
-// server was forked by the Shuttle daemon; silence in every other case
-// (including every non-darwin host, where the attribution does not exist).
+// server was forked by the Shuttle daemon, and the advisory when it is rooted
+// by an app other than kitty; silence in every other case (including every
+// non-darwin host, where the attribution does not exist).
 func printTmuxOriginWarning() {
 	if runtime.GOOS != "darwin" {
 		return
 	}
-	if report := detectTmuxOrigin(); report.Origin == tmuxOriginDaemonBorn {
+	report := detectTmuxOrigin()
+	if report.Origin == tmuxOriginDaemonBorn {
 		fmt.Printf("tmux server: daemon-born — %s\n", tmuxOriginRepair)
+	}
+	if warning := tmuxOriginWarning(report); warning != "" {
+		fmt.Printf("warning: %s\n", warning)
 	}
 }
 

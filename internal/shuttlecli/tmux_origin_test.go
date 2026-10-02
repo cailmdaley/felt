@@ -60,10 +60,10 @@ const launchctlPrintDaemonBorn = `pid/22457 = {
 }
 `
 
-// Real output for a process rooted by the human's own terminal on the same
-// host: kitty, launched by skhd, so the coalition names skhd's bundle. This is
-// what a healthy, user-born tmux server looks like.
-const launchctlPrintUserBorn = `pid/85804 = {
+// Real output for a tmux server forked through a kitty that skhd launched, so
+// the coalition names skhd's launchd job: workers on it get skhd's grants, not
+// kitty's.
+const launchctlPrintSkhdRooted = `pid/85804 = {
 	type = pid
 	handle = 85804
 	active count = 1
@@ -116,7 +116,7 @@ func TestParseResourceCoalitionName(t *testing.T) {
 		want string
 	}{
 		{"daemon-born server", launchctlPrintDaemonBorn, "io.shuttle.daemon"},
-		{"user-born server", launchctlPrintUserBorn, "com.koekeishiya.skhd"},
+		{"skhd-rooted server", launchctlPrintSkhdRooted, "com.koekeishiya.skhd"},
 		// The jetsam coalition carries the same key and is printed right after
 		// the resource one; picking the wrong block would attribute a process
 		// to the jetsam grouping, which is not what TCC follows.
@@ -154,8 +154,11 @@ func TestParseResourceCoalitionName(t *testing.T) {
 func TestClassifyCoalition(t *testing.T) {
 	for _, tc := range []struct{ name, want string }{
 		{daemonLaunchdLabel, tmuxOriginDaemonBorn},
-		{"com.koekeishiya.skhd", tmuxOriginUserBorn},
-		{"net.kovidgoyal.kitty", tmuxOriginUserBorn},
+		{"application.net.kovidgoyal.kitty.1919153.1919664", tmuxOriginKittyBorn},
+		{"application.com.runningwithcrayons.Alfred.1904711.1905105", tmuxOriginAppBorn},
+		{"application.net.kovidgoyal.kitty-quick-access.1.2", tmuxOriginAppBorn},
+		{"com.koekeishiya.skhd", tmuxOriginAppBorn},
+		{"net.kovidgoyal.kitty", tmuxOriginAppBorn},
 		{"", tmuxOriginUnknown},
 	} {
 		if got := classifyCoalition(tc.name); got != tc.want {
@@ -170,8 +173,40 @@ func TestFixturesClassify(t *testing.T) {
 	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintDaemonBorn)); got != tmuxOriginDaemonBorn {
 		t.Fatalf("captured daemon-born output classified %q", got)
 	}
-	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintUserBorn)); got != tmuxOriginUserBorn {
-		t.Fatalf("captured user-born output classified %q", got)
+	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintSkhdRooted)); got != tmuxOriginAppBorn {
+		t.Fatalf("captured skhd-rooted output classified %q", got)
+	}
+}
+
+func TestCoalitionRoot(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"application.com.runningwithcrayons.Alfred.1904711.1905105", "com.runningwithcrayons.Alfred"},
+		{"application.net.kovidgoyal.kitty.1919153.1919664", "net.kovidgoyal.kitty"},
+		{daemonLaunchdLabel, daemonLaunchdLabel},
+		{"com.koekeishiya.skhd", "com.koekeishiya.skhd"},
+		{"", ""},
+	} {
+		if got := coalitionRoot(tc.name); got != tc.want {
+			t.Fatalf("coalitionRoot(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A server rooted by another app is a warning that names the app, never a
+// failed receipt: a server started from another granted terminal is legitimate.
+func TestTmuxOriginWarningNamesTheRootingApp(t *testing.T) {
+	name := "application.com.runningwithcrayons.Alfred.1904711.1905105"
+	report := tmuxOriginReport{Origin: classifyCoalition(name), Coalition: name, RootedBy: coalitionRoot(name)}
+	warning := tmuxOriginWarning(report)
+	for _, want := range []string{"rooted by com.runningwithcrayons.Alfred", "mic, system audio", "restart the server from kitty"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning %q lacks %q", warning, want)
+		}
+	}
+	for _, origin := range []string{tmuxOriginKittyBorn, tmuxOriginDaemonBorn, tmuxOriginUnknown, tmuxOriginAbsent} {
+		if got := tmuxOriginWarning(tmuxOriginReport{Origin: origin}); got != "" {
+			t.Fatalf("origin %s warned %q", origin, got)
+		}
 	}
 }
 
@@ -188,7 +223,8 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 		want   receiptStatus
 	}{
 		{tmuxOriginDaemonBorn, receiptMismatch},
-		{tmuxOriginUserBorn, receiptHealthy},
+		{tmuxOriginKittyBorn, receiptHealthy},
+		{tmuxOriginAppBorn, receiptHealthy},
 		{tmuxOriginUnknown, receiptHealthy},
 		{tmuxOriginAbsent, receiptHealthy},
 	} {
@@ -205,6 +241,9 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 			}
 			if tc.want == receiptMismatch && rec.Repair == "" {
 				t.Fatal("a mismatch must carry the restart-from-a-terminal repair")
+			}
+			if (rec.Warning != "") != (tc.origin == tmuxOriginAppBorn) {
+				t.Fatalf("origin %s: warning %q", tc.origin, rec.Warning)
 			}
 		})
 	}

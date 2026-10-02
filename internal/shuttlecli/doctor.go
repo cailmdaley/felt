@@ -69,9 +69,11 @@ type ReceiptTailnetBridge struct {
 type ReceiptTmuxServer struct {
 	Status    receiptStatus `json:"status"`
 	Repair    string        `json:"repair,omitempty"`
+	Warning   string        `json:"warning,omitempty"`
 	Origin    string        `json:"origin"`
 	ServerPID string        `json:"server_pid,omitempty"`
 	Coalition string        `json:"coalition,omitempty"`
+	RootedBy  string        `json:"rooted_by,omitempty"`
 }
 
 var doctorCmd = &cobra.Command{
@@ -91,9 +93,7 @@ var doctorCmd = &cobra.Command{
 			printHostReceipt(receipt.Host)
 			printTailnetDialReceipt(receipt.Daemon.TailnetDial)
 			printDiscoveryReceipt(receipt.Daemon.Discovery)
-			if receipt.TmuxServer != nil && receipt.TmuxServer.Origin == tmuxOriginDaemonBorn {
-				fmt.Printf("tmux server: daemon-born — %s\n", receipt.TmuxServer.Repair)
-			}
+			printTmuxServerReceipt(receipt.TmuxServer)
 			if receipt.Repair != "" {
 				fmt.Printf("repair: %s\n", receipt.Repair)
 			}
@@ -370,10 +370,33 @@ func collectTmuxServerReceipt() *ReceiptTmuxServer {
 	report := detectTmuxOrigin()
 	receipt := &ReceiptTmuxServer{
 		Status: receiptHealthy, Origin: report.Origin,
-		ServerPID: report.ServerPID, Coalition: report.Coalition,
+		ServerPID: report.ServerPID, Coalition: report.Coalition, RootedBy: report.RootedBy,
+		Warning: tmuxOriginWarning(report),
 	}
 	if report.Origin == tmuxOriginDaemonBorn {
 		receipt.Status, receipt.Repair = receiptMismatch, tmuxOriginRepair
 	}
 	return receipt
+}
+
+// printTmuxServerReceipt names the app the running tmux server is charged to,
+// then the remedy when that app is the daemon or the advisory when it is
+// neither the daemon nor kitty.
+func printTmuxServerReceipt(rec *ReceiptTmuxServer) {
+	if rec == nil {
+		return
+	}
+	switch rec.Origin {
+	case tmuxOriginAbsent:
+		fmt.Println("tmux server: not running")
+	case tmuxOriginUnknown:
+		fmt.Printf("tmux server: pid %s, rooting app unknown\n", rec.ServerPID)
+	case tmuxOriginDaemonBorn:
+		fmt.Printf("tmux server: pid %s, rooted by %s — %s\n", rec.ServerPID, rec.RootedBy, rec.Repair)
+	default:
+		fmt.Printf("tmux server: pid %s, rooted by %s\n", rec.ServerPID, rec.RootedBy)
+	}
+	if rec.Warning != "" {
+		fmt.Printf("warning: %s\n", rec.Warning)
+	}
 }
