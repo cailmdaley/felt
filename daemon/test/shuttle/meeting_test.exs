@@ -222,6 +222,10 @@ defmodule Shuttle.MeetingTest do
     assert joined =~ "`~/.hark/meetings/x.txt` on this host"
     assert joined =~ "This meeting joins this constitution (`proj/shear`)"
     assert joined =~ "references/meeting.md"
+    refute joined =~ "appropriate filing location"
+    refute joined =~ "Do not ask the user for a title"
+    refute joined =~ "provisional date-based name"
+    refute joined =~ "rename it when the transcript clarifies the subject"
     refute Meeting.meeting_message("room", "x", {:capture, "cli"}) =~ "joins this constitution"
   end
 

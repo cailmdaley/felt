@@ -159,12 +159,18 @@ defmodule Shuttle.Meeting do
       when mode in @modes do
     "Meeting mode (#{mode}). hark is transcribing #{meeting_kind(mode)} to `#{transcript_path}` on this host. " <>
       "Read the shuttle skill's references/meeting.md before anything else and follow it. " <>
-      "Use the transcript and felt tree to infer the meeting's identity, topic, participants, " <>
-      "and appropriate filing location. Do not ask the user for a title; use a provisional " <>
-      "date-based name if needed and rename it when the transcript clarifies the subject. " <>
+      capture_scribe_instructions(target) <>
       joined_line(target) <>
       "The user's note about the meeting follows (it may be empty)."
   end
+
+  defp capture_scribe_instructions({:capture, _cli}) do
+    "Use the transcript and felt tree to infer the meeting's identity, topic, participants, " <>
+      "and appropriate filing location. Do not ask the user for a title; use a provisional " <>
+      "date-based name if needed and rename it when the transcript clarifies the subject. "
+  end
+
+  defp capture_scribe_instructions({:fiber, _fiber_id}), do: ""
 
   defp meeting_kind("phone"),
     do: "a live in-person meeting, recorded through a phone's microphone,"
