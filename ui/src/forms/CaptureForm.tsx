@@ -35,7 +35,7 @@ import {
 } from './captureApi'
 import { daemonErrorMessage } from '../board/daemonApi'
 import { isMobileViewport } from '../board/mobile'
-import type { PhoneCaptureHooks } from '../board/phoneMeeting'
+import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeting'
 import { parseMeetingRecord, type MeetingRecord } from '../board/meeting'
 import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
@@ -118,12 +118,13 @@ export function CaptureForm({
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const mounted = useRef(true)
-  const pendingAudio = useRef(false)
+  const pendingAudio = useRef<PhoneCaptureAttempt | null>(null)
+  const submittingRef = useRef(false)
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
-      if (pendingAudio.current) phoneAudio?.cancel()
+      pendingAudio.current?.cancel()
     }
   }, [phoneAudio])
   const {
@@ -155,7 +156,11 @@ export function CaptureForm({
     fetch(`${shuttleBase}/api/v1/meeting`)
       .then((response) => (response.ok ? response.json() as Promise<{ available?: unknown }> : null))
       .then((status) => {
-        if (!cancelled && status?.available === true) setMeetingAvailable(true)
+        if (!cancelled && status?.available === true) {
+          const meeting = parseMeetingRecord((status as { meeting?: unknown }).meeting)
+          setMeetingAvailable(!meeting || meeting.state === 'failed')
+          if (meeting && meeting.state !== 'failed') setMeetingMode(null)
+        }
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -175,7 +180,7 @@ export function CaptureForm({
   }
 
   const submit = async (): Promise<void> => {
-    if (submitting) return
+    if (submittingRef.current) return
     const trimmed = prompt.trim()
     if (!trimmed && !meetingEnabled) {
       setError('Say something first — the session needs a yap to work with.')
@@ -186,16 +191,17 @@ export function CaptureForm({
       setError('Pick a project — the capture session needs a directory to land in.')
       return
     }
+    submittingRef.current = true
     setSubmitting(true)
     setError(null)
     const phone = meetingEnabled && meetingMode === 'phone'
     try {
       // begin reaches AudioContext creation/resume and getUserMedia in this tap,
       // before the first await. The daemon is asked only after the mic succeeds.
-      pendingAudio.current = phone
       const opening = phone ? phoneAudio?.begin() : null
       if (phone && !opening) throw new Error('Phone audio is unavailable on this board.')
-      const generation = opening ? await opening : null
+      pendingAudio.current = opening ?? null
+      const generation = opening ? await opening.ready : null
       if (!mounted.current) return
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
@@ -223,13 +229,13 @@ export function CaptureForm({
         try {
           if (phone && generation !== null) {
             if (!mounted.current) throw new Error('Recording started after Capture closed; the mic is off. Connect it from In flight.')
-            phoneAudio!.bind(generation, data.meeting)
+            opening!.bind(generation, data.meeting)
           }
-          rememberMeetingProject(selectedProject)
+          if (!outcome.error) rememberMeetingProject(selectedProject)
         } catch (err) {
           recordingError = [recordingError, daemonErrorMessage(err)].filter(Boolean).join(' ')
         }
-        pendingAudio.current = false
+        pendingAudio.current = null
         onMeetingResult({ host: outcome.host, error: recordingError, meeting: parseMeetingRecord(data.meeting) })
         return
       }
@@ -238,8 +244,9 @@ export function CaptureForm({
         surface: outcome.surface ?? (isCodexAgent(agentRec) ? surface : 'cli'),
       })
     } catch (err) {
-      if (phone) phoneAudio?.cancel()
-      pendingAudio.current = false
+      pendingAudio.current?.cancel()
+      pendingAudio.current = null
+      submittingRef.current = false
       setError(daemonErrorMessage(err))
       setSubmitting(false)
     }
@@ -276,6 +283,7 @@ export function CaptureForm({
             mode={meetingEnabled ? meetingMode : null}
             disabled={submitting}
             onChange={setMeetingMode}
+            defaultMode={mobileMeeting ? 'phone' : 'call'}
           />
         )}
         <div className="form-controls">
@@ -342,10 +350,11 @@ export function CaptureForm({
  * segments are always laid out and only hidden, so switching meeting on
  * reveals them in space the row already holds and nothing below moves.
  */
-export function MeetingControl({ mode, disabled, onChange }: {
+export function MeetingControl({ mode, disabled, onChange, defaultMode = 'call' }: {
   mode: MeetingMode | null
   disabled: boolean
   onChange: (mode: MeetingMode | null) => void
+  defaultMode?: MeetingMode
 }): JSX.Element {
   return (
     <div className="capture-meeting-row">
@@ -354,7 +363,7 @@ export function MeetingControl({ mode, disabled, onChange }: {
         className="capture-meeting-toggle"
         aria-pressed={mode !== null}
         disabled={disabled}
-        onClick={() => onChange(mode === null ? 'call' : null)}
+        onClick={() => onChange(mode === null ? defaultMode : null)}
       >
         Meeting
       </button>
@@ -392,8 +401,9 @@ export function injectCaptureFormStyles(): void {
     @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
       .capture-mobile-meeting .capture-yap { min-height: 3.5rem; resize: none; }
       .capture-mobile-meeting { gap: 10px; }
-      .capture-mobile-meeting .capture-meeting-row { height: 44px; gap: 6px; }
-      .capture-mobile-meeting .capture-meeting-modes { height: 44px; }
+      .capture-mobile-meeting .capture-meeting-row { height: 48px; gap: 6px; }
+      .capture-mobile-meeting .capture-meeting-toggle { height: 48px; }
+      .capture-mobile-meeting .capture-meeting-modes { height: 48px; padding: 1px; }
       .capture-mobile-meeting .capture-meeting-mode { padding: 0 10px; }
     }
     /* The yap. 17px because this is the dialog's one piece of prose — the

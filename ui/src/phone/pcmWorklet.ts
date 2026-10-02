@@ -1,6 +1,6 @@
 /**
- * The phone page's AudioWorklet: the mic at the device's own rate in, 100 ms
- * chunks of s16le 16 kHz mono posted to the page, each with its peak level.
+ * The phone mic's AudioWorklet: the mic at the device's own rate in, 100 ms
+ * chunks of s16le 16 kHz mono posted to the tab, each with its peak level.
  * It runs in the AudioWorkletGlobalScope, whose globals TypeScript's DOM lib
  * does not describe, so the few it uses are declared here.
  */

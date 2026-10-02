@@ -1,5 +1,5 @@
 /**
- * The phone page's audio arithmetic: the browser's float samples at the
+ * The phone mic's audio arithmetic: the browser's float samples at the
  * device's own rate in, hark's s16le 16 kHz mono out. Pure, so the worklet
  * runs it and the suite tests it.
  */

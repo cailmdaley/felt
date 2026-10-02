@@ -1,14 +1,18 @@
 import { Mic, ScreenLock, audioContextForGesture } from '../phone/mic'
 import { RelayLink } from '../phone/relay'
-import { AudioSession, type SessionDeps } from '../phone/session'
+import { AudioSession } from '../phone/session'
 import { relayUrl } from '../phone/phoneState'
 import { parseMeetingRecord, type MeetingRecord } from './meeting'
 
 /** Capture opens audio in its submit gesture; the board keeps it after the sheet closes. */
-export interface PhoneCaptureHooks {
-  begin(): Promise<number>
+export interface PhoneCaptureAttempt {
+  ready: Promise<number>
   bind(generation: number, meeting: unknown): void
   cancel(): void
+}
+
+export interface PhoneCaptureHooks {
+  begin(): PhoneCaptureAttempt
 }
 
 export class PhoneMeeting implements PhoneCaptureHooks {
@@ -16,6 +20,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   readonly lock: ScreenLock
   peak = 0
   private launch: string | null = null
+  private attempt = 0
   private checkTimer: number | null = null
   private readonly changed: () => void
   private readonly returned = (): void => {
@@ -23,10 +28,10 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   }
   private readonly pagehide = (): void => this.cancel()
 
-  constructor(shuttleBase: string, changed: () => void, level: () => void, deps?: SessionDeps) {
+  constructor(shuttleBase: string, changed: () => void, level: () => void) {
     this.changed = changed
     this.lock = new ScreenLock()
-    this.session = new AudioSession(deps ?? {
+    this.session = new AudioSession({
       openMic: (handlers) => {
         const context = audioContextForGesture()
         return Mic.open(context, handlers).catch((error: unknown) => {
@@ -44,10 +49,22 @@ export class PhoneMeeting implements PhoneCaptureHooks {
     })
   }
 
-  async begin(): Promise<number> {
-    const generation = await this.session.begin()
-    if (generation === null) throw new Error(this.session.error ?? 'The microphone is already opening or in use.')
-    return generation
+  begin(): PhoneCaptureAttempt {
+    // A sheet must not take ownership of audio another gesture already owns.
+    if (this.session.busy) throw new Error('The microphone is already opening or in use.')
+    const attempt = ++this.attempt
+    const opening = this.session.begin()
+    return {
+      ready: opening.then((generation) => {
+        if (generation === null) throw new Error(this.session.error ?? 'The microphone opening was cancelled.')
+        return generation
+      }),
+      bind: (generation, meeting) => {
+        if (attempt !== this.attempt) throw new Error('The microphone opening was cancelled.')
+        this.bind(generation, meeting)
+      },
+      cancel: () => { if (attempt === this.attempt) this.cancel() },
+    }
   }
 
   bind(generation: number, value: unknown): void {
@@ -67,12 +84,16 @@ export class PhoneMeeting implements PhoneCaptureHooks {
       this.changed()
       return
     }
-    try { this.bind(await this.begin(), meeting) } catch (error) {
+    try {
+      const opening = this.begin()
+      opening.bind(await opening.ready, meeting)
+    } catch (error) {
       this.session.error ??= (error as Error).message
     } finally { this.changed() }
   }
 
   cancel(): void {
+    this.attempt += 1
     this.launch = null
     this.peak = 0
     this.session.stop()

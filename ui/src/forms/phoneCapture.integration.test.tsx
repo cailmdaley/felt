@@ -90,6 +90,62 @@ afterEach(async () => {
 })
 
 describe('phone Capture form wiring', () => {
+  it('re-enables mobile Meeting in Phone mode', async () => {
+    await mount()
+    click('.capture-meeting-toggle')
+    click('.capture-meeting-toggle')
+    expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Phone')
+  })
+
+  it('does not offer another meeting while the daemon reports a live recording', async () => {
+    fetcher.mockImplementation(async () => ({ ok: true, json: async () => ({ available: true, meeting: recording }) }))
+    await mount()
+    expect(document.querySelector('.capture-meeting-toggle')).toBeNull()
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Spawn')
+  })
+
+  it('does not cancel an existing mic when a stale Capture sheet tries Start', async () => {
+    const opened = mic()
+    vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
+    await mount()
+    const live = phone.begin()
+    live.bind(await live.ready, recording)
+    click('.form-submit')
+    await tick()
+    expect(document.querySelector('.form-error')?.textContent).toContain('already opening or in use')
+    expect(opened.close).not.toHaveBeenCalled()
+    expect(phone.session.mic).toBe(opened)
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/capture'))).toBe(false)
+    await unmount()
+    expect(opened.close).not.toHaveBeenCalled()
+  })
+
+  it('owns only one Start attempt across same-tick double submission', async () => {
+    const opened = mic()
+    const pending = deferred<ReturnType<typeof mic>>()
+    vi.spyOn(Mic, 'open').mockReturnValue(pending.promise as unknown as Promise<Mic>)
+    await mount()
+    const button = document.querySelector<HTMLButtonElement>('.form-submit')!
+    act(() => { button.click(); button.click() })
+    pending.resolve(opened)
+    await tick()
+    expect(result).toHaveBeenCalledOnce()
+    expect(phone.session.mic).toBe(opened)
+    expect(opened.close).not.toHaveBeenCalled()
+    expect(order.filter((entry) => entry === 'context')).toHaveLength(1)
+  })
+
+  it('continues a successful phone start when remembering the project throws', async () => {
+    const opened = mic()
+    vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
+    await mount()
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    click('.form-submit')
+    await tick()
+    expect(result).toHaveBeenCalledWith(expect.objectContaining({ error: undefined }))
+    expect(phone.session.mic).toBe(opened)
+  })
+
   it('defaults mobile Capture to Phone, restores its successful host/project, and leaves the keyboard closed', async () => {
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
@@ -183,18 +239,24 @@ describe('phone Capture form wiring', () => {
     expect(document.querySelector('.form-error')?.textContent).toBe('not recording')
   })
 
-  it('keeps confirmed recording connected when the remote scribe fails, even on an HTTP error and disabled storage', async () => {
+  it('keeps confirmed recording connected when the remote scribe fails without replacing successful project memory', async () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
     fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 500, json: async () => url.endsWith('/meeting') ? { available: true } : { recording: true, error: 'scribe unavailable', meeting: recording } }))
-    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
+    const projectSelect = document.querySelectorAll<HTMLSelectElement>('.form-select')[1]
+    act(() => {
+      projectSelect.value = 'remote:/first'
+      projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    })
     click('.form-submit')
     await tick()
     expect(result).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining("the scribe didn't start") }))
     expect(phone.session.mic).toBe(opened)
     expect(RelayLink).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining('launch=returned-launch') }))
     expect(opened.close).not.toHaveBeenCalled()
+    expect(localStorage.getItem(MEETING_PROJECT_KEY)).toBe(JSON.stringify(saved))
   })
 
   it('fails closed on a recording response without a launch and reports the continuing recording', async () => {
@@ -220,9 +282,15 @@ describe('phone Capture form wiring', () => {
     act(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     expect(cancel).not.toHaveBeenCalled()
     await unmount()
+    const nextMic = mic()
+    vi.mocked(Mic.open).mockResolvedValue(nextMic as unknown as Mic)
+    const next = phone.begin()
+    next.bind(await next.ready, recording)
     pending.resolve(opened)
     await tick()
     expect(opened.close).toHaveBeenCalledOnce()
+    expect(phone.session.mic).toBe(nextMic)
+    expect(nextMic.close).not.toHaveBeenCalled()
     expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/capture'))).toBe(false)
     expect(result).not.toHaveBeenCalled()
   })
