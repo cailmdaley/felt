@@ -93,14 +93,13 @@ defmodule Shuttle.WaitingTrackerTest do
            end)
   end
 
-  test "subagent_stop yields phase \"waiting\" (folded into waiting, not cleared)",
-       %{events: events} do
+  test "a lone subagent_stop is not the session's activity", %{events: events} do
     name = start(events)
     append(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle")
+    append(events, "stop", "bar-01J00000000000000000000000-shuttle")
 
-    assert wait_until(fn ->
-             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
-           end)
+    assert wait_until(fn -> ingested?(name, "bar-01J00000000000000000000000-shuttle") end)
+    refute ingested?(name, "foo-01J00000000000000000000000-shuttle")
   end
 
   for working_type <- ["pre_tool_use", "post_tool_use", "user_prompt_submit", "session_start"] do
@@ -247,34 +246,56 @@ defmodule Shuttle.WaitingTrackerTest do
            end)
   end
 
-  test "a subagent stop states the count too", %{events: events} do
-    name = start(events)
-    # The worker's own subagent finishing is a last event like any other, and
-    # the shells it leaves behind are the same shells.
-    append_ev(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", %{
-      backgroundTasks: 1
-    })
+  # ── A subagent's stop is not the session's ──
 
-    assert wait_until(fn ->
-             phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
-           end)
+  test "a subagent finishing while the parent works keeps it working", %{events: events} do
+    prewrite(events, "post_tool_use", "foo-01J00000000000000000000000-shuttle", @base - 2_000)
+    prewrite(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", @base - 1_000)
+    name = start(events)
+
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base - 2_000
   end
 
-  test "a subagent stop can also clear a carried-forward count", %{events: events} do
+  test "a background subagent returning does not read as waiting while the parent digests it",
+       %{events: events} do
     name = start(events)
-    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 2})
+    append_ev(events, "stop", "foo-01J00000000000000000000000-shuttle", %{backgroundTasks: 1})
 
     assert wait_until(fn ->
              phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
            end)
 
-    append_ev(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", %{
-      backgroundTasks: 0
-    })
+    # The subagent's stop names no background work; the parent is still busy
+    # with its result until its own next stop says otherwise.
+    append(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", @base + 1_000)
+    append(events, "pre_tool_use", "bar-01J00000000000000000000000-shuttle", @base + 2_000)
 
-    assert wait_until(fn ->
-             phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
-           end)
+    assert wait_until(fn -> ingested?(name, "bar-01J00000000000000000000000-shuttle") end)
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base
+  end
+
+  test "a subagent_stop during idleness keeps the idle phase and its age",
+       %{events: events} do
+    # The pattern Claude Code emits while a worker sits idle: stop, the idle
+    # reminder a minute later, then a subagent_stop from its away summary.
+    prewrite(events, "stop", "foo-01J00000000000000000000000-shuttle", @base - 180_000)
+
+    line =
+      Jason.encode!(%{
+        type: "notification",
+        notificationKind: "idle_prompt",
+        tmuxSession: "foo-01J00000000000000000000000-shuttle",
+        timestamp: @base - 120_000
+      })
+
+    File.write!(events, line <> "\n", [:append])
+    prewrite(events, "subagent_stop", "foo-01J00000000000000000000000-shuttle", @base)
+    name = start(events)
+
+    assert phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
+    assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base - 120_000
   end
 
   test "the suppression expires: an endless task cannot silence a worker forever",

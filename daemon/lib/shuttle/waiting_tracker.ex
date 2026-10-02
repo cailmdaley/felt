@@ -38,9 +38,8 @@ defmodule Shuttle.WaitingTracker do
     * `notification` → `"attention"` for permission, elicitation, and untyped
       notifications; `idle_prompt` → `"waiting"`, or `"working"` over outstanding
       background work; see "Waiting on itself" below.
-    * `stop` / `subagent_stop` → `"waiting"` (a turn or subagent finished;
-      the agent is idle, waiting on the next input) — again except over
-      outstanding background work.
+    * `stop` → `"waiting"` (the turn finished; the agent is idle, waiting on
+      the next input) — again except over outstanding background work.
     * anything else — `pre_tool_use`, `post_tool_use`, `user_prompt_submit`,
       `session_start`, … → `"working"`. This is the **long-tool guard**: a
       worker mid-tool (last event `pre_tool_use`, no following stop) is
@@ -58,8 +57,7 @@ defmodule Shuttle.WaitingTracker do
 
   Two fields the harness volunteers settle it, so nothing here is inferred:
 
-    * `stop` and `subagent_stop` carry `background_tasks` — what the turn is
-      leaving running. The count is remembered on the session (`bg`) and
+    * `stop` carries `background_tasks` — what the turn is leaving running. The count is remembered on the session (`bg`) and
       carried forward until the session is resumed by a prompt or restarted, at
       which point it is zero again and the next stop restamps the truth.
     * `notification` carries `notification_type`. Only `idle_prompt` means
@@ -91,10 +89,19 @@ defmodule Shuttle.WaitingTracker do
 
   Idle gating lives on the client, not here: the daemon reports the category
   and the real timestamp, and the client computes idle (`clientNow -
-  last_event_at`) to decide whether to show a chip. Folding `subagent_stop`
-  into `"waiting"` is
-  deliberate under last-event-wins: a worker that just got a subagent result
-  reads as `"waiting"` until its next `pre_tool_use`, which CC emits quickly.
+  last_event_at`) to decide whether to show a chip.
+
+  ## A subagent's stop is not the session's
+
+  `subagent_stop` says a subagent finished, not what the session around it is
+  doing, so it leaves the record alone, as a `file_sent` delivery does. It
+  fires mid-turn (a foreground `Agent` call returning), while the parent sits
+  idle on a background subagent it will wake to digest, and while the session
+  is idle with no subagent of its own in flight (apparently Claude Code's away
+  summary). Read as a stop, the second would show a worker digesting a result
+  as waiting, and the third would move an idle worker's `last_event_at`
+  forward. The parent's own
+  `stop` and idle `notification` are the session's waiting signals.
 
   Self-healing: `Shuttle.Poller.stamp_runtime/2` only stamps for sessions still
   in `state.running`, so a dead worker's record is harmless. The age prune
@@ -164,8 +171,8 @@ defmodule Shuttle.WaitingTracker do
   defp category("notification", "idle_prompt", bg) when bg > 0, do: "working"
   defp category("notification", "idle_prompt", _bg), do: "waiting"
   defp category("notification", _kind, _bg), do: "attention"
-  defp category(type, _kind, bg) when type in ["stop", "subagent_stop"] and bg > 0, do: "working"
-  defp category(type, _kind, _bg) when type in ["stop", "subagent_stop"], do: "waiting"
+  defp category("stop", _kind, bg) when bg > 0, do: "working"
+  defp category("stop", _kind, _bg), do: "waiting"
   defp category(_type, _kind, _bg), do: "working"
 
   @doc """
@@ -173,14 +180,17 @@ defmodule Shuttle.WaitingTracker do
   `*-shuttle` session unconditionally overwrites its record with the event's
   own type and real timestamp. The `"timestamp"` field is on every hook line;
   `now` is only a fallback for a line missing it (we never invent a
-  worse-than-now age). A `file_sent` event is a delivery, not activity, and
-  leaves the record alone.
+  worse-than-now age). A `file_sent` event is a delivery and a
+  `subagent_stop` belongs to a subagent; neither is the session's own activity,
+  and both leave the record alone.
 
   The strings kept are copied out of the event, so the map never pins the
   buffer a line was read from.
   """
   @spec apply_event(sessions(), map(), integer()) :: sessions()
-  def apply_event(sessions, %{"type" => "file_sent"}, _now), do: sessions
+  def apply_event(sessions, %{"type" => type}, _now)
+      when type in ["file_sent", "subagent_stop"],
+      do: sessions
 
   def apply_event(sessions, %{"type" => type, "tmuxSession" => session} = ev, now)
       when is_binary(type) and is_binary(session) and session != "" do
@@ -228,13 +238,13 @@ defmodule Shuttle.WaitingTracker do
 
   # How much detached work this session is leaving behind, as of this event.
   #
-  # A stop of either kind STATES it. A prompt or a session start CLEARS it — the session has
+  # A stop STATES it. A prompt or a session start CLEARS it — the session has
   # been resumed or restarted, and whatever it is now leaving running the next
   # `stop` will say. Everything else CARRIES IT FORWARD, because the notable
   # case is exactly the one where nothing further is recorded: the idle
   # `notification` that arrives a minute after the stop and, on its own, knows
   # nothing about the shells the stop was waiting on.
-  defp background_tasks(type, ev, _prev) when type in ["stop", "subagent_stop"] do
+  defp background_tasks("stop", ev, _prev) do
     case Map.get(ev, "backgroundTasks") do
       n when is_integer(n) and n > 0 -> n
       _ -> 0
