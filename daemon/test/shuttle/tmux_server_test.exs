@@ -112,6 +112,35 @@ defmodule Shuttle.TmuxServerTest do
     end
   end
 
+  # The kitty seam receives the dispatch's runner, so the coalition reads and
+  # the LaunchServices start run through the same injectable shell as tmux.
+  defmodule RunnerEchoKitty do
+    def run_background(_argv, runner) do
+      send(self(), {:kitty_runner, runner})
+      {:error, "no running kitty is its own responsible app"}
+    end
+  end
+
+  describe "ensure_available/1 with no server" do
+    setup do
+      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      Application.put_env(:shuttle, :kitty_impl, RunnerEchoKitty)
+
+      on_exit(fn ->
+        Application.delete_env(:shuttle, :os_type)
+        Application.delete_env(:shuttle, :kitty_impl)
+      end)
+    end
+
+    test "forks through kitty with the dispatch's runner, and refuses when kitty cannot" do
+      start_supervised!({StubRunner, {"no server running on /tmp/tmux-501/default", 1}})
+
+      assert {:error, {:tmux_server_unavailable, msg}} = TmuxServer.ensure_available(StubRunner)
+      assert_received {:kitty_runner, StubRunner}
+      assert msg =~ "no running kitty is its own responsible app"
+    end
+  end
+
   describe "refusal_message/1" do
     test "names the kitty error, the erlexec symptom, and the remedy" do
       msg = TmuxServer.refusal_message("no live kitty remote-control socket")

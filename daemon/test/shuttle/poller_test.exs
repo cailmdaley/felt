@@ -2057,7 +2057,7 @@ defmodule Shuttle.PollerTest do
   # The kitty seam with nobody home: no live remote-control socket, so on macOS
   # there is no way to get a tmux server that the daemon is not the root of.
   defmodule NoKitty do
-    def run_background(_argv), do: {:error, "no live kitty remote-control socket"}
+    def run_background(_argv, _runner), do: {:error, "no live kitty remote-control socket"}
   end
 
   test "a refused tmux-server preflight parks the fiber for the cooldown" do

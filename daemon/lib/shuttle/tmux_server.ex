@@ -16,19 +16,29 @@ defmodule Shuttle.TmuxServer do
 
   The fix is not to route dispatch through something else — `tmux new-session`'s
   exit status is the dispatch's ground truth and must stay so. The fix is to
-  make sure a tmux server ALREADY EXISTS, forked from the user's own terminal,
+  make sure a tmux server ALREADY EXISTS, forked by an app the human can grant,
   before the daemon ever runs `new-session`. The daemon already remote-controls
   kitty (`Shuttle.Kitty`), so it asks kitty to fork the server: `kitty @ launch
-  --type=background` runs a command as a child of the kitty app, with no window,
-  and TCC then charges kitty — an app the human can grant once.
+  --type=background` runs a command as a child of kitty, with no window, and TCC
+  then charges kitty — an app the human grants once (files, microphone, system
+  audio).
+
+  "Charges kitty" holds only for a kitty that is its own responsible app. TCC
+  follows the launchd resource coalition, and a kitty started by another app's
+  child process sits in that app's coalition: the Quick Access panel toggled by
+  a launcher hotkey is charged to the launcher, so an anchor forked through it
+  hands every worker the launcher's grants — an all-zero microphone, for one.
+  `Shuttle.Kitty.run_background/2` therefore forks only through a kitty whose
+  coalition is kitty's own, and starts one through LaunchServices when none is
+  running.
 
   Three outcomes, and the middle one is the point:
 
     * a server is present (or its presence can't be determined) → `:ok`,
       dispatch proceeds untouched
-    * no server, kitty reachable → kitty forks an anchor session, we wait for
-      the socket, disarm `exit-empty`, then `:ok`
-    * no server, kitty unreachable → dispatch is **REFUSED** with an
+    * no server, a self-rooted kitty reachable or startable → it forks an
+      anchor session, we wait for the socket, disarm `exit-empty`, then `:ok`
+    * no server, no such kitty → dispatch is **REFUSED** with an
       operator-facing message. The daemon never quietly starts the server
       itself; a silent success here is exactly the state that poisons a whole
       day of workers with permission prompts.
@@ -45,7 +55,8 @@ defmodule Shuttle.TmuxServer do
   requires root) prints the process's resource coalition, whose `name` is the
   launchd label or app bundle that rooted the tree — exactly the attribution TCC
   charges file access to. A coalition of `io.shuttle.daemon` is a daemon-born
-  server; anything else is user-born. See `internal/shuttlecli/tmux_origin.go`; nothing
+  server, kitty's is the intended one, and any other app's is reported as a
+  warning by `shuttle doctor`. See `internal/shuttlecli/tmux_origin.go`; nothing
   in this module needs to stamp or read a marker.
   """
 
@@ -101,7 +112,7 @@ defmodule Shuttle.TmuxServer do
   end
 
   defp start_server(runner) do
-    with :ok <- start_via_kitty(),
+    with :ok <- start_via_kitty(runner),
          :ok <- await_server(runner, @await_budget_ms) do
       disarm_exit_empty(runner)
       Logger.info("Started a tmux server via kitty (anchor session #{@anchor})")
@@ -134,19 +145,22 @@ defmodule Shuttle.TmuxServer do
   # immediately dies to `exit-empty` (verified). The server needs one session to
   # hold it up, and the anchor's payload is an effectively-infinite sleep rather
   # than a shell, so nothing is attached to it and nothing can wander off.
-  @spec start_via_kitty() :: :ok | {:error, String.t()}
-  defp start_via_kitty do
-    kitty_impl().run_background([
-      "tmux",
-      "new-session",
-      "-d",
-      "-s",
-      @anchor,
-      "--",
-      "sh",
-      "-c",
-      "exec sleep 2147483647"
-    ])
+  @spec start_via_kitty(module()) :: :ok | {:error, String.t()}
+  defp start_via_kitty(runner) do
+    kitty_impl().run_background(
+      [
+        "tmux",
+        "new-session",
+        "-d",
+        "-s",
+        @anchor,
+        "--",
+        "sh",
+        "-c",
+        "exec sleep 2147483647"
+      ],
+      runner
+    )
   end
 
   # Polls `presence/1` until a server answers, or `budget_ms` elapses.
@@ -204,8 +218,9 @@ defmodule Shuttle.TmuxServer do
       "process under it — the worker, its shells, its tools — would be charged to the daemon's " <>
       "binary by macOS privacy (TCC), so each one raises an \"erlexec wants to access data from " <>
       "other apps\" prompt and the daemon cannot hold those grants. Start a tmux server from " <>
-      "your kitty terminal (`tmux new-session -d -s #{@anchor}`) or open kitty with remote " <>
-      "control enabled, then dispatch again."
+      "a kitty you opened from the Dock or Finder (`tmux new-session -d -s #{@anchor}`) — not " <>
+      "from a launcher's hotkey panel, whose privacy grants it would inherit — or enable kitty " <>
+      "remote control, then dispatch again."
   end
 
   defp refuse(reason) do

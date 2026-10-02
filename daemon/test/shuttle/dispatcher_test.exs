@@ -391,7 +391,7 @@ defmodule Shuttle.DispatcherTest do
 
     def launches, do: Agent.get(__MODULE__, fn {_r, l} -> l end)
 
-    def run_background(argv) do
+    def run_background(argv, _runner) do
       MockRunner.record("kitty", ["@", "launch", "--type=background", "--"] ++ argv)
 
       Agent.get_and_update(__MODULE__, fn {result, launches} ->

@@ -25,6 +25,13 @@ defmodule Shuttle.Kitty do
   `$KITTY_LISTEN_ON` when the daemon *was* launched inside kitty).
   """
 
+  @kitty_coalition_prefix "application.net.kovidgoyal.kitty."
+
+  # Poll budget for a kitty started through LaunchServices to open its control
+  # socket: a cold app launch, well inside one dispatch tick.
+  @launch_budget_ms 5_000
+  @launch_interval_ms 100
+
   @kitty_candidates [
     Path.expand("~/.local/bin/kitty"),
     "/opt/homebrew/bin/kitty",
@@ -87,30 +94,43 @@ defmodule Shuttle.Kitty do
   def open(_session, _host), do: {:error, "tmux_session is required"}
 
   @doc """
-  Run `argv` as a child of the user's kitty, with no window
-  (`kitty @ launch --type=background`).
+  Run `argv` as a child of a kitty that is its own responsible app, with no
+  window (`kitty @ launch --type=background`). macOS only; `runner` carries
+  every shell-out (`launchctl`, `open`, the `kitty @` call itself).
 
   The point is the PROCESS TREE, not the output: a command launched this way is
-  forked by the kitty app, so macOS privacy (TCC) charges its file access to
-  kitty rather than to whoever asked. `Shuttle.TmuxServer` uses it to have the
-  tmux server forked by kitty instead of by the daemon.
+  forked by kitty, so macOS privacy (TCC) charges its file access to kitty's
+  responsible app rather than to whoever asked. `Shuttle.TmuxServer` uses it to
+  have the tmux server forked by kitty instead of by the daemon.
 
-  Unlike `open/2` there is deliberately **no `spawn_window` fallback**: a kitty
-  the daemon itself execs is a child of the daemon, so a server forked under it
-  is daemon-rooted after all — exactly the state this exists to prevent. No live
-  control socket is a clean `{:error, _}`.
+  A kitty is only as good as the app that rooted it. The responsible app is the
+  launchd resource coalition the kitty process sits in, and a kitty started by
+  another app's child process inherits *that* app's coalition: a Quick Access
+  panel toggled by a launcher hotkey (Alfred, skhd) is charged to the launcher,
+  and so is every process it forks, which then sees an all-zero microphone the
+  launcher was never granted. So the socket is chosen by coalition, not by
+  `kitty_socket/0`'s surface preference: among the live `/tmp/kitty-<pid>`
+  sockets, the most recently touched one whose `<pid>` sits in kitty's own
+  coalition (`launchctl print pid/<pid>`, read by `kitty_rooted?/1`).
+
+  With none running, kitty is started through LaunchServices (`open -n -g -a
+  kitty`), which gives the new instance a coalition of its own, and the launch
+  goes through its socket once it appears. There is deliberately **no
+  `spawn_window` fallback**: a kitty the daemon itself execs is a child of the
+  daemon, so a server forked under it is daemon-rooted after all. Every failure
+  is a clean `{:error, reason}`.
 
   (Follow-up, out of scope here: `open/2`'s `spawn_window/5` fallback has the
   same defect for worker *terminals* — a tab opened that way roots its shell
   under the daemon too.)
   """
-  @spec run_background([String.t()]) :: :ok | {:error, String.t()}
-  def run_background(argv) when is_list(argv) and argv != [] do
+  @spec run_background([String.t()], module()) :: :ok | {:error, String.t()}
+  def run_background(argv, runner) when is_list(argv) and argv != [] do
     with {:ok, kitty} <- kitty_bin(),
-         {socket, _kind} when is_binary(socket) <- kitty_socket() || :no_socket do
-      args = ["@"] ++ to_opt(socket) ++ ["launch", "--type=background", "--"] ++ argv
+         {:ok, socket} <- kitty_rooted_socket(runner) do
+      args = ["@", "--to", socket, "launch", "--type=background", "--"] ++ argv
 
-      case run(kitty, args) do
+      case runner.cmd(kitty, args, stderr_to_stdout: true) do
         {_out, 0} ->
           :ok
 
@@ -119,16 +139,131 @@ defmodule Shuttle.Kitty do
            "kitty launch --type=background exited #{code}: " <>
              (out |> String.trim() |> String.slice(0, 240))}
       end
-    else
-      :no_socket ->
-        {:error,
-         "no live kitty remote-control socket (needs `allow_remote_control yes` + " <>
-           "`listen_on unix:/tmp/kitty` in kitty.conf, and a kitty window open)"}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
+
+  # A `unix:` control socket of a kitty rooted by kitty itself, starting one
+  # through LaunchServices when none is running.
+  defp kitty_rooted_socket(runner) do
+    case find_kitty_rooted_socket(runner) do
+      {:ok, socket} -> {:ok, socket}
+      :none -> launch_kitty_app(runner)
+    end
+  end
+
+  defp launch_kitty_app(runner) do
+    case runner.cmd("open", ["-n", "-g", "-a", "kitty"], stderr_to_stdout: true) do
+      {_out, 0} ->
+        budget = Application.get_env(:shuttle, :kitty_launch_budget_ms, @launch_budget_ms)
+        await_kitty_rooted_socket(runner, System.monotonic_time(:millisecond) + budget)
+
+      {out, code} ->
+        {:error,
+         "no running kitty is its own responsible app, and `open -n -g -a kitty` exited " <>
+           "#{code}: " <> (out |> String.trim() |> String.slice(0, 240))}
+    end
+  end
+
+  defp await_kitty_rooted_socket(runner, deadline) do
+    case find_kitty_rooted_socket(runner) do
+      {:ok, socket} ->
+        {:ok, socket}
+
+      :none ->
+        if System.monotonic_time(:millisecond) + @launch_interval_ms > deadline do
+          {:error,
+           "started kitty with `open -n -g -a kitty`, but no control socket of a kitty rooted " <>
+             "by kitty appeared (needs `allow_remote_control yes` + `listen_on unix:/tmp/kitty` " <>
+             "in kitty.conf)"}
+        else
+          Process.sleep(@launch_interval_ms)
+          await_kitty_rooted_socket(runner, deadline)
+        end
+    end
+  end
+
+  defp find_kitty_rooted_socket(runner) do
+    socket_dir()
+    |> Path.join("kitty-*")
+    |> Path.wildcard()
+    |> Enum.flat_map(fn path ->
+      case File.stat(path, time: :posix) do
+        {:ok, %File.Stat{mtime: mtime}} -> [{path, mtime}]
+        _ -> []
+      end
+    end)
+    |> Enum.sort_by(fn {_path, mtime} -> mtime end, :desc)
+    |> Enum.find(fn {path, _mtime} -> socket_kitty_rooted?(path, runner) end)
+    |> case do
+      {path, _mtime} -> {:ok, "unix:" <> path}
+      nil -> :none
+    end
+  end
+
+  # kitty names its `listen_on` socket after its own pid, so the pid in the file
+  # name is the kitty process whose coalition matters. A dead pid (a stale
+  # socket file) makes `launchctl print` fail, which parses to no coalition.
+  defp socket_kitty_rooted?(path, runner) do
+    case Path.basename(path) do
+      "kitty-" <> pid when pid != "" ->
+        if String.match?(pid, ~r/^\d+$/) do
+          {out, _status} =
+            runner.cmd("launchctl", ["print", "pid/" <> pid], stderr_to_stdout: true)
+
+          out |> resource_coalition_name() |> kitty_rooted?()
+        else
+          false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  The `name` of the **resource** coalition in `launchctl print pid/<pid>`
+  output, or `""` when there is none to parse. The output also carries a
+  `jetsam` coalition block; only the resource coalition is the attribution TCC
+  follows. Mirrors `parseResourceCoalitionName` in
+  `internal/shuttlecli/tmux_origin.go`.
+  """
+  @spec resource_coalition_name(String.t()) :: String.t()
+  def resource_coalition_name(output) do
+    output
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.drop_while(
+      &(not (String.starts_with?(&1, "resource coalition") and String.contains?(&1, "{")))
+    )
+    |> case do
+      [] -> ""
+      [_header | body] -> block_name(body, 1)
+    end
+  end
+
+  defp block_name([], _depth), do: ""
+
+  defp block_name([line | rest], depth) do
+    if depth == 1 and String.starts_with?(line, "name = ") do
+      line |> String.replace_prefix("name = ", "") |> String.trim()
+    else
+      depth = depth + count(line, "{") - count(line, "}")
+      if depth <= 0, do: "", else: block_name(rest, depth)
+    end
+  end
+
+  defp count(line, char), do: length(String.split(line, char)) - 1
+
+  @doc """
+  Whether a resource-coalition name is kitty's own: an app launched through
+  LaunchServices gets `application.<bundle id>.<n>.<n>`, and kitty's bundle id
+  is `net.kovidgoyal.kitty`. The Quick Access panel is a separate bundle
+  (`kitty-quick-access`) with its own grants, so it does not count.
+  """
+  @spec kitty_rooted?(String.t()) :: boolean()
+  def kitty_rooted?(coalition), do: String.starts_with?(coalition, @kitty_coalition_prefix)
+
+  defp socket_dir, do: Application.get_env(:shuttle, :kitty_socket_dir, "/tmp")
 
   # ── kitty remote-control plumbing ──────────────────────────────────────────
 
@@ -371,7 +506,14 @@ defmodule Shuttle.Kitty do
     _ -> :dead
   end
 
-  defp kitty_bin,
+  defp kitty_bin do
+    case Application.get_env(:shuttle, :kitty_bin) do
+      path when is_binary(path) -> {:ok, path}
+      nil -> find_kitty_bin()
+    end
+  end
+
+  defp find_kitty_bin,
     do:
       find_bin(
         "kitty",
