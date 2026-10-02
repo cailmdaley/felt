@@ -6,14 +6,29 @@ defmodule ShuttleWeb.MeetingController do
   microphone. `POST /api/v1/capture` with `meeting` starts one for a new capture
   agent; `POST /api/v1/meeting/join` starts one for an existing constitution and
   delivers the meeting message to its worker through the owner-routed
-  `/deliver` path. Report and stop never leave this daemon.
+  `/deliver` path. Reports are host-addressed; stop runs on this daemon.
   """
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.Meeting
+  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
 
-  def show(conn, _params) do
+  alias Shuttle.{Meeting, OriginRouter}
+
+  def show(conn, params) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
+      :local ->
+        show_local(conn)
+
+      {:remote, remote} ->
+        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/meeting", params))
+
+      {:error, {:unknown_origin, origin}} ->
+        conn |> put_status(400) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
+    end
+  end
+
+  defp show_local(conn) do
     case Meeting.show() do
       {:ok, snapshot} ->
         json(conn, snapshot)

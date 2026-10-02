@@ -10,6 +10,14 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     original = System.get_env("SHUTTLE_STORES_FILE")
     original_remotes = Application.get_env(:shuttle, :remotes)
 
+    capability_env =
+      Map.new(
+        [:host_capabilities_os_type, :host_capabilities_runner],
+        &{&1, Application.fetch_env(:shuttle, &1)}
+      )
+
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+
     # SHUTTLE_STORES env WINS over the registry file (FeltStores resolution
     # order), so an operator shell exporting it leaks into every assertion
     # here. Clear it for the test; restore after.
@@ -27,6 +35,11 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
 
     on_exit(fn ->
       File.rm(path)
+
+      Enum.each(capability_env, fn
+        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
+        {key, :error} -> Application.delete_env(:shuttle, key)
+      end)
 
       case original do
         nil -> System.delete_env("SHUTTLE_STORES_FILE")
@@ -69,6 +82,29 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
              Path.expand("~/loom"),
              "/tmp/project"
            ]
+  end
+
+  # Mutation control: replace browser_capable with true or omit it from local_origin/1.
+  test "local origins publish GUI session capability rather than binary presence" do
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
+
+    Application.put_env(
+      :shuttle,
+      :host_capabilities_runner,
+      Shuttle.Test.HostCapabilityProbeRunner
+    )
+
+    for {console, capable} <- [{"501", true}, {"0", false}, {"502", false}] do
+      Process.put(:capability_probe_responses, %{
+        "/usr/bin/stat" => {console, 0},
+        "/usr/bin/id" => {"501", 0},
+        "/bin/launchctl" => {"gui/501 = {}", 0}
+      })
+
+      body = get(api_conn(), "/api/v1/felt-stores").resp_body |> Jason.decode!()
+      assert get_in(body, ["origins", body["host"], "browser_capable"]) == capable
+      assert ShuttleWeb.FeltStoresController.local_origin(body["host"]).browser_capable == capable
+    end
   end
 
   test "surfaces the curated picker-project list on the local origin" do
@@ -217,7 +253,8 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
            "felt_stores" => ["/remote/loom"],
            "expanded_felt_stores" => ["/remote/loom/expanded"],
            "projects" => ["/remote/talks"],
-           "native_folder_picker" => false
+           "native_folder_picker" => false,
+           "browser_capable" => true
          }
        })}
     end
@@ -299,18 +336,37 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       assert get_in(body, ["origins", "candide", "felt_stores"]) == ["/remote/loom"]
       assert get_in(body, ["origins", "candide", "projects"]) == ["/remote/talks"]
       assert get_in(body, ["origins", "candide", "native_folder_picker"]) == false
+      # Mutation control: stamp the viewer's browser capability onto remote origins.
+      assert get_in(body, ["origins", body["host"], "browser_capable"]) == false
+      assert get_in(body, ["origins", "candide", "browser_capable"]) == true
       # The expanded poll list is the owner's business, not the picker's.
       refute Map.has_key?(get_in(body, ["origins", "candide"]), "expanded_felt_stores")
     end)
   end
 
-  test "a cold owner feed still carries the store block" do
+  test "an owner without a browser capability field fails closed even on a GUI viewer" do
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
+
+    Application.put_env(
+      :shuttle,
+      :host_capabilities_runner,
+      Shuttle.Test.HostCapabilityProbeRunner
+    )
+
+    Process.put(:capability_probe_responses, %{
+      "/usr/bin/stat" => {"501", 0},
+      "/usr/bin/id" => {"501", 0},
+      "/bin/launchctl" => {"gui/501 = {}", 0}
+    })
+
     with_candide(fn ->
       start_feed_registry(ColdFeedClient)
       Shuttle.RemoteFiberRegistry.refresh_now()
 
       body = Jason.decode!(get(api_conn(), "/api/v1/felt-stores").resp_body)
       assert get_in(body, ["origins", "candide", "felt_stores"]) == ["/remote/loom"]
+      assert get_in(body, ["origins", body["host"], "browser_capable"]) == true
+      assert get_in(body, ["origins", "candide", "browser_capable"]) == false
     end)
   end
 
@@ -336,6 +392,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       assert get_in(body, ["origins", "candide", "kind"]) == "remote"
       assert get_in(body, ["origins", "candide", "stale"]) == true
       assert get_in(body, ["origins", "candide", "felt_stores"]) == []
+      assert get_in(body, ["origins", "candide", "browser_capable"]) == false
     end)
   end
 end

@@ -59,7 +59,8 @@ defmodule Shuttle.MeetingTest do
     :write_forward_client,
     :meeting_now,
     :meeting_launch_wait_ms,
-    :meeting_fibers
+    :meeting_fibers,
+    :host_capabilities_os_type
   ]
   @tmux_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
 
@@ -78,6 +79,7 @@ defmodule Shuttle.MeetingTest do
     Application.put_env(:shuttle, :remotes, [])
     Application.put_env(:shuttle, :own_host_id, "local-host")
     Application.put_env(:shuttle, :meeting_now, ~N[2026-09-25 14:03:12])
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
     Meeting.Control.reconcile(nil)
 
     on_exit(fn ->
@@ -90,6 +92,111 @@ defmodule Shuttle.MeetingTest do
     end)
 
     %{tmp_dir: tmp_dir, hark_dir: hark_dir, hark_path: hark_path}
+  end
+
+  # Mutation control: omit modes from inspect_current/1 or ignore executable permission.
+  test "GET reports platform-supported modes only when hark is executable", %{hark_path: path} do
+    for {os, modes} <- [{:darwin, ~w(call room phone)}, {:linux, ~w(phone)}] do
+      Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, os})
+
+      body =
+        api_conn()
+        |> get("/api/v1/meeting?origin=#{Shuttle.Poller.own_host_id()}")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
+      assert body == %{"available" => true, "meeting" => nil, "modes" => modes}
+    end
+
+    for unavailable <- [false, path <> "-missing", path] do
+      File.chmod!(path, 0o644)
+      Application.put_env(:shuttle, :hark_path, unavailable)
+      body = api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
+      assert body == %{"available" => false, "meeting" => nil, "modes" => []}
+    end
+  end
+
+  # Mutation control: remove validate_supported_mode/2 from do_start/5.
+  test "Linux rejects device capture before inspecting or launching hark", %{hark_dir: dir} do
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+
+    for mode <- ~w(call room), route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+      conn =
+        api_conn()
+        |> post(
+          route,
+          Jason.encode!(%{"meeting" => %{"mode" => mode}, "fiber_id" => "proj/fiber"})
+        )
+
+      assert conn.status == 422
+
+      assert Jason.decode!(conn.resp_body)["error"] ==
+               "meeting.mode '#{mode}' is not supported on this host"
+    end
+
+    assert Shuttle.Test.MeetingRunner.calls() == []
+    refute File.exists?(Path.join(dir, "meetings"))
+  end
+
+  # Mutation control: replace route_host/1 with a local read or route/1.
+  test "meeting GET forwards the owner's modes and meeting verbatim without a local read" do
+    body =
+      Jason.encode!(%{
+        "available" => true,
+        "modes" => ["phone"],
+        "meeting" => %{"launch" => "remote-launch"}
+      })
+
+    Shuttle.Test.ForwardStub.stub_forward(
+      "audio-host",
+      "http://audio.example:4000",
+      {:ok, 200, "application/json", body}
+    )
+
+    Application.put_env(:shuttle, :hark_path, false)
+
+    conn = get(api_conn(), "/api/v1/meeting?origin=audio-host&extra=kept")
+    assert conn.status == 200
+    assert conn.resp_body == body
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["application/json"]
+    url = Shuttle.Test.StubGetFileClient.last().url |> URI.parse()
+    assert url.path == "/api/v1/meeting"
+    assert url.host == "audio.example"
+    assert URI.decode_query(url.query) == %{"extra" => "kept"}
+    assert Shuttle.Test.MeetingRunner.calls() == []
+  end
+
+  test "meeting GET refuses unknown hosts and surfaces forward failures" do
+    conn = get(api_conn(), "/api/v1/meeting?origin=unknown-host")
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ "unknown host"
+    assert Shuttle.Test.MeetingRunner.calls() == []
+
+    Shuttle.Test.ForwardStub.stub_forward(
+      "audio-host",
+      "http://audio.example:4000",
+      {:error, :econnrefused}
+    )
+
+    conn = get(api_conn(), "/api/v1/meeting?origin=audio-host")
+    assert conn.status == 502
+    assert Jason.decode!(conn.resp_body)["error"] =~ "forward to audio-host failed"
+    assert Shuttle.Test.MeetingRunner.calls() == []
+  end
+
+  test "meeting GET preserves remote errors rather than substituting local availability" do
+    body = Jason.encode!(%{"error" => "tmux unavailable on owner"})
+
+    Shuttle.Test.ForwardStub.stub_forward(
+      "audio-host",
+      "http://audio.example:4000",
+      {:ok, 503, "application/json", body}
+    )
+
+    conn = get(api_conn(), "/api/v1/meeting?origin=audio-host")
+    assert conn.status == 503
+    assert conn.resp_body == body
+    assert Shuttle.Test.MeetingRunner.calls() == []
   end
 
   test "meeting name and title use the trimmed first line and at most six slug words" do
@@ -131,6 +238,8 @@ defmodule Shuttle.MeetingTest do
   test "phone mode launches hark with --phone and its row says it takes phone audio", %{
     hark_dir: hark_dir
   } do
+    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["display-message" | _], _opts, nil ->
         {{"can't find session: hark-meeting", 1}, nil}

@@ -48,7 +48,7 @@ defmodule Shuttle.Meeting do
   that socket.
   """
 
-  alias Shuttle.{Remote, Remotes, Runner, Tmux}
+  alias Shuttle.{HostCapabilities, Remote, Remotes, Runner, Tmux}
 
   @session "hark-meeting"
   @modes ~w(call room phone)
@@ -288,6 +288,7 @@ defmodule Shuttle.Meeting do
          {:ok, note} <- validate_note(note),
          :ok <- validate_target(target),
          executable when is_binary(executable) <- find_hark(opts),
+         :ok <- validate_supported_mode(mode, opts),
          {:ok, snapshot, context} <- inspect_current(opts),
          :ok <- ensure_startable(snapshot),
          {name, title} <-
@@ -328,6 +329,12 @@ defmodule Shuttle.Meeting do
 
   defp validate_meeting(_),
     do: {:error, {:validation, "meeting.mode must be 'call', 'room' or 'phone'"}}
+
+  defp validate_supported_mode(mode, opts) do
+    if mode in HostCapabilities.meeting_modes(true, opts),
+      do: :ok,
+      else: {:error, {:validation, "meeting.mode '#{mode}' is not supported on this host"}}
+  end
 
   defp first_line(note) do
     (note || "")
@@ -563,8 +570,14 @@ defmodule Shuttle.Meeting do
             nil
           end
 
-        {:ok, %{available: not is_nil(find_hark(opts)), meeting: meeting},
-         %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting}}
+        available = not is_nil(find_hark(opts))
+
+        {:ok,
+         %{
+           available: available,
+           modes: HostCapabilities.meeting_modes(available, opts),
+           meeting: meeting
+         }, %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting}}
       end
     end
   end

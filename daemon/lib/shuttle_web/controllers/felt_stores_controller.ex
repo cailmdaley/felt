@@ -39,6 +39,7 @@ defmodule ShuttleWeb.FeltStoresController do
     ConfigFiles,
     FeltStores,
     FolderPicker,
+    HostCapabilities,
     OriginRouter,
     Poller,
     Projects,
@@ -143,7 +144,8 @@ defmodule ShuttleWeb.FeltStoresController do
       # know BEFORE the human clicks which affordance to offer, and the origin
       # payload is already the one thing both forms load; a remote's flag rides
       # in on its relayed origin, describing that remote's desktop, not ours.
-      native_folder_picker: FolderPicker.available?()
+      native_folder_picker: FolderPicker.available?(),
+      browser_capable: HostCapabilities.browser_capable?()
     }
     |> Map.put(:host, host)
   end
@@ -156,6 +158,7 @@ defmodule ShuttleWeb.FeltStoresController do
   defp remote_origin(%Remote{} = remote, %{stores: %{} = stores} = feed) do
     stores
     |> Map.drop(["expanded_felt_stores"])
+    |> Map.put("browser_capable", stores["browser_capable"] == true)
     |> Map.merge(%{
       "kind" => "remote",
       "host" => remote.name,
@@ -172,6 +175,7 @@ defmodule ShuttleWeb.FeltStoresController do
       "display" => Remote.display_name(remote),
       "stale" => true,
       "felt_stores" => [],
+      "browser_capable" => false,
       "last_error" => render_error(feed[:last_error])
     }
   end

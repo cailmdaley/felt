@@ -23,8 +23,8 @@ defmodule ShuttleWeb.Router do
     post("/capture", CaptureController, :create)
     # A recording starts for a new capture (/capture with `meeting`) or joins
     # an existing constitution (/meeting/join). Both record on THIS daemon's
-    # microphone; only the agent's half is owner-routed. The other two routes
-    # observe and stop the local capture.
+    # audio; only the agent's half is owner-routed. Stop acts locally; GET
+    # observes this daemon or the host named by its optional origin.
     post("/meeting/join", MeetingController, :join)
     post("/meeting/stop", MeetingController, :stop)
     get("/meeting", MeetingController, :show)
