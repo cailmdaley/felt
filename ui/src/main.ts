@@ -33,7 +33,8 @@ const board = new KanbanModal({
       shuttleBase,
       onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error'),
       onMeetingResult: (msg, tone) => showToast(msg, tone),
-      onMeetingStarted: () => { void board.refreshMeeting() },
+      phoneAudio: board.phoneAudio,
+      onMeetingStarted: (meeting) => board.meetingStarted(meeting),
     })
   },
   // ⚙︎ at the right end of the tab strip, and ⌘, / , — the operator files of

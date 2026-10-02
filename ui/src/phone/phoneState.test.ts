@@ -1,35 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { MeetingRecord, MeetingStatus } from '../board/meeting'
 import {
   audioHealth,
   clockTime,
   closeMeaning,
   linkWords,
   parseRelayStatus,
-  phoneView,
   reconnectDelay,
   relayUrl,
 } from './phoneState'
-
-const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
-  state: 'live',
-  title: 'Lunch with Martin',
-  started_at: '2026-10-01T12:00:00Z',
-  tail: [],
-  transcript: null,
-  mirror_host: null,
-  fiber: null,
-  joined: false,
-  phone: true,
-  launch: 'L1',
-  tmux_session: 'hark-meeting',
-  error: null,
-  ...overrides,
-})
-
-const status = (row: MeetingRecord | null, available = true): MeetingStatus => ({ available, meeting: row })
-const view = (s: MeetingStatus | null, more: Partial<Parameters<typeof phoneView>[0]> = {}) =>
-  phoneView({ status: s, reachable: true, streaming: false, starting: false, ...more })
 
 describe('relay status frames', () => {
   it('reads the relay’s states and ignores anything else', () => {
@@ -66,44 +44,6 @@ describe('the status line', () => {
     expect(linkWords('waiting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
     expect(linkWords('connected', null, since)).toMatch(/audio lost since 14:03:07/)
     expect(linkWords('ended', 'the meeting has ended', since)).toBe('Ended: the meeting has ended')
-  })
-})
-
-describe('what the screen offers', () => {
-  it('offers Start, with the note, when nothing records', () => {
-    expect(view(status(null))).toMatchObject({ primary: 'start', showNote: true, canStop: false })
-  })
-
-  it('offers Start again after a failure and says what failed', () => {
-    const v = view(status(meeting({ state: 'failed', error: 'no models' })))
-    expect(v.primary).toBe('start')
-    expect(v.detail).toContain('no models')
-  })
-
-  it('offers Connect mic for a live phone meeting this page is not feeding', () => {
-    for (const state of ['loading', 'live'] as const) {
-      expect(view(status(meeting({ state })))).toMatchObject({ primary: 'connect', canStop: true, headline: 'Lunch with Martin' })
-    }
-  })
-
-  it('offers only Stop while streaming', () => {
-    expect(view(status(meeting()), { streaming: true })).toMatchObject({ primary: null, canStop: true })
-  })
-
-  it('names a meeting on the Mac’s own mic and offers no mic of its own', () => {
-    const v = view(status(meeting({ phone: false })))
-    expect(v.primary).toBeNull()
-    expect(v.canStop).toBe(true)
-    expect(v.headline).toMatch(/Mac’s own mic/)
-  })
-
-  it('says when hark is missing, the daemon is out of reach, or a stop is underway', () => {
-    expect(view(status(null, false))).toMatchObject({ primary: null, headline: expect.stringMatching(/hark/) })
-    expect(view(status(null), { reachable: false })).toMatchObject({ primary: null, headline: 'Can’t reach Shuttle' })
-    expect(view(status(null), { reachable: false, streaming: true }).canStop).toBe(true)
-    expect(view(status(meeting({ state: 'stopping' })))).toMatchObject({ primary: null, canStop: false })
-    expect(view(status(null), { starting: true })).toMatchObject({ primary: null, headline: 'Starting the meeting…' })
-    expect(view(null).primary).toBeNull()
   })
 })
 

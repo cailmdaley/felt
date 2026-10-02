@@ -1,6 +1,6 @@
 /**
  * What hark records: `call` this machine's mic and system audio, `room` its mic
- * alone, `phone` a phone's mic streamed in from the phone page (`/phone`).
+ * alone, `phone` a browser's mic streamed from the board.
  */
 export type MeetingMode = 'call' | 'room' | 'phone'
 

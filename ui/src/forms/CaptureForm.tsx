@@ -34,6 +34,10 @@ import {
   type CaptureResponseData,
 } from './captureApi'
 import { daemonErrorMessage } from '../board/daemonApi'
+import { isMobileViewport } from '../board/mobile'
+import type { PhoneCaptureHooks } from '../board/phoneMeeting'
+import { parseMeetingRecord, type MeetingRecord } from '../board/meeting'
+import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
 import { MEETING_MODES, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, useAgentRegistry, type AgentEntry } from './agents'
 import type { Host, Project } from './projectModel'
@@ -76,11 +80,13 @@ export interface CaptureFormProps {
   /** Called after an ordinary successful launch. App runs have no tmux name. */
   onSpawned: (launch: { tmuxSession: string; surface: ExecutionSurface }) => void
   /** Called once the daemon confirms meeting recording began. */
-  onMeetingResult: (result: { host: string; error?: string }) => void
+  onMeetingResult: (result: { host: string; error?: string; meeting: MeetingRecord | null }) => void
   /** Called on cancel / Esc / overlay click. */
   onCancel: () => void
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
   shuttleBase?: string
+  /** Audio belongs to the board, never to this sheet's mount lifetime. */
+  phoneAudio?: PhoneCaptureHooks
 }
 
 export function CaptureForm({
@@ -91,6 +97,7 @@ export function CaptureForm({
   onMeetingResult,
   onCancel,
   shuttleBase = '',
+  phoneAudio,
 }: CaptureFormProps): JSX.Element {
   const [prompt, setPrompt] = useState('')
   const [agent, setAgent] = useState<string>(CAPTURE_DEFAULT_AGENT)
@@ -104,10 +111,21 @@ export function CaptureForm({
   const [chrome, setChrome] = useState<boolean>(false)
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [meetingAvailable, setMeetingAvailable] = useState(false)
-  const [meetingMode, setMeetingMode] = useState<MeetingMode | null>(null)
+  const [mobileMeeting] = useState(() => isMobileViewport())
+  const [meetingMode, setMeetingMode] = useState<MeetingMode | null>(() => mobileMeeting ? 'phone' : null)
+  const [initialSelection] = useState(() => mobileMeeting ? rememberedMeetingProject(hosts, availableProjects) : undefined)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const mounted = useRef(true)
+  const pendingAudio = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (pendingAudio.current) phoneAudio?.cancel()
+    }
+  }, [phoneAudio])
   const {
     selectedHostId,
     selectedHost,
@@ -123,14 +141,14 @@ export function CaptureForm({
     projects: availableProjects,
     hosts,
     onProjectAdded,
+    initialSelection,
   })
 
   const meetingEnabled = meetingAvailable && meetingMode !== null
 
-  // Autofocus the yap — it's the whole point of the dialog.
   useEffect(() => {
-    textareaRef.current?.focus()
-  }, [])
+    if (!mobileMeeting) textareaRef.current?.focus()
+  }, [mobileMeeting])
 
   useEffect(() => {
     let cancelled = false
@@ -170,7 +188,15 @@ export function CaptureForm({
     }
     setSubmitting(true)
     setError(null)
+    const phone = meetingEnabled && meetingMode === 'phone'
     try {
+      // begin reaches AudioContext creation/resume and getUserMedia in this tap,
+      // before the first await. The daemon is asked only after the mic succeeds.
+      pendingAudio.current = phone
+      const opening = phone ? phoneAudio?.begin() : null
+      if (phone && !opening) throw new Error('Phone audio is unavailable on this board.')
+      const generation = opening ? await opening : null
+      if (!mounted.current) return
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,7 +219,18 @@ export function CaptureForm({
       })
       if (outcome.kind === 'error') throw new Error(outcome.message)
       if (outcome.kind === 'meeting-recording') {
-        onMeetingResult({ host: outcome.host, error: outcome.error })
+        let recordingError = outcome.error
+        try {
+          if (phone && generation !== null) {
+            if (!mounted.current) throw new Error('Recording started after Capture closed; the mic is off. Connect it from In flight.')
+            phoneAudio!.bind(generation, data.meeting)
+          }
+          rememberMeetingProject(selectedProject)
+        } catch (err) {
+          recordingError = [recordingError, daemonErrorMessage(err)].filter(Boolean).join(' ')
+        }
+        pendingAudio.current = false
+        onMeetingResult({ host: outcome.host, error: recordingError, meeting: parseMeetingRecord(data.meeting) })
         return
       }
       onSpawned({
@@ -201,6 +238,8 @@ export function CaptureForm({
         surface: outcome.surface ?? (isCodexAgent(agentRec) ? surface : 'cli'),
       })
     } catch (err) {
+      if (phone) phoneAudio?.cancel()
+      pendingAudio.current = false
       setError(daemonErrorMessage(err))
       setSubmitting(false)
     }
@@ -217,19 +256,20 @@ export function CaptureForm({
     <AppDialog
       open
       onOpenChange={(next) => {
-        if (!next) onCancel()
+        if (!next && !submitting) onCancel()
       }}
       title={meetingEnabled ? 'Start a meeting' : 'New idea'}
       eyebrow="shuttle · capture"
+      onOpenAutoFocus={mobileMeeting ? (event) => event.preventDefault() : undefined}
     >
-      <div className="form-sheet" onKeyDown={handleKeyDown}>
+      <div className={`form-sheet${mobileMeeting && meetingEnabled ? ' capture-mobile-meeting' : ''}`}  onKeyDown={handleKeyDown}>
         <textarea
           ref={textareaRef}
           className="capture-yap"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={meetingEnabled ? "What's the meeting? Who's in it?" : 'Speak the idea — a session will write the card'}
-          rows={6}
+          placeholder={meetingEnabled ? 'Optional — the scribe works it out as you talk' : 'Speak the idea — a session will write the card'}
+          rows={mobileMeeting && meetingEnabled ? 2 : 6}
         />
         {meetingAvailable && (
           <MeetingControl
@@ -349,6 +389,13 @@ export function MeetingControl({ mode, disabled, onChange }: {
 export function injectCaptureFormStyles(): void {
   injectFormKitStyles()
   injectStyles('capture-form-styles', `
+    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+      .capture-mobile-meeting .capture-yap { min-height: 3.5rem; resize: none; }
+      .capture-mobile-meeting { gap: 10px; }
+      .capture-mobile-meeting .capture-meeting-row { height: 44px; gap: 6px; }
+      .capture-mobile-meeting .capture-meeting-modes { height: 44px; }
+      .capture-mobile-meeting .capture-meeting-mode { padding: 0 10px; }
+    }
     /* The yap. 17px because this is the dialog's one piece of prose — the
        controls beneath it read at 15px, the labels at 11px. */
     .capture-yap {

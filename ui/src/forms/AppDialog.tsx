@@ -190,6 +190,7 @@ export interface AppDialogProps {
    * child owns its own layout and its own overflow.
    */
   flush?: boolean
+  onOpenAutoFocus?: (event: Event) => void
   children: ReactNode
 }
 
@@ -200,6 +201,7 @@ export function AppDialog({
   eyebrow,
   wide,
   flush,
+  onOpenAutoFocus,
   children,
 }: AppDialogProps): JSX.Element {
   injectAppDialogStyles()
@@ -208,6 +210,7 @@ export function AppDialog({
       <Dialog.Portal>
         <Dialog.Overlay style={appDialogOverlayStyles} />
         <Dialog.Content
+          onOpenAutoFocus={onOpenAutoFocus}
           className={wide ? 'app-dialog-card app-dialog-card-wide' : 'app-dialog-card'}
           style={appDialogContentStyles}
           // Radix warns unless a Description is rendered or the attribute is

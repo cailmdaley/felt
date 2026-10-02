@@ -1,14 +1,10 @@
 /**
- * The phone page's decisions, kept apart from the DOM and the audio graph so
- * the suite can hold them to account: what the screen offers for a meeting
- * state, what the relay's status frames mean, when to reconnect, and what to
- * say about audio that never reached hark. Nothing is held for later: hark
- * pads gaps with silence on its own clock, so late audio would count twice.
+ * Relay status, audio health, reconnect timing and words for lost audio.
+ * Nothing is held for later: hark pads gaps with silence on its own clock,
+ * so late audio would count twice.
  */
 
-import type { MeetingRecord, MeetingStatus } from '../board/meeting.js'
-
-/** The relay socket as the page shows it. */
+/** The relay socket's state. */
 export type LinkState =
   | 'idle'
   | 'opening'
@@ -72,69 +68,6 @@ export function reconnectDelay(attempt: number): number {
 /** An open socket with more than this queued (about 2 s of audio) is not
  *  keeping up; further chunks are dropped and counted as lost. */
 export const BUFFERED_LIMIT = 2 * 16_000 * 2
-
-/** What the screen offers. */
-export interface PhoneView {
-  headline: string
-  detail: string | null
-  /** The one big action: start a phone meeting, or feed the live one. */
-  primary: 'start' | 'connect' | null
-  /** Stop the meeting (and the mic). */
-  canStop: boolean
-  /** The note field belongs to starting a meeting. */
-  showNote: boolean
-}
-
-export interface PhoneViewInput {
-  /** The last `GET /api/v1/meeting`, or null before the first answer. */
-  status: MeetingStatus | null
-  /** Whether the last poll reached the daemon. */
-  reachable: boolean
-  /** This page holds the mic and a relay socket. */
-  streaming: boolean
-  /** A start request from this page is in flight. */
-  starting: boolean
-}
-
-function modeWords(meeting: MeetingRecord): string {
-  return meeting.state === 'starting' ? 'A meeting is starting on the Mac' : 'A meeting is recording the Mac’s own mic'
-}
-
-export function phoneView({ status, reachable, streaming, starting }: PhoneViewInput): PhoneView {
-  const none = { detail: null, primary: null, canStop: false, showNote: false } as const
-  if (starting) return { ...none, headline: 'Starting the meeting…' }
-  if (!reachable) {
-    return { ...none, headline: 'Can’t reach Shuttle', detail: 'Retrying every few seconds.', canStop: streaming }
-  }
-  if (!status) return { ...none, headline: 'Looking for a meeting…' }
-
-  const meeting = status.meeting
-  if (!meeting || meeting.state === 'failed') {
-    if (!status.available) {
-      return { ...none, headline: 'hark isn’t available on this machine', canStop: streaming }
-    }
-    return {
-      headline: 'No meeting yet',
-      detail: meeting?.state === 'failed' ? `The last meeting failed: ${meeting.error || 'no reason given'}` : null,
-      primary: 'start',
-      canStop: false,
-      showNote: true,
-    }
-  }
-  const title = meeting.title?.trim() || 'Untitled meeting'
-  if (meeting.state === 'stopping') return { ...none, headline: 'Stopping…', detail: title }
-  if (streaming) return { ...none, headline: title, canStop: true }
-  if (meeting.phone) {
-    return {
-      headline: title,
-      detail: 'This meeting takes its audio from a phone. Connect this one.',
-      primary: 'connect',
-      canStop: true,
-      showNote: false,
-    }
-  }
-  return { ...none, headline: modeWords(meeting), detail: title, canStop: true }
-}
 
 /** Whether captured audio is still flowing, judged from the track and context. */
 export type AudioHealth = 'ok' | 'muted' | 'suspended' | 'ended'

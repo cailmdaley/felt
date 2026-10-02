@@ -64,6 +64,7 @@ import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { joinDeliveryPhrase, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
 import { joinMeeting as requestMeetingJoin, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
+import { PhoneMeeting } from './phoneMeeting'
 import {
   collectCards,
   createTemporalFetchers,
@@ -253,6 +254,8 @@ export class KanbanModal {
   private meetingFetchPromise: Promise<void> | null = null
   private meetingFetchController: AbortController | null = null
   private readonly meetingStopGuard = new MeetingStopGuard()
+  readonly phoneAudio: PhoneMeeting
+  private meetingReadEpoch = 0
   /**
    * How many multi-write gestures are still landing.
    *
@@ -339,11 +342,22 @@ export class KanbanModal {
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
       getMeeting: () => this.meetingStatus.meeting,
+      getPhoneMeeting: () => this.phoneAudio,
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
       onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
       onRefresh: () => void this.refreshFromSource(),
     })
+    this.phoneAudio = new PhoneMeeting(this.shuttleBase, () => this.presentMeeting(), () => this.surfaces.updatePhoneLevel())
+  }
+
+  /** Capture's response supersedes reads that began before recording started. */
+  meetingStarted(meeting: MeetingRecord | null): void {
+    this.meetingReadEpoch += 1
+    if (meeting) this.meetingStatus = { available: true, meeting }
+    this.presentMeeting()
+    this.surfaces.selectInFlight()
+    void this.refreshMeeting()
   }
 
   /** Refresh local meeting availability and lifecycle independently of the fiber feed. */
@@ -389,6 +403,7 @@ export class KanbanModal {
     this.presentMeeting()
     try {
       await requestMeetingStop(this.shuttleBase)
+      if (meeting.phone) this.phoneAudio.cancel()
     } catch (error) {
       this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
     }
@@ -411,6 +426,7 @@ export class KanbanModal {
       return
     }
     this.assembleChrome()
+    this.phoneAudio.mount()
     host.append(this.container!)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
@@ -436,6 +452,7 @@ export class KanbanModal {
     // The fiber-detail panel floats on document.body, not in our container —
     // an unmount would otherwise orphan it over whatever is behind.
     this.detailModal.close()
+    this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
     this.activeView?.unmount()
@@ -1716,6 +1733,7 @@ export class KanbanModal {
     }
 
     const controller = new AbortController()
+    const epoch = this.meetingReadEpoch
     this.meetingFetchController = controller
     const timeout = window.setTimeout(() => controller.abort(), 10_000)
     let succeeded = false
@@ -1724,11 +1742,12 @@ export class KanbanModal {
         const response = await fetch(`${this.shuttleBase}/api/v1/meeting`, { signal: controller.signal })
         if (!response.ok || !this.container) return
         const status = parseMeetingStatus(await response.json())
-        if (!status) return
+        if (!status || epoch !== this.meetingReadEpoch) return
         succeeded = true
         this.meetingStopGuard.observe(status.meeting)
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
+        this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
         this.detailModal.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)

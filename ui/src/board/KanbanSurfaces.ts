@@ -46,6 +46,8 @@ import type {
 } from './KanbanRules.js'
 import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
+import type { PhoneMeeting } from './phoneMeeting'
+import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
 import { attachLongPress } from './longPress.js'
 import {
   activeFolioIndex,
@@ -232,6 +234,7 @@ interface KanbanSurfaceRendererOptions {
    *  render the In flight head title + count alone. */
   onNewIdeaClick?: () => void
   getMeeting?: () => MeetingRecord | null
+  getPhoneMeeting?: () => PhoneMeeting
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
   onMeetingTerminal?: (session: string) => void
   onMeetingStop?: (meeting: MeetingRecord) => void | Promise<void>
@@ -1526,6 +1529,27 @@ export class KanbanSurfaceRenderer {
     return true
   }
 
+  /** Move the mobile pager to the meeting without changing desktop layout. */
+  selectInFlight(): void {
+    if (!isMobileViewport()) return
+    this.folioIndex = 1
+    const board = this.currentMeetingList?.closest<HTMLElement>('.kbn-now-board')
+    if (board) {
+      board.scrollLeft = folioScrollTarget(1, board.clientWidth, NOW_COLUMN_ORDER.length)
+      const strip = board.parentElement?.querySelector('.kbn-folio')
+      strip?.querySelectorAll<HTMLElement>('.kbn-folio-seg').forEach((seg, index) => {
+        seg.classList.toggle('kbn-folio-seg-active', index === 1)
+        seg.setAttribute('aria-selected', String(index === 1))
+        seg.tabIndex = index === 1 ? 0 : -1
+      })
+    }
+  }
+
+  updatePhoneLevel(): void {
+    const phone = this.o.getPhoneMeeting?.()
+    if (phone && this.currentMeetingList) paintPhoneLevel(this.currentMeetingList, phone.peak)
+  }
+
   updateMeetingDuration(nowMs = Date.now()): void {
     for (const duration of this.currentMeetingList?.querySelectorAll<HTMLElement>('.kbn-meeting-duration:not([hidden])') ?? []) {
       const startedAt = duration.dataset.startedAt
@@ -1630,8 +1654,10 @@ export class KanbanSurfaceRenderer {
     error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
     error.hidden = meeting.state !== 'failed'
 
+    const phone = this.o.getPhoneMeeting?.()
+    if (phone) paintPhoneMeetingControls(block, meeting, phone)
     const actionGroup = block.querySelector<HTMLElement>('.kbn-meeting-actions')!
-    const actionSignature = [meeting.state, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
+    const actionSignature = [meeting.state, meeting.phone, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
     if (actionGroup.dataset.signature === actionSignature) return
     actionGroup.dataset.signature = actionSignature
     actionGroup.replaceChildren()
@@ -1655,7 +1681,7 @@ export class KanbanSurfaceRenderer {
         void this.o.onMeetingStop?.(current)
       })
     }
-    if (actions.terminal && this.o.onMeetingTerminal) {
+    if (actions.terminal && !meeting.phone && this.o.onMeetingTerminal) {
       addAction('Terminal', 'kbn-meeting-terminal', false, () => {
         const session = this.o.getMeeting?.()?.tmux_session
         if (session) this.o.onMeetingTerminal?.(session)

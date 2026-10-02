@@ -353,6 +353,7 @@ export function useProjectSelection<P extends PickerProject>(opts: {
   /** Every host, never empty — `deriveHosts` always yields the local one. */
   hosts: Host[]
   onProjectAdded?: (path: string) => Promise<P[]>
+  initialSelection?: { hostId: string; projectId: string }
 }): {
   selectedHostId: string
   selectedHost: Host
@@ -373,10 +374,10 @@ export function useProjectSelection<P extends PickerProject>(opts: {
   // whichever remote was busiest, and "add a project" would then quietly mean
   // "over there".
   const { hosts } = opts
-  const defaultHostId = hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
+  const defaultHostId = opts.initialSelection?.hostId ?? hosts.find((h) => h.isLocal)?.id ?? hosts[0].id
   const [selectedHostId, setSelectedHostId] = useState<string>(defaultHostId)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    () => projectsForHost(projects, defaultHostId)[0]?.id ?? null,
+    () => opts.initialSelection?.projectId ?? projectsForHost(projects, defaultHostId)[0]?.id ?? null,
   )
   const hostProjects = projectsForHost(projects, selectedHostId)
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? hosts[0]

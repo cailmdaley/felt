@@ -76,7 +76,7 @@ export class AudioSession {
   linkReason: string | null = null
   /** Audio has not reached hark since then (after it had been listening). */
   lostSince: number | null = null
-  /** The mic needs bringing back; the page offers Restore. */
+  /** The mic needs bringing back; the board offers Restore. */
   needsRestore = false
   warning: string | null = null
   error: string | null = null
@@ -86,7 +86,7 @@ export class AudioSession {
     this.now = deps.now ?? Date.now
   }
 
-  /** The page holds a mic, or is opening one. */
+  /** The tab holds a mic, or is opening one. */
   get busy(): boolean {
     return this.acquiring || this.mic !== null
   }

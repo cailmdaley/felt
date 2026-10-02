@@ -1,0 +1,12 @@
+.kbn-phone-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.kbn-phone-state, .kbn-phone-caveat, .kbn-phone-hint, .kbn-phone-warning, .kbn-phone-error { flex-basis: 100%; margin: 0; }
+.kbn-phone-state { color: #2F665E; }
+.kbn-phone-caveat, .kbn-phone-hint { font-size: 13px; color: #7A7068; }
+.kbn-phone-warning, .kbn-phone-error { font-size: 14px; color: #8B3A28; }
+.kbn-phone-meter { width: 100%; height: 6px; background: rgba(63, 130, 120, 0.12); border-radius: 3px; overflow: hidden; }
+.kbn-phone-meter-fill { height: 100%; background: #3F8278; }
+.kbn-phone-meter-hot .kbn-phone-meter-fill { background: #B54834; }
+.kbn-phone-controls [hidden] { display: none; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-phone-controls .kbn-meeting-action { min-height: 44px; padding: 8px 14px; }
+}

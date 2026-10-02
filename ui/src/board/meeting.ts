@@ -18,7 +18,7 @@ export interface MeetingRecord {
   fiber: string | null
   /** Whether `fiber` is a constitution the meeting joined. */
   joined: boolean
-  /** The meeting takes its audio from a phone (`/phone`), not this machine. */
+  /** The meeting takes its audio from a browser mic, not the daemon's machine. */
   phone: boolean
   /** The recording's launch id: what a phone's audio socket binds to. */
   launch: string | null

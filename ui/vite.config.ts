@@ -1,14 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolve } from 'node:path'
 
 /**
  * The Shuttle UI build.
  *
- * Two entries: `index.html` → `src/main.ts`, the kanban board + Stash/Capture
- * (vanilla TS DOM with React form islands), served at `/`; and `phone.html` →
- * `src/phone/main.ts`, the phone mic page, served at `/phone`. The
- * vellum/parchment look is hand-rolled CSS.
+ * `index.html` → `src/main.ts`: the kanban board and Stash/Capture, with
+ * meeting audio owned by the board (vanilla TS DOM with React form islands).
+ * The vellum/parchment look is hand-rolled CSS.
  *
  * The board fetches the daemon with a *relative* base (`/api/v1/...`):
  *
@@ -35,11 +33,5 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        index: resolve(__dirname, 'index.html'),
-        phone: resolve(__dirname, 'phone.html'),
-      },
-    },
   },
 })

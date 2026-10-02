@@ -1,0 +1,98 @@
+import { Mic, ScreenLock, audioContextForGesture } from '../phone/mic'
+import { RelayLink } from '../phone/relay'
+import { AudioSession, type SessionDeps } from '../phone/session'
+import { relayUrl } from '../phone/phoneState'
+import { parseMeetingRecord, type MeetingRecord } from './meeting'
+
+/** Capture opens audio in its submit gesture; the board keeps it after the sheet closes. */
+export interface PhoneCaptureHooks {
+  begin(): Promise<number>
+  bind(generation: number, meeting: unknown): void
+  cancel(): void
+}
+
+export class PhoneMeeting implements PhoneCaptureHooks {
+  readonly session: AudioSession
+  readonly lock: ScreenLock
+  peak = 0
+  private launch: string | null = null
+  private checkTimer: number | null = null
+  private readonly changed: () => void
+  private readonly returned = (): void => {
+    if (document.visibilityState === 'visible') this.session.returned()
+  }
+  private readonly pagehide = (): void => this.cancel()
+
+  constructor(shuttleBase: string, changed: () => void, level: () => void, deps?: SessionDeps) {
+    this.changed = changed
+    this.lock = new ScreenLock()
+    this.session = new AudioSession(deps ?? {
+      openMic: (handlers) => {
+        const context = audioContextForGesture()
+        return Mic.open(context, handlers).catch((error: unknown) => {
+          void context.close().catch(() => {})
+          throw error
+        })
+      },
+      // The scribe's project origin does not own this meeting's audio.
+      createRelay: (launch, events) => new RelayLink({
+        url: relayUrl(shuttleBase, window.location, launch), ...events,
+      }),
+      lock: this.lock,
+      onChange: changed,
+      onLevel: (peak) => { this.peak = peak; level() },
+    })
+  }
+
+  async begin(): Promise<number> {
+    const generation = await this.session.begin()
+    if (generation === null) throw new Error(this.session.error ?? 'The microphone is already opening or in use.')
+    return generation
+  }
+
+  bind(generation: number, value: unknown): void {
+    const meeting = parseMeetingRecord(value)
+    if (!meeting?.phone || !meeting.launch?.trim() || meeting.state === 'failed' || meeting.state === 'stopping') {
+      this.cancel()
+      throw new Error('Recording started, but the daemon did not return a phone meeting launch. The mic is off; reconnect when the meeting is available.')
+    }
+    this.launch = meeting.launch
+    this.session.stream(generation, meeting.launch)
+  }
+
+  async connect(meeting: MeetingRecord): Promise<void> {
+    // Refuse before asking for audio when there is no identity to bind it to.
+    if (!meeting.launch?.trim()) {
+      this.session.error = 'The meeting has no launch id. The mic is off.'
+      this.changed()
+      return
+    }
+    try { this.bind(await this.begin(), meeting) } catch (error) {
+      this.session.error ??= (error as Error).message
+    } finally { this.changed() }
+  }
+
+  cancel(): void {
+    this.launch = null
+    this.peak = 0
+    this.session.stop()
+  }
+
+  observe(meeting: MeetingRecord | null): void {
+    if (this.launch && (!meeting || meeting.launch !== this.launch || meeting.state === 'failed' || meeting.state === 'stopping')) this.cancel()
+  }
+
+  mount(): void {
+    document.addEventListener('visibilitychange', this.returned)
+    window.addEventListener('pagehide', this.pagehide)
+    this.checkTimer = window.setInterval(() => this.session.check(), 1_000)
+  }
+
+  unmount(): void {
+    document.removeEventListener('visibilitychange', this.returned)
+    window.removeEventListener('pagehide', this.pagehide)
+    if (this.checkTimer !== null) window.clearInterval(this.checkTimer)
+    this.checkTimer = null
+    this.cancel()
+  }
+}
