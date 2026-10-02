@@ -1,3 +1,5 @@
+import { parseMeetingRecord, type MeetingRecord } from '../board/meeting'
+
 /**
  * What hark records: `call` this machine's mic and system audio, `room` its mic
  * alone, `phone` a browser's mic streamed from the board.
@@ -45,9 +47,9 @@ export interface JoinMeetingInput {
  * receive it, and says why.
  */
 export type JoinMeetingOutcome =
-  | { kind: 'joined'; delivery: string }
-  | { kind: 'unconfirmed'; detail: string }
-  | { kind: 'recording'; error: string }
+  | { kind: 'joined'; delivery: string; meeting: MeetingRecord | null }
+  | { kind: 'unconfirmed'; detail: string; meeting: MeetingRecord | null }
+  | { kind: 'recording'; error: string; meeting: MeetingRecord | null }
   | { kind: 'error'; message: string }
 
 /**
@@ -95,12 +97,13 @@ export async function joinMeeting(
   const delivery = payload.delivery && typeof payload.delivery === 'object'
     ? payload.delivery as Record<string, unknown>
     : null
+  const meeting = parseMeetingRecord(payload.meeting)
   const unconfirmed = delivery && unconfirmedDetail(delivery)
-  if (unconfirmed) return { kind: 'unconfirmed', detail: unconfirmed }
+  if (unconfirmed) return { kind: 'unconfirmed', detail: unconfirmed, meeting }
   if (response.ok && delivery) {
-    return { kind: 'joined', delivery: typeof delivery.delivery === 'string' ? delivery.delivery : 'message' }
+    return { kind: 'joined', delivery: typeof delivery.delivery === 'string' ? delivery.delivery : 'message', meeting }
   }
-  if (payload.recording === true) return { kind: 'recording', error: responseError(payload, response.status) }
+  if (payload.recording === true) return { kind: 'recording', error: responseError(payload, response.status), meeting }
   if (response.status === 409 && payload.meeting) {
     return { kind: 'error', message: 'A meeting is already starting or running.' }
   }

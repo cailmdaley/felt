@@ -64,7 +64,7 @@ import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { joinDeliveryPhrase, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
 import { joinMeeting as requestMeetingJoin, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
-import { PhoneMeeting } from './phoneMeeting'
+import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import {
   collectCards,
   createTemporalFetchers,
@@ -376,6 +376,19 @@ export class KanbanModal {
    * the error to show beside the control, or null once recording began.
    */
   private async joinCardMeeting(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null> {
+    let opening: PhoneCaptureAttempt | undefined
+    let generation: number | undefined
+    if (mode === 'phone') {
+      try {
+        opening = this.phoneAudio.begin()
+        generation = await opening.ready
+      } catch (error) {
+        opening?.cancel()
+        const message = errText(error)
+        this.showBanner(`Couldn't start the meeting: ${message}`, 'error')
+        return message
+      }
+    }
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,
       origin: card.originId,
@@ -383,6 +396,7 @@ export class KanbanModal {
       note,
     })
     if (outcome.kind === 'error') {
+      opening?.cancel()
       this.showBanner(`Couldn't start the meeting: ${outcome.message}`, 'error')
       return outcome.message
     }
@@ -393,9 +407,18 @@ export class KanbanModal {
     } else {
       this.showBanner(`Recording, but “${card.name}” didn't receive the meeting: ${outcome.error}`, 'error')
     }
-    await this.refreshMeeting()
+    let audioError: string | null = null
+    if (opening && generation !== undefined) {
+      try { opening.bind(generation, outcome.meeting) } catch (error) {
+        audioError = errText(error)
+        this.showBanner(audioError, 'error')
+      }
+      this.meetingStarted(outcome.meeting)
+    } else {
+      await this.refreshMeeting()
+    }
     void this.fetchAndRender()
-    return null
+    return audioError
   }
 
   private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {

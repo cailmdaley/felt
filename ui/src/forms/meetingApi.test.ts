@@ -31,7 +31,7 @@ describe('joinMeeting', () => {
       reply({ meeting: { state: 'live', fiber: 'loom/shear' }, delivery: { delivered: true, delivery: 'resume' } }),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', origin: 'local', mode: 'call' }, fetcher))
-      .resolves.toEqual({ kind: 'joined', delivery: 'resume' })
+      .resolves.toMatchObject({ kind: 'joined', delivery: 'resume', meeting: { state: 'live', fiber: 'loom/shear' } })
     const [url, init] = fetcher.mock.calls[0]!
     expect(url).toBe('http://daemon/api/v1/meeting/join')
     expect(init?.method).toBe('POST')
@@ -44,7 +44,7 @@ describe('joinMeeting', () => {
       reply({ meeting: { state: 'live' }, delivery: { delivered: null, delivery: 'message', detail, receipt: { status: 'unknown', detail } } }, 202),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, current))
-      .resolves.toEqual({ kind: 'unconfirmed', detail })
+      .resolves.toMatchObject({ kind: 'unconfirmed', detail, meeting: { state: 'live' } })
 
     // A daemon that still renders an unknown receipt as a failure: the receipt decides.
     const older = vi.fn<typeof fetch>().mockResolvedValue(
@@ -60,7 +60,7 @@ describe('joinMeeting', () => {
       }, 400),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, older))
-      .resolves.toEqual({ kind: 'unconfirmed', detail: 'native message sent; no correlated receiver turn observed: context deadline exceeded' })
+      .resolves.toMatchObject({ kind: 'unconfirmed', detail: 'native message sent; no correlated receiver turn observed: context deadline exceeded', meeting: { state: 'live' } })
 
     const refused = vi.fn<typeof fetch>().mockResolvedValue(
       reply({
@@ -71,7 +71,7 @@ describe('joinMeeting', () => {
       }, 502),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, refused))
-      .resolves.toEqual({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started' })
+      .resolves.toMatchObject({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started', meeting: { state: 'live' } })
   })
 
   it('keeps a recording that the worker did not receive distinct from a failed start', async () => {
@@ -79,7 +79,7 @@ describe('joinMeeting', () => {
       reply({ recording: true, error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } }, 422),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, recording))
-      .resolves.toEqual({ kind: 'recording', error: 'Fiber is closed — reopen it before dispatching.' })
+      .resolves.toMatchObject({ kind: 'recording', error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } })
 
     const busy = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ error: 'a meeting is already active', meeting: { state: 'live' } }, 409),

@@ -7,7 +7,8 @@ import { RelayLink } from '../phone/relay'
 import type { RelayEvents } from '../phone/session'
 import { MOBILE_MEDIA } from './mobile'
 import { parseMeetingRecord, type MeetingRecord, type MeetingStatus } from './meeting'
-import type { KanbanResponse } from './KanbanTypes'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes'
+import { card } from './testFixtures'
 
 vi.mock('../phone/relay', () => ({ RelayLink: vi.fn(function () {
   return { open: vi.fn(), close: vi.fn(), send: vi.fn(), nudge: vi.fn() }
@@ -19,6 +20,9 @@ interface BoardState {
   lastResponse: KanbanResponse
   meetingStatus: MeetingStatus
   fetchMeetingStatus(): Promise<void>
+  fetchAndRender(): Promise<void>
+  showBanner(message: string, tone: string): void
+  detailModal: { buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, error: HTMLElement): HTMLElement }
   teardownState(): void
 }
 const row = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => parseMeetingRecord({
@@ -71,6 +75,63 @@ afterEach(() => {
 })
 
 describe('board phone meeting card wiring', () => {
+  it('starts a joined Phone from the actual menu gesture and binds confirmed recording even when delivery fails', async () => {
+    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    const order: string[] = []
+    vi.stubGlobal('AudioContext', class {
+      constructor() { order.push('context') }
+      resume() { order.push('resume'); return Promise.resolve() }
+      close() { return Promise.resolve() }
+    })
+    for (const reply of [
+      { ok: true, status: 200, payload: { delivery: { delivery: 'message', delivered: true } } },
+      { ok: true, status: 202, payload: { delivery: { delivered: null, detail: 'queued' } } },
+      { ok: false, status: 502, payload: { recording: true, error: 'delivery failed' } },
+    ]) {
+      board.phoneAudio.cancel()
+      state.meetingStatus.meeting = null
+      const opening = defer<Mic>()
+      vi.mocked(Mic.open).mockImplementation(() => { order.push('mic'); return opening.promise })
+      fetcher.mockImplementation(async (url: string) => ({
+        ok: url.endsWith('/join') ? reply.ok : true,
+        status: reply.status,
+        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: current },
+      }))
+      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('textarea'), document.createElement('div'))
+      document.body.append(menu)
+      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+      order.length = 0
+      fetcher.mockClear()
+      const phone = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!
+      phone.click()
+      expect(order).toEqual(['context', 'resume', 'mic'])
+      expect(fetcher).not.toHaveBeenCalled()
+      opening.resolve(opened as unknown as Mic)
+      await flush()
+      expect(fetcher).toHaveBeenCalledWith('https://audio.example/api/v1/meeting/join', expect.objectContaining({
+        body: JSON.stringify({ fiber_id: 'science/task', origin: 'scribe-host', meeting: { mode: 'phone' } }),
+      }))
+      expect(RelayLink).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'wss://audio.example/api/v1/meeting/audio?launch=L1' }))
+      expect(board.phoneAudio.session.mic).toBe(opened)
+      expect(state.meetingStatus.meeting).toMatchObject({ launch: 'L1' })
+      menu.remove()
+    }
+  })
+
+  it('releases a joined Phone attempt on hard start failure without binding a relay', async () => {
+    state.meetingStatus.meeting = null
+    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
+    const error = document.createElement('div')
+    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('textarea'), error)
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+    menu.querySelector<HTMLButtonElement>('[role="menuitem"]:last-child')!.click()
+    await flush()
+    expect(opened.close).toHaveBeenCalledOnce()
+    expect(RelayLink).not.toHaveBeenCalled()
+    expect(error.textContent).toBe('hark unavailable')
+  })
+
   it('adds audio controls only to phone cards and preserves desktop Stop and Terminal', () => {
     expect(find('.kbn-phone-controls')).not.toBeNull()
     expect(find('.kbn-meeting-stop')?.textContent).toBe('Stop')
