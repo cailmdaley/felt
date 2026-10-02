@@ -75,6 +75,31 @@ afterEach(() => {
 })
 
 describe('board phone meeting card wiring', () => {
+  it('marks hidden and bfcache suspension on the board session and paints the interruption on return', async () => {
+    find<HTMLButtonElement>('.kbn-phone-connect').click()
+    await flush()
+    board.phoneAudio.mount()
+    let visibility: DocumentVisibilityState = 'hidden'
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    const backgrounded = vi.spyOn(board.phoneAudio.session, 'backgrounded')
+    const returned = vi.spyOn(board.phoneAudio.session, 'returned')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(backgrounded).toHaveBeenCalledOnce()
+    handlers.onChunk(new ArrayBuffer(4))
+    expect(board.phoneAudio.session.warning).toBeNull()
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+    expect(backgrounded).toHaveBeenCalledTimes(2)
+    expect(opened.close).not.toHaveBeenCalled()
+    visibility = 'visible'
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+    expect(returned).toHaveBeenCalledOnce()
+    expect(find('.kbn-phone-warning').textContent).toContain('Audio may be missing from')
+    handlers.onChunk(new ArrayBuffer(4))
+    expect(find('.kbn-phone-warning').textContent).toContain('Audio may be missing from')
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+    expect(opened.close).toHaveBeenCalledOnce()
+  })
+
   it('starts a joined Phone from the actual menu gesture and binds confirmed recording even when delivery fails', async () => {
     vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
     const order: string[] = []
@@ -172,7 +197,7 @@ describe('board phone meeting card wiring', () => {
     handlers.onLevel(0.25)
     expect(find('.kbn-phone-meter').getAttribute('aria-valuenow')).toBe('50')
     expect(find('.kbn-phone-meter-fill').style.width).toBe('50%')
-    expect(find('.kbn-phone-hint').textContent).toContain('locking or switching apps may cut the mic')
+    expect(find('.kbn-phone-hint').textContent).toContain('iOS stops the mic when the screen locks')
     events().onLink('reconnecting', null)
     events().onLoss(Date.now(), null)
     expect(find('.kbn-phone-state').textContent).toContain('audio lost since')
@@ -180,7 +205,7 @@ describe('board phone meeting card wiring', () => {
     expect(relay().nudge).toHaveBeenCalledOnce()
     opened.health.mockReturnValue('suspended')
     handlers.onInterrupted('audio suspended')
-    expect(find('.kbn-phone-warning').textContent).toContain('speech is missing')
+    expect(find('.kbn-phone-warning').textContent).toContain('speech may be missing')
     expect(find('.kbn-phone-restore').hidden).toBe(false)
     find<HTMLButtonElement>('.kbn-phone-restore').click()
     await flush()

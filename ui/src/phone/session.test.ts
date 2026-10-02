@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MicHandlers } from './mic'
-import type { AudioHealth, LinkState } from './phoneState'
+import { clockTime, type AudioHealth, type LinkState } from './phoneState'
 import { AudioSession, type LockLike, type MicLike, type RelayEvents, type RelayLike } from './session'
 
 function deferred<T>() {
@@ -173,6 +173,48 @@ describe('audio session ownership', () => {
 })
 
 describe('audio session recovery', () => {
+  it('keeps the full wall-clock background gap through frozen timers and delayed hidden chunks', async () => {
+    const { session, tick, grant, relays } = harness()
+    const start = new Date(2026, 9, 2, 13, 8, 53).getTime()
+    tick(start)
+    const pending = session.begin()
+    const mic = grant()
+    session.stream((await pending)!, 'L1')
+    mic.handlers.onChunk(new ArrayBuffer(4))
+    session.backgrounded()
+    tick(170_000) // No check or timer callback during suspension.
+    relays[0].emit('reconnecting')
+    mic.handlers.onChunk(new ArrayBuffer(4)) // A delayed worklet callback, still hidden.
+    expect(session.warning).toBeNull()
+    tick(10_000)
+    session.returned()
+    const fullGap = `Audio may be missing from ${clockTime(start)} to ${clockTime(start + 180_000)} (the screen locked or the browser went to the background).`
+    expect(session.warning).toBe(fullGap) // Visible before any fresh worklet callback.
+    relays[0].emit('connected')
+    mic.handlers.onChunk(new ArrayBuffer(4))
+    expect(session.warning).toBe(fullGap)
+    session.warning = null
+    mic.handlers.onChunk(new ArrayBuffer(4))
+    expect(session.warning).toBeNull()
+    session.backgrounded()
+    tick(180_000)
+    mic.state = 'suspended'
+    session.returned()
+    expect(session.needsRestore).toBe(true)
+    expect(session.warning).toContain(`interrupted at ${clockTime(start + 180_000)}`)
+
+    // Permission/open can also finish after the tab was hidden.
+    const acquiring = harness()
+    acquiring.tick(start)
+    const acquisition = acquiring.session.begin()
+    acquiring.session.backgrounded()
+    acquiring.tick(180_000)
+    acquiring.grant()
+    await acquisition
+    acquiring.session.returned()
+    expect(acquiring.session.warning).toBe(fullGap)
+  })
+
   it('a muted or ended track shows Restore at once, without a visibility change', async () => {
     for (const state of ['muted', 'ended', 'suspended'] as const) {
       const { session, grant } = harness()
@@ -246,6 +288,6 @@ describe('audio session recovery', () => {
     tick(5_000)
     session.check()
     mic.handlers.onChunk(new ArrayBuffer(4))
-    expect(session.warning).toMatch(/No audio from the mic/)
+    expect(session.warning).toMatch(/Audio may be missing/)
   })
 })

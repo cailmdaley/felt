@@ -69,6 +69,8 @@ export class AudioSession {
   private readonly now: () => number
   private lastChunkAt = 0
   private silentSince: number | null = null
+  private hiddenSince: number | null = null
+  private hidden = false
   mic: MicLike | null = null
   relay: RelayLike | null = null
   acquiring = false
@@ -202,28 +204,49 @@ export class AudioSession {
     }
   }
 
+  /** Remember the wall-clock boundary even when timers and audio callbacks freeze. */
+  backgrounded(): void {
+    if (!this.busy) return
+    this.hidden = true
+    this.hiddenSince ??= this.now()
+  }
+
   /** The tab is visible again: take the lock back, reconnect, check the mic. */
   returned(): void {
+    this.hidden = false
     if (!this.mic) return
     void this.deps.lock.reacquire().catch(() => {}).finally(() => this.changed())
     this.relay?.nudge()
     this.check()
+    if (this.hiddenSince !== null && !this.needsRestore) {
+      this.reportGap(Math.min(this.hiddenSince, this.silentSince ?? Infinity), this.now())
+    }
     if (this.needsRestore) void this.restore()
   }
 
+  private reportGap(since: number, until: number): void {
+    this.warning = `Audio may be missing from ${clockTime(since)} to ${clockTime(until)} (the screen locked or the browser went to the background).`
+    this.changed()
+  }
+
   private heard(): void {
+    // Delayed worklet callbacks while hidden cannot erase the suspension boundary.
+    if (this.hidden) return
     const now = this.now()
-    if (this.silentSince !== null) {
-      this.warning = `No audio from the mic from ${clockTime(this.silentSince)} to ${clockTime(now)} (the screen locked or Safari went to the background).`
+    const starts = [this.silentSince, this.hiddenSince].filter((value): value is number => value !== null)
+    if (starts.length > 0) {
+      const since = Math.min(...starts)
       this.silentSince = null
-      this.changed()
+      this.hiddenSince = null
+      this.reportGap(since, now)
     }
     this.lastChunkAt = now
   }
 
   private interrupted(why: string): void {
     this.needsRestore = true
-    this.warning = `Audio was interrupted at ${clockTime(this.now())} (${why}); speech is missing until the mic is back.`
+    const since = Math.min(this.now(), this.hiddenSince ?? Infinity, this.silentSince ?? Infinity)
+    this.warning = `Audio was interrupted at ${clockTime(since)} (${why}); speech may be missing until the mic is back.`
     this.changed()
   }
 
@@ -239,6 +262,8 @@ export class AudioSession {
     this.needsRestore = false
     this.lostSince = null
     this.silentSince = null
+    this.hiddenSince = null
+    this.hidden = false
     this.deps.lock.release()
   }
 

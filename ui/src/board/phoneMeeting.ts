@@ -23,10 +23,14 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   private attempt = 0
   private checkTimer: number | null = null
   private readonly changed: () => void
-  private readonly returned = (): void => {
+  private readonly visibilityChanged = (): void => {
     if (document.visibilityState === 'visible') this.session.returned()
+    else this.session.backgrounded()
   }
-  private readonly pagehide = (): void => this.cancel()
+  private readonly pagehide = (event: PageTransitionEvent): void => {
+    this.session.backgrounded()
+    if (!event.persisted) this.cancel()
+  }
 
   constructor(shuttleBase: string, changed: () => void, level: () => void) {
     this.changed = changed
@@ -104,14 +108,16 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   }
 
   mount(): void {
-    document.addEventListener('visibilitychange', this.returned)
+    document.addEventListener('visibilitychange', this.visibilityChanged)
     window.addEventListener('pagehide', this.pagehide)
+    window.addEventListener('pageshow', this.visibilityChanged)
     this.checkTimer = window.setInterval(() => this.session.check(), 1_000)
   }
 
   unmount(): void {
-    document.removeEventListener('visibilitychange', this.returned)
+    document.removeEventListener('visibilitychange', this.visibilityChanged)
     window.removeEventListener('pagehide', this.pagehide)
+    window.removeEventListener('pageshow', this.visibilityChanged)
     if (this.checkTimer !== null) window.clearInterval(this.checkTimer)
     this.checkTimer = null
     this.cancel()

@@ -60,7 +60,7 @@ export function paintPhoneMeetingControls(root: HTMLElement, meeting: MeetingRec
   view.meter.hidden = !session.mic
   paintPhoneLevel(root, phone.peak)
   view.hint.hidden = !session.mic
-  view.hint.textContent = 'Keep this screen on and the browser in front: locking or switching apps may cut the mic.' + (phone.lock.held ? ' Screen kept awake.' : '')
+  view.hint.textContent = 'iOS stops the mic when the screen locks. Keep the screen on and the browser in front. ' + (phone.lock.held ? 'Wake lock is preventing auto-lock.' : 'Wake lock can prevent auto-lock; it cannot prevent a manual lock.')
   view.warning.textContent = session.warning ?? ''
   view.warning.hidden = !session.warning
   view.error.textContent = session.error ?? ''
