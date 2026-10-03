@@ -215,6 +215,19 @@ defmodule Shuttle.MeetingTest do
              Meeting.name_and_title("Cósmić shear", now)
   end
 
+  test "pasted-image lines never name a meeting" do
+    now = ~N[2026-09-25 14:03:12]
+
+    assert {"2026-09-25_1403", "Meeting"} =
+             Meeting.name_and_title(
+               "[Image: /h/.shuttle/attachments/u/a.png]\n[Image: /h/b.jpg]",
+               now
+             )
+
+    assert {"2026-09-25_1403_shear-residuals", "shear residuals"} =
+             Meeting.name_and_title("[Image: /h/a.png]\nshear residuals", now)
+  end
+
   test "meeting message carries the facts and points at the skill's meeting reference" do
     call = Meeting.meeting_message("call", "/tmp/meetings/session.txt")
     room = Meeting.meeting_message("room", "/tmp/meetings/session.txt")
@@ -397,6 +410,47 @@ defmodule Shuttle.MeetingTest do
 
     assert %{"meeting" => %{"fiber" => "cosmo/shear-bmodes", "joined" => true}} =
              api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
+  end
+
+  test "a joined meeting whose note is only images is named after the fiber", %{
+    hark_dir: hark_dir
+  } do
+    Application.put_env(:shuttle, :remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient,
+       {:ok, 200, Jason.encode!(%{"delivered" => true, "delivery" => "message"})}}
+    )
+
+    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_joined_meeting_handler(hark_dir)
+    image = "[Image: /remote/.shuttle/attachments/u/0123456789abcdef.png]"
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/join",
+        Jason.encode!(%{
+          "fiber_id" => "cosmo/shear-bmodes",
+          "origin" => "project-host",
+          "meeting" => %{"mode" => "call"},
+          "note" => image
+        })
+      )
+
+    assert conn.status == 200
+    request = Jason.decode!(Shuttle.Test.MeetingCaptureForwardClient.last().body)
+    assert request["text"] =~ "~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt"
+    assert request["text"] =~ image
+
+    {"tmux", ["new-session" | args], _} =
+      Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    assert List.last(Enum.take_while(args, &(&1 != ";"))) =~ "'--title' 'shear-bmodes'"
   end
 
   test "a delivery failure after hark starts keeps the recording row", %{hark_dir: hark_dir} do
