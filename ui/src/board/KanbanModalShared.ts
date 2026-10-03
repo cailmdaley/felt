@@ -13,7 +13,7 @@ import type { KanbanCard } from './KanbanTypes.js'
  * This reads the body once, prefers a JSON `error` field when present, falls
  * back to the raw text, and only then to `<label> (HTTP <status>)`.
  */
-async function errorMessageFromResponse(res: Response, label: string): Promise<string> {
+export async function errorMessageFromResponse(res: Response, label: string): Promise<string> {
   let body = ''
   try { body = (await res.text()).trim() } catch { /* body unreadable (network/stream error) */ }
   if (body) {

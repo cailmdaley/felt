@@ -376,7 +376,11 @@ export class KanbanModal {
    * banner says how its worker received the meeting; the returned string is
    * the error to show beside the control, or null once recording began.
    */
-  private async joinCardMeeting(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null> {
+  private async joinCardMeeting(
+    card: KanbanCard,
+    mode: MeetingMode,
+    composeNote: () => Promise<string>,
+  ): Promise<string | null> {
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
     if (mode === 'phone') {
@@ -389,6 +393,15 @@ export class KanbanModal {
         this.showBanner(`Couldn't start the meeting: ${message}`, 'error')
         return message
       }
+    }
+    // The note waits for any pasted images to reach the owning host; a failed
+    // upload starts no meeting.
+    let note: string
+    try {
+      note = await composeNote()
+    } catch (error) {
+      opening?.cancel()
+      return errText(error)
     }
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,

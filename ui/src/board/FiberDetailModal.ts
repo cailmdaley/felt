@@ -79,7 +79,19 @@ import {
   isoDayLocal,
 } from './civilDay.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
+import {
+  PastedImages,
+  buildImageStrip,
+  composeDirective,
+  filesFromTransfer,
+  transferHasFiles,
+  uploadPastedImages,
+} from './pastedImages.js'
 import './FiberDetailModal.css'
+
+/** A composer send's message, or the function that resolves it (uploading
+ *  pasted images first, and rejecting with their failure). */
+type Directive = string | (() => Promise<string>)
 
 /**
  * Panel geometry remembered across opens within a session — the reader who
@@ -119,9 +131,12 @@ function dayStamp(ms: number): string {
 export interface MeetingJoinControl {
   /** hark is available on this machine and nothing is recording. */
   canJoin(): boolean
-  /** Record a meeting and join it to the card's constitution with `note`;
-   *  resolves to the error to show, or null once recording began. */
-  join(card: KanbanCard, mode: MeetingMode, note: string): Promise<string | null>
+  /** Record a meeting and join it to the card's constitution with the note
+   *  `note` resolves to — it may upload images first, and rejects with their
+   *  failure. Called inside the pick's gesture; Phone opens audio before
+   *  awaiting `note`. Resolves to the error to show, or null once recording
+   *  began. */
+  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<string | null>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
 }
@@ -2484,9 +2499,12 @@ export class FiberDetailModal {
   }
 
   /**
-   * The composer: a message, and the verbs that carry it to a worker. The
-   * message is optional — blank, the worker follows the constitution and its
-   * handoff — and rides the dispatch inline (`user_message`).
+   * The composer: a message, any images pasted or dropped into it, and the
+   * verbs that carry them to a worker. The message is optional — blank, the
+   * worker follows the constitution and its handoff — and rides the dispatch
+   * inline (`user_message`). Images wait as chips until a send; the send first
+   * stores them on the fiber's owning host and appends one `[Image: <path>]`
+   * line each ({@link composeWithImages}), and sends nothing if that fails.
    *
    * Resume is always offered, never gated on a card-visible session id: the
    * session to resume lives in the fiber's `shuttle.session_uuid`, which the
@@ -2517,6 +2535,45 @@ export class FiberDetailModal {
     const err = document.createElement('div')
     err.className = 'kbn-detail-error'
     err.style.display = 'none'
+    const showError = (text: string | null): void => {
+      err.textContent = text ?? ''
+      err.style.display = text ? '' : 'none'
+    }
+
+    const images = new PastedImages()
+    const strip = buildImageStrip(images)
+    const admit = (files: File[]): void => {
+      showError(images.add(files))
+      strip.paint()
+    }
+    message.addEventListener('paste', (e) => {
+      const files = filesFromTransfer(e.clipboardData)
+      if (!files.length) return
+      e.preventDefault()
+      admit(files)
+    })
+    box.addEventListener('dragover', (e) => {
+      if (!transferHasFiles(e.dataTransfer)) return
+      e.preventDefault()
+      box.classList.add('kbn-ctl-composer-drop')
+    })
+    box.addEventListener('dragleave', (e) => {
+      if (!box.contains(e.relatedTarget as Node | null)) box.classList.remove('kbn-ctl-composer-drop')
+    })
+    box.addEventListener('drop', (e) => {
+      box.classList.remove('kbn-ctl-composer-drop')
+      const files = filesFromTransfer(e.dataTransfer)
+      if (!files.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      admit(files)
+    })
+
+    const compose = (): Promise<string> => this.composeWithImages(card, images, message.value)
+    const sent = (): void => {
+      images.clear()
+      strip.paint()
+    }
 
     // The verbs that take the message and act at once, side by side: a
     // meeting (its note), a fresh worker, or the same worker resumed.
@@ -2526,28 +2583,37 @@ export class FiberDetailModal {
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    if (this.meeting) sends.append(this.buildMeeting(card, message, err))
+    if (this.meeting) sends.append(this.buildMeeting(card, message, err, compose, sent))
     sends.append(fresh, resume)
     foot.append(sends)
 
-    const directive = (): string => message.value.trim()
     const pending = this.pendingStartPrompt
     if (pending?.cardId === card.id) {
       this.pendingStartPrompt = null
-      this.showStartPrompt(err, card, pending.body, directive, 'fresh', fresh)
+      this.showStartPrompt(err, card, pending.body, compose, 'fresh', fresh)
     }
     fresh.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.runRequeue(card, directive(), 'fresh', fresh, err)
+      void this.runRequeue(card, compose, 'fresh', fresh, err).then((ok) => ok && sent())
     })
     resume.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.runRequeue(card, directive(), 'previous', resume, err)
+      void this.runRequeue(card, compose, 'previous', resume, err).then((ok) => ok && sent())
     })
 
-    box.append(message, foot)
+    box.append(message, strip.el, foot)
     wrap.append(box, err)
     return wrap
+  }
+
+  /**
+   * The text a composer send carries: `text`, then the paths of `images` once
+   * they are stored on the daemon owning `card`. Throws the upload's reason
+   * when it failed; the send then sends nothing.
+   */
+  private async composeWithImages(card: KanbanCard, images: PastedImages, text: string): Promise<string> {
+    if (!images.size) return text.trim()
+    return composeDirective(text, await uploadPastedImages(this.shuttleBase, card, images.list))
   }
 
   /**
@@ -2555,14 +2621,21 @@ export class FiberDetailModal {
    * Meeting opens a menu, Call, Room or Phone, and picking one starts the
    * recording on the daemon — nothing records before that pick; Phone opens
    * this tab's mic in the pick's gesture and keeps its controls on the board. The
-   * composer's message becomes the meeting's note, and the worker — live or
+   * composer's message, with its images' lines, becomes the meeting's note,
+   * and the worker — live or
    * not — receives the meeting as a joined constitution.
    *
    * One meeting records at a time. While any does, the verb stays in its
    * place, inert, naming the recording on hover; it is absent only where
    * hark is not available. It follows the board's meeting poll.
    */
-  private buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, err: HTMLElement): HTMLElement {
+  private buildMeeting(
+    card: KanbanCard,
+    note: HTMLTextAreaElement,
+    err: HTMLElement,
+    compose: () => Promise<string>,
+    sent: () => void,
+  ): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
     const opener = ctlButton('Meeting', 'kbn-ctl-meet-btn')
@@ -2605,7 +2678,9 @@ export class FiberDetailModal {
       paint()
       opener.textContent = 'Starting…'
       err.style.display = 'none'
-      void this.meeting!.join(card, mode, note.value).then((error) => {
+      // The join is called inside the pick's gesture, so Phone can open the
+      // mic; it resolves the note (uploading any images) after that.
+      void this.meeting!.join(card, mode, compose).then((error) => {
         starting = false
         opener.textContent = 'Meeting'
         if (error) {
@@ -2614,6 +2689,7 @@ export class FiberDetailModal {
         } else {
           note.value = ''
           note.dispatchEvent(new Event('input'))
+          sent()
         }
         paint()
       })
@@ -3562,15 +3638,20 @@ export class FiberDetailModal {
    * resume from the fiber's `shuttle.session_uuid`, falling back to fresh when
    * there is nothing to resume. `projectDir` is a directory the human confirmed
    * in the prompt a refused start raised ({@link showStartPrompt}).
+   *
+   * `directive` is the message, or the composer's function that resolves it
+   * (uploading pasted images first); it is resolved after any cut is
+   * confirmed, and a rejection is shown and sends nothing. Resolves true once
+   * a worker runs for the card.
    */
   private async runRequeue(
     card: KanbanCard,
-    directive: string,
+    directive: Directive,
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
     projectDir?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // A "New session" over a LIVE worker is a CUT: the daemon stamps the
     // clean-exit marker, kills the running session, and starts fresh — which
     // discards whatever in-flight context that worker was holding. Confirm
@@ -3583,7 +3664,7 @@ export class FiberDetailModal {
           `Start a new session? This cuts the open session and discards its ` +
           `in-flight context. Use Resume instead to continue that worker.`,
       )
-      if (!ok) return
+      if (!ok) return false
     }
 
     const original = btn.textContent ?? ''
@@ -3591,17 +3672,26 @@ export class FiberDetailModal {
     btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
     errorEl.style.display = 'none'
 
+    let text: string
+    try {
+      text = typeof directive === 'string' ? directive : await directive()
+    } catch (err: unknown) {
+      const detail = (err as { message?: string })?.message ?? String(err)
+      this.showDispatchError(errorEl, btn, original, detail)
+      return false
+    }
+
     let res: Response
     try {
       res = await postForceDispatch(this.shuttleBase, card, {
-        user_message: directive,
+        user_message: text,
         resume_mode: mode,
         ...(projectDir ? { project_dir: projectDir } : {}),
       })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
       this.showDispatchError(errorEl, btn, original, `Couldn't reach Shuttle: ${detail}`)
-      return
+      return false
     }
 
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
@@ -3609,29 +3699,30 @@ export class FiberDetailModal {
     if (res.status === 409) {
       if (body.tmux_session) {
         this.finishRequeue(card, body.tmux_session)
-        return
+        return true
       }
 
       btn.textContent = 'Already running'
       btn.disabled = true
       errorEl.textContent = 'A worker is already running for this fiber.'
       errorEl.style.display = ''
-      return
+      return false
     }
 
     if (!res.ok) {
       btn.disabled = false
       btn.textContent = original
       if (needsProjectDir(body)) {
-        this.showStartPrompt(errorEl, card, body, () => directive, mode, btn)
-        return
+        this.showStartPrompt(errorEl, card, body, text, mode, btn)
+        return false
       }
       const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`)
       this.showDispatchError(errorEl, btn, original, msg)
-      return
+      return false
     }
 
     this.finishRequeue(card, body.tmux_session)
+    return true
   }
 
   /**
@@ -3644,7 +3735,7 @@ export class FiberDetailModal {
     errorEl: HTMLElement,
     card: KanbanCard,
     body: DispatchFailureBody,
-    directive: () => string,
+    directive: Directive,
     mode: 'fresh' | 'previous',
     btn: HTMLButtonElement,
   ): void {
@@ -3652,7 +3743,7 @@ export class FiberDetailModal {
       reason: dispatchFailureMessage(body, 'The start was refused.'),
       host: body.host ?? card.shuttleHost,
       suggestion: card.inheritedProjectDir,
-      onStart: (dir) => void this.runRequeue(card, directive(), mode, btn, errorEl, dir),
+      onStart: (dir) => void this.runRequeue(card, directive, mode, btn, errorEl, dir),
     })
     errorEl.replaceChildren(prompt)
     errorEl.style.display = ''

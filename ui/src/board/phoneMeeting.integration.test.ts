@@ -22,7 +22,10 @@ interface BoardState {
   fetchMeetingStatus(): Promise<void>
   fetchAndRender(): Promise<void>
   showBanner(message: string, tone: string): void
-  detailModal: { buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, error: HTMLElement): HTMLElement }
+  detailModal: {
+    buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, error: HTMLElement,
+      compose: () => Promise<string>, sent: () => void): HTMLElement
+  }
   teardownState(): void
 }
 const row = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => parseMeetingRecord({
@@ -122,7 +125,7 @@ describe('board phone meeting card wiring', () => {
         status: reply.status,
         json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: current },
       }))
-      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('textarea'), document.createElement('div'))
+      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('textarea'), document.createElement('div'), async () => '', () => {})
       document.body.append(menu)
       menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
       order.length = 0
@@ -148,7 +151,7 @@ describe('board phone meeting card wiring', () => {
     vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
     const error = document.createElement('div')
-    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('textarea'), error)
+    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('textarea'), error, async () => '', () => {})
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]:last-child')!.click()
     await flush()

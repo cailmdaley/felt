@@ -100,6 +100,14 @@ dialogs, and Attach. Each card's panel folds a drawer under its title: a message
 box with New session and Resume, the next launch's agent, effort, session and
 kind, the card's due day and parent, and Temper / Discard.
 
+Images pasted or dropped into the message box wait there as thumbnails, each
+with a × to remove it: PNG, JPEG, GIF or WebP, at most 10 MB each, 8 per send
+and 25 MB in total. New session, Resume and Meeting first store them on the
+host that owns the fiber (under its data directory's `attachments/`), then
+send the message followed by one `[Image: <path>]` line per image, so the
+worker opens each by path. If the upload fails nothing is sent and the box
+says why.
+
 ### Attach
 
 Attach opens the worker's tmux session in kitty specifically — a non-kitty user

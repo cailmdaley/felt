@@ -1418,6 +1418,28 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     })
   }
 
+  // The composer's pasted images: stored "on" the owning host, answered with
+  // the paths a directive names. The last directive sent is left on the
+  // document so a driving script can read what the worker would receive.
+  if (url.endsWith('/api/v1/attachments') && init?.method === 'POST') {
+    const request = body()
+    const items = (request.attachments as { name?: string; mime?: string; sha256?: string }[]) ?? []
+    const home = request.origin && request.origin !== 'local' ? '/home/ada-remote' : '/home/ada'
+    const dir = `${home}/.shuttle/attachments/${String(request.fiber ?? '').replace(/[^A-Za-z0-9_-]/g, '-')}`
+    const ext: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
+    return json({
+      files: items.map((item) => ({
+        name: item.name,
+        path: `${dir}/${String(item.sha256 ?? '').slice(0, 16)}.${ext[item.mime ?? ''] ?? 'png'}`,
+        sha256: item.sha256,
+        size: 0,
+      })),
+    })
+  }
+  if (url.endsWith('/api/v1/dispatch') && init?.method === 'POST') {
+    document.body.dataset.harnessLastDirective = String(body().user_message ?? '')
+  }
+
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow
   // it with a benign OK so the offline harness doesn't error on a click.
   // A start of the hand-filed follow-up: refused the way its owner's

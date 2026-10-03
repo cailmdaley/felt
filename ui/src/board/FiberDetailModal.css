@@ -532,6 +532,55 @@
   color: #A89D8C;
   font-style: italic;
 }
+/* A file dragged over the composer: the box says it will take it. */
+.kbn-ctl-composer.kbn-ctl-composer-drop {
+  border-color: rgba(154, 123, 53, 0.75);
+  border-style: dashed;
+}
+/* Pasted or dropped images, waiting for a send: one thumbnail chip each. */
+.kbn-ctl-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 2px;
+}
+.kbn-ctl-images[hidden] { display: none; }
+.kbn-ctl-image {
+  position: relative;
+  display: inline-flex;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--ctl-line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.6);
+}
+.kbn-ctl-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.kbn-ctl-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(40, 32, 20, 0.72);
+  color: #FFFBEF;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+}
+.kbn-ctl-image-remove:hover,
+.kbn-ctl-image-remove:focus-visible { background: rgba(140, 50, 30, 0.9); }
+@media (pointer: coarse) {
+  .kbn-ctl-image-remove { width: 24px; height: 24px; line-height: 24px; font-size: 16px; }
+}
 .kbn-ctl-composer-foot {
   display: flex;
   flex-wrap: wrap;
