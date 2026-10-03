@@ -40,6 +40,7 @@ is not enough.
 | `POST /capture` | owner-routed; meeting setup is local first | Launch a session from a free-text prompt; meeting mode starts local hark recording before routing the scribe capture |
 | `POST /meeting/join` | local recording; delivery owner-routed | Start local hark recording and join the meeting to an existing constitution's worker |
 | `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
+| `POST /attachments` | owner-routed | Store images pasted into the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -335,6 +336,22 @@ fiber with a live worker receives `text` through session messaging at
 it with `text` as the From User: `delivery: "resume"` continues its previous
 conversation, `delivery: "dispatch"` starts one when it has none. These answer
 with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
+
+`POST /attachments` accepts `{fiber, attachments: [{name, mime, data,
+sha256}]}` (plus `origin` to forward), with `data` base64 and `sha256` the hex
+digest of the decoded bytes. The owning daemon resolves `fiber` in its own
+stores (**404** when it does not own it, **504** when felt timed out) and writes
+each image to `<data dir>/attachments/<fiber uid>/<first 16 hex of
+sha256>.<ext>` (0600, in a 0700 directory; the data dir is `$SHUTTLE_DATA_DIR`,
+default `~/.shuttle`). The name is content-addressed, so re-sending an image
+returns the same path. The answer is `{files: [{name, path, sha256, size}]}` in
+request order, `path` absolute on the owning host. The batch is all or nothing,
+and **400** `{error}` names the first broken rule: `mime` is one of
+`image/png`, `image/jpeg`, `image/gif`, `image/webp` and the bytes carry its
+signature; each image is at most 10 MB; at most 8 per request and 25 MB in
+total; `data` decodes; `sha256` matches. The route's JSON body ceiling is sized
+to that total, and a forward allows 120 s. The board's composer uploads here
+before it sends a directive and appends one `[Image: <path>]` line per image.
 
 `POST /meeting/stop` returns HTTP 202 with `{meeting}` or 404 when no meeting
 exists. It sends at most one SIGINT to a live hark process, even while hark's

@@ -35,10 +35,10 @@ defmodule ShuttleWeb.Endpoint do
   plug(ShuttleWeb.CORSPlug)
   plug(ShuttleWeb.ReadinessPlug)
 
-  # File-bearing message envelopes get a larger, route-specific JSON ceiling.
+  # File-bearing routes get larger, route-specific JSON ceilings.
   # Plug.Parsers leaves an already-fetched body alone, so the ordinary parser
   # below retains its default 8 MB limit for every other endpoint.
-  plug(ShuttleWeb.MessageFilesParser)
+  plug(ShuttleWeb.LargeBodyParser)
 
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

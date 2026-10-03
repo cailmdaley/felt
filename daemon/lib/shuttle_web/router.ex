@@ -15,6 +15,9 @@ defmodule ShuttleWeb.Router do
     pipe_through(:api)
 
     post("/dispatch", DispatchController, :create)
+    # Images pasted into the composer, written on the host owning the fiber
+    # (owner-routed) so the directive can name their paths.
+    post("/attachments", AttachmentsController, :create)
     # Write-and-claim: register an externally-spawned live tmux session as a
     # fiber's running worker (capture sessions claim themselves here).
     post("/claim", ClaimController, :create)
