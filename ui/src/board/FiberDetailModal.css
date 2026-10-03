@@ -578,6 +578,8 @@
 }
 .kbn-ctl-image-remove:hover,
 .kbn-ctl-image-remove:focus-visible { background: rgba(140, 50, 30, 0.9); }
+.kbn-ctl-image-remove:disabled { opacity: 0.35; cursor: default; }
+.kbn-ctl-images-frozen .kbn-ctl-image img { opacity: 0.6; }
 @media (pointer: coarse) {
   .kbn-ctl-image-remove { width: 24px; height: 24px; line-height: 24px; font-size: 16px; }
 }

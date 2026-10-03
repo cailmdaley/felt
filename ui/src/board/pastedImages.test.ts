@@ -8,6 +8,7 @@ import {
   bytesToBase64,
   composeDirective,
   filesFromTransfer,
+  pastedImageFiles,
   transferHasFiles,
   uploadPastedImages,
 } from './pastedImages.js'
@@ -100,6 +101,19 @@ describe('transfers', () => {
     ]
     expect(filesFromTransfer({ files: [] as unknown as FileList, items: items as unknown as DataTransferItemList })).toEqual([a])
     expect(filesFromTransfer(null)).toEqual([])
+  })
+
+  it('treats a clipboard with text as a text paste, attaching nothing', () => {
+    const a = file('a.png', 'image/png')
+    const clip = (text: string) => ({
+      files: [a] as unknown as FileList,
+      items: [] as unknown as DataTransferItemList,
+      getData: (type: string) => (type === 'text/plain' ? text : ''),
+    })
+    expect(pastedImageFiles(clip('a copied paragraph'))).toEqual([])
+    expect(pastedImageFiles(clip('  \n '))).toEqual([a])
+    expect(pastedImageFiles(clip(''))).toEqual([a])
+    expect(pastedImageFiles(null)).toEqual([])
   })
 
   it('tells a file drag from a text drag', () => {

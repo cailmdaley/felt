@@ -114,10 +114,20 @@ export class PastedImages {
 }
 
 /**
- * The files a paste or drop carries, or none. Text on the same clipboard
- * (a copied image's alt text, a file's name) is not a file and is left to the
- * caller.
+ * The images a paste should attach, or none. A clipboard that carries
+ * non-empty `text/plain` is a text paste, even when an image rides along (an
+ * office app puts a rendered PNG beside the copied text): the caller lets the
+ * default paste happen and attaches nothing.
  */
+export function pastedImageFiles(
+  clipboard: Pick<DataTransfer, 'files' | 'items' | 'getData'> | null,
+): File[] {
+  if (!clipboard) return []
+  if (clipboard.getData('text/plain').trim()) return []
+  return filesFromTransfer(clipboard)
+}
+
+/** The files a paste or drop carries, or none. */
 export function filesFromTransfer(transfer: Pick<DataTransfer, 'files' | 'items'> | null): File[] {
   if (!transfer) return []
   const fromFiles = Array.from(transfer.files ?? [])
@@ -203,14 +213,25 @@ export function composeDirective(text: string, paths: readonly string[]): string
 /**
  * The composer's chip strip: a thumbnail per image with a remove control,
  * hidden while there are none. `paint` redraws it from `images`; each
- * thumbnail's object URL lives exactly as long as its chip.
+ * thumbnail's object URL lives as long as its chip, and `dispose` releases
+ * them all when the panel closes. `setFrozen` disables removal while a send
+ * is in flight.
  */
-export function buildImageStrip(images: PastedImages): { el: HTMLElement; paint: () => void } {
+export function buildImageStrip(images: PastedImages): {
+  el: HTMLElement
+  paint: () => void
+  setFrozen: (frozen: boolean) => void
+  dispose: () => void
+} {
   const el = document.createElement('div')
   el.className = 'kbn-ctl-images'
   const urls = new Map<number, string>()
+  let frozen = false
+  let disposed = false
 
   const paint = (): void => {
+    // A closed panel's strip draws nothing more, so it mints no new URLs.
+    if (disposed) return
     const live = new Set(images.list.map((image) => image.id))
     for (const [id, url] of urls) {
       if (!live.has(id)) {
@@ -236,6 +257,7 @@ export function buildImageStrip(images: PastedImages): { el: HTMLElement; paint:
         remove.className = 'kbn-ctl-image-remove'
         remove.textContent = '×'
         remove.setAttribute('aria-label', `Remove ${image.name}`)
+        remove.disabled = frozen
         remove.addEventListener('click', (e) => {
           e.stopPropagation()
           images.remove(image.id)
@@ -248,6 +270,17 @@ export function buildImageStrip(images: PastedImages): { el: HTMLElement; paint:
     el.hidden = images.size === 0
   }
 
+  const setFrozen = (on: boolean): void => {
+    frozen = on
+    el.classList.toggle('kbn-ctl-images-frozen', on)
+    paint()
+  }
+  const dispose = (): void => {
+    disposed = true
+    for (const url of urls.values()) URL.revokeObjectURL(url)
+    urls.clear()
+  }
+
   paint()
-  return { el, paint }
+  return { el, paint, setFrozen, dispose }
 }

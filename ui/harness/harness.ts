@@ -227,8 +227,14 @@ function makeModal(): FiberDetailModal {
             canJoin: () => true,
             current: () => null,
             join: async (card, mode, note) => {
-              console.log('[harness] meeting', card.id, mode, note)
-              return null
+              let text: string
+              try {
+                text = await note()
+              } catch (error) {
+                return { error: String((error as Error)?.message ?? error), delivered: false }
+              }
+              console.log('[harness] meeting', card.id, mode, text)
+              return { error: null, delivered: true }
             },
           },
         }

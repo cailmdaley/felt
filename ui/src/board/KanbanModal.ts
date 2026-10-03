@@ -37,7 +37,7 @@
  */
 
 import './KanbanModal.css'
-import { FiberDetailModal } from './FiberDetailModal.js'
+import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -380,7 +380,7 @@ export class KanbanModal {
     card: KanbanCard,
     mode: MeetingMode,
     composeNote: () => Promise<string>,
-  ): Promise<string | null> {
+  ): Promise<MeetingJoinResult> {
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
     if (mode === 'phone') {
@@ -391,7 +391,7 @@ export class KanbanModal {
         opening?.cancel()
         const message = errText(error)
         this.showBanner(`Couldn't start the meeting: ${message}`, 'error')
-        return message
+        return { error: message, delivered: false }
       }
     }
     // The note waits for any pasted images to reach the owning host; a failed
@@ -401,7 +401,7 @@ export class KanbanModal {
       note = await composeNote()
     } catch (error) {
       opening?.cancel()
-      return errText(error)
+      return { error: errText(error), delivered: false }
     }
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,
@@ -412,7 +412,7 @@ export class KanbanModal {
     if (outcome.kind === 'error') {
       opening?.cancel()
       this.showBanner(`Couldn't start the meeting: ${outcome.message}`, 'error')
-      return outcome.message
+      return { error: outcome.message, delivered: false }
     }
     if (outcome.kind === 'joined') {
       this.showBanner(`Recording — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
@@ -432,7 +432,7 @@ export class KanbanModal {
       await this.refreshMeeting()
     }
     void this.fetchAndRender()
-    return audioError
+    return { error: audioError, delivered: outcome.kind !== 'recording' }
   }
 
   private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {

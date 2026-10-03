@@ -22,12 +22,18 @@ interface BoardState {
   fetchMeetingStatus(): Promise<void>
   fetchAndRender(): Promise<void>
   showBanner(message: string, tone: string): void
-  detailModal: {
-    buildMeeting(card: KanbanCard, note: HTMLTextAreaElement, error: HTMLElement,
-      compose: () => Promise<string>, sent: () => void): HTMLElement
-  }
+  detailModal: { buildMeeting(card: KanbanCard, error: HTMLElement, send: Send): HTMLElement }
   teardownState(): void
 }
+interface Send {
+  compose: () => Promise<string>
+  busy: () => boolean
+  setBusy: ReturnType<typeof vi.fn>
+  sent: ReturnType<typeof vi.fn>
+}
+/** A composer's send state with nothing pasted: the note is `compose`'s. */
+const sendWith = (compose: () => Promise<string> = async () => ''): Send =>
+  ({ compose, busy: () => false, setBusy: vi.fn(), sent: vi.fn() })
 const row = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => parseMeetingRecord({
   state: 'loading', title: 'Meeting', phone: true, launch: 'L1', tmux_session: 'hark-pane', ...overrides,
 })!
@@ -125,7 +131,7 @@ describe('board phone meeting card wiring', () => {
         status: reply.status,
         json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: current },
       }))
-      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('textarea'), document.createElement('div'), async () => '', () => {})
+      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith())
       document.body.append(menu)
       menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
       order.length = 0
@@ -151,13 +157,78 @@ describe('board phone meeting card wiring', () => {
     vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
     const error = document.createElement('div')
-    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('textarea'), error, async () => '', () => {})
+    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), error, sendWith())
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]:last-child')!.click()
     await flush()
     expect(opened.close).toHaveBeenCalledOnce()
     expect(RelayLink).not.toHaveBeenCalled()
     expect(error.textContent).toBe('hark unavailable')
+  })
+
+  it('composes a Phone note with images only after the pick has opened audio', async () => {
+    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    state.meetingStatus.meeting = null
+    const order: string[] = []
+    const opening = defer<Mic>()
+    vi.mocked(Mic.open).mockImplementation(() => { order.push('mic'); return opening.promise })
+    const send = sendWith(async () => { order.push('compose'); return 'look\n[Image: /h/a.png]' })
+    fetcher.mockImplementation(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () => url.endsWith('/join')
+        ? { meeting: current, delivery: { delivery: 'message', delivered: true } }
+        : { available: true, meeting: current },
+    }))
+    const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send)
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+    ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
+    expect(order).toEqual(['mic'])
+    expect(send.setBusy).toHaveBeenCalledWith(true)
+    opening.resolve(opened as unknown as Mic)
+    await flush()
+    await vi.waitFor(() => expect(send.sent).toHaveBeenCalledOnce())
+    expect(order).toEqual(['mic', 'compose'])
+    const join = fetcher.mock.calls.find(([url]) => String(url).endsWith('/join'))!
+    expect(JSON.parse(join[1].body).note).toBe('look\n[Image: /h/a.png]')
+    expect(send.setBusy).toHaveBeenLastCalledWith(false)
+  })
+
+  it('a failed image upload starts no meeting and releases the opened audio', async () => {
+    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    state.meetingStatus.meeting = null
+    const error = document.createElement('div')
+    const send = sendWith(async () => { throw new Error("Couldn't upload images: fiber not found: science/task") })
+    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), error, send)
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+    ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
+    await vi.waitFor(() => expect(error.textContent).toBe("Couldn't upload images: fiber not found: science/task"))
+    expect(opened.close).toHaveBeenCalledOnce()
+    expect(RelayLink).not.toHaveBeenCalled()
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/join'))).toBe(false)
+    expect(send.sent).not.toHaveBeenCalled()
+    expect(send.setBusy).toHaveBeenLastCalledWith(false)
+  })
+
+  it('keeps the note and images when the recording started but its worker did not receive it', async () => {
+    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    for (const [reply, received] of [
+      [{ ok: false, status: 502, payload: { recording: true, error: 'delivery failed' } }, false],
+      [{ ok: true, status: 200, payload: { delivery: { delivery: 'message', delivered: true } } }, true],
+    ] as const) {
+      state.meetingStatus.meeting = null
+      fetcher.mockImplementation(async (url: string) => ({
+        ok: url.endsWith('/join') ? reply.ok : true,
+        status: reply.status,
+        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: null },
+      }))
+      const send = sendWith(async () => '[Image: /h/a.png]')
+      const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send)
+      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+      ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Room')!.click()
+      await vi.waitFor(() => expect(send.setBusy).toHaveBeenLastCalledWith(false))
+      expect(send.sent).toHaveBeenCalledTimes(received ? 1 : 0)
+    }
   })
 
   it('adds audio controls only to phone cards and preserves desktop Stop and Terminal', () => {

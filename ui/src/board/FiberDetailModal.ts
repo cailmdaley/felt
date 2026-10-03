@@ -84,6 +84,7 @@ import {
   buildImageStrip,
   composeDirective,
   filesFromTransfer,
+  pastedImageFiles,
   transferHasFiles,
   uploadPastedImages,
 } from './pastedImages.js'
@@ -92,6 +93,19 @@ import './FiberDetailModal.css'
 /** A composer send's message, or the function that resolves it (uploading
  *  pasted images first, and rejecting with their failure). */
 type Directive = string | (() => Promise<string>)
+
+/** One composer's send state, shared by its verbs. */
+interface ComposerSend {
+  /** The message with its images' lines, uploading them first. */
+  compose(): Promise<string>
+  /** Whether a send is in flight. */
+  busy(): boolean
+  /** Hold every verb but `except` (and freeze the chips), or release them. */
+  setBusy(on: boolean, except?: HTMLButtonElement): void
+  /** A send landed: drop the images it carried, and the message if it was
+   *  not edited since. */
+  sent(): void
+}
 
 /**
  * Panel geometry remembered across opens within a session — the reader who
@@ -128,15 +142,22 @@ function dayStamp(ms: number): string {
 }
 
 /** The board's meeting control, lent to the detail panel. */
+/** How a meeting join ended: the error to show beside the control (null once
+ *  recording began), and whether the constitution's worker received it. */
+export interface MeetingJoinResult {
+  error: string | null
+  delivered: boolean
+}
+
 export interface MeetingJoinControl {
   /** hark is available on this machine and nothing is recording. */
   canJoin(): boolean
   /** Record a meeting and join it to the card's constitution with the note
    *  `note` resolves to — it may upload images first, and rejects with their
    *  failure. Called inside the pick's gesture; Phone opens audio before
-   *  awaiting `note`. Resolves to the error to show, or null once recording
-   *  began. */
-  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<string | null>
+   *  awaiting `note`. Resolves to the error to show (null once recording
+   *  began) and whether the worker received the meeting. */
+  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
 }
@@ -752,6 +773,10 @@ export class FiberDetailModal {
   private transcriptPane: HTMLElement | null = null
   /** Repaints the drawer's Meeting verb from the board's meeting status. */
   private meetingPaint: (() => void) | null = null
+  /** The open composer's verb lock ({@link ComposerSend.setBusy}). */
+  private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
+  /** Releases what the open composers hold (thumbnail URLs), on close. */
+  private composerDisposers: (() => void)[] = []
   /** Whether the open card's worker pill shows its waiting/attention phase.
    *  The Desk draws phase only on In flight cards, and the board answers the
    *  same way here; absent, the phase always shows. */
@@ -1204,6 +1229,8 @@ export class FiberDetailModal {
     this.transcriptCard = null
     this.transcriptPane = null
     this.meetingPaint = null
+    this.composerBusy = null
+    for (const dispose of this.composerDisposers.splice(0)) dispose()
     this.stopLiveRefresh()
     this.bodyRequestToken += 1
     if (this.mobileWatch) {
@@ -2532,22 +2559,44 @@ export class FiberDetailModal {
     }
     message.addEventListener('input', fit)
 
+    // Two lines under the box: a send's outcome (and the project-directory
+    // prompt a refused start raises), and the images turned away. Neither
+    // writes over the other.
     const err = document.createElement('div')
     err.className = 'kbn-detail-error'
     err.style.display = 'none'
-    const showError = (text: string | null): void => {
-      err.textContent = text ?? ''
-      err.style.display = text ? '' : 'none'
+    const imageErr = document.createElement('div')
+    imageErr.className = 'kbn-detail-error kbn-ctl-images-error'
+    imageErr.style.display = 'none'
+    const showImageError = (text: string | null): void => {
+      imageErr.textContent = text ?? ''
+      imageErr.style.display = text ? '' : 'none'
     }
 
     const images = new PastedImages()
     const strip = buildImageStrip(images)
+    this.composerDisposers.push(strip.dispose)
+
+    // While a send is in flight every verb is held and the chips are frozen,
+    // so what is sent is what was shown.
+    let busy = false
+    const fresh = ctlButton('New session', 'kbn-ctl-send')
+    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
+      busy = on
+      for (const verb of [fresh, resume]) if (verb !== except) verb.disabled = on
+      strip.setFrozen(on)
+      this.meetingPaint?.()
+    }
+    this.composerBusy = setBusy
+
     const admit = (files: File[]): void => {
-      showError(images.add(files))
+      if (busy) showImageError('Wait for the send to finish before adding images.')
+      else showImageError(images.add(files))
       strip.paint()
     }
     message.addEventListener('paste', (e) => {
-      const files = filesFromTransfer(e.clipboardData)
+      const files = pastedImageFiles(e.clipboardData)
       if (!files.length) return
       e.preventDefault()
       admit(files)
@@ -2569,40 +2618,52 @@ export class FiberDetailModal {
       admit(files)
     })
 
-    const compose = (): Promise<string> => this.composeWithImages(card, images, message.value)
-    const sent = (): void => {
-      images.clear()
-      strip.paint()
+    // What the last compose took, so a send that lands clears exactly that.
+    let composed: { text: string; ids: number[] } = { text: '', ids: [] }
+    const send: ComposerSend = {
+      compose: () => {
+        composed = { text: message.value, ids: images.list.map((image) => image.id) }
+        return this.composeWithImages(card, images, message.value)
+      },
+      busy: () => busy,
+      setBusy,
+      sent: () => {
+        for (const id of composed.ids) images.remove(id)
+        strip.paint()
+        showImageError(null)
+        if (message.value === composed.text) {
+          message.value = ''
+          message.dispatchEvent(new Event('input'))
+        }
+      },
     }
 
     // The verbs that take the message and act at once, side by side: a
     // meeting (its note), a fresh worker, or the same worker resumed.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const fresh = ctlButton('New session', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    if (this.meeting) sends.append(this.buildMeeting(card, message, err, compose, sent))
+    if (this.meeting) sends.append(this.buildMeeting(card, err, send))
     sends.append(fresh, resume)
     foot.append(sends)
 
     const pending = this.pendingStartPrompt
     if (pending?.cardId === card.id) {
       this.pendingStartPrompt = null
-      this.showStartPrompt(err, card, pending.body, compose, 'fresh', fresh)
+      this.showStartPrompt(err, card, pending.body, send.compose, 'fresh', fresh)
     }
     fresh.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.runRequeue(card, compose, 'fresh', fresh, err).then((ok) => ok && sent())
+      void this.runRequeue(card, send.compose, 'fresh', fresh, err).then((ok) => ok && send.sent())
     })
     resume.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.runRequeue(card, compose, 'previous', resume, err).then((ok) => ok && sent())
+      void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => ok && send.sent())
     })
 
     box.append(message, strip.el, foot)
-    wrap.append(box, err)
+    wrap.append(box, imageErr, err)
     return wrap
   }
 
@@ -2629,13 +2690,7 @@ export class FiberDetailModal {
    * place, inert, naming the recording on hover; it is absent only where
    * hark is not available. It follows the board's meeting poll.
    */
-  private buildMeeting(
-    card: KanbanCard,
-    note: HTMLTextAreaElement,
-    err: HTMLElement,
-    compose: () => Promise<string>,
-    sent: () => void,
-  ): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
     const opener = ctlButton('Meeting', 'kbn-ctl-meet-btn')
@@ -2666,7 +2721,7 @@ export class FiberDetailModal {
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       wrap.hidden = !control.canJoin() && !recording
-      opener.disabled = starting || !control.canJoin()
+      opener.disabled = starting || send.busy() || !control.canJoin()
       opener.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
       if (opener.disabled) setOpen(false)
     }
@@ -2675,23 +2730,23 @@ export class FiberDetailModal {
     const start = (mode: MeetingMode): void => {
       setOpen(false)
       starting = true
-      paint()
+      send.setBusy(true)
       opener.textContent = 'Starting…'
       err.style.display = 'none'
       // The join is called inside the pick's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
-      void this.meeting!.join(card, mode, compose).then((error) => {
+      void this.meeting!.join(card, mode, send.compose).then(({ error, delivered }) => {
         starting = false
         opener.textContent = 'Meeting'
         if (error) {
           err.textContent = error
           err.style.display = ''
-        } else {
-          note.value = ''
-          note.dispatchEvent(new Event('input'))
-          sent()
+        } else if (delivered) {
+          // A recording whose worker never received the note keeps it, and
+          // its images, for another try.
+          send.sent()
         }
-        paint()
+        send.setBusy(false)
       })
     }
     const items = MEETING_MODES.map(({ value, label }) => {
@@ -3667,6 +3722,25 @@ export class FiberDetailModal {
       if (!ok) return false
     }
 
+    // Every composer verb is held until this send lands or fails.
+    const busy = this.composerBusy
+    busy?.(true, btn)
+    try {
+      return await this.sendRequeue(card, directive, mode, btn, errorEl, projectDir)
+    } finally {
+      busy?.(false, btn)
+    }
+  }
+
+  /** {@link runRequeue} past its confirmation: compose, dispatch, report. */
+  private async sendRequeue(
+    card: KanbanCard,
+    directive: Directive,
+    mode: 'fresh' | 'previous',
+    btn: HTMLButtonElement,
+    errorEl: HTMLElement,
+    projectDir?: string,
+  ): Promise<boolean> {
     const original = btn.textContent ?? ''
     btn.disabled = true
     btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'

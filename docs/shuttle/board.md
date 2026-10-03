@@ -106,7 +106,9 @@ and 25 MB in total. New session, Resume and Meeting first store them on the
 host that owns the fiber (under its data directory's `attachments/`), then
 send the message followed by one `[Image: <path>]` line per image, so the
 worker opens each by path. If the upload fails nothing is sent and the box
-says why.
+says why. While a send is in flight every verb waits and the thumbnails are
+frozen. A paste that carries text stays a text paste, even when the copying
+app put an image beside it.
 
 ### Attach
 
