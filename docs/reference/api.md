@@ -350,7 +350,10 @@ and **400** `{error}` names the first broken rule: `mime` is one of
 `image/png`, `image/jpeg`, `image/gif`, `image/webp` and the bytes carry its
 signature; each image is at most 10 MB; at most 8 per request and 25 MB in
 total; `data` decodes; `sha256` matches. The route's JSON body ceiling is sized
-to that total, and a forward allows 120 s. The board's composer uploads here
+to that total, each socket read may take up to 120 s, and a forward allows
+120 s. Images are kept 30 days: every successful store removes files under
+`attachments/` whose mtime is older than that, and fiber directories left
+empty, without following links. Re-sending an image refreshes its mtime. The board's composer uploads here
 before it sends a directive and appends one `[Image: <path>]` line per image.
 
 `POST /meeting/stop` returns HTTP 202 with `{meeting}` or 404 when no meeting

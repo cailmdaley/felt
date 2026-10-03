@@ -22,11 +22,19 @@ defmodule Shuttle.Attachments do
   file is written 0600 to an exclusive temp name in its final directory and
   renamed over the destination (a rename replaces a link, it does not follow
   it).
+
+  **Retention.** Images are kept for `retention_days/0` (30) days. Every
+  successful store prunes the attachments root (`prune/2`): regular files whose
+  mtime is older than that, then fiber directories left empty. It reads two
+  levels and never follows a link — a symlink anywhere under the root is left
+  alone, and so is whatever it points at. Re-sending an image rewrites its file,
+  so an image still in use keeps a fresh mtime.
   """
 
   @max_files 8
   @max_file_bytes 10 * 1024 * 1024
   @max_total_bytes 25 * 1024 * 1024
+  @retention_days 30
 
   @extensions %{
     "image/png" => "png",
@@ -50,6 +58,9 @@ defmodule Shuttle.Attachments do
 
   @doc "The largest decoded total one request may carry, in bytes."
   def max_total_bytes, do: @max_total_bytes
+
+  @doc "How many days a stored image is kept before `prune/2` removes it."
+  def retention_days, do: @retention_days
 
   @doc "The accepted mime types."
   def mimes, do: Map.keys(@extensions) |> Enum.sort()
@@ -84,8 +95,10 @@ defmodule Shuttle.Attachments do
          :ok <- check_total(decoded),
          dir = Path.join(root, fiber_dir(resolved)),
          :ok <- ensure_private_dir(Path.dirname(root), root),
-         :ok <- ensure_private_dir(root, dir) do
-      write_all(dir, decoded)
+         :ok <- ensure_private_dir(root, dir),
+         {:ok, stored} <- write_all(dir, decoded) do
+      prune(root)
+      {:ok, stored}
     end
   end
 
@@ -105,6 +118,44 @@ defmodule Shuttle.Attachments do
     else
       address = Map.get(resolved, :fiber_id) || ""
       :crypto.hash(:sha256, address) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    end
+  end
+
+  @doc """
+  Remove images under `root` older than `retention_days/0` (by mtime, relative
+  to `now`, in POSIX seconds), then the fiber directories that leaves empty.
+  Never follows a link; failures are ignored, since pruning is housekeeping.
+  """
+  @spec prune(String.t(), integer()) :: :ok
+  def prune(root, now \\ System.os_time(:second)) do
+    cutoff = now - @retention_days * 86_400
+
+    for fiber_dir <- entries(root), lstat_type(fiber_dir) == :directory do
+      for file <- entries(fiber_dir) do
+        case File.lstat(file, time: :posix) do
+          {:ok, %File.Stat{type: :regular, mtime: mtime}} when mtime < cutoff -> File.rm(file)
+          _ -> :ok
+        end
+      end
+
+      # rmdir refuses a non-empty directory, so this only removes empty ones.
+      if entries(fiber_dir) == [], do: File.rmdir(fiber_dir)
+    end
+
+    :ok
+  end
+
+  defp entries(dir) do
+    case File.ls(dir) do
+      {:ok, names} -> Enum.map(names, &Path.join(dir, &1))
+      {:error, _} -> []
+    end
+  end
+
+  defp lstat_type(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: type}} -> type
+      _ -> nil
     end
   end
 

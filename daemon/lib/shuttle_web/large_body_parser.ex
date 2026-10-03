@@ -10,7 +10,14 @@ defmodule ShuttleWeb.LargeBodyParser do
     * `/api/v1/messages/files` — message envelopes with attachments (32 MB).
     * `/api/v1/attachments` — the composer's pasted images
       (`Shuttle.Attachments.max_request_bytes/0`).
+
+  Both also wait up to `read_timeout/0` for each socket read instead of the
+  default 15 s, so a body arriving over a slow uplink is not cut off with a
+  408. Plug.Parsers hands `:read_timeout` to `Plug.Conn.read_body/2`, which
+  Bandit applies to each receive.
   """
+
+  @read_timeout_ms 120_000
 
   @limits %{
     "/api/v1/messages/files" => 32 * 1024 * 1024,
@@ -23,9 +30,19 @@ defmodule ShuttleWeb.LargeBodyParser do
                 parsers: [:json],
                 pass: ["application/json"],
                 json_decoder: Phoenix.json_library(),
-                length: length
+                length: length,
+                read_timeout: @read_timeout_ms
               )}
            end)
+
+  @doc "The per-read socket timeout for the listed routes, in milliseconds."
+  def read_timeout, do: @read_timeout_ms
+
+  @doc "The routes this parser reads, with their body ceilings in bytes."
+  def limits, do: @limits
+
+  @doc "The initialized Plug.Parsers config for `path`, or nil."
+  def parser_for(path), do: Map.get(@parsers, path)
 
   def init(opts), do: opts
 

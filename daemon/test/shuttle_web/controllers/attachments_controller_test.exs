@@ -205,6 +205,59 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
     assert File.ls!(elsewhere) == []
   end
 
+  describe "retention" do
+    test "a store prunes images older than the retention window and empty fiber dirs", %{
+      data_dir: data_dir,
+      root: root
+    } do
+      attachments = Path.join(data_dir, "attachments")
+      old = System.os_time(:second) - (Shuttle.Attachments.retention_days() + 1) * 86_400
+      recent = System.os_time(:second) - 86_400
+
+      stale_dir = Path.join(attachments, "STALEFIBER")
+      mixed_dir = Path.join(attachments, "MIXEDFIBER")
+      File.mkdir_p!(stale_dir)
+      File.mkdir_p!(mixed_dir)
+      File.write!(Path.join(stale_dir, "aaaa.png"), "old")
+      File.touch!(Path.join(stale_dir, "aaaa.png"), old)
+      File.write!(Path.join(mixed_dir, "bbbb.png"), "old")
+      File.touch!(Path.join(mixed_dir, "bbbb.png"), old)
+      File.write!(Path.join(mixed_dir, "cccc.png"), "recent")
+      File.touch!(Path.join(mixed_dir, "cccc.png"), recent)
+
+      # A link under the root, to a directory of old files outside it: neither
+      # the link nor what it points at is touched.
+      outside = Path.join(root, "outside")
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "keep.png"), "old")
+      File.touch!(Path.join(outside, "keep.png"), old)
+      File.ln_s!(outside, Path.join(attachments, "LINKED"))
+      File.ln_s!(Path.join(outside, "keep.png"), Path.join(mixed_dir, "link.png"))
+
+      conn = upload(%{"fiber" => "tests/paste", "attachments" => [image()]})
+      assert conn.status == 200
+      [%{"path" => path}] = Jason.decode!(conn.resp_body)["files"]
+
+      assert File.exists?(path)
+      refute File.exists?(stale_dir)
+      refute File.exists?(Path.join(mixed_dir, "bbbb.png"))
+      assert File.exists?(Path.join(mixed_dir, "cccc.png"))
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(mixed_dir, "link.png"))
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(attachments, "LINKED"))
+      assert File.read!(Path.join(outside, "keep.png")) == "old"
+    end
+
+    test "a refused request prunes nothing", %{data_dir: data_dir} do
+      stale_dir = Path.join([data_dir, "attachments", "STALEFIBER"])
+      File.mkdir_p!(stale_dir)
+      File.write!(Path.join(stale_dir, "aaaa.png"), "old")
+      File.touch!(Path.join(stale_dir, "aaaa.png"), 0)
+
+      assert upload(%{"fiber" => "tests/paste", "attachments" => [image("nope")]}).status == 400
+      assert File.exists?(Path.join(stale_dir, "aaaa.png"))
+    end
+  end
+
   test "forwards a remote-origin upload to the owning daemon, origin stripped" do
     start_supervised!(
       {ForwardClient,
