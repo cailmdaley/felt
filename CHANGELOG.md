@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [2.0.0] — 2026-10-04
+
 ### Breaking changes
 
 - Shuttle has its own `shuttle` executable, installed alongside `felt`.
