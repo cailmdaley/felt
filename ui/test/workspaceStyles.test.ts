@@ -17,6 +17,15 @@ describe('workspace style contracts', () => {
     expect(rules).not.toMatch(/display:\s*none|visibility:\s*hidden|content-visibility/)
     expect(css.match(/\.ws-reader\.ws-dormant\s*\{([^}]+)\}/)?.[1]).not.toMatch(/display:\s*none|visibility:\s*hidden/)
   })
+  it('lets prose and text follow a resized frame rather than capping the reading column', () => {
+    expect(css).toMatch(/\.ws-prose,\s*\.ws-content \.kbn-detail-prose\s*\{[^}]*width:\s*100%;\s*max-width:\s*none/)
+    expect(tokens).toContain('clamp(24px, 4%, 64px)')
+    expect(css).toMatch(/\.ws-content \.kbn-fileview-text > \.md-code-block[^}]*padding:\s*var\(--ws-prose-padding\)/)
+  })
+  it('limits chrome rings to keyboard focus', () => {
+    expect(css).toMatch(/button:focus,\s*\.ws-reader a:focus\s*\{[^}]*outline:\s*none/)
+    expect(css).toContain('button:focus-visible')
+  })
   it('settles both track and pages for reduced motion', () => {
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce[^]*\.ws-track,\s*\.ws-page\s*\{\s*transition:\s*none/)
   })

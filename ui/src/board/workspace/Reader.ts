@@ -16,6 +16,8 @@ export interface ReaderOptions {
   onConversation(): void
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
+  /** The overview's compact rows, independent of channel stepping's entry order. */
+  switcherCards?(): KanbanCard[]
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -40,6 +42,10 @@ export class Reader {
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
   private readonly tabs: TabStrip
+  private readonly navbar: HTMLElement
+  private readonly lead: HTMLElement
+  private readonly trail: HTMLElement
+  private keyboardInput = false
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation: HTMLButtonElement
@@ -73,12 +79,12 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
-    const lead = element('div', 'ws-nav-lead')
-    lead.append(this.returnButton, this.title)
-    const trail = element('div', 'ws-nav-trail')
-    trail.append(this.conversation)
-    const nav = element('nav', 'ws-navbar')
-    nav.append(lead, this.tabs.el, trail)
+    this.lead = element('div', 'ws-nav-lead')
+    this.lead.append(this.returnButton, this.title)
+    this.trail = element('div', 'ws-nav-trail')
+    this.trail.append(this.conversation)
+    this.navbar = element('nav', 'ws-navbar')
+    this.navbar.append(this.lead, this.tabs.el, this.trail)
     this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
     const thumbMenu = button('ws-thumb-button', '⋯', () => {
@@ -93,7 +99,7 @@ export class Reader {
     this.sidebar.setAttribute('aria-label', 'Channels')
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(nav, main, thumb, this.announcement)
+    this.el.append(this.navbar, main, thumb, this.announcement)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -106,6 +112,8 @@ export class Reader {
     window.addEventListener('resize', this.relayout)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
+    document.addEventListener('pointerdown', this.pointerInput, true)
+    document.addEventListener('keydown', this.keyboardModality, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
     this.el.addEventListener('mousedown', e => {
@@ -141,7 +149,7 @@ export class Reader {
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
     this.renderSidebar()
-    if (switching) this.returnButton.focus({ preventScroll: true })
+    if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
 
@@ -247,7 +255,24 @@ export class Reader {
     if (doc.kind === 'image' && img?.naturalWidth && img.naturalHeight) width = Math.max(320, (height - this.measure('label-height', 40)) * img.naturalWidth / img.naturalHeight)
     return Math.min(max, width)
   }
+  private layoutNavbar(): void {
+    if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
+    const style = getComputedStyle(this.navbar)
+    const gap = parseFloat(style.columnGap) || 12
+    const width = this.navbar.clientWidth - (parseFloat(style.paddingLeft) || 12) - (parseFloat(style.paddingRight) || 12)
+    if (!width) return
+    const lead = this.returnButton.offsetWidth + gap + Math.min(280, Math.max(100, this.title.scrollWidth))
+    const trail = this.conversation.offsetWidth
+    const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
+    const side = Math.max(lead, trail)
+    // Equal side bands centre a fitting strip over the full-width stage.
+    // A longer strip takes the remaining band, bounded by both controls.
+    this.navbar.style.gridTemplateColumns = tabs + 2 * (side + gap) <= width
+      ? `minmax(0, 1fr) ${tabs}px minmax(0, 1fr)`
+      : `${Math.min(lead, width * 0.32)}px minmax(0, 1fr) ${trail}px`
+  }
   private layout(animate: boolean): void {
+    this.layoutNavbar()
     const ch = this.channel
     if (!ch || !this.active) return
     const W = this.stage.clientWidth, H = this.stage.clientHeight
@@ -362,7 +387,7 @@ export class Reader {
     const r = anchor.getBoundingClientRect()
     menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
     menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
-    menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
+    if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private closeMenu(): boolean {
     if (!this.menu) return false
@@ -372,12 +397,14 @@ export class Reader {
     this.switcher = false
     return true
   }
+  private readonly pointerInput = (): void => { this.keyboardInput = false }
+  private readonly keyboardModality = (): void => { this.keyboardInput = true }
   private readonly outside = (e: PointerEvent): void => {
     if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
   }
   private channelList(filter = ''): HTMLElement {
     const list = element('div', 'ws-channel-list')
-    for (const card of this.opts.cards()) {
+    for (const card of (this.opts.switcherCards?.() ?? this.opts.cards())) {
       if (!`${card.name} ${card.path}`.toLowerCase().includes(filter.toLowerCase())) continue
       const row = button('ws-channel-row', card.name, () => { this.closeMenu(); this.opts.onChannel(card) })
       row.title = card.outcome ?? card.path
@@ -452,6 +479,8 @@ export class Reader {
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
+    document.removeEventListener('pointerdown', this.pointerInput, true)
+    document.removeEventListener('keydown', this.keyboardModality, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
     this.el.remove()

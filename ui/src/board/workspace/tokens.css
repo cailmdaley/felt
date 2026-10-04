@@ -50,7 +50,7 @@
   --ws-lede-size: 21px;
   --ws-prose-size: 18px;
   --ws-prose-width: 760px;
-  --ws-prose-padding: 44px 40px 72px;
+  --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 
   --ws-grid-major-size: 120px;
   --ws-phone-target: 44px;
