@@ -13,7 +13,7 @@
  * screenshots. Nothing is captured from a live board.
  *
  * Each scene's narration is a list of sentences. Every sentence is spoken by
- * a built-in Pocket TTS voice (TOUR_VOICE, default alba), trimmed of edge
+ * a built-in Pocket TTS voice (TOUR_VOICE, default fantine), trimmed of edge
  * silence and measured; the measured lengths set the scene's timing, its
  * rings and the WebVTT cue for that sentence, so editing a sentence cannot
  * drift the captions. Generated speech is cached by voice and text under
@@ -35,7 +35,7 @@ const assets = join(root, 'docs/assets')
 const pages = [join(root, 'docs/index.md'), join(root, 'docs/shuttle/index.md')]
 const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg'
 const ffprobe = process.env.FFPROBE_PATH || 'ffprobe'
-const VOICE = process.env.TOUR_VOICE || 'alba'
+const VOICE = process.env.TOUR_VOICE || 'fantine'
 const TTS_URL = process.env.TOUR_TTS_URL || 'http://localhost:8321/tts'
 const CACHE = process.env.TOUR_TTS_CACHE || join(tmpdir(), 'shuttle-tour-tts')
 
