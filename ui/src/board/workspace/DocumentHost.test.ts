@@ -73,6 +73,22 @@ describe('stable document frames', () => {
     expect(host.get(docs[3].key)!.sheet.inert).toBe(true)
   })
 
+  it('restores prose scroll after its reading geometry is assigned', async () => {
+    const prose = document.createElement('div')
+    let laidOut = false, top = 0
+    Object.defineProperty(prose, 'scrollTop', { get: () => top, set: (value: number) => { top = laidOut ? value : 0 } })
+    buildProse.mockReturnValueOnce(prose)
+    const fiber: WorkspaceDocument = { key: 'fiber:host-a:note', owner: 'host-a', path: '/note.md', name: 'Note', kind: 'fiber', provenance: [{ kind: 'fiber' }] }
+    sessionStorage.setItem('shuttle:workspace:scroll:' + fiber.key, JSON.stringify({ x: 0, y: 360 }))
+    host.setChannel([fiber], fiber.key)
+    expect(prose.scrollTop).toBe(0)
+    laidOut = true
+    await Promise.resolve()
+    expect(prose.scrollTop).toBe(360)
+    host.parkAll()
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + fiber.key)!)).toEqual({ x: 0, y: 360 })
+  })
+
   it('parks a retained document covered and inert without destroying layout or changing its viewer', () => {
     host.setChannel(docs.slice(0, 2), docs[0].key)
     const frame = host.get(docs[0].key)!

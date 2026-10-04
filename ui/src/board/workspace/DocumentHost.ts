@@ -454,6 +454,12 @@ export class DocumentHost {
     state.stopScroll?.()
     scroller.scrollTop = state.scroll.y
     scroller.scrollLeft = state.scroll.x
+    // A fresh prose frame receives its reading geometry later in the same turn.
+    queueMicrotask(() => {
+      if (this.disposed || !state.frame.viewer?.contains(scroller)) return
+      scroller.scrollTop = state.scroll.y
+      scroller.scrollLeft = state.scroll.x
+    })
     const save = () => this.saveScroll(state)
     state.readScroll = () => ({ x: scroller.scrollLeft, y: scroller.scrollTop })
     scroller.addEventListener('scroll', save, { passive: true })
