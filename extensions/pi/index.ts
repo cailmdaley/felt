@@ -15,6 +15,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import installHandoff from "./handoff.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -161,6 +162,7 @@ const denyReason =
 	"is not the same as having the skill loaded.";
 
 export default function feltExtension(pi: ExtensionAPI) {
+	installHandoff(pi);
 	let injectedSessionId: string | null = null;
 	let warnedBinaryMissing = false;
 	let nativeServer: net.Server | null = null;

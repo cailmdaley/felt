@@ -36,8 +36,12 @@ jobs:
       # Deliberately in the Go job, not Elixir: that one installs both CLIs to
       # /usr/local/bin, which the hook resolvers find — the absent-binary
       # fallback assertions would silently test the wrong branch.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Plugin hook tests
-        run: bash scripts/test-plugin-hooks.sh
+        run: make plugin-hooks-test
 
       - name: Bootstrap login shell and failure handling
         run: bash scripts/test-bootstrap.sh

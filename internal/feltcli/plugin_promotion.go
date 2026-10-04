@@ -308,7 +308,7 @@ func isRegularFile(path string) bool {
 // pluginHookBasenames is the plugin's complete hook set: the files that must
 // exist and be executable, and the only commands hooks.json may reference.
 // The two checks must agree, so they read the same list.
-var pluginHookBasenames = []string{"commit.sh", "event.sh", "felt-bin.sh", "remind.sh", "session.sh", "shuttle-bin.sh", "touch.sh"}
+var pluginHookBasenames = []string{"commit.sh", "event.sh", "felt-bin.sh", "handoff.sh", "remind.sh", "session.sh", "shuttle-bin.sh", "touch.sh"}
 
 func validateHookManifest(path, pluginDir string) error {
 	var document map[string]interface{}
@@ -324,6 +324,11 @@ func validateHookManifest(path, pluginDir string) error {
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 			return fmt.Errorf("hook executable %q is missing or not executable", basename)
+		}
+	}
+	for _, module := range []string{"handoff.mjs", filepath.Join("lib", "handoff.mjs")} {
+		if !isRegularFile(filepath.Join(pluginDir, "hooks", module)) {
+			return fmt.Errorf("hook module %q is missing", module)
 		}
 	}
 	return validateHookCommands(document)
