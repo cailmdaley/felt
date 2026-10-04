@@ -48,6 +48,8 @@ interface Wire {
   bodiesTo: (path: string) => Array<Record<string, unknown>>
   /** Fail the next response for a path (the error branches stay honest). */
   fail: (path: string, status?: number, text?: string) => void
+  /** Fail the nth matching request (one-based), after earlier requests succeed. */
+  failOnNth: (path: string, nth: number, status?: number, text?: string) => void
   /** Resolve once the gesture's trailing refetch has landed. */
   settled: () => Promise<void>
 }
@@ -62,11 +64,15 @@ interface Wire {
  */
 function installWire(): Wire {
   const calls: WireCall[] = []
-  const failures = new Map<string, { status: number; text: string }>()
+  const failures = new Map<string, { remaining: number; status: number; text: string }>()
 
   const respond = (url: string): Response => {
     for (const [path, f] of failures) {
       if (url.includes(path)) {
+        if (f.remaining > 0) {
+          f.remaining -= 1
+          continue
+        }
         failures.delete(path)
         return {
           ok: false,
@@ -101,7 +107,11 @@ function installWire(): Wire {
     writes: () => calls.filter((c) => c.method !== 'GET'),
     bodiesTo: (path) =>
       calls.filter((c) => c.url.includes(path) && c.body !== undefined).map((c) => c.body!),
-    fail: (path, status = 500, text = 'boom') => failures.set(path, { status, text }),
+    fail: (path, status = 500, text = 'boom') => failures.set(path, { remaining: 0, status, text }),
+    failOnNth: (path, nth, status = 500, text = 'boom') => {
+      if (!Number.isInteger(nth) || nth < 1) throw new Error('nth must be a positive integer')
+      failures.set(path, { remaining: nth - 1, status, text })
+    },
     settled: async () => {
       await vi.waitFor(() => {
         const last = calls.at(-1)
@@ -161,6 +171,11 @@ type Private = {
   applyResponse: (r: KanbanResponse) => void
   announce: (message: string) => void
   commitPin: (c: KanbanCard) => Promise<void>
+  stackQueueRow: (
+    fiberId: string,
+    plan: { writes: Array<{ fiberId: string; newDep: string }>; protectedIds: string[] },
+  ) => Promise<void>
+  showBanner: (message: string, kind: 'error' | 'info') => void
   pinRole: (c: KanbanCard) => void
   transition: (c: KanbanCard, target: 'tempered' | 'composted') => void
   setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { cold?: boolean; due?: string | null }) => void
@@ -399,6 +414,88 @@ describe('commitPin — the strip drop parks the role before stopping its worker
     await wire.settled()
 
     expect(wire.bodiesTo('/api/v1/lifecycle').map((b) => b.action)).toEqual(['reshape'])
+  })
+})
+
+describe('stackQueueRow — repair the old chain before moving the row', () => {
+  it.each([1, 2, 3])('keeps a valid partial graph and does not move the source when write %i fails', async (failedWrite) => {
+    const source = card({ id: 'queued-source', dependsOn: ['review-head'], dependsOnShape: 'scalar' })
+    const firstChild = card({ id: 'queued-child-a', dependsOn: [source.id], dependsOnShape: 'scalar' })
+    const secondChild = card({ id: 'queued-child-b', dependsOn: [source.id], dependsOnShape: 'scalar' })
+    const target = card({ id: 'in-flight-target', status: 'active' })
+    const board = asPrivate(makeBoard())
+    board.lastResponse = response({
+      folded: [source, firstChild, secondChild],
+      now: { drafts: [], inFlight: [target], awaitingReview: [] },
+    })
+    const banner = vi.spyOn(board, 'showBanner')
+    wire.failOnNth('/api/v1/felt-edit', failedWrite, 500, `write ${failedWrite} refused`)
+
+    const planWrites = [
+      { fiberId: firstChild.id, newDep: 'review-head' },
+      { fiberId: secondChild.id, newDep: 'review-head' },
+      { fiberId: source.id, newDep: target.id },
+    ]
+    await board.stackQueueRow(source.id, {
+      writes: planWrites,
+      protectedIds: [],
+    })
+    await wire.settled()
+
+    expect(wire.bodiesTo('/api/v1/felt-edit')).toEqual(planWrites.slice(0, failedWrite).map((write) => {
+      const origin = write.fiberId === firstChild.id ? firstChild.originId
+        : write.fiberId === secondChild.id ? secondChild.originId : source.originId
+      return { fiber_id: write.fiberId, origin, set: { depends_on: write.newDep } }
+    }))
+    const resultingParent = new Map([
+      [source.id, 'review-head'],
+      [firstChild.id, source.id],
+      [secondChild.id, source.id],
+    ])
+    for (const write of planWrites.slice(0, failedWrite - 1)) resultingParent.set(write.fiberId, write.newDep)
+    expect(resultingParent.get(source.id)).toBe('review-head')
+    for (const id of [source.id, firstChild.id, secondChild.id]) {
+      const seen = new Set<string>()
+      let cursor: string | undefined = id
+      while (cursor && resultingParent.has(cursor)) {
+        expect(seen.has(cursor), `partial graph remains acyclic from ${id}`).toBe(false)
+        seen.add(cursor)
+        cursor = resultingParent.get(cursor)
+      }
+    }
+    expect(resultingParent.size).toBe(3)
+    expect(banner).toHaveBeenCalledWith(expect.stringContaining(`write ${failedWrite} refused`), 'error')
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([])
+  })
+
+  it.each(['missing-child', 'list-source'] as const)('preflights %s before any write', async (caseName) => {
+    const source = card({
+      id: 'queued-source',
+      dependsOn: caseName === 'list-source' ? ['review-head', 'hand-edge'] : ['review-head'],
+      dependsOnShape: caseName === 'list-source' ? 'list' : 'scalar',
+    })
+    const target = card({ id: 'in-flight-target', status: 'active' })
+    const child = caseName === 'missing-child'
+      ? null
+      : card({ id: 'queued-child', dependsOn: [source.id], dependsOnShape: 'scalar' })
+    const board = asPrivate(makeBoard())
+    board.lastResponse = response({
+      folded: [source, ...(child ? [child] : [])],
+      now: { drafts: [], inFlight: [target], awaitingReview: [] },
+    })
+    const banner = vi.spyOn(board, 'showBanner')
+    const writes = caseName === 'missing-child'
+      ? [{ fiberId: 'missing-child', newDep: 'review-head' }, { fiberId: source.id, newDep: target.id }]
+      : [{ fiberId: source.id, newDep: target.id }]
+
+    await board.stackQueueRow(source.id, { writes, protectedIds: [] })
+    if (caseName === 'missing-child') await wire.settled()
+
+    expect(wire.writes()).toEqual([])
+    expect(banner).toHaveBeenCalledWith(
+      expect.stringMatching(caseName === 'missing-child' ? /no longer on the board/ : /hand-written depends_on list/),
+      caseName === 'missing-child' ? 'error' : 'info',
+    )
   })
 })
 

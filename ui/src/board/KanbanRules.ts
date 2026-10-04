@@ -869,6 +869,33 @@ export interface QueueRewrite {
   newDep: string;
 }
 
+export interface QueueGraphNode {
+  id: string;
+  dependsOn?: readonly string[];
+  dependsOnShape?: 'scalar' | 'list';
+}
+
+export interface QueueRowMovePlan {
+  writes: QueueRewrite[];
+  protectedIds: string[];
+}
+
+/** True only when the display order describes one unbranched scalar chain. */
+export function queueIsLinear(
+  headId: string,
+  queue: readonly string[],
+  nodes: readonly QueueGraphNode[],
+): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return queue.every((id, i) => {
+    const node = byId.get(id);
+    const expected = i === 0 ? headId : queue[i - 1];
+    return node?.dependsOnShape === 'scalar'
+      && node.dependsOn?.length === 1
+      && node.dependsOn[0] === expected;
+  });
+}
+
 /**
  * Rewire a queue after a row is dragged to a new position.
  *
@@ -914,30 +941,38 @@ export function reorderQueueWrites(
   return writes;
 }
 
-/**
- * SPLICE a member out of the queue: the chain closes over the gap.
- *
- * Dragging a row off the list is "this one is not in the queue any more", and
- * a queue with a hole in it is not a queue — whoever was behind the departing
- * member has to be handed to whoever was in front of it, or the rest of the
- * chain is orphaned behind a card that no longer waits for anything.
- *
- * Exactly one edge changes (the successor's), so this returns at most one
- * write. The departing row's own `depends_on` is NOT in the result: clearing
- * it is the gesture itself, not part of repairing the chain, and keeping the
- * two separate is what lets the caller apply the drop's own meaning — a
- * column, a surface — on top.
- */
-export function unqueueRowWrites(
-  headId: string,
-  queue: readonly string[],
-  index: number,
-): QueueRewrite[] {
-  if (!Number.isInteger(index) || index < 0) return [];
-  const successor = queue[index + 1];
-  if (successor === undefined) return [];
-  const predecessor = index === 0 ? headId : queue[index - 1];
-  return [{ fiberId: successor, newDep: predecessor }];
+/** Move a queue member behind another stack target: repair its scalar children
+ * to the old predecessor, then attach the source to the destination tail. */
+export function queueRowDropWrites(
+  sourceId: string,
+  previousId: string,
+  candidates: readonly QueueGraphNode[],
+  tailId: string,
+): QueueRowMovePlan {
+  const plan = queueRowDetachPlan(sourceId, previousId, candidates);
+  return {
+    writes: [...plan.writes, { fiberId: sourceId, newDep: tailId }],
+    protectedIds: plan.protectedIds,
+  };
+}
+
+/** Remove a row from its dependency graph without losing any scalar children. */
+export function queueRowDetachPlan(
+  sourceId: string,
+  previousId: string,
+  candidates: readonly QueueGraphNode[],
+): QueueRowMovePlan {
+  const writes: QueueRewrite[] = [];
+  const protectedIds: string[] = [];
+  for (const node of candidates) {
+    if (node.id === sourceId || !node.dependsOn?.includes(sourceId)) continue;
+    if (node.dependsOnShape === 'scalar' && node.dependsOn.length === 1) {
+      writes.push({ fiberId: node.id, newDep: previousId });
+    } else {
+      protectedIds.push(node.id);
+    }
+  }
+  return { writes, protectedIds };
 }
 
 /**

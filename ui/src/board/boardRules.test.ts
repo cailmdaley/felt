@@ -30,7 +30,7 @@ import {
   reorderQueueWrites,
   restingUntil,
   stackZoneOffered,
-  unqueueRowWrites,
+  queueRowDetachPlan,
   stackClaimsDrop,
   stackDropVerdict,
 } from './KanbanRules.js'
@@ -2137,35 +2137,28 @@ describe('dwell arms a card the zone cannot', () => {
   })
 })
 
-describe('taking a row out of the queue closes the chain', () => {
-  // head ← a ← b ← c. Drag `b`'s row onto the board: b leaves, and c — which
-  // was behind b — is handed to a. Without that, c waits forever on a card
-  // that no longer waits for anything.
-  const queue = ['a', 'b', 'c']
-
-  it('rewires the successor to the departing row’s predecessor', () => {
-    expect(unqueueRowWrites('head', queue, 1)).toEqual([{ fiberId: 'c', newDep: 'a' }])
+describe('taking a row out of the dependency graph', () => {
+  it('repairs every scalar child to the source row’s actual predecessor', () => {
+    const plan = queueRowDetachPlan('b', 'a', [
+      { id: 'a', dependsOn: ['head'], dependsOnShape: 'scalar' },
+      { id: 'b', dependsOn: ['a'], dependsOnShape: 'scalar' },
+      { id: 'c', dependsOn: ['b'], dependsOnShape: 'scalar' },
+      { id: 'sibling', dependsOn: ['b'], dependsOnShape: 'scalar' },
+    ])
+    expect(plan.writes).toEqual([
+      { fiberId: 'c', newDep: 'a' },
+      { fiberId: 'sibling', newDep: 'a' },
+    ])
+    expect(plan.protectedIds).toEqual([])
   })
 
-  it('hands the successor to the HEAD when the first row leaves', () => {
-    expect(unqueueRowWrites('head', queue, 0)).toEqual([{ fiberId: 'b', newDep: 'head' }])
-  })
-
-  it('writes nothing when the LAST row leaves — nobody was behind it', () => {
-    expect(unqueueRowWrites('head', queue, 2)).toEqual([])
-    expect(unqueueRowWrites('head', ['only'], 0)).toEqual([])
-  })
-
-  it('never writes the departing row itself — clearing it is the gesture', () => {
-    for (const i of [0, 1, 2]) {
-      expect(unqueueRowWrites('head', queue, i).map((w) => w.fiberId)).not.toContain(queue[i])
-    }
-  })
-
-  it('ignores an index that names no row', () => {
-    expect(unqueueRowWrites('head', queue, -1)).toEqual([])
-    expect(unqueueRowWrites('head', queue, 3)).toEqual([])
-    expect(unqueueRowWrites('head', [], 0)).toEqual([])
+  it('reports list children without rewriting their authored edges', () => {
+    const plan = queueRowDetachPlan('b', 'a', [
+      { id: 'scalar-child', dependsOn: ['b'], dependsOnShape: 'scalar' },
+      { id: 'list-child', dependsOn: ['b', 'other'], dependsOnShape: 'list' },
+    ])
+    expect(plan.writes).toEqual([{ fiberId: 'scalar-child', newDep: 'a' }])
+    expect(plan.protectedIds).toEqual(['list-child'])
   })
 })
 

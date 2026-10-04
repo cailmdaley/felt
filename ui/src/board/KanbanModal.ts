@@ -58,7 +58,7 @@ import {
   nextStandingLaunch,
   restingUntil,
 } from './KanbanRules.js'
-import type { QueueRewrite } from './KanbanRules.js'
+import type { QueueRewrite, QueueRowMovePlan } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
@@ -335,8 +335,9 @@ export class KanbanModal {
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       pin: (card) => this.pinRole(card),
       stack: (card, tailId) => this.stackBehind(card, tailId),
+      stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
       reorderQueue: (writes) => this.reorderQueue(writes),
-      unqueueRow: (fiberId, splice, drop) => this.unqueueRow(fiberId, splice, drop),
+      unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.detailModal.open(card),
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
@@ -1167,13 +1168,88 @@ export class KanbanModal {
         origin: card.originId,
         set: { depends_on: tailId },
       })
-      this.announce(`“${card.name}” now waits on “${tailName}”; it rests until that is tempered.`)
+      this.announce(`“${card.name}” is queued after “${tailName}”.`)
     } catch (err: unknown) {
       const msg = errText(err)
       this.showBanner(`Couldn't queue “${card.name}” behind “${tailName}”: ${msg}`, 'error')
       this.announce(`Sequence edit failed: ${msg}`)
     }
     await this.fetchAndRender()
+  }
+
+  /** Move a folded queue row onto another stack target. Scalar children stay
+   * behind the row's old predecessor; hand-authored list children keep their
+   * explicit edges and are reported. The moved row is written last; if a
+   * repair fails, the refetch shows the completed repairs with source unmoved. */
+  private async stackQueueRow(
+    fiberId: string,
+    plan: { writes: QueueRewrite[]; protectedIds: string[] },
+  ): Promise<void> {
+    const card = findCardById(this.lastResponse, fiberId)
+    if (!card) return
+    if (this.refusesHandwrittenList(card)) return
+    if (card.dependsOnShape !== 'scalar' || !card.dependsOn?.[0]) {
+      this.showBanner(`Couldn't move “${card.name}” to the new queue: its source edge changed during the drag.`, 'error')
+      await this.fetchAndRender()
+      return
+    }
+    for (const write of plan.writes) {
+      const candidate = findCardById(this.lastResponse, write.fiberId)
+      if (!candidate) {
+        this.showBanner(`Couldn't move “${card.name}” to the new queue: “${write.fiberId}” is no longer on the board.`, 'error')
+        await this.fetchAndRender()
+        return
+      }
+      if (write.fiberId === fiberId) continue
+      if (candidate.dependsOnShape === 'list' && candidate.dependsOn?.includes(fiberId)) {
+        plan.protectedIds.push(write.fiberId)
+        plan.writes = plan.writes.filter((item) => item.fiberId !== write.fiberId)
+        continue
+      }
+      if (candidate.dependsOnShape !== 'scalar' || !candidate.dependsOn?.includes(fiberId)) {
+        this.showBanner(`Couldn't move “${card.name}” to the new queue: “${candidate.name}” changed during the drag.`, 'error')
+        await this.fetchAndRender()
+        return
+      }
+    }
+    const tail = findCardById(this.lastResponse, plan.writes.at(-1)?.newDep ?? '')
+    const tailName = tail?.name ?? plan.writes.at(-1)?.newDep ?? 'the target'
+    this.gestureDepth += 1
+    try {
+      try {
+        for (const write of plan.writes) {
+          const rewritten = findCardById(this.lastResponse, write.fiberId)
+          if (!rewritten) throw new Error(`“${write.fiberId}” is no longer on the board`)
+          if (write.fiberId === fiberId && rewritten.dependsOnShape !== 'scalar') {
+            throw new Error('its depends_on is no longer a scalar during the drag')
+          }
+          if (write.fiberId !== fiberId && rewritten.dependsOnShape !== 'scalar') {
+            plan.protectedIds.push(write.fiberId)
+            continue
+          }
+          await this.postFeltEdit({
+            fiber_id: rewritten.id,
+            origin: rewritten.originId,
+            set: { depends_on: write.newDep },
+          })
+        }
+        if (plan.protectedIds.length > 0) {
+          const names = plan.protectedIds.map((id) => findCardById(this.lastResponse, id)?.name ?? id)
+          this.showBanner(
+            `“${card.name}” moved to the new queue. ${names.map((name) => `“${name}”`).join(', ')} still has a hand-written depends_on list naming it, so that list was left unchanged.`,
+            'info',
+          )
+        }
+        this.announce(`“${card.name}” is queued after “${tailName}”.`)
+      } catch (err: unknown) {
+        const msg = errText(err)
+        this.showBanner(`Couldn't move “${card.name}” to the new queue: ${msg}`, 'error')
+        this.announce(`Queue move failed: ${msg}`)
+      }
+    } finally {
+      this.gestureDepth -= 1
+      await this.fetchAndRender()
+    }
   }
 
   /**
@@ -1224,9 +1300,8 @@ export class KanbanModal {
    * The same sentence as dragging a folded card out of a peek list, so it gets the
    * same answer — the edge that holds it goes — plus the one thing a card drag
    * never has to consider: the row was a POSITION, and somebody may have been
-   * standing behind it. `splice` (from `unqueueRowWrites`) hands that successor
-   * to the departing row's predecessor, so the chain closes rather than
-   * stranding its tail behind a card that no longer waits for anything.
+   * standing behind it. Scalar children inherit the departing row's actual
+   * predecessor; hand-written list children are reported and left intact.
    *
    * The drop's own meaning is then applied on top, through the ordinary paths:
    * a column transitions, `now` surfaces, `stashed` keeps it at rest. The card
@@ -1247,7 +1322,7 @@ export class KanbanModal {
    */
   private async unqueueRow(
     fiberId: string,
-    splice: QueueRewrite[],
+    plan: QueueRowMovePlan,
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ): Promise<void> {
     const card = findCardById(this.lastResponse, fiberId)
@@ -1265,22 +1340,16 @@ export class KanbanModal {
       if (painted) this.applyResponse(painted)
 
       try {
-        // The row's own edge first, then the repair. In that order the queue is
-        // never observed with two members claiming the same position.
-        await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
-        for (const w of splice) {
+        // Repair scalar children first. If one repair fails, the row remains
+        // attached to its old queue and no destination action runs.
+        for (const w of plan.writes) {
           const successor = findCardById(before, w.fiberId)
-          // The successor inherits the departing row's predecessor — but only
-          // if its `depends_on:` is a scalar we may rewrite. A hand-written
-          // LIST there is somebody's fan-in, and closing our gap by clobbering
-          // it would delete a decision to tidy up a chain. Leave it standing
-          // and say so: the row still leaves, the tail just keeps waiting on
-          // what it was told to wait on.
+          if (!successor) throw new Error(`“${w.fiberId}” is no longer on the board`)
+          // A hand-written LIST is somebody's fan-in; closing its edge would
+          // delete a decision to tidy up a graph. Leave it standing and report
+          // that the child still names the departing row.
           if (successor?.dependsOnShape === 'list') {
-            this.showBanner(
-              `“${card.name}” is out of the queue. “${successor.name}” waits on a hand-written depends_on list, so it was left as it is — edit that list if it should move up.`,
-              'info',
-            )
+            plan.protectedIds.push(w.fiberId)
             continue
           }
           await this.postFeltEdit({
@@ -1288,6 +1357,14 @@ export class KanbanModal {
             origin: successor?.originId,
             set: { depends_on: w.newDep },
           })
+        }
+        await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
+        if (plan.protectedIds.length > 0) {
+          const names = plan.protectedIds.map((id) => findCardById(before, id)?.name ?? id)
+          this.showBanner(
+            `“${card.name}” is out of the queue. ${names.map((name) => `“${name}”`).join(', ')} still has a hand-written depends_on list naming it, so that list was left unchanged.`,
+            'info',
+          )
         }
         this.announce(`“${card.name}” is out of the queue.`)
       } catch (err: unknown) {

@@ -28,13 +28,15 @@ import {
   stackZoneOffered,
   lensCycles,
   queueDropIndex,
+  queueIsLinear,
+  queueRowDetachPlan,
+  queueRowDropWrites,
   queueMemberNote,
   queueRowGesture,
   queuedBehind,
   queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
-  unqueueRowWrites,
   stackDropVerdict,
 } from './KanbanRules.js'
 import type {
@@ -205,16 +207,18 @@ interface KanbanSurfaceRendererOptions {
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
    *  and resolved the chain tail. */
   stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
+  /** Move a queued row behind a stack target and repair its old queue. */
+  stackQueueRow?: (fiberId: string, plan: ReturnType<typeof queueRowDropWrites>) => void | Promise<void>
   /** Commit a reordered queue — one `depends_on:` write per card whose
    *  predecessor actually changed (`reorderQueueWrites`). Omit to render the
    *  peek list read-only. */
   reorderQueue?: (writes: QueueRewrite[]) => void | Promise<void>
   /** Take a row out of the queue entirely — the drag that leaves the peek list
-   *  and lands on the board. `splice` closes the chain over the gap
-   *  (`unqueueRowWrites`); `drop` is the target's own meaning, applied on top. */
+   *  and lands on the board. The graph plan repairs scalar children and names
+   *  list children that remain attached; `drop` adds the target's meaning. */
   unqueueRow?: (
     fiberId: string,
-    splice: QueueRewrite[],
+    plan: ReturnType<typeof queueRowDetachPlan>,
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
@@ -2043,6 +2047,7 @@ export class KanbanSurfaceRenderer {
       })
     const gestures = members.map(gestureFor)
     const reorderable = gestures.some((g) => g.reorderable)
+      && queueIsLinear(card.id, queued, members.filter((m): m is KanbanCard => !!m))
     // THE LIST IS ITS OWN DRAG BOUNDARY.
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
@@ -2106,9 +2111,13 @@ export class KanbanSurfaceRenderer {
         li.append(suffix)
       }
       const gesture = gestures[i]
+      const canReorder = reorderable && gesture.reorderable
       // The row SAYS what its drag can do — or, when it has none, why. A row
       // that silently refuses to move reads as a broken board.
-      li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${gesture.hint}`
+      const hint = gesture.reorderable && !reorderable
+        ? 'Drag out to move. This queue branches, so rows cannot be reordered.'
+        : gesture.hint
+      li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${hint}`
       // A ROW IS THE FIBER IT NAMES. Without this the click bubbles to the
       // card the list hangs off and opens the HEAD — you click "Euclid
       // timetracker", you get the card you were reading. The row is the only
@@ -2121,7 +2130,7 @@ export class KanbanSurfaceRenderer {
       })
       if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
       if (gesture.draggable) {
-        this.installQueueRowDrag(li, list, card.id, queued, i, gesture.reorderable)
+        this.installQueueRowDrag(li, list, card.id, queued, i, canReorder)
       }
       list.append(li)
     })
@@ -2135,22 +2144,10 @@ export class KanbanSurfaceRenderer {
     return true
   }
 
-  /**
-   * Drag one row of the peek list to a new position in the queue.
-   *
-   * SELF-CONTAINED, by construction. The row carries its own dataTransfer type
-   * — never `text/x-fiber-id` — and never touches `dragSourceId`, which is the
-   * flag every other drop target on the board arms from. So a row in flight
-   * finds the columns, the sections, the day cells and the stack targets all
-   * inert: each of them returns early on a null drag source, none of them
-   * calls `preventDefault`, and a release anywhere outside this list does
-   * nothing at all. That is the whole isolation mechanism, and it is why the
-   * row must not reuse the card's drag channel however convenient it looks.
-   *
-   * `dragstart` also stops propagation: the row lives inside a `draggable`
-   * card, and letting the event bubble would have the card announce ITSELF as
-   * the thing being dragged.
-   */
+  /** Drag a folded row within its own linear queue, to another card stack, or
+   *  out to a surface. It has a separate state channel so column drops can
+   *  unqueue it, while card stack targets can move it directly between queues.
+   *  Stop dragstart bubbling because the row lives inside a draggable card. */
   private installQueueRowDrag(
     row: HTMLElement,
     list: HTMLElement,
@@ -2175,8 +2172,8 @@ export class KanbanSurfaceRenderer {
       row.classList.add('kbn-queue-row-dragging')
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move'
-        // Our own MIME type. Nothing else on the board reads it, and nothing
-        // this drag carries can be mistaken for a fiber being moved.
+        // Queue rows carry their own type; ordinary card drags use the
+        // distinct fiber-id MIME type.
         e.dataTransfer.setData(QUEUE_ROW_MIME, String(index))
       }
     })
@@ -2223,9 +2220,9 @@ export class KanbanSurfaceRenderer {
    *
    * Dragging a row out says "not that one, this one now" — so it means what it
    * says: unqueue the fiber, and let the place it landed keep its own meaning.
-   * The chain closes over the gap (`unqueueRowWrites`), which is the one thing
-   * a card gesture never has to think about, because a card drawn in its own
-   * column is a card, not a position in a list somebody else is behind.
+   * Scalar children close over the gap using the source row's actual parent;
+   * list children retain their authored edges. A card drawn in its own column
+   * is a card, not a position in a list somebody else is behind.
    *
    * Returns true when it handled the drop, so a caller can skip its ordinary
    * path. A drop with no row in flight returns false and changes nothing.
@@ -2237,9 +2234,12 @@ export class KanbanSurfaceRenderer {
     if (!drag || !this.o.unqueueRow) return false
     this.setQueueDrag(null)
     this.o.stopDragAutoScroll()
+    const source = findCardById(this.o.getLastResponse(), drag.fiberId)
+    const previousId = source?.dependsOn?.[0]
+    if (!source || !previousId) return true
     void this.o.unqueueRow(
       drag.fiberId,
-      unqueueRowWrites(drag.headId, drag.queue, drag.from),
+      queueRowDetachPlan(drag.fiberId, previousId, boardCards(this.o.getLastResponse())),
       drop,
     )
     return true
@@ -2257,11 +2257,19 @@ export class KanbanSurfaceRenderer {
    * released over a card.
    */
   private installStackTarget(el: HTMLElement, target: KanbanCard): void {
-    if (!this.o.stack) return
-    const verdictFor = (): StackVerdict | null => {
+    if (!this.o.stack && !this.o.stackQueueRow) return
+    const draggedCard = (): KanbanCard | null => {
+      if (this.queueDrag) {
+        return this.o.stackQueueRow
+          ? findCardById(this.o.getLastResponse(), this.queueDrag.fiberId)
+          : null
+      }
+      if (!this.o.stack) return null
       const sourceId = this.o.getDragSourceId()
-      if (!sourceId || sourceId === target.id) return null
-      const source = findCardById(this.o.getLastResponse(), sourceId)
+      return sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
+    }
+    const verdictFor = (): StackVerdict | null => {
+      const source = draggedCard()
       if (!source) return null
       return stackDropVerdict(source, target, this.chainDependents())
     }
@@ -2387,6 +2395,11 @@ export class KanbanSurfaceRenderer {
       e.preventDefault()
       e.stopPropagation()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      // The column saw the first dragover before the stack's dwell completed.
+      // Once this card owns the gesture, remove that broad cue so it does not
+      // keep claiming the whole column while the pointer stays here.
+      el.closest('.kbn-col')?.classList.remove('kbn-col-drop')
+      el.closest('.kbn-section')?.classList.remove('kbn-section-drop')
       if (verdict?.ok) arm(verdict.tail)
     })
     el.addEventListener('dragleave', (e) => {
@@ -2401,13 +2414,26 @@ export class KanbanSurfaceRenderer {
       }
       e.preventDefault()
       e.stopPropagation()
+      const queueDrag = this.queueDrag
       const sourceId = this.o.getDragSourceId()
       clear()
-      this.o.setDragSourceId(null)
       this.o.stopDragAutoScroll()
-      const source = sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
+      const source = queueDrag
+        ? findCardById(this.o.getLastResponse(), queueDrag.fiberId)
+        : sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
       if (!source || !verdict?.ok) return
-      void this.o.stack?.(source, verdict.tail)
+      if (queueDrag) {
+        this.setQueueDrag(null)
+        const priorId = source.dependsOn?.[0]
+        if (!priorId) return
+        void this.o.stackQueueRow?.(
+          queueDrag.fiberId,
+          queueRowDropWrites(queueDrag.fiberId, priorId, boardCards(this.o.getLastResponse()), verdict.tail),
+        )
+      } else {
+        this.o.setDragSourceId(null)
+        void this.o.stack?.(source, verdict.tail)
+      }
     })
   }
 
