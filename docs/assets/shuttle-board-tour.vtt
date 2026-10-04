@@ -1,97 +1,97 @@
 WEBVTT
 
 1
-00:00:00.600 --> 00:00:04.017
-Here is the Shuttle board, and what each of its buttons does.
+00:00:00.600 --> 00:00:03.946
+Here is the Shuttle board, and how to use its main controls.
 
 2
-00:00:05.133 --> 00:00:12.801
-The Desk sorts tasks into three lanes: drafts not yet started, work in flight, and results awaiting your review.
+00:00:05.067 --> 00:00:10.469
+These Desk lanes show drafts not yet started, work in flight, and results awaiting your review.
 
 3
-00:00:13.933 --> 00:00:17.070
+00:00:11.600 --> 00:00:14.737
 To write a task yourself, click the plus on Drafts.
 
 4
-00:00:18.200 --> 00:00:23.828
+00:00:15.867 --> 00:00:21.495
 The Stash form asks for a title, optional details, a project and an agent.
 
 5
-00:00:23.978 --> 00:00:27.702
+00:00:21.645 --> 00:00:25.369
 One-shot is a single task. Standing repeats on a schedule.
 
 6
-00:00:27.852 --> 00:00:30.383
-Stash saves it as a draft card.
+00:00:25.519 --> 00:00:29.052
+With One-shot selected, Stash saves a draft card.
 
 7
-00:00:31.500 --> 00:00:36.024
+00:00:30.167 --> 00:00:34.690
 Or click the star on In flight, and describe an idea in your own words.
 
 8
-00:00:37.133 --> 00:00:39.376
+00:00:35.800 --> 00:00:38.042
 Pick a project and press Spawn.
 
 9
-00:00:39.526 --> 00:00:43.713
+00:00:38.192 --> 00:00:42.380
 An agent turns your words into a task, and its card appears a moment later.
 
 10
-00:00:44.833 --> 00:00:47.024
+00:00:43.500 --> 00:00:45.690
 Click any card to open it.
 
 11
-00:00:47.174 --> 00:00:51.988
+00:00:45.840 --> 00:00:50.655
 The strip under its title, showing who works it and where, unfolds its actions.
 
 12
-00:00:52.138 --> 00:00:56.113
+00:00:50.805 --> 00:00:54.780
 Write a message for the worker if you like, then choose how to send it.
 
 13
-00:00:56.263 --> 00:01:00.993
+00:00:54.930 --> 00:00:59.659
 New session starts a fresh conversation, which reads the task and its notes from the top.
 
 14
-00:01:01.143 --> 00:01:05.132
+00:00:59.809 --> 00:01:03.799
 If a worker is still running, the board asks before cutting it off.
 
 15
-00:01:05.282 --> 00:01:09.608
-Resume picks up the task’s last conversation, with everything it remembered.
+00:01:03.949 --> 00:01:07.242
+Resume requests the task’s previous conversation.
 
 16
-00:01:09.758 --> 00:01:12.519
+00:01:07.392 --> 00:01:10.153
 Use it when finished work needs one more change.
 
 17
-00:01:13.633 --> 00:01:16.999
+00:01:11.267 --> 00:01:14.632
 Meeting records a conversation and joins it to this task.
 
 18
-00:01:17.149 --> 00:01:25.023
-Call records this computer’s microphone and system audio. Room uses its microphone alone. Phone streams a phone’s microphone through the board.
+00:01:14.782 --> 00:01:22.526
+Call records the recorder computer’s microphone and system audio. Room uses its microphone alone. Phone uses your browser’s microphone.
 
 19
-00:01:25.173 --> 00:01:30.498
+00:01:22.676 --> 00:01:28.002
 The worker follows the live transcript, takes notes, and answers when you address it by name.
 
 20
-00:01:30.648 --> 00:01:32.360
+00:01:28.152 --> 00:01:29.864
 Stop ends the recording.
 
 21
-00:01:33.467 --> 00:01:39.779
+00:01:30.967 --> 00:01:37.279
 On a running card, Aloft opens the worker’s conversation, in a terminal, a browser, or a desktop app.
 
 22
-00:01:40.900 --> 00:01:44.433
+00:01:38.400 --> 00:01:41.933
 When a worker finishes, its outcome waits here for you.
 
 23
-00:01:44.583 --> 00:01:49.355
+00:01:42.083 --> 00:01:46.855
 Read it, then press Temper to accept the result, or Discard to set it aside.
 
 24
-00:01:50.467 --> 00:01:55.149
+00:01:47.967 --> 00:01:52.649
 To try it, set up Shuttle on one machine, and start with one small task.
